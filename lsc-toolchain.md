@@ -76,7 +76,7 @@ For a full ERC-20 walkthrough (spec, proofs, fuzz), see the [forge-lean-erc20](h
 
 ### Rules
 
-- **`lib/*.lean`** defines shared storage/logic only; **no bytecode** is emitted from `lib/` ([lsc-spec.md Appendix B](lsc-spec.md#appendix-b-composition-pattern)).
+- **`lib/*.lean`** defines shared storage/logic only; **no bytecode** is emitted from `lib/` ([lsc-spec.md Appendix B](lsc-appendices.md#appendix-b--composition-pattern)).
 - Every `.lean` file under `spec/` is a specification: `def` propositions (`Prop`) plus optional `axiom` for extern assumptions. 
 - Every `test/<Contract>Proof.lean` file contains proofs for the matching spec (e.g. `CounterProof.lean` for `CounterSpec.lean`). **Invalid:** `Counter.proof.lean` (dots break Lake module naming).
 - The `lean-toolchain` file at the project root pins the exact Lean version. `forge init --lean` creates it. Compilation refuses to run if this file is missing.
@@ -240,7 +240,7 @@ Counter = "0x0000000000000000000000000000000000000001"
 | `forge build`                  | Compiles `.lean` and `.sol` (primary)                                          |
 | `forge test`                   | Runs `.t.sol` EVM tests **and** Lean proof checking (separate report sections) |
 | `forge init --lean`            | Scaffolds `lean-toolchain`, `lakefile.lean`, `spec/`, Counter contract (§9) |
-| `forge init --lean --template erc20` | Scaffolds ERC-20 layout (points to demo patterns; Appendix C)          |
+| `forge init --lean --template erc20` | Scaffolds ERC-20 layout (points to demo patterns; [Appendix A](lsc-appendices.md#appendix-a--erc-20-pattern)) |
 | `forge-lean check-spec <file>` | CI helper: spec shape + sorry-only proofs                                      |
 | `forge-lean build`             | **Debug alias** for Lean-only compile (optional; not primary workflow)         |
 
@@ -311,7 +311,7 @@ All messages are prefixed with `lsc:` and include file, line, and column.
 | ---------------------------------- | ---------------------------------------------------------------------------------------------- |
 | Closure in contract                | `lsc: closures are not supported; use a top-level function`                             |
 | Disallowed type `T`                | `lsc: type T is not allowed; use UInt256, Address, Bool, Bytes32, or Bytes`             |
-| Monadic contract code              | `lsc: monadic code is not allowed in contracts; use explicit state passing`             |
+| Stateful monadic contract code     | `lsc: stateful monads are not allowed; do-notation over Result E is permitted`        |
 | `sorry` in proof file              | `lsc: proof file contains sorry; proofs must be complete`                               |
 | `theorem` or `sorry` in spec file  | `lsc: spec modules use def … : Prop, not theorem; put proofs in *Proof.lean`            |
 | Missing compliance proposition (on test) | `lsc: spec/TokenSpec.lean is missing required def transfer_preserves_total_supply` |
@@ -327,6 +327,14 @@ All messages are prefixed with `lsc:` and include file, line, and column.
 | `EvmContext` in author contract code | `lsc: use caller : Address; EvmContext is export-only`                     |
 | `List` in author contract code     | `lsc: List is not allowed in contract code; use StorageMapping or Lsc.Event.log`        |
 | Unknown event in `Lsc.Event.log`   | `lsc: unknown event type "X"; define Lsc.Event.EvmEvent instance or use string signature` |
+| Raw `Fin` `+ - * /` on `UInt256` outside `do` and `unchecked do` | `lsc: arithmetic outside do blocks must use checkedAdd/Sub/Mul/Div explicitly, or unchecked do for wrapping` |
+| `unchecked` in spec or proof | `lsc: unchecked is contract-only; use + on UInt256 in spec` |
+| `wrapAdd` / direct `UInt256.add` in contract | `lsc: use unchecked do for wrapping arithmetic` |
+| `←` in `do` without `HasArithErrors` | `lsc: arithmetic in do block requires HasArithErrors; add \| overflow to your @[lsc.error] inductive` |
+| `do` on infallible function (`S` or `V`) | `lsc: do-notation requires Result return type` |
+| Plain `+ - * /` outside `do` in contract | `lsc: arithmetic outside do blocks must use checkedAdd/Sub/Mul/Div explicitly` |
+| Postfix `?` on `Result` | `lsc: ? operator is removed; use do-notation and ←` |
+| `open Lsc.Arith` in spec or proof | `lsc: Lsc.Arith is for contract modules only; spec uses Fin +` |
 | Malformed event signature          | `lsc: invalid event signature "..."; expected form "Name(type,type)"`                   |
 | Event argument mismatch            | `lsc: event "Transfer(...)" expects N arguments of types ...; got ...`                  |
 | Author constructs `LogEntry`       | `lsc: LogEntry is compiler-internal; use Lsc.Event.log`                                 |
@@ -409,6 +417,7 @@ flowchart LR
 - `forge-lean build` (debug alias)
 - Validator ([lsc-spec.md](lsc-spec.md).11 dialect law)
 - Compiler-generated export wrappers from `@[lsc.external]` ([lsc-spec.md](lsc-spec.md).9–4.10)
+- `@[lsc.public]` field getters synthesized as `@[lsc.external]` views before ABI pass ([lsc-spec.md §3.5](lsc-spec.md))
 - `Lsc.Event.log` collection and LOG lowering ([lsc-spec.md](lsc-spec.md).5)
 - Yul emitter with auto load/store ([lsc-spec.md](lsc-spec.md).8, §8.2)
 - ABI JSON + selector computation
@@ -416,12 +425,27 @@ flowchart LR
 
 `**Lsc` library**
 
-- `Lsc.Prelude`: `Address`, `Bytes32`, `Bytes`, `EvmContext`, `StorageMapping`
+- `Lsc.Prelude`: `Address`, `Bytes32`, `Bytes`, `EvmContext`, `StorageMapping`, `HasArithErrors`, polymorphic `UInt256.checkedAdd` / `checkedSub` / `checkedMul` / `checkedDiv`; `Monad (Result · E)` for `do`-notation ([lsc-spec.md §2.5](lsc-spec.md))
+- `Lsc.Arith` (in prelude): `unchecked do` macro for wrapping `+ - * /`; checked `+ - * /` sugar inside `do` in `@[lsc.export]` bodies; forward bridge lemmas `checkedAdd_ok`, `checkedAdd_overflow`, … ([lsc-spec.md §2.5](lsc-spec.md))
 - `Lsc.Event`: `Lsc.Event.EvmEvent`, `Lsc.Event.log`, `LogEntry`
 - `Lsc.ProofHelpers`: Layer 1 `compose`; Layers 2–4 `lift_*`, `simulate_call`, `export_cases` (§7)
 - `Lsc.SpecTemplates` (Layer 1 + export/trace skeletons)
-- `@[lsc.external]`, `@[lsc.error]`, `@[lsc.event]` (optional lint), `@[lsc.extern_hook]`, `@[lsc.no_reentrant]` attributes ([lsc-spec.md](lsc-spec.md).5, [lsc-spec.md](lsc-spec.md).9, [lsc-spec.md](lsc-spec.md).16)
+- `@[lsc.external]`, `@[lsc.error]` (elaboration-time generation via `AttributeImpl`: discriminators, `DecidableEq`, `HasArithErrors`), `@[lsc.public]` (elaboration-time `@[lsc.external]` view `def`s from State fields; [lsc-spec.md §3.5](lsc-spec.md)), `@[lsc.event]` (optional lint), `@[lsc.extern_hook]`, `@[lsc.no_reentrant]` attributes ([lsc-spec.md](lsc-spec.md).5, [lsc-spec.md](lsc-spec.md).9, [lsc-spec.md](lsc-spec.md).16)
 - Filename-based contract registration ([lsc-spec.md](lsc-spec.md).13.1); `[lsc.contracts]` in `foundry.toml`
+
+**`Lsc.Arith` (ForgeLean — normative surface)**
+
+Implement in `ForgeLean` / `Lsc.Prelude` per [lsc-spec.md §2.5](lsc-spec.md):
+
+1. Wrapping defs `UInt256.add` / `sub` / `mul` / `div` (prelude-internal; authors use `unchecked do`)
+2. `unchecked` macro on `do` blocks — scoped rewriting of `+ - * /` to wrapping ops
+3. `Monad (Result · E)` instance in `Lsc.Prelude` for standard `do`-notation
+4. Validator macro: checked `+ - * /` → `checkedAdd` … only inside `do` blocks in `@[lsc.export]` function bodies
+5. `@[simp]` forward bridge lemmas: `checkedAdd_ok`, `checkedAdd_overflow`, and sub/mul/div analogues
+6. Validator: reject raw `HAdd` on `UInt256` outside `do` and `unchecked`; forbid `unchecked` / `open Lsc.Arith` in spec and proof; forbid `wrapAdd` in contracts; reject postfix `?` ([lsc-spec.md §13.1](lsc-spec.md))
+7. Register `@[lsc.error]` via `Lean.registerBuiltinAttribute` / `AttributeImpl` — generates discriminators, `DecidableEq`, and `HasArithErrors` at elaboration time (not validator)
+8. Register `@[lsc.public]` on State struct fields — after `State` is known, synthesize `@[lsc.external]` getter `def`s before ABI collection ([lsc-spec.md §3.5](lsc-spec.md))
+9. Validator: reject bare `lsc_errors` keyword; surface `HasArithErrors` resolution failures from Lean elaborator; enforce `@[lsc.public]` rules ([lsc-spec.md §13.1](lsc-spec.md))
 
 **Phase v2a (semantics only)**
 
@@ -481,22 +505,26 @@ The Foundry fork ships a Lean counter beside [`testdata/src/Counter.vy`](https:/
 ```lean
 import Lsc.Prelude
 
-open Lsc EVM
+open Lsc Lsc.Arith
+
+@[lsc.error]
+inductive CounterError where
+  | overflow   -- checkedAdd only
 
 structure CounterState where
+  @[lsc.public]
   number : UInt256
 
 @[lsc.external]
-def increment (s : CounterState) : Option (CounterState × Unit) :=
-  some ({ s with number := s.number + 1 }, ())
+def increment (s : CounterState) : Result CounterState CounterError := do
+  let n ← s.number + 1
+  return .ok { s with number := n }
 
 @[lsc.external]
-def setNumber (s : CounterState) (n : UInt256) : Option (CounterState × Unit) :=
-  some ({ s with number := n }, ())
+def setNumber (s : CounterState) (n : UInt256) : CounterState :=
+  { s with number := n }
 
-@[lsc.external]
-def number (s : CounterState) : Option UInt256 :=
-  some s.number
+-- `number` view generated from @[lsc.public] (§3.5)
 ```
 
 ### `spec/CounterSpec.lean` (minimal)
@@ -555,7 +583,7 @@ That repo is the canonical place for ERC-20-only documentation — not the core 
 
 ### 9.2 Composition demo (ERC-20 + TransferCounter hook)
 
-The [forge-lean-composition](https://github.com/forge-lean/forge-lean-composition) repository demonstrates **mutating external calls**: **MyToken** extends ERC-20 and **CALL**s **TransferCounter** on every successful `transfer` / `transferFrom`. Full layout, theorems, and CEI rules are in **Appendix D**.
+The [forge-lean-composition](https://github.com/forge-lean/forge-lean-composition) repository demonstrates **mutating external calls**: **MyToken** extends ERC-20 and **CALL**s **TransferCounter** on every successful `transfer` / `transferFrom`. Full layout, theorems, and CEI rules are in **[Appendix B](lsc-appendices.md#appendix-b--composition-pattern)**.
 
 **Why a separate repo:** Keeps [forge-lean-erc20](https://github.com/forge-lean/forge-lean-erc20) minimal (closed-world ERC-20 only) while this demo drives v2a `invoke` + v2b `Lsc.extern.call` requirements.
 
