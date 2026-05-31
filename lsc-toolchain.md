@@ -21,7 +21,7 @@ Distribution mirrors **native Foundry Vyper support** (`foundry-compilers` integ
 
 | LSC ([lsc-spec.md](lsc-spec.md)) | This implementation (v1) |
 | -------------------------------- | ------------------------ |
-| `@[lsc.export]` | `@[evm_external]` (attribute name not yet migrated) |
+| `@[lsc.external]` | `@[evm_external]` (attribute name not yet migrated) |
 | `Lsc.Std` / `Lsc.Prelude` | `ForgeLean` package (`ForgeLean.Prelude`, …) |
 | `Lsc.extern` | `ForgeLean.extern` |
 | `Lsc.Event.log` | `EVM.log` |
@@ -140,7 +140,7 @@ src/Counter.lean
 | `match opt with | none => ... | some x => ...` | tag switch                                   |
 | `StorageMapping.get/set`                       | `sload`/`sstore` via `storageKey`            |
 | `Bytes` read/write                             | Solidity-compatible byte array ops           |
-| Author `@[lsc.export]` return `none` / `some`   | `revert(0, 0)` / persist + `Lsc.Event.log` LOGs + ABI return |
+| Author `@[lsc.external]` return `none` / `some`   | `revert(0, 0)` / persist + `Lsc.Event.log` LOGs + ABI return |
 | Generated export `none`                      | `revert(0, 0)` before any store              |
 | Generated export `some (ret, logs)`            | persist state, `LOG` per entry, return `ret` |
 | `Lsc.extern.staticcall` (v2b+)           | `staticcall` + ABI decode; no self `sstore`    |
@@ -317,13 +317,13 @@ All messages are prefixed with `lsc:` and include file, line, and column.
 | Missing compliance proposition (on test) | `lsc: spec/TokenSpec.lean is missing required def transfer_preserves_total_supply` |
 | Missing proof for spec def (on test) | `lsc: spec defines "f" but *Proof.lean has no theorem f`                                |
 | Bare `Option State` on mutator | `lsc: mutator "f" must return Option (State × Unit) or Option (State × scalar); bare Option State is not allowed` |
-| Invalid `@[lsc.export]` return shape | `lsc: @[lsc.export] "f" must return Option (State × Unit), Option (State × scalar), or Option α (view)` (v1: `@[evm_external]`) |
+| Invalid `@[lsc.external]` return shape | `lsc: @[lsc.external] "f" must return Option (State × Unit), Option (State × scalar), or Option α (view)` (v1: `@[evm_external]`) |
 | Typed error / `CallResult` return | `lsc: use Option for revert; error kinds are not supported in v1` |
 | Missing `lean-toolchain`           | `lsc: lean-toolchain file not found; run forge init --lean` |
 | Foundry not found                  | `lsc: foundry not found; install Foundry for the LSC toolchain` |
 | `Bytes` too long                   | `lsc: Bytes length exceeds max_bytes (N)`                                               |
-| Author `sload` / `sstore`          | `lsc: storage IO is only performed by the emitter at @[lsc.export] boundaries` |
-| Hand-written export wrapper        | `lsc: export wrappers are compiler-generated; use @[lsc.export] on contract functions` |
+| Author `sload` / `sstore`          | `lsc: storage IO is only performed by the emitter at @[lsc.external] boundaries` |
+| Hand-written export wrapper        | `lsc: export wrappers are compiler-generated; use @[lsc.external] on contract functions` |
 | `EvmContext` in author contract code | `lsc: use caller : Address; EvmContext is export-only`                     |
 | `List` in author contract code     | `lsc: List is not allowed in contract code; use StorageMapping or Lsc.Event.log`        |
 | Unknown event in `Lsc.Event.log`   | `lsc: unknown event type "X"; define Lsc.Event.EvmEvent instance or use string signature` |
@@ -371,7 +371,7 @@ flowchart LR
 
 | Layer                              | v1 status                                             |
 | ---------------------------------- | ----------------------------------------------------- |
-| Spec theorems → ``@[lsc.export]` functions` functions | **Proven** (Lean kernel)                           |
+| Spec theorems → ``@[lsc.external]` functions` functions | **Proven** (Lean kernel)                           |
 | Compiler-generated export → contract fn | **Trusted** (tested; `lift_no_extern` in v2c)       |
 | Registered callee composition      | **Proven** when `simulate_call` + callee specs hold   |
 | `@[lsc.extern_assume]` interface axioms  | **Trusted** (human-reviewed; not bytecode-checked)    |
@@ -408,7 +408,7 @@ flowchart LR
 - `forge-lean check-spec`
 - `forge-lean build` (debug alias)
 - Validator ([lsc-spec.md](lsc-spec.md).11 dialect law)
-- Compiler-generated export wrappers from `@[lsc.export]` ([lsc-spec.md](lsc-spec.md).9–4.10)
+- Compiler-generated export wrappers from `@[lsc.external]` ([lsc-spec.md](lsc-spec.md).9–4.10)
 - `Lsc.Event.log` collection and LOG lowering ([lsc-spec.md](lsc-spec.md).5)
 - Yul emitter with auto load/store ([lsc-spec.md](lsc-spec.md).8, §8.2)
 - ABI JSON + selector computation
@@ -420,7 +420,7 @@ flowchart LR
 - `Lsc.Event`: `Lsc.Event.EvmEvent`, `Lsc.Event.log`, `LogEntry`
 - `Lsc.ProofHelpers`: Layer 1 `compose`; Layers 2–4 `lift_*`, `simulate_call`, `export_cases` (§7)
 - `Lsc.SpecTemplates` (Layer 1 + export/trace skeletons)
-- `@[lsc.export]`, `@[lsc.event]` (optional lint), `@[lsc.extern_hook]`, `@[lsc.no_reentrant]` attributes ([lsc-spec.md](lsc-spec.md).5, [lsc-spec.md](lsc-spec.md).9, [lsc-spec.md](lsc-spec.md).16)
+- `@[lsc.external]`, `@[lsc.error]`, `@[lsc.event]` (optional lint), `@[lsc.extern_hook]`, `@[lsc.no_reentrant]` attributes ([lsc-spec.md](lsc-spec.md).5, [lsc-spec.md](lsc-spec.md).9, [lsc-spec.md](lsc-spec.md).16)
 - Filename-based contract registration ([lsc-spec.md](lsc-spec.md).13.1); `[lsc.contracts]` in `foundry.toml`
 
 **Phase v2a (semantics only)**
@@ -474,7 +474,7 @@ The Foundry fork ships a Lean counter beside [`testdata/src/Counter.vy`](https:/
 
 **Path (fork):** `foundry/testdata/src/Counter.lean`
 
-**Dialect note:** Contract name comes from the filename (`Counter.lean` → `Counter`). Authors write `@[lsc.export]` functions with inferred ABI; the compiler generates export wrappers and Yul. `forge build` produces deployable `out/Counter.lean/Counter.json` for `deployCode` in Solidity tests.
+**Dialect note:** Contract name comes from the filename (`Counter.lean` → `Counter`). Authors write `@[lsc.external]` functions with inferred ABI; the compiler generates export wrappers and Yul. `forge build` produces deployable `out/Counter.lean/Counter.json` for `deployCode` in Solidity tests.
 
 ### `src/Counter.lean`
 
@@ -486,15 +486,15 @@ open Lsc EVM
 structure CounterState where
   number : UInt256
 
-@[lsc.export]
+@[lsc.external]
 def increment (s : CounterState) : Option (CounterState × Unit) :=
   some ({ s with number := s.number + 1 }, ())
 
-@[lsc.export]
+@[lsc.external]
 def setNumber (s : CounterState) (n : UInt256) : Option (CounterState × Unit) :=
   some ({ s with number := n }, ())
 
-@[lsc.export]
+@[lsc.external]
 def number (s : CounterState) : Option UInt256 :=
   some s.number
 ```
@@ -546,8 +546,8 @@ contract CounterTest is Test {
 
 The [forge-lean-erc20](https://github.com/forge-lean/forge-lean-erc20) repository demonstrates the full workflow at application scale:
 
-1. **Write** — `src/Token.lean` with `ERC20State`, `@[lsc.export]` functions and `Lsc.Event.log` for events (§9.1). Compiler infers ABI from names and `Option` return shapes.
-2. **Spec** — `spec/TokenSpec.lean` with human-reviewed `def … : Prop` over `@[lsc.export]` functions; `[lsc.compliance.erc20]` enforces the proposition list on `forge test`.
+1. **Write** — `src/Token.lean` with `ERC20State`, `@[lsc.external]` functions and `Lsc.Event.log` for events (§9.1). Compiler infers ABI from names and `Option` return shapes.
+2. **Spec** — `spec/TokenSpec.lean` with human-reviewed `def … : Prop` over `@[lsc.external]` functions; `[lsc.compliance.erc20]` enforces the proposition list on `forge test`.
 3. **Prove** — `test/TokenProof.lean` (LLM-assisted, kernel-checked).
 4. **Fuzz** — `test/Token.t.sol` deploys bytecode via `deployCode` and runs Foundry fuzz/invariant tests.
 
@@ -592,7 +592,7 @@ structure ERC20State where
   balances    : StorageMapping Address UInt256
   allowances  : StorageMapping Address (StorageMapping Address UInt256)
 
-@[lsc.export]
+@[lsc.external]
 def transfer (caller : Address) (s : ERC20State) (to : Address) (amount : UInt256)
     : Option (ERC20State × Bool) :=
   if s.balances.get caller < amount then
@@ -614,7 +614,7 @@ def transfer_no_overdraft
   s.balances.get caller < amount
 ```
 
-The demo defines `@[lsc.export]` functions with **`Lsc.Event.log`** on success paths (no hand-written export wrappers; no `Lsc.ERC20` in core).
+The demo defines `@[lsc.external]` functions with **`Lsc.Event.log`** on success paths (no hand-written export wrappers; no `Lsc.ERC20` in core).
 
 ### C.3 Required theorems (`[lsc.compliance.erc20]`)
 
@@ -689,7 +689,7 @@ sequenceDiagram
 
 | Path | Deployed? | Purpose |
 | ---- | --------- | ------- |
-| `lib/ERC20.lean` | No | `ERC20State`, `ERC20.transfer` and related library helpers; **no** `@[lsc.export]` |
+| `lib/ERC20.lean` | No | `ERC20State`, `ERC20.transfer` and related library helpers; **no** `@[lsc.external]` |
 | `src/MyToken.lean` | Yes | `MyTokenState extends ERC20State`; full ERC-20 ABI + hook on transfer paths |
 | `src/TransferCounter.lean` | Yes | Counter contract |
 | `interfaces/ITransferCounter.lean` | No | Interface for `Lsc.extern.call` validator |
@@ -730,7 +730,7 @@ def MyToken.transfer (s : MyTokenState) (from to : Address) (amount : UInt256)
 
 - **Field access:** `s.balances` works on `MyTokenState` (flat inheritance).
 - **Appendix C proofs** target `ERC20.transfer` on `ERC20State` in `spec/ERC20Spec.lean`.
-- **MyToken exports** with hooks: author annotates `transfer` / `transferFrom` with `@[lsc.export]` and `@[lsc.extern_hook]` (or equivalent metadata); **compiler-generated** export threads `World` and inserts `Lsc.extern.call` after contract-function success (§4.15.2).
+- **MyToken exports** with hooks: author annotates `transfer` / `transferFrom` with `@[lsc.external]` and `@[lsc.extern_hook]` (or equivalent metadata); **compiler-generated** export threads `World` and inserts `Lsc.extern.call` after contract-function success (§4.15.2).
 
 ### D.4 TransferCounter
 
@@ -738,7 +738,7 @@ def MyToken.transfer (s : MyTokenState) (from to : Address) (amount : UInt256)
 structure TransferCounterState where
   count : UInt256
 
-@[lsc.export]
+@[lsc.external]
 def onTransfer (s : TransferCounterState) : Option TransferCounterState :=
   some { s with count := s.count + 1 }
 ```
