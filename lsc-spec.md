@@ -19,7 +19,7 @@ This restriction is intentional. Lean's kernel can check proofs about pure funct
 
 **What you can deploy:** persistent storage and mappings, events/logs, standard ABIs (ERC-20 `bool` returns, etc.), cross-contract calls, revert semantics, full EVM bytecode.
 
-**What is restricted in author code:** stateful monads (`StateM`, `IO`), higher-order functions, closures, unbounded collections in state, `Nat`/`Int`/`String`, `structure … extends`, unbounded recursion, manual storage IO. `do`-notation over `Result E` is allowed for fallible exports. See §13 for the full validator error table.
+**What is restricted in author code:** stateful monads (`StateM`, `IO`), higher-order functions, closures, unbounded collections in state, `Nat`/`Int`/`String`, `structure … extends`, unbounded recursion, manual storage IO. `do`-notation over `Except E` is allowed for fallible exports. See §13 for the full validator error table.
 
 ### §1.2 The three files
 
@@ -38,25 +38,18 @@ The **contract** is what deploys. The **spec** is the requirements document — 
 `src/Counter.lean`:
 ```lean
 import Lsc.Prelude
-open Lsc Lsc.Arith
-
--- Error type: increment can overflow at UInt256 max
-@[lsc.error]
-inductive CounterError where
-  | overflow   -- checkedAdd only; no division in Counter
+open Lsc
 
 structure CounterState where
   @[lsc.public]
   number : UInt256
 
--- Fallible mutator: no return value beyond new state, but overflow is possible.
--- Result CounterState CounterError  (two-param: value type, error type)
+-- Fallible mutator: overflow at UInt256 max routes to ArithError
 @[lsc.external]
-def increment (s : CounterState) : Result CounterState CounterError := do
-  let n ← s.number + 1
+def increment (s : CounterState) : Except ArithError CounterState :=
+  checked id do
+  let n ← s.number +? 1
   return .ok { s with number := n }
-
--- Compiler generates @[lsc.external] def number (s : CounterState) : UInt256 := s.number (§3.5)
 ```
 
 `spec/CounterSpec.lean`:
@@ -66,14 +59,16 @@ import Counter
 inductive CounterAction where
   | increment
 
--- Apply a sequence of actions, skipping any that error.
--- List and Nat are allowed in spec files (banned only in contract code).
-def applyActions (s : CounterState) : List CounterAction → CounterState
-  | [] => s
-  | .increment :: rest =>
+/-- Single-step semantics: apply one action; on `.error`, leave state unchanged. -/
+def applyAction (s : CounterState) : CounterAction → CounterState
+  | .increment =>
       match increment s with
-      | .ok s'  => applyActions s'  rest
-      | .err _  => applyActions s   rest   -- overflow: state unchanged
+      | .ok s'    => s'
+      | .error _ => s
+
+/-- Sequence semantics: fold `applyAction` (same as recursive error-skipping). -/
+def applyActions (s : CounterState) (actions : List CounterAction) : CounterState :=
+  actions.foldl applyAction s
 
 /-- On success, increment increases number by exactly 1. -/
 def increment_increases_number
@@ -84,13 +79,14 @@ def increment_increases_number
 /-- increment errors iff number is at UInt256 max (overflow). -/
 def increment_overflows_iff
     (s : CounterState)
-    (h : increment s = .err .overflow) : Prop :=
+    (h : increment s = .error .overflow) : Prop :=
   s.number = UInt256.max
 
 /-- No sequence of actions can decrease the number. -/
 def number_never_decreases
     (s : CounterState) (actions : List CounterAction) : Prop :=
   (applyActions s actions).number ≥ s.number
+  -- equivalently: (actions.foldl applyAction s).number ≥ s.number
 ```
 
 `test/CounterProof.lean`:
@@ -101,44 +97,27 @@ theorem increment_increases_number
     (s s' : CounterState)
     (h : increment s = .ok s') :
     CounterSpec.increment_increases_number s s' h := by
-  simp [CounterSpec.increment_increases_number, increment, UInt256.checkedAdd] at h
-  split_ifs at h with hov
-  · simp [Result.err] at h          -- overflow branch contradicts .ok hyp
-  · simp [UInt256.checkedAdd_ok, hov] at h; omega
+  simp [CounterSpec.increment_increases_number, increment] at h
+  simp [UInt256.addChecked_some (by omega), Option.orWrap_some] at h; omega
 
 theorem increment_overflows_iff
     (s : CounterState)
-    (h : increment s = .err .overflow) :
+    (h : increment s = .error .overflow) :
     CounterSpec.increment_overflows_iff s h := by
-  simp [CounterSpec.increment_overflows_iff, increment, UInt256.checkedAdd] at h
-  split_ifs at h with hov
-  · simp [UInt256.checkedAdd_overflow, hov] at h; omega
-  · simp [Result.ok] at h           -- success branch contradicts .err hyp
+  simp [CounterSpec.increment_overflows_iff, increment] at h
+  simp [UInt256.addChecked_none_of_ge (by omega), Option.orWrap_none] at h; omega
 
 theorem number_never_decreases
     (s : CounterState) (actions : List CounterAction) :
     CounterSpec.number_never_decreases s actions := by
-  induction actions generalizing s with
-  | nil => simp [CounterSpec.number_never_decreases, CounterSpec.applyActions]
-  | cons a rest ih =>
-      cases a with
-      | increment =>
-          simp [CounterSpec.applyActions, CounterSpec.number_never_decreases]
-          by_cases hov : s.number = UInt256.max
-          · -- overflow: state unchanged, ih applies with same s
-            have herr : increment s = .err .overflow := by
-              simp [increment, UInt256.checkedAdd_overflow, hov]
-            simp [CounterSpec.applyActions, herr]
-            exact le_trans (le_refl _) (ih s)
-          · -- success: s'.number = s.number + 1
-            have hok : increment s = .ok { s with number := s.number + 1 } := by
-              simp [increment, UInt256.checkedAdd_ok]; omega
-            simp [CounterSpec.applyActions, hok]
-            have := ih { s with number := s.number + 1 }
-            simp [CounterSpec.number_never_decreases] at this; omega
+  simp only [CounterSpec.number_never_decreases, CounterSpec.applyActions]
+  apply Lsc.Invariant CounterSpec.applyAction (fun s' => s'.number ≥ s.number)
+  · intro s' a hP
+    cases a <;> simp [CounterSpec.applyAction, increment] at hP ⊢ <;> omega
+  · simp
 ```
 
-Three theorems matching three spec `def`s: the success property, the overflow condition, and the global monotonicity invariant. The invariant proof case-splits on overflow vs success — both paths are covered.
+Three theorems matching three spec `def`s: the success property, the overflow condition, and the global monotonicity invariant via `Lsc.Invariant` on `applyAction` (§9.1).
 
 ```mermaid
 flowchart LR
@@ -156,7 +135,7 @@ Authors write pure functions. The compiler generates everything else at `@[lsc.e
 
 | Author writes | Compiler generates |
 |---------------|--------------------|
-| `@[lsc.external] def increment (s : CounterState) : Result CounterState CounterError` | ABI dispatcher, `sload` all fields, call `increment`, on `.ok s'` → `sstore`, on `.err e` → `revert(abi.encode(e))` |
+| `@[lsc.external] def increment (s : CounterState) : Except ArithError CounterState` | ABI dispatcher, `sload` all fields, call `increment`, on `.ok s'` → `sstore`, on `.error e` → `revert(abi.encode(e))` |
 | `@[lsc.public]` on a State field (e.g. `number`) | `@[lsc.external]` view `def` + read-only dispatcher (§3.5) |
 | `Lsc.Event.log (TransferEvent.mk from to amount)` in function body | `LOG2` opcode after store, with correct topic0 and ABI-encoded data |
 | `Lsc.extern.call IERC20.transferFrom ...` in export body (v2b) | `call(gas, addr, 0, ...)` + ABI encode/decode |
@@ -185,19 +164,43 @@ For `lakefile.lean` layout, see [lsc-toolchain.md §2](lsc-toolchain.md#2-projec
 
 ### §2.1 Primitive types
 
-The validator permits exactly these primitive types in contract code. Any other type is a hard error (§13.1).
+The validator permits exactly these primitive types in contract code.
 
 | LSC type | Lean definition | EVM/ABI type | Notes |
 |----------|----------------|--------------|-------|
-| `UInt256` | `Fin (2^256)` | `uint256` | Arithmetic wraps mod 2^256; `omega` and `simp` apply directly via `Fin` lemmas |
+| `UInt256` | `Fin (2^256)` | `uint256` | Arithmetic is modular (`Fin`), identical in contract and spec code |
 | `Address` | `structure Address where val : UInt256` | `address` | Distinct newtype; not coercible to `UInt256` without `.val` |
-| `Bool` | Lean built-in | `bool` | ABI boundary and internal guards |
+| `Bool` | Lean built-in | `bool` | ABI boundary and guards |
 | `Bytes32` | `Fin (2^256)` newtype | `bytes32` | Raw 32-byte value |
-| `Bytes` | Dynamic byte array | `bytes` / `string` | Metadata and string fields; max 256 bytes in v1 (§2.2) |
+| `Bytes[N]` | `{ b : ByteArray // b.size ≤ N }` | `bytes` / `string` | Explicit max length; see §2.2 |
 
-`UInt256 = Fin (2^256)` means all arithmetic is definitional modular arithmetic. No custom axioms are needed for overflow; `omega` handles linear arithmetic over `Fin` directly.
+#### Arithmetic semantics — one rule everywhere
 
-In **spec and proof** modules, plain `+`, `-`, `*`, `/` on `UInt256` mean this modular (`Fin`) semantics. In **contract** modules (`src/*.lean`), fallible `@[lsc.export]` functions use **`do`-notation** over `Result E`; inside **`do`** blocks, `+ - * /` desugar to **checked** operations and **`←`** propagates errors. Outside **`do`** blocks, use explicit `checkedAdd` / … or **`unchecked do`** for wrapping **`Fin`** math (same as spec **`Prop`s**).
+`UInt256 = Fin (2^256)` throughout. `+ - * /` mean modular (`Fin`) arithmetic in
+**all contexts** — contract code, spec files, and proof files. There is no implicit
+operator rewriting.
+
+Two arithmetic modes are available in contract functions:
+
+| Mode | Syntax | Returns | Use when |
+|------|--------|---------|----------|
+| Wrapping | `a + b` | `UInt256` (Fin) | overflow is impossible or irrelevant |
+| Checked | `a +? b` | `Option UInt256` | overflow must revert |
+
+Checked arithmetic is routed to the error type via `checked <variant> do` — a
+block macro that auto-wraps every `← +?` result without repeating the variant
+name on each line. See §2.5 for the full design.
+
+`do`-notation in `@[lsc.external]` functions is standard `Except E` do-notation.
+There is no operator rewriting — `+` is always `Fin` add everywhere.
+
+> **Why not rewrite `+` to checked arithmetic inside `do`?**
+> Implicit operator rewriting creates a semantic gap between contract code and spec
+> code: the same expression would mean different things in different files. LSC
+> eliminates this gap — `a + b` is always `Fin` addition. The `+?` operator and
+> `checked` block make fallible arithmetic visible and explicit without being
+> verbose. The specification and the implementation share exactly one arithmetic
+> model.
 
 `Address` is defined in `Lsc.Prelude`:
 ```lean
@@ -208,68 +211,139 @@ structure Address where
 
 It is not coercible to `UInt256` without an explicit `.val` projection, preventing accidental arithmetic on addresses.
 
-### §2.2 Bytes
+### §2.2 Bytes[N]
 
-`Bytes` uses Solidity-compatible dynamic storage layout:
+`Bytes[N]` is a Vyper-style bounded byte array. The length bound is part of the type.
 
-- Slot `p` holds the length encoding: if `length ≤ 31`, data is left-aligned in the slot with `length * 2` in the LSB; if `length > 31`, slot holds `length * 2 + 1` and payload lives at `keccak256(p)`.
-- **Maximum length in v1: 256 bytes.** Exceeding this is a validator error. Configurability is deferred to v2.
+```lean
+-- Lean 4 definition (Lsc.Prelude)
+abbrev Bytes (n : Nat) := { b : ByteArray // b.size ≤ n }
 
-ABI mapping: `Bytes` ↔ `bytes` (or `string` when used for text metadata).
+notation "Bytes[" n "]" => Bytes n
+```
+
+**Examples:**
+```lean
+tokenUri   : Bytes[512]
+ipfsCid    : Bytes[64]
+shortLabel : Bytes[32]
+```
+
+**Validator rules:**
+- `N` must be a numeric literal (not a variable). Runtime-variable bounds are not
+  supported in v1.
+- `N = 0` is a validator warning (field can never hold data).
+- No global maximum in the type system; the emitter may impose a practical limit
+  (e.g. 4096 bytes) to avoid pathological storage layouts. This limit is
+  configurable in `foundry.toml` under `[lsc.limits]`.
+
+**Storage layout** mirrors Vyper/Solidity:
+- If `b.size ≤ 31`: data is left-aligned in the slot with `b.size * 2` in the LSB.
+- If `b.size > 31`: slot `p` holds `b.size * 2 + 1`; payload lives at
+  `keccak256(p)` in 32-byte chunks.
+
+ABI mapping: `Bytes[N]` ↔ `bytes` (or `string` for text metadata).
 
 ### §2.3 Mapping
 
-`Mapping K V` is the primary keyed storage type. It corresponds to Solidity `mapping(K => V)` with `keccak256(abi.encode(key, slot))` layout.
+`Mapping K V` is defined as a plain Lean 4 function:
+
+```lean
+-- Lsc.Prelude
+abbrev Mapping (K V : Type) := K → V
+
+namespace Mapping
+
+def get (m : Mapping K V) (k : K) : V := m k
+
+def set [DecidableEq K] (m : Mapping K V) (k : K) (v : V) : Mapping K V :=
+  Function.update m k v
+
+def empty [Inhabited V] : Mapping K V := fun _ => default
+
+end Mapping
+```
+
+#### Simp laws (all free from `Function.update`)
+
+```lean
+-- These follow from Function.update_same and Function.update_noteq in Lean core.
+-- No custom axioms needed.
+
+@[simp] theorem Mapping.get_set_same [DecidableEq K] (m : Mapping K V) (k : K) (v : V) :
+    (m.set k v).get k = v :=
+  Function.update_same k v m
+
+@[simp] theorem Mapping.get_set_other [DecidableEq K] (m : Mapping K V)
+    (k k' : K) (v : V) (h : k ≠ k') :
+    (m.set k v).get k' = m.get k' :=
+  Function.update_noteq h v m
+
+@[simp] theorem Mapping.get_empty [Inhabited V] (k : K) :
+    (Mapping.empty : Mapping K V).get k = default := rfl
+
+@[simp] theorem Mapping.set_set_same [DecidableEq K] (m : Mapping K V)
+    (k : K) (v v' : V) :
+    (m.set k v).set k v' = m.set k v' :=
+  Function.update_idem k v v' m   -- or: funext + Function.update_same/noteq
+```
+
+There is **no storage axiom**. Key injectivity follows from `DecidableEq K` and
+`Function.update_noteq`. Struct field slot disjointness is proved by `decide`.
 
 Nested mappings (e.g. ERC-20 allowances) are `Mapping K (Mapping K' V)`.
 
-The full API and `@[simp]` laws are in §3.2.
+> **Why `K → V` instead of `Finsupp K V`?**
+> Contracts never enumerate keys, iterate mappings, or sum over them. `Finsupp`
+> would require `AddZeroClass V` on every value type and adds proof obligations
+> that don't correspond to any on-chain behavior. A plain function is the
+> minimal model that makes `simp [Mapping.get_set_same]` work and keeps proof
+> obligations finite.
 
-### §2.4 Result
+### §2.4 Except
 
-`Result Val E` is the return type for all `@[lsc.external]` mutators that can fail.
+LSC uses Lean 4's standard `Except E A` as the return type for fallible functions.
+No custom `Result` type is defined.
 
 ```lean
--- Defined in Lsc.Prelude
-inductive Result (Val E : Type) where
-  | ok  : Val → Result Val E   -- success
-  | err : E → Result Val E     -- revert with typed error
+-- From Lean 4 core (Lsc.Prelude re-exports these for convenience)
+-- inductive Except (E A : Type) where
+--   | ok    : A → Except E A
+--   | error : E → Except E A
+--
+-- instance : Monad (Except E) -- already in core
 ```
 
-The four return shapes authors use:
+The four return shapes:
 
 | Shape | Meaning | Example |
 |-------|---------|---------|
-| `S` | Infallible mutator — always succeeds, no error possible | `def setFlag (s : S) : S` |
-| `V` | Infallible view — read-only, always returns a value | `def number (s : S) : UInt256` |
-| `Result S E` | Fallible mutator — new state or error, no extra return value | `def increment (s : S) : Result S E` |
-| `Result (S × V) E` | Fallible mutator with return value | `def swap (s : S) ... : Result (S × UInt256) E` |
+| `S` | Infallible mutator | `def setFlag (s : S) : S` |
+| `V` | Infallible view | `def number (s : S) : UInt256` |
+| `Except E S` | Fallible mutator, no ABI return value | `def increment (s : S) : Except E S` |
+| `Except E (S × V)` | Fallible mutator with return value | `def swap (s : S) ... : Except E (S × UInt256)` |
 
-`S` must be the contract's `State` type for the emitter to treat it as a mutator. `V` is any primitive or product of primitives. The validator distinguishes shapes by whether `Val` contains the `State` type.
+`S` must be the contract's `State` type for the emitter to treat it as a mutator. `V` is any primitive or product of primitives. The validator distinguishes shapes by whether the success type contains `State`.
 
-- `.ok val` — success; emitter persists state (extracted from `val`), ABI-encodes the non-state component if present
-- `.err e` — EVM revert; emitter ABI-encodes `e` as a Solidity custom error
+- `.ok val` — success; emitter persists state, ABI-encodes the non-state component
+- `.error e` — EVM revert; emitter ABI-encodes `e` as a Solidity custom error
 
-**Infallible shapes (`S` and `V`):** The emitter wraps these in an unconditional success path. No revert is possible; no error type is needed.
+**Infallible shapes** are wrapped in an unconditional success path by the emitter.
 
-**Views that can fail** (rare): return `Result V E` where `V` is not `State`. The emitter generates a `staticcall`-compatible read-only wrapper that can revert.
+**Views that can fail** (rare): `Except E V` where `V` is not `State`.
+
+Because `Monad (Except E)` is in Lean core, all standard do-notation and bind
+combinators work without any LSC-specific plumbing.
 
 The full ABI inference rules are in §4.4.
 
-**`Monad (Result · E)`** — fallible contract functions use standard Lean 4 `do`-notation. The only monad permitted in contract code; it threads the error channel only (not state):
+### §2.5 Error types, `@[lsc.error]`, arithmetic errors, and `checked`
 
-```lean
--- Lsc.Prelude (confirm or add)
-instance : Monad (Result · E) where
-  pure v    := .ok v
-  bind ma f := match ma with
-    | .err e => .err e
-    | .ok v  => f v
-```
+#### `@[lsc.error]` — declaring contract error types
 
-### §2.5 Error types, `@[lsc.error]`, and arithmetic errors
-
-**`@[lsc.error]` — declaring contract error types:**
+`@[lsc.error]` does exactly one thing: **registers the inductive with the emitter**
+for ABI `errors` generation and revert encoding. No instances are generated, no
+conventions on variant names are imposed.
 
 ```lean
 @[lsc.error]
@@ -277,212 +351,225 @@ inductive TokenError where
   | insufficientBalance
   | insufficientAllowance
   | unauthorized
-  | alreadyInitialized
-  | overflow        -- enables checkedAdd/Sub/Mul
-  | divisionByZero  -- enables checkedDiv
+  | arith (e : ArithError)   -- recommended: one variant wraps all arithmetic failures
+  deriving DecidableEq, Repr
 ```
 
-`@[lsc.error]` is a Lean 4 attribute that fires at elaboration time.
-When applied to an inductive, it immediately generates:
-- `@[simp]` discriminator lemmas (`Result.ok_ne_err`, per-variant injectivity)
-- `DecidableEq` instance
-- `HasArithErrors` instance when `overflow` and/or `divisionByZero`
-  variants are present
+Everything else — `DecidableEq`, `Repr`, doc comments, additional instances — is
+plain Lean 4 `deriving` or `instance` as normal.
 
-The inductive itself is plain Lean 4 — authors can add doc comments,
-derive additional instances, and pattern match normally.
+#### `ArithError` — the prelude arithmetic error type
 
-| Responsibility | Owner |
-|---|---|
-| Declare the inductive | Author (standard Lean) |
-| `@[simp]` discriminators, `DecidableEq`, `HasArithErrors` | `@[lsc.error]` at elaboration |
-| Register type for revert encoding + ABI `errors` | `@[lsc.error]` attribute |
-| Map variants → Solidity `error` entries | Emitter (reads `@[lsc.error]` inductives) |
-| Surface missing `HasArithErrors` at `checkedAdd` sites | Lean elaborator → LSC validator message |
-
-**One error type per contract is recommended for most projects.**
-Every function in the contract uses the same error type, simp lemmas
-are generated once, and LLM proof generation has a single error
-vocabulary for the whole contract. Use per-function error types only
-when two functions have genuinely incompatible error vocabularies (rare).
-
-**`HasArithErrors` — arithmetic error typeclass:**
+`Lsc.Prelude` provides a single arithmetic error type for use across all contracts:
 
 ```lean
 -- Lsc.Prelude
-class HasArithErrors (E : Type) where
-  overflow       : E
-  divisionByZero : E
+inductive ArithError where
+  | overflow
+  | divisionByZero
+  deriving DecidableEq, Repr
 ```
 
-When `@[lsc.error]` sees `overflow` and/or `divisionByZero` variants,
-it generates the `HasArithErrors` instance automatically at elaboration
-time. This makes `checkedAdd`, `checkedSub`, `checkedMul`, and
-`checkedDiv` usable with that error type — no wrapping or `mapErr`
-required. The checked operations are polymorphic:
+Contracts embed it as a single variant. No typeclass, no instance, no codegen.
+
+#### The `+?` operator family
+
+`+?`, `-?`, `*?`, `/?` return `Option UInt256`. They are the only way to express
+fallible arithmetic in LSC. Plain `+ - * /` always wrap (Fin semantics):
 
 ```lean
-def UInt256.checkedAdd [HasArithErrors E] (a b : UInt256) : Result UInt256 E
+-- Lsc.Prelude
+def UInt256.addChecked (a b : UInt256) : Option UInt256 :=
+  if a.val + b.val < 2^256 then some ⟨a.val + b.val⟩ else none
+
+def UInt256.subChecked (a b : UInt256) : Option UInt256 :=
+  if a.val ≥ b.val then some ⟨a.val - b.val⟩ else none
+
+def UInt256.mulChecked (a b : UInt256) : Option UInt256 :=
+  if a.val = 0 ∨ b.val ≤ (2^256 - 1) / a.val then some ⟨a.val * b.val⟩ else none
+
+def UInt256.divChecked (a b : UInt256) : Option UInt256 :=
+  if b.val ≠ 0 then some ⟨a.val / b.val⟩ else none
+
+scoped notation a " +? " b => UInt256.addChecked a b
+scoped notation a " -? " b => UInt256.subChecked a b
+scoped notation a " *? " b => UInt256.mulChecked a b
+scoped notation a " /? " b => UInt256.divChecked a b
 ```
 
-If the contract does not need arithmetic checking, omit `overflow` and
-`divisionByZero`. The Lean elaborator will emit a typeclass resolution
-error at any `checkedAdd` site, which the LSC validator surfaces as:
-`lsc: no HasArithErrors instance for E; add | overflow to your error type`
+#### `checked <f> do` — the recommended arithmetic block
 
-#### Arithmetic surface syntax (`Lsc.Arith`)
-
-Contract and spec code share `UInt256 = Fin (2^256)`, but **surface syntax differs by module role** so overflow intent is visible to authors and the validator.
-
-**Module conventions**
-
-| Module | Required | Forbidden |
-|--------|----------|-----------|
-| `src/*.lean` (contract) | `do` / `unchecked do` in `@[lsc.export]` bodies; explicit `checkedAdd` outside `do` | `open Lsc.Arith` in `spec/` or `test/` |
-| `spec/*.lean`, `test/*Proof.lean` | Plain `+ - * /` on `UInt256` (`Fin`) | `unchecked`, `open Lsc.Arith`, checked `+` in `do` |
-
-**Wrapping — `unchecked do` (Solidity-style):** Only way to use modular **`+ - * /`** on `UInt256` in contracts. Inside the block, operators desugar to **`Fin`** ops (same as spec `+`). Not allowed in spec or proof modules.
+`checked <f> do` is the primary way to write fallible arithmetic in LSC.
+It is a `do`-block macro that declares the error-routing constructor **once**
+at the block header; every `← expr` where `expr : Option A` is automatically
+wrapped via `orWrap f`. Lines with `← expr` where `expr : Except E A` (e.g.
+`require`) are left untouched.
 
 ```lean
--- Lsc.Prelude (Lsc.Arith) — internal / prelude only; authors use unchecked do
-def UInt256.add  (a b : UInt256) : UInt256 := a + b   -- Fin HAdd
-def UInt256.sub  (a b : UInt256) : UInt256 := a - b
-def UInt256.mul  (a b : UInt256) : UInt256 := a * b
-def UInt256.div  (a b : UInt256) : UInt256 := a / b
-
--- Macro: inside unchecked do, `+` uses UInt256.add; body is proof-erased to plain Fin math
-unchecked do
-  let newReserve0 := s.reserve0 + amountIn
-  let k           := s.reserve0 * s.reserve1
-  ...
+-- Lsc.Prelude
+macro "checked" f:term " do" body:doSeq : term =>
+  `((do $body : Option _) |>.orWrap $f)
+-- Each `← e` where e : Option A  desugars to `← e |>.orWrap $f`
+-- Each `← e` where e : Except E A is left unchanged
 ```
 
-**Checked operations** — revert via `Result` / `HasArithErrors E` (authoritative API; macros desugar here):
+**Full example — AMM swap:**
 
 ```lean
-def UInt256.checkedAdd [HasArithErrors E] (a b : UInt256) : Result UInt256 E :=
-  if a.val + b.val >= 2^256 then .err HasArithErrors.overflow
-  else .ok ⟨a.val + b.val⟩
-
-def UInt256.checkedSub [HasArithErrors E] (a b : UInt256) : Result UInt256 E :=
-  if a.val < b.val then .err HasArithErrors.overflow
-  else .ok ⟨a.val - b.val⟩
-
-def UInt256.checkedMul [HasArithErrors E] (a b : UInt256) : Result UInt256 E :=
-  if a.val != 0 && b.val > (2^256 - 1) / a.val then .err HasArithErrors.overflow
-  else .ok ⟨a.val * b.val⟩
-
-def UInt256.checkedDiv [HasArithErrors E] (a b : UInt256) : Result UInt256 E :=
-  if b.val = 0 then .err HasArithErrors.divisionByZero
-  else .ok ⟨a.val / b.val⟩
+@[lsc.external]
+def swap (s : AMMState) (amountIn : UInt256)
+    : Except AMMError AMMState := checked .arith do
+  require (s.reserve0 > 0) .uninitializedPool
+  let num       ← amountIn  *? s.reserve1    -- Option; auto-wrapped via .arith
+  let denom     ← s.reserve0 +? amountIn     -- Option; auto-wrapped via .arith
+  let amountOut ← num /? denom               -- Option; auto-wrapped via .arith
+  return .ok { s with
+    reserve0 := s.reserve0 + amountIn        -- plain Fin +, no check
+    reserve1 := s.reserve1 - amountOut       -- plain Fin -, no check
+  }
 ```
 
-**Checked operators in `do` blocks** — inside `do` blocks in `@[lsc.export]` function bodies, the LSC validator rewrites arithmetic on `UInt256`:
+`.arith` is the constructor `ArithError → AMMError`. Any `none` from `+? -? *?`
+produces `.error (.arith .overflow)`; `/?` producing `none` becomes
+`.error (.arith .overflow)` in v1 (see note on division below).
 
-| Author writes (in `do` block) | Desugars to |
-|-------------------------------|-------------|
-| `a + b` | `a.checkedAdd b` |
-| `a - b` | `a.checkedSub b` |
-| `a * b` | `a.checkedMul b` |
-| `a / b` | `a.checkedDiv b` |
+**Naming:** `checked` is the exact dual of Solidity's `unchecked`. In Solidity,
+arithmetic reverts by default and `unchecked { }` opts out. In LSC, `+` wraps
+by default and `checked .arith do` opts in to overflow checking:
 
-These return `Result UInt256 E`; `←` propagates via `Monad (Result · E)`. Outside `do` blocks and in spec/proof files, `+ - * /` retain standard Lean 4 meanings on `UInt256` (Fin arithmetic). Outside `do` in contract code, use `checkedAdd` / … explicitly. Raw kernel `HAdd` / `HSub` / `HMul` / `HDiv` on `UInt256` without these forms is a **validator error** (§13.1).
+| | Solidity | LSC |
+|---|---|---|
+| Default `+` | reverts on overflow | wraps (Fin) |
+| Opt-out/in block | `unchecked { a + b }` | `a + b` (plain) |
+| Checked | `a + b` (default) | `checked .arith do; let x ← a +? b` |
 
-**Bridge lemmas** (`Lsc.Prelude`, all `@[simp]`):
-
-```lean
-@[simp] theorem UInt256.checkedAdd_ok [HasArithErrors E] (a b : UInt256)
-    (h : a.val + b.val < 2^256) :
-    UInt256.checkedAdd (E := E) a b = .ok ⟨a.val + b.val⟩ := by
-  simp [UInt256.checkedAdd, h]
-
-@[simp] theorem UInt256.checkedAdd_overflow [HasArithErrors E] (a b : UInt256)
-    (h : a.val + b.val >= 2^256) :
-    UInt256.checkedAdd (E := E) a b = .err HasArithErrors.overflow := by
-  simp [UInt256.checkedAdd, h]
-
--- analogous checkedSub_ok, checkedSub_overflow
--- checkedMul_ok, checkedMul_overflow
--- checkedDiv_ok, checkedDiv_divisionByZero
-```
-
-Proofs: prefer `simp [increment, UInt256.checkedAdd_ok]` over unfolding `checkedAdd` (§11.1).
-
-**When to use which (contracts)**
-
-- **`do` / `←` (checked)** — fallible mutators and views; balances, counters, user-facing paths where overflow or division-by-zero should return `.err .overflow` or `.err .divisionByZero`; e.g. `let n ← s.number + 1` inside `do`.
-- **`unchecked do`** — inner steps where linked spec `def`s prove bounds and overflow should not revert; plain `let` with `+ * / -` (`+` returns `UInt256`, not `Result`).
-- **Spec `Prop`s** — always `a + b`, `a * b`, etc. on `UInt256`; link checked paths via `checkedAdd_ok`; inside `unchecked`, contract `+` matches spec `+` definitionally after `simp [swap, …]`.
-
-**Error propagation — `do`-notation:**
-
-Functions that can fail use standard Lean 4 `do`-notation over `Result E`. The `←` operator is monadic bind — it unwraps a `Result Val E`, propagating `.err e` automatically if the computation fails:
-
-```lean
-def increment (s : CounterState) : Result CounterState CounterError := do
-  let n ← s.number + 1   -- + is checkedAdd; ← propagates overflow
-  return .ok { s with number := n }
-```
-
-Inside `do` blocks in contract functions, arithmetic operators on `UInt256` desugar to their checked forms (`+` → `checkedAdd`, etc.). This requires a `HasArithErrors` instance for the function's error type `E` — provided automatically by `@[lsc.error]` when `overflow` and/or `divisionByZero` variants are present.
-
-**`assert` — inline precondition checks:**
-
-```lean
-assert (condition) .ErrorVariant
--- desugars to:
-if ¬(condition) then return .err .ErrorVariant
-```
-
-**Example combining both — forwarding an overflow error:**
+**ERC-20 transfer — full pattern:**
 
 ```lean
 @[lsc.error]
-inductive VaultError where
+inductive TokenError where
   | insufficientBalance
-  | overflow   -- checkedAdd on balances and totalDeposits
+  | unauthorized
+  | arith (e : ArithError)
+  deriving DecidableEq, Repr
 
 @[lsc.external]
-def deposit
-    (@[lsc.caller] caller : Address)
-    (s : VaultState)
-    (amount : UInt256) : Result VaultState VaultError := do
-  assert (amount > 0) .insufficientBalance
-  let newBalance ← s.balances.get caller + amount
-  let newTotal   ← s.totalDeposits + amount
-  return .ok { s with
-    balances      := s.balances.set caller newBalance
-    totalDeposits := newTotal }
+def transfer (caller : Caller) (s : ERC20State)
+    (to : Address) (amount : UInt256)
+    : Except TokenError (ERC20State × Bool) := checked .arith do
+  require (s.balances.get caller.val ≥ amount) .insufficientBalance
+  let newCaller ← s.balances.get caller.val -? amount
+  let newTo     ← s.balances.get to         +? amount
+  let s' := { s with balances :=
+    s.balances.set caller.val newCaller |>.set to newTo }
+  Lsc.Event.log (TransferEvent.mk caller.val to amount)
+  return .ok (s', true)
 ```
 
-If checked `+` overflows, the function immediately returns `.err .overflow`. The spec can then prove:
+#### `orWrap` and `orError` — single-operation fallback
+
+For a single checked operation outside a `checked` block, or when `ArithError`
+is used as the top-level error type directly:
 
 ```lean
-def deposit_arith_error_means_overflow
-    (caller : Address) (s : VaultState) (amount : UInt256)
-    (h : deposit caller s amount = .err .overflow) : Prop :=
-  s.balances.get caller + amount ≥ 2^256 ∨ s.totalDeposits + amount ≥ 2^256
+-- Lsc.Prelude
+
+/-- Map None to a wrapped ArithError. f is a constructor ArithError → E.
+    Use with +? -? *? for single operations outside a checked block. -/
+def Option.orWrap (f : ArithError → E) : Option A → Except E A
+  | some a => .ok a
+  | none   => .error (f .overflow)
+
+/-- Like orWrap but uses .divisionByZero. Use with /? -/
+def Option.orWrapDiv (f : ArithError → E) : Option A → Except E A
+  | some a => .ok a
+  | none   => .error (f .divisionByZero)
+
+/-- Map None to a concrete error value.
+    Use when ArithError is your top-level E (no wrapping needed). -/
+def Option.orError (e : E) : Option A → Except E A
+  | some a => .ok a
+  | none   => .error e
 ```
 
+**Simple contracts** (no domain errors) may use `ArithError` directly as `E`:
+
+```lean
+@[lsc.external]
+def increment (s : CounterState) : Except ArithError CounterState :=
+  checked id do
+  let n ← s.number +? 1
+  return .ok { s with number := n }
+```
+
+#### Summary
+
+| Pattern | When to use | Example |
+|---------|------------|---------|
+| `checked .arith do` | Multiple arithmetic ops (recommended) | AMM, ERC-20 |
+| `\|>.orWrap .arith` | Single operation outside `checked` | One-off update |
+| `\|>.orWrapDiv .arith` | Division outside `checked` | Price calc |
+| `\|>.orError .overflow` | `ArithError` is top-level `E` | Simple counter |
+
+> **Why does `/?` inside `checked` map to `.overflow` and not `.divisionByZero`?**
+> `checked .arith do` uses a single constructor `f : ArithError → E`. `orWrap`
+> always passes `f .overflow`. Division-by-zero semantics require `f .divisionByZero`,
+> which `orWrapDiv` provides. For `/?` inside a `checked` block, use
+> `let x ← a /? b |>.orWrapDiv .arith` explicitly. v2 may detect `/?` and
+> route to `.divisionByZero` automatically.
+
+#### Bridge lemmas (Mathlib naming, all `@[simp]`)
+
+```lean
+@[simp] theorem UInt256.addChecked_some {a b : UInt256} (h : a.val + b.val < 2^256) :
+    a +? b = some ⟨a.val + b.val⟩ := by simp [UInt256.addChecked, h]
+
+@[simp] theorem UInt256.addChecked_none_of_ge {a b : UInt256} (h : a.val + b.val ≥ 2^256) :
+    a +? b = none := by simp [UInt256.addChecked]; omega
+
+@[simp] theorem UInt256.subChecked_some {a b : UInt256} (h : a.val ≥ b.val) :
+    a -? b = some ⟨a.val - b.val⟩ := by simp [UInt256.subChecked, h]
+
+@[simp] theorem UInt256.subChecked_none_of_lt {a b : UInt256} (h : a.val < b.val) :
+    a -? b = none := by simp [UInt256.subChecked]; omega
+
+@[simp] theorem Option.orWrap_some {f : ArithError → E} {a : A} :
+    (some a).orWrap f = .ok a := rfl
+
+@[simp] theorem Option.orWrap_none {f : ArithError → E} :
+    (none : Option A).orWrap f = .error (f .overflow) := rfl
+
+@[simp] theorem Option.orWrapDiv_none {f : ArithError → E} :
+    (none : Option A).orWrapDiv f = .error (f .divisionByZero) := rfl
+
+-- *? analogous to +?; /? analogous to -?
+```
+
+**Proof recipe:** `simp [myFunction]` unfolds `checked`, `+?`, and `orWrap`
+in one step. Bridge lemmas fire automatically; `omega` closes arithmetic goals.
+
 ### §2.6 Forbidden types
+
+The validator permits exactly these primitive types in contract code. Any other type is a hard error (§13.1).
 
 | Forbidden | Validator error | Use instead |
 |-----------|----------------|-------------|
 | `Nat`, `Int`, `Float` | `lsc: type Nat is not allowed; use UInt256` | `UInt256` |
-| `String`, `Char` | `lsc: String is not allowed; use Bytes` | `Bytes` |
+| `String`, `Char` | `lsc: String is not allowed; use Bytes[N]` | `Bytes[N]` |
 | `List`, `Array` in state | `lsc: List is not allowed in contract code` | `Mapping` |
 | `IO`, `StateM`, `ST`, or any monad that threads implicit state | `lsc: stateful monads are not allowed in contracts; use explicit state passing` | Explicit state passing |
 | Higher-order functions | `lsc: functions cannot be passed as arguments` | Top-level helpers |
 | Recursive types / inductives with >2 constructors | `lsc: inductive type X is not allowed` | Struct + `Mapping` (except `@[lsc.error]` error enums) |
-| `Option (S × Ret)` on mutator | `lsc: use Result S Ret E for mutators` | `Result S Ret E` |
+| `Option (S × Ret)` on mutator | `lsc: use Except E (S × Ret) for mutators` | `Except E (S × Ret)` |
 
-**`do`-notation over `Result E` is allowed and recommended** for functions that can fail. This is the only monad permitted in contract code. It does not thread implicit state — `s` remains an explicit parameter, `s'` is an explicit return value — so theorems are unaffected.
+**`do`-notation over `Except E` is allowed and recommended** for functions that can fail. This is the only monad permitted in contract code. It does not thread implicit state — `s` remains an explicit parameter, `s'` is an explicit return value — so theorems are unaffected.
 
 ```lean
--- Allowed: do-notation over Result E (error-only monad)
-@[lsc.export]
-def increment (s : CounterState) : Result CounterState CounterError := do
-  let n ← s.number + 1   -- + desugars to checkedAdd inside do
+-- Allowed: do-notation over Except E (error-only monad)
+@[lsc.external]
+def increment (s : CounterState) : Except ArithError CounterState :=
+  checked id do
+  let n ← s.number +? 1
   return .ok { s with number := n }
 
 -- Banned: StateM or any monad that hides s
@@ -491,10 +578,10 @@ def increment : StateM CounterState Unit := ...
 ```
 
 > **Why not richer types?**
-> Lean's proof automation (`simp`, `omega`, `decide`) works best on flat, finite structures. `Nat` requires `omega` extensions that interact poorly with `Fin`; `List` in state makes proof obligations unbounded; stateful monads hide the state threading that theorems need to quantify over (`s` and `s'` must stay explicit). `do` over `Result E` only threads errors. Every restriction here trades expressiveness for a proof that `simp` can close in one step.
+> Lean's proof automation (`simp`, `omega`, `decide`) works best on flat, finite structures. `Nat` requires `omega` extensions that interact poorly with `Fin`; `List` in state makes proof obligations unbounded; stateful monads hide the state threading that theorems need to quantify over (`s` and `s'` must stay explicit). `do` over `Except E` only threads errors. Every restriction here trades expressiveness for a proof that `simp` can close in one step.
 
-> **Why `Result` instead of keeping `Option`?**
-> `Option` cannot express *which* error fired — `none` is a single undifferentiated failure. `Result S Ret E` lets specs prove "this specific error fires under these conditions", which is essential for user-facing contracts. Generic `Result` simp lemmas in `Lsc.ProofHelpers` and `assert` desugaring ensure proof bodies are no harder to write than with `Option`. See §11.1.
+> **Why `Except` instead of a custom `Result` or bare `Option`?**
+> `Option` cannot express *which* error fired. Lean's core `Except E A` is the standard fallible monad; specs prove "this specific error fires under these conditions" via `.error e`. `Except.ok.injEq` / `Except.error.injEq` and the bridge lemmas in §11.1 keep proof bodies short. See §11.1.
 
 ---
 
@@ -512,8 +599,8 @@ structure CounterState where
 
 ```lean
 structure ERC20State where
-  name        : Bytes                                          -- slot 0
-  symbol      : Bytes                                          -- slot 1
+  name        : Bytes[32]                                      -- slot 0
+  symbol      : Bytes[32]                                      -- slot 1
   decimals    : UInt256                                        -- slot 2
   totalSupply : UInt256                                        -- slot 3
   balances    : Mapping Address UInt256                 -- slot 4
@@ -526,38 +613,7 @@ The **contract name** is the file stem (`Counter` from `src/Counter.lean`). No c
 
 ### §3.2 Mapping laws
 
-`Mapping` is defined in `Lsc.Prelude` with the following `@[simp]` lemmas. These are **definitional equalities** — not axioms — so `simp` can unfold them without any additional hypotheses:
-
-```lean
--- The four core laws, all @[simp]:
-
-@[simp] theorem Mapping.get_set_same
-    {K V : Type} [DecidableEq K] (m : Mapping K V) (k : K) (v : V) :
-    (m.set k v).get k = v := by ...
-
-@[simp] theorem Mapping.get_set_other
-    {K V : Type} [DecidableEq K] (m : Mapping K V) (k k' : K) (v : V)
-    (h : k ≠ k') :
-    (m.set k v).get k' = m.get k' := by ...
-
-@[simp] theorem Mapping.get_empty
-    {K V : Type} [DecidableEq K] [Inhabited V] (k : K) :
-    (Mapping.empty : Mapping K V).get k = default := by ...
-
-@[simp] theorem Mapping.set_set_same
-    {K V : Type} [DecidableEq K] (m : Mapping K V) (k : K) (v v' : V) :
-    (m.set k v).set k v' = m.set k v' := by ...
-```
-
-The one **axiom** (not definitional) is key injectivity for storage slot collision proofs:
-
-```lean
-axiom Mapping.key_injective {K V : Type} [DecidableEq K]
-    (m : Mapping K V) (a b : K) (s : UInt256) :
-    storageKey a s = storageKey b s → a = b
-```
-
-This is the sole storage axiom in `Lsc.Prelude`. Struct field slot disjointness (distinct fields → distinct slots) is provable by `decide` from sequential slot assignment and requires no axiom.
+`Mapping` is `K → V` with `get` / `set` / `empty` and four `@[simp]` lemmas derived from `Function.update` (§2.3). There is **no storage axiom**. Struct field slot disjointness is provable by `decide` from sequential slot assignment.
 
 ### §3.3 Slot layout
 
@@ -602,11 +658,11 @@ structure CounterState where
 
 | Field type | Generated signature | Body |
 |------------|---------------------|------|
-| Scalar (`UInt256`, `Address`, `Bool`, `Bytes32`, `Bytes`) | `def fieldName (s : State) : T` | `s.fieldName` |
+| Scalar (`UInt256`, `Address`, `Bool`, `Bytes32`, `Bytes[N]`) | `def fieldName (s : State) : T` | `s.fieldName` |
 | `Mapping K V` | `def fieldName (s : State) (k : K) : V` | `s.fieldName.get k` |
 | Nested `Mapping` | one key parameter per mapping level, left-to-right | nested `.get` |
 
-Generated exports are infallible views (§4.3): return type `T` directly, not `Result` or `Option`. The emitter treats them like author-written views — no `sstore`, `s : State` excluded from ABI calldata (§4.5).
+Generated exports are infallible views (§4.3): return type `T` directly, not `Except` or `Option`. The emitter treats them like author-written views — no `sstore`, `s : State` excluded from ABI calldata (§4.5).
 
 **Naming:** the ABI function name equals the Lean field name. v1 has no alias attribute. When the standard ABI name differs from the field name (e.g. IERC-20 `balanceOf` vs field `balances`), omit `@[lsc.public]` on that field and write a manual `@[lsc.external]` export instead.
 
@@ -616,6 +672,44 @@ Generated exports are infallible views (§4.3): return type `T` directly, not `R
 
 > **Why an annotation instead of exposing all fields?**
 > Most storage is internal. Opt-in `@[lsc.public]` mirrors Solidity `public` without generating getters for every field (mappings, internal counters, etc.). Proofs stay on record fields; the compiler only adds ABI surface where requested.
+
+### §3.6 `@[lsc.initialize]`
+
+Every contract may declare exactly one initialization function with `@[lsc.initialize]`.
+This is called once at deployment (constructor) and also serves as the designated
+re-initialization entry point for proxy upgrade patterns.
+
+```lean
+@[lsc.initialize]
+def initialize (name symbol : Bytes[32]) (decimals : UInt256)
+    (initialSupply : UInt256) (owner : Caller)
+    : Except TokenError TokenState :=
+  return .ok {
+    name        := name
+    symbol      := symbol
+    decimals    := decimals
+    totalSupply := initialSupply
+    balances    := Mapping.empty |>.set owner.val initialSupply
+    allowances  := Mapping.empty
+  }
+```
+
+**Rules:**
+- At most one `@[lsc.initialize]` per contract module (validator error if more).
+- The return type must be `Except E S` or the bare state type `S` (infallible
+  constructor). No ABI return value.
+- `Caller` parameters are bound to `msg.sender` at deploy time, same as
+  `@[lsc.external]`.
+- The emitter generates an ABI constructor (not a named function) from
+  `@[lsc.initialize]`.
+- For proxy patterns, the emitter additionally generates an `initialize(...)` named
+  ABI function callable post-deployment. The validator enforces that if
+  `@[lsc.initialize]` is present and the contract is marked `@[lsc.proxy_compatible]`,
+  a reentrancy guard on `initialize` is generated automatically.
+
+**Spec / proof:** `@[lsc.initialize]` functions are treated identically to
+`@[lsc.external]` in spec and proof files. The compliance manifest (§12) includes
+constructor theorems (e.g. `constructor_mints_initial_supply`).
 
 ---
 
@@ -627,8 +721,9 @@ Public ABI functions are declared by annotating contract functions with `@[lsc.e
 
 ```lean
 @[lsc.external]
-def increment (s : CounterState) : Result CounterState CounterError := do
-  let n ← s.number + 1
+def increment (s : CounterState) : Except ArithError CounterState :=
+  checked id do
+  let n ← s.number +? 1
   return .ok { s with number := n }
 ```
 
@@ -643,32 +738,56 @@ Mutators read and modify state. The return shape depends on fallibility and whet
 | Return shape | Meaning |
 |---|---|
 | `S` | Infallible mutator — always succeeds |
-| `Result S E` | Fallible mutator, no ABI return value |
-| `Result (S × V) E` | Fallible mutator, ABI returns `V` |
+| `Except E S` | Fallible mutator, no ABI return value |
+| `Except E (S × V)` | Fallible mutator, ABI returns `V` |
+
+**`require` — inline precondition checks:**
+
+`require` is the LSC guard macro. It reads as a precondition, matches Vyper/Solidity
+ergonomics, and does not collide with any Lean 4 builtin:
+
+```lean
+require (condition) .ErrorVariant
+-- desugars to:
+if ¬condition then return .error .ErrorVariant
+```
+
+`assert!` (Lean 4 builtin) is a runtime panic and cannot be used in contract
+functions. `require` is the LSC equivalent.
 
 ```lean
 -- Fallible mutator, no return value (increment can overflow)
 @[lsc.external]
-def increment (s : CounterState) : Result CounterState CounterError := do
-  let n ← s.number + 1
+def increment (s : CounterState) : Except ArithError CounterState :=
+  checked id do
+  let n ← s.number +? 1
   return .ok { s with number := n }
 
 -- Fallible mutator with return value (transfer returns bool)
 @[lsc.external]
-def transfer
-    (@[lsc.caller] caller : Address) (s : TokenState)
-    (to : Address) (amount : UInt256) : Result (TokenState × Bool) TokenError := do
-  assert (s.balances.get caller ≥ amount) .insufficientBalance
-  let newCaller ← s.balances.get caller - amount
-  let newTo     ← s.balances.get to + amount
-  let s' := { s with balances := s.balances.set caller newCaller |>.set to newTo }
-  Lsc.Event.log (TransferEvent.mk caller to amount)
+def transfer (caller : Caller) (s : TokenState)
+    (to : Address) (amount : UInt256) : Except TokenError (TokenState × Bool) :=
+  checked .arith do
+  require (s.balances.get caller.val ≥ amount) .insufficientBalance
+  let newCaller ← s.balances.get caller.val -? amount
+  let newTo     ← s.balances.get to +? amount
+  let s' := { s with balances := s.balances.set caller.val newCaller |>.set to newTo }
+  Lsc.Event.log (TransferEvent.mk caller.val to amount)
   return .ok (s', true)
 
 -- Infallible mutator (sets a flag, no arithmetic, cannot fail)
 @[lsc.external]
 def activate (s : FlagState) : FlagState :=
   { s with active := true }
+```
+
+```lean
+@[lsc.external]
+def deposit (caller : Caller) (s : VaultState) (amount : UInt256)
+    : Except VaultError VaultState := checked .arith do
+  require (amount > 0) .insufficientBalance
+  let newBalance ← s.balances.get caller.val +? amount
+  return .ok { s with balances := s.balances.set caller.val newBalance }
 ```
 
 ### §4.3 Views
@@ -681,9 +800,9 @@ Views read state without modifying it:
 
 -- Fallible view (rare): author-written
 @[lsc.external]
-def price (s : AMMState) : Result UInt256 AMMError := do
-  assert (s.reserve1 > 0) .uninitializedPool
-  let p ← s.reserve0 / s.reserve1
+def price (s : AMMState) : Except AMMError UInt256 := do
+  require (s.reserve1 > 0) .uninitializedPool
+  let p ← s.reserve0 /? s.reserve1 |>.orWrapDiv .arith
   return .ok p
 ```
 
@@ -697,15 +816,15 @@ The compiler infers the full ABI from the `@[lsc.external]` function signature.
 |--------------------|-----------|------------|------------|
 | `S` | nonpayable | none | none |
 | `V` (not State) | view | ABI type of `V` | none |
-| `Result S E` | nonpayable | none | `E` variants |
-| `Result (S × Bool) E` | nonpayable | `bool` | `E` variants |
-| `Result (S × UInt256) E` | nonpayable | `uint256` | `E` variants |
-| `Result (S × Address) E` | nonpayable | `address` | `E` variants |
-| `Result (S × Bytes32) E` | nonpayable | `bytes32` | `E` variants |
-| `Result V E` (V not State) | view | ABI type of `V` | `E` variants |
-| `Option _` on mutator | **validator error** | — | use `Result` |
+| `Except E S` | nonpayable | none | `E` variants |
+| `Except E (S × Bool)` | nonpayable | `bool` | `E` variants |
+| `Except E (S × UInt256)` | nonpayable | `uint256` | `E` variants |
+| `Except E (S × Address)` | nonpayable | `address` | `E` variants |
+| `Except E (S × Bytes32)` | nonpayable | `bytes32` | `E` variants |
+| `Except E V` (V not State) | view | ABI type of `V` | `E` variants |
+| `Option _` on mutator | **validator error** | — | use `Except` |
 
-Each `@[lsc.error]` variant becomes one Solidity `error` entry in the ABI JSON — including `overflow` and `divisionByZero` when present on the contract error inductive.
+Each `@[lsc.error]` variant becomes one Solidity `error` entry in the ABI JSON.
 
 ### §4.5 Parameter filtering
 
@@ -714,20 +833,21 @@ The compiler excludes certain parameters from ABI calldata automatically:
 | Parameter kind | ABI | Rule |
 |---------------|-----|------|
 | `s : SomeState` (contract State struct) | excluded | Loaded by compiler from storage |
-| `@[lsc.caller] caller : Address` | excluded | Bound to `msg.sender` by wrapper |
-| `UInt256`, `Address`, `Bool`, `Bytes32`, `Bytes` (no annotation) | included | In declaration order |
+| `caller : Caller` | excluded | Bound to `msg.sender` by wrapper |
+| `UInt256`, `Address`, `Bool`, `Bytes32`, `Bytes[N]` (no annotation) | included | In declaration order |
 
 Parameters are included in the ABI in the order they appear after the excluded ones are removed.
 
 ### §4.6 State threading
 
-State is threaded **explicitly** through every function. Stateful monads are disallowed (§2.6); `do` over `Result E` is allowed.
+State is threaded **explicitly** through every function. Stateful monads are disallowed (§2.6); `do` over `Except E` is allowed.
 
 ```lean
--- Correct: explicit state threading with do-notation over Result
+-- Correct: explicit state threading with do-notation over Except
 @[lsc.external]
-def increment (s : CounterState) : Result CounterState CounterError := do
-  let n ← s.number + 1   -- + desugars to checkedAdd inside do block
+def increment (s : CounterState) : Except ArithError CounterState :=
+  checked id do
+  let n ← s.number +? 1
   return .ok { s with number := n }
 
 -- Infallible: no do needed
@@ -742,77 +862,84 @@ def increment : StateM CounterState Unit := ...  -- lsc: stateful monads are not
 All proofs are written against the same `@[lsc.external]` signatures that get deployed.
 
 > **Why allow `do`-notation but ban `StateM`?**
-> `do` over `Result E` only threads the error channel — `s` stays an explicit parameter, `s'` stays an explicit return value. Theorems quantify over both as before: `(h : f s = .ok s')`. `StateM` hides `s` inside the monad, making it impossible to state theorems of that form. The ban is on implicit state, not on `do`-notation itself.
+> `do` over `Except E` only threads the error channel — `s` stays an explicit parameter, `s'` stays an explicit return value. Theorems quantify over both as before: `(h : f s = .ok s')`. `StateM` hides `s` inside the monad, making it impossible to state theorems of that form. The ban is on implicit state, not on `do`-notation itself.
 
 > **Why infer the ABI instead of requiring an explicit signature string?**
 > Explicit ABI strings duplicate information already in the type. They drift, have typos, and create a second proof surface. Inferring from types keeps the contract module as the single source of truth — including error types, which map to Solidity `error` declarations automatically.
-
-> **Why `Result S Unit E` and not a bare `Result S E` for void mutators?**
-> Uniform `Result S Ret E` means every mutator success uses one hypothesis form: `(h : f … s = .ok s' ret)`. Proofs ignore `ret` with `_` when only state matters. A separate bare form would fork the proof pattern and break `SpecTemplates` skeletons.
 
 ---
 
 ## §5 Caller Identity
 
-### §5.1 The `@[lsc.caller]` annotation
+### §5.1 The `Caller` type
 
-When a function needs to know who called it (e.g. for authorization), the caller's address is passed as an explicit parameter annotated with `@[lsc.caller]`:
+When a function needs to know who called it, the caller's address is passed as a
+`Caller` parameter:
+
+```lean
+-- Lsc.Prelude
+structure Caller where
+  val : Address
+  deriving DecidableEq, Repr
+```
+
+Any parameter of type `Caller` is **excluded from ABI calldata** and bound to
+`msg.sender` by the emitter. No annotation is required — the type itself is the
+signal.
 
 ```lean
 @[lsc.external]
-def transfer
-    (@[lsc.caller] caller : Address)
-    (s : ERC20State)
-    (to : Address)
-    (amount : UInt256) : Result (ERC20State × Bool) TokenError := ...
+def transfer (caller : Caller) (s : ERC20State)
+    (to : Address) (amount : UInt256)
+    : Except TokenError (ERC20State × Bool) := do
+  require (s.balances.get caller.val ≥ amount) .insufficientBalance
+  ...
 ```
-
-The compiler binds this parameter to `msg.sender` in the generated export wrapper. It is excluded from ABI calldata (§4.5).
 
 ### §5.2 Validator rules
 
-- **`@[lsc.caller]` must have type `Address`** — any other type is a validator error.
-- **At most one `@[lsc.caller]` per function** — validator error if more than one.
-- **If `Address` appears as the first non-state parameter without `@[lsc.caller]`, the validator emits an error** — this prevents silent bugs where a caller address accidentally becomes an ABI argument.
-- **`@[lsc.caller]` may appear in any position** — it does not have to be first.
+- **At most one `Caller` parameter per function** — validator error if more than one.
+- **`Caller` may appear in any position** — the validator identifies it by type,
+  not position.
+- **`Address` as first non-state parameter with name `caller`, `sender`, `from`,
+  or `owner`** — validator warning suggesting `Caller` type to avoid accidental
+  ABI exposure.
 
 ```lean
 -- Correct
-@[lsc.external]
-def withdraw (@[lsc.caller] caller : Address) (s : VaultState) (amount : UInt256) : ...
+def withdraw (caller : Caller) (s : VaultState) (amount : UInt256) : ...
 
--- Validator error: Address first parameter, no @[lsc.caller]
-@[lsc.external]
+-- Validator warning: Address named 'caller' without Caller type
 def withdraw (caller : Address) (s : VaultState) (amount : UInt256) : ...
--- lsc: parameter 'caller : Address' looks like a caller address but has no @[lsc.caller] annotation;
---      add @[lsc.caller] to exclude from ABI, or rename to avoid confusion
+-- lsc: parameter 'caller : Address' looks like a caller address; use type Caller
+--      to exclude from ABI and bind to msg.sender
 
--- Validator error: two @[lsc.caller] annotations
-@[lsc.external]
-def foo (@[lsc.caller] a : Address) (@[lsc.caller] b : Address) (s : S) : ...
--- lsc: at most one @[lsc.caller] parameter per export
+-- Validator error: two Caller parameters
+def foo (a : Caller) (b : Caller) (s : S) : ...
+-- lsc: at most one Caller parameter per export
 ```
 
-### §5.3 EvmContext (compiler-generated only)
+### §5.3 In proofs
 
-The full `EvmContext` struct is used by the compiler-generated export wrapper only. Authors never write it in contract functions.
+Theorems quantify over `caller : Caller` directly:
 
 ```lean
--- Compiler-internal; not available in src/*.lean
-structure EvmContext where
-  sender  : Address
-  value   : UInt256
-  address : Address   -- executing contract (self)
-  origin  : Address   -- tx.origin
+theorem transfer_no_overdraft
+    (caller : Caller) (to : Address) (amount : UInt256) (s : ERC20State)
+    (h : transfer caller s to amount = .error .insufficientBalance) :
+    ERC20Spec.transfer_no_overdraft caller to amount s h := by ...
 ```
 
-The wrapper binds `@[lsc.caller] caller := ctx.sender` before invoking the author function.
+No `EvmContext` appears in author-facing proofs. The caller is always a
+first-class proof variable.
 
-> **Why an annotation instead of a positional or naming convention?**
-> Positional rules ("first `Address` is always the caller") break when a function genuinely takes an address as an ABI argument in the first position. Naming conventions (`caller`, `sender`, `from`) are ambiguous across codebases. An explicit annotation is unambiguous, self-documenting, and gives the validator a clear rule to enforce.
-
-> **Why not implicit `msg.sender` as a global?**
-> Implicit globals make theorems non-uniform — you need to reason about an injected context variable that isn't in the function signature. Explicit `@[lsc.caller] caller : Address` means theorems quantify over `caller` directly: `∀ caller, transfer caller s to amount = …`.
+> **Why a newtype instead of `@[lsc.caller]` annotation?**
+> A type-level distinction means the proof system tracks caller parameters
+> without any attribute magic. `funext` and `simp` work uniformly.
+> When `block.timestamp` or other context values are needed in future versions,
+> they become separate newtypes (`BlockTimestamp`, `BlockNumber`) following the
+> same pattern — each excluded from ABI by type, each a clean proof variable.
+> No `EvmContext` struct is needed and no annotation proliferation occurs.
 
 ---
 
@@ -841,16 +968,14 @@ Events are emitted inline in the function body with `Lsc.Event.log`. This is ana
 
 ```lean
 @[lsc.external]
-def transfer
-    (@[lsc.caller] caller : Address)
-    (s : ERC20State)
-    (to : Address)
-    (amount : UInt256) : Result (ERC20State × Bool) TokenError := do
-  assert (s.balances.get caller ≥ amount) .insufficientBalance
-  let newCaller ← s.balances.get caller - amount
-  let newTo     ← s.balances.get to + amount
-  let s' := { s with balances := s.balances.set caller newCaller |>.set to newTo }
-  Lsc.Event.log (TransferEvent.mk caller to amount)
+def transfer (caller : Caller) (s : ERC20State)
+    (to : Address) (amount : UInt256) : Except TokenError (ERC20State × Bool) :=
+  checked .arith do
+  require (s.balances.get caller.val ≥ amount) .insufficientBalance
+  let newCaller ← s.balances.get caller.val -? amount
+  let newTo     ← s.balances.get to +? amount
+  let s' := { s with balances := s.balances.set caller.val newCaller |>.set to newTo }
+  Lsc.Event.log (TransferEvent.mk caller.val to amount)
   return .ok (s', true)
 ```
 
@@ -868,7 +993,7 @@ if fee > 0 then Lsc.Event.log (FeeEvent.mk caller fee)
 .ok (s', true)
 ```
 
-Each `Lsc.Event.log` on a path to `.ok _` is collected independently. No logs fire on paths that return `.err _`.
+Each `Lsc.Event.log` on a path to `.ok _` is collected independently. No logs fire on paths that return `.error _`.
 
 ### §6.3 Proof erasure
 
@@ -885,7 +1010,7 @@ is definitionally equal to:
 .ok (s', true)
 ```
 
-As a result, `simp [transfer]` in a proof unfolds `transfer` as if `Lsc.Event.log` were absent. Spec theorems quantify only over `Result` returns; `transfer … = .ok (s', _)` has the same meaning whether or not the body contains log calls.
+As a result, `simp [transfer]` in a proof unfolds `transfer` as if `Lsc.Event.log` were absent. Spec theorems quantify only over `Except` returns; `transfer … = .ok (s', _)` has the same meaning whether or not the body contains log calls.
 
 Log correctness (correct `topic0`, correct indexed/non-indexed encoding, correct emit ordering) is a compiler obligation tested via `deployCode` + log assertions in Foundry `.t.sol` tests (§14.3).
 
@@ -919,20 +1044,20 @@ Logs never fire on `none` paths (revert before store).
 
 ## §7 Revert
 
-### §7.1 `.err e` = EVM REVERT
+### §7.1 `.error e` = EVM REVERT
 
-Fallible `@[lsc.external]` functions return `Result Val E`. `.err e` models EVM revert with a typed custom error; `.ok val` models success.
+Fallible `@[lsc.external]` functions return `Except E A`. `.error e` models EVM revert with a typed custom error; `.ok val` models success.
 
 ```lean
 @[lsc.external]
-def transfer
-    (@[lsc.caller] caller : Address) (s : TokenState)
-    (to : Address) (amount : UInt256) : Result (TokenState × Bool) TokenError := do
-  assert (s.balances.get caller >= amount) .insufficientBalance
-  let newCaller ← s.balances.get caller - amount
-  let newTo     ← s.balances.get to + amount
-  Lsc.Event.log (TransferEvent.mk caller to amount)
-  return .ok ({ s with balances := s.balances.set caller newCaller |>.set to newTo }, true)
+def transfer (caller : Caller) (s : TokenState)
+    (to : Address) (amount : UInt256) : Except TokenError (TokenState × Bool) :=
+  checked .arith do
+  require (s.balances.get caller.val ≥ amount) .insufficientBalance
+  let newCaller ← s.balances.get caller.val -? amount
+  let newTo     ← s.balances.get to +? amount
+  Lsc.Event.log (TransferEvent.mk caller.val to amount)
+  return .ok ({ s with balances := s.balances.set caller.val newCaller |>.set to newTo }, true)
 ```
 
 Infallible functions (`S` or `V` return shapes) never revert.
@@ -941,35 +1066,35 @@ Infallible functions (`S` or `V` return shapes) never revert.
 
 | Lean return | EVM behavior |
 |-------------|-------------|
-| `.err e` | `REVERT` with `abi.encode(e)` — no storage commit, no events |
+| `.error e` | `REVERT` with `abi.encode(e)` — no storage commit, no events |
 | `.ok s'` (infallible mutator `S`) | persist `s'`; no ABI returndata |
-| `.ok (s', v)` (fallible `Result (S x V) E`) | persist `s'`, emit events, ABI-encode `v` |
+| `.ok (s', v)` (fallible `Except E (S × V)`) | persist `s'`, emit events, ABI-encode `v` |
 | `val` (infallible view `V`) | read-only; ABI-encode `val`; no store |
-| `.ok v` (fallible view `Result V E`) | read-only; ABI-encode `v`; no store |
+| `.ok v` (fallible view `Except E V`) | read-only; ABI-encode `v`; no store |
 
 ### §7.3 Error specs
 
-Error specs use `(h : f ... = .err .Variant)` as the hypothesis:
+Error specs use `(h : f ... = .error .Variant)` as the hypothesis:
 
 ```lean
 /-- transfer reverts with insufficientBalance when caller has too little. -/
 def transfer_no_overdraft
-    (caller to : Address) (amount : UInt256) (s : TokenState)
-    (h : transfer caller s to amount = .err .insufficientBalance) : Prop :=
-  s.balances.get caller < amount
+    (caller : Caller) (to : Address) (amount : UInt256) (s : TokenState)
+    (h : transfer caller s to amount = .error .insufficientBalance) : Prop :=
+  s.balances.get caller.val < amount
 
-/-- transfer overflows only when the recipient addition wraps. -/
+/-- transfer reverts with arithmetic error when checked ops fail. -/
 def transfer_arith_overflow
-    (caller to : Address) (amount : UInt256) (s : TokenState)
-    (h : transfer caller s to amount = .err .overflow) : Prop :=
-  s.balances.get caller >= amount /\
-  s.balances.get to + amount >= 2^256
+    (caller : Caller) (to : Address) (amount : UInt256) (s : TokenState)
+    (h : transfer caller s to amount = .error (.arith .overflow)) : Prop :=
+  s.balances.get caller.val ≥ amount /\
+  s.balances.get to + amount ≥ 2^256
 ```
 
 Specs can now distinguish *which* error fired. The matching theorem proves each condition with `simp [transfer] + omega`.
 
-> **Why Result with typed errors instead of Option?**
-> `Option` cannot express which error fired. `Result Val E` lets specs prove exact error conditions — essential for user-facing contracts. The `@[simp]` discriminators and `assert`/`do` desugaring ensure proof bodies are no harder to write than with `Option`. See §11.1 for the helpers.
+> **Why `Except` with typed errors instead of `Option`?**
+> `Option` cannot express which error fired. `Except E A` lets specs prove exact error conditions — essential for user-facing contracts. Core `Except` discriminators, `require` desugaring, and bridge lemmas in §11.1 keep proof bodies short.
 
 > **Why not partial functions?**
 > Lean requires totality for kernel checking. Partial functions break `simp` and LLM proof generation.
@@ -981,7 +1106,7 @@ Specs can now distinguish *which* error fired. The matching theorem proves each 
 
 ### §8.1 World and accounts
 
-Single-contract `State → Result S E` is insufficient when bytecode calls other contracts. Multi-contract storage lives in `World` in `Lsc.Semantics`:
+Single-contract `State → Except E S` is insufficient when bytecode calls other contracts. Multi-contract storage lives in `World` in `Lsc.Semantics`:
 
 ```lean
 inductive TypedAccount where
@@ -997,7 +1122,7 @@ structure World where
   accounts : Mapping Address Account
 ```
 
-Author contract functions remain `State → Result S E` (or infallible `S`) — they never take `World`. `World` threading happens only in compiler-generated export bodies.
+Author contract functions remain `State → Except E S` (or infallible `S`) — they never take `World`. `World` threading happens only in compiler-generated export bodies.
 
 ### §8.2 `invoke` semantics
 
@@ -1020,7 +1145,7 @@ Lsc.extern.staticcall IERC20.balanceOf tokenAddr ctx w who : UInt256
 
 -- Mutating (call): may update World and reenter; returns new world
 Lsc.extern.call IERC20.transferFrom tokenAddr ctx w from to amount
-  : Result (World × Bool) ExternError
+  : Except ExternError (World × Bool)
 ```
 
 Interface typeclasses (`IERC20`, etc.) live in `Lsc.Interfaces` or project `interfaces/*.lean`.
@@ -1034,13 +1159,13 @@ Interface typeclasses (`IERC20`, etc.) live in `Lsc.Interfaces` or project `inte
 
 ### §8.5 Reentrancy
 
-`@[lsc.no_reentrant]` on an export is a validator-checked annotation: no `Lsc.extern.call` (mutating) may appear in the dynamic call graph of this export while a frame for `self` is on the stack. Proofs may use `lift_no_reentrant` (§11.6) to reduce to `State → Result S E` without trace quantification.
+`@[lsc.no_reentrant]` on an export is a validator-checked annotation: no `Lsc.extern.call` (mutating) may appear in the dynamic call graph of this export while a frame for `self` is on the stack. Proofs may use `lift_no_reentrant` (§11.6) to reduce to `State → Except E S` without trace quantification.
 
 ### §8.6 Unsafe escape hatch (v3)
 
 ```lean
 Lsc.unsafe.call (addr : Address) (value : UInt256) (calldata : Bytes)
-  : Result (World × Bytes) ExternError
+  : Except ExternError (World × Bytes)
 ```
 
 No spec support in default templates. Requires `@[lsc.allow_unsafe_calls]` on the contract module. Foundry fuzz tests only.
@@ -1063,20 +1188,124 @@ No spec support in default templates. Requires `@[lsc.allow_unsafe_calls]` on th
 ```lean
 import Counter
 
+inductive CounterAction where
+  | increment
+
+/-- Single-step model for sequence proofs (`Lsc.Invariant`). -/
+def applyAction (s : CounterState) : CounterAction → CounterState
+  | .increment =>
+      match increment s with
+      | .ok s'    => s'
+      | .error _ => s
+
+def applyActions (s : CounterState) (actions : List CounterAction) : CounterState :=
+  actions.foldl applyAction s
+
 /-- increment increases the stored number by exactly 1. -/
 def increment_increases_number
     (s s' : CounterState)
     (h : increment s = .ok s') : Prop :=
   s'.number = s.number + 1
 
-/-- Global invariant: no sequence of user actions can decrease the number.
-    applyActions and CounterAction are defined in the spec file alongside these defs. -/
+/-- Global invariant: no sequence of user actions can decrease the number. -/
 def number_never_decreases
     (s : CounterState) (actions : List CounterAction) : Prop :=
   (applyActions s actions).number ≥ s.number
 ```
 
-The RHS is the proposition body — what must hold given the hypothesis. Single-call specs use `(h : f … s = .ok s')` or `(h : f … = .ok (s', ret))` for success and `(h : f … = .err e)` for revert. **Sequence specs** (like `number_never_decreases`) take a `List Action` and a helper `applyActions` function defined in the same spec file — both are plain Lean `def`s. `Nat` and `List` are allowed in spec files; they are banned only in contract code (§2.5). Specs use plain `Fin` `+` on `UInt256`, not `unchecked` or `open Lsc.Arith`.
+The RHS is the proposition body — what must hold given the hypothesis. Single-call specs use `(h : f … s = .ok s')` or `(h : f … = .ok (s', ret))` for success and `(h : f … = .error e)` for revert.
+
+**Sequence specs** (like `number_never_decreases`) define three pieces in the spec file:
+
+1. `inductive Action` — one variant per exported mutator (with the parameters the spec needs).
+2. `def applyAction (s : S) : Action → S` — run one export; on `.error`, return `s` unchanged.
+3. `def applyActions := actions.foldl applyAction` — fold into a list (or an equivalent recursive `def`).
+
+Proofs of sequence invariants use `Lsc.Invariant applyAction P` (§9.1) so authors prove one case per action instead of hand-written list induction. `Nat` and `List` are allowed in spec files; they are banned only in contract code (§2.6). Specs use plain `Fin` `+` on `UInt256` — the same semantics as contract code (§2.1).
+
+#### Sequence invariants and `Lsc.Invariant`
+
+For properties that must hold across any sequence of actions (e.g. AMM constant
+product, token supply conservation), LSC provides a canonical combinator in
+`Lsc.Prelude`:
+
+```lean
+-- Lsc.Prelude
+/-- `Lsc.Invariant step P` states that predicate `P` is preserved by every
+    single step, and therefore holds after any sequence of steps.
+    Use for global contract invariants. -/
+theorem Lsc.Invariant
+    {S A : Type}
+    (step  : S → A → S)
+    (P     : S → Prop)
+    (hstep : ∀ (s : S) (a : A), P s → P (step s a))
+    (s     : S)
+    (actions : List A)
+    (h0    : P s)
+    : P (List.foldl step s actions) := by
+  induction actions generalizing s with
+  | nil  => exact h0
+  | cons a rest ih =>
+      simp [List.foldl]
+      exact ih (step s a) (hstep s a h0)
+```
+
+**AMM example — constant product invariant:**
+
+```lean
+-- spec/AMMSpec.lean
+
+inductive AMMAction where
+  | swap (amountIn : UInt256)
+  | addLiquidity (caller : Caller) (amount0 amount1 : UInt256)
+
+def applyAction (s : AMMState) : AMMAction → AMMState
+  | .swap amountIn =>
+      match swap s amountIn with
+      | .ok (s', _) => s'
+      | .error _   => s
+  | .addLiquidity caller a0 a1 =>
+      match addLiquidity caller s a0 a1 with
+      | .ok (s', _) => s'
+      | .error _    => s
+
+def applyAMMActions (s : AMMState) (actions : List AMMAction) : AMMState :=
+  actions.foldl applyAction s
+
+/-- The constant product k = reserve0 * reserve1 never decreases (after any sequence). -/
+def constant_product_nondecreasing
+    (s : AMMState) (actions : List AMMAction)
+    (h0 : s.reserve0 * s.reserve1 = s.k) : Prop :=
+  let s' := applyAMMActions s actions
+  s'.reserve0 * s'.reserve1 ≥ s.k
+```
+
+**Proof sketch:**
+
+```lean
+-- test/AMMProof.lean
+
+theorem constant_product_nondecreasing ... := by
+  simp only [AMMSpec.constant_product_nondecreasing, AMMSpec.applyAMMActions]
+  apply Lsc.Invariant AMMSpec.applyAction (fun s => s.reserve0 * s.reserve1 ≥ s.k)
+  · intro s a hP
+    cases a with
+    | swap amountIn =>
+        simp [AMMSpec.applyAction, swap] at hP ⊢; omega
+    | addLiquidity caller a0 a1 =>
+        simp [AMMSpec.applyAction, addLiquidity] at hP ⊢; omega
+  · simpa using h0
+```
+
+`Lsc.Invariant` eliminates the need for authors to write induction boilerplate.
+The proof obligation reduces to one case per action type.
+
+**When to use `Lsc.Invariant` vs direct induction:**
+- Use `Lsc.Invariant` when the property is a simple predicate on state that
+  each action independently preserves.
+- Use direct `induction` when the property relates the *initial* state to the
+  *final* state in a way that depends on the full history (e.g. "total tokens
+  transferred equals sum of individual transfers").
 
 ### §9.2 Naming convention
 
@@ -1092,11 +1321,11 @@ The proof file uses the **same name** for the proving `theorem`. The compliance 
 
 Every mutating export should have at least:
 1. One **success property** using `(h : f … s = .ok s')` or `(h : f … = .ok (s', _))` — what holds after the call
-2. One **revert property** using `(h : f … = .err e)` — what inputs cause revert
+2. One **revert property** using `(h : f … = .error e)` — what inputs cause revert
 
 Views typically need one success property.
 
-Contracts with global invariants (properties that must hold across any sequence of calls) should additionally have at least one **sequence spec** using `List Action` and an `applyActions` helper. See the Counter example in §1.2 for the pattern.
+Contracts with global invariants (properties that must hold across any sequence of calls) should additionally have at least one **sequence spec**: `Action`, `applyAction`, `applyActions` (fold), and a `def` over `applyActions` or `List.foldl applyAction`. See the Counter example in §1.2 and §9.1.
 
 ### §9.4 Validator rules for spec files
 
@@ -1146,19 +1375,21 @@ theorem increment_increases_number
   simp [CounterSpec.increment_increases_number, increment] at h
   exact h
 
--- Sequence theorem: proved by induction over the action list.
+-- Sequence theorem: `Lsc.Invariant` on `applyAction` (§9.1).
 theorem number_never_decreases
     (s : CounterState) (actions : List CounterAction) :
     CounterSpec.number_never_decreases s actions := by
-  induction actions generalizing s with
-  | nil => simp [CounterSpec.number_never_decreases, CounterSpec.applyActions]
-  | cons a rest ih =>
-      cases a with
-      | increment =>
-          simp [CounterSpec.applyActions, increment]
-          have := ih { number := s.number + 1 }
-          simp [CounterSpec.number_never_decreases] at this
-          omega
+  simp only [CounterSpec.number_never_decreases, CounterSpec.applyActions]
+  apply Lsc.Invariant CounterSpec.applyAction (fun s' => s'.number ≥ s.number)
+  · intro s' a hP; cases a <;> simp [CounterSpec.applyAction, increment] at hP ⊢ <;> omega
+  · simp
+
+theorem increment_overflows_iff
+    (s : CounterState)
+    (h : increment s = .error .overflow) :
+    CounterSpec.increment_overflows_iff s h := by
+  simp [CounterSpec.increment_overflows_iff, increment] at h
+  simp [UInt256.addChecked_none_of_ge (by omega), Option.orWrap_none] at h; omega
 ```
 
 Each `theorem`:
@@ -1166,7 +1397,7 @@ Each `theorem`:
 - Takes the **same arguments** as the spec `def`
 - Concludes that the spec `def` applied to those arguments holds (`CounterSpec.<name> …`)
 
-Sequence theorems are proved by induction over the `List Action` — a standard Lean pattern that LLM proof generation handles well.
+Sequence theorems typically use `Lsc.Invariant` on the spec's `applyAction`. Direct `induction` over the action list remains valid when the property is not a simple per-step predicate (§9.1).
 
 ### §10.2 Conclusion shape rule
 
@@ -1207,107 +1438,114 @@ There is no `lsc prove` command in v1.
 
 The default proof layer. Theorems are stated and proved directly over `@[lsc.external]` functions using `simp`, `omega`, and `Mapping` lemmas. No `World`, no export wrappers, no lifting.
 
+#### `Except` discriminators
+
 ```lean
-namespace Lsc
+-- Lean 4 core already provides Except.ok.injEq and Except.error.injEq.
+-- LSC adds the ne directions which fire in error proofs:
 
--- ── Result discriminators (Lsc.ProofHelpers) ──
+@[simp] theorem Except.ok_ne_error {E A : Type} (a : A) (e : E) :
+    (Except.ok a : Except E A) ≠ Except.error e := by simp
 
-@[simp] theorem Result.ok_ne_err {Val E : Type} (v : Val) (e : E) :
-    (Result.ok v : Result Val E) ≠ Result.err e := by simp [Result.ok, Result.err]
-
-@[simp] theorem Result.err_ne_ok {Val E : Type} (v : Val) (e : E) :
-    (Result.err e : Result Val E) ≠ Result.ok v := by simp [Result.ok, Result.err]
-
-@[simp] theorem Result.ok_inj {Val E : Type} {v v' : Val} :
-    (Result.ok v : Result Val E) = Result.ok v' ↔ v = v' := by simp [Result.ok]
-
-@[simp] theorem Result.err_inj {Val E : Type} {e e' : E} :
-    (Result.err e : Result Val E) = Result.err e' ↔ e = e' := by simp [Result.err]
-
--- ── Layer 1 core helpers ──────────────────────────────────────────────────────
-
-/-- Two successive successful mutator calls: extract intermediate state. -/
-theorem compose {S E : Type} (f g : S → Result S E) (s s'' s' : S)
-    (hf : f s = .ok s') (hg : g s' = .ok s'') :
-    ∃ smid, f s = .ok smid ∧ g smid = .ok s'' :=
-  ⟨s', hf, hg⟩
-
-/-- Success state extraction (val ignored when only state matters). -/
-theorem success_state {Val E : Type} {f : α → Result Val E} {v : Val}
-    (h : f x = .ok v) : f x = .ok v := h
-
-/-- Error helper: given f errors with e, derive any P provable from inputs. -/
-theorem err_implies {Val E : Type} {f : α → Result Val E} {e : E}
-    {P : Prop} (h : f x = .err e) (hp : P) : P := hp
-
-/-- Sequence monotonicity: reduce sequence specs to per-step specs. -/
-theorem applyActions_monotone
-    {S Action : Type}
-    (apply : S → Action → S)
-    (field : S → UInt256)
-    (hstep : ∀ (s : S) (a : Action), field (apply s a) ≥ field s)
-    (s : S) (actions : List Action) :
-    field (actions.foldl apply s) ≥ field s := by
-  induction actions generalizing s with
-  | nil  => simp
-  | cons a rest ih =>
-      simp [List.foldl]
-      exact le_trans (hstep s a) (ih (apply s a))
-
-end Lsc
+@[simp] theorem Except.error_ne_ok {E A : Type} (a : A) (e : E) :
+    (Except.error e : Except E A) ≠ Except.ok a := by simp
 ```
 
-The `Result.ok_ne_err` and `Result.err_ne_ok` simp lemmas fire automatically during `simp [myFunction]`, eliminating the `.ok ≠ .err` case work that would otherwise appear in every error proof. With these in place, error proofs have the same `simp + omega` structure as success proofs.
+#### Arithmetic in proofs
 
-Per-variant injectivity lemmas and `HasArithErrors` field projections are generated by `@[lsc.error]` at elaboration time. `HasArithErrors` fields resolve to concrete constructors via `@[simp]` — so `simp [myFunction, UInt256.checkedAdd]` will automatically simplify `HasArithErrors.overflow` to `.overflow` (or whatever the concrete variant is) without any extra simp lemmas from the author.
-
-#### Checked arithmetic in proofs
-
-Inside `do` blocks, `+` in `increment` elaborates to `UInt256.checkedAdd`. Specs still use **`Fin` `+`** on `UInt256`. Bridge lemmas reconnect the two:
+`+?` returns `Option`; `orWrap` / `orError` convert to `Except`. Both are
+`@[simp]`-transparent. The proof recipe for a function body containing
+`s.number +? 1 |>.orWrap .arith`:
 
 ```lean
--- After simp [increment] at h : increment s = .ok s':
-simp [UInt256.checkedAdd_ok, hov] at h   -- yields s'.number = s.number + 1
+-- Success branch (h : ... = .ok ...):
+simp [UInt256.addChecked_some (by omega), Option.orWrap_some] at h
 
--- Overflow case at h : increment s = .err .overflow:
-simp [UInt256.checkedAdd_overflow, hov] at h   -- Nat-level bound for omega
+-- Failure branch (h : ... = .error (.arith .overflow)):
+simp [UInt256.addChecked_none_of_ge (by omega), Option.orWrap_none] at h
 ```
 
-**Recipe:** unfold the export with `simp [f, …]`; use `checkedAdd_ok` / `checkedSub_ok` with overflow bounds on `.ok` hypotheses from `do`/`←` lines (desugared to `checkedAdd`); use `checkedAdd_overflow` / `checkedSub_overflow` / `checkedDiv_divisionByZero` on `.err .overflow` / `.err .divisionByZero` goals. For `unchecked do` bodies, `simp` exposes the same `+` as in the spec `Prop`.
+In practice `simp [myFunction]` unfolds everything and `omega` closes the
+arithmetic goals — the bridge lemmas fire automatically.
 
-### §11.2 Worked example: `transfer_no_overdraft`
+#### `bind_ok` — intermediate state extraction
 
-This is a complete proof of a revert property using Layer 1 helpers and `Mapping` simp lemmas.
+Replaces the underspecified `compose` helper. Useful when reasoning about two
+sequential fallible operations where the intermediate state is not yet named:
 
-**Spec** (`spec/ERC20Spec.lean`):
 ```lean
-def transfer_no_overdraft
-    (@[lsc.caller] caller to : Address) (amount : UInt256) (s : ERC20State)
-    (h : transfer caller s to amount = none) : Prop :=
-  s.balances.get caller < amount
+/-- If binding two fallible operations succeeds, extract the intermediate state. -/
+@[simp] theorem Except.bind_ok {E A B : Type} {ma : Except E A} {f : A → Except E B}
+    {b : B} (h : ma >>= f = .ok b) :
+    ∃ a, ma = .ok a ∧ f a = .ok b := by
+  cases ma with
+  | error e => simp at h
+  | ok a    => exact ⟨a, rfl, h⟩
 ```
 
-**Proof** (`test/ERC20Proof.lean`):
+This is the key lemma for multi-step proofs. Instead of `compose` (which required
+knowing `s'` upfront), `bind_ok` destructures the intermediate state from the
+success hypothesis.
+
+#### Worked example: two-step transfer
+
 ```lean
-theorem transfer_no_overdraft
-    (caller to : Address) (amount : UInt256) (s : ERC20State)
-    (h : transfer caller s to amount = none) :
-    ERC20Spec.transfer_no_overdraft caller to amount s h := by
-  -- Unfold the spec def (it's just s.balances.get caller < amount)
-  simp [ERC20Spec.transfer_no_overdraft]
-  -- Unfold transfer; the only path that returns none is the guard branch
-  simp [transfer] at h
-  -- h is now: s.balances.get caller < amount = True (from the if-guard)
-  -- omega closes the arithmetic goal
+-- Spec:
+def transferFrom_decrements_allowance
+    (spender owner to : Address) (amount : UInt256) (s s' : ERC20State) (ret : Bool)
+    (h : transferFrom spender s owner to amount = .ok (s', ret)) : Prop :=
+  s'.allowances.get owner |>.get spender = s.allowances.get owner |>.get spender - amount
+
+-- Proof:
+theorem transferFrom_decrements_allowance ... := by
+  simp [ERC20Spec.transferFrom_decrements_allowance, transferFrom] at h ⊢
+  -- transferFrom body: require check then two checkedSub calls
+  -- simp unfolds require; remaining h is about the arithmetic path
+  obtain ⟨bal, hbal, hrest⟩ := Except.bind_ok h     -- extract after first ←
+  obtain ⟨alw, halw, hfinal⟩ := Except.bind_ok hrest -- extract after second ←
+  simp [Mapping.get_set_same, Mapping.get_set_other,
+        UInt256.subChecked_some (by omega)] at *
   omega
 ```
 
-**Step by step:**
-1. `simp [ERC20Spec.transfer_no_overdraft]` — unfolds the spec `def`, reducing the goal to `s.balances.get caller < amount`
-2. `simp [transfer] at h` — unfolds `transfer`; the `if s.balances.get caller < amount then none` branch is the only `none` path; `simp` extracts the guard condition from `h`
-3. `omega` — closes the linear arithmetic goal
+#### Worked example: revert condition with `split_ifs`
 
-If the function body used `Mapping.get` or `set`, the `@[simp]` lemmas from §3.2 (`get_set_same`, `get_set_other`) would fire automatically during `simp [transfer]`.
+When the function body has conditional branches, `simp` alone may not reduce
+to a single goal. Use `split_ifs` to case-split, then close each branch:
+
+```lean
+-- Spec:
+def transfer_no_overdraft
+    (caller : Caller) (to : Address) (amount : UInt256) (s : ERC20State)
+    (h : transfer caller s to amount = .error .insufficientBalance) : Prop :=
+  s.balances.get caller.val < amount
+
+-- Proof:
+theorem transfer_no_overdraft
+    (caller : Caller) (to : Address) (amount : UInt256) (s : ERC20State)
+    (h : transfer caller s to amount = .error .insufficientBalance) :
+    ERC20Spec.transfer_no_overdraft caller to amount s h := by
+  simp [ERC20Spec.transfer_no_overdraft, transfer] at h
+  -- After simp [transfer], h contains the unfolded body.
+  -- require desugars to an if; split_ifs names the two branches:
+  split_ifs at h with hguard
+  · -- hguard : ¬(s.balances.get caller.val ≥ amount)
+    -- h      : Except.error .insufficientBalance = Except.error .insufficientBalance
+    omega   -- hguard gives s.balances.get caller.val < amount directly
+  · -- hguard : s.balances.get caller.val ≥ amount
+    -- h      : the continuation returned .error .insufficientBalance
+    -- This branch contradicts: continuation only errors on checked arithmetic
+    simp [UInt256.subChecked_some (by omega)] at h
+```
+
+**Pattern:** `simp [f]` to unfold; `split_ifs` to name branches; `omega` or
+`simp [UInt256.addChecked_some]` to close each case.
+
+`Lsc.Invariant` (§9.1) reduces sequence proofs to per-step obligations. `applyActions_monotone` remains available for monotonicity specs that do not fit the invariant combinator.
+
+### §11.2 Worked example: `transfer_no_overdraft`
+
+See the full `split_ifs` proof pattern in §11.1. The spec and proof use `caller : Caller` and `.error .insufficientBalance` (not `Option`/`none`). After `simp [transfer] at h`, `split_ifs` names the `require` guard branch; `omega` closes the balance inequality.
 
 ### §11.3 `Mapping` simp lemmas in proofs
 
@@ -1330,8 +1568,8 @@ Used when a spec must reason about compiler-generated export wrappers or ABI `Bo
 namespace Lsc
 
 /-- Strip LogEntry list from compiler-generated export (event logs are proof-erased). -/
-theorem lift_logs {S α E : Type} {f : S → Result (S × α) E}
-    {g : S → Result (S × α × List LogEntry) E}
+theorem lift_logs {S α E : Type} {f : S → Except E (S × α)}
+    {g : S → Except E (S × α × List LogEntry)}
     (hg : ∀ s r, f s = some r → ∃ logs, g s = some (r, logs))
     (s : S) (r : S × α) (logs : List LogEntry)
     (h : g s = some (r, logs)) :
@@ -1339,8 +1577,8 @@ theorem lift_logs {S α E : Type} {f : S → Result (S × α) E}
 
 /-- Export with no Lsc.extern.* sites equals internal fn then load/store. -/
 theorem lift_no_extern {S Ret : Type}
-    (internal : S → Result (S × Ret) E)
-    (exportFn : EvmContext → S → Result (S × Ret × List LogEntry) E)
+    (internal : S → Except E (S × Ret))
+    (exportFn : EvmContext → S → Except E (S × Ret × List LogEntry))
     (h : ∀ ctx s s' ret, internal s = some (s', ret) →
          ∃ logs, exportFn ctx s = some (s', ret, logs)) :
     ∀ ctx s s' ret, internal s = some (s', ret) →
@@ -1361,9 +1599,9 @@ namespace Lsc
     inherit callee spec theorems in the caller's proof.
     TODO v2b: complete World threading; hSim must propagate w' correctly. -/
 theorem simulate_call {S CalleeState Ret : Type}
-    (callerInternal : S → Result (S × Ret) E)
-    (calleeInternal : CalleeState → Result CalleeState CalleeError)
-    (exportWithCall : EvmContext → World → S → Result (World × Ret × List LogEntry) E)
+    (callerInternal : S → Except E (S × Ret))
+    (calleeInternal : CalleeState → Except CalleeError CalleeState)
+    (exportWithCall : EvmContext → World → S → Except E (World × Ret × List LogEntry))
     -- hSim: exportWithCall agrees with running callerInternal then calleeInternal
     -- on the relevant World projection; full signature TBD
     (hSim : True)  -- placeholder; v2b
@@ -1379,16 +1617,16 @@ namespace Lsc
 
 /-- @[lsc.no_reentrant]: when the validator certifies no self-call frames occur,
     the export reduces to the internal contract function. -/
-theorem lift_no_reentrant {S Ret : Type}
-    (internal : S → Result (S × Ret) E)
-    (exportFn : EvmContext → World → S → Result (S × Ret × List LogEntry) E)
+theorem lift_no_reentrant {S Ret E : Type}
+    (internal : S → Except E (S × Ret))
+    (exportFn : EvmContext → World → S → Except E (S × Ret × List LogEntry))
     (hNoReentry : True)  -- replaced by validator certificate in v2c
     (h : ∀ ctx w s, exportFn ctx w s =
       match internal s with
-      | none => none
-      | some (s', ret) => some (s', ret, [])) :
-    ∀ s s' ret, internal s = some (s', ret) →
-    ∀ ctx w, exportFn ctx w s = some (s', ret, []) := by
+      | .error e => .error e
+      | .ok (s', ret) => .ok (s', ret, [])) :
+    ∀ s s' ret, internal s = .ok (s', ret) →
+    ∀ ctx w, exportFn ctx w s = .ok (s', ret, []) := by
   intro s s' ret hInt ctx w
   rw [h]; simp [hInt]
 
@@ -1397,7 +1635,7 @@ end Lsc
 
 ### §11.7 Tactics
 
-**`export_cases`** — destructs a `Result (Ret × List LogEntry) E` for Layer 2 goals:
+**`export_cases`** — destructs an `Except E (Ret × List LogEntry)` for Layer 2 goals:
 ```lean
 macro "export_cases" h:ident : tactic => `(tactic|
   (cases $(h) with
@@ -1407,7 +1645,7 @@ macro "export_cases" h:ident : tactic => `(tactic|
        simp_all))
 ```
 
-**`erc_cases`** — destructs `Result (S × Bool) E`:
+**`erc_cases`** — destructs `Except E (S × Bool)`:
 ```lean
 macro "erc_cases" h:ident : tactic => `(tactic|
   (cases $(h) with
@@ -1492,46 +1730,41 @@ The LSC validator runs as a post-elaboration pass over contract modules (`src/*.
 | Construct | Error message |
 |-----------|--------------|
 | `Nat`, `Int`, `Float` | `lsc: type Nat is not allowed; use UInt256` |
-| `String`, `Char` | `lsc: String is not allowed; use Bytes` |
+| `String`, `Char` | `lsc: String is not allowed; use Bytes[N]` |
 | Closures / lambda capturing outer variable | `lsc: closures are not supported; use a top-level function` |
 | Partial application | `lsc: partial application is not supported` |
-| `IO`, `StateM`, `ST`, stateful monads | `lsc: stateful monads are not allowed; do-notation over Result E is permitted` |
+| `IO`, `StateM`, `ST`, stateful monads | `lsc: stateful monads are not allowed; do-notation over Except E is permitted` |
 | Higher-order functions | `lsc: functions cannot be passed as arguments` |
 | Unbounded recursion | `lsc: recursive function X must be structurally terminating` |
 | `List` or `Array` in author code | `lsc: List is not allowed in contract code; use Mapping or Lsc.Event.log for events` |
 | `structure … extends` | `lsc: storage inheritance via extends is not supported in v1; define a flat State struct` |
 | `LogEntry` constructed in author code | `lsc: LogEntry is compiler-internal; use Lsc.Event.log` |
 | Hand-written export wrapper | `lsc: export wrappers are compiler-generated; use @[lsc.external] on contract functions` |
-| `EvmContext` in author contract code | `lsc: use @[lsc.caller] caller : Address; EvmContext is compiler-generated only` |
-| Error type `E` in `Result … E` without `@[lsc.error]` | `lsc: error type E must be declared with @[lsc.error]` |
+| `EvmContext` in author contract code | `lsc: use Caller for msg.sender; EvmContext is compiler-generated only` |
+| Error type `E` in `Except E …` without `@[lsc.error]` | `lsc: error type E must be declared with @[lsc.error]` |
 | `@[lsc.error]` on non-inductive | `lsc: @[lsc.error] may only be applied to inductive types` |
 | `lsc_errors` keyword | `lsc: lsc_errors is not supported; use @[lsc.error] inductive` |
 | Multiple `@[lsc.error]` in one module | `lsc: multiple @[lsc.error] types in one contract; one per module is recommended` |
-| Bare `Option State` on mutator | `lsc: use Result S E or Result (S × V) E for mutators` |
-| Invalid `@[lsc.external]` return shape | `lsc: @[lsc.external] "f" must return Result S E, Result (S × V) E, S (infallible mutator), or V (infallible view)` |
+| Bare `Option State` on mutator | `lsc: use Except E S or Except E (S × V) for mutators` |
+| Invalid `@[lsc.external]` return shape | `lsc: @[lsc.external] "f" must return Except E S, Except E (S × V), S (infallible mutator), or V (infallible view)` |
 | Unresolved polymorphism | `lsc: polymorphic function X cannot be compiled` |
-| `Bytes` longer than 256 bytes | `lsc: Bytes literal exceeds max length of 256 bytes` |
+| `Bytes[N]` literal longer than `N` | `lsc: Bytes literal exceeds declared bound N` |
+| More than one `@[lsc.initialize]` | `lsc: at most one @[lsc.initialize] per contract module` |
 | Author `sload` / `sstore` / slot indices | `lsc: storage IO is only performed by the emitter at @[lsc.external] boundaries` |
 | `World` in contract functions | `lsc: World is not allowed in contract functions; extern calls are compiler-generated` |
 | `Lsc.extern.*` in contract functions | `lsc: external calls are only allowed in compiler-generated exports` |
 | Malformed event signature | `lsc: invalid event signature "..."; expected form "Name(type,type)"` |
 | Event arg count / type mismatch | `lsc: event "Transfer(...)" expects N arguments of types ...; got ...` |
-| `@[lsc.caller]` with non-Address type | `lsc: @[lsc.caller] parameter must have type Address` |
-| Multiple `@[lsc.caller]` on one export | `lsc: at most one @[lsc.caller] parameter per export` |
-| `Address` parameter first, no `@[lsc.caller]` | `lsc: parameter looks like a caller address but has no @[lsc.caller] annotation` |
+| Multiple `Caller` parameters on one export | `lsc: at most one Caller parameter per export` |
+| `Address` named caller/sender/from/owner without `Caller` type | `lsc: parameter looks like a caller address; use type Caller` |
+| `assert` in contract function | `lsc: use require for contract guards; assert! is a runtime panic` |
 | `@[lsc.public]` not on State struct field | `lsc: @[lsc.public] may only annotate State struct fields` |
 | `@[lsc.public]` on unsupported field type | `lsc: @[lsc.public] field has unsupported type` |
 | `@[lsc.public]` field name collides with `@[lsc.external]` def | `lsc: field "X" is @[lsc.public] but @[lsc.external] def X already exists` |
-| Raw `HAdd` / `HSub` / `HMul` / `HDiv` on `UInt256` outside `do` and `unchecked do` | `lsc: arithmetic outside do blocks must use checkedAdd/Sub/Mul/Div explicitly, or unchecked do for wrapping; raw Fin operators are not allowed` |
-| `unchecked` in spec or proof modules | `lsc: unchecked is contract-only; use + on UInt256 in spec` |
-| `wrapAdd` / `UInt256.add` called directly in contract | `lsc: use unchecked do for wrapping arithmetic; wrapAdd is not allowed in contracts` |
-| `open Lsc.Arith` in spec or proof modules | `lsc: Lsc.Arith is for contract modules only; spec uses Fin +` |
-| `←` in `do` block where `E` has no `HasArithErrors` instance | `lsc: arithmetic in do block requires HasArithErrors; add \| overflow to your @[lsc.error] inductive` |
-| `do` block on infallible function (return type `S` or `V`) | `lsc: do-notation requires Result return type` |
-| Plain `+` `-` `*` `/` on `UInt256` outside `do` block in contract code | `lsc: arithmetic outside do blocks must use checkedAdd/Sub/Mul/Div explicitly` |
-| Postfix `?` on `Result` | `lsc: ? operator is removed; use do-notation and ←` |
-| `Option (S × Ret)` as mutator return | `lsc: use Result S E or Result (S × V) E for mutators; Option is for infallible views` |
-| `assert` with non-Bool condition | `lsc: assert condition must be a Bool or decidable Prop` |
+| `+?` / `checked` in spec or proof modules | `lsc: checked arithmetic is contract-only; spec uses Fin +` |
+| `do` block on infallible function (return type `S` or `V`) | `lsc: do-notation requires Except return type` |
+| `Option (S × Ret)` as mutator return | `lsc: use Except E S or Except E (S × V) for mutators` |
+| `require` with non-Bool condition | `lsc: require condition must be a Bool or decidable Prop` |
 
 ### §13.2 Spec module errors
 
@@ -1554,11 +1787,11 @@ Authors write pure functions. At each `@[lsc.external]` boundary (including view
 1. **ABI dispatcher** — computes 4-byte selector from `keccak256(canonicalSignature)`; dispatches in Yul
 2. **Calldata decode** — ABI-decodes included parameters (§4.5) from calldata
 3. **`EvmContext` construction** — binds `ctx.sender := msg.sender`, `ctx.value := msg.value`, etc.
-4. **`@[lsc.caller]` binding** — `caller := ctx.sender`
-5. **State load** — `sload` all struct fields; decode dynamic `Bytes` tails
+4. **`Caller` binding** — `caller.val := ctx.sender` for each `Caller` parameter
+5. **State load** — `sload` all struct fields; decode dynamic `Bytes[N]` tails
 6. **Author function call** — invokes the `@[lsc.external]` function with loaded state and decoded args
-7. **On `none`** — `revert(0, 0)`; no storage writes; no events
-8. **On `some (s', ret)`** — `sstore` all fields; collect and emit `Lsc.Event.log` sites in source order via `LOG` opcodes; ABI-encode `ret` as returndata
+7. **On `.error e`** — `revert(abi.encode(e))`; no storage writes; no events
+8. **On `.ok val`** — `sstore` all fields; collect and emit `Lsc.Event.log` sites in source order via `LOG` opcodes; ABI-encode non-state component of `val` as returndata
 
 View exports (§4.3) omit steps 5-store and 8-store; the emitter may lazy-load only accessed fields if the observable result matches whole-state read.
 
@@ -1567,7 +1800,7 @@ View exports (§4.3) omit steps 5-store and 8-store; the emitter may lazy-load o
 The emitter's whole-state load → apply → store semantics are the normative model. Any emitter optimization (diff stores, lazy view loads) must produce observable behavior identical to:
 
 ```
-load all fields → call author function → store all fields (on some)
+load all fields → call author function → store all fields (on `.ok`)
 ```
 
 This invariant is the bridge between Lean proofs (which reason about pure functions on `State` snapshots) and EVM bytecode (which reads and writes individual slots).

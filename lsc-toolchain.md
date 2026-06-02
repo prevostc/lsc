@@ -2,7 +2,7 @@
 
 **Companion document:** [lsc-spec.md](lsc-spec.md) — normative LSC language definition  
 
-This document describes **one conforming implementation** of [LSC](lsc-spec.md): a Foundry fork, `LeanCompiler`, Lake integration, and the `ForgeLean` Lean package (legacy name; normative API names are `Lsc.*` per the language spec).
+This document describes **one conforming implementation** of [LSC](lsc-spec.md): a Foundry fork, `LeanCompiler`, Lake integration, and the `ForgeLean` Lean package (legacy name; normative API names are `Lsc.*` per the language spec). Examples and error messages track the current spec: `Except E A`, `Caller`, `Bytes[N]`, `checked` / `+?`, and `require`.
 
 ---
 
@@ -138,11 +138,11 @@ src/Counter.lean
 | `UInt256` literal `n`                          | `0xN`                                        |
 | `if c then t else f`                           | `switch` / `if`                              |
 | `match opt with | none => ... | some x => ...` | tag switch                                   |
-| `StorageMapping.get/set`                       | `sload`/`sstore` via `storageKey`            |
-| `Bytes` read/write                             | Solidity-compatible byte array ops           |
-| Author `@[lsc.external]` return `none` / `some`   | `revert(0, 0)` / persist + `Lsc.Event.log` LOGs + ABI return |
-| Generated export `none`                      | `revert(0, 0)` before any store              |
-| Generated export `some (ret, logs)`            | persist state, `LOG` per entry, return `ret` |
+| `Mapping.get/set`                              | `sload`/`sstore` via `storageKey`            |
+| `Bytes[N]` read/write                          | Solidity-compatible bounded byte array ops   |
+| Author `@[lsc.external]` return `.error e` / `.ok val` | `revert(abi.encode(e))` / persist + `Lsc.Event.log` LOGs + ABI return |
+| Generated export `.error e`                    | `revert(abi.encode(e))` before any store     |
+| Generated export `.ok (val, logs)`             | persist state, `LOG` per entry, return `ret` |
 | `Lsc.extern.staticcall` (v2b+)           | `staticcall` + ABI decode; no self `sstore`    |
 | `Lsc.extern.call` (v2b+)                 | `call` + revert on failure; `invoke` threading |
 | `Lsc.unsafe.call` (v3)                   | raw `call`; no spec guarantees                 |
@@ -177,9 +177,9 @@ Primary output: `out/<Contract>.lean/<Contract>.json` compatible with Foundry's 
 | `Address`                              | `address`            |
 | `Bool`                                 | `bool`               |
 | `Bytes32`                              | `bytes32`            |
-| `Bytes`                                | `string`             |
-| `Option (Bool × List LogEntry)` return | `bool`               |
-| View `UInt256` / `Bytes`               | respective view type |
+| `Bytes[N]`                             | `string` / `bytes`   |
+| `Except E (S × Bool)` return           | `bool`               |
+| View `UInt256` / `Bytes[N]`            | respective view type |
 
 
 ---
@@ -211,7 +211,9 @@ skip = ["spec/**", "test/**/*Proof.lean"]
 path = "/optional/path/to/lean"   # default: `lean` on PATH
 toolchain_file = "lean-toolchain"
 emit_yul = true
-max_bytes = 256
+
+[lsc.limits]
+max_bytes = 4096   # emitter practical cap per Bytes[N] field; see lsc-spec §2.2
 
 [profile.default.lean.contracts]
 Counter = "0x0000000000000000000000000000000000000001"
@@ -310,31 +312,28 @@ All messages are prefixed with `lsc:` and include file, line, and column.
 | Condition                          | Message                                                                                        |
 | ---------------------------------- | ---------------------------------------------------------------------------------------------- |
 | Closure in contract                | `lsc: closures are not supported; use a top-level function`                             |
-| Disallowed type `T`                | `lsc: type T is not allowed; use UInt256, Address, Bool, Bytes32, or Bytes`             |
-| Stateful monadic contract code     | `lsc: stateful monads are not allowed; do-notation over Result E is permitted`        |
+| Disallowed type `T`                | `lsc: type T is not allowed; use UInt256, Address, Bool, Bytes32, or Bytes[N]`        |
+| Stateful monadic contract code     | `lsc: stateful monads are not allowed; do-notation over Except E is permitted`        |
 | `sorry` in proof file              | `lsc: proof file contains sorry; proofs must be complete`                               |
 | `theorem` or `sorry` in spec file  | `lsc: spec modules use def … : Prop, not theorem; put proofs in *Proof.lean`            |
 | Missing compliance proposition (on test) | `lsc: spec/TokenSpec.lean is missing required def transfer_preserves_total_supply` |
 | Missing proof for spec def (on test) | `lsc: spec defines "f" but *Proof.lean has no theorem f`                                |
-| Bare `Option State` on mutator | `lsc: mutator "f" must return Option (State × Unit) or Option (State × scalar); bare Option State is not allowed` |
-| Invalid `@[lsc.external]` return shape | `lsc: @[lsc.external] "f" must return Option (State × Unit), Option (State × scalar), or Option α (view)` (v1: `@[evm_external]`) |
-| Typed error / `CallResult` return | `lsc: use Option for revert; error kinds are not supported in v1` |
+| Bare `Option State` on mutator | `lsc: use Except E S or Except E (S × V) for mutators` |
+| Invalid `@[lsc.external]` return shape | `lsc: @[lsc.external] "f" must return Except E S, Except E (S × V), S (infallible mutator), or V (infallible view)` |
+| Typed error without `@[lsc.error]` | `lsc: error type E must be declared with @[lsc.error]` |
 | Missing `lean-toolchain`           | `lsc: lean-toolchain file not found; run forge init --lean` |
 | Foundry not found                  | `lsc: foundry not found; install Foundry for the LSC toolchain` |
-| `Bytes` too long                   | `lsc: Bytes length exceeds max_bytes (N)`                                               |
+| `Bytes[N]` literal too long        | `lsc: Bytes literal exceeds declared bound N`                                           |
 | Author `sload` / `sstore`          | `lsc: storage IO is only performed by the emitter at @[lsc.external] boundaries` |
 | Hand-written export wrapper        | `lsc: export wrappers are compiler-generated; use @[lsc.external] on contract functions` |
-| `EvmContext` in author contract code | `lsc: use caller : Address; EvmContext is export-only`                     |
-| `List` in author contract code     | `lsc: List is not allowed in contract code; use StorageMapping or Lsc.Event.log`        |
+| `EvmContext` in author contract code | `lsc: use Caller for msg.sender; EvmContext is compiler-generated only`   |
+| Multiple `Caller` on one export    | `lsc: at most one Caller parameter per export`                                          |
+| `assert` in contract function      | `lsc: use require for contract guards; assert! is a runtime panic`                      |
+| `List` in author contract code     | `lsc: List is not allowed in contract code; use Mapping or Lsc.Event.log`               |
 | Unknown event in `Lsc.Event.log`   | `lsc: unknown event type "X"; define Lsc.Event.EvmEvent instance or use string signature` |
-| Raw `Fin` `+ - * /` on `UInt256` outside `do` and `unchecked do` | `lsc: arithmetic outside do blocks must use checkedAdd/Sub/Mul/Div explicitly, or unchecked do for wrapping` |
-| `unchecked` in spec or proof | `lsc: unchecked is contract-only; use + on UInt256 in spec` |
-| `wrapAdd` / direct `UInt256.add` in contract | `lsc: use unchecked do for wrapping arithmetic` |
-| `←` in `do` without `HasArithErrors` | `lsc: arithmetic in do block requires HasArithErrors; add \| overflow to your @[lsc.error] inductive` |
-| `do` on infallible function (`S` or `V`) | `lsc: do-notation requires Result return type` |
-| Plain `+ - * /` outside `do` in contract | `lsc: arithmetic outside do blocks must use checkedAdd/Sub/Mul/Div explicitly` |
-| Postfix `?` on `Result` | `lsc: ? operator is removed; use do-notation and ←` |
-| `open Lsc.Arith` in spec or proof | `lsc: Lsc.Arith is for contract modules only; spec uses Fin +` |
+| `+?` / `checked` in spec or proof | `lsc: checked arithmetic is contract-only; spec uses Fin +` |
+| `do` on infallible function (`S` or `V`) | `lsc: do-notation requires Except return type` |
+| More than one `@[lsc.initialize]` | `lsc: at most one @[lsc.initialize] per contract module` |
 | Malformed event signature          | `lsc: invalid event signature "..."; expected form "Name(type,type)"`                   |
 | Event argument mismatch            | `lsc: event "Transfer(...)" expects N arguments of types ...; got ...`                  |
 | Author constructs `LogEntry`       | `lsc: LogEntry is compiler-internal; use Lsc.Event.log`                                 |
@@ -363,7 +362,7 @@ flowchart LR
   subgraph trusted_v1 [Trusted in v1]
     Emitter[Lean IR to Yul emitter]
     Solc[solc]
-    Axiom[StorageMapping.key_injective]
+    Note[Mapping laws from Function.update — no storage axiom]
   end
 
   subgraph future [Phase 2 TBD]
@@ -387,7 +386,7 @@ flowchart LR
 | Lean model → Yul                   | **Trusted** (tested emitter)                          |
 | Yul → bytecode                     | **Trusted** (`solc`)                                  |
 | Bytecode → spec on chain           | **Tested** (Solidity fuzz/invariant via `deployCode`) |
-| `StorageMapping.key_injective`     | **Axiom** (single storage axiom in contract proofs)   |
+| `Mapping` simp laws                | Definitional from `Function.update` (§2.3)            |
 | `Lsc.unsafe.call`            | **No spec** (fuzz only)                               |
 
 
@@ -425,27 +424,26 @@ flowchart LR
 
 `**Lsc` library**
 
-- `Lsc.Prelude`: `Address`, `Bytes32`, `Bytes`, `EvmContext`, `StorageMapping`, `HasArithErrors`, polymorphic `UInt256.checkedAdd` / `checkedSub` / `checkedMul` / `checkedDiv`; `Monad (Result · E)` for `do`-notation ([lsc-spec.md §2.5](lsc-spec.md))
-- `Lsc.Arith` (in prelude): `unchecked do` macro for wrapping `+ - * /`; checked `+ - * /` sugar inside `do` in `@[lsc.export]` bodies; forward bridge lemmas `checkedAdd_ok`, `checkedAdd_overflow`, … ([lsc-spec.md §2.5](lsc-spec.md))
+- `Lsc.Prelude`: `Address`, `Caller`, `Bytes32`, `Bytes[N]`, `Mapping`, `ArithError`, `UInt256` (`Fin`), `+? -? *? /?`, `checked` macro, `Option.orWrap` / `orWrapDiv` / `orError`, `require`; `Monad (Except E)` from Lean core ([lsc-spec.md §2](lsc-spec.md#2-types))
+- `Lsc.Prelude`: `@[simp]` bridge lemmas `UInt256.addChecked_some`, `Option.orWrap_none`, …; `Lsc.Invariant` for sequence specs ([lsc-spec.md §9.1](lsc-spec.md#91-format))
 - `Lsc.Event`: `Lsc.Event.EvmEvent`, `Lsc.Event.log`, `LogEntry`
-- `Lsc.ProofHelpers`: Layer 1 `compose`; Layers 2–4 `lift_*`, `simulate_call`, `export_cases` (§7)
+- `Lsc.ProofHelpers`: Layer 1 `Except.bind_ok`, `Except.ok_ne_error`; Layers 2–4 `lift_*`, `simulate_call`, `export_cases` ([lsc-spec.md §11](lsc-spec.md#11-proof-helpers-lscproofhelpers))
 - `Lsc.SpecTemplates` (Layer 1 + export/trace skeletons)
-- `@[lsc.external]`, `@[lsc.error]` (elaboration-time generation via `AttributeImpl`: discriminators, `DecidableEq`, `HasArithErrors`), `@[lsc.public]` (elaboration-time `@[lsc.external]` view `def`s from State fields; [lsc-spec.md §3.5](lsc-spec.md)), `@[lsc.event]` (optional lint), `@[lsc.extern_hook]`, `@[lsc.no_reentrant]` attributes ([lsc-spec.md](lsc-spec.md).5, [lsc-spec.md](lsc-spec.md).9, [lsc-spec.md](lsc-spec.md).16)
+- `@[lsc.external]`, `@[lsc.error]` (registers inductive for ABI `errors` / revert encoding only), `@[lsc.initialize]`, `@[lsc.public]` (synthesized `@[lsc.external]` views; [lsc-spec.md §3.5](lsc-spec.md)), `@[lsc.event]` (optional lint), `@[lsc.extern_hook]`, `@[lsc.no_reentrant]` ([lsc-spec.md](lsc-spec.md))
 - Filename-based contract registration ([lsc-spec.md](lsc-spec.md).13.1); `[lsc.contracts]` in `foundry.toml`
 
-**`Lsc.Arith` (ForgeLean — normative surface)**
+**Arithmetic and fallibility (ForgeLean — normative surface)**
 
-Implement in `ForgeLean` / `Lsc.Prelude` per [lsc-spec.md §2.5](lsc-spec.md):
+Implement in `ForgeLean` / `Lsc.Prelude` per [lsc-spec.md §2.1–§2.5](lsc-spec.md#21-primitive-types):
 
-1. Wrapping defs `UInt256.add` / `sub` / `mul` / `div` (prelude-internal; authors use `unchecked do`)
-2. `unchecked` macro on `do` blocks — scoped rewriting of `+ - * /` to wrapping ops
-3. `Monad (Result · E)` instance in `Lsc.Prelude` for standard `do`-notation
-4. Validator macro: checked `+ - * /` → `checkedAdd` … only inside `do` blocks in `@[lsc.export]` function bodies
-5. `@[simp]` forward bridge lemmas: `checkedAdd_ok`, `checkedAdd_overflow`, and sub/mul/div analogues
-6. Validator: reject raw `HAdd` on `UInt256` outside `do` and `unchecked`; forbid `unchecked` / `open Lsc.Arith` in spec and proof; forbid `wrapAdd` in contracts; reject postfix `?` ([lsc-spec.md §13.1](lsc-spec.md))
-7. Register `@[lsc.error]` via `Lean.registerBuiltinAttribute` / `AttributeImpl` — generates discriminators, `DecidableEq`, and `HasArithErrors` at elaboration time (not validator)
-8. Register `@[lsc.public]` on State struct fields — after `State` is known, synthesize `@[lsc.external]` getter `def`s before ABI collection ([lsc-spec.md §3.5](lsc-spec.md))
-9. Validator: reject bare `lsc_errors` keyword; surface `HasArithErrors` resolution failures from Lean elaborator; enforce `@[lsc.public]` rules ([lsc-spec.md §13.1](lsc-spec.md))
+1. `UInt256 = Fin (2^256)` — plain `+ - * /` are modular everywhere (no operator rewriting in `do`)
+2. `+? -? *? /?` → `Option UInt256`; `checked f do` macro wraps `←` Option binds via `orWrap`
+3. `require (cond) .variant` macro → `if ¬cond then return .error .variant`
+4. `@[simp]` bridge lemmas: `UInt256.addChecked_some`, `Option.orWrap_none`, …
+5. Validator: forbid `+?` / `checked` in spec and proof; forbid `assert` in contracts; enforce `Caller` rules ([lsc-spec.md §13.1](lsc-spec.md))
+6. Register `@[lsc.error]` — emitter registration only (no `HasArithErrors` codegen)
+7. Register `@[lsc.initialize]` — at most one per module; constructor + optional proxy `initialize` ABI
+8. Register `@[lsc.public]` — synthesize getter `@[lsc.external]` `def`s before ABI collection ([lsc-spec.md §3.5](lsc-spec.md))
 
 **Phase v2a (semantics only)**
 
@@ -505,19 +503,16 @@ The Foundry fork ships a Lean counter beside [`testdata/src/Counter.vy`](https:/
 ```lean
 import Lsc.Prelude
 
-open Lsc Lsc.Arith
-
-@[lsc.error]
-inductive CounterError where
-  | overflow   -- checkedAdd only
+open Lsc
 
 structure CounterState where
   @[lsc.public]
   number : UInt256
 
 @[lsc.external]
-def increment (s : CounterState) : Result CounterState CounterError := do
-  let n ← s.number + 1
+def increment (s : CounterState) : Except ArithError CounterState :=
+  checked id do
+  let n ← s.number +? 1
   return .ok { s with number := n }
 
 @[lsc.external]
@@ -533,8 +528,8 @@ def setNumber (s : CounterState) (n : UInt256) : CounterState :=
 import Counter
 
 def increment_increases_number
-    (s s' : CounterState) (ret : Unit)
-    (h : increment s = some (s', ret)) : Prop :=
+    (s s' : CounterState)
+    (h : increment s = .ok s') : Prop :=
   s'.number = s.number + 1
 ```
 
@@ -544,11 +539,11 @@ def increment_increases_number
 import CounterSpec
 
 theorem increment_increases_number
-    (s s' : CounterState) (ret : Unit)
-    (h : increment s = some (s', ret)) :
-    CounterSpec.increment_increases_number s s' ret h := by
+    (s s' : CounterState)
+    (h : increment s = .ok s') :
+    CounterSpec.increment_increases_number s s' h := by
   simp [CounterSpec.increment_increases_number, increment] at h
-  exact h
+  simp [UInt256.addChecked_some (by omega), Option.orWrap_some] at h; omega
 ```
 
 No `EvmContext`, `LogEntry`, or `Lsc.ProofHelpers` import required — Layer 1 proofs only ([lsc-spec.md §1.6.2](lsc-spec.md#162-proof-layers-default-path-vs-advanced)).
@@ -574,7 +569,7 @@ contract CounterTest is Test {
 
 The [forge-lean-erc20](https://github.com/forge-lean/forge-lean-erc20) repository demonstrates the full workflow at application scale:
 
-1. **Write** — `src/Token.lean` with `ERC20State`, `@[lsc.external]` functions and `Lsc.Event.log` for events (§9.1). Compiler infers ABI from names and `Option` return shapes.
+1. **Write** — `src/Token.lean` with `ERC20State`, `@[lsc.external]` functions and `Lsc.Event.log` for events (§9.1). Compiler infers ABI from names and `Except` return shapes.
 2. **Spec** — `spec/TokenSpec.lean` with human-reviewed `def … : Prop` over `@[lsc.external]` functions; `[lsc.compliance.erc20]` enforces the proposition list on `forge test`.
 3. **Prove** — `test/TokenProof.lean` (LLM-assisted, kernel-checked).
 4. **Fuzz** — `test/Token.t.sol` deploys bytecode via `deployCode` and runs Foundry fuzz/invariant tests.
@@ -601,7 +596,7 @@ This appendix documents the **[forge-lean-erc20](https://github.com/forge-lean/f
 ### C.1 Application scope
 
 - Full ERC-20 interface (constructor-only mint; no post-deploy mint/burn in the reference token)
-- `Bytes` for `name` / `symbol`; mutators return `bool` on the ABI (compiler-generated)
+- `Bytes[32]` for `name` / `symbol`; mutators return `bool` on the ABI
 - `Lsc.Event.log` for `Transfer` and `Approval` events (classic emit)
 
 ### C.2 State and prelude (demo `lib/` or `src/ERC20.lean`)
@@ -613,33 +608,38 @@ structure TransferEvent where
   deriving Lsc.Event.EvmEvent
 
 structure ERC20State where
-  name        : Bytes
-  symbol      : Bytes
+  name        : Bytes[32]
+  symbol      : Bytes[32]
   decimals    : UInt256
   totalSupply : UInt256
-  balances    : StorageMapping Address UInt256
-  allowances  : StorageMapping Address (StorageMapping Address UInt256)
+  balances    : Mapping Address UInt256
+  allowances  : Mapping Address (Mapping Address UInt256)
+
+@[lsc.error]
+inductive TokenError where
+  | insufficientBalance
+  | arith (e : ArithError)
+  deriving DecidableEq, Repr
 
 @[lsc.external]
-def transfer (caller : Address) (s : ERC20State) (to : Address) (amount : UInt256)
-    : Option (ERC20State × Bool) :=
-  if s.balances.get caller < amount then
-    none
-  else
-    let s' := { s with
-      balances := s.balances.set caller (s.balances.get caller - amount)
-                    |>.set to (s.balances.get to + amount) }
-    Lsc.Event.log (TransferEvent.mk caller to amount)
-    some (s', true)
+def transfer (caller : Caller) (s : ERC20State) (to : Address) (amount : UInt256)
+    : Except TokenError (ERC20State × Bool) :=
+  checked .arith do
+  require (s.balances.get caller.val ≥ amount) .insufficientBalance
+  let newCaller ← s.balances.get caller.val -? amount
+  let newTo     ← s.balances.get to +? amount
+  let s' := { s with balances := s.balances.set caller.val newCaller |>.set to newTo }
+  Lsc.Event.log (TransferEvent.mk caller.val to amount)
+  return .ok (s', true)
 ```
 
-Example revert theorem (no error-kind branching; §2.8):
+Example revert theorem:
 
 ```lean
 def transfer_no_overdraft
-    (caller to : Address) (amount : UInt256) (s : ERC20State)
-    (h : transfer caller s to amount = none) : Prop :=
-  s.balances.get caller < amount
+    (caller : Caller) (to : Address) (amount : UInt256) (s : ERC20State)
+    (h : transfer caller s to amount = .error .insufficientBalance) : Prop :=
+  s.balances.get caller.val < amount
 ```
 
 The demo defines `@[lsc.external]` functions with **`Lsc.Event.log`** on success paths (no hand-written export wrappers; no `Lsc.ERC20` in core).
@@ -652,16 +652,16 @@ Enforced only when the demo repo (or a project) sets `[lsc.compliance.erc20]` in
 | Group        | Theorem                               | Statement (summary)                           |
 | ------------ | ------------------------------------- | --------------------------------------------- |
 | Transfer     | `transfer_preserves_total_supply`     | `totalSupply` unchanged on success            |
-| Transfer     | `transfer_no_overdraft`               | insufficient balance → `none`                 |
+| Transfer     | `transfer_no_overdraft`               | insufficient balance → `.error .insufficientBalance` |
 | Transfer     | `transfer_no_creation`                | tokens conserved between distinct parties     |
 | Transfer     | `transfer_self_noop`                  | `from = to` → state unchanged on success path |
 | Approve      | `approve_sets_allowance`              | allowance equals requested amount             |
 | Approve      | `increaseAllowance_additive`          | allowance increases by delta                  |
 | Approve      | `decreaseAllowance_subtractive`       | allowance decreases by delta (saturating)     |
 | Approve      | `decreaseAllowance_saturates_at_zero` | decrease below zero → allowance 0             |
-| TransferFrom | `transferFrom_respects_allowance`     | insufficient allowance → `none`               |
+| TransferFrom | `transferFrom_respects_allowance`     | insufficient allowance → typed `.error`       |
 | TransferFrom | `transferFrom_decrements_allowance`   | allowance reduced by transfer amount          |
-| TransferFrom | `transferFrom_respects_balance`       | insufficient balance → `none`                 |
+| TransferFrom | `transferFrom_respects_balance`       | insufficient balance → typed `.error`         |
 | Constructor  | `constructor_mints_initial_supply`    | deployer balance equals `initialSupply`       |
 | Constructor  | `constructor_sets_metadata`           | `name`, `symbol`, `decimals` stored correctly |
 
@@ -679,7 +679,7 @@ forge-lean-erc20/
 
 ### C.5 LLM prompt sketch (Token)
 
-> Given `src/Token.lean` and `spec/TokenSpec.lean` (`def … : Prop`), complete `test/TokenProof.lean` with one `theorem` per spec def. Use `simp`, `omega`, `StorageMapping.get_set_same`. No `sorry`.
+> Given `src/Token.lean` and `spec/TokenSpec.lean` (`def … : Prop`), complete `test/TokenProof.lean` with one `theorem` per spec def. Use `simp`, `omega`, `Mapping.get_set_same`, `Except.bind_ok`. No `sorry`.
 
 Full source listings are maintained in the demo repository, not duplicated here.
 
@@ -737,11 +737,11 @@ structure ERC20State where
   symbol : Bytes
   decimals : UInt256
   totalSupply : UInt256
-  balances : StorageMapping Address UInt256
-  allowances : StorageMapping Address (StorageMapping Address UInt256)
+  balances : Mapping Address UInt256
+  allowances : Mapping Address (Mapping Address UInt256)
 
 def ERC20.transfer (s : ERC20State) (from to : Address) (amount : UInt256)
-    : Option ERC20State := ...
+    : Except TokenError ERC20State := ...
 
 -- src/MyToken.lean
 import ERC20
@@ -750,10 +750,10 @@ structure MyTokenState extends ERC20State where
   counter : Address   -- 0 = hook disabled in tests
 
 def MyToken.transfer (s : MyTokenState) (from to : Address) (amount : UInt256)
-    : Option MyTokenState :=
+    : Except TokenError MyTokenState :=
   match ERC20.transfer s.toERC20 from to amount with
-  | none => none
-  | some erc' => some { s with toERC20 := erc' }
+  | .error e => .error e
+  | .ok erc' => .ok { s with toERC20 := erc' }
 ```
 
 - **Field access:** `s.balances` works on `MyTokenState` (flat inheritance).
@@ -767,8 +767,10 @@ structure TransferCounterState where
   count : UInt256
 
 @[lsc.external]
-def onTransfer (s : TransferCounterState) : Option TransferCounterState :=
-  some { s with count := s.count + 1 }
+def onTransfer (s : TransferCounterState) : Except ArithError TransferCounterState :=
+  checked id do
+  let c ← s.count +? 1
+  return .ok { s with count := c }
 ```
 
 - No `Lsc.extern.*` in the counter (closed-world Layer 1 proofs).
@@ -780,23 +782,23 @@ def onTransfer (s : TransferCounterState) : Option TransferCounterState :=
 
 1. Calls `MyToken.transfer` / `transferFrom` (delegates to `ERC20.transfer` on `s.toERC20`).
 2. If `s.counter ≠ 0` and transfer is not a self-noop, `Lsc.extern.call` to `ITransferCounter.onTransfer`.
-3. On callee revert → export returns `none`; emitter / `invoke` must not persist token storage (§4.14).
+3. On callee revert → export returns `.error e`; emitter / `invoke` must not persist token storage (§8).
 
 **Reference generated export shape (illustrative — not written in `src/`):**
 
 ```lean
 -- Compiler-generated only
 def transfer (ctx : EvmContext) (w : World) (s : MyTokenState) (to : Address) (amount : UInt256)
-    : Option (World × Bool × List LogEntry) :=
+    : Except E (World × Bool × List LogEntry) :=
   match MyToken.transfer s ctx.sender to amount with
-  | none => none
-  | some s' =>
+  | .error e => .error e
+  | .ok s' =>
       if s'.counter == Address.zero then
-        some (w, true, [...])   -- LOGs from Lsc.Event.log sites on success path
+        .ok (w, true, [...])   -- LOGs from Lsc.Event.log sites on success path
       else
         match Lsc.extern.call w s'.counter ctx inferInstance s'.counter with
-        | none => none
-        | some (w', ()) => some (w', true, [...])
+        | .error e => .error e
+        | .ok (w', ()) => .ok (w', true, [...])
 ```
 
 **Self-transfer (`from == to`):** When `ERC20.transfer` is a noop, **do not** call the counter (`transfer_self_noop`).
@@ -826,7 +828,7 @@ required = [
   "transfer_increments_counter_when_hooked",
   "transfer_skips_counter_when_zero",
   "transfer_self_noop_skips_counter",
-  "hook_revert_implies_transfer_none",
+  "hook_revert_implies_transfer_error",
   "transferFrom_increments_counter_when_hooked"
 ]
 ```
@@ -843,7 +845,7 @@ required = [
 | `transfer_increments_counter_when_hooked` | `counter ≠ 0`, successful hooked export ⇒ counter `count` increases by 1 |
 | `transfer_skips_counter_when_zero` | `counter = 0` ⇒ behavior matches export without extern |
 | `transfer_self_noop_skips_counter` | `from = to` ⇒ counter unchanged |
-| `hook_revert_implies_transfer_none` | counter call reverts ⇒ MyToken export `none` |
+| `hook_revert_implies_transfer_error` | counter call reverts ⇒ MyToken export `.error` |
 | `transferFrom_increments_counter_when_hooked` | same as `transfer` for `transferFrom` |
 
 
@@ -881,7 +883,7 @@ required = [
 
 ### D.11 LLM prompt sketches
 
-**ERC-20:** Given `lib/ERC20.lean` and `spec/ERC20Spec.lean`, complete `test/ERC20Proof.lean`. Use `simp`, `omega`, `StorageMapping.get_set_*`. No `sorry`.
+**ERC-20:** Given `lib/ERC20.lean` and `spec/ERC20Spec.lean`, complete `test/ERC20Proof.lean`. Use `simp`, `omega`, `Mapping.get_set_*`, `Except.bind_ok`. No `sorry`.
 
 **Composition:** Given `src/MyToken.lean`, `spec/MyTokenSpec.lean`, and `Lsc.ProofHelpers`, complete `test/MyTokenProof.lean` for hook theorems. No `sorry`.
 

@@ -2,7 +2,7 @@
 
 # LSC Appendices
 
-Extended reference patterns, examples, and project history.
+Extended reference patterns, examples, and project history. Code samples follow [lsc-spec.md](lsc-spec.md) (v1): `Except E A`, `Caller`, `Bytes[N]`, `checked .arith do`, `require`, and `Mapping` as `K → V`.
 
 | Appendix | Title | Section |
 |----------|-------|---------|
@@ -32,8 +32,8 @@ structure ApprovalEvent where
   deriving Lsc.Event.EvmEvent
 
 structure ERC20State where
-  name        : Bytes
-  symbol      : Bytes
+  name        : Bytes[32]
+  symbol      : Bytes[32]
   decimals    : UInt256
   totalSupply : UInt256
   balances    : Mapping Address UInt256
@@ -43,31 +43,29 @@ structure ERC20State where
 ### A.2 Key exports
 
 ```lean
-@[lsc.external]
-def transfer
-    (@[lsc.caller] caller : Address)
-    (s : ERC20State)
-    (to : Address)
-    (amount : UInt256) : Result (ERC20State × Bool) TokenError :=
-  if s.balances.get caller < amount then
-    none
-  else
-    let s' := { s with
-      balances := s.balances.set caller (s.balances.get caller - amount)
-                    |>.set to (s.balances.get to + amount) }
-    Lsc.Event.log (TransferEvent.mk caller to amount)
-    .ok (s', true)
+@[lsc.error]
+inductive TokenError where
+  | insufficientBalance
+  | arith (e : ArithError)
+  deriving DecidableEq, Repr
 
 @[lsc.external]
-def approve
-    (@[lsc.caller] caller : Address)
-    (s : ERC20State)
-    (spender : Address)
-    (amount : UInt256) : Result (ERC20State × Bool) TokenError :=
-  let s' := { s with
-    allowances := s.allowances.set caller
-      (s.allowances.get caller |>.set spender amount) }
-  Lsc.Event.log (ApprovalEvent.mk caller spender amount)
+def transfer (caller : Caller) (s : ERC20State) (to : Address) (amount : UInt256)
+    : Except TokenError (ERC20State × Bool) :=
+  checked .arith do
+  require (s.balances.get caller.val ≥ amount) .insufficientBalance
+  let newCaller ← s.balances.get caller.val -? amount
+  let newTo     ← s.balances.get to +? amount
+  let s' := { s with balances := s.balances.set caller.val newCaller |>.set to newTo }
+  Lsc.Event.log (TransferEvent.mk caller.val to amount)
+  return .ok (s', true)
+
+@[lsc.external]
+def approve (caller : Caller) (s : ERC20State) (spender : Address) (amount : UInt256)
+    : Except TokenError (ERC20State × Bool) :=
+  let s' := { s with allowances :=
+    s.allowances.set caller.val (s.allowances.get caller.val |>.set spender amount) }
+  Lsc.Event.log (ApprovalEvent.mk caller.val spender amount)
   .ok (s', true)
 ```
 
@@ -77,31 +75,31 @@ def approve
 -- spec/ERC20Spec.lean
 /-- transfer reverts when caller has insufficient balance. -/
 def transfer_no_overdraft
-    (caller to : Address) (amount : UInt256) (s : ERC20State)
-    (h : transfer caller s to amount = none) : Prop :=
-  s.balances.get caller < amount
+    (caller : Caller) (to : Address) (amount : UInt256) (s : ERC20State)
+    (h : transfer caller s to amount = .error .insufficientBalance) : Prop :=
+  s.balances.get caller.val < amount
 
 /-- transfer preserves total supply. -/
 def transfer_preserves_total_supply
-    (caller to : Address) (amount : UInt256)
+    (caller : Caller) (to : Address) (amount : UInt256)
     (s s' : ERC20State) (ret : Bool)
-    (h : transfer caller s to amount = some (s', ret)) : Prop :=
+    (h : transfer caller s to amount = .ok (s', ret)) : Prop :=
   s'.totalSupply = s.totalSupply
 ```
 
 ```lean
 -- test/ERC20Proof.lean
 theorem transfer_no_overdraft
-    (caller to : Address) (amount : UInt256) (s : ERC20State)
-    (h : transfer caller s to amount = none) :
+    (caller : Caller) (to : Address) (amount : UInt256) (s : ERC20State)
+    (h : transfer caller s to amount = .error .insufficientBalance) :
     ERC20Spec.transfer_no_overdraft caller to amount s h := by
-  simp [ERC20Spec.transfer_no_overdraft, transfer] at *
-  omega
+  simp [ERC20Spec.transfer_no_overdraft, transfer] at h
+  split_ifs at h with hguard <;> omega
 
 theorem transfer_preserves_total_supply
-    (caller to : Address) (amount : UInt256)
+    (caller : Caller) (to : Address) (amount : UInt256)
     (s s' : ERC20State) (ret : Bool)
-    (h : transfer caller s to amount = some (s', ret)) :
+    (h : transfer caller s to amount = .ok (s', ret)) :
     ERC20Spec.transfer_preserves_total_supply caller to amount s s' ret h := by
   simp [ERC20Spec.transfer_preserves_total_supply, transfer] at *
   exact h.2
@@ -139,8 +137,8 @@ sequenceDiagram
 ```lean
 -- src/MyToken.lean
 structure MyTokenState where
-  name        : Bytes
-  symbol      : Bytes
+  name        : Bytes[32]
+  symbol      : Bytes[32]
   decimals    : UInt256
   totalSupply : UInt256
   balances    : Mapping Address UInt256
@@ -157,11 +155,12 @@ structure TransferCounterState where
 
 @[lsc.error]
 inductive TransferCounterError where
-  | overflow   -- checkedAdd only
+  | arith (e : ArithError)  -- ArithError via +?
 
 @[lsc.external]
-def onTransfer (s : TransferCounterState) : Result TransferCounterState TransferCounterError := do
-  let c ← s.count + 1
+def onTransfer (s : TransferCounterState) : Except ArithError TransferCounterState :=
+  checked id do
+  let c ← s.count +? 1
   return .ok { s with count := c }
 ```
 
@@ -176,7 +175,7 @@ def onTransfer (s : TransferCounterState) : Result TransferCounterState Transfer
 | `transfer_increments_counter_when_hooked` | `counter ≠ 0`, successful export ⇒ `count` increases by 1 |
 | `transfer_skips_counter_when_zero` | `counter = 0` ⇒ behavior matches export without extern |
 | `transfer_self_noop_skips_counter` | `from = to` ⇒ counter unchanged |
-| `hook_revert_implies_transfer_none` | counter call reverts ⇒ MyToken export `none` |
+| `hook_revert_implies_transfer_error` | counter call reverts ⇒ MyToken export `.error` |
 
 **TransferCounter** (`spec/TransferCounterSpec.lean`):
 
@@ -225,13 +224,13 @@ All v2+ content is removed from the main spec body. This appendix records what e
 
 ## Appendix E — ERC-20 with Mint/Burn
 
-This appendix is a complete, self-contained ERC-20 implementation with owner-controlled mint and burn. It demonstrates `Mapping`, `@[lsc.caller]`, events, authorization proofs, construction pattern, and the compliance manifest.
+This appendix is a complete, self-contained ERC-20 implementation with owner-controlled mint and burn. It demonstrates `Mapping`, `Caller`, events, authorization proofs, construction pattern, and the compliance manifest.
 
 ### E.1 Contract (`src/Token.lean`)
 
 ```lean
 import Lsc.Prelude
-open Lsc Lsc.Arith
+open Lsc
 
 -- Events
 structure TransferEvent where
@@ -247,8 +246,8 @@ structure ApprovalEvent where
 -- State
 structure TokenState where
   owner       : Address                                                  -- slot 0 (private)
-  @[lsc.public] name        : Bytes                                      -- slot 1
-  @[lsc.public] symbol      : Bytes                                      -- slot 2
+  @[lsc.public] name        : Bytes[32] -- slot 1
+  @[lsc.public] symbol      : Bytes[32] -- slot 2
   @[lsc.public] decimals    : UInt256                                  -- slot 3
   @[lsc.public] totalSupply : UInt256                                    -- slot 4
   balances    : Mapping Address UInt256                           -- slot 5
@@ -261,93 +260,79 @@ inductive TokenError where
   | insufficientAllowance
   | unauthorized
   | alreadyInitialized
-  | overflow   -- checkedAdd/checkedSub; no division in ERC-20
+  | arith (e : ArithError)  -- +? / checked .arith; no division in ERC-20
 
--- Construction: call initialize once; reverts if already initialized.
--- owner = Address.zero means uninitialized.
-@[lsc.external]
-def initialize
-    (@[lsc.caller] caller : Address)
-    (s : TokenState)
-    (name : Bytes) (symbol : Bytes) (decimals : UInt256)
-    (initialSupply : UInt256) : Result TokenState TokenError :=
-  if s.owner.val ≠ 0 then none   -- already initialized
-  else
-    let s' := { s with
-      owner       := caller
-      name        := name
-      symbol      := symbol
-      decimals    := decimals
-      totalSupply := initialSupply
-      balances    := s.balances.set caller initialSupply }
-    Lsc.Event.log (TransferEvent.mk { val := 0 } caller initialSupply)
-    .ok s'
+-- Construction: @[lsc.initialize] (deploy + optional proxy re-init; §3.6)
+@[lsc.initialize]
+def initialize (name symbol : Bytes[32]) (decimals : UInt256)
+    (initialSupply : UInt256) (owner : Caller) : Except TokenError TokenState :=
+  return .ok {
+    name := name, symbol := symbol, decimals := decimals
+    owner := owner.val, totalSupply := initialSupply
+    balances := Mapping.empty |>.set owner.val initialSupply
+    allowances := Mapping.empty }
 
 -- Transfer
 @[lsc.external]
-def transfer
-    (@[lsc.caller] caller : Address)
-    (s : TokenState)
-    (to : Address) (amount : UInt256) : Result (TokenState × Bool) TokenError := do
-  assert (s.balances.get caller ≥ amount) .insufficientBalance
-  let newCaller ← s.balances.get caller - amount
-  let newTo     ← s.balances.get to + amount
-  let s' := { s with balances := s.balances.set caller newCaller |>.set to newTo }
-  Lsc.Event.log (TransferEvent.mk caller to amount)
+def transfer (caller : Caller) (s : TokenState) (to : Address) (amount : UInt256)
+    : Except TokenError (TokenState × Bool) :=
+  checked .arith do
+  require (s.balances.get caller.val ≥ amount) .insufficientBalance
+  let newCaller ← s.balances.get caller.val -? amount
+  let newTo     ← s.balances.get to +? amount
+  let s' := { s with balances := s.balances.set caller.val newCaller |>.set to newTo }
+  Lsc.Event.log (TransferEvent.mk caller.val to amount)
   return .ok (s', true)
 
 -- Approve
 @[lsc.external]
 def approve
-    (@[lsc.caller] caller : Address)
+    (caller : Caller)
     (s : TokenState)
-    (spender : Address) (amount : UInt256) : Result (TokenState × Bool) TokenError :=
+    (spender : Address) (amount : UInt256) : Except TokenError (TokenState × Bool) :=
   let s' := { s with allowances :=
-    s.allowances.set caller (s.allowances.get caller |>.set spender amount) }
-  Lsc.Event.log (ApprovalEvent.mk caller spender amount)
+    s.allowances.set caller.val (s.allowances.get caller.val |>.set spender amount) }
+  Lsc.Event.log (ApprovalEvent.mk caller.val spender amount)
   .ok (s', true)
 
 -- TransferFrom
 @[lsc.external]
-def transferFrom
-    (@[lsc.caller] caller : Address)
-    (s : TokenState)
-    (from to : Address) (amount : UInt256) : Result (TokenState × Bool) TokenError := do
-  let allowed := s.allowances.get from |>.get caller
-  assert (s.balances.get from ≥ amount) .insufficientBalance
-  assert (allowed ≥ amount) .insufficientAllowance
-  let newFrom ← s.balances.get from - amount
-  let newTo   ← s.balances.get to + amount
-  let newAllowance ← allowed - amount
+def transferFrom (caller : Caller) (s : TokenState) (from to : Address) (amount : UInt256)
+    : Except TokenError (TokenState × Bool) :=
+  checked .arith do
+  let allowed := s.allowances.get from |>.get caller.val
+  require (s.balances.get from ≥ amount) .insufficientBalance
+  require (allowed ≥ amount) .insufficientAllowance
+  let newFrom ← s.balances.get from -? amount
+  let newTo   ← s.balances.get to +? amount
+  let newAllowance ← allowed -? amount
   let s' := { s with
     balances   := s.balances.set from newFrom |>.set to newTo
-    allowances := s.allowances.set from (s.allowances.get from |>.set caller newAllowance) }
+    allowances := s.allowances.set from (s.allowances.get from |>.set caller.val newAllowance) }
   Lsc.Event.log (TransferEvent.mk from to amount)
   return .ok (s', true)
 
 -- Mint (owner only)
 @[lsc.external]
-def mint
-    (@[lsc.caller] caller : Address)
-    (s : TokenState)
-    (to : Address) (amount : UInt256) : Result TokenState TokenError := do
-  assert (caller == s.owner) .unauthorized
-  let newSupply ← s.totalSupply + amount
-  let newBal    ← s.balances.get to + amount
+def mint (caller : Caller) (s : TokenState) (to : Address) (amount : UInt256)
+    : Except TokenError TokenState :=
+  checked .arith do
+  require (caller.val == s.owner) .unauthorized
+  let newSupply ← s.totalSupply +? amount
+  let newBal    ← s.balances.get to +? amount
   let s' := { s with totalSupply := newSupply, balances := s.balances.set to newBal }
   Lsc.Event.log (TransferEvent.mk { val := 0 } to amount)
   return .ok s'
 
 -- Burn (owner only)
 @[lsc.external]
-def burn
-    (@[lsc.caller] caller : Address)
-    (s : TokenState)
-    (from : Address) (amount : UInt256) : Result TokenState TokenError := do
-  assert (caller == s.owner) .unauthorized
-  assert (s.balances.get from ≥ amount) .insufficientBalance
-  let newSupply ← s.totalSupply - amount
-  let newBal    ← s.balances.get from - amount
+def burn (caller : Caller) (s : TokenState) (from : Address) (amount : UInt256)
+    : Except TokenError TokenState :=
+  checked .arith do
+  require (caller.val == s.owner) .unauthorized
+  require (s.balances.get from ≥ amount) .insufficientBalance
+  let newSupply ← s.totalSupply -? amount
+  let newBal    ← s.balances.get from -? amount
   let s' := { s with totalSupply := newSupply, balances := s.balances.set from newBal }
   Lsc.Event.log (TransferEvent.mk from { val := 0 } amount)
   return .ok s'
@@ -373,134 +358,127 @@ import Token
 
 /-- mint reverts when caller is not the owner. -/
 def mint_requires_owner
-    (caller : Address) (s : TokenState) (to : Address) (amount : UInt256)
-    (h : mint caller s to amount = none) : Prop :=
-  caller ≠ s.owner ∨ True  -- first branch is the authorization guard
+    (caller : Caller) (s : TokenState) (to : Address) (amount : UInt256)
+    (h : mint caller s to amount = .error .unauthorized) : Prop :=
+  caller.val ≠ s.owner ∨ True  -- first branch is the authorization guard
 
 /-- burn reverts when caller is not the owner. -/
 def burn_requires_owner
-    (caller : Address) (s : TokenState) (from : Address) (amount : UInt256)
-    (h : burn caller s from amount = none) : Prop :=
-  caller ≠ s.owner ∨ s.balances.get from < amount
+    (caller : Caller) (s : TokenState) (from : Address) (amount : UInt256)
+    (h : burn caller s from amount = .error .unauthorized) : Prop :=
+  caller.val ≠ s.owner
 
 -- ── Supply conservation ───────────────────────────────────────────────────────
 
 /-- transfer preserves total supply. -/
 def transfer_preserves_supply
-    (caller to : Address) (amount : UInt256)
+    (caller : Caller) (to : Address) (amount : UInt256)
     (s s' : TokenState) (ret : Bool)
-    (h : transfer caller s to amount = some (s', ret)) : Prop :=
+    (h : transfer caller s to amount = .ok (s', ret)) : Prop :=
   s'.totalSupply = s.totalSupply
 
 /-- transferFrom preserves total supply. -/
 def transferFrom_preserves_supply
     (caller from to : Address) (amount : UInt256)
     (s s' : TokenState) (ret : Bool)
-    (h : transferFrom caller s from to amount = some (s', ret)) : Prop :=
+    (h : transferFrom caller s from to amount = .ok (s', ret)) : Prop :=
   s'.totalSupply = s.totalSupply
 
 /-- mint increases total supply by exactly amount. -/
 def mint_increases_supply
-    (caller to : Address) (amount : UInt256)
+    (caller : Caller) (to : Address) (amount : UInt256)
     (s s' : TokenState) (ret : Unit)
-    (h : mint caller s to amount = some (s', ret)) : Prop :=
+    (h : mint caller s to amount = .ok (s', ret)) : Prop :=
   s'.totalSupply = s.totalSupply + amount
 
 /-- burn decreases total supply by exactly amount. -/
 def burn_decreases_supply
     (caller from : Address) (amount : UInt256)
     (s s' : TokenState) (ret : Unit)
-    (h : burn caller s from amount = some (s', ret)) : Prop :=
+    (h : burn caller s from amount = .ok (s', ret)) : Prop :=
   s'.totalSupply = s.totalSupply - amount
 
 -- ── Balance correctness ───────────────────────────────────────────────────────
 
 /-- transfer reverts when caller has insufficient balance. -/
 def transfer_no_overdraft
-    (caller to : Address) (amount : UInt256) (s : TokenState)
-    (h : transfer caller s to amount = none) : Prop :=
-  s.balances.get caller < amount
+    (caller : Caller) (to : Address) (amount : UInt256) (s : TokenState)
+    (h : transfer caller s to amount = .error .insufficientBalance) : Prop :=
+  s.balances.get caller.val < amount
 
 /-- transfer moves tokens from caller to recipient. -/
 def transfer_moves_tokens
-    (caller to : Address) (amount : UInt256)
+    (caller : Caller) (to : Address) (amount : UInt256)
     (s s' : TokenState) (ret : Bool)
-    (h : transfer caller s to amount = some (s', ret)) : Prop :=
-  caller ≠ to →
-    s'.balances.get caller = s.balances.get caller - amount ∧
+    (h : transfer caller s to amount = .ok (s', ret)) : Prop :=
+  caller.val ≠ to →
+    s'.balances.get caller.val = s.balances.get caller.val - amount ∧
     s'.balances.get to     = s.balances.get to   + amount
 
 /-- transfer to self leaves balances unchanged. -/
 def transfer_self_noop
-    (caller : Address) (amount : UInt256)
+    (caller : Caller) (amount : UInt256)
     (s s' : TokenState) (ret : Bool)
-    (h : transfer caller s caller amount = some (s', ret)) : Prop :=
-  s'.balances.get caller = s.balances.get caller
+    (h : transfer caller s caller amount = .ok (s', ret)) : Prop :=
+  s'.balances.get caller.val = s.balances.get caller.val
 
 /-- transferFrom reverts when allowance is insufficient. -/
 def transferFrom_no_allowance_overdraft
     (caller from to : Address) (amount : UInt256) (s : TokenState)
-    (h : transferFrom caller s from to amount = none) : Prop :=
+    (h : transferFrom caller s from to amount = .error .insufficientBalance) : Prop :=
   s.balances.get from < amount ∨
-  s.allowances.get from |>.get caller < amount
+  s.allowances.get from |>.get caller.val < amount
 
 /-- transferFrom decrements allowance by amount. -/
 def transferFrom_decrements_allowance
     (caller from to : Address) (amount : UInt256)
     (s s' : TokenState) (ret : Bool)
-    (h : transferFrom caller s from to amount = some (s', ret)) : Prop :=
-  s'.allowances.get from |>.get caller =
-    s.allowances.get from |>.get caller - amount
+    (h : transferFrom caller s from to amount = .ok (s', ret)) : Prop :=
+  s'.allowances.get from |>.get caller.val =
+    s.allowances.get from |>.get caller.val - amount
 
--- ── Initialization ────────────────────────────────────────────────────────────
+-- ── Initialization (`@[lsc.initialize]` — §3.6) ───────────────────────────────
 
-/-- initialize reverts if called a second time. -/
-def initialize_once
-    (caller : Address) (s : TokenState)
-    (name symbol : Bytes) (decimals initialSupply : UInt256)
-    (h : initialize caller s name symbol decimals initialSupply = none) : Prop :=
-  s.owner.val ≠ 0
+/-- initialize sets owner to the deployer Caller. -/
+def constructor_sets_owner
+    (owner : Caller) (name symbol : Bytes[32]) (decimals initialSupply : UInt256)
+    (s' : TokenState)
+    (h : initialize name symbol decimals initialSupply owner = .ok s') : Prop :=
+  s'.owner = owner.val
 
-/-- initialize sets caller as owner. -/
-def initialize_sets_owner
-    (caller : Address) (s s' : TokenState)
-    (name symbol : Bytes) (decimals initialSupply : UInt256) (ret : Unit)
-    (h : initialize caller s name symbol decimals initialSupply = some (s', ret)) : Prop :=
-  s'.owner = caller
-
-/-- initialize grants initial supply to caller. -/
-def initialize_grants_supply
-    (caller : Address) (s s' : TokenState)
-    (name symbol : Bytes) (decimals initialSupply : UInt256) (ret : Unit)
-    (h : initialize caller s name symbol decimals initialSupply = some (s', ret)) : Prop :=
-  s'.balances.get caller = initialSupply ∧
+/-- initialize grants initial supply to owner. -/
+def constructor_mints_initial_supply
+    (owner : Caller) (name symbol : Bytes[32]) (decimals initialSupply : UInt256)
+    (s' : TokenState)
+    (h : initialize name symbol decimals initialSupply owner = .ok s') : Prop :=
+  s'.balances.get owner.val = initialSupply ∧
   s'.totalSupply = initialSupply
 
 -- ── Sequence invariant ────────────────────────────────────────────────────────
 
 inductive TokenAction where
-  | transfer     (caller to : Address) (amount : UInt256)
-  | transferFrom (caller from to : Address) (amount : UInt256)
-  | approve      (caller spender : Address) (amount : UInt256)
-  | mint         (caller to : Address) (amount : UInt256)
-  | burn         (caller from : Address) (amount : UInt256)
+  | transfer     (caller : Caller) (to : Address) (amount : UInt256)
+  | transferFrom (caller : Caller) (from to : Address) (amount : UInt256)
+  | approve      (caller : Caller) (spender : Address) (amount : UInt256)
+  | mint         (caller : Caller) (to : Address) (amount : UInt256)
+  | burn         (caller : Caller) (from : Address) (amount : UInt256)
 
 def applyTokenAction (s : TokenState) : TokenAction → TokenState
   | .transfer caller to amount =>
       match transfer caller s to amount with
-      | some (s', _) => s' | none => s
+      | .ok (s', _) => s' | .error _ => s
   | .transferFrom caller from to amount =>
       match transferFrom caller s from to amount with
-      | some (s', _) => s' | none => s
+      | .ok (s', _) => s' | .error _ => s
   | .approve caller spender amount =>
       match approve caller s spender amount with
-      | some (s', _) => s' | none => s
+      | .ok (s', _) => s' | .error _ => s
   | .mint caller to amount =>
       match mint caller s to amount with
-      | some (s', _) => s' | none => s
+      | .ok (s', _) => s' | .error _ => s
   | .burn caller from amount =>
       match burn caller s from amount with
-      | some (s', _) => s' | none => s
+      | .ok (s', _) => s' | .error _ => s
 
 def applyTokenActions (s : TokenState) (actions : List TokenAction) : TokenState :=
   actions.foldl applyTokenAction s
@@ -525,7 +503,7 @@ import TokenSpec
 theorem transfer_preserves_supply
     (caller to : Address) (amount : UInt256)
     (s s' : TokenState) (ret : Bool)
-    (h : transfer caller s to amount = some (s', ret)) :
+    (h : transfer caller s to amount = .ok (s', ret)) :
     TokenSpec.transfer_preserves_supply caller to amount s s' ret h := by
   simp [TokenSpec.transfer_preserves_supply, transfer] at *
   split_ifs at h with hbal
@@ -534,7 +512,7 @@ theorem transfer_preserves_supply
 
 theorem transfer_no_overdraft
     (caller to : Address) (amount : UInt256) (s : TokenState)
-    (h : transfer caller s to amount = none) :
+    (h : transfer caller s to amount = .error .insufficientBalance) :
     TokenSpec.transfer_no_overdraft caller to amount s h := by
   simp [TokenSpec.transfer_no_overdraft, transfer] at *
   split_ifs at h with hbal
@@ -542,9 +520,9 @@ theorem transfer_no_overdraft
   · simp at h
 
 theorem transfer_self_noop
-    (caller : Address) (amount : UInt256)
+    (caller : Caller) (amount : UInt256)
     (s s' : TokenState) (ret : Bool)
-    (h : transfer caller s caller amount = some (s', ret)) :
+    (h : transfer caller s caller amount = .ok (s', ret)) :
     TokenSpec.transfer_self_noop caller amount s s' ret h := by
   simp [TokenSpec.transfer_self_noop, transfer] at *
   split_ifs at h with hbal
@@ -554,8 +532,8 @@ theorem transfer_self_noop
     omega
 
 theorem mint_requires_owner
-    (caller : Address) (s : TokenState) (to : Address) (amount : UInt256)
-    (h : mint caller s to amount = none) :
+    (caller : Caller) (s : TokenState) (to : Address) (amount : UInt256)
+    (h : mint caller s to amount = .error .insufficientBalance) :
     TokenSpec.mint_requires_owner caller s to amount h := by
   simp [TokenSpec.mint_requires_owner, mint] at *
   split_ifs at h with hown
@@ -565,33 +543,26 @@ theorem mint_requires_owner
 theorem mint_increases_supply
     (caller to : Address) (amount : UInt256)
     (s s' : TokenState) (ret : Unit)
-    (h : mint caller s to amount = some (s', ret)) :
+    (h : mint caller s to amount = .ok (s', ret)) :
     TokenSpec.mint_increases_supply caller to amount s s' ret h := by
   simp [TokenSpec.mint_increases_supply, mint] at *
   split_ifs at h with hown
   · simp at h
   · simp at h; obtain ⟨hs', _⟩ := h; simp [← hs']
 
-theorem initialize_sets_owner
-    (caller : Address) (s s' : TokenState)
-    (name symbol : Bytes) (decimals initialSupply : UInt256) (ret : Unit)
-    (h : initialize caller s name symbol decimals initialSupply = some (s', ret)) :
-    TokenSpec.initialize_sets_owner caller s s' name symbol decimals initialSupply ret h := by
-  simp [TokenSpec.initialize_sets_owner, initialize] at *
-  split_ifs at h with hinit
-  · simp at h
-  · simp at h; obtain ⟨hs', _⟩ := h; simp [← hs']
+theorem constructor_sets_owner
+    (owner : Caller) (name symbol : Bytes[32]) (decimals initialSupply : UInt256)
+    (s' : TokenState)
+    (h : initialize name symbol decimals initialSupply owner = .ok s') :
+    TokenSpec.constructor_sets_owner owner name symbol decimals initialSupply s' h := by
+  simp [TokenSpec.constructor_sets_owner, initialize] at h; rfl
 
-theorem initialize_grants_supply
-    (caller : Address) (s s' : TokenState)
-    (name symbol : Bytes) (decimals initialSupply : UInt256) (ret : Unit)
-    (h : initialize caller s name symbol decimals initialSupply = some (s', ret)) :
-    TokenSpec.initialize_grants_supply caller s s' name symbol decimals initialSupply ret h := by
-  simp [TokenSpec.initialize_grants_supply, initialize] at *
-  split_ifs at h with hinit
-  · simp at h
-  · simp at h; obtain ⟨hs', _⟩ := h
-    simp [← hs', Mapping.get_set_same]
+theorem constructor_mints_initial_supply
+    (owner : Caller) (name symbol : Bytes[32]) (decimals initialSupply : UInt256)
+    (s' : TokenState)
+    (h : initialize name symbol decimals initialSupply owner = .ok s') :
+    TokenSpec.constructor_mints_initial_supply owner name symbol decimals initialSupply s' h := by
+  simp [TokenSpec.constructor_mints_initial_supply, initialize, Mapping.get_set_same] at h; rfl
 
 -- Sequence invariant: transfer/approve/transferFrom don't change totalSupply.
 theorem non_mint_burn_actions_preserve_supply
@@ -642,9 +613,8 @@ required = [
   "mint_increases_supply",
   "burn_requires_owner",
   "burn_decreases_supply",
-  "initialize_once",
-  "initialize_sets_owner",
-  "initialize_grants_supply",
+  "constructor_sets_owner",
+  "constructor_mints_initial_supply",
   "non_mint_burn_actions_preserve_supply",
 ]
 ```
@@ -655,10 +625,10 @@ required = [
 |---------|-------|
 | `Mapping` with `Address` keys | `balances`, `allowances` |
 | Nested `Mapping` | `allowances : Mapping Address (Mapping Address UInt256)` |
-| `@[lsc.caller]` authorization | `mint`, `burn`: revert if `caller ≠ s.owner` |
-| Construction pattern (initialize once) | `initialize`: revert if `s.owner.val ≠ 0` |
-| Revert spec (`h : f … = none`) | `transfer_no_overdraft`, `mint_requires_owner`, `initialize_once` |
-| Success spec (`h : f … = some (s', _)`) | `transfer_moves_tokens`, `mint_increases_supply` |
+| `Caller` authorization | `mint`, `burn`: revert if `caller.val ≠ s.owner` |
+| `@[lsc.initialize]` | deploy-time `initialize` (§3.6) |
+| Revert spec (`h : f … = .error e`) | `transfer_no_overdraft`, `mint_requires_owner` |
+| Success spec (`h : f … = .ok (s', _)`) | `transfer_moves_tokens`, `mint_increases_supply` |
 | Sequence invariant over `List TokenAction` | `non_mint_burn_actions_preserve_supply` |
 | Compliance manifest | `[lsc.compliance.erc20_mintburn]` |
 
@@ -685,7 +655,7 @@ This appendix is a complete constant-product AMM with `swap`, `addLiquidity`, an
 
 ```lean
 import Lsc.Prelude
-open Lsc Lsc.Arith
+open Lsc
 
 @[lsc.error]
 inductive AMMError where
@@ -694,7 +664,7 @@ inductive AMMError where
   | zeroAmount
   | insufficientLp
   | zeroOutput
-  | overflow        -- checkedMul for k, checkedAdd/Sub for reserves
+  | arith (e : ArithError)  -- arith via +? and Fin +
   | divisionByZero  -- checkedDiv for price and LP calculations
 
 structure AMMState where
@@ -707,46 +677,44 @@ structure AMMState where
 -- Checked math in do; specs use hOverflow preconditions (e.g. swap_preserves_k).
 
 @[lsc.external]
-def swap
-    (s : AMMState)
-    (amountIn : UInt256) : Result (AMMState × UInt256) AMMError := do
-  assert (s.reserve0 > 0 ∧ s.reserve1 > 0) .uninitializedPool
-  assert (amountIn > 0) .zeroInput
-  let k         ← s.reserve0 * s.reserve1
-  let newR0     ← s.reserve0 + amountIn
-  let newR1     ← k / newR0
-  if newR1 = 0 then
-    return .err .zeroOutput
-  else
-    let amountOut ← s.reserve1 - newR1
-    return .ok ({ s with reserve0 := newR0, reserve1 := newR1 }, amountOut)
+def swap (s : AMMState) (amountIn : UInt256) : Except AMMError (AMMState × UInt256) :=
+  checked .arith do
+  require (s.reserve0 > 0) .uninitializedPool
+  let num       ← amountIn *? s.reserve1
+  let denom     ← s.reserve0 +? amountIn
+  let amountOut ← num /? denom |>.orWrapDiv .arith
+  if amountOut = 0 then
+    return .error (.arith .overflow)  -- zero output treated as failure in v1
+  return .ok ({ s with
+    reserve0 := s.reserve0 + amountIn
+    reserve1 := s.reserve1 - amountOut }, amountOut)
 
 @[lsc.external]
 def addLiquidity
-    (@[lsc.caller] caller : Address)
+    (caller : Caller)
     (s : AMMState)
-    (amount0 amount1 : UInt256) : Result (AMMState × UInt256) AMMError := do
+    (amount0 amount1 : UInt256) : Except AMMError (AMMState × UInt256) := do
   if amount0 = 0 ∨ amount1 = 0 then
-    return .err .zeroAmount
+    return .error .zeroAmount
   else if s.totalLP = 0 then
     let lpMinted := amount0
     let s' := { s with
       reserve0   := amount0
       reserve1   := amount1
       totalLP    := lpMinted
-      lpBalances := s.lpBalances.set caller lpMinted }
+      lpBalances := s.lpBalances.set caller.val lpMinted }
     return .ok (s', lpMinted)
   else if s.reserve0 = 0 then
-    return .err .uninitializedPool
+    return .error .uninitializedPool
   else
     let lpMinted ← s.totalLP * amount0 / s.reserve0
     if lpMinted = 0 then
-      return .err .zeroAmount
+      return .error .zeroAmount
     else
       let newReserve0 ← s.reserve0 + amount0
       let newReserve1 ← s.reserve1 + amount1
       let newTotalLP  ← s.totalLP + lpMinted
-      let newLpBal    ← s.lpBalances.get caller + lpMinted
+      let newLpBal    ← s.lpBalances.get caller.val + lpMinted
       let s' := { s with
         reserve0   := newReserve0
         reserve1   := newReserve1
@@ -756,25 +724,25 @@ def addLiquidity
 
 @[lsc.external]
 def removeLiquidity
-    (@[lsc.caller] caller : Address)
+    (caller : Caller)
     (s : AMMState)
-    (lpAmount : UInt256) : Result (AMMState × UInt256 × UInt256) AMMError := do
+    (lpAmount : UInt256) : Except AMMError (AMMState × UInt256 × UInt256) := do
   if lpAmount = 0 then
-    return .err .zeroAmount
+    return .error .zeroAmount
   else if s.totalLP = 0 then
-    return .err .uninitializedPool
-  else if s.lpBalances.get caller < lpAmount then
-    return .err .insufficientLp
+    return .error .uninitializedPool
+  else if s.lpBalances.get caller.val < lpAmount then
+    return .error .insufficientLp
   else
     let amount0Out ← s.reserve0 * lpAmount / s.totalLP
     let amount1Out ← s.reserve1 * lpAmount / s.totalLP
     if amount0Out = 0 ∨ amount1Out = 0 then
-      return .err .zeroOutput
+      return .error .zeroOutput
     else
       let newReserve0 ← s.reserve0 - amount0Out
       let newReserve1 ← s.reserve1 - amount1Out
       let newTotalLP  ← s.totalLP - lpAmount
-      let newLpBal    ← s.lpBalances.get caller - lpAmount
+      let newLpBal    ← s.lpBalances.get caller.val - lpAmount
       let s' := { s with
         reserve0   := newReserve0
         reserve1   := newReserve1
@@ -805,13 +773,13 @@ def k (s : AMMState) : UInt256 := s.reserve0 * s.reserve1
 /-- swap reverts on zero input. -/
 def swap_revert_zero_input
     (s : AMMState)
-    (h : swap s 0 = .err .zeroInput) : Prop :=
+    (h : swap s 0 = .error .zeroInput) : Prop :=
   True   -- always holds; zero input always reverts by construction
 
 /-- swap reverts on uninitialized pool. -/
 def swap_revert_uninitialized
     (s : AMMState) (amountIn : UInt256)
-    (h : swap s amountIn = .err .uninitializedPool) : Prop :=
+    (h : swap s amountIn = .error .uninitializedPool) : Prop :=
   s.reserve0 = 0 ∨ s.reserve1 = 0
 
 /-- swap output is positive when it succeeds. -/
@@ -845,53 +813,53 @@ def swap_decreases_reserve1
 
 /-- addLiquidity reverts on zero amounts. -/
 def addLiquidity_revert_zero
-    (caller : Address) (s : AMMState) (amount0 amount1 : UInt256)
-    (h : addLiquidity caller s amount0 amount1 = .err .zeroAmount) : Prop :=
+    (caller : Caller) (s : AMMState) (amount0 amount1 : UInt256)
+    (h : addLiquidity caller s amount0 amount1 = .error .zeroAmount) : Prop :=
   amount0 = 0 ∨ amount1 = 0
 
 /-- addLiquidity increases both reserves (subsequent deposit). -/
 def addLiquidity_increases_reserves
-    (caller : Address) (s s' : AMMState) (amount0 amount1 lpMinted : UInt256)
+    (caller : Caller) (s s' : AMMState) (amount0 amount1 lpMinted : UInt256)
     (hNotFirst : s.totalLP > 0)
     (h : addLiquidity caller s amount0 amount1 = .ok (s', lpMinted)) : Prop :=
   s'.reserve0 ≥ s.reserve0 ∧ s'.reserve1 ≥ s.reserve1
 
 /-- addLiquidity increases totalLP. -/
 def addLiquidity_increases_totalLP
-    (caller : Address) (s s' : AMMState) (amount0 amount1 lpMinted : UInt256)
+    (caller : Caller) (s s' : AMMState) (amount0 amount1 lpMinted : UInt256)
     (h : addLiquidity caller s amount0 amount1 = .ok (s', lpMinted)) : Prop :=
   s'.totalLP ≥ s.totalLP
 
 /-- addLiquidity mints LP to caller. -/
 def addLiquidity_mints_to_caller
-    (caller : Address) (s s' : AMMState) (amount0 amount1 lpMinted : UInt256)
+    (caller : Caller) (s s' : AMMState) (amount0 amount1 lpMinted : UInt256)
     (h : addLiquidity caller s amount0 amount1 = .ok (s', lpMinted)) : Prop :=
-  s'.lpBalances.get caller ≥ s.lpBalances.get caller
+  s'.lpBalances.get caller.val ≥ s.lpBalances.get caller
 
 -- ── removeLiquidity specs ─────────────────────────────────────────────────────
 
 /-- removeLiquidity reverts when caller has insufficient LP. -/
 def removeLiquidity_revert_insufficient_lp
-    (caller : Address) (s : AMMState) (lpAmount : UInt256)
-    (h : removeLiquidity caller s lpAmount = .err .insufficientLp) : Prop :=
-  s.lpBalances.get caller < lpAmount
+    (caller : Caller) (s : AMMState) (lpAmount : UInt256)
+    (h : removeLiquidity caller s lpAmount = .error .insufficientLp) : Prop :=
+  s.lpBalances.get caller.val < lpAmount
 
 /-- removeLiquidity decreases totalLP by lpAmount. -/
 def removeLiquidity_burns_lp
-    (caller : Address) (s s' : AMMState) (lpAmount amount0Out amount1Out : UInt256)
+    (caller : Caller) (s s' : AMMState) (lpAmount amount0Out amount1Out : UInt256)
     (h : removeLiquidity caller s lpAmount = .ok (s', amount0Out, amount1Out)) : Prop :=
   s'.totalLP = s.totalLP - lpAmount
 
 /-- removeLiquidity decreases caller LP balance by lpAmount. -/
 def removeLiquidity_decreases_caller_lp
-    (caller : Address) (s s' : AMMState) (lpAmount amount0Out amount1Out : UInt256)
+    (caller : Caller) (s s' : AMMState) (lpAmount amount0Out amount1Out : UInt256)
     (h : removeLiquidity caller s lpAmount = .ok (s', amount0Out, amount1Out)) : Prop :=
-  s'.lpBalances.get caller = s.lpBalances.get caller - lpAmount
+  s'.lpBalances.get caller = s.lpBalances.get caller.val - lpAmount
 
 /-- removeLiquidity: k may decrease slightly (integer division rounding)
     but is bounded below by k - totalLP (worst-case rounding loss). -/
 def removeLiquidity_k_bounded
-    (caller : Address) (s s' : AMMState) (lpAmount amount0Out amount1Out : UInt256)
+    (caller : Caller) (s s' : AMMState) (lpAmount amount0Out amount1Out : UInt256)
     (h : removeLiquidity caller s lpAmount = .ok (s', amount0Out, amount1Out)) : Prop :=
   k s' ≤ k s  -- k can only decrease on removal (reserves shrink)
 
@@ -899,19 +867,19 @@ def removeLiquidity_k_bounded
 
 inductive AMMAction where
   | swap          (amountIn : UInt256)
-  | addLiquidity  (caller : Address) (amount0 amount1 : UInt256)
-  | removeLiquidity (caller : Address) (lpAmount : UInt256)
+  | addLiquidity  (caller : Caller) (amount0 amount1 : UInt256)
+  | removeLiquidity (caller : Caller) (lpAmount : UInt256)
 
 def applyAMMAction (s : AMMState) : AMMAction → AMMState
   | .swap amountIn =>
       match swap s amountIn with
-      | .ok (s', _) => s' | .err _ => s
+      | .ok (s', _) => s' | .error _ => s
   | .addLiquidity caller amount0 amount1 =>
       match addLiquidity caller s amount0 amount1 with
-      | .ok (s', _) => s' | .err _ => s
+      | .ok (s', _) => s' | .error _ => s
   | .removeLiquidity caller lpAmount =>
       match removeLiquidity caller s lpAmount with
-      | .ok (s', _, _) => s' | .err _ => s
+      | .ok (s', _, _) => s' | .error _ => s
 
 def applyAMMActions (s : AMMState) (actions : List AMMAction) : AMMState :=
   actions.foldl applyAMMAction s
@@ -971,23 +939,23 @@ theorem swap_decreases_reserve1
   split_ifs at h <;> simp_all
 
 theorem addLiquidity_increases_reserves
-    (caller : Address) (s s' : AMMState) (amount0 amount1 lpMinted : UInt256)
+    (caller : Caller) (s s' : AMMState) (amount0 amount1 lpMinted : UInt256)
     (hNotFirst : s.totalLP > 0)
-    (h : addLiquidity caller s amount0 amount1 = some (s', lpMinted)) :
+    (h : addLiquidity caller s amount0 amount1 = .ok (s', lpMinted)) :
     AMMSpec.addLiquidity_increases_reserves caller s s' amount0 amount1 lpMinted hNotFirst h := by
   simp [AMMSpec.addLiquidity_increases_reserves, addLiquidity] at *
   split_ifs at h <;> simp_all <;> omega
 
 theorem addLiquidity_increases_totalLP
-    (caller : Address) (s s' : AMMState) (amount0 amount1 lpMinted : UInt256)
-    (h : addLiquidity caller s amount0 amount1 = some (s', lpMinted)) :
+    (caller : Caller) (s s' : AMMState) (amount0 amount1 lpMinted : UInt256)
+    (h : addLiquidity caller s amount0 amount1 = .ok (s', lpMinted)) :
     AMMSpec.addLiquidity_increases_totalLP caller s s' amount0 amount1 lpMinted h := by
   simp [AMMSpec.addLiquidity_increases_totalLP, addLiquidity] at *
   split_ifs at h <;> simp_all <;> omega
 
 theorem removeLiquidity_burns_lp
-    (caller : Address) (s s' : AMMState) (lpAmount amount0Out amount1Out : UInt256)
-    (h : removeLiquidity caller s lpAmount = some (s', amount0Out, amount1Out)) :
+    (caller : Caller) (s s' : AMMState) (lpAmount amount0Out amount1Out : UInt256)
+    (h : removeLiquidity caller s lpAmount = .ok (s', amount0Out, amount1Out)) :
     AMMSpec.removeLiquidity_burns_lp caller s s' lpAmount amount0Out amount1Out h := by
   simp [AMMSpec.removeLiquidity_burns_lp, removeLiquidity] at *
   split_ifs at h <;> simp_all
@@ -1010,8 +978,8 @@ theorem k_never_decreases_swap_add
       simp [AMMSpec.applyAMMActions, AMMSpec.applyAMMAction]
       cases a with
       | swap amountIn =>
-          -- do/← desugaring: simp [swap] unfolds to checkedMul/checkedAdd/checkedDiv
-          simp [swap, UInt256.checkedMul, UInt256.checkedAdd, UInt256.checkedDiv]
+          -- do/← desugaring: simp [swap] unfolds checked .arith and +?
+          simp [swap, swap, UInt256.addChecked]
           split_ifs with h0 hAmt hDeg
           · -- swap reverted: state unchanged, k unchanged, apply ih
             exact le_trans (le_refl _) (ih s hrest hNoOverflow)
@@ -1027,7 +995,7 @@ theorem k_never_decreases_swap_add
               simp [AMMSpec.k]; omega
             exact le_trans hk (ih _ hrest (by simp [AMMSpec.k] at *; omega))
       | addLiquidity caller amount0 amount1 =>
-          simp [addLiquidity, UInt256.checkedMul, UInt256.checkedAdd]
+          simp [addLiquidity, addLiquidity]
           split_ifs
           · exact le_trans (le_refl _) (ih s hrest hNoOverflow)
           · -- first deposit: k goes from 0 to amount0 * amount1
@@ -1051,7 +1019,7 @@ theorem k_never_decreases_swap_add
 |---------|-------|
 | Multi-field state with invariant | `reserve0`, `reserve1`, `totalLP`, `lpBalances` |
 | `Mapping` for LP balances | `lpBalances : Mapping Address UInt256` |
-| Multi-scalar return | `removeLiquidity` returns `Result (AMMState × UInt256 × UInt256) AMMError` |
+| Multi-scalar return | `removeLiquidity` returns `Except AMMError (AMMState × UInt256 × UInt256)` |
 | Overflow precondition in spec | `hOverflow : s.reserve0 * s.reserve1 < 2^256 - s.reserve0` |
 | Integer division honesty | `k s' ≥ k s` (not `=`) for swap; `k s' ≤ k s` for remove |
 | Named invariant helper | `def k (s : AMMState) : UInt256 := s.reserve0 * s.reserve1` |
