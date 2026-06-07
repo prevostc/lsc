@@ -2,7 +2,7 @@
 
 **Companion document:** [lsc-spec.md](lsc-spec.md) — normative LSC language definition  
 
-This document describes **one conforming implementation** of [LSC](lsc-spec.md): a Foundry fork, `LeanCompiler`, Lake integration, and the `ForgeLean` Lean package (legacy name; normative API names are `Lsc.*` per the language spec). Examples and error messages track the current spec: `Except E A`, `Caller`, `Bytes[N]`, `checked` / `+?`, and `require`.
+This document describes **one conforming implementation** of [LSC](lsc-spec.md): a Foundry fork, `LeanCompiler`, Lake integration, and the `ForgeLean` Lean package (legacy name; normative API names are `Lsc.*` per the language spec). Examples and error messages track the current spec: `Except E A`, `Caller`, `Bytes[N]`, `LscError` / `+?`, and `require`.
 
 ---
 
@@ -330,7 +330,7 @@ All messages are prefixed with `lsc:` and include file, line, and column.
 | `assert` in contract function      | `lsc: use require for contract guards; assert! is a runtime panic`                      |
 | `List` in author contract code     | `lsc: List is not allowed in contract code; use Mapping or Lsc.Event.log`               |
 | Unknown event in `Lsc.Event.log`   | `lsc: unknown event type "X"; define Lsc.Event.EvmEvent instance or use string signature` |
-| `+?` / `checked` in lemma file    | `lsc: checked arithmetic is contract-only; lemmas use Fin +` |
+| `+?`, `-?`, `*?`, `/?` in lemma file | `lsc: checked arithmetic (+?) is contract-only; lemmas use Fin +` |
 | `do` on infallible function (`S` or `V`) | `lsc: do-notation requires Except return type` |
 | More than one `@[lsc.initialize]` | `lsc: at most one @[lsc.initialize] per contract module` |
 | Malformed event signature          | `lsc: invalid event signature "..."; expected form "Name(type,type)"`                   |
@@ -423,8 +423,8 @@ flowchart LR
 
 `**Lsc` library**
 
-- `Lsc.Prelude`: `Address`, `Caller`, `Bytes32`, `Bytes[N]`, `Mapping`, `ArithError`, `UInt256` (`Fin`), `+? -? *? /?`, `checked` macro, `Option.orWrap` / `orWrapDiv` / `orError`, `require`; `Monad (Except E)` from Lean core ([lsc-spec.md §2](lsc-spec.md#2-types))
-- `Lsc.Prelude`: `@[simp]` bridge lemmas `UInt256.addChecked_some`, `Option.orWrap_none`, …; `Lsc.Invariant` for sequence invariants ([lsc-spec.md §9.1](lsc-spec.md#91-lemma-files-testlemmalean))
+- `Lsc.Prelude`: `Address`, `Caller`, `Bytes32`, `Bytes[N]`, `Mapping`, `ArithError`, `LscError`, `UInt256` (`Fin`), `+? -? *? /?` (return `Except E _`), `Option.orError`, `require`; `Monad (Except E)` from Lean core ([lsc-spec.md §2](lsc-spec.md#2-types))
+- `Lsc.Prelude`: `@[simp]` bridge lemmas `UInt256.addChecked_ok`, `UInt256.addChecked_error`, …; `Lsc.Invariant` for sequence invariants ([lsc-spec.md §9.1](lsc-spec.md#91-lemma-files-testlemmalean))
 - `Lsc.Event`: `Lsc.Event.EvmEvent`, `Lsc.Event.log`, `LogEntry`
 - `Lsc.ProofHelpers`: Layer 1 `Except.bind_ok`, `Except.ok_ne_error`; Layers 2–4 `lift_*`, `simulate_call`, `export_cases` ([lsc-spec.md §10](lsc-spec.md#10-proof-helpers))
 - `Lsc.SpecTemplates` (Layer 1 + export/trace skeletons)
@@ -436,10 +436,10 @@ flowchart LR
 Implement in `ForgeLean` / `Lsc.Prelude` per [lsc-spec.md §2.1–§2.5](lsc-spec.md#21-primitive-types):
 
 1. `UInt256 = Fin (2^256)` — plain `+ - * /` are modular everywhere (no operator rewriting in `do`)
-2. `+? -? *? /?` → `Option UInt256`; `checked f do` macro wraps `←` Option binds via `orWrap`
+2. `LscError` typeclass + `+? -? *? /?` → `Except E _` via in-scope instance; compose with `←` in `do`-blocks over `Except E`
 3. `require (cond) .variant` macro → `if ¬cond then return .error .variant`
-4. `@[simp]` bridge lemmas: `UInt256.addChecked_some`, `Option.orWrap_none`, …
-5. Validator: forbid `+?` / `checked` in lemma files; forbid `assert` in contracts; enforce `Caller` rules ([lsc-spec.md §12.1](lsc-spec.md))
+4. `@[simp]` bridge lemmas: `UInt256.addChecked_ok`, `UInt256.addChecked_error`, …
+5. Validator: forbid `+?` in lemma files; require `arith` constructor + `LscError` on `@[lsc.error]` types; forbid `assert` in contracts; enforce `Caller` rules ([lsc-spec.md §12.1](lsc-spec.md))
 6. Register `@[lsc.error]` — emitter registration only (no `HasArithErrors` codegen)
 7. Register `@[lsc.initialize]` — at most one per module; constructor + optional proxy `initialize` ABI
 8. Register `@[lsc.public]` — synthesize getter `@[lsc.external]` `def`s before ABI collection ([lsc-spec.md §3.5](lsc-spec.md))
@@ -509,8 +509,7 @@ structure CounterState where
   number : UInt256
 
 @[lsc.external]
-def increment (s : CounterState) : Except ArithError CounterState :=
-  checked id do
+def increment (s : CounterState) : Except ArithError CounterState := do
   let n ← s.number +? 1
   return .ok { s with number := n }
 
@@ -530,8 +529,7 @@ lemma increment_increases_number
     (s s' : CounterState)
     (h : increment s = .ok s') :
     s'.number = s.number + 1 := by
-  simp [increment] at h
-  simp [UInt256.addChecked_some (by omega), Option.orWrap_some] at h; omega
+  simp [increment] at h ⊢; omega
 ```
 
 ### `test/CounterTheorem.lean` (minimal)
@@ -620,13 +618,12 @@ structure ERC20State where
 @[lsc.error]
 inductive TokenError where
   | insufficientBalance
-  | arith (e : ArithError)
+  | arith : ArithError → TokenError
   deriving DecidableEq, Repr
 
 @[lsc.external]
 def transfer (caller : Caller) (s : ERC20State) (to : Address) (amount : UInt256)
-    : Except TokenError (ERC20State × Bool) :=
-  checked .arith do
+    : Except TokenError (ERC20State × Bool) := do
   require (s.balances.get caller.val ≥ amount) .insufficientBalance
   let newCaller ← s.balances.get caller.val -? amount
   let newTo     ← s.balances.get to +? amount
@@ -770,8 +767,7 @@ structure TransferCounterState where
   count : UInt256
 
 @[lsc.external]
-def onTransfer (s : TransferCounterState) : Except ArithError TransferCounterState :=
-  checked id do
+def onTransfer (s : TransferCounterState) : Except ArithError TransferCounterState := do
   let c ← s.count +? 1
   return .ok { s with count := c }
 ```

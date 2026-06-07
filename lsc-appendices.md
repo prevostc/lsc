@@ -2,7 +2,7 @@
 
 # LSC Appendices
 
-Extended reference patterns, examples, and project history. Code samples follow [lsc-spec.md](lsc-spec.md) (v1): `Except E A`, `Caller`, `Bytes[N]`, `checked .arith do`, `require`, and `Mapping` as `K → V`.
+Extended reference patterns, examples, and project history. Code samples follow [lsc-spec.md](lsc-spec.md) (v1): `Except E A`, `Caller`, `Bytes[N]`, `LscError` / `+?`, `require`, and `Mapping` as `K → V`.
 
 | Appendix | Title | Section |
 |----------|-------|---------|
@@ -46,13 +46,13 @@ structure ERC20State where
 @[lsc.error]
 inductive TokenError where
   | insufficientBalance
-  | arith (e : ArithError)
+  | arith : ArithError → TokenError
   deriving DecidableEq, Repr
 
 @[lsc.external]
 def transfer (caller : Caller) (s : ERC20State) (to : Address) (amount : UInt256)
     : Except TokenError (ERC20State × Bool) :=
-  checked .arith do
+  do
   require (s.balances.get caller.val ≥ amount) .insufficientBalance
   let newCaller ← s.balances.get caller.val -? amount
   let newTo     ← s.balances.get to +? amount
@@ -162,11 +162,11 @@ structure TransferCounterState where
 
 @[lsc.error]
 inductive TransferCounterError where
-  | arith (e : ArithError)  -- ArithError via +?
+  | arith : ArithError → TransferCounterError  -- via LscError +?
 
 @[lsc.external]
 def onTransfer (s : TransferCounterState) : Except ArithError TransferCounterState :=
-  checked id do
+  do
   let c ← s.count +? 1
   return .ok { s with count := c }
 ```
@@ -267,7 +267,7 @@ inductive TokenError where
   | insufficientAllowance
   | unauthorized
   | alreadyInitialized
-  | arith (e : ArithError)  -- +? / checked .arith; no division in ERC-20
+  | arith : ArithError → TokenError  -- +? via LscError; no division in ERC-20
 
 -- Construction: @[lsc.initialize] (deploy + optional proxy re-init; §3.6)
 @[lsc.initialize]
@@ -283,7 +283,7 @@ def initialize (name symbol : Bytes[32]) (decimals : UInt256)
 @[lsc.external]
 def transfer (caller : Caller) (s : TokenState) (to : Address) (amount : UInt256)
     : Except TokenError (TokenState × Bool) :=
-  checked .arith do
+  do
   require (s.balances.get caller.val ≥ amount) .insufficientBalance
   let newCaller ← s.balances.get caller.val -? amount
   let newTo     ← s.balances.get to +? amount
@@ -306,7 +306,7 @@ def approve
 @[lsc.external]
 def transferFrom (caller : Caller) (s : TokenState) (from to : Address) (amount : UInt256)
     : Except TokenError (TokenState × Bool) :=
-  checked .arith do
+  do
   let allowed := s.allowances.get from |>.get caller.val
   require (s.balances.get from ≥ amount) .insufficientBalance
   require (allowed ≥ amount) .insufficientAllowance
@@ -323,7 +323,7 @@ def transferFrom (caller : Caller) (s : TokenState) (from to : Address) (amount 
 @[lsc.external]
 def mint (caller : Caller) (s : TokenState) (to : Address) (amount : UInt256)
     : Except TokenError TokenState :=
-  checked .arith do
+  do
   require (caller.val == s.owner) .unauthorized
   let newSupply ← s.totalSupply +? amount
   let newBal    ← s.balances.get to +? amount
@@ -335,7 +335,7 @@ def mint (caller : Caller) (s : TokenState) (to : Address) (amount : UInt256)
 @[lsc.external]
 def burn (caller : Caller) (s : TokenState) (from : Address) (amount : UInt256)
     : Except TokenError TokenState :=
-  checked .arith do
+  do
   require (caller.val == s.owner) .unauthorized
   require (s.balances.get from ≥ amount) .insufficientBalance
   let newSupply ← s.totalSupply -? amount
@@ -610,8 +610,8 @@ inductive AMMError where
   | zeroAmount
   | insufficientLp
   | zeroOutput
-  | arith (e : ArithError)  -- arith via +? and Fin +
-  | divisionByZero  -- checkedDiv for price and LP calculations
+  | arith : ArithError → AMMError  -- via LscError +?
+  | divisionByZero  -- /? for price and LP calculations
 
 structure AMMState where
   reserve0    : UInt256                         -- slot 0: token0 reserves
@@ -624,11 +624,11 @@ structure AMMState where
 
 @[lsc.external]
 def swap (s : AMMState) (amountIn : UInt256) : Except AMMError (AMMState × UInt256) :=
-  checked .arith do
+  do
   require (s.reserve0 > 0) .uninitializedPool
   let num       ← amountIn *? s.reserve1
   let denom     ← s.reserve0 +? amountIn
-  let amountOut ← num /? denom |>.orWrapDiv .arith
+  let amountOut ← num /? denom
   if amountOut = 0 then
     return .error (.arith .overflow)  -- zero output treated as failure in v1
   return .ok ({ s with

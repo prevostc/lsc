@@ -58,8 +58,7 @@ structure CounterState where
   number : UInt256
 
 @[Lsc.external]
-def increment (s : CounterState) : Except ArithError CounterState :=
-  checked! id do
+def increment (s : CounterState) : Except ArithError CounterState := do
   let n ← s.number +? 1
   return .ok { s with number := n }
 ```
@@ -114,7 +113,7 @@ lemma increment_increases_number (s s' : CounterState) (h : increment s = .ok s'
 
 lemma increment_overflows_iff (s : CounterState) (h : increment s = .error .overflow) :
     s.number = UInt256.max := by
-  simp [increment, UInt256.addChecked_none_of_ge (by omega), Option.orWrap_none] at h; omega
+  simp [increment, UInt256.addChecked_error (by omega)] at h; omega
 
 lemma number_never_decreases (s : CounterState) (actions : List CounterAction) :
     (applyActions s actions).number ≥ s.number := by
@@ -161,9 +160,9 @@ Two modes:
 | Mode | Syntax | Returns | Use when |
 |------|--------|---------|----------|
 | Wrapping | `a + b` | `UInt256` | overflow is impossible or irrelevant |
-| Checked | `a +? b` | `Option UInt256` | overflow must revert |
+| Checked | `a +? b` | `Except E UInt256` | overflow must revert |
 
-Checked arithmetic is routed to the error type via `checked! <variant> do`. See §2.5.
+Checked arithmetic returns `Except E _` via the in-scope `LscError E` instance. Compose with `←` in a `do`-block over `Except E`. See §2.5.
 
 ### §2.2 Bytes[N]
 
@@ -245,11 +244,13 @@ The four return shapes:
 `.ok val` — success; emitter persists state and ABI-encodes the non-state component.
 `.error e` — EVM revert; emitter ABI-encodes `e` as a Solidity custom error.
 
-### §2.5 Error types, arithmetic errors, and `checked!`
+### §2.5 Error types, arithmetic errors, and `LscError`
 
 #### `@[Lsc.error]` — declaring contract error types
 
 Registers the inductive with the emitter for ABI `errors` generation and revert encoding.
+
+Every `@[Lsc.error]` type **must** include an `arith` constructor and a `LscError` instance. This is enforced by the validator (§12.1). It makes the arithmetic fault channel part of the error type's contract — LSC does not allow error types that silently discard arithmetic faults.
 
 ```lean
 @[Lsc.error]
@@ -257,8 +258,24 @@ inductive TokenError where
   | insufficientBalance
   | insufficientAllowance
   | unauthorized
-  | arith (e : ArithError)
+  | arith : ArithError → TokenError
   deriving DecidableEq, Repr
+
+instance : LscError TokenError where
+  arith := .arith
+```
+
+The `arith` constructor and `LscError` instance can be auto-derived by the `@[Lsc.error]` attribute — authors may omit them and the attribute will inject both:
+
+```lean
+-- Equivalent shorthand: @[Lsc.error] derives arith constructor + LscError instance automatically
+@[Lsc.error]
+inductive TokenError where
+  | insufficientBalance
+  | insufficientAllowance
+  | unauthorized
+  deriving DecidableEq, Repr
+-- arith : ArithError → TokenError and instance LscError TokenError injected by @[Lsc.error]
 ```
 
 #### `ArithError` — prelude arithmetic error type
@@ -271,20 +288,38 @@ inductive ArithError where
   deriving DecidableEq, Repr
 ```
 
-#### The `+?` operator family
-
-`+?`, `-?`, `*?`, `/?` return `Option UInt256`. Plain `+ - * /` always wrap (Fin semantics).
+#### `LscError` — the arithmetic fault typeclass
 
 ```lean
 -- Lsc.Prelude
-def UInt256.addChecked (a b : UInt256) : Option UInt256 :=
-  if a.val + b.val < 2^256 then some ⟨a.val + b.val⟩ else none
-def UInt256.subChecked (a b : UInt256) : Option UInt256 :=
-  if a.val ≥ b.val then some ⟨a.val - b.val⟩ else none
-def UInt256.mulChecked (a b : UInt256) : Option UInt256 :=
-  if a.val = 0 ∨ b.val ≤ (2^256 - 1) / a.val then some ⟨a.val * b.val⟩ else none
-def UInt256.divChecked (a b : UInt256) : Option UInt256 :=
-  if b.val ≠ 0 then some ⟨a.val / b.val⟩ else none
+class LscError (E : Type) where
+  arith : ArithError → E
+
+-- ArithError is its own LscError (identity instance, for simple contracts)
+instance : LscError ArithError where
+  arith := id
+```
+
+This typeclass is the mechanism by which `+?`, `-?`, `*?`, `/?` inject arithmetic faults into any error type `E` without an explicit lift at every call site. The instance is resolved at elaboration time.
+
+#### The `+?` operator family
+
+`+?`, `-?`, `*?`, `/?` return `Except E A` directly (not `Option`), using the `LscError E` instance in scope. Plain `+ - * /` always wrap (Fin semantics).
+
+```lean
+-- Lsc.Prelude
+def UInt256.addChecked [LscError E] (a b : UInt256) : Except E UInt256 :=
+  if a.val + b.val < 2^256 then .ok ⟨a.val + b.val⟩
+  else .error (LscError.arith .overflow)
+def UInt256.subChecked [LscError E] (a b : UInt256) : Except E UInt256 :=
+  if a.val ≥ b.val then .ok ⟨a.val - b.val⟩
+  else .error (LscError.arith .overflow)
+def UInt256.mulChecked [LscError E] (a b : UInt256) : Except E UInt256 :=
+  if a.val = 0 ∨ b.val ≤ (2^256 - 1) / a.val then .ok ⟨a.val * b.val⟩
+  else .error (LscError.arith .overflow)
+def UInt256.divChecked [LscError E] (a b : UInt256) : Except E UInt256 :=
+  if b.val ≠ 0 then .ok ⟨a.val / b.val⟩
+  else .error (LscError.arith .divisionByZero)
 
 scoped notation a " +? " b => UInt256.addChecked a b
 scoped notation a " -? " b => UInt256.subChecked a b
@@ -292,43 +327,27 @@ scoped notation a " *? " b => UInt256.mulChecked a b
 scoped notation a " /? " b => UInt256.divChecked a b
 ```
 
-#### `checked! <f> do` — fallible arithmetic block
-
-`checked! <f> do` is a `do`-block macro that routes every `← e` where `e : Option A` through `orWrap f`, declaring the error constructor once at the block header. Lines where `e : Except E A` (e.g. `require`) are left untouched. The `!` sigil marks it as a macro (Lean 4 convention for effectful macros).
-
-```lean
--- Lsc.Prelude
-macro "checked!" f:term " do" body:doSeq : term =>
-  `((do $body : Option _) |>.orWrap $f)
-```
-
-`/?` inside `checked!` should always be written with explicit `|>.orWrapDiv f` to correctly route to `.divisionByZero` rather than `.overflow`:
-
-```lean
-let amountOut ← num /? denom |>.orWrapDiv .arith
-```
+Because `+?` etc. return `Except E _` directly, they compose naturally with `←` in a `do`-block over `Except E` — no macro, no wrapper, no lift annotation needed.
 
 **AMM swap example:**
 
 ```lean
 @[Lsc.external]
-def swap (s : AMMState) (amountIn : UInt256) : Except AMMError AMMState :=
-  checked! .arith do
+def swap (s : AMMState) (amountIn : UInt256) : Except AMMError AMMState := do
   require (s.reserve0 > 0) .uninitializedPool
   let num       ← amountIn  *? s.reserve1
   let denom     ← s.reserve0 +? amountIn
-  let amountOut ← num /? denom |>.orWrapDiv .arith
+  let amountOut ← num /? denom
   return .ok { s with
     reserve0 := s.reserve0 + amountIn
     reserve1 := s.reserve1 - amountOut }
 ```
 
-**Simple contracts** (no domain errors) use `ArithError` directly as `E`:
+**Simple contracts** use `ArithError` directly as `E`; the identity `LscError ArithError` instance is in the prelude:
 
 ```lean
 @[Lsc.external]
-def increment (s : CounterState) : Except ArithError CounterState :=
-  checked! id do
+def increment (s : CounterState) : Except ArithError CounterState := do
   let n ← s.number +? 1
   return .ok { s with number := n }
 ```
@@ -339,45 +358,36 @@ def increment (s : CounterState) : Except ArithError CounterState :=
 |---|---|---|
 | Default `+` | reverts on overflow | wraps (Fin) |
 | Opt-out | `unchecked { a + b }` | `a + b` (plain) |
-| Checked | `a + b` (default) | `checked! .arith do; let x ← a +? b` |
-
-#### `orWrap` and `orWrapDiv` — single-operation fallback
-
-```lean
--- Lsc.Prelude
-def Option.orWrap (f : ArithError → E) : Option A → Except E A
-  | some a => .ok a
-  | none   => .error (f .overflow)
-
-def Option.orWrapDiv (f : ArithError → E) : Option A → Except E A
-  | some a => .ok a
-  | none   => .error (f .divisionByZero)
-
-def Option.orError (e : E) : Option A → Except E A
-  | some a => .ok a
-  | none   => .error e
-```
+| Checked | `a + b` (default) | `let x ← a +? b` in `do`-block |
 
 #### Bridge lemmas (`@[simp]`)
 
 ```lean
-@[simp] theorem UInt256.addChecked_some {a b : UInt256} (h : a.val + b.val < 2^256) :
-    a +? b = some ⟨a.val + b.val⟩ := by simp [UInt256.addChecked, h]
-@[simp] theorem UInt256.addChecked_none {a b : UInt256} (h : a.val + b.val ≥ 2^256) :
-    a +? b = none := by simp [UInt256.addChecked]; omega
-@[simp] theorem UInt256.subChecked_some {a b : UInt256} (h : a.val ≥ b.val) :
-    a -? b = some ⟨a.val - b.val⟩ := by simp [UInt256.subChecked, h]
-@[simp] theorem UInt256.subChecked_none {a b : UInt256} (h : a.val < b.val) :
-    a -? b = none := by simp [UInt256.subChecked]; omega
-@[simp] theorem Option.orWrap_some {f : ArithError → E} {a : A} :
-    (some a).orWrap f = .ok a := rfl
-@[simp] theorem Option.orWrap_none {f : ArithError → E} :
-    (none : Option A).orWrap f = .error (f .overflow) := rfl
-@[simp] theorem Option.orWrapDiv_none {f : ArithError → E} :
-    (none : Option A).orWrapDiv f = .error (f .divisionByZero) := rfl
+@[simp] theorem UInt256.addChecked_ok [LscError E] {a b : UInt256} (h : a.val + b.val < 2^256) :
+    (a +? b : Except E UInt256) = .ok ⟨a.val + b.val⟩ := by simp [UInt256.addChecked, h]
+@[simp] theorem UInt256.addChecked_error [LscError E] {a b : UInt256} (h : a.val + b.val ≥ 2^256) :
+    (a +? b : Except E UInt256) = .error (LscError.arith .overflow) := by
+  simp [UInt256.addChecked]; omega
+@[simp] theorem UInt256.subChecked_ok [LscError E] {a b : UInt256} (h : a.val ≥ b.val) :
+    (a -? b : Except E UInt256) = .ok ⟨a.val - b.val⟩ := by simp [UInt256.subChecked, h]
+@[simp] theorem UInt256.subChecked_error [LscError E] {a b : UInt256} (h : a.val < b.val) :
+    (a -? b : Except E UInt256) = .error (LscError.arith .overflow) := by
+  simp [UInt256.subChecked]; omega
+@[simp] theorem UInt256.divChecked_error [LscError E] {a : UInt256} :
+    (a /? 0 : Except E UInt256) = .error (LscError.arith .divisionByZero) := by
+  simp [UInt256.divChecked]
 ```
 
-**Proof recipe:** `simp [myFunction]` unfolds `checked!`, `+?`, and `orWrap` in one step. Bridge lemmas fire automatically; `omega` closes arithmetic goals.
+**Proof recipe:** `simp [myFunction]` unfolds `+?`, `-?`, `*?`, `/?` and fires bridge lemmas in one step. `omega` closes arithmetic goals. Arithmetic revert theorems use `.error (LscError.arith .overflow)` or `.error (.arith .overflow)` interchangeably when the instance is in scope.
+
+#### `Option.orError` — single-operation option lift (rare)
+
+```lean
+-- Lsc.Prelude — for non-arithmetic Option sites
+def Option.orError (e : E) : Option A → Except E A
+  | some a => .ok a
+  | none   => .error e
+```
 
 ### §2.6 Forbidden types
 
@@ -494,8 +504,7 @@ All `@[Lsc.external]` functions are **non-reentrant by default** — the emitter
 
 ```lean
 @[Lsc.external]
-def increment (s : CounterState) : Except ArithError CounterState :=
-  checked! id do
+def increment (s : CounterState) : Except ArithError CounterState := do
   let n ← s.number +? 1
   return .ok { s with number := n }
 ```
@@ -522,8 +531,7 @@ if ¬condition then return .error .ErrorVariant
 -- Fallible mutator with return value
 @[Lsc.external]
 def transfer (caller : Caller) (s : ERC20State)
-    (to : Address) (amount : UInt256) : Except TokenError (ERC20State × Bool) :=
-  checked! .arith do
+    (to : Address) (amount : UInt256) : Except TokenError (ERC20State × Bool) := do
   require (s.balances.load caller ≥ amount) .insufficientBalance
   let newCaller ← s.balances.load caller -? amount
   let newTo     ← s.balances.load to +? amount
@@ -543,7 +551,7 @@ def activate (s : FlagState) : FlagState := { s with active := true }
 @[Lsc.external]
 def price (s : AMMState) : Except AMMError UInt256 := do
   require (s.reserve1 > 0) .uninitializedPool
-  let p ← s.reserve0 /? s.reserve1 |>.orWrapDiv .arith
+  let p ← s.reserve0 /? s.reserve1
   return .ok p
 ```
 
@@ -640,8 +648,7 @@ A function that accepts ETH **must** declare a `callvalue : CallValue` parameter
 ```lean
 @[Lsc.external]
 def deposit (caller : Caller) (callvalue : CallValue) (s : VaultState)
-    : Except VaultError VaultState :=
-  checked! .arith do
+    : Except VaultError VaultState := do
   require (callvalue > 0) .zeroDeposit
   let newBal ← s.balances.load caller +? callvalue
   return .ok { s with balances := s.balances.store caller newBal }
@@ -664,8 +671,7 @@ def Lsc.Eth.transfer (to : Address) (amount : CallValue) : Except EthError Unit
 ```lean
 @[Lsc.external]
 def withdraw (caller : Caller) (s : VaultState) (amount : UInt256)
-    : Except VaultError VaultState :=
-  checked! .arith do
+    : Except VaultError VaultState := do
   require (s.balances.load caller ≥ amount) .insufficientBalance
   let newBal ← s.balances.load caller -? amount
   let s' := { s with balances := s.balances.store caller newBal }
@@ -678,8 +684,7 @@ def withdraw (caller : Caller) (s : VaultState) (amount : UInt256)
 ```lean
 -- Optional: accept plain ETH transfers (no calldata)
 @[Lsc.receive]
-def receive (callvalue : CallValue) (s : VaultState) : Except VaultError VaultState :=
-  checked! .arith do
+def receive (callvalue : CallValue) (s : VaultState) : Except VaultError VaultState := do
   require (callvalue > 0) .zeroDeposit
   let newBal ← s.totalDeposited +? callvalue
   return .ok { s with totalDeposited := newBal }
@@ -957,7 +962,7 @@ lemma transferFrom_decrements_allowance ... := by
   obtain ⟨bal, hbal, hrest⟩ := Except.bind_ok h
   obtain ⟨alw, halw, hfinal⟩ := Except.bind_ok hrest
   simp [Mapping.load_store_same, Mapping.load_store_other,
-        UInt256.subChecked_some (by omega)] at *
+        UInt256.subChecked_ok (by omega)] at *
   omega
 ```
 
@@ -969,7 +974,7 @@ lemma transfer_no_overdraft ... := by
   -- require desugars to if; split_ifs names the branches
   split_ifs at h with hguard
   · omega   -- hguard : ¬(balance ≥ amount) gives balance < amount directly
-  · simp [UInt256.subChecked_some (by omega)] at h  -- contradiction: this branch can't error here
+  · simp [UInt256.subChecked_ok (by omega)] at h  -- contradiction: this branch can't error here
 ```
 
 ### §10.2 Layer 2 — Wrapped (export bridge)
@@ -1071,6 +1076,8 @@ Runs as a post-elaboration pass over contract, lemma, and theorem modules. All m
 | `EvmContext` in author code | error | `lsc: use Caller for msg.sender` |
 | Error type without `@[Lsc.error]` | error | `lsc: error type must be declared with @[Lsc.error]` |
 | `@[Lsc.error]` on non-inductive | error | `lsc: @[Lsc.error] may only annotate inductive types` |
+| `@[Lsc.error]` type missing `arith` constructor | error | `lsc: error type must include arith : ArithError → E` |
+| `@[Lsc.error]` type missing `LscError` instance | error | `lsc: error type must have a LscError instance` |
 | Bare `Option State` on mutator | error | `lsc: use Except E S` |
 | Invalid `@[Lsc.external]` return shape | error | `lsc: must return Except E S, Except E (S × V), S, or V` |
 | Unresolved polymorphism | error | `lsc: polymorphic function cannot be compiled` |
@@ -1095,6 +1102,7 @@ Runs as a post-elaboration pass over contract, lemma, and theorem modules. All m
 | Construct | Severity | Error message |
 |-----------|----------|--------------|
 | `theorem` (non-helper) | error | `lsc: use lemma in *Lemma.lean; put requirements in *Theorem.lean` |
+| `+?`, `-?`, `*?`, `/?` in lemma file | error | `lsc: checked arithmetic (+?) is contract-only; lemmas use Fin +` |
 | `sorry` | error | `lsc: sorry not allowed in lemma modules` |
 
 ### §12.3 Theorem module errors (`test/*Theorem.lean`)
