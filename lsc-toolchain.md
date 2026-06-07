@@ -28,7 +28,7 @@ Distribution mirrors **native Foundry Vyper support** (`foundry-compilers` integ
 | `[lsc.contracts]` | `[lean.contracts]` in `foundry.toml` |
 | `[lsc.compliance.*]` | `[lean.compliance.*]` |
 | `[lsc]` profile keys | `[lean]` in `foundry.toml` |
-| `lsc check-spec` | `forge-lean check-spec` (CLI alias TBD) |
+| `lsc check-theorems` | `forge-lean check-theorems` (CLI alias TBD) |
 | Diagnostic prefix `lsc:` | `forge-lean:` (emitter/validator messages) |
 
 Future releases may align implementation identifiers with the language spec.
@@ -39,7 +39,7 @@ Future releases may align implementation identifiers with the language spec.
 | ---------- | ---- |
 | **forge-lean** (this repo) | [lsc-spec.md](lsc-spec.md), [lsc-toolchain.md](lsc-toolchain.md); eventually `ForgeLean` / `Lsc` library source |
 | **foundry** fork | `LeanCompiler`, `forge build` / `forge test`, `testdata/src/Counter.lean` |
-| **[forge-lean-erc20](https://github.com/forge-lean/forge-lean-erc20)** | ERC-20 demo: spec, proofs, fuzz |
+| **[forge-lean-erc20](https://github.com/forge-lean/forge-lean-erc20)** | ERC-20 demo: lemmas, theorems, fuzz |
 | **[forge-lean-composition](https://github.com/forge-lean/forge-lean-composition)** | Composition demo: `Lsc.extern.call` hook |
 
 ---
@@ -58,10 +58,9 @@ my-project/
 ├── lake-manifest.json
 ├── src/
 │   └── Counter.lean            # Lean 4 contracts (default scaffold)
-├── spec/
-│   └── CounterSpec.lean        # Human-authored Prop definitions (def only)
 ├── test/
-│   ├── CounterProof.lean       # LLM-generated proof terms (module CounterProof)
+│   ├── CounterLemma.lean       # AI-generated: scaffolding + lemma proofs
+│   ├── CounterTheorem.lean     # Human-reviewed: high-level theorems (one-line delegations)
 │   └── Counter.t.sol           # optional: deployCode fuzz (like Counter.vy)
 ├── cache/                      # incremental compile cache (Foundry-managed)
 └── out/
@@ -72,16 +71,15 @@ my-project/
         └── Counter.abi         # ABI JSON (debug; also embedded in Counter.json)
 ```
 
-For a full ERC-20 walkthrough (spec, proofs, fuzz), see the [forge-lean-erc20](https://github.com/forge-lean/forge-lean-erc20) demo repository (§9.1).
+For a full ERC-20 walkthrough (lemmas, theorems, fuzz), see the [forge-lean-erc20](https://github.com/forge-lean/forge-lean-erc20) demo repository (§9.1).
 
 ### Rules
 
 - **`lib/*.lean`** defines shared storage/logic only; **no bytecode** is emitted from `lib/` ([lsc-spec.md Appendix B](lsc-appendices.md#appendix-b--composition-pattern)).
-- Every `.lean` file under `spec/` is a specification: `def` propositions (`Prop`) plus optional `axiom` for extern assumptions. 
-- Every `test/<Contract>Proof.lean` file contains proofs for the matching spec (e.g. `CounterProof.lean` for `CounterSpec.lean`). **Invalid:** `Counter.proof.lean` (dots break Lake module naming).
+- There is **no `spec/` directory**. Each contract has `test/<Contract>Lemma.lean` (AI-generated scaffolding + `lemma` proofs) and `test/<Contract>Theorem.lean` (human-reviewed high-level `theorem` statements with one-line lemma delegations). **Invalid:** `Counter.proof.lean` (dots break Lake module naming).
 - The `lean-toolchain` file at the project root pins the exact Lean version. `forge init --lean` creates it. Compilation refuses to run if this file is missing.
-- Lean imports use **Lake module paths** (e.g. `import Counter` for `src/Counter.lean`, `import CounterProof` for `test/CounterProof.lean`), not filesystem paths like `import src.Counter`.
-- `spec/**` and `test/**/*Proof.lean` are excluded from contract compilation via `skip` in `foundry.toml`.
+- Lean imports use **Lake module paths** (e.g. `import Counter` for `src/Counter.lean`, `import CounterLemma` / `import CounterTheorem` for proof modules), not filesystem paths like `import src.Counter`.
+- `test/**/*Lemma.lean` and `test/**/*Theorem.lean` are excluded from contract compilation via `skip` in `foundry.toml`.
 
 ### `lakefile.lean` (minimal)
 
@@ -205,7 +203,7 @@ There is no separate `forge-vyper`-style plugin binary that Foundry auto-discove
 src = "src"
 out = "out"
 libs = ["lib"]
-skip = ["spec/**", "test/**/*Proof.lean"]
+skip = ["test/**/*Lemma.lean", "test/**/*Theorem.lean"]
 
 [profile.default.lean]
 path = "/optional/path/to/lean"   # default: `lean` on PATH
@@ -218,9 +216,9 @@ max_bytes = 4096   # emitter practical cap per Bytes[N] field; see lsc-spec §2.
 [profile.default.lean.contracts]
 Counter = "0x0000000000000000000000000000000000000001"
 
-# Optional: require named theorems in spec (demo repos, CI profiles)
+# Optional: require named theorems (demo repos, CI profiles)
 # [lsc.compliance.erc20]
-# spec = "spec/Token.spec.lean"
+# theorems = "test/ERC20Theorem.lean"
 # required = ["transfer_preserves_total_supply", ...]
 ```
 
@@ -241,9 +239,9 @@ Counter = "0x0000000000000000000000000000000000000001"
 | ------------------------------ | ------------------------------------------------------------------------------ |
 | `forge build`                  | Compiles `.lean` and `.sol` (primary)                                          |
 | `forge test`                   | Runs `.t.sol` EVM tests **and** Lean proof checking (separate report sections) |
-| `forge init --lean`            | Scaffolds `lean-toolchain`, `lakefile.lean`, `spec/`, Counter contract (§9) |
+| `forge init --lean`            | Scaffolds `lean-toolchain`, `lakefile.lean`, Counter lemma/theorem stubs (§9) |
 | `forge init --lean --template erc20` | Scaffolds ERC-20 layout (points to demo patterns; [Appendix A](lsc-appendices.md#appendix-a--erc-20-pattern)) |
-| `forge-lean check-spec <file>` | CI helper: spec shape + sorry-only proofs                                      |
+| `forge-lean check-theorems <file>` | CI helper: theorem shape + sorry-only lemmas                              |
 | `forge-lean build`             | **Debug alias** for Lean-only compile (optional; not primary workflow)         |
 
 
@@ -267,9 +265,9 @@ Formal proofs and EVM tests are complementary: proofs verify the Lean model; fuz
 
 After Solidity tests, Foundry runs the Lean proof runner:
 
-- `lake build` for spec + proof modules
-- Checks all spec `def` propositions have matching proof `theorem`s; optional `[lsc.compliance.*]` manifest ([lsc-spec.md §7](lsc-spec.md#7-verification))
-- Rejects `sorry` in proof files
+- `lake build` for lemma + theorem modules
+- Checks required `theorem` names in `*Theorem.lean` with one-line `*Lemma` delegations; optional `[lsc.compliance.*]` manifest ([lsc-spec.md §11](lsc-spec.md#11-compliance-manifests))
+- Rejects `sorry` in lemma and theorem files
 - Reports `PASS` / `FAIL` per theorem
 
 Exit code: fails if **either** Solidity tests or Lean proofs fail (configurable in future; v1 default is combined failure).
@@ -282,23 +280,23 @@ Uses `solc` from the user's Foundry installation via `foundry-compilers`. Error 
 
 ## 5. Proof checking in CI
 
-`forge build` performs **no** spec or proof checks — contracts only.
+`forge build` performs **no** lemma or theorem checks — contracts only.
 
 `forge test` runs, after Solidity tests:
 
-- `lake build` for spec + proof modules  
-- Checks all spec `def` propositions have matching proof `theorem`s; optional `[lsc.compliance.*]` / `[lean.compliance.*]` manifest  
-- Rejects `sorry` in proof files  
+- `lake build` for lemma + theorem modules  
+- Checks required `theorem` names in `*Theorem.lean`; optional `[lsc.compliance.*]` / `[lean.compliance.*]` manifest  
+- Rejects `sorry` in lemma and theorem files  
 - Reports `PASS` / `FAIL` per theorem  
 
 **Utilities:**
 
 | Command | Role |
 | ------- | ---- |
-| `forge-lean check-spec <file>` | CI helper: spec shape (`def … : Prop` only; target name: `lsc check-spec`) |
+| `forge-lean check-theorems <file>` | CI helper: theorem one-liner shape (target name: `lsc check-theorems`) |
 | `forge-lean build` | Debug alias for Lean-only compile (target name: `lsc build`) |
 
-See [lsc-spec.md §7](lsc-spec.md#7-verification) for the verification model.
+See [lsc-spec.md §9](lsc-spec.md#9-proof-files) and [§11](lsc-spec.md#11-compliance-manifests) for the verification model.
 
 ---
 
@@ -314,10 +312,11 @@ All messages are prefixed with `lsc:` and include file, line, and column.
 | Closure in contract                | `lsc: closures are not supported; use a top-level function`                             |
 | Disallowed type `T`                | `lsc: type T is not allowed; use UInt256, Address, Bool, Bytes32, or Bytes[N]`        |
 | Stateful monadic contract code     | `lsc: stateful monads are not allowed; do-notation over Except E is permitted`        |
-| `sorry` in proof file              | `lsc: proof file contains sorry; proofs must be complete`                               |
-| `theorem` or `sorry` in spec file  | `lsc: spec modules use def … : Prop, not theorem; put proofs in *Proof.lean`            |
-| Missing compliance proposition (on test) | `lsc: spec/TokenSpec.lean is missing required def transfer_preserves_total_supply` |
-| Missing proof for spec def (on test) | `lsc: spec defines "f" but *Proof.lean has no theorem f`                                |
+| `sorry` in lemma or theorem file   | `lsc: proof module contains sorry; proofs must be complete`                             |
+| `theorem` in `*Lemma.lean`         | `lsc: use lemma in *Lemma.lean; put requirements in *Theorem.lean`                      |
+| `lemma` in `*Theorem.lean`         | `lsc: put proofs in *Lemma.lean`                                                        |
+| Theorem body not one-line delegation | `lsc: theorem body must be a one-line *Lemma delegation`                              |
+| Missing required theorem (on test) | `lsc: compliance requires "f" but no theorem in *Theorem.lean`                        |
 | Bare `Option State` on mutator | `lsc: use Except E S or Except E (S × V) for mutators` |
 | Invalid `@[lsc.external]` return shape | `lsc: @[lsc.external] "f" must return Except E S, Except E (S × V), S (infallible mutator), or V (infallible view)` |
 | Typed error without `@[lsc.error]` | `lsc: error type E must be declared with @[lsc.error]` |
@@ -331,7 +330,7 @@ All messages are prefixed with `lsc:` and include file, line, and column.
 | `assert` in contract function      | `lsc: use require for contract guards; assert! is a runtime panic`                      |
 | `List` in author contract code     | `lsc: List is not allowed in contract code; use Mapping or Lsc.Event.log`               |
 | Unknown event in `Lsc.Event.log`   | `lsc: unknown event type "X"; define Lsc.Event.EvmEvent instance or use string signature` |
-| `+?` / `checked` in spec or proof | `lsc: checked arithmetic is contract-only; spec uses Fin +` |
+| `+?` / `checked` in lemma file    | `lsc: checked arithmetic is contract-only; lemmas use Fin +` |
 | `do` on infallible function (`S` or `V`) | `lsc: do-notation requires Except return type` |
 | More than one `@[lsc.initialize]` | `lsc: at most one @[lsc.initialize] per contract module` |
 | Malformed event signature          | `lsc: invalid event signature "..."; expected form "Name(type,type)"`                   |
@@ -354,9 +353,9 @@ All messages are prefixed with `lsc:` and include file, line, and column.
 ```mermaid
 flowchart LR
   subgraph proven_v1 [Proven in v1]
-    SpecThm[Spec theorems]
+    Thm[Theorem files]
     LeanFn[Contract functions]
-    SpecThm --> LeanFn
+    Thm --> LeanFn
   end
 
   subgraph trusted_v1 [Trusted in v1]
@@ -378,9 +377,9 @@ flowchart LR
 
 | Layer                              | v1 status                                             |
 | ---------------------------------- | ----------------------------------------------------- |
-| Spec theorems → ``@[lsc.external]` functions` functions | **Proven** (Lean kernel)                           |
+| Theorem files → ``@[lsc.external]` functions` | **Proven** (Lean kernel)                           |
 | Compiler-generated export → contract fn | **Trusted** (tested; `lift_no_extern` in v2c)       |
-| Registered callee composition      | **Proven** when `simulate_call` + callee specs hold   |
+| Registered callee composition      | **Proven** when `simulate_call` + callee theorems hold |
 | `@[lsc.extern_assume]` interface axioms  | **Trusted** (human-reviewed; not bytecode-checked)    |
 | `Lsc.Semantics.invoke`       | **Trusted** in v2a–b; reference for emitter tests     |
 | Lean model → Yul                   | **Trusted** (tested emitter)                          |
@@ -392,7 +391,7 @@ flowchart LR
 
 **Phase 2 (scope TBD):** May include a formal proof that the Yul emitter refines the Lean functional semantics. The approach (refinement types, deep embedding of Yul, etc.) will be chosen after v1 experience.
 
-**Intent:** Full-stack verification — eventually the artifact on Ethereum is provably linked to the human-reviewed spec. v1 delivers the spec + proof workflow on the Lean model.
+**Intent:** Full-stack verification — eventually the artifact on Ethereum is provably linked to the human-reviewed theorem file. v1 delivers the lemma + theorem workflow on the Lean model.
 
 ---
 
@@ -408,11 +407,11 @@ flowchart LR
 - `forge init --lean` scaffolding (Counter default)
 - `testdata/src/Counter.lean` + CI compile (parity with `Counter.vy`)
 - `forge test` Lean proof runner; optional `[lsc.compliance.*]` (§5.3)
-- `skip` patterns for `spec/` and `test/**/*Proof.lean`
+- `skip` patterns for `test/**/*Lemma.lean` and `test/**/*Theorem.lean`
 
 `**forge-lean` utilities (Rust)**
 
-- `forge-lean check-spec`
+- `forge-lean check-theorems`
 - `forge-lean build` (debug alias)
 - Validator ([lsc-spec.md](lsc-spec.md).11 dialect law)
 - Compiler-generated export wrappers from `@[lsc.external]` ([lsc-spec.md](lsc-spec.md).9–4.10)
@@ -425,9 +424,9 @@ flowchart LR
 `**Lsc` library**
 
 - `Lsc.Prelude`: `Address`, `Caller`, `Bytes32`, `Bytes[N]`, `Mapping`, `ArithError`, `UInt256` (`Fin`), `+? -? *? /?`, `checked` macro, `Option.orWrap` / `orWrapDiv` / `orError`, `require`; `Monad (Except E)` from Lean core ([lsc-spec.md §2](lsc-spec.md#2-types))
-- `Lsc.Prelude`: `@[simp]` bridge lemmas `UInt256.addChecked_some`, `Option.orWrap_none`, …; `Lsc.Invariant` for sequence specs ([lsc-spec.md §9.1](lsc-spec.md#91-format))
+- `Lsc.Prelude`: `@[simp]` bridge lemmas `UInt256.addChecked_some`, `Option.orWrap_none`, …; `Lsc.Invariant` for sequence invariants ([lsc-spec.md §9.1](lsc-spec.md#91-lemma-files-testlemmalean))
 - `Lsc.Event`: `Lsc.Event.EvmEvent`, `Lsc.Event.log`, `LogEntry`
-- `Lsc.ProofHelpers`: Layer 1 `Except.bind_ok`, `Except.ok_ne_error`; Layers 2–4 `lift_*`, `simulate_call`, `export_cases` ([lsc-spec.md §11](lsc-spec.md#11-proof-helpers-lscproofhelpers))
+- `Lsc.ProofHelpers`: Layer 1 `Except.bind_ok`, `Except.ok_ne_error`; Layers 2–4 `lift_*`, `simulate_call`, `export_cases` ([lsc-spec.md §10](lsc-spec.md#10-proof-helpers))
 - `Lsc.SpecTemplates` (Layer 1 + export/trace skeletons)
 - `@[lsc.external]`, `@[lsc.error]` (registers inductive for ABI `errors` / revert encoding only), `@[lsc.initialize]`, `@[lsc.public]` (synthesized `@[lsc.external]` views; [lsc-spec.md §3.5](lsc-spec.md)), `@[lsc.event]` (optional lint), `@[lsc.extern_hook]`, `@[lsc.no_reentrant]` ([lsc-spec.md](lsc-spec.md))
 - Filename-based contract registration ([lsc-spec.md](lsc-spec.md).13.1); `[lsc.contracts]` in `foundry.toml`
@@ -440,7 +439,7 @@ Implement in `ForgeLean` / `Lsc.Prelude` per [lsc-spec.md §2.1–§2.5](lsc-spe
 2. `+? -? *? /?` → `Option UInt256`; `checked f do` macro wraps `←` Option binds via `orWrap`
 3. `require (cond) .variant` macro → `if ¬cond then return .error .variant`
 4. `@[simp]` bridge lemmas: `UInt256.addChecked_some`, `Option.orWrap_none`, …
-5. Validator: forbid `+?` / `checked` in spec and proof; forbid `assert` in contracts; enforce `Caller` rules ([lsc-spec.md §13.1](lsc-spec.md))
+5. Validator: forbid `+?` / `checked` in lemma files; forbid `assert` in contracts; enforce `Caller` rules ([lsc-spec.md §12.1](lsc-spec.md))
 6. Register `@[lsc.error]` — emitter registration only (no `HasArithErrors` codegen)
 7. Register `@[lsc.initialize]` — at most one per module; constructor + optional proxy `initialize` ABI
 8. Register `@[lsc.public]` — synthesize getter `@[lsc.external]` `def`s before ABI collection ([lsc-spec.md §3.5](lsc-spec.md))
@@ -472,13 +471,13 @@ Implement in `ForgeLean` / `Lsc.Prelude` per [lsc-spec.md §2.1–§2.5](lsc-spe
 **Demo repository ([forge-lean-erc20](https://github.com/forge-lean/forge-lean-erc20))**
 
 - `src/Token.lean` application code (§9.1)
-- Full spec + proofs + `[lsc.compliance.erc20]`
+- Full lemma + theorem modules + `[lsc.compliance.erc20]`
 - `Token.t.sol` fuzz via `deployCode`
 
 **Demo repository ([forge-lean-composition](https://github.com/forge-lean/forge-lean-composition))**
 
 - `lib/ERC20.lean` + `src/MyToken.lean` + `src/TransferCounter.lean` (§9.2)
-- `[lsc.compliance.erc20]` on `ERC20Spec`; `[lsc.compliance.hook]` on `MyTokenSpec`
+- `[lsc.compliance.erc20]` on `ERC20Theorem`; `[lsc.compliance.hook]` on `MyTokenTheorem`
 - `test/Composition.t.sol` multi-contract fuzz
 - Optional `testdata/src/TransferCounter.lean` in Foundry fork (minimal compile smoke)
 
@@ -522,31 +521,34 @@ def setNumber (s : CounterState) (n : UInt256) : CounterState :=
 -- `number` view generated from @[lsc.public] (§3.5)
 ```
 
-### `spec/CounterSpec.lean` (minimal)
+### `test/CounterLemma.lean` (minimal)
 
 ```lean
 import Counter
 
-def increment_increases_number
-    (s s' : CounterState)
-    (h : increment s = .ok s') : Prop :=
-  s'.number = s.number + 1
-```
-
-### `test/CounterProof.lean` (minimal)
-
-```lean
-import CounterSpec
-
-theorem increment_increases_number
+lemma increment_increases_number
     (s s' : CounterState)
     (h : increment s = .ok s') :
-    CounterSpec.increment_increases_number s s' h := by
-  simp [CounterSpec.increment_increases_number, increment] at h
+    s'.number = s.number + 1 := by
+  simp [increment] at h
   simp [UInt256.addChecked_some (by omega), Option.orWrap_some] at h; omega
 ```
 
-No `EvmContext`, `LogEntry`, or `Lsc.ProofHelpers` import required — Layer 1 proofs only ([lsc-spec.md §1.6.2](lsc-spec.md#162-proof-layers-default-path-vs-advanced)).
+### `test/CounterTheorem.lean` (minimal)
+
+```lean
+import Counter
+import CounterLemma
+
+/-- On success, increment increases number by exactly 1. -/
+theorem increment_increases_number
+    (s s' : CounterState)
+    (h : increment s = .ok s') :
+    s'.number = s.number + 1 :=
+  CounterLemma.increment_increases_number s s' h
+```
+
+No `EvmContext`, `LogEntry`, or `Lsc.ProofHelpers` import required — Layer 1 lemmas only ([lsc-spec.md §10.1](lsc-spec.md#101-layer-1--pure-default)).
 
 ### `test/Counter.t.sol` (sketch)
 
@@ -563,15 +565,15 @@ contract CounterTest is Test {
 
 ### LLM prompt sketch (Counter)
 
-> Given `src/Counter.lean` and `spec/CounterSpec.lean` (def … : Prop), complete `test/CounterProof.lean` with a theorem per spec def. Use `simp` on contract and spec definitions. No `sorry`.
+> Given `src/Counter.lean` and `test/CounterTheorem.lean` (high-level theorem statements), complete `test/CounterLemma.lean` with a homonymous `lemma` per theorem. Use `simp` on contract definitions. No `sorry`.
 
 ### 9.1 ERC-20 showcase (external demo)
 
 The [forge-lean-erc20](https://github.com/forge-lean/forge-lean-erc20) repository demonstrates the full workflow at application scale:
 
 1. **Write** — `src/Token.lean` with `ERC20State`, `@[lsc.external]` functions and `Lsc.Event.log` for events (§9.1). Compiler infers ABI from names and `Except` return shapes.
-2. **Spec** — `spec/TokenSpec.lean` with human-reviewed `def … : Prop` over `@[lsc.external]` functions; `[lsc.compliance.erc20]` enforces the proposition list on `forge test`.
-3. **Prove** — `test/TokenProof.lean` (LLM-assisted, kernel-checked).
+2. **Theorem** — `test/TokenTheorem.lean` with human-reviewed high-level `theorem` statements; `[lsc.compliance.erc20]` enforces the theorem list on `forge test`.
+3. **Lemma** — `test/TokenLemma.lean` (LLM-assisted scaffolding + tactic proofs, kernel-checked).
 4. **Fuzz** — `test/Token.t.sol` deploys bytecode via `deployCode` and runs Foundry fuzz/invariant tests.
 
 That repo is the canonical place for ERC-20-only documentation — not the core Foundry toolchain.
@@ -633,13 +635,14 @@ def transfer (caller : Caller) (s : ERC20State) (to : Address) (amount : UInt256
   return .ok (s', true)
 ```
 
-Example revert theorem:
+Example revert theorem (human-reviewed `*Theorem.lean`):
 
 ```lean
-def transfer_no_overdraft
+theorem transfer_no_overdraft
     (caller : Caller) (to : Address) (amount : UInt256) (s : ERC20State)
-    (h : transfer caller s to amount = .error .insufficientBalance) : Prop :=
-  s.balances.get caller.val < amount
+    (h : transfer caller s to amount = .error .insufficientBalance) :
+    s.balances.get caller.val < amount :=
+  ERC20Lemma.transfer_no_overdraft caller to amount s h
 ```
 
 The demo defines `@[lsc.external]` functions with **`Lsc.Event.log`** on success paths (no hand-written export wrappers; no `Lsc.ERC20` in core).
@@ -671,15 +674,15 @@ Enforced only when the demo repo (or a project) sets `[lsc.compliance.erc20]` in
 ```
 forge-lean-erc20/
 ├── src/Token.lean
-├── spec/TokenSpec.lean
-├── test/TokenProof.lean
+├── test/TokenLemma.lean
+├── test/TokenTheorem.lean
 ├── test/Token.t.sol
 └── foundry.toml    # [lsc.compliance.erc20]
 ```
 
 ### C.5 LLM prompt sketch (Token)
 
-> Given `src/Token.lean` and `spec/TokenSpec.lean` (`def … : Prop`), complete `test/TokenProof.lean` with one `theorem` per spec def. Use `simp`, `omega`, `Mapping.get_set_same`, `Except.bind_ok`. No `sorry`.
+> Given `src/Token.lean` and `test/TokenTheorem.lean` (high-level theorem statements), complete `test/TokenLemma.lean` with one homonymous `lemma` per theorem. Use `simp`, `omega`, `Mapping.load_store_same`, `Except.bind_ok`. No `sorry`.
 
 Full source listings are maintained in the demo repository, not duplicated here.
 
@@ -721,10 +724,10 @@ sequenceDiagram
 | `src/MyToken.lean` | Yes | `MyTokenState extends ERC20State`; full ERC-20 ABI + hook on transfer paths |
 | `src/TransferCounter.lean` | Yes | Counter contract |
 | `interfaces/ITransferCounter.lean` | No | Interface for `Lsc.extern.call` validator |
-| `spec/ERC20Spec.lean` | — | Appendix C theorems over `ERC20.transfer` on `ERC20State` |
-| `spec/MyTokenSpec.lean` | — | Hook / composition theorems only |
-| `spec/TransferCounterSpec.lean` | — | `onTransfer` increments `count` |
-| `test/ERC20Proof.lean`, `test/MyTokenProof.lean`, `test/TransferCounterProof.lean` | — | Proofs |
+| `test/ERC20Theorem.lean` | — | Appendix C theorems over `ERC20.transfer` on `ERC20State` |
+| `test/MyTokenTheorem.lean` | — | Hook / composition theorems only |
+| `test/TransferCounterTheorem.lean` | — | `onTransfer` increments `count` |
+| `test/ERC20Lemma.lean`, `test/MyTokenLemma.lean`, `test/TransferCounterLemma.lean` | — | AI-generated lemma proofs |
 | `test/Composition.t.sol` | — | Deploy both; fuzz `transfer` vs `count` |
 
 
@@ -757,7 +760,7 @@ def MyToken.transfer (s : MyTokenState) (from to : Address) (amount : UInt256)
 ```
 
 - **Field access:** `s.balances` works on `MyTokenState` (flat inheritance).
-- **Appendix C proofs** target `ERC20.transfer` on `ERC20State` in `spec/ERC20Spec.lean`.
+- **Appendix C theorems** target `ERC20.transfer` on `ERC20State` in `test/ERC20Theorem.lean`.
 - **MyToken exports** with hooks: author annotates `transfer` / `transferFrom` with `@[lsc.external]` and `@[lsc.extern_hook]` (or equivalent metadata); **compiler-generated** export threads `World` and inserts `Lsc.extern.call` after contract-function success (§4.15.2).
 
 ### D.4 TransferCounter
@@ -815,7 +818,7 @@ MyToken = "0x0000000000000000000000000000000000000001"
 TransferCounter = "0x0000000000000000000000000000000000000002"
 
 [lsc.compliance.erc20]
-spec = "spec/ERC20Spec.lean"
+theorems = "test/ERC20Theorem.lean"
 required = [
   "transfer_preserves_total_supply",
   "transfer_no_overdraft",
@@ -823,7 +826,7 @@ required = [
 ]
 
 [lsc.compliance.hook]
-spec = "spec/MyTokenSpec.lean"
+theorems = "test/MyTokenTheorem.lean"
 required = [
   "transfer_increments_counter_when_hooked",
   "transfer_skips_counter_when_zero",
@@ -835,9 +838,9 @@ required = [
 
 ### D.7 Required theorems
 
-**ERC-20 (`[lsc.compliance.erc20]`):** Same table as Appendix C.3, stated over `ERC20.transfer` in `spec/ERC20Spec.lean`.
+**ERC-20 (`[lsc.compliance.erc20]`):** Same table as Appendix C.3, stated over `ERC20.transfer` in `test/ERC20Theorem.lean`.
 
-**Hook (`[lsc.compliance.hook]`):** In `spec/MyTokenSpec.lean` only.
+**Hook (`[lsc.compliance.hook]`):** In `test/MyTokenTheorem.lean` only.
 
 
 | Theorem | Statement (summary) |
@@ -849,7 +852,7 @@ required = [
 | `transferFrom_increments_counter_when_hooked` | same as `transfer` for `transferFrom` |
 
 
-**TransferCounter (`spec/TransferCounterSpec.lean`):**
+**TransferCounter (`test/TransferCounterTheorem.lean`):**
 
 
 | Theorem | Statement (summary) |
@@ -861,9 +864,9 @@ required = [
 
 | Layer | What | Where |
 | ----- | ---- | ----- |
-| 1 | ERC-20 contract fns | `ERC20Spec` / `ERC20Proof` — no `World` |
-| 2 | Counter contract fns | `TransferCounterSpec` / `TransferCounterProof` |
-| 3 | Hook / composition | `MyTokenSpec` / `MyTokenProof` — `lift_no_extern`, `simulate_call`, or `@[lsc.no_reentrant]` (§4.16, §7.5) |
+| 1 | ERC-20 contract fns | `ERC20Theorem` / `ERC20Lemma` — no `World` |
+| 2 | Counter contract fns | `TransferCounterTheorem` / `TransferCounterLemma` |
+| 3 | Hook / composition | `MyTokenTheorem` / `MyTokenLemma` — `lift_no_extern`, `simulate_call`, or `@[lsc.no_reentrant]` (§4.16, §10.2) |
 | 4 | EVM | `Composition.t.sol` — `deployCode` both contracts; assert `count` after transfers |
 
 ### D.9 Platform dependencies
@@ -883,9 +886,9 @@ required = [
 
 ### D.11 LLM prompt sketches
 
-**ERC-20:** Given `lib/ERC20.lean` and `spec/ERC20Spec.lean`, complete `test/ERC20Proof.lean`. Use `simp`, `omega`, `Mapping.get_set_*`, `Except.bind_ok`. No `sorry`.
+**ERC-20:** Given `lib/ERC20.lean` and `test/ERC20Theorem.lean`, complete `test/ERC20Lemma.lean`. Use `simp`, `omega`, `Mapping.load_store_*`, `Except.bind_ok`. No `sorry`.
 
-**Composition:** Given `src/MyToken.lean`, `spec/MyTokenSpec.lean`, and `Lsc.ProofHelpers`, complete `test/MyTokenProof.lean` for hook theorems. No `sorry`.
+**Composition:** Given `src/MyToken.lean`, `test/MyTokenTheorem.lean`, and `Lsc.ProofHelpers`, complete `test/MyTokenLemma.lean` for hook lemmas. No `sorry`.
 
 ## Appendix A. Migration from forge-lean-spec v1.6
 
@@ -893,10 +896,10 @@ required = [
 | ---------------------------------- | ------------ |
 | §1 Overview, §2 Design principles | [lsc-spec.md §1](lsc-spec.md#1-introduction) |
 | §4 Contract model | [lsc-spec.md §3–6](lsc-spec.md#3-defining-a-contract) |
-| §5–7 Spec / proof / helpers | [lsc-spec.md §7](lsc-spec.md#7-verification) |
+| §5–7 Lemma / theorem / helpers | [lsc-spec.md §9–§10](lsc-spec.md#9-proof-files) |
 | §8 Compiler | [lsc-toolchain.md §3](lsc-toolchain.md#3-compiler-pipeline) |
 | §9 Foundry | [lsc-toolchain.md §4](lsc-toolchain.md#4-foundry-integration) |
-| §10 ForgeLean package | [lsc-spec.md §9](lsc-spec.md#9-standard-library-lscstd) + toolchain §1.1 |
+| §10 ForgeLean package | [lsc-spec.md §2](lsc-spec.md#2-types) + toolchain §1.1 |
 | §11 Errors | [lsc-spec.md §8](lsc-spec.md#8-well-formedness-and-diagnostics) + toolchain §6 |
 | §12 Counter | [lsc-spec.md §1.1](lsc-spec.md#11-end-to-end-example-counter) + toolchain §9 |
 | §13 Trust | [lsc-toolchain.md §7](lsc-toolchain.md#7-trust-boundaries) |

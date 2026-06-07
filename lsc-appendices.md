@@ -16,7 +16,7 @@ Extended reference patterns, examples, and project history. Code samples follow 
 
 ## Appendix A — ERC-20 Pattern
 
-This appendix documents the **[forge-lean-erc20](https://github.com/forge-lean/forge-lean-erc20)** showcase. It is not part of the core `Lsc` package or default proof runner behavior. The demo enables `[lsc.compliance.erc20]` (§12) to require the theorem list there.
+This appendix documents the **[forge-lean-erc20](https://github.com/forge-lean/forge-lean-erc20)** showcase. It is not part of the core `Lsc` package or default proof runner behavior. The demo enables `[lsc.compliance.erc20]` (§11) to require the theorem list there.
 
 ### A.1 State
 
@@ -69,40 +69,47 @@ def approve (caller : Caller) (s : ERC20State) (spender : Address) (amount : UIn
   .ok (s', true)
 ```
 
-### A.3 Example spec and proof
+### A.3 Example lemma and theorem
 
 ```lean
--- spec/ERC20Spec.lean
-/-- transfer reverts when caller has insufficient balance. -/
-def transfer_no_overdraft
-    (caller : Caller) (to : Address) (amount : UInt256) (s : ERC20State)
-    (h : transfer caller s to amount = .error .insufficientBalance) : Prop :=
-  s.balances.get caller.val < amount
+-- test/ERC20Lemma.lean (AI-generated)
+import Token
 
-/-- transfer preserves total supply. -/
-def transfer_preserves_total_supply
+lemma transfer_no_overdraft
+    (caller : Caller) (to : Address) (amount : UInt256) (s : ERC20State)
+    (h : transfer caller s to amount = .error .insufficientBalance) :
+    s.balances.get caller.val < amount := by
+  simp [transfer] at h
+  split_ifs at h with hguard <;> omega
+
+lemma transfer_preserves_total_supply
     (caller : Caller) (to : Address) (amount : UInt256)
     (s s' : ERC20State) (ret : Bool)
-    (h : transfer caller s to amount = .ok (s', ret)) : Prop :=
-  s'.totalSupply = s.totalSupply
+    (h : transfer caller s to amount = .ok (s', ret)) :
+    s'.totalSupply = s.totalSupply := by
+  simp [transfer] at *
+  exact h.2
 ```
 
 ```lean
--- test/ERC20Proof.lean
+-- test/ERC20Theorem.lean (human-reviewed)
+import Token
+import ERC20Lemma
+
+/-- transfer reverts when caller has insufficient balance. -/
 theorem transfer_no_overdraft
     (caller : Caller) (to : Address) (amount : UInt256) (s : ERC20State)
     (h : transfer caller s to amount = .error .insufficientBalance) :
-    ERC20Spec.transfer_no_overdraft caller to amount s h := by
-  simp [ERC20Spec.transfer_no_overdraft, transfer] at h
-  split_ifs at h with hguard <;> omega
+    s.balances.get caller.val < amount :=
+  ERC20Lemma.transfer_no_overdraft caller to amount s h
 
+/-- transfer preserves total supply. -/
 theorem transfer_preserves_total_supply
     (caller : Caller) (to : Address) (amount : UInt256)
     (s s' : ERC20State) (ret : Bool)
     (h : transfer caller s to amount = .ok (s', ret)) :
-    ERC20Spec.transfer_preserves_total_supply caller to amount s s' ret h := by
-  simp [ERC20Spec.transfer_preserves_total_supply, transfer] at *
-  exact h.2
+    s'.totalSupply = s.totalSupply :=
+  ERC20Lemma.transfer_preserves_total_supply caller to amount s s' ret h
 ```
 
 ---
@@ -166,7 +173,7 @@ def onTransfer (s : TransferCounterState) : Except ArithError TransferCounterSta
 
 ### B.4 Required theorems
 
-**ERC-20 compliance** (`[lsc.compliance.erc20]`): same table as §12.3, stated over `MyToken` functions.
+**ERC-20 compliance** (`[lsc.compliance.erc20]`): same table as §11.3, stated over `MyToken` functions.
 
 **Hook compliance** (`[lsc.compliance.hook]`):
 
@@ -177,7 +184,7 @@ def onTransfer (s : TransferCounterState) : Except ArithError TransferCounterSta
 | `transfer_self_noop_skips_counter` | `from = to` ⇒ counter unchanged |
 | `hook_revert_implies_transfer_error` | counter call reverts ⇒ MyToken export `.error` |
 
-**TransferCounter** (`spec/TransferCounterSpec.lean`):
+**TransferCounter** (`test/TransferCounterTheorem.lean`):
 
 | Theorem | Statement summary |
 |---------|------------------|
@@ -187,9 +194,9 @@ def onTransfer (s : TransferCounterState) : Except ArithError TransferCounterSta
 
 | Layer | What | Files |
 |-------|------|-------|
-| 1 | TransferCounter closed-world | `TransferCounterSpec` / `TransferCounterProof` |
-| 2 | MyToken ERC-20 properties | `MyTokenSpec` / `MyTokenProof` — no `World` |
-| 3 | Hook composition | `MyTokenSpec` / `MyTokenProof` — `simulate_call` (v2b) |
+| 1 | TransferCounter closed-world | `TransferCounterTheorem` / `TransferCounterLemma` |
+| 2 | MyToken ERC-20 properties | `MyTokenTheorem` / `MyTokenLemma` — no `World` |
+| 3 | Hook composition | `MyTokenTheorem` / `MyTokenLemma` — `simulate_call` (v2b) |
 | 4 | EVM | `Composition.t.sol` — `deployCode` both contracts; assert `count` after transfers |
 
 ---
@@ -349,112 +356,101 @@ def allowance (s : TokenState) (owner spender : Address) : UInt256 :=
 -- name, symbol, decimals, totalSupply: generated from @[lsc.public] (§3.5)
 ```
 
-### E.2 Spec (`spec/TokenSpec.lean`)
+### E.2 Lemma (`test/TokenLemma.lean`)
+
+AI-generated. Contains action-model scaffolding, helper `def`s, and `lemma` proofs. Property statements below are the lemma conclusions; tactic proofs are in §E.3.
 
 ```lean
 import Token
 
 -- ── Authorization ────────────────────────────────────────────────────────────
 
-/-- mint reverts when caller is not the owner. -/
-def mint_requires_owner
+lemma mint_requires_owner
     (caller : Caller) (s : TokenState) (to : Address) (amount : UInt256)
-    (h : mint caller s to amount = .error .unauthorized) : Prop :=
+    (h : mint caller s to amount = .error .unauthorized) :
   caller.val ≠ s.owner ∨ True  -- first branch is the authorization guard
 
-/-- burn reverts when caller is not the owner. -/
-def burn_requires_owner
+lemma burn_requires_owner
     (caller : Caller) (s : TokenState) (from : Address) (amount : UInt256)
-    (h : burn caller s from amount = .error .unauthorized) : Prop :=
+    (h : burn caller s from amount = .error .unauthorized) :
   caller.val ≠ s.owner
 
 -- ── Supply conservation ───────────────────────────────────────────────────────
 
-/-- transfer preserves total supply. -/
-def transfer_preserves_supply
+lemma transfer_preserves_supply
     (caller : Caller) (to : Address) (amount : UInt256)
     (s s' : TokenState) (ret : Bool)
-    (h : transfer caller s to amount = .ok (s', ret)) : Prop :=
+    (h : transfer caller s to amount = .ok (s', ret)) :
   s'.totalSupply = s.totalSupply
 
-/-- transferFrom preserves total supply. -/
-def transferFrom_preserves_supply
+lemma transferFrom_preserves_supply
     (caller from to : Address) (amount : UInt256)
     (s s' : TokenState) (ret : Bool)
-    (h : transferFrom caller s from to amount = .ok (s', ret)) : Prop :=
+    (h : transferFrom caller s from to amount = .ok (s', ret)) :
   s'.totalSupply = s.totalSupply
 
-/-- mint increases total supply by exactly amount. -/
-def mint_increases_supply
+lemma mint_increases_supply
     (caller : Caller) (to : Address) (amount : UInt256)
     (s s' : TokenState) (ret : Unit)
-    (h : mint caller s to amount = .ok (s', ret)) : Prop :=
+    (h : mint caller s to amount = .ok (s', ret)) :
   s'.totalSupply = s.totalSupply + amount
 
-/-- burn decreases total supply by exactly amount. -/
-def burn_decreases_supply
+lemma burn_decreases_supply
     (caller from : Address) (amount : UInt256)
     (s s' : TokenState) (ret : Unit)
-    (h : burn caller s from amount = .ok (s', ret)) : Prop :=
+    (h : burn caller s from amount = .ok (s', ret)) :
   s'.totalSupply = s.totalSupply - amount
 
 -- ── Balance correctness ───────────────────────────────────────────────────────
 
-/-- transfer reverts when caller has insufficient balance. -/
-def transfer_no_overdraft
+lemma transfer_no_overdraft
     (caller : Caller) (to : Address) (amount : UInt256) (s : TokenState)
-    (h : transfer caller s to amount = .error .insufficientBalance) : Prop :=
+    (h : transfer caller s to amount = .error .insufficientBalance) :
   s.balances.get caller.val < amount
 
-/-- transfer moves tokens from caller to recipient. -/
-def transfer_moves_tokens
+lemma transfer_moves_tokens
     (caller : Caller) (to : Address) (amount : UInt256)
     (s s' : TokenState) (ret : Bool)
-    (h : transfer caller s to amount = .ok (s', ret)) : Prop :=
+    (h : transfer caller s to amount = .ok (s', ret)) :
   caller.val ≠ to →
     s'.balances.get caller.val = s.balances.get caller.val - amount ∧
     s'.balances.get to     = s.balances.get to   + amount
 
-/-- transfer to self leaves balances unchanged. -/
-def transfer_self_noop
+lemma transfer_self_noop
     (caller : Caller) (amount : UInt256)
     (s s' : TokenState) (ret : Bool)
-    (h : transfer caller s caller amount = .ok (s', ret)) : Prop :=
+    (h : transfer caller s caller amount = .ok (s', ret)) :
   s'.balances.get caller.val = s.balances.get caller.val
 
-/-- transferFrom reverts when allowance is insufficient. -/
-def transferFrom_no_allowance_overdraft
+lemma transferFrom_no_allowance_overdraft
     (caller from to : Address) (amount : UInt256) (s : TokenState)
-    (h : transferFrom caller s from to amount = .error .insufficientBalance) : Prop :=
+    (h : transferFrom caller s from to amount = .error .insufficientBalance) :
   s.balances.get from < amount ∨
   s.allowances.get from |>.get caller.val < amount
 
-/-- transferFrom decrements allowance by amount. -/
-def transferFrom_decrements_allowance
+lemma transferFrom_decrements_allowance
     (caller from to : Address) (amount : UInt256)
     (s s' : TokenState) (ret : Bool)
-    (h : transferFrom caller s from to amount = .ok (s', ret)) : Prop :=
+    (h : transferFrom caller s from to amount = .ok (s', ret)) :
   s'.allowances.get from |>.get caller.val =
     s.allowances.get from |>.get caller.val - amount
 
--- ── Initialization (`@[lsc.initialize]` — §3.6) ───────────────────────────────
+-- ── Initialization (`@[lsc.initialize]` — §3.5) ───────────────────────────────
 
-/-- initialize sets owner to the deployer Caller. -/
-def constructor_sets_owner
+lemma constructor_sets_owner
     (owner : Caller) (name symbol : Bytes[32]) (decimals initialSupply : UInt256)
     (s' : TokenState)
-    (h : initialize name symbol decimals initialSupply owner = .ok s') : Prop :=
+    (h : initialize name symbol decimals initialSupply owner = .ok s') :
   s'.owner = owner.val
 
-/-- initialize grants initial supply to owner. -/
-def constructor_mints_initial_supply
+lemma constructor_mints_initial_supply
     (owner : Caller) (name symbol : Bytes[32]) (decimals initialSupply : UInt256)
     (s' : TokenState)
-    (h : initialize name symbol decimals initialSupply owner = .ok s') : Prop :=
+    (h : initialize name symbol decimals initialSupply owner = .ok s') :
   s'.balances.get owner.val = initialSupply ∧
   s'.totalSupply = initialSupply
 
--- ── Sequence invariant ────────────────────────────────────────────────────────
+-- ── Sequence invariant (scaffolding) ────────────────────────────────────────
 
 inductive TokenAction where
   | transfer     (caller : Caller) (to : Address) (amount : UInt256)
@@ -483,124 +479,74 @@ def applyTokenAction (s : TokenState) : TokenAction → TokenState
 def applyTokenActions (s : TokenState) (actions : List TokenAction) : TokenState :=
   actions.foldl applyTokenAction s
 
-/-- No sequence of transfer/approve/transferFrom actions changes the total supply.
-    Mint and burn are excluded from this variant to isolate conservation. -/
-def non_mint_burn_actions_preserve_supply
+lemma non_mint_burn_actions_preserve_supply
     (s : TokenState)
     (actions : List TokenAction)
     (hSafe : actions.All (fun a => match a with
       | .mint _ _ _ => False
       | .burn _ _ _ => False
-      | _ => True)) : Prop :=
+      | _ => True)) :
   (applyTokenActions s actions).totalSupply = s.totalSupply
 ```
 
-### E.3 Proof (`test/TokenProof.lean`)
+### E.3 Lemma proofs (`test/TokenLemma.lean`, continued)
+
+Tactic bodies for the lemmas above (abbreviated):
 
 ```lean
-import TokenSpec
-
-theorem transfer_preserves_supply
+lemma transfer_preserves_supply
     (caller to : Address) (amount : UInt256)
     (s s' : TokenState) (ret : Bool)
     (h : transfer caller s to amount = .ok (s', ret)) :
-    TokenSpec.transfer_preserves_supply caller to amount s s' ret h := by
-  simp [TokenSpec.transfer_preserves_supply, transfer] at *
+    s'.totalSupply = s.totalSupply := by
+  simp [transfer] at *
   split_ifs at h with hbal
   · simp at h
   · simp at h; obtain ⟨hs', _⟩ := h; simp [← hs']
 
-theorem transfer_no_overdraft
+lemma transfer_no_overdraft
     (caller to : Address) (amount : UInt256) (s : TokenState)
     (h : transfer caller s to amount = .error .insufficientBalance) :
-    TokenSpec.transfer_no_overdraft caller to amount s h := by
-  simp [TokenSpec.transfer_no_overdraft, transfer] at *
+    s.balances.get caller.val < amount := by
+  simp [transfer] at *
   split_ifs at h with hbal
   · exact hbal
   · simp at h
 
-theorem transfer_self_noop
-    (caller : Caller) (amount : UInt256)
-    (s s' : TokenState) (ret : Bool)
-    (h : transfer caller s caller amount = .ok (s', ret)) :
-    TokenSpec.transfer_self_noop caller amount s s' ret h := by
-  simp [TokenSpec.transfer_self_noop, transfer] at *
-  split_ifs at h with hbal
-  · simp at h
-  · simp at h; obtain ⟨hs', _⟩ := h
-    simp [← hs', Mapping.get_set_same, Mapping.get_set_other]
-    omega
-
-theorem mint_requires_owner
-    (caller : Caller) (s : TokenState) (to : Address) (amount : UInt256)
-    (h : mint caller s to amount = .error .insufficientBalance) :
-    TokenSpec.mint_requires_owner caller s to amount h := by
-  simp [TokenSpec.mint_requires_owner, mint] at *
-  split_ifs at h with hown
-  · left; exact hown
-  · simp at h
-
-theorem mint_increases_supply
-    (caller to : Address) (amount : UInt256)
-    (s s' : TokenState) (ret : Unit)
-    (h : mint caller s to amount = .ok (s', ret)) :
-    TokenSpec.mint_increases_supply caller to amount s s' ret h := by
-  simp [TokenSpec.mint_increases_supply, mint] at *
-  split_ifs at h with hown
-  · simp at h
-  · simp at h; obtain ⟨hs', _⟩ := h; simp [← hs']
-
-theorem constructor_sets_owner
-    (owner : Caller) (name symbol : Bytes[32]) (decimals initialSupply : UInt256)
-    (s' : TokenState)
-    (h : initialize name symbol decimals initialSupply owner = .ok s') :
-    TokenSpec.constructor_sets_owner owner name symbol decimals initialSupply s' h := by
-  simp [TokenSpec.constructor_sets_owner, initialize] at h; rfl
-
-theorem constructor_mints_initial_supply
-    (owner : Caller) (name symbol : Bytes[32]) (decimals initialSupply : UInt256)
-    (s' : TokenState)
-    (h : initialize name symbol decimals initialSupply owner = .ok s') :
-    TokenSpec.constructor_mints_initial_supply owner name symbol decimals initialSupply s' h := by
-  simp [TokenSpec.constructor_mints_initial_supply, initialize, Mapping.get_set_same] at h; rfl
-
--- Sequence invariant: transfer/approve/transferFrom don't change totalSupply.
-theorem non_mint_burn_actions_preserve_supply
-    (s : TokenState) (actions : List TokenAction)
-    (hSafe : actions.All (fun a => match a with
-      | .mint _ _ _ => False | .burn _ _ _ => False | _ => True)) :
-    TokenSpec.non_mint_burn_actions_preserve_supply s actions hSafe := by
-  simp [TokenSpec.non_mint_burn_actions_preserve_supply]
-  induction actions generalizing s with
-  | nil => simp [TokenSpec.applyTokenActions]
-  | cons a rest ih =>
-      simp [List.All] at hSafe
-      obtain ⟨ha, hrest⟩ := hSafe
-      simp [TokenSpec.applyTokenActions, TokenSpec.applyTokenAction]
-      cases a with
-      | transfer caller to amount =>
-          simp at ha
-          simp [transfer]
-          split_ifs with hbal
-          · exact ih s hrest
-          · simp; exact ih _ hrest
-      | transferFrom caller from to amount =>
-          simp at ha
-          simp [transferFrom]
-          split_ifs <;> simp <;> exact ih _ hrest
-      | approve caller spender amount =>
-          simp at ha
-          simp [approve]
-          exact ih _ hrest
-      | mint => simp at ha
-      | burn  => simp at ha
+-- ... remaining lemmas follow the same pattern (see §E.2 signatures)
 ```
 
-### E.4 Compliance manifest (`foundry.toml` excerpt)
+### E.4 Theorem file (`test/TokenTheorem.lean`)
+
+Human-reviewed. One-line delegations per requirement:
+
+```lean
+import Token
+import TokenLemma
+
+/-- transfer preserves total supply. -/
+theorem transfer_preserves_supply
+    (caller to : Address) (amount : UInt256)
+    (s s' : TokenState) (ret : Bool)
+    (h : transfer caller s to amount = .ok (s', ret)) :
+    s'.totalSupply = s.totalSupply :=
+  TokenLemma.transfer_preserves_supply caller to amount s s' ret h
+
+/-- transfer reverts when caller has insufficient balance. -/
+theorem transfer_no_overdraft
+    (caller to : Address) (amount : UInt256) (s : TokenState)
+    (h : transfer caller s to amount = .error .insufficientBalance) :
+    s.balances.get caller.val < amount :=
+  TokenLemma.transfer_no_overdraft caller to amount s h
+
+-- ... homonymous theorem per lemma in §E.2
+```
+
+### E.5 Compliance manifest (`foundry.toml` excerpt)
 
 ```toml
 [lsc.compliance.erc20_mintburn]
-spec = "spec/TokenSpec.lean"
+theorems = "test/TokenTheorem.lean"
 required = [
   "transfer_preserves_supply",
   "transfer_no_overdraft",
@@ -619,18 +565,18 @@ required = [
 ]
 ```
 
-### E.5 What this example demonstrates
+### E.6 What this example demonstrates
 
 | Feature | Where |
 |---------|-------|
 | `Mapping` with `Address` keys | `balances`, `allowances` |
 | Nested `Mapping` | `allowances : Mapping Address (Mapping Address UInt256)` |
 | `Caller` authorization | `mint`, `burn`: revert if `caller.val ≠ s.owner` |
-| `@[lsc.initialize]` | deploy-time `initialize` (§3.6) |
-| Revert spec (`h : f … = .error e`) | `transfer_no_overdraft`, `mint_requires_owner` |
-| Success spec (`h : f … = .ok (s', _)`) | `transfer_moves_tokens`, `mint_increases_supply` |
-| Sequence invariant over `List TokenAction` | `non_mint_burn_actions_preserve_supply` |
-| Compliance manifest | `[lsc.compliance.erc20_mintburn]` |
+| `@[lsc.initialize]` | deploy-time `initialize` (§3.5) |
+| Revert theorem (`h : f … = .error e`) | `transfer_no_overdraft`, `mint_requires_owner` in `*Theorem.lean` |
+| Success theorem (`h : f … = .ok (s', _)`) | `transfer_moves_tokens`, `mint_increases_supply` in `*Theorem.lean` |
+| Sequence invariant over `List TokenAction` | scaffolding + lemma in `*Lemma.lean`; theorem in `*Theorem.lean` |
+| Compliance manifest | `[lsc.compliance.erc20_mintburn]` lists theorem names |
 
 
 ---
@@ -639,17 +585,17 @@ required = [
 
 ## Appendix F — UniV2-Style AMM
 
-This appendix is a complete constant-product AMM with `swap`, `addLiquidity`, and `removeLiquidity`. It demonstrates multi-field state invariants, the `k = x * y` preservation proof, overflow preconditions in specs, and a sequence monotonicity invariant over all three actions.
+This appendix is a complete constant-product AMM with `swap`, `addLiquidity`, and `removeLiquidity`. It demonstrates multi-field state invariants, the `k = x * y` preservation proof, overflow preconditions in theorems, and a sequence monotonicity invariant over all three actions.
 
 ### F.1 Design notes
 
-**`k = reserve0 * reserve1` and overflow:** `UInt256` multiplication can overflow for large reserves. The spec states `k`-preservation under an explicit no-overflow precondition (`reserve0 * reserve1 < 2^256`). This is honest — UniV2 itself relies on practical reserve bounds. The precondition appears in the spec `def` as a hypothesis; proofs discharge it with `omega` when the inputs are bounded.
+**`k = reserve0 * reserve1` and overflow:** `UInt256` multiplication can overflow for large reserves. The theorem states `k`-preservation under an explicit no-overflow precondition (`reserve0 * reserve1 < 2^256`). This is honest — UniV2 itself relies on practical reserve bounds. The precondition appears in the theorem statement as a hypothesis; lemma proofs discharge it with `omega` when the inputs are bounded.
 
 **No-fee swap for `k`-preservation:** The preservation proof uses a no-fee swap. Fees only make `k` larger (proved separately as `k_never_decreases`). The no-fee version is the clean mathematical core.
 
 **LP tokens:** `lpBalances` tracks each address's share. `addLiquidity` mints LP tokens proportional to the liquidity added; `removeLiquidity` burns them and returns the proportional reserves.
 
-**Integer division:** `removeLiquidity` uses integer division for the reserve amounts returned. The spec states `≥` rather than `=` for `k` after removal, because rounding may leave a fractional unit in the pool.
+**Integer division:** `removeLiquidity` uses integer division for the reserve amounts returned. The theorem states `≥` rather than `=` for `k` after removal, because rounding may leave a fractional unit in the pool.
 
 ### F.2 Contract (`src/AMM.lean`)
 
@@ -674,7 +620,7 @@ structure AMMState where
   lpBalances  : Mapping Address UInt256  -- slot 3: LP token balances
 
 -- ── Swap (no fee, constant product) ──────────────────────────────────────────
--- Checked math in do; specs use hOverflow preconditions (e.g. swap_preserves_k).
+-- Checked math in do; theorems use hOverflow preconditions (e.g. swap_preserves_k).
 
 @[lsc.external]
 def swap (s : AMMState) (amountIn : UInt256) : Except AMMError (AMMState × UInt256) :=
@@ -759,7 +705,9 @@ def lpBalance (s : AMMState) (account : Address) : UInt256 :=
   s.lpBalances.get account
 ```
 
-### F.3 Spec (`spec/AMMSpec.lean`)
+### F.3 Lemma (`test/AMMLemma.lean`)
+
+AI-generated. Contains helper `def`s, action-model scaffolding, and `lemma` proofs.
 
 ```lean
 import AMM
@@ -768,102 +716,85 @@ import AMM
 
 def k (s : AMMState) : UInt256 := s.reserve0 * s.reserve1
 
--- ── Swap specs ────────────────────────────────────────────────────────────────
+-- ── Swap lemmas ───────────────────────────────────────────────────────────────
 
-/-- swap reverts on zero input. -/
-def swap_revert_zero_input
+lemma swap_revert_zero_input
     (s : AMMState)
-    (h : swap s 0 = .error .zeroInput) : Prop :=
+    (h : swap s 0 = .error .zeroInput) :
   True   -- always holds; zero input always reverts by construction
 
-/-- swap reverts on uninitialized pool. -/
-def swap_revert_uninitialized
+lemma swap_revert_uninitialized
     (s : AMMState) (amountIn : UInt256)
-    (h : swap s amountIn = .error .uninitializedPool) : Prop :=
+    (h : swap s amountIn = .error .uninitializedPool) :
   s.reserve0 = 0 ∨ s.reserve1 = 0
 
-/-- swap output is positive when it succeeds. -/
-def swap_positive_output
+lemma swap_positive_output
     (s s' : AMMState) (amountIn amountOut : UInt256)
-    (h : swap s amountIn = .ok (s', amountOut)) : Prop :=
+    (h : swap s amountIn = .ok (s', amountOut)) :
   amountOut > 0
 
-/-- Core: swap preserves k (no-fee version, integer arithmetic).
-    reserve0 * reserve1 only grows (floor division leaves dust in pool).
-    Precondition: no overflow on k computation. -/
-def swap_preserves_k
+lemma swap_preserves_k
     (s s' : AMMState) (amountIn amountOut : UInt256)
-    (hOverflow : s.reserve0 * s.reserve1 < 2^256 - s.reserve0)  -- no overflow
-    (h : swap s amountIn = .ok (s', amountOut)) : Prop :=
+    (hOverflow : s.reserve0 * s.reserve1 < 2^256 - s.reserve0)
+    (h : swap s amountIn = .ok (s', amountOut)) :
   k s' ≥ k s
 
-/-- swap increases reserve0 by exactly amountIn. -/
-def swap_increases_reserve0
+lemma swap_increases_reserve0
     (s s' : AMMState) (amountIn amountOut : UInt256)
-    (h : swap s amountIn = .ok (s', amountOut)) : Prop :=
+    (h : swap s amountIn = .ok (s', amountOut)) :
   s'.reserve0 = s.reserve0 + amountIn
 
-/-- swap decreases reserve1 (amountOut leaves the pool). -/
-def swap_decreases_reserve1
+lemma swap_decreases_reserve1
     (s s' : AMMState) (amountIn amountOut : UInt256)
-    (h : swap s amountIn = .ok (s', amountOut)) : Prop :=
+    (h : swap s amountIn = .ok (s', amountOut)) :
   s'.reserve1 = s.reserve1 - amountOut
 
--- ── addLiquidity specs ────────────────────────────────────────────────────────
+-- ── addLiquidity lemmas ────────────────────────────────────────────────────────
 
-/-- addLiquidity reverts on zero amounts. -/
-def addLiquidity_revert_zero
+lemma addLiquidity_revert_zero
     (caller : Caller) (s : AMMState) (amount0 amount1 : UInt256)
-    (h : addLiquidity caller s amount0 amount1 = .error .zeroAmount) : Prop :=
+    (h : addLiquidity caller s amount0 amount1 = .error .zeroAmount) :
   amount0 = 0 ∨ amount1 = 0
 
-/-- addLiquidity increases both reserves (subsequent deposit). -/
-def addLiquidity_increases_reserves
+lemma addLiquidity_increases_reserves
     (caller : Caller) (s s' : AMMState) (amount0 amount1 lpMinted : UInt256)
     (hNotFirst : s.totalLP > 0)
-    (h : addLiquidity caller s amount0 amount1 = .ok (s', lpMinted)) : Prop :=
+    (h : addLiquidity caller s amount0 amount1 = .ok (s', lpMinted)) :
   s'.reserve0 ≥ s.reserve0 ∧ s'.reserve1 ≥ s.reserve1
 
-/-- addLiquidity increases totalLP. -/
-def addLiquidity_increases_totalLP
+lemma addLiquidity_increases_totalLP
     (caller : Caller) (s s' : AMMState) (amount0 amount1 lpMinted : UInt256)
-    (h : addLiquidity caller s amount0 amount1 = .ok (s', lpMinted)) : Prop :=
+    (h : addLiquidity caller s amount0 amount1 = .ok (s', lpMinted)) :
   s'.totalLP ≥ s.totalLP
 
-/-- addLiquidity mints LP to caller. -/
-def addLiquidity_mints_to_caller
+lemma addLiquidity_mints_to_caller
     (caller : Caller) (s s' : AMMState) (amount0 amount1 lpMinted : UInt256)
-    (h : addLiquidity caller s amount0 amount1 = .ok (s', lpMinted)) : Prop :=
+    (h : addLiquidity caller s amount0 amount1 = .ok (s', lpMinted)) :
   s'.lpBalances.get caller.val ≥ s.lpBalances.get caller
 
--- ── removeLiquidity specs ─────────────────────────────────────────────────────
+-- ── removeLiquidity lemmas ─────────────────────────────────────────────────────
 
-/-- removeLiquidity reverts when caller has insufficient LP. -/
-def removeLiquidity_revert_insufficient_lp
+lemma removeLiquidity_revert_insufficient_lp
     (caller : Caller) (s : AMMState) (lpAmount : UInt256)
-    (h : removeLiquidity caller s lpAmount = .error .insufficientLp) : Prop :=
+    (h : removeLiquidity caller s lpAmount = .error .insufficientLp) :
   s.lpBalances.get caller.val < lpAmount
 
-/-- removeLiquidity decreases totalLP by lpAmount. -/
-def removeLiquidity_burns_lp
+lemma removeLiquidity_burns_lp
     (caller : Caller) (s s' : AMMState) (lpAmount amount0Out amount1Out : UInt256)
-    (h : removeLiquidity caller s lpAmount = .ok (s', amount0Out, amount1Out)) : Prop :=
+    (h : removeLiquidity caller s lpAmount = .ok (s', amount0Out, amount1Out)) :
   s'.totalLP = s.totalLP - lpAmount
 
-/-- removeLiquidity decreases caller LP balance by lpAmount. -/
-def removeLiquidity_decreases_caller_lp
+lemma removeLiquidity_decreases_caller_lp
     (caller : Caller) (s s' : AMMState) (lpAmount amount0Out amount1Out : UInt256)
-    (h : removeLiquidity caller s lpAmount = .ok (s', amount0Out, amount1Out)) : Prop :=
+    (h : removeLiquidity caller s lpAmount = .ok (s', amount0Out, amount1Out)) :
   s'.lpBalances.get caller = s.lpBalances.get caller.val - lpAmount
 
-/-- removeLiquidity: k may decrease slightly (integer division rounding)
-    but is bounded below by k - totalLP (worst-case rounding loss). -/
-def removeLiquidity_k_bounded
+lemma removeLiquidity_k_bounded
     (caller : Caller) (s s' : AMMState) (lpAmount amount0Out amount1Out : UInt256)
-    (h : removeLiquidity caller s lpAmount = .ok (s', amount0Out, amount1Out)) : Prop :=
-  k s' ≤ k s  -- k can only decrease on removal (reserves shrink)
+    (h : removeLiquidity caller s lpAmount = .ok (s', amount0Out, amount1Out)) :
+  k s' ≤ k s
 
--- ── Sequence invariant: k never decreases under swap-only sequences ───────────
+-- ── Sequence invariant scaffolding ─────────────────────────────────────────────
 
 inductive AMMAction where
   | swap          (amountIn : UInt256)
@@ -884,31 +815,24 @@ def applyAMMAction (s : AMMState) : AMMAction → AMMState
 def applyAMMActions (s : AMMState) (actions : List AMMAction) : AMMState :=
   actions.foldl applyAMMAction s
 
-/-- k never decreases under any sequence of swaps and addLiquidity calls.
-    Precondition: no removeLiquidity in the sequence (which can decrease k by rounding).
-    Precondition: no overflow (k fits in UInt256 throughout). -/
-def k_never_decreases_swap_add
+lemma k_never_decreases_swap_add
     (s : AMMState)
     (actions : List AMMAction)
     (hNoRemove : actions.All (fun a => match a with
       | .removeLiquidity _ _ => False | _ => True))
-    (hNoOverflow : k s < 2^255) : Prop :=
+    (hNoOverflow : k s < 2^255) :
   k (applyAMMActions s actions) ≥ k s
 ```
 
-### F.4 Proof (`test/AMMProof.lean`)
+### F.4 Lemma proofs (`test/AMMLemma.lean`, continued)
 
 ```lean
-import AMMSpec
-
--- ── Helper lemma: swap step increases k ──────────────────────────────────────
-
-theorem swap_preserves_k
+lemma swap_preserves_k
     (s s' : AMMState) (amountIn amountOut : UInt256)
     (hOverflow : s.reserve0 * s.reserve1 < 2^256 - s.reserve0)
     (h : swap s amountIn = .ok (s', amountOut)) :
-    AMMSpec.swap_preserves_k s s' amountIn amountOut hOverflow h := by
-  simp [AMMSpec.swap_preserves_k, AMMSpec.k, swap] at *
+    k s' ≥ k s := by
+  simp [k, swap] at *
   -- Unfold swap; after split_ifs only the success branch remains
   split_ifs at h with h0 hAmt hDegen
   · simp at h
@@ -924,115 +848,61 @@ theorem swap_preserves_k
     -- Since newR0 > reserve0, the floor rounding keeps k non-decreasing
     omega
 
+lemma swap_increases_reserve0
+    (s s' : AMMState) (amountIn amountOut : UInt256)
+    (h : swap s amountIn = .ok (s', amountOut)) :
+    s'.reserve0 = s.reserve0 + amountIn := by
+  simp [swap] at *
+  split_ifs at h <;> simp_all
+
+-- ... remaining lemma proofs follow the same pattern (see §F.3 signatures)
+```
+
+### F.5 Theorem file (`test/AMMTheorem.lean`)
+
+Human-reviewed. One-line delegations per requirement:
+
+```lean
+import AMM
+import AMMLemma
+
+/-- Core: swap preserves k (no-fee version). -/
+theorem swap_preserves_k
+    (s s' : AMMState) (amountIn amountOut : UInt256)
+    (hOverflow : s.reserve0 * s.reserve1 < 2^256 - s.reserve0)
+    (h : swap s amountIn = .ok (s', amountOut)) :
+    AMMLemma.k s' ≥ AMMLemma.k s :=
+  AMMLemma.swap_preserves_k s s' amountIn amountOut hOverflow h
+
 theorem swap_increases_reserve0
     (s s' : AMMState) (amountIn amountOut : UInt256)
     (h : swap s amountIn = .ok (s', amountOut)) :
-    AMMSpec.swap_increases_reserve0 s s' amountIn amountOut h := by
-  simp [AMMSpec.swap_increases_reserve0, swap] at *
-  split_ifs at h <;> simp_all
+    s'.reserve0 = s.reserve0 + amountIn :=
+  AMMLemma.swap_increases_reserve0 s s' amountIn amountOut h
 
-theorem swap_decreases_reserve1
-    (s s' : AMMState) (amountIn amountOut : UInt256)
-    (h : swap s amountIn = .ok (s', amountOut)) :
-    AMMSpec.swap_decreases_reserve1 s s' amountIn amountOut h := by
-  simp [AMMSpec.swap_decreases_reserve1, swap] at *
-  split_ifs at h <;> simp_all
-
-theorem addLiquidity_increases_reserves
-    (caller : Caller) (s s' : AMMState) (amount0 amount1 lpMinted : UInt256)
-    (hNotFirst : s.totalLP > 0)
-    (h : addLiquidity caller s amount0 amount1 = .ok (s', lpMinted)) :
-    AMMSpec.addLiquidity_increases_reserves caller s s' amount0 amount1 lpMinted hNotFirst h := by
-  simp [AMMSpec.addLiquidity_increases_reserves, addLiquidity] at *
-  split_ifs at h <;> simp_all <;> omega
-
-theorem addLiquidity_increases_totalLP
-    (caller : Caller) (s s' : AMMState) (amount0 amount1 lpMinted : UInt256)
-    (h : addLiquidity caller s amount0 amount1 = .ok (s', lpMinted)) :
-    AMMSpec.addLiquidity_increases_totalLP caller s s' amount0 amount1 lpMinted h := by
-  simp [AMMSpec.addLiquidity_increases_totalLP, addLiquidity] at *
-  split_ifs at h <;> simp_all <;> omega
-
-theorem removeLiquidity_burns_lp
-    (caller : Caller) (s s' : AMMState) (lpAmount amount0Out amount1Out : UInt256)
-    (h : removeLiquidity caller s lpAmount = .ok (s', amount0Out, amount1Out)) :
-    AMMSpec.removeLiquidity_burns_lp caller s s' lpAmount amount0Out amount1Out h := by
-  simp [AMMSpec.removeLiquidity_burns_lp, removeLiquidity] at *
-  split_ifs at h <;> simp_all
-
--- ── Sequence invariant: k never decreases under swap + addLiquidity ───────────
-
-theorem k_never_decreases_swap_add
-    (s : AMMState)
-    (actions : List AMMAction)
-    (hNoRemove : actions.All (fun a => match a with
-      | .removeLiquidity _ _ => False | _ => True))
-    (hNoOverflow : AMMSpec.k s < 2^255) :
-    AMMSpec.k_never_decreases_swap_add s actions hNoRemove hNoOverflow := by
-  simp [AMMSpec.k_never_decreases_swap_add]
-  induction actions generalizing s with
-  | nil => simp [AMMSpec.applyAMMActions]
-  | cons a rest ih =>
-      simp [List.All] at hNoRemove
-      obtain ⟨ha, hrest⟩ := hNoRemove
-      simp [AMMSpec.applyAMMActions, AMMSpec.applyAMMAction]
-      cases a with
-      | swap amountIn =>
-          -- do/← desugaring: simp [swap] unfolds checked .arith and +?
-          simp [swap, swap, UInt256.addChecked]
-          split_ifs with h0 hAmt hDeg
-          · -- swap reverted: state unchanged, k unchanged, apply ih
-            exact le_trans (le_refl _) (ih s hrest hNoOverflow)
-          · exact le_trans (le_refl _) (ih s hrest hNoOverflow)
-          · exact le_trans (le_refl _) (ih s hrest hNoOverflow)
-          · -- swap succeeded: k s' ≥ k s (from swap_preserves_k; use checked*_ok under hNoOverflow)
-            -- then ih: k (applyAMMActions s' rest) ≥ k s'
-            -- combine: k (applyAMMActions s' rest) ≥ k s
-            have hk : AMMSpec.k { s with
-                reserve0 := s.reserve0 + amountIn
-                reserve1 := s.reserve0 * s.reserve1 / (s.reserve0 + amountIn) } ≥
-                AMMSpec.k s := by
-              simp [AMMSpec.k]; omega
-            exact le_trans hk (ih _ hrest (by simp [AMMSpec.k] at *; omega))
-      | addLiquidity caller amount0 amount1 =>
-          simp [addLiquidity, addLiquidity]
-          split_ifs
-          · exact le_trans (le_refl _) (ih s hrest hNoOverflow)
-          · -- first deposit: k goes from 0 to amount0 * amount1
-            simp [AMMSpec.k]
-            exact Nat.zero_le _  -- k was 0 (totalLP = 0 implies reserves = 0)
-          · exact le_trans (le_refl _) (ih s hrest hNoOverflow)
-          · -- subsequent deposit: both reserves increase, k increases
-            have hk : AMMSpec.k { s with
-                reserve0   := s.reserve0 + amount0
-                reserve1   := s.reserve1 + amount1
-                totalLP    := s.totalLP + s.totalLP * amount0 / s.reserve0
-                lpBalances := _ } ≥ AMMSpec.k s := by
-              simp [AMMSpec.k]; nlinarith
-            exact le_trans hk (ih _ hrest (by simp [AMMSpec.k] at *; nlinarith))
-      | removeLiquidity => simp at ha
+-- ... homonymous theorem per lemma in §F.3
 ```
 
-### F.5 What this example demonstrates
+### F.6 What this example demonstrates
 
 | Feature | Where |
 |---------|-------|
 | Multi-field state with invariant | `reserve0`, `reserve1`, `totalLP`, `lpBalances` |
 | `Mapping` for LP balances | `lpBalances : Mapping Address UInt256` |
 | Multi-scalar return | `removeLiquidity` returns `Except AMMError (AMMState × UInt256 × UInt256)` |
-| Overflow precondition in spec | `hOverflow : s.reserve0 * s.reserve1 < 2^256 - s.reserve0` |
+| Overflow precondition in theorem | `hOverflow : s.reserve0 * s.reserve1 < 2^256 - s.reserve0` |
 | Integer division honesty | `k s' ≥ k s` (not `=`) for swap; `k s' ≤ k s` for remove |
-| Named invariant helper | `def k (s : AMMState) : UInt256 := s.reserve0 * s.reserve1` |
+| Named invariant helper | `def k` in `*Lemma.lean` |
 | `nlinarith` for nonlinear arithmetic | `k_never_decreases_swap_add` — `k` is a product, not linear |
 | Sequence invariant with action filter | `hNoRemove` excludes `removeLiquidity` from the monotonicity claim |
 | Mixed revert conditions | `swap`: zero input, uninitialized, degenerate output |
 
-### F.6 Key proof observations
+### F.7 Key proof observations
 
-**Why `≥` and not `=` for `swap_preserves_k`:** Integer division floors `newReserve1 = k / newReserve0`. The true mathematical `k` would require `newReserve1 = k / newReserve0` exactly, but integer division leaves `k mod newReserve0` as dust in the pool. So `newReserve0 * newReserve1 ≥ k` — the pool keeps the rounding error. This is the correct and honest spec.
+**Why `≥` and not `=` for `swap_preserves_k`:** Integer division floors `newReserve1 = k / newReserve0`. The true mathematical `k` would require `newReserve1 = k / newReserve0` exactly, but integer division leaves `k mod newReserve0` as dust in the pool. So `newReserve0 * newReserve1 ≥ k` — the pool keeps the rounding error. This is the correct and honest theorem statement.
 
 **`nlinarith` for the sequence invariant:** `k` is a product of two `UInt256` values, making the invariant nonlinear. `omega` handles only linear arithmetic; `nlinarith` (nonlinear arithmetic) is needed for goals involving products. Both are available in Lean 4's `Mathlib`-derived tactic set.
 
-**Overflow as a spec precondition, not a validator rule:** The overflow bound appears in the spec `def` as `hOverflow`, not as a validator error. This is intentional — the validator cannot know at compile time what the runtime reserve values will be. The spec makes the assumption explicit; Foundry fuzz tests verify it holds for realistic inputs.
+**Overflow as a theorem precondition, not a validator rule:** The overflow bound appears in the theorem statement as `hOverflow`, not as a validator error. This is intentional — the validator cannot know at compile time what the runtime reserve values will be. The theorem makes the assumption explicit; Foundry fuzz tests verify it holds for realistic inputs.
 
-**`removeLiquidity` and `k`:** Removal proportionally reduces both reserves, so `k` decreases. The sequence invariant therefore excludes `removeLiquidity` via `hNoRemove`. A more complete spec could prove `k_after_remove ≥ k_before - totalLP` (bounded loss), but that requires more careful arithmetic and is left as an exercise.
+**`removeLiquidity` and `k`:** Removal proportionally reduces both reserves, so `k` decreases. The sequence invariant therefore excludes `removeLiquidity` via `hNoRemove`. A more complete theorem could prove `k_after_remove ≥ k_before - totalLP` (bounded loss), but that requires more careful arithmetic and is left as an exercise.

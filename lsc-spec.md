@@ -19,7 +19,7 @@ This restriction is intentional. Lean's kernel checks proofs about pure function
 
 **What you can deploy:** persistent storage and mappings, events/logs, standard ABIs (ERC-20 `bool` returns, etc.), ETH transfers, cross-contract calls, revert semantics, full EVM bytecode.
 
-**What is restricted in author code:** stateful monads (`StateM`, `IO`), higher-order functions, closures, unbounded collections in state, `Nat`/`Int`/`String`, `structure … extends`, unbounded recursion, manual storage IO. `do`-notation over `Except E` is allowed for fallible exports. See §13 for the full validator error table.
+**What is restricted in author code:** stateful monads (`StateM`, `IO`), higher-order functions, closures, unbounded collections in state, `Nat`/`Int`/`String`, `structure … extends`, unbounded recursion, manual storage IO. `do`-notation over `Except E` is allowed for fallible exports. See §12 for the full validator error table.
 
 ### §1.2 What the compiler generates vs what authors write
 
@@ -32,19 +32,19 @@ Authors write pure functions. The compiler generates everything else at `@[Lsc.e
 | `Lsc.Event.log (TransferEvent.mk from to amount)` in function body | `LOG2` opcode after store, with correct topic0 and ABI-encoded data |
 | `callvalue : CallValue` parameter | bound to `msg.value`; marks function payable; validator error if missing on ETH-receiving path (§5.4) |
 
-Proofs target the author-written functions directly — the same signatures that get deployed. The lowering pipeline is formally verified in Lean (§14.3).
+Proofs target the author-written functions directly — the same signatures that get deployed. The lowering pipeline is formally verified in Lean (§13.3).
 
-### §1.3 The three files
+### §1.3 The three modules
 
-Every LSC project produces three module kinds per contract:
+Every LSC project produces three module kinds per contract. There is no `spec/` directory.
 
 | File | Role | Kernel-checked |
 |------|------|---------------|
 | `src/Counter.lean` | Contract — `State` struct + `@[Lsc.external]` functions | Yes (types) |
-| `spec/CounterSpec.lean` | Spec — `def` declarations of type `Prop` | Yes (well-formedness) |
-| `test/CounterProof.lean` | Proof — `theorem` proofs of each spec `def` | Yes (full proof check) |
+| `test/CounterLemma.lean` | Lemma — action model scaffolding + `lemma` proofs | Yes (full proof check) |
+| `test/CounterTheorem.lean` | Theorem — high-level requirements, one-line lemma delegations | Yes (full proof check) |
 
-The **contract** is what deploys. The **spec** is the requirements document — written and reviewed by humans, containing only `Prop` definitions, no proof terms. The **proof** is generated (typically by an LLM) and checked by the Lean kernel; it never needs human review because the kernel guarantees correctness when it compiles without `sorry`.
+The **contract** is what deploys. The **theorem** file is the requirements document — written and reviewed by humans. Each `theorem` states a readable business property inline and delegates to a homonymous `lemma` in exactly one line. The **lemma** file is AI-generated and holds scaffolding (`CounterAction`, `applyAction`, `applyActions`) plus all tactic proofs; humans do not review it. The Lean kernel checks both files.
 
 **End-to-end Counter example:**
 
@@ -64,7 +64,35 @@ def increment (s : CounterState) : Except ArithError CounterState :=
   return .ok { s with number := n }
 ```
 
-`spec/CounterSpec.lean`:
+`test/CounterTheorem.lean`:
+```lean
+import Counter
+import CounterLemma
+
+/-- On success, increment increases number by exactly 1. -/
+theorem increment_increases_number (s s' : CounterState) (h : increment s = .ok s') :
+    s'.number = s.number + 1 :=
+  CounterLemma.increment_increases_number s s' h
+
+/-- increment errors iff number is at UInt256 max. -/
+theorem increment_overflows_iff (s : CounterState) (h : increment s = .error .overflow) :
+    s.number = UInt256.max :=
+  CounterLemma.increment_overflows_iff s h
+
+/-- No sequence of actions can decrease the number. -/
+theorem number_never_decreases (s : CounterState) (actions : List CounterLemma.CounterAction) :
+    (CounterLemma.applyActions s actions).number ≥ s.number :=
+  CounterLemma.number_never_decreases s actions
+```
+
+```mermaid
+flowchart LR
+  Contract[Counter.lean] --> Lemma[CounterLemma.lean]
+  Lemma --> Theorem[CounterTheorem.lean]
+  Theorem --> Kernel[Lean kernel ✓]
+```
+
+`test/CounterLemma.lean`:
 ```lean
 import Counter
 
@@ -80,55 +108,20 @@ def applyAction (s : CounterState) : CounterAction → CounterState
 def applyActions (s : CounterState) (actions : List CounterAction) : CounterState :=
   actions.foldl applyAction s
 
-/-- On success, increment increases number by exactly 1. -/
-def increment_increases_number
-    (s s' : CounterState)
-    (h : increment s = .ok s') : Prop :=
-  s'.number = s.number + 1
+lemma increment_increases_number (s s' : CounterState) (h : increment s = .ok s') :
+    s'.number = s.number + 1 := by
+  simp [increment] at h ⊢; omega
 
-/-- increment errors iff number is at UInt256 max. -/
-def increment_overflows_iff
-    (s : CounterState)
-    (h : increment s = .error .overflow) : Prop :=
-  s.number = UInt256.max
+lemma increment_overflows_iff (s : CounterState) (h : increment s = .error .overflow) :
+    s.number = UInt256.max := by
+  simp [increment, UInt256.addChecked_none_of_ge (by omega), Option.orWrap_none] at h; omega
 
-/-- No sequence of actions can decrease the number. -/
-def number_never_decreases
-    (s : CounterState) (actions : List CounterAction) : Prop :=
-  (applyActions s actions).number ≥ s.number
-```
-
-`test/CounterProof.lean`:
-```lean
-import CounterSpec
-
-theorem increment_increases_number
-    (s s' : CounterState)
-    (h : increment s = .ok s') :
-    CounterSpec.increment_increases_number s s' h := by
-  simp [CounterSpec.increment_increases_number, increment] at h ⊢; omega
-
-theorem increment_overflows_iff
-    (s : CounterState)
-    (h : increment s = .error .overflow) :
-    CounterSpec.increment_overflows_iff s h := by
-  simp [CounterSpec.increment_overflows_iff, increment,
-        UInt256.addChecked_none_of_ge (by omega), Option.orWrap_none] at h; omega
-
-theorem number_never_decreases
-    (s : CounterState) (actions : List CounterAction) :
-    CounterSpec.number_never_decreases s actions := by
-  simp only [CounterSpec.number_never_decreases, CounterSpec.applyActions]
-  apply Lsc.Invariant CounterSpec.applyAction (fun s' => s'.number ≥ s.number)
-  · intro s' a hP; cases a <;> simp [CounterSpec.applyAction, increment] at hP ⊢ <;> omega
+lemma number_never_decreases (s : CounterState) (actions : List CounterAction) :
+    (applyActions s actions).number ≥ s.number := by
+  simp only [applyActions]
+  apply Lsc.Invariant applyAction (fun s' => s'.number ≥ s.number)
+  · intro s' a hP; cases a <;> simp [applyAction, increment] at hP ⊢ <;> omega
   · simp
-```
-
-```mermaid
-flowchart LR
-  Contract[Counter.lean] --> Spec[CounterSpec.lean]
-  Spec --> Proof[CounterProof.lean]
-  Proof --> Kernel[Lean kernel ✓]
 ```
 
 ### §1.4 Non-goals (v1)
@@ -161,7 +154,7 @@ For `lakefile.lean` layout, see [lsc-toolchain.md §2](lsc-toolchain.md#2-projec
 
 #### Arithmetic semantics
 
-`UInt256 = Fin (2^256)` throughout. `+ - * /` mean modular arithmetic in **all contexts** — contract, spec, and proof files.
+`UInt256 = Fin (2^256)` throughout. `+ - * /` mean modular arithmetic in **all contexts** — contract, lemma, and theorem files.
 
 Two modes:
 
@@ -435,7 +428,7 @@ Fields occupy slots 0, 1, 2, … in declaration order. `Mapping` fields occupy o
 | Term | Meaning | Who uses it |
 |------|---------|-------------|
 | `store` | Functional update: `Mapping.store`, record `{ s with field := v }` | Contract authors |
-| `State` | Full contract snapshot threaded through `@[Lsc.external]` functions | Authors and spec theorems |
+| `State` | Full contract snapshot threaded through `@[Lsc.external]` functions | Authors and theorem files |
 | `sstore` | Persist snapshot to chain via EVM `SSTORE` | **Emitter only** |
 
 Authors never call `sstore`. Theorems quantify over complete `s` and `s'`.
@@ -708,8 +701,9 @@ def fallback (s : VaultState) : Except VaultError VaultState :=
 ```lean
 theorem deposit_increases_balance
     (caller : Caller) (callvalue : CallValue) (s s' : VaultState)
-    (h : deposit caller callvalue s = .ok s') : Prop :=
-  s'.balances.load caller = s.balances.load caller + callvalue
+    (h : deposit caller callvalue s = .ok s') :
+    s'.balances.load caller = s.balances.load caller + callvalue :=
+  VaultLemma.deposit_increases_balance caller callvalue s s' h
 ```
 
 ---
@@ -746,9 +740,9 @@ Emit ordering: **load → call author function → on `.ok` → sstore → LOG(s
 
 ### §6.3 Proof erasure
 
-`Lsc.Event.log` is proof-erased: it is definitionally equal to the identity in the Lean kernel. Spec theorems quantify only over `Except` returns — log calls do not appear in proofs.
+`Lsc.Event.log` is proof-erased: it is definitionally equal to the identity in the Lean kernel. Theorems quantify only over `Except` returns — log calls do not appear in proofs.
 
-Log correctness (correct `topic0`, encoding, ordering) is covered by the formally-verified lowering pipeline (§14.3).
+Log correctness (correct `topic0`, encoding, ordering) is covered by the formally-verified lowering pipeline (§13.3).
 
 > **Why proof erasure?** Returning log lists from functions would pollute every theorem with list destructions the spec doesn't care about. Log *correctness* belongs in the verified emitter, not in Lean proofs.
 
@@ -760,7 +754,7 @@ Log correctness (correct `topic0`, encoding, ordering) is covered by the formall
 
 ## §7 Revert
 
-Covered by §4.4 (EVM behavior table) and §9.3 (error spec patterns). In brief:
+Covered by §4.4 (EVM behavior table) and §9.4 (requirements checklist). In brief:
 
 - `.error e` → `REVERT` with `abi.encode(e)`; no storage commit; no events.
 - Error specs use `(h : f ... = .error .Variant)` as the hypothesis and prove the condition under which that error fires.
@@ -799,12 +793,12 @@ Interface typeclasses live in `Lsc.Interfaces` or project `interfaces/*.lean`.
 
 | Callee kind | Resolution | Proof strength |
 |-------------|-----------|----------------|
-| **Registered** | Same repo `src/*.lean` + address table | Compose callee spec theorems via `simulate_call` (§11.5) |
-| **Assumed** | `@[extern_assume "IERC20"]` + axioms in `spec/` | Trust interface axioms (human-reviewed) |
+| **Registered** | Same repo `src/*.lean` + address table | Compose callee theorems via `simulate_call` (§10.3) |
+| **Assumed** | `@[extern_assume "IERC20"]` + axioms in `test/*Lemma.lean` | Trust interface axioms (human-reviewed) |
 
 ### §8.4 Reentrancy
 
-`@[Lsc.external]` functions are non-reentrant by default (§4.1). `@[Lsc.allow_reentrant]` opts out. Proofs of re-entrant exports must use Layer 2 helpers (§11).
+`@[Lsc.external]` functions are non-reentrant by default (§4.1). `@[Lsc.allow_reentrant]` opts out. Proofs of re-entrant exports must use Layer 2 helpers (§10).
 
 ---
 
@@ -812,11 +806,19 @@ Interface typeclasses live in `Lsc.Interfaces` or project `interfaces/*.lean`.
 
 ---
 
-## §9 Spec Files
+## §9 Proof Files
 
-### §9.1 Format
+Each contract has two proof modules in `test/`: `*Lemma.lean` (AI-generated) and `*Theorem.lean` (human-reviewed requirements).
 
-`spec/<Contract>Spec.lean` contains **only** `def` declarations with return type `Prop`. No proof terms. No tactics. This is the requirements document — written and reviewed by humans.
+### §9.1 Lemma files (`test/*Lemma.lean`)
+
+Lemma files are **AI-generated**. Humans do not review them. They import the contract module and contain:
+
+- **Action model scaffolding** for sequence invariants (`inductive Action`, `applyAction`, `applyActions`)
+- **Helper `def`s** used by proofs
+- **`lemma` proofs** with full tactic bodies
+
+No `sorry`. Kernel-checked.
 
 ```lean
 import Counter
@@ -829,21 +831,26 @@ def applyAction (s : CounterState) : CounterAction → CounterState
 def applyActions (s : CounterState) (actions : List CounterAction) : CounterState :=
   actions.foldl applyAction s
 
-def increment_increases_number (s s' : CounterState) (h : increment s = .ok s') : Prop :=
-  s'.number = s.number + 1
+lemma increment_increases_number (s s' : CounterState) (h : increment s = .ok s') :
+    s'.number = s.number + 1 := by
+  simp [increment] at h ⊢; omega
 
-def number_never_decreases (s : CounterState) (actions : List CounterAction) : Prop :=
-  (applyActions s actions).number ≥ s.number
+lemma number_never_decreases (s : CounterState) (actions : List CounterAction) :
+    (applyActions s actions).number ≥ s.number := by
+  simp only [applyActions]
+  apply Lsc.Invariant applyAction (fun s' => s'.number ≥ s.number)
+  · intro s' a hP; cases a <;> simp [applyAction, increment] at hP ⊢ <;> omega
+  · simp
 ```
 
 #### Sequence invariants and `Lsc.Invariant`
 
-For properties that must hold across any sequence of actions, define:
+For properties that must hold across any sequence of actions, define in `*Lemma.lean`:
 1. `inductive Action` — one variant per exported mutator.
 2. `def applyAction (s : S) : Action → S` — run one action; on `.error`, return `s` unchanged.
 3. `def applyActions := actions.foldl applyAction`.
 
-Then prove using `Lsc.Invariant`:
+Then prove the corresponding `lemma` using `Lsc.Invariant`:
 
 ```lean
 -- Lsc.Prelude
@@ -858,82 +865,70 @@ theorem Lsc.Invariant
 
 **When to use direct `induction` instead:** when the property relates initial to final state in a way that depends on the full history (e.g. "total tokens transferred equals sum of individual transfers").
 
-### §9.2 Naming convention
+`axiom` is allowed in `*Lemma.lean` for `@[extern_assume]` interface assumptions (§8.3).
 
-- `{function}_{property}` for single-call specs: `increment_increases_number`, `transfer_no_overdraft`
-- `{subject}_{invariant}` for sequence specs: `number_never_decreases`, `constant_product_nondecreasing`
+### §9.2 Theorem files (`test/*Theorem.lean`)
 
-The proof file uses the **same name** for each proving `theorem`.
+Theorem files are the **requirements document** — written and reviewed by humans. Each `theorem`:
 
-### §9.3 Spec checklist
+- States a readable business property **inline** in its type (not via a separate spec module)
+- Carries a docstring describing the requirement
+- Delegates to a homonymous `lemma` in **exactly one line**
 
-Every mutating export should have at minimum:
-1. A **success property** — `(h : f … s = .ok s')` — what holds after the call
-2. A **revert property** — `(h : f … = .error e)` — what inputs cause each revert
-
-Contracts with global invariants additionally need a **sequence spec**: `Action`, `applyAction`, `applyActions`, and a `def` over `applyActions`.
-
-### §9.4 Validator rules for spec files
-
-| Construct | Error |
-|-----------|-------|
-| `theorem` or `lemma` | `lsc: use def … : Prop; put proofs in *Proof.lean` |
-| `sorry` | `lsc: sorry not allowed in spec modules` |
-| `by` tactic proof | `lsc: spec modules must not contain proof terms` |
-| `def` not returning `Prop` | `lsc: spec definition must return Prop` |
-
-`axiom` is allowed for `@[extern_assume]` interface assumptions (§8.3).
-
----
-
-## §10 Proof Files
-
-### §10.1 Format
-
-`test/<Contract>Proof.lean` contains `theorem` proofs of each spec `Prop`. No `sorry`.
+No `sorry`. This is the CI `PASS`/`FAIL` enumeration surface.
 
 ```lean
-import CounterSpec
+import Counter
+import CounterLemma
 
+/-- On success, increment increases number by exactly 1. -/
 theorem increment_increases_number (s s' : CounterState) (h : increment s = .ok s') :
-    CounterSpec.increment_increases_number s s' h := by
-  simp [CounterSpec.increment_increases_number, increment] at h ⊢; omega
+    s'.number = s.number + 1 :=
+  CounterLemma.increment_increases_number s s' h
 
-theorem number_never_decreases (s : CounterState) (actions : List CounterAction) :
-    CounterSpec.number_never_decreases s actions := by
-  simp only [CounterSpec.number_never_decreases, CounterSpec.applyActions]
-  apply Lsc.Invariant CounterSpec.applyAction (fun s' => s'.number ≥ s.number)
-  · intro s' a hP; cases a <;> simp [CounterSpec.applyAction, increment] at hP ⊢ <;> omega
-  · simp
+/-- No sequence of actions can decrease the number. -/
+theorem number_never_decreases (s : CounterState) (actions : List CounterLemma.CounterAction) :
+    (CounterLemma.applyActions s actions).number ≥ s.number :=
+  CounterLemma.number_never_decreases s actions
 ```
 
-Each `theorem`:
-- Has the **same name** as the spec `def`
-- Takes the **same arguments**
-- Concludes with `ContractSpec.<name> args` applied to those arguments
+### §9.3 Naming convention
 
-### §10.2 Proof authorship
+- `{function}_{property}` for single-call properties: `increment_increases_number`, `transfer_no_overdraft`
+- `{subject}_{invariant}` for sequence invariants: `number_never_decreases`, `constant_product_nondecreasing`
 
-Proofs are generated externally (typically by an LLM) and checked by the Lean kernel. **The kernel is the arbiter.** Authors do not need to read proof bodies.
+Each name appears as a homonymous `lemma` / `theorem` pair.
 
-### §10.3 Enforcement rules
+### §9.4 Requirements checklist
+
+Every mutating export should have at minimum in `*Theorem.lean`:
+1. A **success theorem** — `(h : f … s = .ok s')` — what holds after the call
+2. A **revert theorem** — `(h : f … = .error e)` — what inputs cause each revert
+
+Contracts with global invariants additionally need an action model in `*Lemma.lean` (`Action`, `applyAction`, `applyActions`) plus an invariant theorem in `*Theorem.lean`.
+
+### §9.5 Proof authorship
+
+AI writes `*Lemma.lean` (scaffolding + tactic proofs). Humans craft `*Theorem.lean` (theorem statements + one-line delegations). The Lean kernel is the arbiter for both.
+
+### §9.6 Enforcement rules
 
 | Condition | Result |
 |-----------|--------|
-| `sorry` in proof file | FAIL |
-| `theorem` or `sorry` in spec file | FAIL |
-| Lean type error in proof | FAIL |
-| Spec `def` present but no matching `theorem` | FAIL |
-| `theorem` conclusion does not match spec `def` | FAIL |
-| `theorem` not naming any spec `def` | warning (helper lemma) |
+| `sorry` in lemma or theorem file | FAIL |
+| Lean type error in lemma or theorem file | FAIL |
+| Required theorem missing from `*Theorem.lean` | FAIL |
+| Theorem body is not a single lemma delegation | error |
+| `theorem` with no homonymous `lemma` | FAIL (typecheck) |
+| `lemma` with no matching `theorem` | warning (helper lemma) |
 
 ---
 
-## §11 Proof Helpers
+## §10 Proof Helpers
 
-### §11.1 Layer 1 — Pure (default)
+### §10.1 Layer 1 — Pure (default)
 
-Theorems proved directly over `@[Lsc.external]` functions using `simp`, `omega`, and `Mapping` lemmas. This is the default layer. Most contracts never leave Layer 1.
+Lemmas proved directly over `@[Lsc.external]` functions using `simp`, `omega`, and `Mapping` lemmas. This is the default layer. Most contracts never leave Layer 1.
 
 #### `Except` discriminators
 
@@ -957,8 +952,8 @@ Theorems proved directly over `@[Lsc.external]` functions using `simp`, `omega`,
 ```lean
 -- simp [f] to unfold; obtain ⟨mid, hmid, hrest⟩ := Except.bind_ok h to extract intermediate
 -- state; simp [Mapping.load_store_same] + omega to close
-theorem transferFrom_decrements_allowance ... := by
-  simp [ERC20Spec.transferFrom_decrements_allowance, transferFrom] at h ⊢
+lemma transferFrom_decrements_allowance ... := by
+  simp [transferFrom] at h ⊢
   obtain ⟨bal, hbal, hrest⟩ := Except.bind_ok h
   obtain ⟨alw, halw, hfinal⟩ := Except.bind_ok hrest
   simp [Mapping.load_store_same, Mapping.load_store_other,
@@ -969,17 +964,17 @@ theorem transferFrom_decrements_allowance ... := by
 **Proof recipe for revert conditions with `split_ifs`:**
 
 ```lean
-theorem transfer_no_overdraft ... := by
-  simp [ERC20Spec.transfer_no_overdraft, transfer] at h
+lemma transfer_no_overdraft ... := by
+  simp [transfer] at h
   -- require desugars to if; split_ifs names the branches
   split_ifs at h with hguard
   · omega   -- hguard : ¬(balance ≥ amount) gives balance < amount directly
   · simp [UInt256.subChecked_some (by omega)] at h  -- contradiction: this branch can't error here
 ```
 
-### §11.2 Layer 2 — Wrapped (export bridge)
+### §10.2 Layer 2 — Wrapped (export bridge)
 
-Used when a spec must reason about compiler-generated export wrappers or ABI `Bool` returns. Most contracts do not need this layer.
+Used when a lemma must reason about compiler-generated export wrappers or ABI `Bool` returns. Most contracts do not need this layer.
 
 ```lean
 -- Strip event log lists from compiler-generated export
@@ -989,24 +984,24 @@ theorem Lsc.lift_logs {S α E : Type} ...
 theorem Lsc.lift_no_extern ...
 ```
 
-### §11.3 Layer 3 — Composed (cross-contract, v2b)
+### §10.3 Layer 3 — Composed (cross-contract, v2b)
 
-> **TODO v2b:** `simulate_call` threads `World` through callees and composes callee spec theorems with caller spec theorems.
+> **TODO v2b:** `simulate_call` threads `World` through callees and composes callee theorems with caller theorems.
 
-### §11.4 Tactics
+### §10.4 Tactics
 
 **`export_cases`** — destructs `Except E (Ret × List LogEntry)` for Layer 2 goals.
 **`erc_cases`** — destructs `Except E (S × Bool)`.
 
 ---
 
-## §12 Compliance Manifests
+## §11 Compliance Manifests
 
-### §12.1 Opt-in theorem requirements
+### §11.1 Opt-in theorem requirements
 
 ```toml
 [lsc.compliance.erc20]
-spec = "spec/ERC20Spec.lean"
+theorems = "test/ERC20Theorem.lean"
 required = [
   "transfer_preserves_total_supply",
   "transfer_no_overdraft",
@@ -1023,14 +1018,16 @@ required = [
 
 Compliance is always opt-in. The default proof runner imposes no application requirements.
 
-### §12.2 Proof runner verification
+### §11.2 Proof runner verification
 
 For each listed name the runner checks:
-1. A `def <name> … : Prop` exists in the spec file.
-2. A `theorem <name>` exists in the corresponding `*Proof.lean`.
-3. The theorem's conclusion is **exactly** the spec `def` applied to the same arguments — enforced by the Lean type system.
+1. A `theorem <name>` exists in the corresponding `*Theorem.lean`.
+2. The theorem body is a one-line `*Lemma.<name>` delegation.
+3. A homonymous `lemma <name>` typechecks in `*Lemma.lean` (implicit).
 
-### §12.3 ERC-20 required theorems
+CI reports `PASS`/`FAIL` per **theorem** name only.
+
+### §11.3 ERC-20 required theorems
 
 | Group | Theorem | Statement summary |
 |-------|---------|------------------|
@@ -1053,11 +1050,11 @@ For each listed name the runner checks:
 
 ---
 
-## §13 Validator
+## §12 Validator
 
-Runs as a post-elaboration pass over contract and spec modules. All messages use prefix `lsc:` with file, line, and column. **Hard errors** abort compilation. **Warnings** are reported but do not abort.
+Runs as a post-elaboration pass over contract, lemma, and theorem modules. All messages use prefix `lsc:` with file, line, and column. **Hard errors** abort compilation. **Warnings** are reported but do not abort.
 
-### §13.1 Contract module errors
+### §12.1 Contract module errors
 
 | Construct | Severity | Error message |
 |-----------|----------|--------------|
@@ -1093,21 +1090,27 @@ Runs as a post-elaboration pass over contract and spec modules. All messages use
 | `Address` named caller/sender/from/owner without `Caller` type | warning | `lsc: use Caller type to exclude from ABI and bind to msg.sender` |
 | `Bytes[0]` field | warning | `lsc: field can never hold data` |
 
-### §13.2 Spec module errors
+### §12.2 Lemma module errors (`test/*Lemma.lean`)
 
 | Construct | Severity | Error message |
 |-----------|----------|--------------|
-| `theorem` or `lemma` | error | `lsc: use def … : Prop; put proofs in *Proof.lean` |
-| `sorry` | error | `lsc: sorry not allowed in spec modules` |
-| `by` tactic proof | error | `lsc: spec modules must not contain proof terms` |
-| `def` not returning `Prop` | error | `lsc: spec definition must return Prop` |
-| Missing proof for listed spec `def` | error | `lsc: spec defines "f" but no matching theorem in *Proof.lean` |
+| `theorem` (non-helper) | error | `lsc: use lemma in *Lemma.lean; put requirements in *Theorem.lean` |
+| `sorry` | error | `lsc: sorry not allowed in lemma modules` |
+
+### §12.3 Theorem module errors (`test/*Theorem.lean`)
+
+| Construct | Severity | Error message |
+|-----------|----------|--------------|
+| `sorry` | error | `lsc: sorry not allowed in theorem modules` |
+| Theorem body is not a single lemma delegation | error | `lsc: theorem body must be a one-line *Lemma delegation` |
+| Missing required theorem | error | `lsc: compliance requires "f" but no theorem in *Theorem.lean` |
+| `lemma` | error | `lsc: put proofs in *Lemma.lean` |
 
 ---
 
-## §14 Compiler-Generated Code
+## §13 Compiler-Generated Code
 
-### §14.1 What the emitter produces
+### §13.1 What the emitter produces
 
 At each `@[Lsc.external]` boundary, the emitter generates:
 
@@ -1124,7 +1127,7 @@ At each `@[Lsc.external]` boundary, the emitter generates:
 
 For `@[Lsc.public]`-generated getters and all view exports: step 7 performs a lazy load of only the accessed slot(s); step 10 is skipped.
 
-### §14.2 Auto load/store invariant
+### §13.2 Auto load/store invariant
 
 Any emitter optimization (lazy view loads, diff stores) must produce observable behavior identical to:
 
@@ -1134,9 +1137,9 @@ load all fields → call author function → store all fields (on `.ok`)
 
 This invariant bridges Lean proofs (pure functions on `State` snapshots) and EVM bytecode (individual slot reads/writes).
 
-### §14.3 Formal verification of the lowering pipeline
+### §13.3 Formal verification of the lowering pipeline
 
-The Lean IR → Yul emitter is implemented in Lean 4 and **formally verified**: the emitter is proved correct with respect to the auto load/store invariant (§14.2). This includes:
+The Lean IR → Yul emitter is implemented in Lean 4 and **formally verified**: the emitter is proved correct with respect to the auto load/store invariant (§13.2). This includes:
 
 | Component | Verification status |
 |-----------|-------------------|
@@ -1148,6 +1151,6 @@ The Lean IR → Yul emitter is implemented in Lean 4 and **formally verified**: 
 
 Foundry fuzz tests (`deployCode` + property assertions) serve as an additional independent check. The emitter correctness proof and test suite are part of the LSC distribution.
 
-### §14.4 Gas (non-goal in v1)
+### §13.4 Gas (non-goal in v1)
 
 Gas estimation, optimization, and EIP-150 gas forwarding rules for `CALL` are outside the v1 proof scope. Gas is fully delegated to the emitter and testable via Foundry.
