@@ -57,7 +57,7 @@ def transfer (caller : Caller) (s : ERC20State) (to : Address) (amount : UInt256
   let newCaller ← s.balances.get caller.val -? amount
   let newTo     ← s.balances.get to +? amount
   let s' := { s with balances := s.balances.set caller.val newCaller |>.set to newTo }
-  Lsc.Event.log (TransferEvent.mk caller.val to amount)
+  emit! TransferEvent caller.val to amount
   return .ok (s', true)
 
 @[lsc.external]
@@ -65,7 +65,7 @@ def approve (caller : Caller) (s : ERC20State) (spender : Address) (amount : UIn
     : Except TokenError (ERC20State × Bool) :=
   let s' := { s with allowances :=
     s.allowances.set caller.val (s.allowances.get caller.val |>.set spender amount) }
-  Lsc.Event.log (ApprovalEvent.mk caller.val spender amount)
+  emit! ApprovalEvent caller.val spender amount
   .ok (s', true)
 ```
 
@@ -288,7 +288,7 @@ def transfer (caller : Caller) (s : TokenState) (to : Address) (amount : UInt256
   let newCaller ← s.balances.get caller.val -? amount
   let newTo     ← s.balances.get to +? amount
   let s' := { s with balances := s.balances.set caller.val newCaller |>.set to newTo }
-  Lsc.Event.log (TransferEvent.mk caller.val to amount)
+  emit! TransferEvent caller.val to amount
   return .ok (s', true)
 
 -- Approve
@@ -299,7 +299,7 @@ def approve
     (spender : Address) (amount : UInt256) : Except TokenError (TokenState × Bool) :=
   let s' := { s with allowances :=
     s.allowances.set caller.val (s.allowances.get caller.val |>.set spender amount) }
-  Lsc.Event.log (ApprovalEvent.mk caller.val spender amount)
+  emit! ApprovalEvent caller.val spender amount
   .ok (s', true)
 
 -- TransferFrom
@@ -316,7 +316,7 @@ def transferFrom (caller : Caller) (s : TokenState) (from to : Address) (amount 
   let s' := { s with
     balances   := s.balances.set from newFrom |>.set to newTo
     allowances := s.allowances.set from (s.allowances.get from |>.set caller.val newAllowance) }
-  Lsc.Event.log (TransferEvent.mk from to amount)
+  emit! TransferEvent from to amount
   return .ok (s', true)
 
 -- Mint (owner only)
@@ -328,7 +328,7 @@ def mint (caller : Caller) (s : TokenState) (to : Address) (amount : UInt256)
   let newSupply ← s.totalSupply +? amount
   let newBal    ← s.balances.get to +? amount
   let s' := { s with totalSupply := newSupply, balances := s.balances.set to newBal }
-  Lsc.Event.log (TransferEvent.mk { val := 0 } to amount)
+  emit! TransferEvent { val := 0 } to amount
   return .ok s'
 
 -- Burn (owner only)
@@ -341,7 +341,7 @@ def burn (caller : Caller) (s : TokenState) (from : Address) (amount : UInt256)
   let newSupply ← s.totalSupply -? amount
   let newBal    ← s.balances.get from -? amount
   let s' := { s with totalSupply := newSupply, balances := s.balances.set from newBal }
-  Lsc.Event.log (TransferEvent.mk from { val := 0 } amount)
+  emit! TransferEvent from { val := 0 } amount
   return .ok s'
 
 -- Views (IERC-20 names differ from field names → manual exports)

@@ -24,7 +24,7 @@ Distribution mirrors **native Foundry Vyper support** (`foundry-compilers` integ
 | `@[lsc.external]` | `@[evm_external]` (attribute name not yet migrated) |
 | `Lsc.Std` / `Lsc.Prelude` | `ForgeLean` package (`ForgeLean.Prelude`, …) |
 | `Lsc.extern` | `ForgeLean.extern` |
-| `Lsc.Event.log` | `EVM.log` |
+| `emit!` / `Lsc.Event.log` | `EVM.log` |
 | `[lsc.contracts]` | `[lean.contracts]` in `foundry.toml` |
 | `[lsc.compliance.*]` | `[lean.compliance.*]` |
 | `[lsc]` profile keys | `[lean]` in `foundry.toml` |
@@ -138,7 +138,7 @@ src/Counter.lean
 | `match opt with | none => ... | some x => ...` | tag switch                                   |
 | `Mapping.get/set`                              | `sload`/`sstore` via `storageKey`            |
 | `Bytes[N]` read/write                          | Solidity-compatible bounded byte array ops   |
-| Author `@[lsc.external]` return `.error e` / `.ok val` | `revert(abi.encode(e))` / persist + `Lsc.Event.log` LOGs + ABI return |
+| Author `@[lsc.external]` return `.error e` / `.ok val` | `revert(abi.encode(e))` / persist + `emit!` LOGs + ABI return |
 | Generated export `.error e`                    | `revert(abi.encode(e))` before any store     |
 | Generated export `.ok (val, logs)`             | persist state, `LOG` per entry, return `ret` |
 | `Lsc.extern.staticcall` (v2b+)           | `staticcall` + ABI decode; no self `sstore`    |
@@ -328,15 +328,15 @@ All messages are prefixed with `lsc:` and include file, line, and column.
 | `EvmContext` in author contract code | `lsc: use Caller for msg.sender; EvmContext is compiler-generated only`   |
 | Multiple `Caller` on one export    | `lsc: at most one Caller parameter per export`                                          |
 | `assert` in contract function      | `lsc: use require for contract guards; assert! is a runtime panic`                      |
-| `List` in author contract code     | `lsc: List is not allowed in contract code; use Mapping or Lsc.Event.log`               |
-| Unknown event in `Lsc.Event.log`   | `lsc: unknown event type "X"; define Lsc.Event.EvmEvent instance or use string signature` |
+| `List` in author contract code     | `lsc: List is not allowed in contract code; use Mapping or emit!`               |
+| Unknown event in `emit!`           | `lsc: unknown event type "X"; define Lsc.Event.EvmEvent instance or use string signature` |
 | `+?`, `-?`, `*?`, `/?` in lemma file | `lsc: checked arithmetic (+?) is contract-only; lemmas use Fin +` |
 | `do` on infallible function (`S` or `V`) | `lsc: do-notation requires Except return type` |
 | More than one `@[lsc.initialize]` | `lsc: at most one @[lsc.initialize] per contract module` |
 | Malformed event signature          | `lsc: invalid event signature "..."; expected form "Name(type,type)"`                   |
 | Event argument mismatch            | `lsc: event "Transfer(...)" expects N arguments of types ...; got ...`                  |
-| Author constructs `LogEntry`       | `lsc: LogEntry is compiler-internal; use Lsc.Event.log`                                 |
-| `@[lsc.event]` / log mismatch (lint) | `lsc: function declares event "Transfer(...)" but body has no matching Lsc.Event.log` |
+| Author constructs `LogEntry`       | `lsc: LogEntry is compiler-internal; use emit!`                                 |
+| `@[lsc.event]` / log mismatch (lint) | `lsc: function declares event "Transfer(...)" but body has no matching emit!` |
 | `World` in contract function       | `lsc: World is not allowed in contract functions; externs are compiler-generated only`          |
 | Invalid contract filename stem     | `lsc: contract file "src/foo.lean" must be PascalCase (e.g. src/Foo.lean)`              |
 | Unknown registered contract name     | `lsc: unknown contract name "X"; add [lsc.contracts] entry or deploy src/X.lean`       |
@@ -416,16 +416,16 @@ flowchart LR
 - Validator ([lsc-spec.md](lsc-spec.md).11 dialect law)
 - Compiler-generated export wrappers from `@[lsc.external]` ([lsc-spec.md](lsc-spec.md).9–4.10)
 - `@[lsc.public]` field getters synthesized as `@[lsc.external]` views before ABI pass ([lsc-spec.md §3.5](lsc-spec.md))
-- `Lsc.Event.log` collection and LOG lowering ([lsc-spec.md](lsc-spec.md).5)
+- `emit!` collection and LOG lowering ([lsc-spec.md](lsc-spec.md).5)
 - Yul emitter with auto load/store ([lsc-spec.md](lsc-spec.md).8, §8.2)
 - ABI JSON + selector computation
 - All error messages (§11)
 
 `**Lsc` library**
 
-- `Lsc.Prelude`: `Address`, `Caller`, `Bytes32`, `Bytes[N]`, `Mapping`, `ArithError`, `LscError`, `UInt256` (`Fin`), `+? -? *? /?` (return `Except E _`), `Option.orError`, `require`; `Monad (Except E)` from Lean core ([lsc-spec.md §2](lsc-spec.md#2-types))
+- `Lsc.Prelude`: `Address`, `Caller`, `Bytes32`, `Bytes[N]`, `Mapping`, `ArithError`, `LscError`, `UInt256` (`Fin`), `+? -? *? /?` (return `Except E _`), `Option.orError`, `require`, `emit!`; `Monad (Except E)` from Lean core ([lsc-spec.md §2](lsc-spec.md#2-types))
 - `Lsc.Prelude`: `@[simp]` bridge lemmas `UInt256.addChecked_ok`, `UInt256.addChecked_error`, …; `Lsc.Invariant` for sequence invariants ([lsc-spec.md §9.1](lsc-spec.md#91-lemma-files-testlemmalean))
-- `Lsc.Event`: `Lsc.Event.EvmEvent`, `Lsc.Event.log`, `LogEntry`
+- `Lsc.Event`: `Lsc.Event.EvmEvent`, `Lsc.Event.log`, `LogEntry` (`emit!` macro lives in `Lsc.Prelude`)
 - `Lsc.ProofHelpers`: Layer 1 `Except.bind_ok`, `Except.ok_ne_error`; Layers 2–4 `lift_*`, `simulate_call`, `export_cases` ([lsc-spec.md §10](lsc-spec.md#10-proof-helpers))
 - `Lsc.SpecTemplates` (Layer 1 + export/trace skeletons)
 - `@[lsc.external]`, `@[lsc.error]` (registers inductive for ABI `errors` / revert encoding only), `@[lsc.initialize]`, `@[lsc.public]` (synthesized `@[lsc.external]` views; [lsc-spec.md §3.5](lsc-spec.md)), `@[lsc.event]` (optional lint), `@[lsc.extern_hook]`, `@[lsc.no_reentrant]` ([lsc-spec.md](lsc-spec.md))
@@ -438,11 +438,12 @@ Implement in `ForgeLean` / `Lsc.Prelude` per [lsc-spec.md §2.1–§2.5](lsc-spe
 1. `UInt256 = Fin (2^256)` — plain `+ - * /` are modular everywhere (no operator rewriting in `do`)
 2. `LscError` typeclass + `+? -? *? /?` → `Except E _` via in-scope instance; compose with `←` in `do`-blocks over `Except E`
 3. `require (cond) .variant` macro → `if ¬cond then return .error .variant`
-4. `@[simp]` bridge lemmas: `UInt256.addChecked_ok`, `UInt256.addChecked_error`, …
-5. Validator: forbid `+?` in lemma files; require `arith` constructor + `LscError` on `@[lsc.error]` types; forbid `assert` in contracts; enforce `Caller` rules ([lsc-spec.md §12.1](lsc-spec.md))
-6. Register `@[lsc.error]` — emitter registration only (no `HasArithErrors` codegen)
-7. Register `@[lsc.initialize]` — at most one per module; constructor + optional proxy `initialize` ABI
-8. Register `@[lsc.public]` — synthesize getter `@[lsc.external]` `def`s before ABI collection ([lsc-spec.md §3.5](lsc-spec.md))
+4. `emit! Event arg*` macro → `Lsc.Event.log (Event.mk arg*)`
+5. `@[simp]` bridge lemmas: `UInt256.addChecked_ok`, `UInt256.addChecked_error`, …
+6. Validator: forbid `+?` in lemma files; require `arith` constructor + `LscError` on `@[lsc.error]` types; forbid `assert` in contracts; enforce `Caller` rules ([lsc-spec.md §12.1](lsc-spec.md))
+7. Register `@[lsc.error]` — emitter registration only (no `HasArithErrors` codegen)
+8. Register `@[lsc.initialize]` — at most one per module; constructor + optional proxy `initialize` ABI
+9. Register `@[lsc.public]` — synthesize getter `@[lsc.external]` `def`s before ABI collection ([lsc-spec.md §3.5](lsc-spec.md))
 
 **Phase v2a (semantics only)**
 
@@ -569,7 +570,7 @@ contract CounterTest is Test {
 
 The [forge-lean-erc20](https://github.com/forge-lean/forge-lean-erc20) repository demonstrates the full workflow at application scale:
 
-1. **Write** — `src/Token.lean` with `ERC20State`, `@[lsc.external]` functions and `Lsc.Event.log` for events (§9.1). Compiler infers ABI from names and `Except` return shapes.
+1. **Write** — `src/Token.lean` with `ERC20State`, `@[lsc.external]` functions and `emit!` for events (§9.1). Compiler infers ABI from names and `Except` return shapes.
 2. **Theorem** — `test/TokenTheorem.lean` with human-reviewed high-level `theorem` statements; `[lsc.compliance.erc20]` enforces the theorem list on `forge test`.
 3. **Lemma** — `test/TokenLemma.lean` (LLM-assisted scaffolding + tactic proofs, kernel-checked).
 4. **Fuzz** — `test/Token.t.sol` deploys bytecode via `deployCode` and runs Foundry fuzz/invariant tests.
@@ -597,7 +598,7 @@ This appendix documents the **[forge-lean-erc20](https://github.com/forge-lean/f
 
 - Full ERC-20 interface (constructor-only mint; no post-deploy mint/burn in the reference token)
 - `Bytes[32]` for `name` / `symbol`; mutators return `bool` on the ABI
-- `Lsc.Event.log` for `Transfer` and `Approval` events (classic emit)
+- `emit!` for `TransferEvent` and `ApprovalEvent` (classic emit)
 
 ### C.2 State and prelude (demo `lib/` or `src/ERC20.lean`)
 
@@ -628,7 +629,7 @@ def transfer (caller : Caller) (s : ERC20State) (to : Address) (amount : UInt256
   let newCaller ← s.balances.get caller.val -? amount
   let newTo     ← s.balances.get to +? amount
   let s' := { s with balances := s.balances.set caller.val newCaller |>.set to newTo }
-  Lsc.Event.log (TransferEvent.mk caller.val to amount)
+  emit! TransferEvent caller.val to amount
   return .ok (s', true)
 ```
 
@@ -642,7 +643,7 @@ theorem transfer_no_overdraft
   ERC20Lemma.transfer_no_overdraft caller to amount s h
 ```
 
-The demo defines `@[lsc.external]` functions with **`Lsc.Event.log`** on success paths (no hand-written export wrappers; no `Lsc.ERC20` in core).
+The demo defines `@[lsc.external]` functions with **`emit!`** on success paths (no hand-written export wrappers; no `Lsc.ERC20` in core).
 
 ### C.3 Required theorems (`[lsc.compliance.erc20]`)
 
@@ -793,7 +794,7 @@ def transfer (ctx : EvmContext) (w : World) (s : MyTokenState) (to : Address) (a
   | .error e => .error e
   | .ok s' =>
       if s'.counter == Address.zero then
-        .ok (w, true, [...])   -- LOGs from Lsc.Event.log sites on success path
+        .ok (w, true, [...])   -- LOGs from emit! sites on success path
       else
         match Lsc.extern.call w s'.counter ctx inferInstance s'.counter with
         | .error e => .error e

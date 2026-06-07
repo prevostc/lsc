@@ -29,7 +29,7 @@ Authors write pure functions. The compiler generates everything else at `@[Lsc.e
 |---------------|--------------------|
 | `@[Lsc.external] def increment (s : CounterState) : Except ArithError CounterState` | ABI dispatcher, `sload` all fields, call `increment`, on `.ok s'` → `sstore`, on `.error e` → `revert(abi.encode(e))` |
 | `@[Lsc.public]` on a State field (e.g. `number`) | `@[Lsc.external]` view + lazy slot read (§3.5) |
-| `Lsc.Event.log (TransferEvent.mk from to amount)` in function body | `LOG2` opcode after store, with correct topic0 and ABI-encoded data |
+| `emit! TransferEvent from to amount` in function body | `LOG2` opcode after store, with correct topic0 and ABI-encoded data |
 | `callvalue : CallValue` parameter | bound to `msg.value`; marks function payable; validator error if missing on ETH-receiving path (§5.4) |
 
 Proofs target the author-written functions directly — the same signatures that get deployed. The lowering pipeline is formally verified in Lean (§13.3).
@@ -536,7 +536,7 @@ def transfer (caller : Caller) (s : ERC20State)
   let newCaller ← s.balances.load caller -? amount
   let newTo     ← s.balances.load to +? amount
   let s' := { s with balances := s.balances.store caller newCaller |>.store to newTo }
-  Lsc.Event.log (TransferEvent.mk caller to amount)
+  emit! TransferEvent caller to amount
   return .ok (s', true)
 
 -- Infallible mutator
@@ -726,16 +726,20 @@ structure TransferEvent where
 
 The `EvmEvent` instance supplies the canonical ABI signature and which fields are indexed (topics) vs non-indexed (data).
 
-### §6.2 Emitting: `Lsc.Event.log`
+### §6.2 Emitting: `emit!`
 
 ```lean
+emit! TransferEvent caller to amount
+-- desugars to:
 Lsc.Event.log (TransferEvent.mk caller to amount)
 ```
 
+The first argument is the event structure (must have `deriving Lsc.Event.EvmEvent`). Positional arguments match the structure fields in declaration order.
+
 **Multiple events on one path:**
 ```lean
-Lsc.Event.log (TransferEvent.mk caller to amount)
-if fee > 0 then Lsc.Event.log (FeeEvent.mk caller fee)
+emit! TransferEvent caller to amount
+if fee > 0 then emit! FeeEvent caller fee
 return .ok (s', true)
 ```
 
@@ -745,15 +749,12 @@ Emit ordering: **load → call author function → on `.ok` → sstore → LOG(s
 
 ### §6.3 Proof erasure
 
-`Lsc.Event.log` is proof-erased: it is definitionally equal to the identity in the Lean kernel. Theorems quantify only over `Except` returns — log calls do not appear in proofs.
+`emit!` desugars to `Lsc.Event.log`, which is proof-erased: it is definitionally equal to the identity in the Lean kernel. Theorems quantify only over `Except` returns — log calls do not appear in proofs.
 
 Log correctness (correct `topic0`, encoding, ordering) is covered by the formally-verified lowering pipeline (§13.3).
 
 > **Why proof erasure?** Returning log lists from functions would pollute every theorem with list destructions the spec doesn't care about. Log *correctness* belongs in the verified emitter, not in Lean proofs.
 
-### §6.4 Optional `@[Lsc.event]` lint
-
-`@[Lsc.event "Transfer(address,address,uint256)"]` on an export is optional lint declaring which events may fire. The validator warns if the annotation and `Lsc.Event.log` calls are inconsistent.
 
 ---
 
@@ -1131,7 +1132,7 @@ At each `@[Lsc.external]` boundary, the emitter generates:
 7. **State load** — `sload` all struct fields (full load for mutators; lazy slot read for views and `@[Lsc.public]` getters)
 8. **Author function call** — invoke the `@[Lsc.external]` function
 9. **On `.error e`** — `revert(abi.encode(e))`; no storage writes; no events
-10. **On `.ok val`** — `sstore` all modified fields; collect and emit `Lsc.Event.log` sites in source order via `LOG` opcodes; ABI-encode non-state component as returndata
+10. **On `.ok val`** — `sstore` all modified fields; collect and emit `emit!` / `Lsc.Event.log` sites in source order via `LOG` opcodes; ABI-encode non-state component as returndata
 
 For `@[Lsc.public]`-generated getters and all view exports: step 7 performs a lazy load of only the accessed slot(s); step 10 is skipped.
 
@@ -1153,7 +1154,7 @@ The Lean IR → Yul emitter is implemented in Lean 4 and **formally verified**: 
 |-----------|-------------------|
 | Lean IR → Yul emitter | Formally verified in Lean |
 | ABI encoding/decoding fidelity | Formally verified in Lean |
-| `LOG` opcode encoding from `Lsc.Event.log` | Formally verified in Lean |
+| `LOG` opcode encoding from `emit!` / `Lsc.Event.log` | Formally verified in Lean |
 | `keccak256` selector computation | Formally verified in Lean |
 | `Mapping` slot layout match (Lean model ↔ Yul output) | Formally verified in Lean |
 
