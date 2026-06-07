@@ -149,7 +149,6 @@ For `lakefile.lean` layout, see [lsc-toolchain.md §2](lsc-toolchain.md#2-projec
 | `Bool` | Lean built-in | `bool` | |
 | `Bytes32` | `Fin (2^256)` newtype | `bytes32` | Raw 32-byte value |
 | `Bytes[N]` | `{ b : ByteArray // b.size ≤ N }` | `bytes` / `string` | Bounded; see §2.2 |
-| `EthValue` | `structure EthValue where val : UInt256` | `uint256` (wei) | ETH amounts; see §5.4 |
 
 #### Arithmetic semantics
 
