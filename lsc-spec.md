@@ -893,12 +893,23 @@ If a function does **not** declare `CallValue`, the emitter generates a guard th
 
 #### ETH transfers out
 
-To send ETH from the contract, use `Lsc.Eth.transfer`:
+To send ETH from the contract, use `native_transfer!`:
 
 ```lean
 -- Lsc.Prelude
--- Returns Except EthError Unit; .error .transferFailed on failure
-def Lsc.Eth.transfer (to : Address) (amount : CallValue) : Except EthError Unit
+-- macro; desugars to Lsc.Eth.transfer (emitter lowers to CALL with value)
+native_transfer! to amount
+-- desugars to:
+Lsc.Eth.transfer to amount   -- Except EthError Unit; .error .transferFailed on failure
+```
+
+Composes with `←` in `do`-blocks over the contract's `Except E`. Failure maps via a required constructor on `@[Lsc.error]` types:
+
+```lean
+@[Lsc.error]
+inductive VaultError where
+  | arith : ArithError → VaultError
+  | eth   : EthError → VaultError   -- required when module uses native_transfer!
 ```
 
 ```lean
@@ -908,7 +919,7 @@ def withdraw (caller : Caller) (s : VaultState) (amount : UInt256)
   require (s.balances.load caller ≥ amount) .insufficientBalance
   let newBal ← s.balances.load caller -? amount
   let s' := { s with balances := s.balances.store caller newBal }
-  let _ ← Lsc.Eth.transfer caller amount |>.mapError .ethTransfer
+  let _ ← native_transfer! caller amount
   return .ok s'
 ```
 
@@ -1123,7 +1134,7 @@ def transfer ... := do
 
 The compiler-generated export wrapper still performs load/store, reentrancy guard, and `Caller` binding (§13.1). It runs the author function (including callees), lowering each `call!` / `staticcall!` site to `CALL` / `STATICCALL` with ambient `w` / `ctx`. On `.error` — revert; no self `sstore`; no `emit!` logs; extern `World` changes rolled back.
 
-Macros live in `Lsc.Prelude` alongside `emit!` and `require`.
+Macros live in `Lsc.Prelude` alongside `emit!`, `native_transfer!`, `require`, `call!`, and `staticcall!`.
 
 ### §8.3 Proof erasure
 
@@ -1490,6 +1501,7 @@ Runs as a post-elaboration pass over contract, lemma, and theorem modules. All m
 | `@[Lsc.error]` on non-inductive | error | `lsc: @[Lsc.error] may only annotate inductive types` |
 | `@[Lsc.error]` type missing `arith` constructor | error | `lsc: error type must include arith : ArithError → E` |
 | `@[Lsc.error]` type missing `extern` constructor when `call!` used | error | `lsc: error type must include extern : ExternError → E` |
+| `@[Lsc.error]` type missing `eth` constructor when `native_transfer!` used | error | `lsc: error type must include eth : EthError → E` |
 | `@[Lsc.error]` type missing `LscError` instance | error | `lsc: error type must have a LscError instance` |
 | Bare `Option State` on mutator | error | `lsc: use Except E S` |
 | Invalid `@[Lsc.external]` return shape | error | `lsc: must return Except E S, Except E (S × V), S, or V` |

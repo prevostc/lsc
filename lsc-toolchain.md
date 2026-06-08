@@ -139,6 +139,7 @@ src/Counter.lean
 | `Mapping.get/set`                              | `sload`/`sstore` via `storageKey`            |
 | `Bytes[N]` read/write                          | Solidity-compatible bounded byte array ops   |
 | Author `@[lsc.external]` return `.error e` / `.ok val` | `revert(abi.encode(e))` / persist + `emit!` LOGs + ABI return |
+| `native_transfer! to amount` | `CALL` with `value`; revert on failure |
 | Generated export `.error e`                    | `revert(abi.encode(e))` before any store     |
 | Generated export `.ok (val, logs)`             | persist state, `LOG` per entry, return `ret` |
 | `staticcall! (a : I).method` (v2b+) | `STATICCALL` + ABI decode; no self `sstore` |
@@ -342,6 +343,7 @@ All messages are prefixed with `lsc:` and include file, line, and column.
 | Invalid interface cast `(e : I)`   | `lsc: I must be an interface with LscInterface instance` |
 | Unknown interface method           | `lsc: method not found on interface I` |
 | `call!` used but error type missing `extern` | `lsc: error type must include extern : ExternError → E` |
+| `native_transfer!` used but error type missing `eth` | `lsc: error type must include eth : EthError → E` |
 | Invalid contract filename stem     | `lsc: contract file "src/foo.lean" must be PascalCase (e.g. src/Foo.lean)`              |
 | Unknown registered contract name     | `lsc: unknown contract name "X"; add [lsc.contracts] entry or deploy src/X.lean`       |
 | `staticcall` to mutating export    | `lsc: staticcall target "sig" may persist storage`                                      |
@@ -425,7 +427,7 @@ flowchart LR
 
 `**Lsc` library**
 
-- `Lsc.Prelude`: `Address`, `Caller`, `Bytes32`, `Bytes[N]`, `Mapping`, `ArithError`, `LscError`, `UInt256` (`Fin`), `+? -? *? /?` (return `Except E _`), `Option.orError`, `require`, `emit!`, `staticcall!`, `call!`; `Monad (Except E)` from Lean core ([lsc-spec.md §2](lsc-spec.md#2-types))
+- `Lsc.Prelude`: `Address`, `Caller`, `Bytes32`, `Bytes[N]`, `Mapping`, `ArithError`, `LscError`, `UInt256` (`Fin`), `+? -? *? /?` (return `Except E _`), `Option.orError`, `require`, `emit!`, `native_transfer!`, `staticcall!`, `call!`; `Monad (Except E)` from Lean core ([lsc-spec.md §2](lsc-spec.md#2-types))
 - `Lsc.Prelude`: `@[simp]` bridge lemmas `UInt256.addChecked_ok`, `UInt256.addChecked_error`, …; `Lsc.Invariant` for sequence invariants ([lsc-spec.md §9.1](lsc-spec.md#91-lemma-files-testlemmalean))
 - `Lsc.Event`: `Lsc.Event.EvmEvent`, `Lsc.Event.log`, `LogEntry` (`emit!` macro lives in `Lsc.Prelude`)
 - `Lsc.ProofHelpers`: Layer 1 `Except.bind_ok`, `Except.ok_ne_error`; Layers 2–4 `lift_*`, `simulate_call`, `export_cases` ([lsc-spec.md §10](lsc-spec.md#10-proof-helpers))
@@ -441,14 +443,15 @@ Implement in `ForgeLean` / `Lsc.Prelude` per [lsc-spec.md §2.1–§2.5](lsc-spe
 2. `LscError` typeclass + `+? -? *? /?` → `Except E _` via in-scope instance; compose with `←` in `do`-blocks over `Except E`
 3. `require (cond) .variant` macro → `if ¬cond then return .error .variant`
 4. `emit! Event arg*` macro → `Lsc.Event.log (Event.mk arg*)`
-5. `(e : I)` interface cast macro → `ContractAt I` when `I` has `LscInterface` ([lsc-spec.md §8.2](lsc-spec.md#82-external-calls-interface-cast-staticcall-call))
-6. `staticcall! (a : I).method args` macro → `Lsc.extern.staticcall I.method a w ctx args : Ret`
-7. `call! (a : I).method args` macro → `Lsc.extern.call I.method a w ctx args : Except ExternError Ret` (author binds `Ret` only; `w`/`ctx` implicit in export wrapper)
-8. `@[simp]` bridge lemmas: `UInt256.addChecked_ok`, `UInt256.addChecked_error`, …
-9. Validator: forbid `+?` in lemma files; require `arith` + `extern` (when `call!` used) on `@[lsc.error]` types; forbid `assert` in contracts; enforce `Caller` rules ([lsc-spec.md §12.1](lsc-spec.md))
-10. Register `@[lsc.error]` — emitter registration only (no `HasArithErrors` codegen)
-11. Register `@[lsc.initialize]` — at most one per module; constructor + optional proxy `initialize` ABI
-12. Register `@[lsc.public]` — synthesize getter `@[lsc.external]` `def`s before ABI collection ([lsc-spec.md §3.5](lsc-spec.md))
+5. `native_transfer! to amount` macro → `Lsc.Eth.transfer to amount` ([lsc-spec.md §5.3](lsc-spec.md#53-eth-handling-and-callvalue))
+6. `(e : I)` interface cast macro → `ContractAt I` when `I` has `LscInterface` ([lsc-spec.md §8.2](lsc-spec.md#82-external-calls-interface-cast-staticcall-call))
+7. `staticcall! (a : I).method args` macro → `Lsc.extern.staticcall I.method a w ctx args : Ret`
+8. `call! (a : I).method args` macro → `Lsc.extern.call I.method a w ctx args : Except ExternError Ret` (author binds `Ret` only; `w`/`ctx` implicit in export wrapper)
+9. `@[simp]` bridge lemmas: `UInt256.addChecked_ok`, `UInt256.addChecked_error`, …
+10. Validator: forbid `+?` in lemma files; require `arith` + `extern` (when `call!` used) + `eth` (when `native_transfer!` used) on `@[lsc.error]` types; forbid `assert` in contracts; enforce `Caller` rules ([lsc-spec.md §12.1](lsc-spec.md))
+11. Register `@[lsc.error]` — emitter registration only (no `HasArithErrors` codegen)
+12. Register `@[lsc.initialize]` — at most one per module; constructor + optional proxy `initialize` ABI
+13. Register `@[lsc.public]` — synthesize getter `@[lsc.external]` `def`s before ABI collection ([lsc-spec.md §3.5](lsc-spec.md))
 
 **Phase v2a (semantics only)**
 
