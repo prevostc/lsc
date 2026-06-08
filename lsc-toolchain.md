@@ -136,7 +136,7 @@ src/Counter.lean
 | `UInt256` literal `n`                          | `0xN`                                        |
 | `if c then t else f`                           | `switch` / `if`                              |
 | `match opt with | none => ... | some x => ...` | tag switch                                   |
-| `Mapping.get/set`                              | `sload`/`sstore` via `storageKey`            |
+| `m[k]` / `m[k := v]` (`Mapping.get/set`)       | `sload`/`sstore` via `storageKey`            |
 | `Bytes[N]` read/write                          | Solidity-compatible bounded byte array ops   |
 | Author `@[lsc.external]` return `.error e` / `.ok val` | `revert(abi.encode(e))` / persist + `emit!` LOGs + ABI return |
 | `native_transfer! to amount` | `CALL` with `value`; revert on failure |
@@ -634,11 +634,11 @@ inductive TokenError where
 @[lsc.external]
 def transfer (caller : Caller) (s : ERC20State) (to : Address) (amount : UInt256)
     : Except TokenError (ERC20State × Bool) := do
-  require (s.balances.get caller.val ≥ amount) .insufficientBalance
-  let newCaller ← s.balances.get caller.val -? amount
-  let newTo     ← s.balances.get to +? amount
-  let s' := { s with balances := s.balances.set caller.val newCaller |>.set to newTo }
-  emit! TransferEvent caller.val to amount
+  require (s.balances[caller] ≥ amount) .insufficientBalance
+  let newCaller ← s.balances[caller] -? amount
+  let newTo     ← s.balances[to] +? amount
+  let s' := { s with balances := s.balances[caller := newCaller][to := newTo] }
+  emit! TransferEvent caller to amount
   return .ok (s', true)
 ```
 
@@ -648,7 +648,7 @@ Example revert theorem (human-reviewed `*Theorem.lean`):
 theorem transfer_no_overdraft
     (caller : Caller) (to : Address) (amount : UInt256) (s : ERC20State)
     (h : transfer caller s to amount = .error .insufficientBalance) :
-    s.balances.get caller.val < amount :=
+    s.balances[caller] < amount :=
   ERC20Lemma.transfer_no_overdraft caller to amount s h
 ```
 
@@ -689,7 +689,7 @@ forge-lean-erc20/
 
 ### C.5 LLM prompt sketch (Token)
 
-> Given `src/Token.lean` and `test/TokenTheorem.lean` (high-level theorem statements), complete `test/TokenLemma.lean` with one homonymous `lemma` per theorem. Use `simp`, `omega`, `Mapping.load_store_same`, `Except.bind_ok`. No `sorry`.
+> Given `src/Token.lean` and `test/TokenTheorem.lean` (high-level theorem statements), complete `test/TokenLemma.lean` with one homonymous `lemma` per theorem. Use `simp`, `omega`, `Mapping.get_set_same`, `Except.bind_ok`. No `sorry`.
 
 Full source listings are maintained in the demo repository, not duplicated here.
 
@@ -890,7 +890,7 @@ required = [
 
 ### D.11 LLM prompt sketches
 
-**ERC-20:** Given `lib/ERC20.lean` and `test/ERC20Theorem.lean`, complete `test/ERC20Lemma.lean`. Use `simp`, `omega`, `Mapping.load_store_*`, `Except.bind_ok`. No `sorry`.
+**ERC-20:** Given `lib/ERC20.lean` and `test/ERC20Theorem.lean`, complete `test/ERC20Lemma.lean`. Use `simp`, `omega`, `Mapping.get_set_*`, `Except.bind_ok`. No `sorry`.
 
 **Composition:** Given `src/MyToken.lean`, `test/MyTokenTheorem.lean`, and `Lsc.ProofHelpers`, complete `test/MyTokenLemma.lean` for hook lemmas. No `sorry`.
 

@@ -191,11 +191,14 @@ notation "Bytes[" n "]" => Bytes n
 abbrev Mapping (K V : Type) := K → V
 
 namespace Mapping
-def load  (m : Mapping K V) (k : K) : V := m k
-def store [DecidableEq K] (m : Mapping K V) (k : K) (v : V) : Mapping K V :=
+def get (m : Mapping K V) (k : K) : V := m k
+def set [DecidableEq K] (m : Mapping K V) (k : K) (v : V) : Mapping K V :=
   Function.update m k v
 def empty [Inhabited V] : Mapping K V := fun _ => default
 end Mapping
+
+scoped notation m:65 "[" k:65 "]" => Mapping.get m k
+scoped notation m:65 "[" k:65 " := " v:65 "]" => Mapping.set m k v
 ```
 
 **Storage layout:** slot `p` for a `Mapping` field; entry at key `k` lives at `keccak256(abi.encode(k, p))` using ABI-encoded (padded) key encoding — identical to Solidity. Test vector:
@@ -208,26 +211,28 @@ entry slot = keccak256(
 )
 ```
 
-Nested mappings (e.g. ERC-20 allowances) are `Mapping K (Mapping K' V)`.
+Nested mappings (e.g. ERC-20 allowances) are `Mapping K (Mapping K' V)`. Reads chain: `s.allowances[owner][spender]`. Writes nest: `s.allowances[owner := s.allowances[owner][spender := amount]]`.
 
 **Simp laws** (derived from `Function.update`; no custom axioms):
 
 ```lean
-@[simp] theorem Mapping.load_store_same [DecidableEq K] (m : Mapping K V) (k : K) (v : V) :
-    (m.store k v).load k = v := Function.update_same k v m
+@[simp] theorem Mapping.get_set_same [DecidableEq K] (m : Mapping K V) (k : K) (v : V) :
+    (m.set k v).get k = v := Function.update_same k v m
 
-@[simp] theorem Mapping.load_store_other [DecidableEq K] (m : Mapping K V)
+@[simp] theorem Mapping.get_set_other [DecidableEq K] (m : Mapping K V)
     (k k' : K) (v : V) (h : k ≠ k') :
-    (m.store k v).load k' = m.load k' := Function.update_noteq h v m
+    (m.set k v).get k' = m.get k' := Function.update_noteq h v m
 
-@[simp] theorem Mapping.load_empty [Inhabited V] (k : K) :
-    (Mapping.empty : Mapping K V).load k = default := rfl
+@[simp] theorem Mapping.get_empty [Inhabited V] (k : K) :
+    (Mapping.empty : Mapping K V).get k = default := rfl
 
-@[simp] theorem Mapping.store_store_same [DecidableEq K] (m : Mapping K V) (k : K) (v v' : V) :
-    (m.store k v).store k v' = m.store k v' := Function.update_idem k v v' m
+@[simp] theorem Mapping.set_set_same [DecidableEq K] (m : Mapping K V) (k : K) (v v' : V) :
+    (m.set k v).set k v' = m.set k v' := Function.update_idem k v v' m
 ```
 
-> **Why `K → V` instead of `Finsupp`?** Contracts never enumerate or sum over keys. A plain function is the minimal model that makes `simp [Mapping.load_store_same]` work with no extra instances.
+> **Why `K → V` instead of `Finsupp`?** Contracts never enumerate or sum over keys. A plain function is the minimal model that makes `simp [Mapping.get_set_same]` work with no extra instances.
+
+Bracket notation (`m[k]`, `m[k := v]`) is preferred in author examples; it desugars to `Mapping.get` / `Mapping.set`.
 
 ### §2.4 Except
 
@@ -670,11 +675,12 @@ Fields occupy slots 0, 1, 2, … in declaration order. `Mapping` fields occupy o
 
 | Term | Meaning | Who uses it |
 |------|---------|-------------|
-| `store` | Functional update: `Mapping.store`, record `{ s with field := v }` | Contract authors |
+| `get` / `set` | Functional mapping access: `m[k]`, `m[k := v]` (desugar to `Mapping.get` / `Mapping.set`) | Contract authors |
+| `store` (record) | Scalar field update: `{ s with field := v }` | Contract authors |
 | `State` | Full contract snapshot threaded through `@[Lsc.external]` functions | Authors and theorem files |
 | `sstore` | Persist snapshot to chain via EVM `SSTORE` | **Emitter only** |
 
-Authors never call `sstore`. Theorems quantify over complete `s` and `s'`.
+Authors never call `sstore`. Theorems quantify over complete `s` and `s'`. Bracket notation is preferred in author examples; `Mapping.get` / `Mapping.set` remain the underlying names for proofs and macro expansion.
 
 > **Why whole-state load/store?** Theorems on complete snapshots make `s'.field = s.field` trivially provable by `simp` when `field` doesn't appear in the function body.
 
@@ -717,7 +723,7 @@ def initialize (name symbol : Bytes[32]) (decimals : UInt256)
     symbol      := symbol
     decimals    := decimals
     totalSupply := initialSupply
-    balances    := Mapping.empty |>.store owner initialSupply
+    balances    := Mapping.empty[owner := initialSupply]
     allowances  := Mapping.empty }
 ```
 
@@ -765,10 +771,10 @@ if ¬condition then return .error .ErrorVariant
 @[Lsc.external]
 def transfer (caller : Caller) (s : ERC20State)
     (to : Address) (amount : UInt256) : Except TokenError (ERC20State × Bool) := do
-  require (s.balances.load caller ≥ amount) .insufficientBalance
-  let newCaller ← s.balances.load caller -? amount
-  let newTo     ← s.balances.load to +? amount
-  let s' := { s with balances := s.balances.store caller newCaller |>.store to newTo }
+  require (s.balances[caller] ≥ amount) .insufficientBalance
+  let newCaller ← s.balances[caller] -? amount
+  let newTo     ← s.balances[to] +? amount
+  let s' := { s with balances := s.balances[caller := newCaller][to := newTo] }
   emit! TransferEvent caller to amount
   return .ok (s', true)
 
@@ -883,8 +889,8 @@ A function that accepts ETH **must** declare a `callvalue : CallValue` parameter
 def deposit (caller : Caller) (callvalue : CallValue) (s : VaultState)
     : Except VaultError VaultState := do
   require (callvalue > 0) .zeroDeposit
-  let newBal ← s.balances.load caller +? callvalue
-  return .ok { s with balances := s.balances.store caller newBal }
+  let newBal ← s.balances[caller] +? callvalue
+  return .ok { s with balances := s.balances[caller := newBal] }
 ```
 
 #### Non-payable protection (default)
@@ -916,9 +922,9 @@ inductive VaultError where
 @[Lsc.external]
 def withdraw (caller : Caller) (s : VaultState) (amount : UInt256)
     : Except VaultError VaultState := do
-  require (s.balances.load caller ≥ amount) .insufficientBalance
-  let newBal ← s.balances.load caller -? amount
-  let s' := { s with balances := s.balances.store caller newBal }
+  require (s.balances[caller] ≥ amount) .insufficientBalance
+  let newBal ← s.balances[caller] -? amount
+  let s' := { s with balances := s.balances[caller := newBal] }
   let _ ← native_transfer! caller amount
   return .ok s'
 ```
@@ -951,7 +957,7 @@ def fallback (s : VaultState) : Except VaultError VaultState :=
 theorem deposit_increases_balance
     (caller : Caller) (callvalue : CallValue) (s s' : VaultState)
     (h : deposit caller callvalue s = .ok s') :
-    s'.balances.load caller = s.balances.load caller + callvalue :=
+    s'.balances[caller] = s.balances[caller] + callvalue :=
   VaultLemma.deposit_increases_balance caller callvalue s s' h
 ```
 
@@ -1078,12 +1084,12 @@ Authors bind only the interface method's return type (`Ret`), not `World × Ret`
 @[Lsc.external]
 def transfer (caller : Caller) (s : MyTokenState) (to : Address) (amount : UInt256)
     : Except TokenError (MyTokenState × Bool) := do
-  require (s.balances.load caller ≥ amount) .insufficientBalance
-  let newCaller ← s.balances.load caller -? amount
-  let newTo     ← s.balances.load to +? amount
-  let s' := { s with balances := s.balances.store caller newCaller |>.store to newTo }
+  require (s.balances[caller] ≥ amount) .insufficientBalance
+  let newCaller ← s.balances[caller] -? amount
+  let newTo     ← s.balances[to] +? amount
+  let s' := { s with balances := s.balances[caller := newCaller][to := newTo] }
   emit! TransferEvent caller to amount
-  if s'.counter ≠ Address.zero ∧ caller.val ≠ to then
+  if s'.counter ≠ Address.zero ∧ caller ≠ to then
     let _ ← call! (s'.counter : ITransferCounter).onTransfer
   return .ok (s', true)
 ```
@@ -1379,12 +1385,12 @@ Lemmas proved directly over `@[Lsc.external]` functions using `simp`, `omega`, a
 
 ```lean
 -- simp [f] to unfold; obtain ⟨mid, hmid, hrest⟩ := Except.bind_ok h to extract intermediate
--- state; simp [Mapping.load_store_same] + omega to close
+-- state; simp [Mapping.get_set_same] + omega to close
 lemma transferFrom_decrements_allowance ... := by
   simp [transferFrom] at h ⊢
   obtain ⟨bal, hbal, hrest⟩ := Except.bind_ok h
   obtain ⟨alw, halw, hfinal⟩ := Except.bind_ok hrest
-  simp [Mapping.load_store_same, Mapping.load_store_other,
+  simp [Mapping.get_set_same, Mapping.get_set_other,
         UInt256.subChecked_ok (by omega)] at *
   omega
 ```
