@@ -712,9 +712,21 @@ required = [
 
 ## Appendix F — UniV2-Style AMM
 
-This appendix is a complete constant-product AMM with `swap`, `addLiquidity`, and `removeLiquidity`. It demonstrates multi-field state invariants, the `k = x * y` preservation proof, overflow preconditions in theorems, and a sequence monotonicity invariant over all three actions.
+This appendix is a complete constant-product AMM with `swap`, `addLiquidity`, and `removeLiquidity`. It demonstrates multi-field state invariants, the `k = x * y` preservation proof, overflow preconditions in theorems, a sequence monotonicity invariant over all three actions, and **inline `extcall!` token transfers** via assumed `IERC20` callees (§8.2).
 
 ### F.1 Design notes
+
+**External tokens:** The pool stores `token0`, `token1`, and `self : Address` (the pool's own address for `transferFrom` recipients). LSC has no `address(this)` primitive yet — `@[lsc.initialize]` sets these at deploy time; the deploy script passes the known pool address (same spirit as `[lsc.contracts]` in Foundry config).
+
+| Path | Purpose |
+|------|---------|
+| `interfaces/IERC20.lean` | Interface for `extcall!` / validator (`@[extern_assume "IERC20"]`) |
+
+**Assumed `IERC20`:** Token contracts are assumed extern callees (§8.4). Reserve-math theorems stay **Layer 1** — `extcall!` sites are proof-erased (§8.3). Token-balance correctness at runtime is trusted at deploy time; Layer 3 composition via `simulate_call` is future work (v2b).
+
+**Checks-effects-interactions:** Each mutator computes outputs and updates reserves / LP state first, then calls `safeTransferFrom` / `safeTransfer`. Callee revert maps to `.error (.extern _)` and rolls back self `sstore` (§8.2).
+
+**Bidirectional swap:** `zeroForOne : Bool` selects direction — `true` = token0 in / token1 out; `false` = token1 in / token0 out.
 
 **`k = reserve0 * reserve1` and overflow:** `UInt256` multiplication can overflow for large reserves. The theorem states `k`-preservation under an explicit no-overflow precondition (`reserve0 * reserve1 < 2^256`). This is honest — UniV2 itself relies on practical reserve bounds. The precondition appears in the theorem statement as a hypothesis; lemma proofs discharge it with `omega` when the inputs are bounded.
 
@@ -728,6 +740,7 @@ This appendix is a complete constant-product AMM with `swap`, `addLiquidity`, an
 
 ```lean
 import Lsc.Prelude
+import IERC20
 open Lsc
 
 @[lsc.error]
@@ -738,29 +751,65 @@ inductive AMMError where
   | insufficientLp
   | zeroOutput
   | arith : ArithError → AMMError  -- via LscError +?
+  | extern : ExternError → AMMError  -- required when module uses extcall!
   | divisionByZero  -- /? for price and LP calculations
 
 structure AMMState where
-  reserve0    : UInt256                         -- slot 0: token0 reserves
-  reserve1    : UInt256                         -- slot 1: token1 reserves
-  totalLP     : UInt256                         -- slot 2: total LP tokens outstanding
-  lpBalances  : Mapping Address UInt256  -- slot 3: LP token balances
+  token0     : Address                         -- slot 0: token0 contract
+  token1     : Address                         -- slot 1: token1 contract
+  self       : Address                         -- slot 2: pool address (transferFrom recipient)
+  reserve0   : UInt256                         -- slot 3: token0 reserves
+  reserve1   : UInt256                         -- slot 4: token1 reserves
+  totalLP    : UInt256                         -- slot 5: total LP tokens outstanding
+  lpBalances : Mapping Address UInt256  -- slot 6: LP token balances
 
--- ── Swap (no fee, constant product) ──────────────────────────────────────────
+@[lsc.initialize]
+def initialize (token0 token1 self : Address) : Except AMMError AMMState :=
+  return .ok { token0, token1, self,
+    reserve0 := 0, reserve1 := 0, totalLP := 0, lpBalances := Mapping.empty }
+
+-- ── Token interaction helpers (interactions — called after state effects) ───────
+-- Generic wrappers mirroring UniV2 _safeTransfer / _safeTransferFrom.
+
+def safeTransfer (token to : Address) (amount : UInt256) : Except AMMError Unit := do
+  let ok ← extcall! (token : IERC20).transfer to amount
+  if ok then return .ok () else return .error .zeroAmount
+
+def safeTransferFrom (token from to : Address) (amount : UInt256) : Except AMMError Unit := do
+  let ok ← extcall! (token : IERC20).transferFrom from to amount
+  if ok then return .ok () else return .error .zeroAmount
+
+-- ── Swap (no fee, constant product, bidirectional) ────────────────────────────
 -- Checked math in do; theorems use hOverflow preconditions (e.g. swap_preserves_k).
+-- CEI: compute amountOut → update reserves → pull input token → push output token.
 
 @[lsc.external]
-def swap (s : AMMState) (amountIn : UInt256) : Except AMMError (AMMState × UInt256) :=
-  do
-  require (s.reserve0 > 0) .uninitializedPool
-  let num       ← amountIn *? s.reserve1
-  let denom     ← s.reserve0 +? amountIn
-  let amountOut ← num /? denom
-  if amountOut = 0 then
-    return .error (.arith .overflow)  -- zero output treated as failure in v1
-  return .ok ({ s with
-    reserve0 := s.reserve0 + amountIn
-    reserve1 := s.reserve1 - amountOut }, amountOut)
+def swap (caller : Caller) (s : AMMState) (zeroForOne : Bool) (amountIn : UInt256)
+    : Except AMMError (AMMState × UInt256) := do
+  require (amountIn > 0) .zeroInput
+  require (s.reserve0 > 0 ∧ s.reserve1 > 0) .uninitializedPool
+  if zeroForOne then
+    let num       ← amountIn *? s.reserve1
+    let denom     ← s.reserve0 +? amountIn
+    let amountOut ← num /? denom
+    require (amountOut > 0) .zeroOutput
+    let s' := { s with
+      reserve0 := s.reserve0 + amountIn
+      reserve1 := s.reserve1 - amountOut }
+    ← safeTransferFrom s'.token0 caller s'.self amountIn
+    ← safeTransfer s'.token1 caller amountOut
+    return .ok (s', amountOut)
+  else
+    let num       ← amountIn *? s.reserve0
+    let denom     ← s.reserve1 +? amountIn
+    let amountOut ← num /? denom
+    require (amountOut > 0) .zeroOutput
+    let s' := { s with
+      reserve1 := s.reserve1 + amountIn
+      reserve0 := s.reserve0 - amountOut }
+    ← safeTransferFrom s'.token1 caller s'.self amountIn
+    ← safeTransfer s'.token0 caller amountOut
+    return .ok (s', amountOut)
 
 @[lsc.external]
 def addLiquidity
@@ -776,6 +825,8 @@ def addLiquidity
       reserve1   := amount1
       totalLP    := lpMinted
       lpBalances := s.lpBalances[caller := lpMinted] }
+    ← safeTransferFrom s'.token0 caller s'.self amount0
+    ← safeTransferFrom s'.token1 caller s'.self amount1
     return .ok (s', lpMinted)
   else if s.reserve0 = 0 then
     return .error .uninitializedPool
@@ -793,6 +844,8 @@ def addLiquidity
         reserve1   := newReserve1
         totalLP    := newTotalLP
         lpBalances := s.lpBalances[caller := newLpBal] }
+      ← safeTransferFrom s'.token0 caller s'.self amount0
+      ← safeTransferFrom s'.token1 caller s'.self amount1
       return .ok (s', lpMinted)
 
 @[lsc.external]
@@ -821,6 +874,8 @@ def removeLiquidity
         reserve1   := newReserve1
         totalLP    := newTotalLP
         lpBalances := s.lpBalances[caller := newLpBal] }
+      ← safeTransfer s'.token0 caller amount0Out
+      ← safeTransfer s'.token1 caller amount1Out
       return .ok (s', amount0Out, amount1Out)
 
 @[lsc.external]
@@ -846,35 +901,50 @@ def k (s : AMMState) : ℕ := s.reserve0.val * s.reserve1.val
 -- ── Swap lemmas ───────────────────────────────────────────────────────────────
 
 lemma swap_revert_zero_input
-    (s : AMMState)
-    (h : swap s 0 = .error .zeroInput) :
+    (caller : Caller) (s : AMMState) (zeroForOne : Bool)
+    (h : swap caller s zeroForOne 0 = .error .zeroInput) :
   True   -- always holds; zero input always reverts by construction
 
 lemma swap_revert_uninitialized
-    (s : AMMState) (amountIn : UInt256)
-    (h : swap s amountIn = .error .uninitializedPool) :
+    (caller : Caller) (s : AMMState) (zeroForOne : Bool) (amountIn : UInt256)
+    (h : swap caller s zeroForOne amountIn = .error .uninitializedPool) :
   s.reserve0 = 0 ∨ s.reserve1 = 0
 
 lemma swap_positive_output
-    (s s' : AMMState) (amountIn amountOut : UInt256)
-    (h : swap s amountIn = .ok (s', amountOut)) :
+    (caller : Caller) (s s' : AMMState) (zeroForOne : Bool) (amountIn amountOut : UInt256)
+    (h : swap caller s zeroForOne amountIn = .ok (s', amountOut)) :
   amountOut > 0
 
 lemma swap_preserves_k
-    (s s' : AMMState) (amountIn amountOut : UInt256)
-    (hOverflow : s.reserve0 * s.reserve1 < 2^256 - s.reserve0)
-    (h : swap s amountIn = .ok (s', amountOut)) :
+    (caller : Caller) (s s' : AMMState) (zeroForOne : Bool) (amountIn amountOut : UInt256)
+    (hOverflow : if zeroForOne then s.reserve0.val * s.reserve1.val < 2^256 - s.reserve0.val
+                 else s.reserve0.val * s.reserve1.val < 2^256 - s.reserve1.val)
+    (h : swap caller s zeroForOne amountIn = .ok (s', amountOut)) :
   k s' ≥ k s
 
 lemma swap_increases_reserve0
-    (s s' : AMMState) (amountIn amountOut : UInt256)
-    (h : swap s amountIn = .ok (s', amountOut)) :
+    (caller : Caller) (s s' : AMMState) (zeroForOne : Bool) (amountIn amountOut : UInt256)
+    (hDir : zeroForOne = true)
+    (h : swap caller s zeroForOne amountIn = .ok (s', amountOut)) :
   s'.reserve0 = s.reserve0 + amountIn
 
+lemma swap_increases_reserve1
+    (caller : Caller) (s s' : AMMState) (zeroForOne : Bool) (amountIn amountOut : UInt256)
+    (hDir : zeroForOne = false)
+    (h : swap caller s zeroForOne amountIn = .ok (s', amountOut)) :
+  s'.reserve1 = s.reserve1 + amountIn
+
 lemma swap_decreases_reserve1
-    (s s' : AMMState) (amountIn amountOut : UInt256)
-    (h : swap s amountIn = .ok (s', amountOut)) :
+    (caller : Caller) (s s' : AMMState) (zeroForOne : Bool) (amountIn amountOut : UInt256)
+    (hDir : zeroForOne = true)
+    (h : swap caller s zeroForOne amountIn = .ok (s', amountOut)) :
   s'.reserve1 = s.reserve1 - amountOut
+
+lemma swap_decreases_reserve0
+    (caller : Caller) (s s' : AMMState) (zeroForOne : Bool) (amountIn amountOut : UInt256)
+    (hDir : zeroForOne = false)
+    (h : swap caller s zeroForOne amountIn = .ok (s', amountOut)) :
+  s'.reserve0 = s.reserve0 - amountOut
 
 -- ── addLiquidity lemmas ────────────────────────────────────────────────────────
 
@@ -924,13 +994,13 @@ lemma removeLiquidity_k_bounded
 -- ── Sequence invariant scaffolding ─────────────────────────────────────────────
 
 inductive AMMAction where
-  | swap          (amountIn : UInt256)
-  | addLiquidity  (caller : Caller) (amount0 amount1 : UInt256)
+  | swap            (caller : Caller) (zeroForOne : Bool) (amountIn : UInt256)
+  | addLiquidity    (caller : Caller) (amount0 amount1 : UInt256)
   | removeLiquidity (caller : Caller) (lpAmount : UInt256)
 
 def applyAMMAction (s : AMMState) : AMMAction → AMMState
-  | .swap amountIn =>
-      match swap s amountIn with
+  | .swap caller zeroForOne amountIn =>
+      match swap caller s zeroForOne amountIn with
       | .ok (s', _) => s' | .error _ => s
   | .addLiquidity caller amount0 amount1 =>
       match addLiquidity caller s amount0 amount1 with
@@ -955,34 +1025,42 @@ lemma k_never_decreases_swap_add
 
 ```lean
 lemma swap_preserves_k
-    (s s' : AMMState) (amountIn amountOut : UInt256)
-    (hOverflow : s.reserve0 * s.reserve1 < 2^256 - s.reserve0)
-    (h : swap s amountIn = .ok (s', amountOut)) :
+    (caller : Caller) (s s' : AMMState) (zeroForOne : Bool) (amountIn amountOut : UInt256)
+    (hOverflow : if zeroForOne then s.reserve0.val * s.reserve1.val < 2^256 - s.reserve0.val
+                 else s.reserve0.val * s.reserve1.val < 2^256 - s.reserve1.val)
+    (h : swap caller s zeroForOne amountIn = .ok (s', amountOut)) :
     k s' ≥ k s := by
   simp [k, swap] at *
-  -- Unfold swap; after split_ifs only the success branch remains
-  split_ifs at h with h0 hAmt hDegen
-  · simp at h
-  · simp at h
-  · simp at h
-  · simp at h
+  split_ifs at h with hDir
+  · -- zeroForOne = true: token0 in, token1 out
     obtain ⟨hs', _⟩ := h
     simp [← hs']
     -- Goal: (reserve0 + amountIn) * (k / (reserve0 + amountIn)) ≥ reserve0 * reserve1
-    -- By integer division: n / d * d ≤ n, so (k / newR0) * newR0 ≤ k
-    -- But we need ≥ k for the new k = newR0 * newR1 = newR0 * (k / newR0)
-    -- Integer division: k / newR0 * newR0 ≥ k - newR0 + 1 > k - newR0
-    -- Since newR0 > reserve0, the floor rounding keeps k non-decreasing
+    omega
+  · -- zeroForOne = false: token1 in, token0 out
+    obtain ⟨hs', _⟩ := h
+    simp [← hs']
+    -- Goal: (reserve1 + amountIn) * (k / (reserve1 + amountIn)) ≥ reserve0 * reserve1
     omega
 
 lemma swap_increases_reserve0
-    (s s' : AMMState) (amountIn amountOut : UInt256)
-    (h : swap s amountIn = .ok (s', amountOut)) :
+    (caller : Caller) (s s' : AMMState) (zeroForOne : Bool) (amountIn amountOut : UInt256)
+    (hDir : zeroForOne = true)
+    (h : swap caller s zeroForOne amountIn = .ok (s', amountOut)) :
     s'.reserve0 = s.reserve0 + amountIn := by
-  simp [swap] at *
+  simp [swap, hDir] at *
+  split_ifs at h <;> simp_all
+
+lemma swap_increases_reserve1
+    (caller : Caller) (s s' : AMMState) (zeroForOne : Bool) (amountIn amountOut : UInt256)
+    (hDir : zeroForOne = false)
+    (h : swap caller s zeroForOne amountIn = .ok (s', amountOut)) :
+    s'.reserve1 = s.reserve1 + amountIn := by
+  simp [swap, hDir] at *
   split_ifs at h <;> simp_all
 
 -- ... remaining lemma proofs follow the same pattern (see §F.3 signatures)
+-- extcall! sites in safeTransfer* are proof-erased (§8.3); reserve goals unchanged
 ```
 
 ### F.5 Theorem file (`test/AMMTheorem.lean`)
@@ -995,17 +1073,26 @@ import AMMLemma
 
 /-- Core: swap preserves k (no-fee version). -/
 theorem swap_preserves_k
-    (s s' : AMMState) (amountIn amountOut : UInt256)
-    (hOverflow : s.reserve0 * s.reserve1 < 2^256 - s.reserve0)
-    (h : swap s amountIn = .ok (s', amountOut)) :
+    (caller : Caller) (s s' : AMMState) (zeroForOne : Bool) (amountIn amountOut : UInt256)
+    (hOverflow : if zeroForOne then s.reserve0.val * s.reserve1.val < 2^256 - s.reserve0.val
+                 else s.reserve0.val * s.reserve1.val < 2^256 - s.reserve1.val)
+    (h : swap caller s zeroForOne amountIn = .ok (s', amountOut)) :
     AMMLemma.k s' ≥ AMMLemma.k s :=
-  AMMLemma.swap_preserves_k s s' amountIn amountOut hOverflow h
+  AMMLemma.swap_preserves_k caller s s' zeroForOne amountIn amountOut hOverflow h
 
 theorem swap_increases_reserve0
-    (s s' : AMMState) (amountIn amountOut : UInt256)
-    (h : swap s amountIn = .ok (s', amountOut)) :
+    (caller : Caller) (s s' : AMMState) (zeroForOne : Bool) (amountIn amountOut : UInt256)
+    (hDir : zeroForOne = true)
+    (h : swap caller s zeroForOne amountIn = .ok (s', amountOut)) :
     s'.reserve0 = s.reserve0 + amountIn :=
-  AMMLemma.swap_increases_reserve0 s s' amountIn amountOut h
+  AMMLemma.swap_increases_reserve0 caller s s' zeroForOne amountIn amountOut hDir h
+
+theorem swap_increases_reserve1
+    (caller : Caller) (s s' : AMMState) (zeroForOne : Bool) (amountIn amountOut : UInt256)
+    (hDir : zeroForOne = false)
+    (h : swap caller s zeroForOne amountIn = .ok (s', amountOut)) :
+    s'.reserve1 = s.reserve1 + amountIn :=
+  AMMLemma.swap_increases_reserve1 caller s s' zeroForOne amountIn amountOut hDir h
 
 -- ... homonymous theorem per lemma in §F.3
 ```
@@ -1014,17 +1101,25 @@ theorem swap_increases_reserve0
 
 | Feature | Where |
 |---------|-------|
-| Multi-field state with invariant | `reserve0`, `reserve1`, `totalLP`, `lpBalances` |
+| Multi-field state with invariant | `token0`, `token1`, `self`, `reserve0`, `reserve1`, `totalLP`, `lpBalances` |
 | `Mapping` for LP balances | `lpBalances : Mapping Address UInt256` |
+| `extcall!` / assumed `IERC20` | `safeTransfer`, `safeTransferFrom` |
+| CEI ordering | reserve/LP update before token calls |
+| `extern` error channel | `AMMError.extern` |
+| Bidirectional swap | `zeroForOne : Bool` on `swap` |
+| `@[lsc.initialize]` | sets `token0`, `token1`, `self` |
 | Multi-scalar return | `removeLiquidity` returns `Except AMMError (AMMState × UInt256 × UInt256)` |
-| Overflow precondition in theorem | `hOverflow : s.reserve0 * s.reserve1 < 2^256 - s.reserve0` |
+| Overflow precondition in theorem | direction-dependent `hOverflow` on `swap_preserves_k` |
 | Integer division honesty | `k s' ≥ k s` (not `=`) for swap; `k s' ≤ k s` for remove |
 | Named invariant helper | `def k` in `*Lemma.lean` |
 | `nlinarith` for nonlinear arithmetic | `k_never_decreases_swap_add` — `k` is a product, not linear |
 | Sequence invariant with action filter | `hNoRemove` excludes `removeLiquidity` from the monotonicity claim |
 | Mixed revert conditions | `swap`: zero input, uninitialized, degenerate output |
+| Proof-erased extern calls | Layer 1 reserve lemmas ignore `extcall!` sites (§8.3) |
 
 ### F.7 Key proof observations
+
+**Proof-erased token transfers:** `safeTransfer` / `safeTransferFrom` contain `extcall!` sites that are definitionally no-ops on author `AMMState` (§8.3). Reserve and `k` lemmas unfold `swap` / `addLiquidity` / `removeLiquidity` without reasoning about external token balances. Token-movement correctness is a deployment/runtime concern (assumed `IERC20`); Layer 3 composition theorems are future work (v2b).
 
 **Why `≥` and not `=` for `swap_preserves_k`:** Integer division floors `newReserve1 = k / newReserve0`. The true mathematical `k` would require `newReserve1 = k / newReserve0` exactly, but integer division leaves `k mod newReserve0` as dust in the pool. So `newReserve0 * newReserve1 ≥ k` — the pool keeps the rounding error. This is the correct and honest theorem statement.
 
