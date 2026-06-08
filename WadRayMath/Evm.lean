@@ -1,16 +1,16 @@
-import WayRayMath.Nat
-import WayRayMath.Real
+import WadRayMath.Nat
+import WadRayMath.Real
 
 /-!
-# WayRayMath.Evm
+# WadRayMath.Evm
 
 EVM-faithful `Except` wrappers with `uint256` overflow and revert guards,
 matching on-chain `WadRayMath` behavior.
 -/
 
-namespace WayRayMath.Evm
+namespace WadRayMath.Evm
 
-open WayRayMath.Nat
+open WadRayMath.Nat
 
 /-- `type(uint256).max` -/
 def UINT256_MAX : ℕ := 2^256 - 1
@@ -159,4 +159,4 @@ theorem rayMulHalfUp_error_real_ok (a b : ℕ) (h : ¬ rayMulHalfUpReverts a b) 
   rcases rayMulHalfUp_eq_ok a b h ▸ hok
   exact Real.rayMulHalfUp_error a b
 
-end WayRayMath.Evm
+end WadRayMath.Evm

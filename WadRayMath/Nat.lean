@@ -1,7 +1,7 @@
 import Mathlib
 
 /-!
-# WayRayMath.Nat
+# WadRayMath.Nat
 
 RAY fixed-point arithmetic on `ℕ`, mirroring Aave's `WadRayMath`
 ([source](https://github.com/aave/aave-v4/blob/main/src/libraries/math/WadRayMath.sol)).
@@ -9,11 +9,11 @@ RAY fixed-point arithmetic on `ℕ`, mirroring Aave's `WadRayMath`
 Includes definitions, helper lemmas, single-op rounding bounds, monotonicity,
 and compositional error certificates.
 
-Overflow and division-by-zero are ignored here; see `WayRayMath.Evm` for
+Overflow and division-by-zero are ignored here; see `WadRayMath.Evm` for
 EVM-faithful `Except` wrappers.
 -/
 
-namespace WayRayMath.Nat
+namespace WadRayMath.Nat
 
 /-! ## Constants -/
 
@@ -98,7 +98,7 @@ lemma rayDivDown_mul_le (a b : ℕ) (_hb : 0 < b) :
     rayDivDown a b * b ≤ a * RAY :=
   Nat.div_mul_le_self _ _
 
-lemma rayDiv_mul_le (a b : ℕ) (_hb : 0 < b) :
+lemma rayDivHalfUp_mul_le (a b : ℕ) (_hb : 0 < b) :
     rayDivHalfUp a b * b ≤ a * RAY + b / 2 :=
   Nat.div_mul_le_self _ _
 
@@ -228,4 +228,4 @@ theorem double_rayMulHalfUp_scaled_error (sd a b : ℕ) :
     _ ≤ RAY * RAY + sd * RAY := by gcongr
     _ = sd * RAY + RAY * RAY := by ring
 
-end WayRayMath.Nat
+end WadRayMath.Nat

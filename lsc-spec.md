@@ -152,16 +152,18 @@ For `lakefile.lean` layout, see [lsc-toolchain.md §2](lsc-toolchain.md#2-projec
 
 #### Arithmetic semantics
 
-`UInt256 = Fin (2^256)` throughout. `+ - * /` mean modular arithmetic in **all contexts** — contract, lemma, and theorem files.
+`UInt256 = Fin (2^256)` at the ABI/storage boundary. `+ - * /` are modular (`Fin`) operations available everywhere, but their use in `@[Lsc.external]` contract functions is restricted (see below).
 
 Two modes:
 
 | Mode | Syntax | Returns | Use when |
 |------|--------|---------|----------|
-| Wrapping | `a + b` | `UInt256` | overflow is impossible or irrelevant |
-| Checked | `a +? b` | `Except E UInt256` | overflow must revert |
+| Checked | `a +? b` | `Except E UInt256` | **default in `@[Lsc.external]` functions** — overflow reverts |
+| Wrapping | `a + b` | `UInt256` | lemma/theorem files only; or intentional modular arithmetic |
 
 Checked arithmetic returns `Except E _` via the in-scope `LscError E` instance. Compose with `←` in a `do`-block over `Except E`. See §2.5.
+
+**Validator rule:** plain `+ - *` on `UInt256` inside `@[Lsc.external]` functions is a warning (`lsc: prefer +? for checked arithmetic in contract functions`). It is not an error — wrapping is sometimes intentional (e.g. bitwise packing). In lemma and theorem files plain `+` is unrestricted; proofs use it naturally when reasoning about `UInt256.val` arithmetic.
 
 ### §2.2 Bytes[N]
 
@@ -333,13 +335,14 @@ Because `+?` etc. return `Except E _` directly, they compose naturally with `←
 ```lean
 @[Lsc.external]
 def swap (s : AMMState) (amountIn : UInt256) : Except AMMError AMMState := do
-  require (s.reserve0 > 0) .uninitializedPool
-  let num       ← amountIn  *? s.reserve1
+  require (s.reserve0 > 0 ∧ s.reserve1 > 0) .uninitializedPool
+  let num       ← amountIn   *? s.reserve1
   let denom     ← s.reserve0 +? amountIn
-  let amountOut ← num /? denom
-  return .ok { s with
-    reserve0 := s.reserve0 + amountIn
-    reserve1 := s.reserve1 - amountOut }
+  let amountOut ← num        /? denom
+  require (amountOut > 0) .insufficientLiquidity
+  let r0' ← s.reserve0 +? amountIn
+  let r1' ← s.reserve1 -? amountOut
+  return .ok { s with reserve0 := r0', reserve1 := r1' }
 ```
 
 **Simple contracts** use `ArithError` directly as `E`; the identity `LscError ArithError` instance is in the prelude:
@@ -361,14 +364,47 @@ def increment (s : CounterState) : Except ArithError CounterState := do
 
 #### Bridge lemmas (`@[simp]`)
 
+The bridge lemmas are **biconditional** — they rewrite `(a +? b = .ok r)` into a pure `ℕ` proposition about `.val`. This means a single `simp [myFunction, UInt256.addChecked_val, ...]` call in a tactic proof immediately reduces any goal to plain natural number arithmetic, with no `Fin` modular reasoning or `.val` coercions leaking through.
+
 ```lean
-@[simp] theorem UInt256.addChecked_ok [LscError E] {a b : UInt256} (h : a.val + b.val < 2^256) :
-    (a +? b : Except E UInt256) = .ok ⟨a.val + b.val⟩ := by simp [UInt256.addChecked, h]
+-- Lsc.Prelude
+@[simp] theorem UInt256.addChecked_val [LscError E] {a b r : UInt256} :
+    (a +? b : Except E UInt256) = .ok r ↔
+    (a.val + b.val < 2^256 ∧ r.val = a.val + b.val) := by
+  simp [UInt256.addChecked]; constructor
+  · intro h; split_ifs at h with hlt <;> simp_all; exact ⟨hlt, by simp [Fin.ext_iff]⟩
+  · rintro ⟨hlt, hval⟩; simp [hlt, Fin.ext_iff, hval]
+
+@[simp] theorem UInt256.subChecked_val [LscError E] {a b r : UInt256} :
+    (a -? b : Except E UInt256) = .ok r ↔
+    (b.val ≤ a.val ∧ r.val = a.val - b.val) := by
+  simp [UInt256.subChecked]; constructor
+  · intro h; split_ifs at h with hle <;> simp_all; exact ⟨hle, by simp [Fin.ext_iff]⟩
+  · rintro ⟨hle, hval⟩; simp [hle, Fin.ext_iff, hval]
+
+@[simp] theorem UInt256.mulChecked_val [LscError E] {a b r : UInt256} :
+    (a *? b : Except E UInt256) = .ok r ↔
+    (a.val * b.val < 2^256 ∧ r.val = a.val * b.val) := by
+  simp [UInt256.mulChecked]; constructor
+  · intro h; split_ifs at h with hlt <;> simp_all
+    exact ⟨by cases hlt with
+      | inl h => simp [h]
+      | inr h => exact Nat.lt_of_div_le h, by simp [Fin.ext_iff]⟩
+  · rintro ⟨hlt, hval⟩
+    simp [Fin.ext_iff, hval]
+    right; exact Nat.le_div_iff_mul_le (by omega) |>.mpr (by omega)
+
+@[simp] theorem UInt256.divChecked_val [LscError E] {a b r : UInt256} :
+    (a /? b : Except E UInt256) = .ok r ↔
+    (b.val ≠ 0 ∧ r.val = a.val / b.val) := by
+  simp [UInt256.divChecked]; constructor
+  · intro h; split_ifs at h with hne <;> simp_all; exact ⟨hne, by simp [Fin.ext_iff]⟩
+  · rintro ⟨hne, hval⟩; simp [hne, Fin.ext_iff, hval]
+
+-- Error-direction lemmas (unchanged, still useful)
 @[simp] theorem UInt256.addChecked_error [LscError E] {a b : UInt256} (h : a.val + b.val ≥ 2^256) :
     (a +? b : Except E UInt256) = .error (LscError.arith .overflow) := by
   simp [UInt256.addChecked]; omega
-@[simp] theorem UInt256.subChecked_ok [LscError E] {a b : UInt256} (h : a.val ≥ b.val) :
-    (a -? b : Except E UInt256) = .ok ⟨a.val - b.val⟩ := by simp [UInt256.subChecked, h]
 @[simp] theorem UInt256.subChecked_error [LscError E] {a b : UInt256} (h : a.val < b.val) :
     (a -? b : Except E UInt256) = .error (LscError.arith .overflow) := by
   simp [UInt256.subChecked]; omega
@@ -377,7 +413,9 @@ def increment (s : CounterState) : Except ArithError CounterState := do
   simp [UInt256.divChecked]
 ```
 
-**Proof recipe:** `simp [myFunction]` unfolds `+?`, `-?`, `*?`, `/?` and fires bridge lemmas in one step. `omega` closes arithmetic goals. Arithmetic revert theorems use `.error (LscError.arith .overflow)` or `.error (.arith .overflow)` interchangeably when the instance is in scope.
+**Proof recipe:** `simp [myFunction, UInt256.addChecked_val, UInt256.subChecked_val, UInt256.mulChecked_val, UInt256.divChecked_val]` unfolds `+?`, `-?`, `*?`, `/?` and rewrites all checked arithmetic results into pure `ℕ` hypotheses about `.val` in one step. `omega` closes linear goals; `nlinarith` closes nonlinear ones (e.g. constant-product inequalities). Arithmetic revert theorems use `.error (LscError.arith .overflow)` or `.error (.arith .overflow)` interchangeably when the instance is in scope.
+
+> **Why biconditional?** A one-directional lemma (`h → simp result`) forces proofs to supply the bound hypothesis first, producing `.val`-laden intermediate goals. The biconditional form lets `simp` rewrite `(a +? b = .ok r)` → `(a.val + b.val < 2^256 ∧ r.val = a.val + b.val)` in one shot, with no manual `.val` unwrapping. All `Fin` machinery is absorbed by the bridge lemmas; downstream proofs only see `ℕ`.
 
 #### `Option.orError` — single-operation option lift (rare)
 
@@ -403,6 +441,202 @@ def Option.orError (e : E) : Option A → Except E A
 `do`-notation over `Except E` is allowed — it only threads the error channel; `s` remains explicit.
 
 > **Why not richer types?** `simp` + `omega` + `decide` work best on flat finite structures. Every restriction here trades expressiveness for proofs that close in one step.
+
+### §2.7 Fixed-point arithmetic (`Lsc.Ray` / `Lsc.Wad`)
+
+DeFi contracts routinely multiply and divide `uint256` values that represent decimal fractions — interest rates, exchange rates, price indices. Without a library, authors write their own fixed-point mul/div and lose all verified bounds. `Lsc.Ray` and `Lsc.Wad` are the built-in fixed-point libraries (scale 10²⁷ and 10¹⁸), wrapping the three-tier [`WadRayMath`](WadRayMath/) design. Extended operator reference: [Appendix D](lsc-appendices.md#appendix-d--wadray-fixed-point).
+
+#### Scale constants
+
+```lean
+-- Lsc.Ray / Lsc.Wad
+def WAD : ℕ := 10^18   -- 1.0 in WAD encoding
+def RAY : ℕ := 10^27   -- 1.0 in RAY encoding
+def HALF_WAD : ℕ := WAD / 2
+def HALF_RAY : ℕ := RAY / 2
+```
+
+Values stored on-chain are plain `UInt256`; their `.val` represents a RAY- or WAD-scaled integer. `1.0` is `RAY` (10²⁷); `0.5` is `HALF_RAY`; `1.05` is `RAY + RAY / 20`.
+
+#### Ray/WAD fixed-point operations
+
+Operations live in `Lsc.Ray` (RAY scale) and `Lsc.Wad` (WAD scale) and follow the same `Except E` pattern as `+?`. **Three explicit rounding variants** are provided for each operation — there are no default aliases. Aave's on-chain convention is half-up (`rayMulHalfUp` / `wadMulHalfUp`); authors must name the rounding mode at every call site.
+
+```lean
+-- Lsc.Ray  (all return Except E UInt256; E resolved via LscError instance)
+
+-- RAY multiply
+def rayMulDown   [LscError E] (a b : UInt256) : Except E UInt256
+def rayMulUp     [LscError E] (a b : UInt256) : Except E UInt256
+def rayMulHalfUp [LscError E] (a b : UInt256) : Except E UInt256
+
+-- RAY divide
+def rayDivDown   [LscError E] (a b : UInt256) : Except E UInt256
+def rayDivUp     [LscError E] (a b : UInt256) : Except E UInt256
+def rayDivHalfUp [LscError E] (a b : UInt256) : Except E UInt256
+
+-- Lsc.Wad — same six defs with wad* prefix and WAD = 10^18 scale
+def wadMulDown   [LscError E] (a b : UInt256) : Except E UInt256
+def wadMulUp     [LscError E] (a b : UInt256) : Except E UInt256
+def wadMulHalfUp [LscError E] (a b : UInt256) : Except E UInt256
+def wadDivDown   [LscError E] (a b : UInt256) : Except E UInt256
+def wadDivUp     [LscError E] (a b : UInt256) : Except E UInt256
+def wadDivHalfUp [LscError E] (a b : UInt256) : Except E UInt256
+```
+
+Revert conditions mirror Aave's `WadRayMath`:
+
+| Operation | Reverts when |
+|-----------|-------------|
+| `rayMulHalfUp a b` | `b ≠ 0 ∧ a > (UINT256_MAX - HALF_RAY) / b` |
+| `rayDivHalfUp a b` | `b = 0 ∨ a > (UINT256_MAX - b/2) / RAY` |
+| `rayMulDown a b` | `b ≠ 0 ∧ a > UINT256_MAX / b` |
+| `rayDivDown a b` | `b = 0 ∨ a > UINT256_MAX / RAY` |
+
+(`wadMulHalfUp` / `wadDivHalfUp` / `wadMulDown` / `wadDivDown` use the same predicates with `HALF_WAD` / `WAD`.)
+
+#### Bracket-pair operators
+
+Fixed-point ops may revert (overflow / division-by-zero), so operators use a **trailing `?`** like `+?`. The rounding mode is a **bracket pair wrapping `*` or `/`**:
+
+| Pair | Rounding | Math (RAY mul) |
+|------|----------|----------------|
+| `⌊·⌋` | Down | `⌊a·b / RAY⌋` |
+| `⌈·⌉` | Up | `⌈a·b / RAY⌉` |
+| `⸢·⸣` | HalfUp | `⌊(a·b + HALF_RAY) / RAY⌋` |
+
+`⸢⸣` (U+2E22 / U+2E23, Supplemental Punctuation half-bracket pair) is adopted **by LSC convention** for half-up — distinct from philological use in Unicode. Algorithm unchanged: add half-ulp then floor.
+
+```
+a ⌊*⌋? b    rayMulDown      may revert
+a ⌈*⌉? b    rayMulUp        may revert
+a ⸢*⸣? b    rayMulHalfUp    may revert   (Aave default)
+a ⌊/⌋? b    rayDivDown      may revert
+a ⌈/⌉? b    rayDivUp        may revert
+a ⸢/⸣? b    rayDivHalfUp    may revert
+```
+
+**Scale from namespace** — Lean cannot infer RAY vs WAD from `UInt256` alone. Import one module and `open scoped` it; the same glyph strings desugar to `ray*` or `wad*` defs:
+
+```lean
+-- Lsc/Ray.lean
+namespace Lsc.Ray
+  scoped notation a:65 " ⌊*⌋? " b:65 => rayMulDown a b
+  scoped notation a:65 " ⌈*⌉? " b:65 => rayMulUp a b
+  scoped notation a:65 " ⸢*⸣? " b:65 => rayMulHalfUp a b
+  scoped notation a:65 " ⌊/⌋? " b:65 => rayDivDown a b
+  scoped notation a:65 " ⌈/⌉? " b:65 => rayDivUp a b
+  scoped notation a:65 " ⸢/⸣? " b:65 => rayDivHalfUp a b
+end Lsc.Ray
+
+-- Lsc/Wad.lean — identical operators, wad* defs
+```
+
+Do **not** `open scoped` both `Lsc.Ray` and `Lsc.Wad` in the same file — operators clash. Mixed-scale files use explicit function names.
+
+**Usage in contract code:**
+
+```lean
+import Lsc.Prelude
+import Lsc.Ray
+open Lsc Lsc.Ray
+open scoped Lsc.Ray
+
+@[Lsc.external]
+def accrueInterest (s : LendingState) : Except LendingError LendingState := do
+  -- index *= (1 + rate);  all values RAY-encoded
+  let growth    ← s.liquidityRate ⸢*⸣? s.timeDelta
+  let newFactor ← s.liquidityIndex +? growth
+  let newIndex  ← newFactor ⸢*⸣? s.liquidityRate
+  return .ok { s with liquidityIndex := newIndex }
+```
+
+#### Three tiers of verified behaviour
+
+`Lsc.Ray` is backed by three layers ( `Lsc.Wad` mirrors the same structure at WAD scale):
+
+| Tier | Module | What it gives you |
+|------|--------|-------------------|
+| **ℕ code** | `Lsc.Ray.Nat` | Definitions + helper lemmas + rounding bounds over `ℕ` |
+| **EVM code** | `Lsc.Ray.Evm` | `Except`-wrapped contract ops + simulation theorems (overflow conditions match) |
+| **Real bounds** | `Lsc.Ray.Real` | `decode`, `toReal`, bridge lemmas bounding error in `ℝ` |
+
+For most contracts only the ℕ tier is needed. Import `Lsc.Ray.Real` when you need to prove precision statements like "the accrued interest is within 10⁻²⁷ of the true value."
+
+#### Bridge lemmas
+
+Each operation gets the same biconditional bridge lemma pattern as `+?` (§2.5). Names match the explicit def (example for half-up mul; down/up/half-up div follow the same shape):
+
+```lean
+-- Lsc.Ray
+@[simp] theorem rayMulHalfUp_val [LscError E] {a b r : UInt256} :
+    (rayMulHalfUp a b : Except E UInt256) = .ok r ↔
+    (¬ rayMulHalfUpReverts a.val b.val ∧
+     r.val = Lsc.Ray.Nat.rayMulHalfUp a.val b.val) := ...
+
+@[simp] theorem rayDivHalfUp_val [LscError E] {a b r : UInt256} :
+    (rayDivHalfUp a b : Except E UInt256) = .ok r ↔
+    (¬ rayDivHalfUpReverts a.val b.val ∧
+     r.val = Lsc.Ray.Nat.rayDivHalfUp a.val b.val) := ...
+```
+
+After `simp [accrueInterest, rayMulHalfUp_val, UInt256.addChecked_val]` all goals reduce to `ℕ` arithmetic. Bracket operators desugar to these defs before `simp`. The rounding-bound theorems (`rayMulHalfUp_error`, `double_rayMulHalfUp_decode_error`) are available in `Lsc.Ray.Nat` and `Lsc.Ray.Real` respectively.
+
+#### Rounding-bound theorems (available in `Lsc.Ray.Nat`)
+
+```lean
+-- Single multiply: result is within HALF_RAY of the exact product
+theorem rayMulHalfUp_error (a b : ℕ) :
+    rayDist (a * b) (rayMulHalfUp a b * RAY) ≤ HALF_RAY
+
+-- Single multiply: one-sided bounds
+theorem rayMulHalfUp_exact_le (a b : ℕ) : a * b ≤ rayMulHalfUp a b * RAY + HALF_RAY
+theorem rayMulHalfUp_exact_ge (a b : ℕ) : rayMulHalfUp a b * RAY ≤ a * b + HALF_RAY
+
+-- Composition: double rayMulHalfUp slack at scale 2
+theorem double_rayMulHalfUp_scaled_error (sd a b : ℕ) :
+    rayDist (rayMulHalfUp sd (rayMulHalfUp a b) * RAY * RAY) (sd * (a * b)) ≤
+      sd * RAY + RAY * RAY
+```
+
+#### Real-valued precision bounds (available in `Lsc.Ray.Real`)
+
+```lean
+-- decode n = (n : ℝ) / RAY  (the mathematical value of a RAY-encoded integer)
+
+-- Single multiply is within 10^-27 of the true product
+theorem rayMulHalfUp_error_real (a b : ℕ) :
+    |decode a * decode b - decode (rayMulHalfUp a b)| ≤ (1 : ℝ) / (2 * RAY)
+
+-- Double multiply error in decoded space
+theorem double_rayMulHalfUp_decode_error (sd a b : ℕ) :
+    |decode (rayMulHalfUp sd (rayMulHalfUp a b)) - decode sd * decode a * decode b| ≤
+      (1 + decode sd) * (1 / (2 * RAY))
+```
+
+#### Named invariant pattern for ray-valued quantities
+
+Following §9.7, define economic quantities using `decode` so theorem statements stay clean:
+
+```lean
+-- *Lemma.lean
+open Lsc.Ray.Real in
+def interestRate (s : LendingState) : ℝ := decode s.liquidityRate.val
+def liquidityIndex (s : LendingState) : ℝ := decode s.liquidityIndex.val
+
+-- *Theorem.lean
+/-- The liquidity index is non-decreasing on every accrual. -/
+theorem accrueInterest_index_nondecreasing (s s' : LendingState)
+    (h : accrueInterest s = .ok s') :
+    liquidityIndex s ≤ liquidityIndex s' :=
+  LendingLemma.accrueInterest_index_nondecreasing s s' h
+```
+
+#### What is *not* in `Lsc.Ray` / `Lsc.Wad`
+
+- **No `rayPow` / `wadPow`** — exponentiation requires unbounded loops; use a caller-supplied pre-computed factor or iterate with bounded recursion.
+- **No fixed-point square root** — same reason.
+- **No WAD↔RAY conversion helpers** — multiply/divide by `RAY / WAD = 10^9` using the plain `*?` / `/?` operators; no special case needed.
 
 ---
 
@@ -779,29 +1013,142 @@ structure World where
   accounts : Mapping Address Account
 ```
 
-Author contract functions remain `State → Except E S` — they never take `World`. `World` threading happens only in compiler-generated export bodies.
+Author functions never take `World` as a parameter. `call!` and `staticcall!` may appear in any contract-module `def` (`src/*.lean`). The compiler threads `World` through those sites when lowering exports and their callees (see §8.2).
 
-### §8.2 `Lsc.extern.call` / `staticcall`
+### §8.2 External calls: interface cast, `staticcall!`, `call!`
+
+Authors invoke other contracts inline in ordinary `do`-blocks — same as `emit!` and `require`. No separate export body, hook attribute, or `World` argument.
+
+#### Interface cast
+
+Mirror Solidity's `IERC20(addr).balanceOf(who)` — one expression carries the runtime **address** and compile-time **interface**:
 
 ```lean
--- Read-only: callee must not modify storage
-Lsc.extern.staticcall IERC20.balanceOf tokenAddr w who : UInt256
+-- Lsc.Interfaces
+class LscInterface (I : Type) where
+  -- method signatures for validator + selector lookup
 
--- Mutating: may update World; returns new world
-Lsc.extern.call IERC20.transferFrom tokenAddr w from to amount
-  : Except ExternError (World × Bool)
+abbrev ContractAt (I : Type) [LscInterface I] := Address
 ```
 
-Interface typeclasses live in `Lsc.Interfaces` or project `interfaces/*.lean`.
+**Cast notation** (macro in `Lsc.Prelude`):
 
-### §8.3 Registered vs assumed callees
+```lean
+(e : I)   -- when I is an interface with [LscInterface I]
+-- desugars to:
+(e : ContractAt I)
+```
+
+`ContractAt I` is proof-transparent (`ContractAt I` = `Address`). Interface typeclasses live in `Lsc.Interfaces` or project `interfaces/*.lean`.
+
+#### `staticcall!` and `call!`
+
+**Read-only — `staticcall!` (callee must not modify storage):**
+
+```lean
+let bal ← staticcall! (tokenAddr : IERC20).balanceOf who
+-- emitter desugars each site to:
+Lsc.extern.staticcall IERC20.balanceOf tokenAddr w ctx args : Ret
+```
+
+**Mutating — `call!` (callee may update `World`; revert rolls back):**
+
+```lean
+let ok ← call! (tokenAddr : IERC20).transferFrom from to amount
+-- emitter desugars each site to:
+Lsc.extern.call IERC20.transferFrom tokenAddr w ctx args : Except ExternError Ret
+```
+
+Authors bind only the interface method's return type (`Ret`), not `World × Ret`. `w` and `ctx` (`msg.sender`, etc.) are implicit — supplied by the export wrapper at each site, like `LOG` opcodes for `emit!`.
+
+**Example — composition hook inline (Appendix B):**
+
+```lean
+@[Lsc.external]
+def transfer (caller : Caller) (s : MyTokenState) (to : Address) (amount : UInt256)
+    : Except TokenError (MyTokenState × Bool) := do
+  require (s.balances.load caller ≥ amount) .insufficientBalance
+  let newCaller ← s.balances.load caller -? amount
+  let newTo     ← s.balances.load to +? amount
+  let s' := { s with balances := s.balances.store caller newCaller |>.store to newTo }
+  emit! TransferEvent caller to amount
+  if s'.counter ≠ Address.zero ∧ caller.val ≠ to then
+    let _ ← call! (s'.counter : ITransferCounter).onTransfer
+  return .ok (s', true)
+```
+
+**Example — view with `staticcall!`:**
+
+```lean
+@[Lsc.external]
+def check (s : PoolState) (tokenAddr : Address) (who : Address) : Except PoolError UInt256 := do
+  let bal ← staticcall! (tokenAddr : IERC20).balanceOf who
+  return .ok bal
+```
+
+#### Typing and errors
+
+`call!` and `staticcall!` compose with `←` in `do`-blocks over the contract's `Except E`. Callee revert maps to `.error` via a required constructor on `@[Lsc.error]` types:
+
+```lean
+@[Lsc.error]
+inductive TokenError where
+  | arith  : ArithError → TokenError
+  | extern : ExternError → TokenError   -- required when module uses call!
+```
+
+Same propagation model as `+?` / `require`. Contract modules using `staticcall!` only (no `call!`) do not require `extern`.
+
+#### Helpers
+
+The guard + `call!` block may live in a top-level helper in the same contract module:
+
+```lean
+def notifyCounterIfHooked (caller : Caller) (s' : MyTokenState) (to : Address)
+    : Except TokenError Unit := do
+  if s'.counter ≠ Address.zero ∧ caller.val ≠ to then
+    let _ ← call! (s'.counter : ITransferCounter).onTransfer
+  return .ok ()
+
+@[Lsc.external]
+def transfer ... := do
+  ...
+  ← notifyCounterIfHooked caller s' to
+  return .ok (s', true)
+```
+
+`call!` / `staticcall!` are allowed in **any `def` in `src/*.lean`**, not only on `@[Lsc.external]` entry points. Forbidden in `test/*Lemma.lean` and `test/*Theorem.lean`. Helpers that only perform extern side effects return `Except E Unit`. The emitter lowers sites in the **transitive closure** of each export (internal function or inline). CEI order follows dynamic call order in the author `do` block.
+
+#### Export lowering
+
+The compiler-generated export wrapper still performs load/store, reentrancy guard, and `Caller` binding (§13.1). It runs the author function (including callees), lowering each `call!` / `staticcall!` site to `CALL` / `STATICCALL` with ambient `w` / `ctx`. On `.error` — revert; no self `sstore`; no `emit!` logs; extern `World` changes rolled back.
+
+Macros live in `Lsc.Prelude` alongside `emit!` and `require`.
+
+### §8.3 Proof erasure
+
+`call!` desugars to `Lsc.extern.invoke`, which is **proof-erased for `World` effects** in the Lean kernel — definitionally a no-op on author `State` (parallel to `Lsc.Event.log` for logs in §6.3).
+
+**Layer 1:** theorems over `transfer`, `increment`, etc. unfold author `do` without `World`. Inline `call!` sites do not appear in state-transition proofs. ERC-20 lemmas unchanged.
+
+**Layer 3:** hook / composition theorems (`transfer_increments_counter_when_hooked`, etc.) use `simulate_call` + callee theorems ([Appendix B](lsc-appendices.md#appendix-b--composition-pattern)).
+
+**Assumed interfaces** (`IERC20` on an unknown token): `staticcall!` results used in author logic may need axioms in `*Lemma.lean` (§8.4) — trusted external behavior.
+
+> **Why proof-erasure for `call!` but not for `staticcall!` results?** World threading pollutes every theorem; erased. A `UInt256` balance used in a `require` is part of author logic — proved via axioms (assumed callee) or Layer 3 (same-repo callee). Only the multi-contract store aspect is erased at Layer 1.
+
+Extern-call correctness (selector, encoding, CEI ordering, revert rollback) is covered by the formally-verified lowering pipeline (§13.3).
+
+### §8.4 Registered vs assumed callees
 
 | Callee kind | Resolution | Proof strength |
 |-------------|-----------|----------------|
-| **Registered** | Same repo `src/*.lean` + address table | Compose callee theorems via `simulate_call` (§10.3) |
+| **Same-repo** | `src/*.lean` contract + matching interface in `interfaces/*.lean` | Layer 3 via `simulate_call` (§10.3) + callee theorems |
 | **Assumed** | `@[extern_assume "IERC20"]` + axioms in `test/*Lemma.lean` | Trust interface axioms (human-reviewed) |
 
-### §8.4 Reentrancy
+`[lsc.contracts]` in `foundry.toml` is a **deploy/test tooling** address table for Foundry multi-contract tests — not part of author call syntax.
+
+### §8.5 Reentrancy
 
 `@[Lsc.external]` functions are non-reentrant by default (§4.1). `@[Lsc.allow_reentrant]` opts out. Proofs of re-entrant exports must use Layer 2 helpers (§10).
 
@@ -870,7 +1217,7 @@ theorem Lsc.Invariant
 
 **When to use direct `induction` instead:** when the property relates initial to final state in a way that depends on the full history (e.g. "total tokens transferred equals sum of individual transfers").
 
-`axiom` is allowed in `*Lemma.lean` for `@[extern_assume]` interface assumptions (§8.3).
+`axiom` is allowed in `*Lemma.lean` for `@[extern_assume]` interface assumptions (§8.4).
 
 ### §9.2 Theorem files (`test/*Theorem.lean`)
 
@@ -926,6 +1273,71 @@ AI writes `*Lemma.lean` (scaffolding + tactic proofs). Humans craft `*Theorem.le
 | Theorem body is not a single lemma delegation | error |
 | `theorem` with no homonymous `lemma` | FAIL (typecheck) |
 | `lemma` with no matching `theorem` | warning (helper lemma) |
+
+### §9.7 Writing `.val`-free theorem statements
+
+Theorem files are the **requirements document** — they should read like a protocol specification, not implementation plumbing. Raw `.val` projections in theorem statements are a readability smell: `s'.reserve0.val * s'.reserve1.val ≥ s.reserve0.val * s.reserve1.val` is harder to read and review than `k s ≤ k s'`.
+
+Two patterns to eliminate `.val` noise:
+
+#### Named invariant functions (preferred for economic properties)
+
+Define the economic quantities once in `*Lemma.lean` as plain `ℕ`-valued functions, then state theorems purely over those:
+
+```lean
+-- AMMlemma.lean
+def k (s : AMMState) : ℕ := s.reserve0.val * s.reserve1.val
+def price (s : AMMState) : ℚ := s.reserve1.val / s.reserve0.val  -- for real-valued bounds
+```
+
+```lean
+-- AMMTheorem.lean
+/-- Constant product never decreases on a successful swap. -/
+theorem swap_k_nondecreasing (s s' : AMMState) (amountIn : UInt256)
+    (h : swap s amountIn = .ok s') : k s ≤ k s' :=
+  AMMlemma.swap_k_nondecreasing s s' amountIn h
+
+/-- reserve0 strictly increases on every successful swap. -/
+theorem swap_reserve0_increases (s s' : AMMState) (amountIn : UInt256)
+    (hPos : amountIn.val > 0) (h : swap s amountIn = .ok s') :
+    k s ≤ k s' :=
+  AMMlemma.swap_reserve0_increases s s' amountIn hPos h
+```
+
+The `.val` is hidden once inside `k`; every downstream theorem is clean.
+
+#### View projection (for multi-field state structs)
+
+When a theorem needs to mention several fields of a state struct, a `view` projection keeps the statement readable without per-field `.val`:
+
+```lean
+-- AMMlemma.lean
+structure AMMView where
+  reserve0 reserve1 totalLp : ℕ
+
+def AMMState.view (s : AMMState) : AMMView :=
+  { reserve0 := s.reserve0.val, reserve1 := s.reserve1.val, totalLp := s.totalLp.val }
+
+-- Conventional notation; import into *Theorem.lean via `open AMMlemma`
+scoped notation s "↓" => AMMState.view s
+```
+
+```lean
+-- AMMTheorem.lean
+/-- Swap preserves total liquidity. -/
+theorem swap_lp_unchanged (s s' : AMMState) (amountIn : UInt256)
+    (h : swap s amountIn = .ok s') : (s↓).totalLp = (s'↓).totalLp :=
+  AMMlemma.swap_lp_unchanged s s' amountIn h
+
+/-- Adding liquidity never decreases LP supply. -/
+theorem addLiquidity_lp_nondecreasing
+    (caller : Caller) (s s' : AMMState) (a0 a1 lpMint : UInt256)
+    (h : addLiquidity caller s a0 a1 = .ok (s', lpMint)) :
+    (s↓).totalLp ≤ (s'↓).totalLp :=
+  AMMlemma.addLiquidity_lp_nondecreasing caller s s' a0 a1 lpMint h
+```
+
+**Guideline:** use named invariant functions when the quantity has an economic name (`k`, `price`, `totalSupply`, `solvency`). Use the view projection `↓` when the theorem is about structural state relationships (field X vs field Y). Either way, `.val` belongs in `*Lemma.lean` definitions, not in `*Theorem.lean` statement types.
 
 ---
 
@@ -1077,6 +1489,7 @@ Runs as a post-elaboration pass over contract, lemma, and theorem modules. All m
 | Error type without `@[Lsc.error]` | error | `lsc: error type must be declared with @[Lsc.error]` |
 | `@[Lsc.error]` on non-inductive | error | `lsc: @[Lsc.error] may only annotate inductive types` |
 | `@[Lsc.error]` type missing `arith` constructor | error | `lsc: error type must include arith : ArithError → E` |
+| `@[Lsc.error]` type missing `extern` constructor when `call!` used | error | `lsc: error type must include extern : ExternError → E` |
 | `@[Lsc.error]` type missing `LscError` instance | error | `lsc: error type must have a LscError instance` |
 | Bare `Option State` on mutator | error | `lsc: use Except E S` |
 | Invalid `@[Lsc.external]` return shape | error | `lsc: must return Except E S, Except E (S × V), S, or V` |
@@ -1085,6 +1498,9 @@ Runs as a post-elaboration pass over contract, lemma, and theorem modules. All m
 | More than one `@[Lsc.initialize]` | error | `lsc: at most one @[Lsc.initialize] per contract module` |
 | `sload` / `sstore` in author code | error | `lsc: storage IO is emitter-only` |
 | `World` in contract functions | error | `lsc: World not allowed in contract functions` |
+| `call!` / `staticcall!` in `test/*Lemma.lean` or `test/*Theorem.lean` | error | `lsc: external calls are contract-module only` |
+| Invalid interface cast `(e : I)` | error | `lsc: I must be an interface with LscInterface instance` |
+| Unknown interface method in `call!` / `staticcall!` | error | `lsc: method not found on interface I` |
 | Malformed event signature | error | `lsc: invalid event signature; expected "Name(type,type)"` |
 | Event arg count / type mismatch | error | `lsc: event argument mismatch` |
 | Multiple `Caller` parameters | error | `lsc: at most one Caller parameter per export` |
@@ -1102,8 +1518,8 @@ Runs as a post-elaboration pass over contract, lemma, and theorem modules. All m
 | Construct | Severity | Error message |
 |-----------|----------|--------------|
 | `theorem` (non-helper) | error | `lsc: use lemma in *Lemma.lean; put requirements in *Theorem.lean` |
-| `+?`, `-?`, `*?`, `/?` in lemma file | error | `lsc: checked arithmetic (+?) is contract-only; lemmas use Fin +` |
 | `sorry` | error | `lsc: sorry not allowed in lemma modules` |
+| `call!` / `staticcall!` | error | `lsc: external calls are contract-module only` |
 
 ### §12.3 Theorem module errors (`test/*Theorem.lean`)
 
@@ -1113,6 +1529,7 @@ Runs as a post-elaboration pass over contract, lemma, and theorem modules. All m
 | Theorem body is not a single lemma delegation | error | `lsc: theorem body must be a one-line *Lemma delegation` |
 | Missing required theorem | error | `lsc: compliance requires "f" but no theorem in *Theorem.lean` |
 | `lemma` | error | `lsc: put proofs in *Lemma.lean` |
+| `call!` / `staticcall!` | error | `lsc: external calls are contract-module only` |
 
 ---
 
@@ -1129,8 +1546,8 @@ At each `@[Lsc.external]` boundary, the emitter generates:
 5. **`Caller` binding** — `caller := msg.sender`
 6. **`CallValue` binding** — `callvalue := msg.value` if present
 7. **State load** — `sload` all struct fields (full load for mutators; lazy slot read for views and `@[Lsc.public]` getters)
-8. **Author function call** — invoke the `@[Lsc.external]` function
-9. **On `.error e`** — `revert(abi.encode(e))`; no storage writes; no events
+8. **Author function call** — invoke the `@[Lsc.external]` function (and its callees); lower each `call!` / `staticcall!` site to `CALL` / `STATICCALL` with ambient `World` and `msg.sender`
+9. **On `.error e`** — `revert(abi.encode(e))`; no storage writes; no events; extern `World` changes rolled back
 10. **On `.ok val`** — `sstore` all modified fields; collect and emit `emit!` / `Lsc.Event.log` sites in source order via `LOG` opcodes; ABI-encode non-state component as returndata
 
 For `@[Lsc.public]`-generated getters and all view exports: step 7 performs a lazy load of only the accessed slot(s); step 10 is skipped.

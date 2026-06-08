@@ -1,13 +1,13 @@
 import Mathlib
-import WayRayMath.Nat
+import WadRayMath.Nat
 
 /-!
-# WayRayMath.Real
+# WadRayMath.Real
 
 Codec (`decode`, `toReal`) and bridge lemmas pushing `Nat` distance bounds to `ℝ`.
 -/
 
-namespace WayRayMath.Real
+namespace WadRayMath.Real
 
 noncomputable section
 
@@ -137,4 +137,4 @@ theorem double_rayMulHalfUp_decode_error (sd a b : ℕ) :
 
 end
 
-end WayRayMath.Real
+end WadRayMath.Real

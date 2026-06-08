@@ -2,13 +2,14 @@
 
 # LSC Appendices
 
-Extended reference patterns, examples, and project history. Code samples follow [lsc-spec.md](lsc-spec.md) (v1): `Except E A`, `Caller`, `Bytes[N]`, `LscError` / `+?`, `require`, and `Mapping` as `K → V`.
+Extended reference patterns, examples, and project history. Code samples follow [lsc-spec.md](lsc-spec.md) (v1): `Except E A`, `Caller`, `Bytes[N]`, `LscError` / `+?`, fixed-point `⌊*⌋?` / `⸢*⸣?` (§2.7), `require`, and `Mapping` as `K → V`.
 
 | Appendix | Title | Section |
 |----------|-------|---------|
 | A | ERC-20 Pattern | [§A](#appendix-a--erc-20-pattern) |
 | B | Composition Pattern | [§B](#appendix-b--composition-pattern) |
 | C | Versioning Roadmap | [§C](#appendix-c--versioning-roadmap) |
+| D | Wad/Ray Fixed-point | [§D](#appendix-d--wadray-fixed-point) |
 | E | ERC-20 with Mint/Burn | [§E](#appendix-e--erc-20-with-mintburn) |
 | F | UniV2-Style AMM | [§F](#appendix-f--univ2-style-amm) |
 
@@ -118,7 +119,7 @@ theorem transfer_preserves_total_supply
 
 ## Appendix B — Composition Pattern
 
-This appendix documents the **[forge-lean-composition](https://github.com/forge-lean/forge-lean-composition)** demo — the reference application for `Lsc.extern.call`, reentrancy-aware `World`/`invoke`, and multi-contract composition. It is the primary driver for v2a–v2b extern support.
+This appendix documents the **[forge-lean-composition](https://github.com/forge-lean/forge-lean-composition)** demo — the reference application for inline `call!` / `staticcall!` with interface casts, reentrancy-aware `World`/`invoke`, and multi-contract composition. It is the primary driver for v2a–v2b extern support.
 
 ### B.1 Goal
 
@@ -133,7 +134,7 @@ sequenceDiagram
   participant TC as TransferCounter
   User->>MyToken: transfer(to, amount)
   MyToken->>MyToken: ERC20 transfer logic
-  MyToken->>TC: Lsc.extern.call onTransfer
+  MyToken->>TC: call! (counter : ITransferCounter).onTransfer
   TC->>TC: count + 1
   TC-->>MyToken: success
   MyToken-->>User: true
@@ -153,7 +154,38 @@ structure MyTokenState where
   counter     : Address   -- 0 = hook disabled
 ```
 
-### B.3 TransferCounter
+### B.3 MyToken exports
+
+MyToken adds a `counter : Address` field (`0` = hook disabled). On successful `transfer` / `transferFrom`, token logic runs first, then an inline `call!` to the counter (checks-effects-interactions):
+
+```lean
+-- src/MyToken.lean (excerpt)
+@[Lsc.error]
+inductive TokenError where
+  | arith  : ArithError → TokenError
+  | extern : ExternError → TokenError
+
+def notifyCounterIfHooked (caller : Caller) (s' : MyTokenState) (to : Address)
+    : Except TokenError Unit := do
+  if s'.counter ≠ Address.zero ∧ caller.val ≠ to then
+    let _ ← call! (s'.counter : ITransferCounter).onTransfer
+  return .ok ()
+
+@[Lsc.external]
+def transfer (caller : Caller) (s : MyTokenState) (to : Address) (amount : UInt256)
+    : Except TokenError (MyTokenState × Bool) := do
+  require (s.balances.load caller ≥ amount) .insufficientBalance
+  let newCaller ← s.balances.load caller -? amount
+  let newTo     ← s.balances.load to +? amount
+  let s' := { s with balances := s.balances.store caller newCaller |>.store to newTo }
+  emit! TransferEvent caller to amount
+  ← notifyCounterIfHooked caller s' to
+  return .ok (s', true)
+```
+
+Self-transfer skip and zero-counter skip are ordinary control flow in `notifyCounterIfHooked` (or inlined in `transfer`). No hook attributes or compiler-inserted export bodies.
+
+### B.4 TransferCounter
 
 ```lean
 -- src/TransferCounter.lean
@@ -171,7 +203,7 @@ def onTransfer (s : TransferCounterState) : Except ArithError TransferCounterSta
   return .ok { s with count := c }
 ```
 
-### B.4 Required theorems
+### B.5 Required theorems
 
 **ERC-20 compliance** (`[lsc.compliance.erc20]`): same table as §11.3, stated over `MyToken` functions.
 
@@ -190,7 +222,7 @@ def onTransfer (s : TransferCounterState) : Except ArithError TransferCounterSta
 |---------|------------------|
 | `onTransfer_increments_count` | `onTransfer` increments `count` by exactly 1 |
 
-### B.5 Proof strategy
+### B.6 Proof strategy
 
 | Layer | What | Files |
 |-------|------|-------|
@@ -211,13 +243,13 @@ All v2+ content is removed from the main spec body. This appendix records what e
 |-------|--------|-------------|
 | **v1** | Current | Counter + ERC-20 demo; no `Lsc.extern.*` in core tests; `World`/`invoke` in `Lsc.Semantics` but not emitted |
 | **v2a** | Planned | `World`, `Account`, `invoke` fully wired in Foundry multi-contract tests |
-| **v2b** | Planned | `Lsc.extern.call` / `staticcall` emitter; `CALL` lowering; registered callees; `simulate_call` complete |
+| **v2b** | Planned | Inline `call!` / `staticcall!` emitter; `CALL` / `STATICCALL` lowering; interface casts; `simulate_call` complete |
 | **v2c** | Planned | `@[lsc.no_reentrant]` validator enforcement; trace templates; `lift_*` refinement lemmas |
 | **v3** | Future | `delegatecall`; `Lsc.unsafe.call`; `CREATE` / `SELFDESTRUCT` in `World` |
 
 | Feature | First available | Proof stance |
 |---------|----------------|-------------|
-| `CALL` | v2b | Compose registered contracts; assume interfaces otherwise |
+| `CALL` | v2b | Layer 3 via `simulate_call` for same-repo callees; assume interfaces otherwise |
 | `STATICCALL` | v2b | `lift_staticcall_view` |
 | `DELEGATECALL` | v3 | Proxy specs |
 | Arbitrary calldata | v3 (`unsafe.call`) | Fuzz only |
@@ -226,6 +258,101 @@ All v2+ content is removed from the main spec body. This appendix records what e
 | Gas forwarding proof | Phase 2 | Emitter correctness proof |
 
 ---
+
+---
+
+## Appendix D — Wad/Ray Fixed-point
+
+RAY (10²⁷) and WAD (10¹⁸) fixed-point multiply/divide with explicit rounding modes. Normative API: [lsc-spec.md §2.7](lsc-spec.md#27-fixed-point-arithmetic-lscray--lscwad). Implementation reference: [`WadRayMath/`](WadRayMath/).
+
+### D.1 Operator quick-reference
+
+All operators return `Except E UInt256` — trailing `?` marks the fallible channel (same as `+?`). Bracket pairs wrap `*` or `/`; scale comes from which namespace you `open scoped`.
+
+| Operator | Rounding | `Lsc.Ray` def | Math (RAY mul) |
+|----------|----------|---------------|----------------|
+| `a ⌊*⌋? b` | Down | `rayMulDown` | `⌊a·b / RAY⌋` |
+| `a ⌈*⌉? b` | Up | `rayMulUp` | `⌈a·b / RAY⌉` |
+| `a ⸢*⸣? b` | HalfUp | `rayMulHalfUp` | `⌊(a·b + HALF_RAY) / RAY⌋` |
+| `a ⌊/⌋? b` | Down | `rayDivDown` | floor-scaled division |
+| `a ⌈/⌉? b` | Up | `rayDivUp` | ceiling-scaled division |
+| `a ⸢/⸣? b` | HalfUp | `rayDivHalfUp` | half-up scaled division |
+
+Under `open scoped Lsc.Wad`, the same six operators desugar to `wadMulDown`, `wadMulUp`, `wadMulHalfUp`, `wadDivDown`, `wadDivUp`, `wadDivHalfUp` (scale `WAD = 10^18`).
+
+**Bracket pairs:**
+
+| Pair | Unicode | Use |
+|------|---------|-----|
+| `⌊⌋` | U+230A / U+230B | Floor / round down |
+| `⌈⌉` | U+2308 / U+2309 | Ceiling / round up |
+| `⸢⸣` | U+2E22 / U+2E23 | Half-up **by LSC convention** |
+
+Unicode distinguishes `⸢⸣` from math floor/ceiling (philological half-brackets). LSC adopts them for half-up fixed-point; the algorithm is still add-half-ulp then floor.
+
+**No default aliases** — `rayMulHalfUp`, not `rayMul`. Aave's on-chain default is half-up; authors name it explicitly or use `⸢*⸣?`.
+
+### D.2 Namespace scope
+
+```lean
+import Lsc.Ray
+open Lsc Lsc.Ray
+open scoped Lsc.Ray    -- ⌊*⌋?, ⸢*⸣?, etc. → ray*
+
+-- WAD contract:
+import Lsc.Wad
+open scoped Lsc.Wad   -- same glyphs → wad*
+```
+
+Do **not** `open scoped` both `Lsc.Ray` and `Lsc.Wad` in one file — operator strings clash. Mixed-scale code uses explicit function names (`rayMulHalfUp`, `wadMulHalfUp`).
+
+Plain `*?` / `/?` remain `UInt256` checked arithmetic (no rounding) from `Lsc.Prelude`.
+
+### D.3 Lending example
+
+```lean
+import Lsc.Prelude
+import Lsc.Ray
+open Lsc Lsc.Ray
+open scoped Lsc.Ray
+
+structure LendingState where
+  liquidityRate  : UInt256   -- RAY-encoded
+  liquidityIndex : UInt256   -- RAY-encoded
+  timeDelta      : UInt256   -- RAY-encoded
+
+@[Lsc.external]
+def accrueInterest (s : LendingState) : Except LendingError LendingState := do
+  let growth    ← s.liquidityRate ⸢*⸣? s.timeDelta
+  let newFactor ← s.liquidityIndex +? growth
+  let newIndex  ← newFactor ⸢*⸣? s.liquidityRate
+  return .ok { s with liquidityIndex := newIndex }
+```
+
+One-sided bounds (e.g. conservative accrual cap) use floor/ceil operators:
+
+```lean
+let capped ← rate ⌊*⌋? delta   -- rayMulDown
+```
+
+### D.4 Proof tiers and lemmas
+
+| Tier | Module | Role |
+|------|--------|------|
+| ℕ | `Lsc.Ray.Nat` / `WadRayMath.Nat` | Definitions, `rayMulHalfUp_error`, monotonicity |
+| EVM | `Lsc.Ray.Evm` / `WadRayMath.Evm` | `Except` wrappers, revert conditions |
+| ℝ | `Lsc.Ray.Real` / `WadRayMath.Real` | `decode`, `rayMulHalfUp_error_real` |
+
+**Bridge lemmas** (proofs use explicit names; operators desugar before `simp`):
+
+```lean
+@[simp] theorem rayMulHalfUp_val [LscError E] {a b r : UInt256} :
+    (rayMulHalfUp a b : Except E UInt256) = .ok r ↔
+    (¬ rayMulHalfUpReverts a.val b.val ∧
+     r.val = Lsc.Ray.Nat.rayMulHalfUp a.val b.val) := ...
+```
+
+**Proof recipe:** `simp [accrueInterest, rayMulHalfUp_val, UInt256.addChecked_val]` then `omega` / `nlinarith`.
 
 ---
 
