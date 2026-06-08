@@ -2,7 +2,7 @@
 
 **Companion document:** [lsc-spec.md](lsc-spec.md) — normative LSC language definition  
 
-This document describes **one conforming implementation** of [LSC](lsc-spec.md): a Foundry fork, `LeanCompiler`, Lake integration, and the `ForgeLean` Lean package (legacy name; normative API names are `Lsc.*` per the language spec). Examples and error messages track the current spec: `Except E A`, `Caller`, `Bytes[N]`, `LscError` / `+?`, and `require`.
+This document describes **one conforming implementation** of [LSC](lsc-spec.md): a Foundry fork, `LeanCompiler`, Lake integration, and the `ForgeLean` Lean package (legacy name; normative API names are `Lsc.*` per the language spec). Examples and error messages track the current spec: `Except E A`, `MsgContext`, `Bytes[N]`, `LscError` / `+?`, and `require`.
 
 ---
 
@@ -326,8 +326,8 @@ All messages are prefixed with `lsc:` and include file, line, and column.
 | `Bytes[N]` literal too long        | `lsc: Bytes literal exceeds declared bound N`                                           |
 | Author `sload` / `sstore`          | `lsc: storage IO is only performed by the emitter at @[lsc.external] boundaries` |
 | Hand-written export wrapper        | `lsc: export wrappers are compiler-generated; use @[lsc.external] on contract functions` |
-| `EvmContext` in author contract code | `lsc: use Caller for msg.sender; EvmContext is compiler-generated only`   |
-| Multiple `Caller` on one export    | `lsc: at most one Caller parameter per export`                                          |
+| `EvmContext` in author contract code | `lsc: use MsgContext for message/block context; EvmContext is compiler-generated only`   |
+| Multiple `MsgContext` on one export    | `lsc: at most one MsgContext parameter per export`                                          |
 | `assert` in contract function      | `lsc: use require for contract guards; assert! is a runtime panic`                      |
 | `List` in author contract code     | `lsc: List is not allowed in contract code; use Mapping or emit!`               |
 | Unknown event in `emit!`           | `lsc: unknown event type "X"; define Lsc.Event.EvmEvent instance or use string signature` |
@@ -429,7 +429,7 @@ flowchart LR
 
 `**Lsc` library**
 
-- `Lsc.Prelude`: `Address`, `Caller`, `Bytes32`, `Bytes[N]`, `Mapping`, `ArithError`, `LscError`, `UInt256` (`{ n // n < 2^256 }`; `DecidableEq`, `LE`/`LT`, `HAdd UInt256 ℕ` for proof literal add), `+? -? *? /?` (return `Except E _`), `+↻ -↻ *↻` (modular wrap), `Option.orError`, `require`, `emit!`, `native_transfer!`, `staticcall!`, `extcall!`; `Monad (Except E)` from Lean core ([lsc-spec.md §2](lsc-spec.md#2-types))
+- `Lsc.Prelude`: `Address`, `MsgContext`, `Bytes32`, `Bytes[N]`, `Mapping`, `ArithError`, `LscError`, `UInt256` (`{ n // n < 2^256 }`; `DecidableEq`, `LE`/`LT`, `HAdd UInt256 ℕ` for proof literal add), `+? -? *? /?` (return `Except E _`), `+↻ -↻ *↻` (modular wrap), `Option.orError`, `require`, `emit!`, `native_transfer!`, `staticcall!`, `extcall!`; `Monad (Except E)` from Lean core ([lsc-spec.md §2](lsc-spec.md#2-types))
 - `Lsc.Prelude`: `@[simp]` bridge lemmas `UInt256.addChecked_ok`, `UInt256.addChecked_error`, …; `Lsc.Invariant` for sequence invariants ([lsc-spec.md §9.1](lsc-spec.md#91-lemma-files-testlemmalean))
 - `Lsc.Event`: `Lsc.Event.EvmEvent`, `Lsc.Event.log`, `LogEntry` (`emit!` macro lives in `Lsc.Prelude`)
 - `Lsc.ProofHelpers`: Layer 1 `Except.bind_ok`, `Except.ok_ne_error`; Layers 2–4 `lift_*`, `simulate_call`, `export_cases` ([lsc-spec.md §10](lsc-spec.md#10-proof-helpers))
@@ -445,12 +445,12 @@ Implement in `ForgeLean` / `Lsc.Prelude` per [lsc-spec.md §2.1–§2.5](lsc-spe
 2. `LscError` typeclass + `+? -? *? /?` → `Except E _` via in-scope instance; compose with `←` in `do`-blocks over `Except E`
 3. `require (cond) .variant` macro → `if ¬cond then return .error .variant`
 4. `emit! Event arg*` macro → `Lsc.Event.log (Event.mk arg*)`
-5. `native_transfer! to amount` macro → `Lsc.Eth.transfer to amount` ([lsc-spec.md §5.3](lsc-spec.md#53-eth-handling-and-callvalue))
+5. `native_transfer! to amount` macro → `Lsc.Eth.transfer to amount` ([lsc-spec.md §5.2](lsc-spec.md#52-eth-handling))
 6. `(e : I)` interface cast macro → `ContractAt I` when `I` has `LscInterface` ([lsc-spec.md §8.2](lsc-spec.md#82-external-calls-interface-cast-staticcall-call))
 7. `staticcall! (a : I).method args` macro → `Lsc.extern.staticcall I.method a w ctx args : Ret`
 8. `extcall! (a : I).method args` macro → `Lsc.extern.extcall I.method a w ctx args : Except ExternError Ret` (author binds `Ret` only; `w`/`ctx` implicit in export wrapper)
 9. `@[simp]` bridge lemmas: `UInt256.addChecked_ok`, `UInt256.addChecked_error`, …
-10. Validator: forbid `+?` in lemma files; require `arith` + `extern` (when `extcall!` used) + `eth` (when `native_transfer!` used) on `@[lsc.error]` types; forbid `assert` in contracts; enforce `Caller` rules ([lsc-spec.md §12.1](lsc-spec.md))
+10. Validator: forbid `+?` in lemma files; require `arith` + `extern` (when `extcall!` used) + `eth` (when `native_transfer!` used) on `@[lsc.error]` types; forbid `assert` in contracts; enforce `MsgContext` rules ([lsc-spec.md §12.1](lsc-spec.md))
 11. Register `@[lsc.error]` — emitter registration only (no `HasArithErrors` codegen)
 12. Register `@[lsc.initialize]` — at most one per module; constructor + optional proxy `initialize` ABI
 13. Register `@[lsc.public]` — synthesize getter `@[lsc.external]` `def`s before ABI collection ([lsc-spec.md §3.5](lsc-spec.md))
@@ -635,13 +635,13 @@ inductive TokenError where
   deriving DecidableEq, Repr
 
 @[lsc.external]
-def transfer (caller : Caller) (s : ERC20State) (to : Address) (amount : UInt256)
+def transfer (ctx : MsgContext) (s : ERC20State) (to : Address) (amount : UInt256)
     : Except TokenError (ERC20State × Bool) := do
-  require (s.balances[caller] ≥ amount) .insufficientBalance
-  let newCaller ← s.balances[caller] -? amount
+  require (s.balances[ctx.sender] ≥ amount) .insufficientBalance
+  let newSender ← s.balances[ctx.sender] -? amount
   let newTo     ← s.balances[to] +? amount
-  let s' := { s with balances := s.balances[caller := newCaller][to := newTo] }
-  emit! TransferEvent caller to amount
+  let s' := { s with balances := s.balances[ctx.sender := newSender][to := newTo] }
+  emit! TransferEvent ctx.sender to amount
   return .ok (s', true)
 ```
 
@@ -649,10 +649,10 @@ Example revert theorem (human-reviewed `*Theorem.lean`):
 
 ```lean
 theorem transfer_no_overdraft
-    (caller : Caller) (to : Address) (amount : UInt256) (s : ERC20State)
-    (h : transfer caller s to amount = .error .insufficientBalance) :
-    s.balances[caller] < amount :=
-  ERC20Lemma.transfer_no_overdraft caller to amount s h
+    (ctx : MsgContext) (to : Address) (amount : UInt256) (s : ERC20State)
+    (h : transfer ctx s to amount = .error .insufficientBalance) :
+    s.balances[ctx.sender] < amount :=
+  ERC20Lemma.transfer_no_overdraft ctx to amount s h
 ```
 
 The demo defines `@[lsc.external]` functions with **`emit!`** on success paths (no hand-written export wrappers; no `Lsc.ERC20` in core).
@@ -793,23 +793,23 @@ def onTransfer (s : TransferCounterState) : Except ArithError TransferCounterSta
 **Checks-effects-interactions** on `transfer` / `transferFrom`. Author writes token logic and inline `extcall!` in the same `@[Lsc.external]` function (or a helper it calls):
 
 ```lean
-def notifyCounterIfHooked (caller : Caller) (s' : MyTokenState) (to : Address)
+def notifyCounterIfHooked (ctx : MsgContext) (s' : MyTokenState) (to : Address)
     : Except TokenError Unit := do
-  if s'.counter ≠ Address.zero ∧ caller.val ≠ to then
+  if s'.counter ≠ Address.zero ∧ ctx.sender.val ≠ to then
     let _ ← extcall! (s'.counter : ITransferCounter).onTransfer
   return .ok ()
 
 @[Lsc.external]
-def transfer (caller : Caller) (s : MyTokenState) (to : Address) (amount : UInt256)
+def transfer (ctx : MsgContext) (s : MyTokenState) (to : Address) (amount : UInt256)
     : Except TokenError (MyTokenState × Bool) := do
   -- ERC-20 checks + effects ...
   let s' := ...
-  emit! TransferEvent caller to amount
-  ← notifyCounterIfHooked caller s' to
+  emit! TransferEvent ctx.sender to amount
+  ← notifyCounterIfHooked ctx s' to
   return .ok (s', true)
 ```
 
-The export wrapper loads state, runs the author function (lowering each `extcall!` site to `CALL` with ambient `World` / `msg.sender`), then stores on `.ok`. On callee revert → export `.error`; no self `sstore` (§8).
+The export wrapper loads state, runs the author function (lowering each `extcall!` site to `CALL` with ambient `World` / `MsgContext`), then stores on `.ok`. On callee revert → export `.error`; no self `sstore` (§8).
 
 **Self-transfer (`from == to`):** skip the counter call in `notifyCounterIfHooked` (`transfer_self_noop`).
 

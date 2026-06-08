@@ -30,7 +30,7 @@ Authors write pure functions. The compiler generates everything else at `@[Lsc.e
 | `@[Lsc.external] def increment (s : CounterState) : Except ArithError CounterState` | ABI dispatcher, `sload` all fields, call `increment`, on `.ok s'` → `sstore`, on `.error e` → `revert(abi.encode(e))` |
 | `@[Lsc.public]` on a State field (e.g. `number`) | `@[Lsc.external]` view + lazy slot read (§3.5) |
 | `emit! TransferEvent from to amount` in function body | `LOG2` opcode after store, with correct topic0 and ABI-encoded data |
-| `callvalue : CallValue` parameter | bound to `msg.value`; marks function payable; validator error if missing on ETH-receiving path (§5.4) |
+| `ctx : MsgContext` parameter | bound to `msg.sender`, `msg.value`, `block.timestamp`, `block.number` (§5.1); `@[Lsc.payable]` marks function payable (§5.2) |
 
 Proofs target the author-written functions directly — the same signatures that get deployed. The lowering pipeline is formally verified in Lean (§13.3).
 
@@ -771,20 +771,20 @@ At most one initialization function per contract, called at deployment (construc
 ```lean
 @[Lsc.initialize]
 def initialize (name symbol : Bytes[32]) (decimals : UInt256)
-    (initialSupply : UInt256) (owner : Caller)
+    (initialSupply : UInt256) (ctx : MsgContext)
     : Except TokenError TokenState :=
   return .ok {
     name        := name
     symbol      := symbol
     decimals    := decimals
     totalSupply := initialSupply
-    balances    := Mapping.empty[owner := initialSupply]
+    balances    := Mapping.empty[ctx.sender := initialSupply]
     allowances  := Mapping.empty }
 ```
 
 - Return type must be `Except E S` or bare `S`.
 - The emitter generates an ABI constructor (not a named function).
-- `Caller` parameters are bound to `msg.sender` at deploy time (§5.1).
+- `ctx.sender` is bound to `msg.sender` at deploy time (§5.1).
 
 ---
 
@@ -824,13 +824,13 @@ if ¬condition then return .error .ErrorVariant
 ```lean
 -- Fallible mutator with return value
 @[Lsc.external]
-def transfer (caller : Caller) (s : ERC20State)
+def transfer (ctx : MsgContext) (s : ERC20State)
     (to : Address) (amount : UInt256) : Except TokenError (ERC20State × Bool) := do
-  require (s.balances[caller] ≥ amount) .insufficientBalance
-  let newCaller ← s.balances[caller] -? amount
+  require (s.balances[ctx.sender] ≥ amount) .insufficientBalance
+  let newSender ← s.balances[ctx.sender] -? amount
   let newTo     ← s.balances[to] +? amount
-  let s' := { s with balances := s.balances[caller := newCaller][to := newTo] }
-  emit! TransferEvent caller to amount
+  let s' := { s with balances := s.balances[ctx.sender := newSender][to := newTo] }
+  emit! TransferEvent ctx.sender to amount
   return .ok (s', true)
 
 -- Infallible mutator
@@ -865,7 +865,7 @@ The emitter generates a read-only wrapper; no `sstore` is emitted. For `@[Lsc.pu
 | `Except E V` (V not State) | view | ABI type of `V` | `E` variants |
 | `Option _` on mutator | **validator error** | — | use `Except` |
 
-When a `CallValue` parameter is present (§5.4), the function is marked `payable` in the ABI.
+When an export is marked `@[Lsc.payable]` or `@[Lsc.receive]` (§5.2), the function is marked `payable` in the ABI.
 
 **EVM behavior summary:**
 
@@ -881,76 +881,73 @@ When a `CallValue` parameter is present (§5.4), the function is marked `payable
 | Parameter kind | ABI | Rule |
 |---------------|-----|------|
 | `s : SomeState` | excluded | Loaded from storage by compiler |
-| `caller : Caller` | excluded | Bound to `msg.sender` (§5.1) |
-| `callvalue : CallValue` | excluded | Bound to `msg.value` (§5.4) |
+| `ctx : MsgContext` | excluded | Bound to message/block context (§5.1) |
 | All other primitive types | included | In declaration order after excluded params |
 
 ---
 
-## §5 Caller Identity and ETH Handling
+## §5 Message Context and ETH Handling
 
-### §5.1 The `Caller` type
+### §5.1 The `MsgContext` type
 
 ```lean
 -- Lsc.Prelude
-@[reducible] def Caller := Address
+structure MsgContext where
+  sender    : Address
+  value     : UInt256   -- msg.value
+  timestamp : UInt256   -- block.timestamp
+  number    : UInt256   -- block.number
 ```
 
-Any parameter of type `Caller` is excluded from ABI calldata and bound to `msg.sender` by the emitter. The type itself is the signal — no annotation required.
+Any parameter of type `MsgContext` is excluded from ABI calldata. The emitter binds all fields from EVM opcodes at each export boundary. The type itself is the signal — no annotation required. Parameter name convention: `ctx`.
 
 ```lean
 @[Lsc.external]
-def transfer (caller : Caller) (s : ERC20State)
+def transfer (ctx : MsgContext) (s : ERC20State)
     (to : Address) (amount : UInt256)
     : Except TokenError (ERC20State × Bool) := ...
 ```
 
+**Field bindings:**
+
+| Field | Bound to |
+|-------|----------|
+| `ctx.sender` | `msg.sender` |
+| `ctx.value` | `msg.value` |
+| `ctx.timestamp` | `block.timestamp` |
+| `ctx.number` | `block.number` |
+
 **Validator rules:**
-- At most one `Caller` parameter per function.
-- `Address` parameter named `caller`, `sender`, `from`, or `owner` → warning: use `Caller` type.
+- At most one `MsgContext` parameter per function.
+- `Address` parameter named `caller`, `sender`, `from`, or `owner` used for authorization → warning: use `ctx.sender` from `MsgContext` instead.
 
-**In proofs:** theorems quantify over `caller : Caller` directly. No `EvmContext`.
+**Optional on exports:** functions that need no message or block context (e.g. `increment (s : CounterState)`) omit `ctx`. Exports that need only `ctx.sender` still take the full `MsgContext` — unused fields are available for time-locked logic without adding types later.
 
-> **Why `abbrev` not `structure`?** A `structure` forces `.val` projections throughout proofs. `abbrev Caller := Address` is proof-transparent — `funext` and `simp` work uniformly with no unwrapping.
+**In proofs:** theorems quantify over `ctx : MsgContext` directly. No `EvmContext`.
 
-### §5.2 Block context
+> **Why a `structure`?** Bundling sender, value, and block fields in one excluded parameter beats four parallel type-as-signal parameters. Proofs use field projections (`ctx.sender`, `ctx.value`); `simp` and `cases ctx` work uniformly.
 
-When a function needs block context values, they are passed as typed parameters bound by the emitter:
+### §5.2 ETH handling
 
-| Type | Bound to | ABI | Notes |
-|------|----------|-----|-------|
-| `Caller` | `msg.sender` | excluded | §5.1 |
-| `CallValue` | `msg.value` | excluded | marks function payable; §5.4 |
-| `BlockTimestamp` | `block.timestamp` | excluded | future: v2 |
-| `BlockNumber` | `block.number` | excluded | future: v2 |
-
-Each is an `@[reducible] def` alias for `UInt256`. Each is excluded from ABI calldata by type. Each is a clean proof variable — no `EvmContext` struct needed.
-
-### §5.3 ETH handling and `CallValue`
-
-LSC has explicit, cohesive ETH handling. There is no implicit `msg.value`.
-
-```lean
--- Lsc.Prelude
-@[reducible] def CallValue := UInt256
-```
+LSC has explicit, cohesive ETH handling. There is no implicit `msg.value` — authors read `ctx.value` when a function accepts ETH.
 
 #### Payable functions
 
-A function that accepts ETH **must** declare a `callvalue : CallValue` parameter. The emitter binds it to `msg.value` and marks the function `payable` in the ABI.
+A function that accepts ETH **must** be marked `@[Lsc.payable]`. The emitter marks the function `payable` in the ABI and skips the `msg.value` guard. The author reads `ctx.value`:
 
 ```lean
+@[Lsc.payable]
 @[Lsc.external]
-def deposit (caller : Caller) (callvalue : CallValue) (s : VaultState)
+def deposit (ctx : MsgContext) (s : VaultState)
     : Except VaultError VaultState := do
-  require (callvalue > 0) .zeroDeposit
-  let newBal ← s.balances[caller] +? callvalue
-  return .ok { s with balances := s.balances[caller := newBal] }
+  require (ctx.value > 0) .zeroDeposit
+  let newBal ← s.balances[ctx.sender] +? ctx.value
+  return .ok { s with balances := s.balances[ctx.sender := newBal] }
 ```
 
 #### Non-payable protection (default)
 
-If a function does **not** declare `CallValue`, the emitter generates a guard that reverts if `msg.value > 0`. This prevents ETH from being locked in a contract that has no way to withdraw it. This is the default for all functions.
+If an export is **not** marked `@[Lsc.payable]` or `@[Lsc.receive]`, the emitter generates a guard that reverts if `msg.value > 0`. This applies even when `ctx : MsgContext` is present (e.g. ERC-20 `transfer`). It prevents ETH from being locked in a contract that has no way to withdraw it.
 
 #### ETH transfers out
 
@@ -975,12 +972,12 @@ inductive VaultError where
 
 ```lean
 @[Lsc.external]
-def withdraw (caller : Caller) (s : VaultState) (amount : UInt256)
+def withdraw (ctx : MsgContext) (s : VaultState) (amount : UInt256)
     : Except VaultError VaultState := do
-  require (s.balances[caller] ≥ amount) .insufficientBalance
-  let newBal ← s.balances[caller] -? amount
-  let s' := { s with balances := s.balances[caller := newBal] }
-  let _ ← native_transfer! caller amount
+  require (s.balances[ctx.sender] ≥ amount) .insufficientBalance
+  let newBal ← s.balances[ctx.sender] -? amount
+  let s' := { s with balances := s.balances[ctx.sender := newBal] }
+  let _ ← native_transfer! ctx.sender amount
   return .ok s'
 ```
 
@@ -989,9 +986,9 @@ def withdraw (caller : Caller) (s : VaultState) (amount : UInt256)
 ```lean
 -- Optional: accept plain ETH transfers (no calldata)
 @[Lsc.receive]
-def receive (callvalue : CallValue) (s : VaultState) : Except VaultError VaultState := do
-  require (callvalue > 0) .zeroDeposit
-  let newBal ← s.totalDeposited +? callvalue
+def receive (ctx : MsgContext) (s : VaultState) : Except VaultError VaultState := do
+  require (ctx.value > 0) .zeroDeposit
+  let newBal ← s.totalDeposited +? ctx.value
   return .ok { s with totalDeposited := newBal }
 
 -- Optional: called when no selector matches
@@ -1000,20 +997,20 @@ def fallback (s : VaultState) : Except VaultError VaultState :=
   return .error .unknownSelector
 ```
 
-- `@[Lsc.receive]` must take `CallValue` (validator error otherwise).
-- `@[Lsc.fallback]` must **not** take `CallValue` unless also marked payable via an additional `@[Lsc.allow_value]` attribute.
+- `@[Lsc.receive]` must take `ctx : MsgContext` (validator error otherwise); implies `payable`.
+- `@[Lsc.fallback]` is nonpayable by default; use `@[Lsc.allow_value]` to accept `msg.value`.
 - If neither is defined and plain ETH is sent, the transaction reverts (safe default).
 
 #### In proofs
 
-`callvalue : CallValue` is a plain `UInt256` alias — theorems quantify over it directly:
+Theorems quantify over `ctx : MsgContext` directly:
 
 ```lean
 theorem deposit_increases_balance
-    (caller : Caller) (callvalue : CallValue) (s s' : VaultState)
-    (h : deposit caller callvalue s = .ok s') :
-    s'.balances[caller] = s.balances[caller] + callvalue :=
-  VaultLemma.deposit_increases_balance caller callvalue s s' h
+    (ctx : MsgContext) (s s' : VaultState)
+    (h : deposit ctx s = .ok s') :
+    s'.balances[ctx.sender] = s.balances[ctx.sender] + ctx.value :=
+  VaultLemma.deposit_increases_balance ctx s s' h
 ```
 
 ---
@@ -1034,17 +1031,17 @@ The `EvmEvent` instance supplies the canonical ABI signature and which fields ar
 ### §6.2 Emitting: `emit!`
 
 ```lean
-emit! TransferEvent caller to amount
+emit! TransferEvent ctx.sender to amount
 -- desugars to:
-Lsc.Event.log (TransferEvent.mk caller to amount)
+Lsc.Event.log (TransferEvent.mk ctx.sender to amount)
 ```
 
 The first argument is the event structure (must have `deriving Lsc.Event.EvmEvent`). Positional arguments match the structure fields in declaration order.
 
 **Multiple events on one path:**
 ```lean
-emit! TransferEvent caller to amount
-if fee > 0 then emit! FeeEvent caller fee
+emit! TransferEvent ctx.sender to amount
+if fee > 0 then emit! FeeEvent ctx.sender fee
 return .ok (s', true)
 ```
 
@@ -1137,14 +1134,14 @@ Authors bind only the interface method's return type (`Ret`), not `World × Ret`
 
 ```lean
 @[Lsc.external]
-def transfer (caller : Caller) (s : MyTokenState) (to : Address) (amount : UInt256)
+def transfer (ctx : MsgContext) (s : MyTokenState) (to : Address) (amount : UInt256)
     : Except TokenError (MyTokenState × Bool) := do
-  require (s.balances[caller] ≥ amount) .insufficientBalance
-  let newCaller ← s.balances[caller] -? amount
+  require (s.balances[ctx.sender] ≥ amount) .insufficientBalance
+  let newSender ← s.balances[ctx.sender] -? amount
   let newTo     ← s.balances[to] +? amount
-  let s' := { s with balances := s.balances[caller := newCaller][to := newTo] }
-  emit! TransferEvent caller to amount
-  if s'.counter ≠ Address.zero ∧ caller ≠ to then
+  let s' := { s with balances := s.balances[ctx.sender := newSender][to := newTo] }
+  emit! TransferEvent ctx.sender to amount
+  if s'.counter ≠ Address.zero ∧ ctx.sender ≠ to then
     let _ ← extcall! (s'.counter : ITransferCounter).onTransfer
   return .ok (s', true)
 ```
@@ -1176,16 +1173,16 @@ Same propagation model as `+?` / `require`. Contract modules using `staticcall!`
 The guard + `extcall!` block may live in a top-level helper in the same contract module:
 
 ```lean
-def notifyCounterIfHooked (caller : Caller) (s' : MyTokenState) (to : Address)
+def notifyCounterIfHooked (ctx : MsgContext) (s' : MyTokenState) (to : Address)
     : Except TokenError Unit := do
-  if s'.counter ≠ Address.zero ∧ caller.val ≠ to then
+  if s'.counter ≠ Address.zero ∧ ctx.sender.val ≠ to then
     let _ ← extcall! (s'.counter : ITransferCounter).onTransfer
   return .ok ()
 
 @[Lsc.external]
 def transfer ... := do
   ...
-  ← notifyCounterIfHooked caller s' to
+  ← notifyCounterIfHooked ctx s' to
   return .ok (s', true)
 ```
 
@@ -1193,7 +1190,7 @@ def transfer ... := do
 
 #### Export lowering
 
-The compiler-generated export wrapper still performs load/store, reentrancy guard, and `Caller` binding (§13.1). It runs the author function (including callees), lowering each `extcall!` / `staticcall!` site to `CALL` / `STATICCALL` with ambient `w` / `ctx`. On `.error` — revert; no self `sstore`; no `emit!` logs; extern `World` changes rolled back.
+The compiler-generated export wrapper still performs load/store, reentrancy guard, and `MsgContext` binding (§13.1). It runs the author function (including callees), lowering each `extcall!` / `staticcall!` site to `CALL` / `STATICCALL` with ambient `w` / `ctx`. On `.error` — revert; no self `sstore`; no `emit!` logs; extern `World` changes rolled back.
 
 Macros live in `Lsc.Prelude` alongside `emit!`, `native_transfer!`, `require`, `extcall!`, and `staticcall!`.
 
@@ -1404,10 +1401,10 @@ theorem swap_lp_unchanged (s s' : AMMState) (amountIn : UInt256)
 
 /-- Adding liquidity never decreases LP supply. -/
 theorem addLiquidity_lp_nondecreasing
-    (caller : Caller) (s s' : AMMState) (a0 a1 lpMint : UInt256)
-    (h : addLiquidity caller s a0 a1 = .ok (s', lpMint)) :
+    (ctx : MsgContext) (s s' : AMMState) (a0 a1 lpMint : UInt256)
+    (h : addLiquidity ctx s a0 a1 = .ok (s', lpMint)) :
     (s↓).totalLp ≤ (s'↓).totalLp :=
-  AMMlemma.addLiquidity_lp_nondecreasing caller s s' a0 a1 lpMint h
+  AMMlemma.addLiquidity_lp_nondecreasing ctx s s' a0 a1 lpMint h
 ```
 
 **Guideline:** use named invariant functions when the quantity has an economic name (`k`, `price`, `totalSupply`, `solvency`). Use the view projection `↓` when the theorem is about structural state relationships (field X vs field Y). Either way, `.val` belongs in `*Lemma.lean` definitions, not in `*Theorem.lean` statement types.
@@ -1558,7 +1555,7 @@ Runs as a post-elaboration pass over contract, lemma, and theorem modules. All m
 | `List` or `Array` in author code | error | `lsc: use Mapping` |
 | `structure … extends` | error | `lsc: storage inheritance not supported in v1` |
 | Hand-written export wrapper | error | `lsc: use @[Lsc.external] on contract functions` |
-| `EvmContext` in author code | error | `lsc: use Caller for msg.sender` |
+| `EvmContext` in author code | error | `lsc: use MsgContext for message/block context` |
 | Error type without `@[Lsc.error]` | error | `lsc: error type must be declared with @[Lsc.error]` |
 | `@[Lsc.error]` on non-inductive | error | `lsc: @[Lsc.error] may only annotate inductive types` |
 | `@[Lsc.error]` type missing `arith` constructor | error | `lsc: error type must include arith : ArithError → E` |
@@ -1577,16 +1574,16 @@ Runs as a post-elaboration pass over contract, lemma, and theorem modules. All m
 | Unknown interface method in `extcall!` / `staticcall!` | error | `lsc: method not found on interface I` |
 | Malformed event signature | error | `lsc: invalid event signature; expected "Name(type,type)"` |
 | Event arg count / type mismatch | error | `lsc: event argument mismatch` |
-| Multiple `Caller` parameters | error | `lsc: at most one Caller parameter per export` |
+| Multiple `MsgContext` parameters | error | `lsc: at most one MsgContext parameter per export` |
 | `require` on infallible function | error | `lsc: require requires Except return type` |
 | `assert` in contract function | error | `lsc: use require; assert! is a runtime panic` |
 | Plain `+ - * /` on `UInt256` | error | `lsc: use +? or +↻ on UInt256` |
 | `UInt256 + ℕ` in contract module | error | `lsc: use +? for arithmetic in contract functions` |
 | `@[Lsc.public]` not on State field | error | `lsc: @[Lsc.public] may only annotate State struct fields` |
 | `@[Lsc.public]` field name collides with existing `@[Lsc.external]` | error | `lsc: field is @[Lsc.public] but @[Lsc.external] def already exists` |
-| `@[Lsc.receive]` without `CallValue` parameter | error | `lsc: @[Lsc.receive] must take CallValue` |
+| `@[Lsc.receive]` without `MsgContext` parameter | error | `lsc: @[Lsc.receive] must take MsgContext` |
 | `@[Lsc.allow_reentrant]` on export | warning | `lsc: REENTRANT function; ensure reentrancy safety manually` |
-| `Address` named caller/sender/from/owner without `Caller` type | warning | `lsc: use Caller type to exclude from ABI and bind to msg.sender` |
+| `Address` named caller/sender/from/owner for authorization | warning | `lsc: use ctx.sender from MsgContext instead of an Address parameter` |
 | `Bytes[0]` field | warning | `lsc: field can never hold data` |
 
 ### §12.2 Lemma module errors (`test/*Lemma.lean`)
@@ -1619,16 +1616,15 @@ At each `@[Lsc.external]` boundary, the emitter generates:
 
 1. **ABI dispatcher** — 4-byte selector from `keccak256(canonicalSignature)`; Yul dispatch
 2. **Calldata decode** — ABI-decode included parameters (§4.5) from calldata
-3. **`msg.value` guard** — revert if `CALLVALUE > 0` and no `CallValue` parameter present
+3. **`msg.value` guard** — revert if `CALLVALUE > 0` on non-payable exports (§5.2)
 4. **Reentrancy guard** — unless `@[Lsc.allow_reentrant]`; standard mutex pattern
-5. **`Caller` binding** — `caller := msg.sender`
-6. **`CallValue` binding** — `callvalue := msg.value` if present
-7. **State load** — `sload` all struct fields (full load for mutators; lazy slot read for views and `@[Lsc.public]` getters)
-8. **Author function call** — invoke the `@[Lsc.external]` function (and its callees); lower each `extcall!` / `staticcall!` site to `CALL` / `STATICCALL` with ambient `World` and `msg.sender`
-9. **On `.error e`** — `revert(abi.encode(e))`; no storage writes; no events; extern `World` changes rolled back
-10. **On `.ok val`** — `sstore` all modified fields; collect and emit `emit!` / `Lsc.Event.log` sites in source order via `LOG` opcodes; ABI-encode non-state component as returndata
+5. **`MsgContext` binding** — when `ctx : MsgContext` is present: `sender := msg.sender`, `value := msg.value`, `timestamp := block.timestamp`, `number := block.number`
+6. **State load** — `sload` all struct fields (full load for mutators; lazy slot read for views and `@[Lsc.public]` getters)
+7. **Author function call** — invoke the `@[Lsc.external]` function (and its callees); lower each `extcall!` / `staticcall!` site to `CALL` / `STATICCALL` with ambient `World` and `MsgContext`
+8. **On `.error e`** — `revert(abi.encode(e))`; no storage writes; no events; extern `World` changes rolled back
+9. **On `.ok val`** — `sstore` all modified fields; collect and emit `emit!` / `Lsc.Event.log` sites in source order via `LOG` opcodes; ABI-encode non-state component as returndata
 
-For `@[Lsc.public]`-generated getters and all view exports: step 7 performs a lazy load of only the accessed slot(s); step 10 is skipped.
+For `@[Lsc.public]`-generated getters and all view exports: step 6 performs a lazy load of only the accessed slot(s); step 9 is skipped.
 
 ### §13.2 Auto load/store invariant
 

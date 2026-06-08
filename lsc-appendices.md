@@ -2,7 +2,7 @@
 
 # LSC Appendices
 
-Extended reference patterns, examples, and project history. Code samples follow [lsc-spec.md](lsc-spec.md) (v1): `Except E A`, `Caller`, `Bytes[N]`, `LscError` / `+?`, fixed-point `⌊*⌋?` / `⸢*⸣?` (§2.7), `require`, and `Mapping` as `K → V`.
+Extended reference patterns, examples, and project history. Code samples follow [lsc-spec.md](lsc-spec.md) (v1): `Except E A`, `MsgContext`, `Bytes[N]`, `LscError` / `+?`, fixed-point `⌊*⌋?` / `⸢*⸣?` (§2.7), `require`, and `Mapping` as `K → V`.
 
 | Appendix | Title | Section |
 |----------|-------|---------|
@@ -51,22 +51,22 @@ inductive TokenError where
   deriving DecidableEq, Repr
 
 @[lsc.external]
-def transfer (caller : Caller) (s : ERC20State) (to : Address) (amount : UInt256)
+def transfer (ctx : MsgContext) (s : ERC20State) (to : Address) (amount : UInt256)
     : Except TokenError (ERC20State × Bool) :=
   do
-  require (s.balances[caller] ≥ amount) .insufficientBalance
-  let newCaller ← s.balances[caller] -? amount
+  require (s.balances[ctx.sender] ≥ amount) .insufficientBalance
+  let newSender ← s.balances[ctx.sender] -? amount
   let newTo     ← s.balances[to] +? amount
-  let s' := { s with balances := s.balances[caller := newCaller][to := newTo] }
-  emit! TransferEvent caller to amount
+  let s' := { s with balances := s.balances[ctx.sender := newSender][to := newTo] }
+  emit! TransferEvent ctx.sender to amount
   return .ok (s', true)
 
 @[lsc.external]
-def approve (caller : Caller) (s : ERC20State) (spender : Address) (amount : UInt256)
+def approve (ctx : MsgContext) (s : ERC20State) (spender : Address) (amount : UInt256)
     : Except TokenError (ERC20State × Bool) :=
   let s' := { s with allowances :=
-    s.allowances[caller := s.allowances[caller][spender := amount]] }
-  emit! ApprovalEvent caller spender amount
+    s.allowances[ctx.sender := s.allowances[ctx.sender][spender := amount]] }
+  emit! ApprovalEvent ctx.sender spender amount
   .ok (s', true)
 ```
 
@@ -77,16 +77,16 @@ def approve (caller : Caller) (s : ERC20State) (spender : Address) (amount : UIn
 import Token
 
 lemma transfer_no_overdraft
-    (caller : Caller) (to : Address) (amount : UInt256) (s : ERC20State)
-    (h : transfer caller s to amount = .error .insufficientBalance) :
-    s.balances[caller] < amount := by
+    (ctx : MsgContext) (to : Address) (amount : UInt256) (s : ERC20State)
+    (h : transfer ctx s to amount = .error .insufficientBalance) :
+    s.balances[ctx.sender] < amount := by
   simp [transfer] at h
   split_ifs at h with hguard <;> omega
 
 lemma transfer_preserves_total_supply
-    (caller : Caller) (to : Address) (amount : UInt256)
+    (ctx : MsgContext) (to : Address) (amount : UInt256)
     (s s' : ERC20State) (ret : Bool)
-    (h : transfer caller s to amount = .ok (s', ret)) :
+    (h : transfer ctx s to amount = .ok (s', ret)) :
     s'.totalSupply = s.totalSupply := by
   simp [transfer] at *
   exact h.2
@@ -97,20 +97,20 @@ lemma transfer_preserves_total_supply
 import Token
 import ERC20Lemma
 
-/-- transfer reverts when caller has insufficient balance. -/
+/-- transfer reverts when sender has insufficient balance. -/
 theorem transfer_no_overdraft
-    (caller : Caller) (to : Address) (amount : UInt256) (s : ERC20State)
-    (h : transfer caller s to amount = .error .insufficientBalance) :
-    s.balances[caller] < amount :=
-  ERC20Lemma.transfer_no_overdraft caller to amount s h
+    (ctx : MsgContext) (to : Address) (amount : UInt256) (s : ERC20State)
+    (h : transfer ctx s to amount = .error .insufficientBalance) :
+    s.balances[ctx.sender] < amount :=
+  ERC20Lemma.transfer_no_overdraft ctx to amount s h
 
 /-- transfer preserves total supply. -/
 theorem transfer_preserves_total_supply
-    (caller : Caller) (to : Address) (amount : UInt256)
+    (ctx : MsgContext) (to : Address) (amount : UInt256)
     (s s' : ERC20State) (ret : Bool)
-    (h : transfer caller s to amount = .ok (s', ret)) :
+    (h : transfer ctx s to amount = .ok (s', ret)) :
     s'.totalSupply = s.totalSupply :=
-  ERC20Lemma.transfer_preserves_total_supply caller to amount s s' ret h
+  ERC20Lemma.transfer_preserves_total_supply ctx to amount s s' ret h
 ```
 
 ---
@@ -165,21 +165,21 @@ inductive TokenError where
   | arith  : ArithError → TokenError
   | extern : ExternError → TokenError
 
-def notifyCounterIfHooked (caller : Caller) (s' : MyTokenState) (to : Address)
+def notifyCounterIfHooked (ctx : MsgContext) (s' : MyTokenState) (to : Address)
     : Except TokenError Unit := do
-  if s'.counter ≠ Address.zero ∧ caller ≠ to then
+  if s'.counter ≠ Address.zero ∧ ctx.sender ≠ to then
     let _ ← extcall! (s'.counter : ITransferCounter).onTransfer
   return .ok ()
 
 @[Lsc.external]
-def transfer (caller : Caller) (s : MyTokenState) (to : Address) (amount : UInt256)
+def transfer (ctx : MsgContext) (s : MyTokenState) (to : Address) (amount : UInt256)
     : Except TokenError (MyTokenState × Bool) := do
-  require (s.balances[caller] ≥ amount) .insufficientBalance
-  let newCaller ← s.balances[caller] -? amount
+  require (s.balances[ctx.sender] ≥ amount) .insufficientBalance
+  let newSender ← s.balances[ctx.sender] -? amount
   let newTo     ← s.balances[to] +? amount
-  let s' := { s with balances := s.balances[caller := newCaller][to := newTo] }
-  emit! TransferEvent caller to amount
-  ← notifyCounterIfHooked caller s' to
+  let s' := { s with balances := s.balances[ctx.sender := newSender][to := newTo] }
+  emit! TransferEvent ctx.sender to amount
+  ← notifyCounterIfHooked ctx s' to
   return .ok (s', true)
 ```
 
@@ -358,7 +358,7 @@ let capped ← rate ⌊*⌋? delta   -- rayMulDown
 
 ## Appendix E — ERC-20 with Mint/Burn
 
-This appendix is a complete, self-contained ERC-20 implementation with owner-controlled mint and burn. It demonstrates `Mapping`, `Caller`, events, authorization proofs, construction pattern, and the compliance manifest.
+This appendix is a complete, self-contained ERC-20 implementation with owner-controlled mint and burn. It demonstrates `Mapping`, `MsgContext`, events, authorization proofs, construction pattern, and the compliance manifest.
 
 ### E.1 Contract (`src/Token.lean`)
 
@@ -399,42 +399,42 @@ inductive TokenError where
 -- Construction: @[lsc.initialize] (deploy + optional proxy re-init; §3.6)
 @[lsc.initialize]
 def initialize (name symbol : Bytes[32]) (decimals : UInt256)
-    (initialSupply : UInt256) (owner : Caller) : Except TokenError TokenState :=
+    (initialSupply : UInt256) (ctx : MsgContext) : Except TokenError TokenState :=
   return .ok {
     name := name, symbol := symbol, decimals := decimals
-    owner := owner, totalSupply := initialSupply
-    balances := Mapping.empty[owner := initialSupply]
+    owner := ctx.sender, totalSupply := initialSupply
+    balances := Mapping.empty[ctx.sender := initialSupply]
     allowances := Mapping.empty }
 
 -- Transfer
 @[lsc.external]
-def transfer (caller : Caller) (s : TokenState) (to : Address) (amount : UInt256)
+def transfer (ctx : MsgContext) (s : TokenState) (to : Address) (amount : UInt256)
     : Except TokenError (TokenState × Bool) :=
   do
-  require (s.balances[caller] ≥ amount) .insufficientBalance
-  let newCaller ← s.balances[caller] -? amount
+  require (s.balances[ctx.sender] ≥ amount) .insufficientBalance
+  let newSender ← s.balances[ctx.sender] -? amount
   let newTo     ← s.balances[to] +? amount
-  let s' := { s with balances := s.balances[caller := newCaller][to := newTo] }
-  emit! TransferEvent caller to amount
+  let s' := { s with balances := s.balances[ctx.sender := newSender][to := newTo] }
+  emit! TransferEvent ctx.sender to amount
   return .ok (s', true)
 
 -- Approve
 @[lsc.external]
 def approve
-    (caller : Caller)
+    (ctx : MsgContext)
     (s : TokenState)
     (spender : Address) (amount : UInt256) : Except TokenError (TokenState × Bool) :=
   let s' := { s with allowances :=
-    s.allowances[caller := s.allowances[caller][spender := amount]] }
-  emit! ApprovalEvent caller spender amount
+    s.allowances[ctx.sender := s.allowances[ctx.sender][spender := amount]] }
+  emit! ApprovalEvent ctx.sender spender amount
   .ok (s', true)
 
 -- TransferFrom
 @[lsc.external]
-def transferFrom (caller : Caller) (s : TokenState) (from to : Address) (amount : UInt256)
+def transferFrom (ctx : MsgContext) (s : TokenState) (from to : Address) (amount : UInt256)
     : Except TokenError (TokenState × Bool) :=
   do
-  let allowed := s.allowances[from][caller]
+  let allowed := s.allowances[from][ctx.sender]
   require (s.balances[from] ≥ amount) .insufficientBalance
   require (allowed ≥ amount) .insufficientAllowance
   let newFrom ← s.balances[from] -? amount
@@ -442,16 +442,16 @@ def transferFrom (caller : Caller) (s : TokenState) (from to : Address) (amount 
   let newAllowance ← allowed -? amount
   let s' := { s with
     balances   := s.balances[from := newFrom][to := newTo]
-    allowances := s.allowances[from := s.allowances[from][caller := newAllowance]] }
+    allowances := s.allowances[from := s.allowances[from][ctx.sender := newAllowance]] }
   emit! TransferEvent from to amount
   return .ok (s', true)
 
 -- Mint (owner only)
 @[lsc.external]
-def mint (caller : Caller) (s : TokenState) (to : Address) (amount : UInt256)
+def mint (ctx : MsgContext) (s : TokenState) (to : Address) (amount : UInt256)
     : Except TokenError TokenState :=
   do
-  require (caller == s.owner) .unauthorized
+  require (ctx.sender == s.owner) .unauthorized
   let newSupply ← s.totalSupply +? amount
   let newBal    ← s.balances[to] +? amount
   let s' := { s with totalSupply := newSupply, balances := s.balances[to := newBal] }
@@ -460,10 +460,10 @@ def mint (caller : Caller) (s : TokenState) (to : Address) (amount : UInt256)
 
 -- Burn (owner only)
 @[lsc.external]
-def burn (caller : Caller) (s : TokenState) (from : Address) (amount : UInt256)
+def burn (ctx : MsgContext) (s : TokenState) (from : Address) (amount : UInt256)
     : Except TokenError TokenState :=
   do
-  require (caller == s.owner) .unauthorized
+  require (ctx.sender == s.owner) .unauthorized
   require (s.balances[from] ≥ amount) .insufficientBalance
   let newSupply ← s.totalSupply -? amount
   let newBal    ← s.balances[from] -? amount
@@ -493,114 +493,114 @@ import Token
 -- ── Authorization ────────────────────────────────────────────────────────────
 
 lemma mint_requires_owner
-    (caller : Caller) (s : TokenState) (to : Address) (amount : UInt256)
-    (h : mint caller s to amount = .error .unauthorized) :
-  caller.val ≠ s.owner ∨ True  -- first branch is the authorization guard
+    (ctx : MsgContext) (s : TokenState) (to : Address) (amount : UInt256)
+    (h : mint ctx s to amount = .error .unauthorized) :
+  ctx.sender.val ≠ s.owner
 
 lemma burn_requires_owner
-    (caller : Caller) (s : TokenState) (from : Address) (amount : UInt256)
-    (h : burn caller s from amount = .error .unauthorized) :
-  caller.val ≠ s.owner
+    (ctx : MsgContext) (s : TokenState) (from : Address) (amount : UInt256)
+    (h : burn ctx s from amount = .error .unauthorized) :
+  ctx.sender.val ≠ s.owner
 
 -- ── Supply conservation ───────────────────────────────────────────────────────
 
 lemma transfer_preserves_supply
-    (caller : Caller) (to : Address) (amount : UInt256)
+    (ctx : MsgContext) (to : Address) (amount : UInt256)
     (s s' : TokenState) (ret : Bool)
-    (h : transfer caller s to amount = .ok (s', ret)) :
+    (h : transfer ctx s to amount = .ok (s', ret)) :
   s'.totalSupply = s.totalSupply
 
 lemma transferFrom_preserves_supply
-    (caller from to : Address) (amount : UInt256)
+    (ctx : MsgContext) (from to : Address) (amount : UInt256)
     (s s' : TokenState) (ret : Bool)
-    (h : transferFrom caller s from to amount = .ok (s', ret)) :
+    (h : transferFrom ctx s from to amount = .ok (s', ret)) :
   s'.totalSupply = s.totalSupply
 
 lemma mint_increases_supply
-    (caller : Caller) (to : Address) (amount : UInt256)
+    (ctx : MsgContext) (to : Address) (amount : UInt256)
     (s s' : TokenState) (ret : Unit)
-    (h : mint caller s to amount = .ok (s', ret)) :
+    (h : mint ctx s to amount = .ok (s', ret)) :
   s'.totalSupply = s.totalSupply + amount
 
 lemma burn_decreases_supply
-    (caller from : Address) (amount : UInt256)
+    (ctx : MsgContext) (from : Address) (amount : UInt256)
     (s s' : TokenState) (ret : Unit)
-    (h : burn caller s from amount = .ok (s', ret)) :
+    (h : burn ctx s from amount = .ok (s', ret)) :
   s'.totalSupply = s.totalSupply - amount
 
 -- ── Balance correctness ───────────────────────────────────────────────────────
 
 lemma transfer_no_overdraft
-    (caller : Caller) (to : Address) (amount : UInt256) (s : TokenState)
-    (h : transfer caller s to amount = .error .insufficientBalance) :
-  s.balances[caller] < amount
+    (ctx : MsgContext) (to : Address) (amount : UInt256) (s : TokenState)
+    (h : transfer ctx s to amount = .error .insufficientBalance) :
+  s.balances[ctx.sender] < amount
 
 lemma transfer_moves_tokens
-    (caller : Caller) (to : Address) (amount : UInt256)
+    (ctx : MsgContext) (to : Address) (amount : UInt256)
     (s s' : TokenState) (ret : Bool)
-    (h : transfer caller s to amount = .ok (s', ret)) :
-  caller ≠ to →
-    s'.balances[caller] = s.balances[caller] - amount ∧
+    (h : transfer ctx s to amount = .ok (s', ret)) :
+  ctx.sender ≠ to →
+    s'.balances[ctx.sender] = s.balances[ctx.sender] - amount ∧
     s'.balances[to]     = s.balances[to]   + amount
 
 lemma transfer_self_noop
-    (caller : Caller) (amount : UInt256)
+    (ctx : MsgContext) (amount : UInt256)
     (s s' : TokenState) (ret : Bool)
-    (h : transfer caller s caller amount = .ok (s', ret)) :
-  s'.balances[caller] = s.balances[caller]
+    (h : transfer ctx s ctx.sender amount = .ok (s', ret)) :
+  s'.balances[ctx.sender] = s.balances[ctx.sender]
 
 lemma transferFrom_no_allowance_overdraft
-    (caller from to : Address) (amount : UInt256) (s : TokenState)
-    (h : transferFrom caller s from to amount = .error .insufficientBalance) :
+    (ctx : MsgContext) (from to : Address) (amount : UInt256) (s : TokenState)
+    (h : transferFrom ctx s from to amount = .error .insufficientBalance) :
   s.balances[from] < amount ∨
-  s.allowances[from][caller] < amount
+  s.allowances[from][ctx.sender] < amount
 
 lemma transferFrom_decrements_allowance
-    (caller from to : Address) (amount : UInt256)
+    (ctx : MsgContext) (from to : Address) (amount : UInt256)
     (s s' : TokenState) (ret : Bool)
-    (h : transferFrom caller s from to amount = .ok (s', ret)) :
-  s'.allowances[from][caller] =
-    s.allowances[from][caller] - amount
+    (h : transferFrom ctx s from to amount = .ok (s', ret)) :
+  s'.allowances[from][ctx.sender] =
+    s.allowances[from][ctx.sender] - amount
 
 -- ── Initialization (`@[lsc.initialize]` — §3.5) ───────────────────────────────
 
 lemma constructor_sets_owner
-    (owner : Caller) (name symbol : Bytes[32]) (decimals initialSupply : UInt256)
+    (ctx : MsgContext) (name symbol : Bytes[32]) (decimals initialSupply : UInt256)
     (s' : TokenState)
-    (h : initialize name symbol decimals initialSupply owner = .ok s') :
-  s'.owner = owner
+    (h : initialize name symbol decimals initialSupply ctx = .ok s') :
+  s'.owner = ctx.sender
 
 lemma constructor_mints_initial_supply
-    (owner : Caller) (name symbol : Bytes[32]) (decimals initialSupply : UInt256)
+    (ctx : MsgContext) (name symbol : Bytes[32]) (decimals initialSupply : UInt256)
     (s' : TokenState)
-    (h : initialize name symbol decimals initialSupply owner = .ok s') :
-  s'.balances[owner] = initialSupply ∧
+    (h : initialize name symbol decimals initialSupply ctx = .ok s') :
+  s'.balances[ctx.sender] = initialSupply ∧
   s'.totalSupply = initialSupply
 
 -- ── Sequence invariant (scaffolding) ────────────────────────────────────────
 
 inductive TokenAction where
-  | transfer     (caller : Caller) (to : Address) (amount : UInt256)
-  | transferFrom (caller : Caller) (from to : Address) (amount : UInt256)
-  | approve      (caller : Caller) (spender : Address) (amount : UInt256)
-  | mint         (caller : Caller) (to : Address) (amount : UInt256)
-  | burn         (caller : Caller) (from : Address) (amount : UInt256)
+  | transfer     (ctx : MsgContext) (to : Address) (amount : UInt256)
+  | transferFrom (ctx : MsgContext) (from to : Address) (amount : UInt256)
+  | approve      (ctx : MsgContext) (spender : Address) (amount : UInt256)
+  | mint         (ctx : MsgContext) (to : Address) (amount : UInt256)
+  | burn         (ctx : MsgContext) (from : Address) (amount : UInt256)
 
 def applyTokenAction (s : TokenState) : TokenAction → TokenState
-  | .transfer caller to amount =>
-      match transfer caller s to amount with
+  | .transfer ctx to amount =>
+      match transfer ctx s to amount with
       | .ok (s', _) => s' | .error _ => s
-  | .transferFrom caller from to amount =>
-      match transferFrom caller s from to amount with
+  | .transferFrom ctx from to amount =>
+      match transferFrom ctx s from to amount with
       | .ok (s', _) => s' | .error _ => s
-  | .approve caller spender amount =>
-      match approve caller s spender amount with
+  | .approve ctx spender amount =>
+      match approve ctx s spender amount with
       | .ok (s', _) => s' | .error _ => s
-  | .mint caller to amount =>
-      match mint caller s to amount with
+  | .mint ctx to amount =>
+      match mint ctx s to amount with
       | .ok (s', _) => s' | .error _ => s
-  | .burn caller from amount =>
-      match burn caller s from amount with
+  | .burn ctx from amount =>
+      match burn ctx s from amount with
       | .ok (s', _) => s' | .error _ => s
 
 def applyTokenActions (s : TokenState) (actions : List TokenAction) : TokenState :=
@@ -622,9 +622,9 @@ Tactic bodies for the lemmas above (abbreviated):
 
 ```lean
 lemma transfer_preserves_supply
-    (caller to : Address) (amount : UInt256)
+    (ctx : MsgContext) (to : Address) (amount : UInt256)
     (s s' : TokenState) (ret : Bool)
-    (h : transfer caller s to amount = .ok (s', ret)) :
+    (h : transfer ctx s to amount = .ok (s', ret)) :
     s'.totalSupply = s.totalSupply := by
   simp [transfer] at *
   split_ifs at h with hbal
@@ -632,9 +632,9 @@ lemma transfer_preserves_supply
   · simp at h; obtain ⟨hs', _⟩ := h; simp [← hs']
 
 lemma transfer_no_overdraft
-    (caller to : Address) (amount : UInt256) (s : TokenState)
-    (h : transfer caller s to amount = .error .insufficientBalance) :
-    s.balances[caller] < amount := by
+    (ctx : MsgContext) (to : Address) (amount : UInt256) (s : TokenState)
+    (h : transfer ctx s to amount = .error .insufficientBalance) :
+    s.balances[ctx.sender] < amount := by
   simp [transfer] at *
   split_ifs at h with hbal
   · exact hbal
@@ -653,18 +653,18 @@ import TokenLemma
 
 /-- transfer preserves total supply. -/
 theorem transfer_preserves_supply
-    (caller to : Address) (amount : UInt256)
+    (ctx : MsgContext) (to : Address) (amount : UInt256)
     (s s' : TokenState) (ret : Bool)
-    (h : transfer caller s to amount = .ok (s', ret)) :
+    (h : transfer ctx s to amount = .ok (s', ret)) :
     s'.totalSupply = s.totalSupply :=
-  TokenLemma.transfer_preserves_supply caller to amount s s' ret h
+  TokenLemma.transfer_preserves_supply ctx to amount s s' ret h
 
-/-- transfer reverts when caller has insufficient balance. -/
+/-- transfer reverts when sender has insufficient balance. -/
 theorem transfer_no_overdraft
-    (caller to : Address) (amount : UInt256) (s : TokenState)
-    (h : transfer caller s to amount = .error .insufficientBalance) :
-    s.balances[caller] < amount :=
-  TokenLemma.transfer_no_overdraft caller to amount s h
+    (ctx : MsgContext) (to : Address) (amount : UInt256) (s : TokenState)
+    (h : transfer ctx s to amount = .error .insufficientBalance) :
+    s.balances[ctx.sender] < amount :=
+  TokenLemma.transfer_no_overdraft ctx to amount s h
 
 -- ... homonymous theorem per lemma in §E.2
 ```
@@ -698,7 +698,7 @@ required = [
 |---------|-------|
 | `Mapping` with `Address` keys | `balances`, `allowances` |
 | Nested `Mapping` | `allowances : Mapping Address (Mapping Address UInt256)` |
-| `Caller` authorization | `mint`, `burn`: revert if `caller.val ≠ s.owner` |
+| `MsgContext` authorization | `mint`, `burn`: revert if `ctx.sender.val ≠ s.owner` |
 | `@[lsc.initialize]` | deploy-time `initialize` (§3.5) |
 | Revert theorem (`h : f … = .error e`) | `transfer_no_overdraft`, `mint_requires_owner` in `*Theorem.lean` |
 | Success theorem (`h : f … = .ok (s', _)`) | `transfer_moves_tokens`, `mint_increases_supply` in `*Theorem.lean` |
@@ -784,7 +784,7 @@ def safeTransferFrom (token from to : Address) (amount : UInt256) : Except AMMEr
 -- CEI: compute amountOut → update reserves → pull input token → push output token.
 
 @[lsc.external]
-def swap (caller : Caller) (s : AMMState) (zeroForOne : Bool) (amountIn : UInt256)
+def swap (ctx : MsgContext) (s : AMMState) (zeroForOne : Bool) (amountIn : UInt256)
     : Except AMMError (AMMState × UInt256) := do
   require (amountIn > 0) .zeroInput
   require (s.reserve0 > 0 ∧ s.reserve1 > 0) .uninitializedPool
@@ -796,8 +796,8 @@ def swap (caller : Caller) (s : AMMState) (zeroForOne : Bool) (amountIn : UInt25
     let s' := { s with
       reserve0 := s.reserve0 + amountIn
       reserve1 := s.reserve1 - amountOut }
-    ← safeTransferFrom s'.token0 caller s'.self amountIn
-    ← safeTransfer s'.token1 caller amountOut
+    ← safeTransferFrom s'.token0 ctx.sender s'.self amountIn
+    ← safeTransfer s'.token1 ctx.sender amountOut
     return .ok (s', amountOut)
   else
     let num       ← amountIn *? s.reserve0
@@ -807,13 +807,13 @@ def swap (caller : Caller) (s : AMMState) (zeroForOne : Bool) (amountIn : UInt25
     let s' := { s with
       reserve1 := s.reserve1 + amountIn
       reserve0 := s.reserve0 - amountOut }
-    ← safeTransferFrom s'.token1 caller s'.self amountIn
-    ← safeTransfer s'.token0 caller amountOut
+    ← safeTransferFrom s'.token1 ctx.sender s'.self amountIn
+    ← safeTransfer s'.token0 ctx.sender amountOut
     return .ok (s', amountOut)
 
 @[lsc.external]
 def addLiquidity
-    (caller : Caller)
+    (ctx : MsgContext)
     (s : AMMState)
     (amount0 amount1 : UInt256) : Except AMMError (AMMState × UInt256) := do
   if amount0 = 0 ∨ amount1 = 0 then
@@ -824,9 +824,9 @@ def addLiquidity
       reserve0   := amount0
       reserve1   := amount1
       totalLP    := lpMinted
-      lpBalances := s.lpBalances[caller := lpMinted] }
-    ← safeTransferFrom s'.token0 caller s'.self amount0
-    ← safeTransferFrom s'.token1 caller s'.self amount1
+      lpBalances := s.lpBalances[ctx.sender := lpMinted] }
+    ← safeTransferFrom s'.token0 ctx.sender s'.self amount0
+    ← safeTransferFrom s'.token1 ctx.sender s'.self amount1
     return .ok (s', lpMinted)
   else if s.reserve0 = 0 then
     return .error .uninitializedPool
@@ -838,26 +838,26 @@ def addLiquidity
       let newReserve0 ← s.reserve0 + amount0
       let newReserve1 ← s.reserve1 + amount1
       let newTotalLP  ← s.totalLP + lpMinted
-      let newLpBal    ← s.lpBalances[caller] + lpMinted
+      let newLpBal    ← s.lpBalances[ctx.sender] + lpMinted
       let s' := { s with
         reserve0   := newReserve0
         reserve1   := newReserve1
         totalLP    := newTotalLP
-        lpBalances := s.lpBalances[caller := newLpBal] }
-      ← safeTransferFrom s'.token0 caller s'.self amount0
-      ← safeTransferFrom s'.token1 caller s'.self amount1
+        lpBalances := s.lpBalances[ctx.sender := newLpBal] }
+      ← safeTransferFrom s'.token0 ctx.sender s'.self amount0
+      ← safeTransferFrom s'.token1 ctx.sender s'.self amount1
       return .ok (s', lpMinted)
 
 @[lsc.external]
 def removeLiquidity
-    (caller : Caller)
+    (ctx : MsgContext)
     (s : AMMState)
     (lpAmount : UInt256) : Except AMMError (AMMState × UInt256 × UInt256) := do
   if lpAmount = 0 then
     return .error .zeroAmount
   else if s.totalLP = 0 then
     return .error .uninitializedPool
-  else if s.lpBalances[caller] < lpAmount then
+  else if s.lpBalances[ctx.sender] < lpAmount then
     return .error .insufficientLp
   else
     let amount0Out ← s.reserve0 * lpAmount / s.totalLP
@@ -868,14 +868,14 @@ def removeLiquidity
       let newReserve0 ← s.reserve0 - amount0Out
       let newReserve1 ← s.reserve1 - amount1Out
       let newTotalLP  ← s.totalLP - lpAmount
-      let newLpBal    ← s.lpBalances[caller] - lpAmount
+      let newLpBal    ← s.lpBalances[ctx.sender] - lpAmount
       let s' := { s with
         reserve0   := newReserve0
         reserve1   := newReserve1
         totalLP    := newTotalLP
-        lpBalances := s.lpBalances[caller := newLpBal] }
-      ← safeTransfer s'.token0 caller amount0Out
-      ← safeTransfer s'.token1 caller amount1Out
+        lpBalances := s.lpBalances[ctx.sender := newLpBal] }
+      ← safeTransfer s'.token0 ctx.sender amount0Out
+      ← safeTransfer s'.token1 ctx.sender amount1Out
       return .ok (s', amount0Out, amount1Out)
 
 @[lsc.external]
@@ -901,112 +901,112 @@ def k (s : AMMState) : ℕ := s.reserve0.val * s.reserve1.val
 -- ── Swap lemmas ───────────────────────────────────────────────────────────────
 
 lemma swap_revert_zero_input
-    (caller : Caller) (s : AMMState) (zeroForOne : Bool)
-    (h : swap caller s zeroForOne 0 = .error .zeroInput) :
+    (ctx : MsgContext) (s : AMMState) (zeroForOne : Bool)
+    (h : swap ctx s zeroForOne 0 = .error .zeroInput) :
   True   -- always holds; zero input always reverts by construction
 
 lemma swap_revert_uninitialized
-    (caller : Caller) (s : AMMState) (zeroForOne : Bool) (amountIn : UInt256)
-    (h : swap caller s zeroForOne amountIn = .error .uninitializedPool) :
+    (ctx : MsgContext) (s : AMMState) (zeroForOne : Bool) (amountIn : UInt256)
+    (h : swap ctx s zeroForOne amountIn = .error .uninitializedPool) :
   s.reserve0 = 0 ∨ s.reserve1 = 0
 
 lemma swap_positive_output
-    (caller : Caller) (s s' : AMMState) (zeroForOne : Bool) (amountIn amountOut : UInt256)
-    (h : swap caller s zeroForOne amountIn = .ok (s', amountOut)) :
+    (ctx : MsgContext) (s s' : AMMState) (zeroForOne : Bool) (amountIn amountOut : UInt256)
+    (h : swap ctx s zeroForOne amountIn = .ok (s', amountOut)) :
   amountOut > 0
 
 lemma swap_preserves_k
-    (caller : Caller) (s s' : AMMState) (zeroForOne : Bool) (amountIn amountOut : UInt256)
+    (ctx : MsgContext) (s s' : AMMState) (zeroForOne : Bool) (amountIn amountOut : UInt256)
     (hOverflow : if zeroForOne then s.reserve0.val * s.reserve1.val < 2^256 - s.reserve0.val
                  else s.reserve0.val * s.reserve1.val < 2^256 - s.reserve1.val)
-    (h : swap caller s zeroForOne amountIn = .ok (s', amountOut)) :
+    (h : swap ctx s zeroForOne amountIn = .ok (s', amountOut)) :
   k s' ≥ k s
 
 lemma swap_increases_reserve0
-    (caller : Caller) (s s' : AMMState) (zeroForOne : Bool) (amountIn amountOut : UInt256)
+    (ctx : MsgContext) (s s' : AMMState) (zeroForOne : Bool) (amountIn amountOut : UInt256)
     (hDir : zeroForOne = true)
-    (h : swap caller s zeroForOne amountIn = .ok (s', amountOut)) :
+    (h : swap ctx s zeroForOne amountIn = .ok (s', amountOut)) :
   s'.reserve0 = s.reserve0 + amountIn
 
 lemma swap_increases_reserve1
-    (caller : Caller) (s s' : AMMState) (zeroForOne : Bool) (amountIn amountOut : UInt256)
+    (ctx : MsgContext) (s s' : AMMState) (zeroForOne : Bool) (amountIn amountOut : UInt256)
     (hDir : zeroForOne = false)
-    (h : swap caller s zeroForOne amountIn = .ok (s', amountOut)) :
+    (h : swap ctx s zeroForOne amountIn = .ok (s', amountOut)) :
   s'.reserve1 = s.reserve1 + amountIn
 
 lemma swap_decreases_reserve1
-    (caller : Caller) (s s' : AMMState) (zeroForOne : Bool) (amountIn amountOut : UInt256)
+    (ctx : MsgContext) (s s' : AMMState) (zeroForOne : Bool) (amountIn amountOut : UInt256)
     (hDir : zeroForOne = true)
-    (h : swap caller s zeroForOne amountIn = .ok (s', amountOut)) :
+    (h : swap ctx s zeroForOne amountIn = .ok (s', amountOut)) :
   s'.reserve1 = s.reserve1 - amountOut
 
 lemma swap_decreases_reserve0
-    (caller : Caller) (s s' : AMMState) (zeroForOne : Bool) (amountIn amountOut : UInt256)
+    (ctx : MsgContext) (s s' : AMMState) (zeroForOne : Bool) (amountIn amountOut : UInt256)
     (hDir : zeroForOne = false)
-    (h : swap caller s zeroForOne amountIn = .ok (s', amountOut)) :
+    (h : swap ctx s zeroForOne amountIn = .ok (s', amountOut)) :
   s'.reserve0 = s.reserve0 - amountOut
 
 -- ── addLiquidity lemmas ────────────────────────────────────────────────────────
 
 lemma addLiquidity_revert_zero
-    (caller : Caller) (s : AMMState) (amount0 amount1 : UInt256)
-    (h : addLiquidity caller s amount0 amount1 = .error .zeroAmount) :
+    (ctx : MsgContext) (s : AMMState) (amount0 amount1 : UInt256)
+    (h : addLiquidity ctx s amount0 amount1 = .error .zeroAmount) :
   amount0 = 0 ∨ amount1 = 0
 
 lemma addLiquidity_increases_reserves
-    (caller : Caller) (s s' : AMMState) (amount0 amount1 lpMinted : UInt256)
+    (ctx : MsgContext) (s s' : AMMState) (amount0 amount1 lpMinted : UInt256)
     (hNotFirst : s.totalLP > 0)
-    (h : addLiquidity caller s amount0 amount1 = .ok (s', lpMinted)) :
+    (h : addLiquidity ctx s amount0 amount1 = .ok (s', lpMinted)) :
   s'.reserve0 ≥ s.reserve0 ∧ s'.reserve1 ≥ s.reserve1
 
 lemma addLiquidity_increases_totalLP
-    (caller : Caller) (s s' : AMMState) (amount0 amount1 lpMinted : UInt256)
-    (h : addLiquidity caller s amount0 amount1 = .ok (s', lpMinted)) :
+    (ctx : MsgContext) (s s' : AMMState) (amount0 amount1 lpMinted : UInt256)
+    (h : addLiquidity ctx s amount0 amount1 = .ok (s', lpMinted)) :
   s'.totalLP ≥ s.totalLP
 
-lemma addLiquidity_mints_to_caller
-    (caller : Caller) (s s' : AMMState) (amount0 amount1 lpMinted : UInt256)
-    (h : addLiquidity caller s amount0 amount1 = .ok (s', lpMinted)) :
-  s'.lpBalances[caller] ≥ s.lpBalances[caller]
+lemma addLiquidity_mints_to_ctx.sender
+    (ctx : MsgContext) (s s' : AMMState) (amount0 amount1 lpMinted : UInt256)
+    (h : addLiquidity ctx s amount0 amount1 = .ok (s', lpMinted)) :
+  s'.lpBalances[ctx.sender] ≥ s.lpBalances[ctx.sender]
 
 -- ── removeLiquidity lemmas ─────────────────────────────────────────────────────
 
 lemma removeLiquidity_revert_insufficient_lp
-    (caller : Caller) (s : AMMState) (lpAmount : UInt256)
-    (h : removeLiquidity caller s lpAmount = .error .insufficientLp) :
-  s.lpBalances[caller] < lpAmount
+    (ctx : MsgContext) (s : AMMState) (lpAmount : UInt256)
+    (h : removeLiquidity ctx s lpAmount = .error .insufficientLp) :
+  s.lpBalances[ctx.sender] < lpAmount
 
 lemma removeLiquidity_burns_lp
-    (caller : Caller) (s s' : AMMState) (lpAmount amount0Out amount1Out : UInt256)
-    (h : removeLiquidity caller s lpAmount = .ok (s', amount0Out, amount1Out)) :
+    (ctx : MsgContext) (s s' : AMMState) (lpAmount amount0Out amount1Out : UInt256)
+    (h : removeLiquidity ctx s lpAmount = .ok (s', amount0Out, amount1Out)) :
   s'.totalLP = s.totalLP - lpAmount
 
-lemma removeLiquidity_decreases_caller_lp
-    (caller : Caller) (s s' : AMMState) (lpAmount amount0Out amount1Out : UInt256)
-    (h : removeLiquidity caller s lpAmount = .ok (s', amount0Out, amount1Out)) :
-  s'.lpBalances[caller] = s.lpBalances[caller] - lpAmount
+lemma removeLiquidity_decreases_ctx.sender_lp
+    (ctx : MsgContext) (s s' : AMMState) (lpAmount amount0Out amount1Out : UInt256)
+    (h : removeLiquidity ctx s lpAmount = .ok (s', amount0Out, amount1Out)) :
+  s'.lpBalances[ctx.sender] = s.lpBalances[ctx.sender] - lpAmount
 
 lemma removeLiquidity_k_bounded
-    (caller : Caller) (s s' : AMMState) (lpAmount amount0Out amount1Out : UInt256)
-    (h : removeLiquidity caller s lpAmount = .ok (s', amount0Out, amount1Out)) :
+    (ctx : MsgContext) (s s' : AMMState) (lpAmount amount0Out amount1Out : UInt256)
+    (h : removeLiquidity ctx s lpAmount = .ok (s', amount0Out, amount1Out)) :
   k s' ≤ k s
 
 -- ── Sequence invariant scaffolding ─────────────────────────────────────────────
 
 inductive AMMAction where
-  | swap            (caller : Caller) (zeroForOne : Bool) (amountIn : UInt256)
-  | addLiquidity    (caller : Caller) (amount0 amount1 : UInt256)
-  | removeLiquidity (caller : Caller) (lpAmount : UInt256)
+  | swap            (ctx : MsgContext) (zeroForOne : Bool) (amountIn : UInt256)
+  | addLiquidity    (ctx : MsgContext) (amount0 amount1 : UInt256)
+  | removeLiquidity (ctx : MsgContext) (lpAmount : UInt256)
 
 def applyAMMAction (s : AMMState) : AMMAction → AMMState
-  | .swap caller zeroForOne amountIn =>
-      match swap caller s zeroForOne amountIn with
+  | .swap ctx zeroForOne amountIn =>
+      match swap ctx s zeroForOne amountIn with
       | .ok (s', _) => s' | .error _ => s
-  | .addLiquidity caller amount0 amount1 =>
-      match addLiquidity caller s amount0 amount1 with
+  | .addLiquidity ctx amount0 amount1 =>
+      match addLiquidity ctx s amount0 amount1 with
       | .ok (s', _) => s' | .error _ => s
-  | .removeLiquidity caller lpAmount =>
-      match removeLiquidity caller s lpAmount with
+  | .removeLiquidity ctx lpAmount =>
+      match removeLiquidity ctx s lpAmount with
       | .ok (s', _, _) => s' | .error _ => s
 
 def applyAMMActions (s : AMMState) (actions : List AMMAction) : AMMState :=
@@ -1025,10 +1025,10 @@ lemma k_never_decreases_swap_add
 
 ```lean
 lemma swap_preserves_k
-    (caller : Caller) (s s' : AMMState) (zeroForOne : Bool) (amountIn amountOut : UInt256)
+    (ctx : MsgContext) (s s' : AMMState) (zeroForOne : Bool) (amountIn amountOut : UInt256)
     (hOverflow : if zeroForOne then s.reserve0.val * s.reserve1.val < 2^256 - s.reserve0.val
                  else s.reserve0.val * s.reserve1.val < 2^256 - s.reserve1.val)
-    (h : swap caller s zeroForOne amountIn = .ok (s', amountOut)) :
+    (h : swap ctx s zeroForOne amountIn = .ok (s', amountOut)) :
     k s' ≥ k s := by
   simp [k, swap] at *
   split_ifs at h with hDir
@@ -1044,17 +1044,17 @@ lemma swap_preserves_k
     omega
 
 lemma swap_increases_reserve0
-    (caller : Caller) (s s' : AMMState) (zeroForOne : Bool) (amountIn amountOut : UInt256)
+    (ctx : MsgContext) (s s' : AMMState) (zeroForOne : Bool) (amountIn amountOut : UInt256)
     (hDir : zeroForOne = true)
-    (h : swap caller s zeroForOne amountIn = .ok (s', amountOut)) :
+    (h : swap ctx s zeroForOne amountIn = .ok (s', amountOut)) :
     s'.reserve0 = s.reserve0 + amountIn := by
   simp [swap, hDir] at *
   split_ifs at h <;> simp_all
 
 lemma swap_increases_reserve1
-    (caller : Caller) (s s' : AMMState) (zeroForOne : Bool) (amountIn amountOut : UInt256)
+    (ctx : MsgContext) (s s' : AMMState) (zeroForOne : Bool) (amountIn amountOut : UInt256)
     (hDir : zeroForOne = false)
-    (h : swap caller s zeroForOne amountIn = .ok (s', amountOut)) :
+    (h : swap ctx s zeroForOne amountIn = .ok (s', amountOut)) :
     s'.reserve1 = s.reserve1 + amountIn := by
   simp [swap, hDir] at *
   split_ifs at h <;> simp_all
@@ -1073,26 +1073,26 @@ import AMMLemma
 
 /-- Core: swap preserves k (no-fee version). -/
 theorem swap_preserves_k
-    (caller : Caller) (s s' : AMMState) (zeroForOne : Bool) (amountIn amountOut : UInt256)
+    (ctx : MsgContext) (s s' : AMMState) (zeroForOne : Bool) (amountIn amountOut : UInt256)
     (hOverflow : if zeroForOne then s.reserve0.val * s.reserve1.val < 2^256 - s.reserve0.val
                  else s.reserve0.val * s.reserve1.val < 2^256 - s.reserve1.val)
-    (h : swap caller s zeroForOne amountIn = .ok (s', amountOut)) :
+    (h : swap ctx s zeroForOne amountIn = .ok (s', amountOut)) :
     AMMLemma.k s' ≥ AMMLemma.k s :=
-  AMMLemma.swap_preserves_k caller s s' zeroForOne amountIn amountOut hOverflow h
+  AMMLemma.swap_preserves_k ctx s s' zeroForOne amountIn amountOut hOverflow h
 
 theorem swap_increases_reserve0
-    (caller : Caller) (s s' : AMMState) (zeroForOne : Bool) (amountIn amountOut : UInt256)
+    (ctx : MsgContext) (s s' : AMMState) (zeroForOne : Bool) (amountIn amountOut : UInt256)
     (hDir : zeroForOne = true)
-    (h : swap caller s zeroForOne amountIn = .ok (s', amountOut)) :
+    (h : swap ctx s zeroForOne amountIn = .ok (s', amountOut)) :
     s'.reserve0 = s.reserve0 + amountIn :=
-  AMMLemma.swap_increases_reserve0 caller s s' zeroForOne amountIn amountOut hDir h
+  AMMLemma.swap_increases_reserve0 ctx s s' zeroForOne amountIn amountOut hDir h
 
 theorem swap_increases_reserve1
-    (caller : Caller) (s s' : AMMState) (zeroForOne : Bool) (amountIn amountOut : UInt256)
+    (ctx : MsgContext) (s s' : AMMState) (zeroForOne : Bool) (amountIn amountOut : UInt256)
     (hDir : zeroForOne = false)
-    (h : swap caller s zeroForOne amountIn = .ok (s', amountOut)) :
+    (h : swap ctx s zeroForOne amountIn = .ok (s', amountOut)) :
     s'.reserve1 = s.reserve1 + amountIn :=
-  AMMLemma.swap_increases_reserve1 caller s s' zeroForOne amountIn amountOut hDir h
+  AMMLemma.swap_increases_reserve1 ctx s s' zeroForOne amountIn amountOut hDir h
 
 -- ... homonymous theorem per lemma in §F.3
 ```
