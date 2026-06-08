@@ -119,7 +119,7 @@ theorem transfer_preserves_total_supply
 
 ## Appendix B — Composition Pattern
 
-This appendix documents the **[forge-lean-composition](https://github.com/forge-lean/forge-lean-composition)** demo — the reference application for inline `call!` / `staticcall!` with interface casts, reentrancy-aware `World`/`invoke`, and multi-contract composition. It is the primary driver for v2a–v2b extern support.
+This appendix documents the **[forge-lean-composition](https://github.com/forge-lean/forge-lean-composition)** demo — the reference application for inline `extcall!` / `staticcall!` with interface casts, reentrancy-aware `World`/`invoke`, and multi-contract composition. It is the primary driver for v2a–v2b extern support.
 
 ### B.1 Goal
 
@@ -134,7 +134,7 @@ sequenceDiagram
   participant TC as TransferCounter
   User->>MyToken: transfer(to, amount)
   MyToken->>MyToken: ERC20 transfer logic
-  MyToken->>TC: call! (counter : ITransferCounter).onTransfer
+  MyToken->>TC: extcall! (counter : ITransferCounter).onTransfer
   TC->>TC: count + 1
   TC-->>MyToken: success
   MyToken-->>User: true
@@ -156,7 +156,7 @@ structure MyTokenState where
 
 ### B.3 MyToken exports
 
-MyToken adds a `counter : Address` field (`0` = hook disabled). On successful `transfer` / `transferFrom`, token logic runs first, then an inline `call!` to the counter (checks-effects-interactions):
+MyToken adds a `counter : Address` field (`0` = hook disabled). On successful `transfer` / `transferFrom`, token logic runs first, then an inline `extcall!` to the counter (checks-effects-interactions):
 
 ```lean
 -- src/MyToken.lean (excerpt)
@@ -168,7 +168,7 @@ inductive TokenError where
 def notifyCounterIfHooked (caller : Caller) (s' : MyTokenState) (to : Address)
     : Except TokenError Unit := do
   if s'.counter ≠ Address.zero ∧ caller ≠ to then
-    let _ ← call! (s'.counter : ITransferCounter).onTransfer
+    let _ ← extcall! (s'.counter : ITransferCounter).onTransfer
   return .ok ()
 
 @[Lsc.external]
@@ -243,7 +243,7 @@ All v2+ content is removed from the main spec body. This appendix records what e
 |-------|--------|-------------|
 | **v1** | Current | Counter + ERC-20 demo; no `Lsc.extern.*` in core tests; `World`/`invoke` in `Lsc.Semantics` but not emitted |
 | **v2a** | Planned | `World`, `Account`, `invoke` fully wired in Foundry multi-contract tests |
-| **v2b** | Planned | Inline `call!` / `staticcall!` emitter; `CALL` / `STATICCALL` lowering; interface casts; `simulate_call` complete |
+| **v2b** | Planned | Inline `extcall!` / `staticcall!` emitter; `CALL` / `STATICCALL` lowering; interface casts; `simulate_call` complete |
 | **v2c** | Planned | `@[lsc.no_reentrant]` validator enforcement; trace templates; `lift_*` refinement lemmas |
 | **v3** | Future | `delegatecall`; `Lsc.unsafe.call`; `CREATE` / `SELFDESTRUCT` in `World` |
 
@@ -306,7 +306,7 @@ open scoped Lsc.Wad   -- same glyphs → wad*
 
 Do **not** `open scoped` both `Lsc.Ray` and `Lsc.Wad` in one file — operator strings clash. Mixed-scale code uses explicit function names (`rayMulHalfUp`, `wadMulHalfUp`).
 
-Plain `*?` / `/?` remain `UInt256` checked arithmetic (no rounding) from `Lsc.Prelude`.
+Plain `*?` / `/?` remain `UInt256` checked arithmetic (no rounding) from `Lsc.Prelude`. Modular wrap uses `+↻ -↻ *↻` (§2.5); plain `+ - * /` on `UInt256` are a type error.
 
 ### D.3 Lending example
 
@@ -841,7 +841,7 @@ import AMM
 
 -- ── Helper: k value ───────────────────────────────────────────────────────────
 
-def k (s : AMMState) : UInt256 := s.reserve0 * s.reserve1
+def k (s : AMMState) : ℕ := s.reserve0.val * s.reserve1.val
 
 -- ── Swap lemmas ───────────────────────────────────────────────────────────────
 

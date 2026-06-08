@@ -109,7 +109,8 @@ def applyActions (s : CounterState) (actions : List CounterAction) : CounterStat
 
 lemma increment_increases_number (s s' : CounterState) (h : increment s = .ok s') :
     s'.number = s.number + 1 := by
-  simp [increment] at h ⊢; omega
+  rw [UInt256.eq_iff]
+  simp [increment, UInt256.addChecked_val] at h ⊢; omega
 
 lemma increment_overflows_iff (s : CounterState) (h : increment s = .error .overflow) :
     s.number = UInt256.max := by
@@ -119,7 +120,7 @@ lemma number_never_decreases (s : CounterState) (actions : List CounterAction) :
     (applyActions s actions).number ≥ s.number := by
   simp only [applyActions]
   apply Lsc.Invariant applyAction (fun s' => s'.number ≥ s.number)
-  · intro s' a hP; cases a <;> simp [applyAction, increment] at hP ⊢ <;> omega
+  · intro s' a hP; cases a <;> simp [applyAction, increment, UInt256.addChecked_val, UInt256.le_iff] at hP ⊢ <;> omega
   · simp
 ```
 
@@ -144,26 +145,30 @@ For `lakefile.lean` layout, see [lsc-toolchain.md §2](lsc-toolchain.md#2-projec
 
 | LSC type | Lean definition | EVM/ABI type | Notes |
 |----------|----------------|--------------|-------|
-| `UInt256` | `Fin (2^256)` | `uint256` | Modular arithmetic everywhere |
+| `UInt256` | `{ n : ℕ // n < 2^256 }` | `uint256` | Bounded; no default `+ - * /` — use `+?` or `+↻` |
 | `Address` | `structure Address where val : UInt256` | `address` | Not coercible to `UInt256` without `.val` |
 | `Bool` | Lean built-in | `bool` | |
-| `Bytes32` | `Fin (2^256)` newtype | `bytes32` | Raw 32-byte value |
+| `Bytes32` | `structure Bytes32 where val : UInt256` | `bytes32` | Opaque 32-byte word; not coercible to `UInt256` |
 | `Bytes[N]` | `{ b : ByteArray // b.size ≤ N }` | `bytes` / `string` | Bounded; see §2.2 |
 
 #### Arithmetic semantics
 
-`UInt256 = Fin (2^256)` at the ABI/storage boundary. `+ - * /` are modular (`Fin`) operations available everywhere, but their use in `@[Lsc.external]` contract functions is restricted (see below).
-
-Two modes:
+`UInt256` is a bounded natural subtype at the ABI/storage boundary. It does **not** inherit `Fin`'s modular `Add`/`Mul` instances — plain `+ - * /` on `UInt256` are a **type error** in author code. Two explicit operator families:
 
 | Mode | Syntax | Returns | Use when |
 |------|--------|---------|----------|
-| Checked | `a +? b` | `Except E UInt256` | **default in `@[Lsc.external]` functions** — overflow reverts |
-| Wrapping | `a + b` | `UInt256` | lemma/theorem files only; or intentional modular arithmetic |
+| Checked | `a +? b` | `Except E UInt256` | **default** — overflow reverts (Solidity default) |
+| Wrapping | `a +↻ b` | `UInt256` | Intentional mod-2²⁵⁶ — Solidity `unchecked { }` |
+
+Same pattern for `-?`/`-↻`, `*?`/`*↻`, `/?` (checked; divide-by-zero reverts). Modular add/sub/mul use `+↻ -↻ *↻`; division has no modular wrap on EVM — use `/?` or `UInt256.divMod a b hb` when `b ≠ 0`.
+
+The wrap suffix ↻ is U+21BB (clockwise open circle arrow), paired with the checked suffix `?`.
 
 Checked arithmetic returns `Except E _` via the in-scope `LscError E` instance. Compose with `←` in a `do`-block over `Except E`. See §2.5.
 
-**Validator rule:** plain `+ - *` on `UInt256` inside `@[Lsc.external]` functions is a warning (`lsc: prefer +? for checked arithmetic in contract functions`). It is not an error — wrapping is sometimes intentional (e.g. bitwise packing). In lemma and theorem files plain `+` is unrestricted; proofs use it naturally when reasoning about `UInt256.val` arithmetic.
+**Comparisons:** `=`, `≤`, `≥`, `<`, `>` on `UInt256` compare via `.val` (prelude instances). Theorem statements use `s'.field = s.field + 1` and `s'.field ≥ s.field` — not `.val`.
+
+**Lemma files:** `+?` is contract-only (§12.2). `UInt256 + ℕ` literal add (`addNat` / `HAdd`) is for proof goals only — validator forbids it in contract modules. Use `+↻` for modular `UInt256` algebra; use named `ℕ` helpers (§9.7) for nonlinear invariants like `k s`.
 
 ### §2.2 Bytes[N]
 
@@ -308,23 +313,63 @@ instance : LscError ArithError where
 
 This typeclass is the mechanism by which `+?`, `-?`, `*?`, `/?` inject arithmetic faults into any error type `E` without an explicit lift at every call site. The instance is resolved at elaboration time.
 
-#### The `+?` operator family
+#### Type definition and projections
 
-`+?`, `-?`, `*?`, `/?` return `Except E A` directly (not `Option`), using the `LscError E` instance in scope. Plain `+ - * /` always wrap (Fin semantics).
+```lean
+-- Lsc.Prelude
+abbrev UInt256 := { n : ℕ // n < 2^256 }
+
+namespace UInt256
+def val (a : UInt256) : ℕ := a.1
+def mk (n : ℕ) (h : n < 2^256) : UInt256 := ⟨n, h⟩
+def max : UInt256 := ⟨(2^256 - 1), by omega⟩
+
+instance : DecidableEq UInt256 :=
+  ⟨fun a b => decide (a.val = b.val), by intros; simp [UInt256.val]; exact Subtype.ext_iff.mpr⟩
+
+instance : LE UInt256 where le a b := a.val ≤ b.val
+instance : LT UInt256 where lt a b := a.val < b.val
+instance : DecidableLE UInt256 := ⟨fun a b => decide (a.val ≤ b.val), by intros; simp [UInt256.le_iff]⟩
+instance : DecidableLT UInt256 := ⟨fun a b => decide (a.val < b.val), by intros; simp [UInt256.lt_iff]⟩
+
+@[simp] theorem eq_iff {a b : UInt256} : a = b ↔ a.val = b.val :=
+  ⟨fun h => by simp [h], Subtype.ext⟩
+
+@[simp] theorem le_iff {a b : UInt256} : a ≤ b ↔ a.val ≤ b.val := ⟨fun _ => id, fun _ => id⟩
+@[simp] theorem lt_iff {a b : UInt256} : a < b ↔ a.val < b.val := ⟨fun _ => id, fun _ => id⟩
+
+/-- Add a natural literal; bound proof synthesized by `omega` at each use site. -/
+def addNat (a : UInt256) (n : ℕ) (h : a.val + n < 2^256 := by omega) : UInt256 := ⟨a.val + n, h⟩
+
+instance : HAdd UInt256 ℕ UInt256 where hAdd := UInt256.addNat
+
+-- OfNat instance for literals n with n < 2^256 (compile-time check)
+end UInt256
+
+structure Bytes32 where
+  val : UInt256
+  deriving DecidableEq, Repr
+```
+
+> **Why subtype not `Fin`?** `Fin (2^256)` is definitionally the same carrier but ships modular arithmetic instances. LSC forbids silent wrap: checked ops revert (`+?`), modular ops are opt-in (`+↻`). A standalone subtype without `Fin` instances makes the wrong thing a type error.
+
+#### The `+?` operator family (checked)
+
+`+?`, `-?`, `*?`, `/?` return `Except E A` directly (not `Option`), using the `LscError E` instance in scope.
 
 ```lean
 -- Lsc.Prelude
 def UInt256.addChecked [LscError E] (a b : UInt256) : Except E UInt256 :=
-  if a.val + b.val < 2^256 then .ok ⟨a.val + b.val⟩
+  if h : a.val + b.val < 2^256 then .ok ⟨a.val + b.val, h⟩
   else .error (LscError.arith .overflow)
 def UInt256.subChecked [LscError E] (a b : UInt256) : Except E UInt256 :=
-  if a.val ≥ b.val then .ok ⟨a.val - b.val⟩
+  if h : b.val ≤ a.val then .ok ⟨a.val - b.val, by omega⟩
   else .error (LscError.arith .overflow)
 def UInt256.mulChecked [LscError E] (a b : UInt256) : Except E UInt256 :=
-  if a.val = 0 ∨ b.val ≤ (2^256 - 1) / a.val then .ok ⟨a.val * b.val⟩
+  if h : a.val * b.val < 2^256 then .ok ⟨a.val * b.val, h⟩
   else .error (LscError.arith .overflow)
 def UInt256.divChecked [LscError E] (a b : UInt256) : Except E UInt256 :=
-  if b.val ≠ 0 then .ok ⟨a.val / b.val⟩
+  if h : b.val ≠ 0 then .ok ⟨a.val / b.val, by omega⟩
   else .error (LscError.arith .divisionByZero)
 
 scoped notation a " +? " b => UInt256.addChecked a b
@@ -332,6 +377,29 @@ scoped notation a " -? " b => UInt256.subChecked a b
 scoped notation a " *? " b => UInt256.mulChecked a b
 scoped notation a " /? " b => UInt256.divChecked a b
 ```
+
+#### The `+↻` operator family (wrapping)
+
+Modular arithmetic mod 2²⁵⁶. Rare — bit packing, `unchecked`-style algorithms. ↻ is U+21BB.
+
+```lean
+-- Lsc.Prelude
+def UInt256.addMod (a b : UInt256) : UInt256 :=
+  ⟨(a.val + b.val) % 2^256, by omega⟩
+def UInt256.subMod (a b : UInt256) : UInt256 :=
+  ⟨(a.val + 2^256 - b.val) % 2^256, by omega⟩
+def UInt256.mulMod (a b : UInt256) : UInt256 :=
+  ⟨(a.val * b.val) % 2^256, by omega⟩
+scoped notation a " +↻ " b => UInt256.addMod a b
+scoped notation a " -↻ " b => UInt256.subMod a b
+scoped notation a " *↻ " b => UInt256.mulMod a b
+
+/-- Truncating division when `b ≠ 0`; EVM `unchecked` still reverts on divide-by-zero. -/
+def UInt256.divMod (a b : UInt256) (hb : b.val ≠ 0) : UInt256 :=
+  ⟨a.val / b.val, by omega⟩
+```
+
+No `/↻` notation — nonzero divisor proof is required at each call site. In contracts use `/?`; in lemmas use `a.val / b.val` or `divMod` with an explicit `hb`.
 
 Because `+?` etc. return `Except E _` directly, they compose naturally with `←` in a `do`-block over `Except E` — no macro, no wrapper, no lift annotation needed.
 
@@ -363,48 +431,35 @@ def increment (s : CounterState) : Except ArithError CounterState := do
 
 | | Solidity | LSC |
 |---|---|---|
-| Default `+` | reverts on overflow | wraps (Fin) |
-| Opt-out | `unchecked { a + b }` | `a + b` (plain) |
-| Checked | `a + b` (default) | `let x ← a +? b` in `do`-block |
+| Default | `a + b` reverts | `let x ← a +? b` in `do`-block |
+| Opt-out | `unchecked { a + b }` | `a +↻ b` |
+| Plain `+` on `UInt256` | N/A | Type error |
 
 #### Bridge lemmas (`@[simp]`)
 
-The bridge lemmas are **biconditional** — they rewrite `(a +? b = .ok r)` into a pure `ℕ` proposition about `.val`. This means a single `simp [myFunction, UInt256.addChecked_val, ...]` call in a tactic proof immediately reduces any goal to plain natural number arithmetic, with no `Fin` modular reasoning or `.val` coercions leaking through.
+The bridge lemmas are **biconditional** — they rewrite `(a +? b = .ok r)` into a pure `ℕ` proposition about `.val`. This means a single `simp [myFunction, UInt256.addChecked_val, ...]` call in a tactic proof immediately reduces any goal to plain natural number arithmetic, with no subtype coercions leaking through.
 
 ```lean
 -- Lsc.Prelude
 @[simp] theorem UInt256.addChecked_val [LscError E] {a b r : UInt256} :
     (a +? b : Except E UInt256) = .ok r ↔
     (a.val + b.val < 2^256 ∧ r.val = a.val + b.val) := by
-  simp [UInt256.addChecked]; constructor
-  · intro h; split_ifs at h with hlt <;> simp_all; exact ⟨hlt, by simp [Fin.ext_iff]⟩
-  · rintro ⟨hlt, hval⟩; simp [hlt, Fin.ext_iff, hval]
+  simp [UInt256.addChecked]; constructor <;> intro h <;> split_ifs at h <;> simp_all <;> omega
 
 @[simp] theorem UInt256.subChecked_val [LscError E] {a b r : UInt256} :
     (a -? b : Except E UInt256) = .ok r ↔
     (b.val ≤ a.val ∧ r.val = a.val - b.val) := by
-  simp [UInt256.subChecked]; constructor
-  · intro h; split_ifs at h with hle <;> simp_all; exact ⟨hle, by simp [Fin.ext_iff]⟩
-  · rintro ⟨hle, hval⟩; simp [hle, Fin.ext_iff, hval]
+  simp [UInt256.subChecked]; constructor <;> intro h <;> split_ifs at h <;> simp_all <;> omega
 
 @[simp] theorem UInt256.mulChecked_val [LscError E] {a b r : UInt256} :
     (a *? b : Except E UInt256) = .ok r ↔
     (a.val * b.val < 2^256 ∧ r.val = a.val * b.val) := by
-  simp [UInt256.mulChecked]; constructor
-  · intro h; split_ifs at h with hlt <;> simp_all
-    exact ⟨by cases hlt with
-      | inl h => simp [h]
-      | inr h => exact Nat.lt_of_div_le h, by simp [Fin.ext_iff]⟩
-  · rintro ⟨hlt, hval⟩
-    simp [Fin.ext_iff, hval]
-    right; exact Nat.le_div_iff_mul_le (by omega) |>.mpr (by omega)
+  simp [UInt256.mulChecked]; constructor <;> intro h <;> split_ifs at h <;> simp_all <;> omega
 
 @[simp] theorem UInt256.divChecked_val [LscError E] {a b r : UInt256} :
     (a /? b : Except E UInt256) = .ok r ↔
     (b.val ≠ 0 ∧ r.val = a.val / b.val) := by
-  simp [UInt256.divChecked]; constructor
-  · intro h; split_ifs at h with hne <;> simp_all; exact ⟨hne, by simp [Fin.ext_iff]⟩
-  · rintro ⟨hne, hval⟩; simp [hne, Fin.ext_iff, hval]
+  simp [UInt256.divChecked]; constructor <;> intro h <;> split_ifs at h <;> simp_all <;> omega
 
 -- Error-direction lemmas (unchanged, still useful)
 @[simp] theorem UInt256.addChecked_error [LscError E] {a b : UInt256} (h : a.val + b.val ≥ 2^256) :
@@ -420,7 +475,7 @@ The bridge lemmas are **biconditional** — they rewrite `(a +? b = .ok r)` into
 
 **Proof recipe:** `simp [myFunction, UInt256.addChecked_val, UInt256.subChecked_val, UInt256.mulChecked_val, UInt256.divChecked_val]` unfolds `+?`, `-?`, `*?`, `/?` and rewrites all checked arithmetic results into pure `ℕ` hypotheses about `.val` in one step. `omega` closes linear goals; `nlinarith` closes nonlinear ones (e.g. constant-product inequalities). Arithmetic revert theorems use `.error (LscError.arith .overflow)` or `.error (.arith .overflow)` interchangeably when the instance is in scope.
 
-> **Why biconditional?** A one-directional lemma (`h → simp result`) forces proofs to supply the bound hypothesis first, producing `.val`-laden intermediate goals. The biconditional form lets `simp` rewrite `(a +? b = .ok r)` → `(a.val + b.val < 2^256 ∧ r.val = a.val + b.val)` in one shot, with no manual `.val` unwrapping. All `Fin` machinery is absorbed by the bridge lemmas; downstream proofs only see `ℕ`.
+> **Why biconditional?** A one-directional lemma (`h → simp result`) forces proofs to supply the bound hypothesis first, producing `.val`-laden intermediate goals. The biconditional form lets `simp` rewrite `(a +? b = .ok r)` → `(a.val + b.val < 2^256 ∧ r.val = a.val + b.val)` in one shot, with no manual `.val` unwrapping. All subtype machinery is absorbed by the bridge lemmas; downstream proofs only see `ℕ`.
 
 #### `Option.orError` — single-operation option lift (rare)
 
@@ -1030,9 +1085,9 @@ structure World where
   accounts : Mapping Address Account
 ```
 
-Author functions never take `World` as a parameter. `call!` and `staticcall!` may appear in any contract-module `def` (`src/*.lean`). The compiler threads `World` through those sites when lowering exports and their callees (see §8.2).
+Author functions never take `World` as a parameter. `extcall!` and `staticcall!` may appear in any contract-module `def` (`src/*.lean`). The compiler threads `World` through those sites when lowering exports and their callees (see §8.2).
 
-### §8.2 External calls: interface cast, `staticcall!`, `call!`
+### §8.2 External calls: interface cast, `staticcall!`, `extcall!`
 
 Authors invoke other contracts inline in ordinary `do`-blocks — same as `emit!` and `require`. No separate export body, hook attribute, or `World` argument.
 
@@ -1058,7 +1113,7 @@ abbrev ContractAt (I : Type) [LscInterface I] := Address
 
 `ContractAt I` is proof-transparent (`ContractAt I` = `Address`). Interface typeclasses live in `Lsc.Interfaces` or project `interfaces/*.lean`.
 
-#### `staticcall!` and `call!`
+#### `staticcall!` and `extcall!`
 
 **Read-only — `staticcall!` (callee must not modify storage):**
 
@@ -1068,12 +1123,12 @@ let bal ← staticcall! (tokenAddr : IERC20).balanceOf who
 Lsc.extern.staticcall IERC20.balanceOf tokenAddr w ctx args : Ret
 ```
 
-**Mutating — `call!` (callee may update `World`; revert rolls back):**
+**Mutating — `extcall!` (callee may update `World`; revert rolls back):**
 
 ```lean
-let ok ← call! (tokenAddr : IERC20).transferFrom from to amount
+let ok ← extcall! (tokenAddr : IERC20).transferFrom from to amount
 -- emitter desugars each site to:
-Lsc.extern.call IERC20.transferFrom tokenAddr w ctx args : Except ExternError Ret
+Lsc.extern.extcall IERC20.transferFrom tokenAddr w ctx args : Except ExternError Ret
 ```
 
 Authors bind only the interface method's return type (`Ret`), not `World × Ret`. `w` and `ctx` (`msg.sender`, etc.) are implicit — supplied by the export wrapper at each site, like `LOG` opcodes for `emit!`.
@@ -1090,7 +1145,7 @@ def transfer (caller : Caller) (s : MyTokenState) (to : Address) (amount : UInt2
   let s' := { s with balances := s.balances[caller := newCaller][to := newTo] }
   emit! TransferEvent caller to amount
   if s'.counter ≠ Address.zero ∧ caller ≠ to then
-    let _ ← call! (s'.counter : ITransferCounter).onTransfer
+    let _ ← extcall! (s'.counter : ITransferCounter).onTransfer
   return .ok (s', true)
 ```
 
@@ -1105,26 +1160,26 @@ def check (s : PoolState) (tokenAddr : Address) (who : Address) : Except PoolErr
 
 #### Typing and errors
 
-`call!` and `staticcall!` compose with `←` in `do`-blocks over the contract's `Except E`. Callee revert maps to `.error` via a required constructor on `@[Lsc.error]` types:
+`extcall!` and `staticcall!` compose with `←` in `do`-blocks over the contract's `Except E`. Callee revert maps to `.error` via a required constructor on `@[Lsc.error]` types:
 
 ```lean
 @[Lsc.error]
 inductive TokenError where
   | arith  : ArithError → TokenError
-  | extern : ExternError → TokenError   -- required when module uses call!
+  | extern : ExternError → TokenError   -- required when module uses extcall!
 ```
 
-Same propagation model as `+?` / `require`. Contract modules using `staticcall!` only (no `call!`) do not require `extern`.
+Same propagation model as `+?` / `require`. Contract modules using `staticcall!` only (no `extcall!`) do not require `extern`.
 
 #### Helpers
 
-The guard + `call!` block may live in a top-level helper in the same contract module:
+The guard + `extcall!` block may live in a top-level helper in the same contract module:
 
 ```lean
 def notifyCounterIfHooked (caller : Caller) (s' : MyTokenState) (to : Address)
     : Except TokenError Unit := do
   if s'.counter ≠ Address.zero ∧ caller.val ≠ to then
-    let _ ← call! (s'.counter : ITransferCounter).onTransfer
+    let _ ← extcall! (s'.counter : ITransferCounter).onTransfer
   return .ok ()
 
 @[Lsc.external]
@@ -1134,25 +1189,25 @@ def transfer ... := do
   return .ok (s', true)
 ```
 
-`call!` / `staticcall!` are allowed in **any `def` in `src/*.lean`**, not only on `@[Lsc.external]` entry points. Forbidden in `test/*Lemma.lean` and `test/*Theorem.lean`. Helpers that only perform extern side effects return `Except E Unit`. The emitter lowers sites in the **transitive closure** of each export (internal function or inline). CEI order follows dynamic call order in the author `do` block.
+`extcall!` / `staticcall!` are allowed in **any `def` in `src/*.lean`**, not only on `@[Lsc.external]` entry points. Forbidden in `test/*Lemma.lean` and `test/*Theorem.lean`. Helpers that only perform extern side effects return `Except E Unit`. The emitter lowers sites in the **transitive closure** of each export (internal function or inline). CEI order follows dynamic call order in the author `do` block.
 
 #### Export lowering
 
-The compiler-generated export wrapper still performs load/store, reentrancy guard, and `Caller` binding (§13.1). It runs the author function (including callees), lowering each `call!` / `staticcall!` site to `CALL` / `STATICCALL` with ambient `w` / `ctx`. On `.error` — revert; no self `sstore`; no `emit!` logs; extern `World` changes rolled back.
+The compiler-generated export wrapper still performs load/store, reentrancy guard, and `Caller` binding (§13.1). It runs the author function (including callees), lowering each `extcall!` / `staticcall!` site to `CALL` / `STATICCALL` with ambient `w` / `ctx`. On `.error` — revert; no self `sstore`; no `emit!` logs; extern `World` changes rolled back.
 
-Macros live in `Lsc.Prelude` alongside `emit!`, `native_transfer!`, `require`, `call!`, and `staticcall!`.
+Macros live in `Lsc.Prelude` alongside `emit!`, `native_transfer!`, `require`, `extcall!`, and `staticcall!`.
 
 ### §8.3 Proof erasure
 
-`call!` desugars to `Lsc.extern.invoke`, which is **proof-erased for `World` effects** in the Lean kernel — definitionally a no-op on author `State` (parallel to `Lsc.Event.log` for logs in §6.3).
+`extcall!` desugars to `Lsc.extern.invoke`, which is **proof-erased for `World` effects** in the Lean kernel — definitionally a no-op on author `State` (parallel to `Lsc.Event.log` for logs in §6.3).
 
-**Layer 1:** theorems over `transfer`, `increment`, etc. unfold author `do` without `World`. Inline `call!` sites do not appear in state-transition proofs. ERC-20 lemmas unchanged.
+**Layer 1:** theorems over `transfer`, `increment`, etc. unfold author `do` without `World`. Inline `extcall!` sites do not appear in state-transition proofs. ERC-20 lemmas unchanged.
 
 **Layer 3:** hook / composition theorems (`transfer_increments_counter_when_hooked`, etc.) use `simulate_call` + callee theorems ([Appendix B](lsc-appendices.md#appendix-b--composition-pattern)).
 
 **Assumed interfaces** (`IERC20` on an unknown token): `staticcall!` results used in author logic may need axioms in `*Lemma.lean` (§8.4) — trusted external behavior.
 
-> **Why proof-erasure for `call!` but not for `staticcall!` results?** World threading pollutes every theorem; erased. A `UInt256` balance used in a `require` is part of author logic — proved via axioms (assumed callee) or Layer 3 (same-repo callee). Only the multi-contract store aspect is erased at Layer 1.
+> **Why proof-erasure for `extcall!` but not for `staticcall!` results?** World threading pollutes every theorem; erased. A `UInt256` balance used in a `require` is part of author logic — proved via axioms (assumed callee) or Layer 3 (same-repo callee). Only the multi-contract store aspect is erased at Layer 1.
 
 Extern-call correctness (selector, encoding, CEI ordering, revert rollback) is covered by the formally-verified lowering pipeline (§13.3).
 
@@ -1202,13 +1257,14 @@ def applyActions (s : CounterState) (actions : List CounterAction) : CounterStat
 
 lemma increment_increases_number (s s' : CounterState) (h : increment s = .ok s') :
     s'.number = s.number + 1 := by
-  simp [increment] at h ⊢; omega
+  rw [UInt256.eq_iff]
+  simp [increment, UInt256.addChecked_val] at h ⊢; omega
 
 lemma number_never_decreases (s : CounterState) (actions : List CounterAction) :
     (applyActions s actions).number ≥ s.number := by
   simp only [applyActions]
   apply Lsc.Invariant applyAction (fun s' => s'.number ≥ s.number)
-  · intro s' a hP; cases a <;> simp [applyAction, increment] at hP ⊢ <;> omega
+  · intro s' a hP; cases a <;> simp [applyAction, increment, UInt256.addChecked_val, UInt256.le_iff] at hP ⊢ <;> omega
   · simp
 ```
 
@@ -1293,7 +1349,7 @@ AI writes `*Lemma.lean` (scaffolding + tactic proofs). Humans craft `*Theorem.le
 
 ### §9.7 Writing `.val`-free theorem statements
 
-Theorem files are the **requirements document** — they should read like a protocol specification, not implementation plumbing. Raw `.val` projections in theorem statements are a readability smell: `s'.reserve0.val * s'.reserve1.val ≥ s.reserve0.val * s.reserve1.val` is harder to read and review than `k s ≤ k s'`.
+Theorem files are the **requirements document** — they should read like a protocol specification, not implementation plumbing. Use `UInt256` equality and ordering (`=`, `≤`) directly — prelude instances handle the comparison. Raw `.val` projections on **multi-field** expressions are a readability smell: `s'.reserve0.val * s'.reserve1.val ≥ s.reserve0.val * s.reserve1.val` is harder to read than `k s ≤ k s'`.
 
 Two patterns to eliminate `.val` noise:
 
@@ -1506,7 +1562,7 @@ Runs as a post-elaboration pass over contract, lemma, and theorem modules. All m
 | Error type without `@[Lsc.error]` | error | `lsc: error type must be declared with @[Lsc.error]` |
 | `@[Lsc.error]` on non-inductive | error | `lsc: @[Lsc.error] may only annotate inductive types` |
 | `@[Lsc.error]` type missing `arith` constructor | error | `lsc: error type must include arith : ArithError → E` |
-| `@[Lsc.error]` type missing `extern` constructor when `call!` used | error | `lsc: error type must include extern : ExternError → E` |
+| `@[Lsc.error]` type missing `extern` constructor when `extcall!` used | error | `lsc: error type must include extern : ExternError → E` |
 | `@[Lsc.error]` type missing `eth` constructor when `native_transfer!` used | error | `lsc: error type must include eth : EthError → E` |
 | `@[Lsc.error]` type missing `LscError` instance | error | `lsc: error type must have a LscError instance` |
 | Bare `Option State` on mutator | error | `lsc: use Except E S` |
@@ -1516,14 +1572,16 @@ Runs as a post-elaboration pass over contract, lemma, and theorem modules. All m
 | More than one `@[Lsc.initialize]` | error | `lsc: at most one @[Lsc.initialize] per contract module` |
 | `sload` / `sstore` in author code | error | `lsc: storage IO is emitter-only` |
 | `World` in contract functions | error | `lsc: World not allowed in contract functions` |
-| `call!` / `staticcall!` in `test/*Lemma.lean` or `test/*Theorem.lean` | error | `lsc: external calls are contract-module only` |
+| `extcall!` / `staticcall!` in `test/*Lemma.lean` or `test/*Theorem.lean` | error | `lsc: external calls are contract-module only` |
 | Invalid interface cast `(e : I)` | error | `lsc: I must be an interface with LscInterface instance` |
-| Unknown interface method in `call!` / `staticcall!` | error | `lsc: method not found on interface I` |
+| Unknown interface method in `extcall!` / `staticcall!` | error | `lsc: method not found on interface I` |
 | Malformed event signature | error | `lsc: invalid event signature; expected "Name(type,type)"` |
 | Event arg count / type mismatch | error | `lsc: event argument mismatch` |
 | Multiple `Caller` parameters | error | `lsc: at most one Caller parameter per export` |
 | `require` on infallible function | error | `lsc: require requires Except return type` |
 | `assert` in contract function | error | `lsc: use require; assert! is a runtime panic` |
+| Plain `+ - * /` on `UInt256` | error | `lsc: use +? or +↻ on UInt256` |
+| `UInt256 + ℕ` in contract module | error | `lsc: use +? for arithmetic in contract functions` |
 | `@[Lsc.public]` not on State field | error | `lsc: @[Lsc.public] may only annotate State struct fields` |
 | `@[Lsc.public]` field name collides with existing `@[Lsc.external]` | error | `lsc: field is @[Lsc.public] but @[Lsc.external] def already exists` |
 | `@[Lsc.receive]` without `CallValue` parameter | error | `lsc: @[Lsc.receive] must take CallValue` |
@@ -1537,7 +1595,9 @@ Runs as a post-elaboration pass over contract, lemma, and theorem modules. All m
 |-----------|----------|--------------|
 | `theorem` (non-helper) | error | `lsc: use lemma in *Lemma.lean; put requirements in *Theorem.lean` |
 | `sorry` | error | `lsc: sorry not allowed in lemma modules` |
-| `call!` / `staticcall!` | error | `lsc: external calls are contract-module only` |
+| `+?`, `-?`, `*?`, `/?` | error | `lsc: checked arithmetic (+?) is contract-only; lemmas use .val or +↻` |
+| `UInt256 + UInt256` (or `- * /` between two `UInt256`) | error | `lsc: use .val arithmetic on ℕ, +↻, or UInt256 + ℕ literal add` |
+| `extcall!` / `staticcall!` | error | `lsc: external calls are contract-module only` |
 
 ### §12.3 Theorem module errors (`test/*Theorem.lean`)
 
@@ -1547,7 +1607,7 @@ Runs as a post-elaboration pass over contract, lemma, and theorem modules. All m
 | Theorem body is not a single lemma delegation | error | `lsc: theorem body must be a one-line *Lemma delegation` |
 | Missing required theorem | error | `lsc: compliance requires "f" but no theorem in *Theorem.lean` |
 | `lemma` | error | `lsc: put proofs in *Lemma.lean` |
-| `call!` / `staticcall!` | error | `lsc: external calls are contract-module only` |
+| `extcall!` / `staticcall!` | error | `lsc: external calls are contract-module only` |
 
 ---
 
@@ -1564,7 +1624,7 @@ At each `@[Lsc.external]` boundary, the emitter generates:
 5. **`Caller` binding** — `caller := msg.sender`
 6. **`CallValue` binding** — `callvalue := msg.value` if present
 7. **State load** — `sload` all struct fields (full load for mutators; lazy slot read for views and `@[Lsc.public]` getters)
-8. **Author function call** — invoke the `@[Lsc.external]` function (and its callees); lower each `call!` / `staticcall!` site to `CALL` / `STATICCALL` with ambient `World` and `msg.sender`
+8. **Author function call** — invoke the `@[Lsc.external]` function (and its callees); lower each `extcall!` / `staticcall!` site to `CALL` / `STATICCALL` with ambient `World` and `msg.sender`
 9. **On `.error e`** — `revert(abi.encode(e))`; no storage writes; no events; extern `World` changes rolled back
 10. **On `.ok val`** — `sstore` all modified fields; collect and emit `emit!` / `Lsc.Event.log` sites in source order via `LOG` opcodes; ABI-encode non-state component as returndata
 
