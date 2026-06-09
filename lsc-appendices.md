@@ -2,7 +2,7 @@
 
 # LSC Appendices
 
-Extended reference patterns, examples, and project history. Code samples follow [lsc-spec.md](lsc-spec.md) (v1): `Except E A`, `MsgContext`, `Bytes[N]`, `LscError` / `+?`, fixed-point `⌊*⌋?` / `⸢*⸣?` (§2.7), `require`, and `Mapping` as `K → V`.
+Extended reference patterns, examples, and project history. Code samples follow [lsc-spec.md](lsc-spec.md) (v1): `World E`, `load`/`store`, ERC-7201 namespaced storage (§3.3), `MsgContext`, `Bytes[N]`, `LscError` / `+?`, fixed-point `⌊*⌋?` / `⸢*⸣?` (§2.7), `require`, and `Mapping` as `K → V`.
 
 | Appendix | Title | Section |
 |----------|-------|---------|
@@ -12,6 +12,8 @@ Extended reference patterns, examples, and project history. Code samples follow 
 | D | Wad/Ray Fixed-point | [§D](#appendix-d--wadray-fixed-point) |
 | E | ERC-20 with Mint/Burn | [§E](#appendix-e--erc-20-with-mintburn) |
 | F | UniV2-Style AMM | [§F](#appendix-f--univ2-style-amm) |
+| G | Reentrancy and CEI | [§G](#appendix-g--reentrancy-and-cei) |
+| H | Proxy and Upgradeable Storage | [§H](#appendix-h--proxy-and-upgradeable-storage) |
 
 ---
 
@@ -58,7 +60,7 @@ def transfer (ctx : MsgContext) (s : ERC20State) (to : Address) (amount : UInt25
   let newSender ← s.balances[ctx.sender] -? amount
   let newTo     ← s.balances[to] +? amount
   let s' := { s with balances := s.balances[ctx.sender := newSender][to := newTo] }
-  emit! TransferEvent ctx.sender to amount
+  Free.liftF (.emit (TransferEvent.toLog ctx.sender to amount) ())
   return .ok (s', true)
 
 @[lsc.external]
@@ -66,7 +68,7 @@ def approve (ctx : MsgContext) (s : ERC20State) (spender : Address) (amount : UI
     : Except TokenError (ERC20State × Bool) :=
   let s' := { s with allowances :=
     s.allowances[ctx.sender := s.allowances[ctx.sender][spender := amount]] }
-  emit! ApprovalEvent ctx.sender spender amount
+  Free.liftF (.emit (ApprovalEvent.toLog ctx.sender spender amount) ())
   .ok (s', true)
 ```
 
@@ -140,18 +142,22 @@ sequenceDiagram
   MyToken-->>User: true
 ```
 
-### B.2 MyToken state (flat struct — no `extends`)
+### B.2 MyToken state (nested ERC20 layout — no `extends`)
 
 ```lean
+-- lib/ERC20.lean
+state! @namespace "ERC20" where
+  name symbol : Bytes[32]
+  decimals totalSupply : UInt256
+  balances : Mapping Address UInt256
+  allowances : Mapping Address (Mapping Address UInt256)
+
 -- src/MyToken.lean
-structure MyTokenState where
-  name        : Bytes[32]
-  symbol      : Bytes[32]
-  decimals    : UInt256
-  totalSupply : UInt256
-  balances    : Mapping Address UInt256
-  allowances  : Mapping Address (Mapping Address UInt256)
-  counter     : Address   -- 0 = hook disabled
+import ERC20
+
+state! @namespace "MyToken" where
+  token   : ERC20 @namespace "ERC20"   -- owned token ledger
+  counter : Address                    -- 0 = hook disabled; erc7201:"MyToken"
 ```
 
 ### B.3 MyToken exports
@@ -178,7 +184,7 @@ def transfer (ctx : MsgContext) (s : MyTokenState) (to : Address) (amount : UInt
   let newSender ← s.balances[ctx.sender] -? amount
   let newTo     ← s.balances[to] +? amount
   let s' := { s with balances := s.balances[ctx.sender := newSender][to := newTo] }
-  emit! TransferEvent ctx.sender to amount
+  Free.liftF (.emit (TransferEvent.toLog ctx.sender to amount) ())
   ← notifyCounterIfHooked ctx s' to
   return .ok (s', true)
 ```
@@ -245,16 +251,20 @@ All v2+ content is removed from the main spec body. This appendix records what e
 | **v2a** | Planned | `World`, `Account`, `invoke` fully wired in Foundry multi-contract tests |
 | **v2b** | Planned | Inline `extcall!` / `staticcall!` emitter; `CALL` / `STATICCALL` lowering; interface casts; `simulate_call` complete |
 | **v2c** | Planned | `@[lsc.no_reentrant]` validator enforcement; trace templates; `lift_*` refinement lemmas |
-| **v3** | Future | `delegatecall`; `Lsc.unsafe.call`; `CREATE` / `SELFDESTRUCT` in `World` |
+| **v3** | Future | `delegatecall` emitter; `Lsc.unsafe.call`; `CREATE` / `SELFDESTRUCT` in `World` |
 
 | Feature | First available | Proof stance |
 |---------|----------------|-------------|
+| ERC-7201 namespaced storage | v1 | Default `state!` layout; artifact `storageLayout` |
+| `@namespace` / nested layout fields | v1 | §3.7; auto `"Parent.field"` instance ids |
+| `state! @proxy` (EIP-1967) | v1 | Proxy module schema; §3.8 |
+| `@[lsc.schema]` migration linter | v1 | Per-namespace append-only; §3.9 |
 | `CALL` | v2b | Layer 3 via `simulate_call` for same-repo callees; assume interfaces otherwise |
 | `STATICCALL` | v2b | `lift_staticcall_view` |
-| `DELEGATECALL` | v3 | Proxy specs |
+| `DELEGATECALL` lowering | v3 | `WorldF.delegatecall`; §8.7 |
 | Arbitrary calldata | v3 (`unsafe.call`) | Fuzz only |
 | `CREATE` / `SELFDESTRUCT` | v3 | After CALL stable |
-| `structure … extends` | TBD | If clear v2 use case emerges |
+| `structure … extends` | Not planned | Use nested layout fields (§3.7) |
 | Gas forwarding proof | Phase 2 | Emitter correctness proof |
 
 ---
@@ -316,17 +326,24 @@ import Lsc.Ray
 open Lsc Lsc.Ray
 open scoped Lsc.Ray
 
-structure LendingState where
-  liquidityRate  : UInt256   -- RAY-encoded
-  liquidityIndex : UInt256   -- RAY-encoded
-  timeDelta      : UInt256   -- RAY-encoded
+state! where
+  liquidityRate  : UInt256   -- RAY-encoded, slot 0
+  liquidityIndex : UInt256   -- RAY-encoded, slot 1
+  timeDelta      : UInt256   -- RAY-encoded, slot 2
 
-@[Lsc.external]
-def accrueInterest (s : LendingState) : Except LendingError LendingState := do
-  let growth    ← s.liquidityRate ⸢*⸣? s.timeDelta
-  let newFactor ← s.liquidityIndex +? growth
-  let newIndex  ← newFactor ⸢*⸣? s.liquidityRate
-  return .ok { s with liquidityIndex := newIndex }
+@[lsc.error]
+inductive LendingError where
+  | arith : ArithError → LendingError
+
+abbrev LendingAMM := World LendingError
+
+@[lsc.external]
+def accrueInterest : LendingAMM Unit := do
+  let (rate, index, delta) ← load [.liquidityRate, .liquidityIndex, .timeDelta]
+  let growth    ← rate ⸢*⸣? delta
+  let newFactor ← index +? growth
+  let newIndex  ← newFactor ⸢*⸣? rate
+  store [ .liquidityIndex := newIndex ]
 ```
 
 One-sided bounds (e.g. conservative accrual cap) use floor/ceil operators:
@@ -415,7 +432,7 @@ def transfer (ctx : MsgContext) (s : TokenState) (to : Address) (amount : UInt25
   let newSender ← s.balances[ctx.sender] -? amount
   let newTo     ← s.balances[to] +? amount
   let s' := { s with balances := s.balances[ctx.sender := newSender][to := newTo] }
-  emit! TransferEvent ctx.sender to amount
+  Free.liftF (.emit (TransferEvent.toLog ctx.sender to amount) ())
   return .ok (s', true)
 
 -- Approve
@@ -426,7 +443,7 @@ def approve
     (spender : Address) (amount : UInt256) : Except TokenError (TokenState × Bool) :=
   let s' := { s with allowances :=
     s.allowances[ctx.sender := s.allowances[ctx.sender][spender := amount]] }
-  emit! ApprovalEvent ctx.sender spender amount
+  Free.liftF (.emit (ApprovalEvent.toLog ctx.sender spender amount) ())
   .ok (s', true)
 
 -- TransferFrom
@@ -443,7 +460,7 @@ def transferFrom (ctx : MsgContext) (s : TokenState) (from to : Address) (amount
   let s' := { s with
     balances   := s.balances[from := newFrom][to := newTo]
     allowances := s.allowances[from := s.allowances[from][ctx.sender := newAllowance]] }
-  emit! TransferEvent from to amount
+  Free.liftF (.emit (TransferEvent.toLog from to amount) ())
   return .ok (s', true)
 
 -- Mint (owner only)
@@ -455,7 +472,7 @@ def mint (ctx : MsgContext) (s : TokenState) (to : Address) (amount : UInt256)
   let newSupply ← s.totalSupply +? amount
   let newBal    ← s.balances[to] +? amount
   let s' := { s with totalSupply := newSupply, balances := s.balances[to := newBal] }
-  emit! TransferEvent { val := 0 } to amount
+  Free.liftF (.emit (TransferEvent.toLog { val := 0 } to amount) ())
   return .ok s'
 
 -- Burn (owner only)
@@ -468,7 +485,7 @@ def burn (ctx : MsgContext) (s : TokenState) (from : Address) (amount : UInt256)
   let newSupply ← s.totalSupply -? amount
   let newBal    ← s.balances[from] -? amount
   let s' := { s with totalSupply := newSupply, balances := s.balances[from := newBal] }
-  emit! TransferEvent from { val := 0 } amount
+  Free.liftF (.emit (TransferEvent.toLog from { val := 0 } amount) ())
   return .ok s'
 
 -- Views (IERC-20 names differ from field names → manual exports)
@@ -716,7 +733,7 @@ This appendix is a complete constant-product AMM with `swap`, `addLiquidity`, an
 
 ### F.1 Design notes
 
-**External tokens:** The pool stores `token0`, `token1`, and `self : Address` (the pool's own address for `transferFrom` recipients). LSC has no `address(this)` primitive yet — `@[lsc.initialize]` sets these at deploy time; the deploy script passes the known pool address (same spirit as `[lsc.contracts]` in Foundry config).
+**External tokens:** The pool stores `token0` and `token1` as `IERC20` interface references (§3.7). The pool's own address for `transferFrom` recipients is the implicit `self` binding (§5.1) — not a state field.
 
 | Path | Purpose |
 |------|---------|
@@ -724,7 +741,7 @@ This appendix is a complete constant-product AMM with `swap`, `addLiquidity`, an
 
 **Assumed `IERC20`:** Token contracts are assumed extern callees (§8.4). Reserve-math theorems stay **Layer 1** — `extcall!` sites are proof-erased (§8.3). Token-balance correctness at runtime is trusted at deploy time; Layer 3 composition via `simulate_call` is future work (v2b).
 
-**Checks-effects-interactions:** Each mutator computes outputs and updates reserves / LP state first, then calls `safeTransferFrom` / `safeTransfer`. Callee revert maps to `.error (.extern _)` and rolls back self `sstore` (§8.2).
+**Checks-effects-interactions:** Each mutator computes outputs and updates reserves / LP state first, then calls `safeTransferFrom` / `safeTransfer`. Callee revert maps to `.error (.extern _)` and rolls back self `store` (§8.2). This is the recommended CEI pattern; guarded exports may use other orderings with a CEI linter warning unless suppressed ([Appendix G](lsc-appendices.md#appendix-g--reentrancy-and-cei)).
 
 **Bidirectional swap:** `zeroForOne : Bool` selects direction — `true` = token0 in / token1 out; `false` = token1 in / token0 out.
 
@@ -754,29 +771,28 @@ inductive AMMError where
   | extern : ExternError → AMMError  -- required when module uses extcall!
   | divisionByZero  -- /? for price and LP calculations
 
-structure AMMState where
-  token0     : Address                         -- slot 0: token0 contract
-  token1     : Address                         -- slot 1: token1 contract
-  self       : Address                         -- slot 2: pool address (transferFrom recipient)
-  reserve0   : UInt256                         -- slot 3: token0 reserves
-  reserve1   : UInt256                         -- slot 4: token1 reserves
-  totalLP    : UInt256                         -- slot 5: total LP tokens outstanding
-  lpBalances : Mapping Address UInt256  -- slot 6: LP token balances
+-- erc7201:"AMM" — token0/token1 are external IERC20 refs, not nested layouts (§3.7, Appendix H.4)
+state! @namespace "AMM" where
+  token0 token1 : IERC20                       -- offset 0–1: stored as address
+  reserve0   : UInt256                         -- offset 2
+  reserve1   : UInt256                         -- offset 3
+  totalLP    : UInt256                         -- offset 4
+  lpBalances : Mapping Address UInt256         -- offset 5
 
 @[lsc.initialize]
-def initialize (token0 token1 self : Address) : Except AMMError AMMState :=
-  return .ok { token0, token1, self,
+def initialize (token0 token1 : Address) : Except AMMError AMMState :=
+  return .ok { token0 := ⟨token0⟩, token1 := ⟨token1⟩,
     reserve0 := 0, reserve1 := 0, totalLP := 0, lpBalances := Mapping.empty }
 
 -- ── Token interaction helpers (interactions — called after state effects) ───────
 -- Generic wrappers mirroring UniV2 _safeTransfer / _safeTransferFrom.
 
-def safeTransfer (token to : Address) (amount : UInt256) : Except AMMError Unit := do
-  let ok ← extcall! (token : IERC20).transfer to amount
+def safeTransfer (token : ContractAt IERC20) (to : Address) (amount : UInt256) : Except AMMError Unit := do
+  let ok ← extcall! token.transfer to amount
   if ok then return .ok () else return .error .zeroAmount
 
-def safeTransferFrom (token from to : Address) (amount : UInt256) : Except AMMError Unit := do
-  let ok ← extcall! (token : IERC20).transferFrom from to amount
+def safeTransferFrom (token : ContractAt IERC20) (from to : Address) (amount : UInt256) : Except AMMError Unit := do
+  let ok ← extcall! token.transferFrom from to amount
   if ok then return .ok () else return .error .zeroAmount
 
 -- ── Swap (no fee, constant product, bidirectional) ────────────────────────────
@@ -796,7 +812,7 @@ def swap (ctx : MsgContext) (s : AMMState) (zeroForOne : Bool) (amountIn : UInt2
     let s' := { s with
       reserve0 := s.reserve0 + amountIn
       reserve1 := s.reserve1 - amountOut }
-    ← safeTransferFrom s'.token0 ctx.sender s'.self amountIn
+    ← safeTransferFrom s'.token0 ctx.sender self amountIn
     ← safeTransfer s'.token1 ctx.sender amountOut
     return .ok (s', amountOut)
   else
@@ -807,7 +823,7 @@ def swap (ctx : MsgContext) (s : AMMState) (zeroForOne : Bool) (amountIn : UInt2
     let s' := { s with
       reserve1 := s.reserve1 + amountIn
       reserve0 := s.reserve0 - amountOut }
-    ← safeTransferFrom s'.token1 ctx.sender s'.self amountIn
+    ← safeTransferFrom s'.token1 ctx.sender self amountIn
     ← safeTransfer s'.token0 ctx.sender amountOut
     return .ok (s', amountOut)
 
@@ -825,8 +841,8 @@ def addLiquidity
       reserve1   := amount1
       totalLP    := lpMinted
       lpBalances := s.lpBalances[ctx.sender := lpMinted] }
-    ← safeTransferFrom s'.token0 ctx.sender s'.self amount0
-    ← safeTransferFrom s'.token1 ctx.sender s'.self amount1
+    ← safeTransferFrom s'.token0 ctx.sender self amount0
+    ← safeTransferFrom s'.token1 ctx.sender self amount1
     return .ok (s', lpMinted)
   else if s.reserve0 = 0 then
     return .error .uninitializedPool
@@ -844,8 +860,8 @@ def addLiquidity
         reserve1   := newReserve1
         totalLP    := newTotalLP
         lpBalances := s.lpBalances[ctx.sender := newLpBal] }
-      ← safeTransferFrom s'.token0 ctx.sender s'.self amount0
-      ← safeTransferFrom s'.token1 ctx.sender s'.self amount1
+      ← safeTransferFrom s'.token0 ctx.sender self amount0
+      ← safeTransferFrom s'.token1 ctx.sender self amount1
       return .ok (s', lpMinted)
 
 @[lsc.external]
@@ -1101,13 +1117,14 @@ theorem swap_increases_reserve1
 
 | Feature | Where |
 |---------|-------|
-| Multi-field state with invariant | `token0`, `token1`, `self`, `reserve0`, `reserve1`, `totalLP`, `lpBalances` |
+| Multi-field state with invariant | `token0`, `token1`, `reserve0`, `reserve1`, `totalLP`, `lpBalances` |
 | `Mapping` for LP balances | `lpBalances : Mapping Address UInt256` |
 | `extcall!` / assumed `IERC20` | `safeTransfer`, `safeTransferFrom` |
 | CEI ordering | reserve/LP update before token calls |
 | `extern` error channel | `AMMError.extern` |
 | Bidirectional swap | `zeroForOne : Bool` on `swap` |
-| `@[lsc.initialize]` | sets `token0`, `token1`, `self` |
+| `@[lsc.initialize]` | sets `token0`, `token1` |
+| Implicit `self` | `transferFrom` recipient via §5.1 |
 | Multi-scalar return | `removeLiquidity` returns `Except AMMError (AMMState × UInt256 × UInt256)` |
 | Overflow precondition in theorem | direction-dependent `hOverflow` on `swap_preserves_k` |
 | Integer division honesty | `k s' ≥ k s` (not `=`) for swap; `k s' ≤ k s` for remove |
@@ -1128,3 +1145,170 @@ theorem swap_increases_reserve1
 **Overflow as a theorem precondition, not a validator rule:** The overflow bound appears in the theorem statement as `hOverflow`, not as a validator error. This is intentional — the validator cannot know at compile time what the runtime reserve values will be. The theorem makes the assumption explicit; Foundry fuzz tests verify it holds for realistic inputs.
 
 **`removeLiquidity` and `k`:** Removal proportionally reduces both reserves, so `k` decreases. The sequence invariant therefore excludes `removeLiquidity` via `hNoRemove`. A more complete theorem could prove `k_after_remove ≥ k_before - totalLP` (bounded loss), but that requires more careful arithmetic and is left as an exercise.
+
+---
+
+## Appendix G — Reentrancy and CEI
+
+Reference patterns for [lsc-spec.md §4.1](lsc-spec.md#41-the-lscexternal-annotation), [§8.5](lsc-spec.md#85-reentrancy-and-cei), and [§13.1](lsc-spec.md#131-export-wrapper-generation).
+
+### G.1 Default: contract-wide lock
+
+Every `@[lsc.external]` export (unless `@[lsc.allow_reentrant]`) is wrapped with a single per-contract lock. Authors may write `store` before or after external calls; the lock prevents classic reentrancy drains. The CEI linter still warns on store-after-interaction unless suppressed (§G.2).
+
+### G.2 Guarded withdraw — store after call with suppress
+
+Interactions-first ordering is intentional; the lock makes it safe. `@[lsc.allow_store_after_call]` silences the CEI warning and records `"allowStoreAfterCall": true` in the artifact.
+
+```lean
+/-- cei: guarded withdraw; contract-wide lock prevents reentry during transfer -/
+@[lsc.external]
+@[lsc.allow_store_after_call]
+def withdraw (ctx : MsgContext) (amount : UInt256) : Vault UInt256 := do
+  let bal ← load (.balances ctx.caller)
+  require (bal ≥ amount) .insufficient
+  call (token : IERC20).transfer ctx.caller amount
+  store [ (.balances ctx.caller) := bal - amount ]
+  return amount
+```
+
+Without `@[lsc.allow_store_after_call]`, the same body compiles but emits:
+
+`lsc: store after call violates CEI; move stores before calls or add @[lsc.allow_store_after_call]`
+
+### G.3 CEI ordering (recommended for `@[lsc.allow_reentrant]`)
+
+When the lock is off, write effects before interactions. AMM `swap` (Appendix F) and composition hooks (Appendix B) follow this pattern.
+
+```lean
+@[lsc.external]
+@[lsc.allow_reentrant]
+def hook (ctx : MsgContext) (data : UInt256) : Hook Unit := do
+  let v ← load .value
+  store [ .value := v + data ]
+  call (target : ITarget).notify
+  return ()
+```
+
+### G.4 Comparison
+
+| Pattern | Lock | CEI order | CEI warning | Typical use |
+|---------|------|-----------|-------------|-------------|
+| Guarded + CEI (`swap`) | yes | effects → interactions | none | Pools, token hooks |
+| Guarded + store-after-call + suppress | yes | interactions → effects | suppressed | Withdraw-style transfers |
+| `allow_reentrant` + CEI | no | effects → interactions | none if ordered | Callbacks, hooks |
+| `allow_reentrant` + store-after-call | no | interactions → effects | **warning** | Avoid unless proven safe |
+
+---
+
+## Appendix H — Proxy and Upgradeable Storage
+
+Reference walkthrough for [lsc-spec.md §3.3](lsc-spec.md#33-erc-7201-namespaced-storage-default-layout) (ERC-7201), [§3.7](lsc-spec.md#37-nested-layout-fields) (nested layouts), [§3.8](lsc-spec.md#38-proxy-storage-proxy) (`@proxy`), [§3.9](lsc-spec.md#39-schema-versioning-and-migration) (migration), and [§8.7](lsc-spec.md#87-delegatecall-and-upgradeable-proxies-v3) (`delegatecall`, v3).
+
+### H.1 Storage classes in one proxy account
+
+| Class | Mechanism | Example |
+|---|---|---|
+| Proxy metadata | `state! @proxy where` | `implementation`, `admin` (EIP-1967) |
+| App layout instances | ERC-7201 nested fields | `token : ERC20 @namespace "ERC20"` |
+| App scalars | ERC-7201 parent `@namespace` | `counter : Address` in `"MyToken"` |
+| Compiler infra | Reserved namespaces | `"lsc.reentrancy.lock"`, `"lsc.initialized"` |
+
+Implementation bytecode runs via **delegatecall** (v3) into the proxy's storage trie — ERC-7201 roots live on the proxy account.
+
+### H.2 Lib layout + MyToken (singleton nested ERC20)
+
+```lean
+-- lib/ERC20.lean
+state! @namespace "ERC20" where
+  name symbol : Bytes[32]
+  decimals totalSupply : UInt256
+  balances : Mapping Address UInt256
+  allowances : Mapping Address (Mapping Address UInt256)
+
+-- src/MyTokenV1.lean
+@[lsc.schema "MyToken/1"]
+state! @namespace "MyToken" where
+  token   : ERC20 @namespace "ERC20"   -- frozen canonical ledger namespace
+  counter : Address                    -- erc7201:"MyToken" offset 0
+
+-- src/MyTokenV2.lean — append-only in "MyToken" namespace
+@[lsc.schema "MyToken/2"]
+state! @namespace "MyToken" where
+  token   : ERC20 @namespace "ERC20"   -- unchanged on chain
+  counter : Address
+  feeBps  : UInt16                    -- new offset 1 in "MyToken"
+```
+
+Upgrade: deploy `MyTokenV2`, proxy admin updates `implementation`. Namespace `"ERC20"` decode unchanged; `"MyToken"` prefix fields stable; `feeBps` initialized in `upgrade()` or lazily.
+
+### H.3 DualVault — duplicate nested layouts (auto instance ids)
+
+```lean
+-- lib/VaultLedger.lean
+state! @namespace "VaultLedger" where
+  balances      : Mapping Address UInt256
+  totalDeposits : UInt256
+
+-- src/DualVault.lean
+import VaultLedger
+
+state! @namespace "DualVault" where
+  vaultA : VaultLedger    -- auto erc7201:"DualVault.vaultA"
+  vaultB : VaultLedger    -- auto erc7201:"DualVault.vaultB"
+```
+
+```lean
+let (ta, tb) ← load [.vaultA.totalDeposits, (.vaultB.balances a)]
+store [ (.vaultA.balances a) := v ]
+```
+
+Theorems quantify over `s.vaultA` and `s.vaultB` independently. Instance ids are stable across upgrades unless fields are renamed (breaking per §3.9).
+
+### H.4 AMM — external tokens are `IERC20` interface refs, not nested layouts
+
+Pools reference IERC20 contracts by interface-typed address fields; reserves live in the pool namespace. The pool's own address is implicit `self` (§5.1), not stored. See [Appendix F](#appendix-f--univ2-style-amm).
+
+```lean
+state! @namespace "AMM" where
+  token0 token1 : IERC20
+  reserve0 reserve1 totalLP : UInt256
+  lpBalances : Mapping Address UInt256
+```
+
+Do not nest `ERC20` for `token0`/`token1` — those balances live in external contracts, accessed via `call` / `extcall!`. Use `IERC20` (interface ref), not `Address` alone, when the field is always an ERC-20 callee.
+
+### H.5 Transparent proxy module
+
+```lean
+-- src/TransparentProxy.lean
+state! @proxy where
+  implementation : Address
+  admin : Address
+
+@[lsc.initialize]
+def initialize (impl admin : Address) : TransparentProxy Unit := do
+  store [ .implementation := impl, .admin := admin ]
+```
+
+### H.6 Deploy and upgrade sequence
+
+```mermaid
+sequenceDiagram
+  participant Admin
+  participant Proxy
+  participant ImplV1 as MyTokenV1
+  participant ImplV2 as MyTokenV2
+  Admin->>Proxy: deploy + initialize(impl, admin)
+  Admin->>Proxy: delegatecall ImplV1.initialize
+  Note over Proxy: erc7201 ERC20 + MyToken written
+  Admin->>Proxy: upgrade(ImplV2)
+  Note over Proxy: ERC20 namespace unchanged; feeBps init
+```
+
+1. Deploy `MyTokenV1` implementation bytecode.
+2. Deploy `TransparentProxy`; set `implementation` to V1.
+3. `delegatecall` V1 `initialize` — writes `"ERC20"` and `"MyToken"` namespaces.
+4. Upgrade: set `implementation` to V2; call V2 `upgrade()` if needed for `feeBps`.
+
+`delegatecall` lowering is v3; schema and `@proxy` are normative in v1 for authoring and artifacts.

@@ -24,7 +24,7 @@ Distribution mirrors **native Foundry Vyper support** (`foundry-compilers` integ
 | `@[lsc.external]` | `@[evm_external]` (attribute name not yet migrated) |
 | `Lsc.Std` / `Lsc.Prelude` | `ForgeLean` package (`ForgeLean.Prelude`, …) |
 | `Lsc.extern` | `ForgeLean.extern` |
-| `emit!` / `Lsc.Event.log` | `EVM.log` |
+| `WorldF.emit` | `EVM.log` |
 | `[lsc.contracts]` | `[lean.contracts]` in `foundry.toml` |
 | `[lsc.compliance.*]` | `[lean.compliance.*]` |
 | `[lsc]` profile keys | `[lean]` in `foundry.toml` |
@@ -136,18 +136,20 @@ src/Counter.lean
 | `UInt256` literal `n`                          | `0xN`                                        |
 | `if c then t else f`                           | `switch` / `if`                              |
 | `match opt with | none => ... | some x => ...` | tag switch                                   |
-| `m[k]` / `m[k := v]` (`Mapping.get/set`)       | `sload`/`sstore` via `storageKey`            |
+| `load` / `store [ … := … ]` (author)           | `readSlots` / `writeSlots` → inline `SLOAD`/`SSTORE` at source position (pre-call stores before `CALL`) |
+| `m[k]` / `m[k := v]` (`Mapping.get/set`)       | `SLOAD`/`SSTORE` via `storageKey`            |
 | `Bytes[N]` read/write                          | Solidity-compatible bounded byte array ops   |
-| Author `@[lsc.external]` return `.error e` / `.ok val` | `revert(abi.encode(e))` / persist + `emit!` LOGs + ABI return |
+| Author `@[lsc.external]` return `.error e` / `.ok val` | `revert(abi.encode(e))` / persist + `.emit` LOGs + ABI return |
 | `native_transfer! to amount` | `CALL` with `value`; revert on failure |
 | Generated export `.error e`                    | `revert(abi.encode(e))` before any store     |
-| Generated export `.ok (val, logs)`             | persist state, `LOG` per entry, return `ret` |
-| `staticcall! (a : I).method` (v2b+) | `STATICCALL` + ABI decode; no self `sstore` |
+| Generated export `.ok (val, logs)`             | inline `SSTORE`/`LOG` per source order, return `ret` |
+| Reentrancy lock (default export)               | contract-wide slot: `require lock==0`; `lock:=1`; body; `lock:=0` on ok/error |
+| `staticcall! (a : I).method` (v2b+) | `STATICCALL` + ABI decode; no self `store` |
 | `extcall! (a : I).method` (v2b+)       | `CALL` + revert on failure; implicit `World` threading |
 | `Lsc.unsafe.call` (v3)                   | raw `call`; no spec guarantees                 |
 
 
-Internal struct field access in export bodies is compiled against **local** copies loaded in step 2; persistence diffs whole struct fields. Extern sites suspend load/store around the opcode sequence per §4.14.4.
+Export bodies lower in **source order**: each `writeSlots` becomes inline `SSTORE` at its program point; each `call`/`staticcall`/`native_transfer!` becomes `CALL`/`STATICCALL` at its program point. Pre-call stores must appear before the corresponding `CALL` in bytecode ([lsc-spec.md §13.1](lsc-spec.md#131-export-wrapper-generation)).
 
 ### 3.3 Yul Object Structure
 
@@ -164,10 +166,29 @@ Primary output: `out/<Contract>.lean/<Contract>.json` compatible with Foundry's 
   "deployedBytecode": { "object": "0x..." },
   "metadata": {
     "compiler": { "version": "forge-lean/1.1.0" },
-    "storageLayout": { ... }
+    "storageLayout": {
+      "layout": "erc7201",
+      "schemaId": "Counter/1",
+      "namespaces": [
+        {
+          "id": "Counter",
+          "root": "0x…",
+          "fields": [{ "name": "number", "offset": 0, "type": "uint256" }]
+        }
+      ]
+    },
+    "lscExports": [
+      {
+        "name": "withdraw",
+        "allowReentrant": false,
+        "allowStoreAfterCall": true
+      }
+    ]
   }
 }
 ```
+
+`allowStoreAfterCall` is `true` when the export carries `@[lsc.allow_store_after_call]` ([lsc-spec.md §13.1](lsc-spec.md#131-export-wrapper-generation)).
 
 
 | Lean 4 type                            | ABI type             |
@@ -324,13 +345,14 @@ All messages are prefixed with `lsc:` and include file, line, and column.
 | Missing `lean-toolchain`           | `lsc: lean-toolchain file not found; run forge init --lean` |
 | Foundry not found                  | `lsc: foundry not found; install Foundry for the LSC toolchain` |
 | `Bytes[N]` literal too long        | `lsc: Bytes literal exceeds declared bound N`                                           |
-| Author `sload` / `sstore`          | `lsc: storage IO is only performed by the emitter at @[lsc.external] boundaries` |
+| Author `sload` / `sstore` / `ssload` / `readSlots` / `writeSlots` | `lsc: storage IO is emitter-only; use load/store` |
+| `store .field v` or tuple pairs in `store [ … ]` | `lsc: store requires record-update syntax [ .field := v ]` |
 | Hand-written export wrapper        | `lsc: export wrappers are compiler-generated; use @[lsc.external] on contract functions` |
 | `EvmContext` in author contract code | `lsc: use MsgContext for message/block context; EvmContext is compiler-generated only`   |
 | Multiple `MsgContext` on one export    | `lsc: at most one MsgContext parameter per export`                                          |
 | `assert` in contract function      | `lsc: use require for contract guards; assert! is a runtime panic`                      |
-| `List` in author contract code     | `lsc: List is not allowed in contract code; use Mapping or emit!`               |
-| Unknown event in `emit!`           | `lsc: unknown event type "X"; define Lsc.Event.EvmEvent instance or use string signature` |
+| `List` in author contract code     | `lsc: List is not allowed in contract code; use Mapping or WorldF.emit`               |
+| Unknown event in `.emit`           | `lsc: unknown event type "X"; define Lsc.Event.EvmEvent instance or use string signature` |
 | Plain `+ - * /` on `UInt256` | `lsc: use +? or +↻ on UInt256` |
 | `UInt256 + ℕ` in contract module | `lsc: use +? for arithmetic in contract functions` |
 | `+?`, `-?`, `*?`, `/?` in lemma file | `lsc: checked arithmetic (+?) is contract-only; lemmas use UInt256 + ℕ, .val, or +↻` |
@@ -338,11 +360,14 @@ All messages are prefixed with `lsc:` and include file, line, and column.
 | More than one `@[lsc.initialize]` | `lsc: at most one @[lsc.initialize] per contract module` |
 | Malformed event signature          | `lsc: invalid event signature "..."; expected form "Name(type,type)"`                   |
 | Event argument mismatch            | `lsc: event "Transfer(...)" expects N arguments of types ...; got ...`                  |
-| Author constructs `LogEntry`       | `lsc: LogEntry is compiler-internal; use emit!`                                 |
-| `@[lsc.event]` / log mismatch (lint) | `lsc: function declares event "Transfer(...)" but body has no matching emit!` |
+| Author constructs `LogEntry`       | `lsc: LogEntry is compiler-internal; use Free.liftF (.emit …)`                                 |
+| `@[lsc.event]` / log mismatch (lint) | `lsc: function declares event "Transfer(...)" but body has no matching .emit` |
 | `World` in contract function       | `lsc: World is not allowed in contract functions` |
 | `extcall!` / `staticcall!` in `test/*Lemma.lean` or `test/*Theorem.lean` | `lsc: external calls are contract-module only` |
 | Invalid interface cast `(e : I)`   | `lsc: I must be an interface with LscInterface instance` |
+| Layout type used for external token reference | `lsc: use IERC20 for external token references, not nested ERC20 layout` |
+| `state!` field type: not storable and not layout/interface ref | `lsc: invalid state field type` |
+| `self` as `state!` field or author `def` | `lsc: self is reserved for the implicit contract address` |
 | Unknown interface method           | `lsc: method not found on interface I` |
 | `extcall!` used but error type missing `extern` | `lsc: error type must include extern : ExternError → E` |
 | `native_transfer!` used but error type missing `eth` | `lsc: error type must include eth : EthError → E` |
@@ -350,6 +375,8 @@ All messages are prefixed with `lsc:` and include file, line, and column.
 | Unknown registered contract name     | `lsc: unknown contract name "X"; add [lsc.contracts] entry or deploy src/X.lean`       |
 | `staticcall` to mutating export    | `lsc: staticcall target "sig" may persist storage`                                      |
 | Reentrancy without `@[lsc.no_reentrant]` | `lsc: mutating extern.extcall may reenter; add @[lsc.no_reentrant] or prove via trace spec`  |
+| `store` after interaction in export closure | warning: `lsc: store after call violates CEI; move stores before calls or add @[lsc.allow_store_after_call]` |
+| `@[lsc.allow_store_after_call]` without `cei:` doc comment | error: `lsc: allow_store_after_call requires cei: justification comment` |
 
 
 ---
@@ -421,20 +448,20 @@ flowchart LR
 - `forge-lean build` (debug alias)
 - Validator ([lsc-spec.md](lsc-spec.md).11 dialect law)
 - Compiler-generated export wrappers from `@[lsc.external]` ([lsc-spec.md](lsc-spec.md).9–4.10)
-- `@[lsc.public]` field getters synthesized as `@[lsc.external]` views before ABI pass ([lsc-spec.md §3.5](lsc-spec.md))
-- `emit!` collection and LOG lowering ([lsc-spec.md](lsc-spec.md).5)
-- Yul emitter with auto load/store ([lsc-spec.md](lsc-spec.md).8, §8.2)
+- `@public` field getters in `state!` synthesized as `@[lsc.external]` views before ABI pass ([lsc-spec.md §3.5](lsc-spec.md))
+- `.emit` collection and LOG lowering ([lsc-spec.md](lsc-spec.md).5)
+- Yul emitter with inline source-order load/store/call lowering + contract-wide reentrancy lock ([lsc-spec.md §8](lsc-spec.md), §13.1)
 - ABI JSON + selector computation
 - All error messages (§11)
 
 `**Lsc` library**
 
-- `Lsc.Prelude`: `Address`, `MsgContext`, `Bytes32`, `Bytes[N]`, `Mapping`, `ArithError`, `LscError`, `UInt256` (`{ n // n < 2^256 }`; `DecidableEq`, `LE`/`LT`, `HAdd UInt256 ℕ` for proof literal add), `+? -? *? /?` (return `Except E _`), `+↻ -↻ *↻` (modular wrap), `Option.orError`, `require`, `emit!`, `native_transfer!`, `staticcall!`, `extcall!`; `Monad (Except E)` from Lean core ([lsc-spec.md §2](lsc-spec.md#2-types))
+- `Lsc.Prelude`: `Address`, `MsgContext`, `Bytes32`, `Bytes[N]`, `Mapping`, `ArithError`, `LscError`, `UInt256` (`{ n // n < 2^256 }`; `DecidableEq`, `LE`/`LT`, `HAdd UInt256 ℕ` for proof literal add), `+? -? *? /?` (return `Except E _`), `+↻ -↻ *↻` (modular wrap), `Option.orError`, `require`, `state!`, `load`, `store [ … := … ]`, `native_transfer!`, `staticcall!`, `extcall!`; `World`, `WorldF` (`readSlots`/`writeSlots`/`emit`), `LogPolicy`, `LscState`, `Lsc.run`, `World.runWith`, `World.run`, `World.runCollect`; `@[simp]` `load`/`store`/`readSlots_eq_seq`/`writeSlots_eq_seq` bridge lemmas; `Monad (Except E)` from Lean core ([lsc-spec.md §2](lsc-spec.md#2-types))
 - `Lsc.Prelude`: `@[simp]` bridge lemmas `UInt256.addChecked_ok`, `UInt256.addChecked_error`, …; `Lsc.Invariant` for sequence invariants ([lsc-spec.md §9.1](lsc-spec.md#91-lemma-files-testlemmalean))
-- `Lsc.Event`: `Lsc.Event.EvmEvent`, `Lsc.Event.log`, `LogEntry` (`emit!` macro lives in `Lsc.Prelude`)
+- `Lsc.Event`: `Lsc.Event.EvmEvent`, `EventLog`, `LogEntry`
 - `Lsc.ProofHelpers`: Layer 1 `Except.bind_ok`, `Except.ok_ne_error`; Layers 2–4 `lift_*`, `simulate_call`, `export_cases` ([lsc-spec.md §10](lsc-spec.md#10-proof-helpers))
 - `Lsc.SpecTemplates` (Layer 1 + export/trace skeletons)
-- `@[lsc.external]`, `@[lsc.error]` (registers inductive for ABI `errors` / revert encoding only), `@[lsc.initialize]`, `@[lsc.public]` (synthesized `@[lsc.external]` views; [lsc-spec.md §3.5](lsc-spec.md)), `@[lsc.event]` (optional lint), `@[lsc.no_reentrant]` ([lsc-spec.md](lsc-spec.md))
+- `@[lsc.external]`, `@[lsc.error]` (registers inductive for ABI `errors` / revert encoding only), `@[lsc.initialize]`, `@[lsc.event]` (optional lint), `@[lsc.allow_reentrant]`, `@[lsc.allow_store_after_call]`, `@[lsc.no_reentrant]` ([lsc-spec.md](lsc-spec.md)); surface syntax via `state!`, `require`, `extcall!` macros; events via `Free.liftF (.emit …)` in `World E` `do`-blocks
 - Filename-based contract registration ([lsc-spec.md](lsc-spec.md).13.1); `[lsc.contracts]` in `foundry.toml`
 
 **Arithmetic and fallibility (ForgeLean — normative surface)**
@@ -443,17 +470,21 @@ Implement in `ForgeLean` / `Lsc.Prelude` per [lsc-spec.md §2.1–§2.5](lsc-spe
 
 1. `UInt256 = { n : ℕ // n < 2^256 }` — no `Fin` arithmetic instances; `DecidableEq` + `LE`/`LT` via `.val`; `HAdd UInt256 ℕ` (`addNat`) for proof literal add only; plain `UInt256 + UInt256` is a type error; `+↻ -↻ *↻` for modular wrap
 2. `LscError` typeclass + `+? -? *? /?` → `Except E _` via in-scope instance; compose with `←` in `do`-blocks over `Except E`
-3. `require (cond) .variant` macro → `if ¬cond then return .error .variant`
-4. `emit! Event arg*` macro → `Lsc.Event.log (Event.mk arg*)`
-5. `native_transfer! to amount` macro → `Lsc.Eth.transfer to amount` ([lsc-spec.md §5.2](lsc-spec.md#52-eth-handling))
-6. `(e : I)` interface cast macro → `ContractAt I` when `I` has `LscInterface` ([lsc-spec.md §8.2](lsc-spec.md#82-external-calls-interface-cast-staticcall-call))
-7. `staticcall! (a : I).method args` macro → `Lsc.extern.staticcall I.method a w ctx args : Ret`
-8. `extcall! (a : I).method args` macro → `Lsc.extern.extcall I.method a w ctx args : Except ExternError Ret` (author binds `Ret` only; `w`/`ctx` implicit in export wrapper)
-9. `@[simp]` bridge lemmas: `UInt256.addChecked_ok`, `UInt256.addChecked_error`, …
-10. Validator: forbid `+?` in lemma files; require `arith` + `extern` (when `extcall!` used) + `eth` (when `native_transfer!` used) on `@[lsc.error]` types; forbid `assert` in contracts; enforce `MsgContext` rules ([lsc-spec.md §12.1](lsc-spec.md))
-11. Register `@[lsc.error]` — emitter registration only (no `HasArithErrors` codegen)
-12. Register `@[lsc.initialize]` — at most one per module; constructor + optional proxy `initialize` ABI
-13. Register `@[lsc.public]` — synthesize getter `@[lsc.external]` `def`s before ABI collection ([lsc-spec.md §3.5](lsc-spec.md))
+3. `state! where …` / `state! @namespace "…" where` / `state! @proxy where` macros → `Module.State` struct, `TypedSlot` constants (namespace + offset), `[LscState]` / `[LscStateFragment]` instances ([lsc-spec.md §3.1–§3.8](lsc-spec.md#31-declaring-contract-state-state)); interface-typed fields (`IERC20`, …) elaborate to `ContractAt I` in the struct with `FromWord`/`ToWord` via underlying `Address`; reject layout types where an interface ref is required
+4. ERC-7201 root computation per namespace id; nested layout fields with auto `"Parent.field"` instance ids and optional field `@namespace` override ([lsc-spec.md §3.3](lsc-spec.md#33-erc-7201-namespaced-storage-default-layout), [§3.7](lsc-spec.md#37-nested-layout-fields))
+5. `load .field` / `load [.a, .b, …]` / `load (.nested.field …)` → `Free.liftF (.readSlots …)` at resolved absolute slots; `store [ .field := v, … ]` macro → `Free.liftF (.writeSlots …)` ([lsc-spec.md §3.2](lsc-spec.md#32-typedslot-and-load--store))
+6. `require (cond) .variant` macro → `if ¬cond then return .error .variant`
+7. `native_transfer! to amount` macro → `Lsc.Eth.transfer to amount` ([lsc-spec.md §5.2](lsc-spec.md#52-eth-handling))
+8. `(e : I)` interface cast macro → `ContractAt I` when `I` has `LscInterface` ([lsc-spec.md §8.2](lsc-spec.md#82-external-calls-interface-cast-staticcall-call))
+9. `staticcall! (a : I).method args` macro → `Lsc.extern.staticcall I.method a w ctx args : Ret`
+10. `extcall! (a : I).method args` macro → `Lsc.extern.extcall I.method a w ctx args : Except ExternError Ret` (author binds `Ret` only; `w`/`ctx` implicit in export wrapper)
+11. `@[simp]` bridge lemmas: `UInt256.addChecked_ok`, `UInt256.addChecked_error`, `load_val`, `store_val`, `readSlots_eq_seq`, `writeSlots_eq_seq`, …
+12. Validator: ERC-7201 namespace uniqueness; `@proxy`/`@namespace` mutual exclusion; `@[lsc.schema]` per-namespace migration; forbid `+?` in lemma files; require `arith` + `extern` (when `extcall!` used) + `eth` (when `native_transfer!` used) on `@[lsc.error]` types; forbid `assert` in contracts; enforce `MsgContext` rules; reject `store .field v`; CEI linter (interprocedural, warning) + `@[lsc.allow_store_after_call]` suppress with `cei:` comment ([lsc-spec.md §12.1](lsc-spec.md))
+13. Register `@[lsc.error]` — emitter registration only (no `HasArithErrors` codegen)
+14. Register `@[lsc.initialize]` — at most one per module; constructor + optional proxy `initialize` ABI
+15. `@public` on `state!` fields — synthesize getter `@[lsc.external]` `def`s before ABI collection ([lsc-spec.md §3.5](lsc-spec.md#35-the-public-field-annotation))
+16. Reentrancy lock in `"lsc.reentrancy.lock"` namespace ([lsc-spec.md §3.3](lsc-spec.md#33-erc-7201-namespaced-storage-default-layout), [§13.1](lsc-spec.md#131-export-wrapper-generation))
+17. Implicit `self : Address` in contract modules — bound to `ADDRESS` / `selfAddress` in export wrapper; reserved name ([lsc-spec.md §5.1](lsc-spec.md#51-the-msgcontext-type))
 
 **Phase v2a (semantics only)**
 
@@ -463,7 +494,10 @@ Implement in `ForgeLean` / `Lsc.Prelude` per [lsc-spec.md §2.1–§2.5](lsc-spe
 **Phase v2b (extern calls)**
 
 - `Lsc.Interfaces`: `LscInterface`, `ContractAt`, `(e : I)` cast macro
+- `state!` interface-typed fields: `TypedSlot (ContractAt I)`, `FromWord`/`ToWord` instances per interface ref; `@public` getters ABI-return `address` ([lsc-spec.md §3.1](lsc-spec.md#31-declaring-contract-state-state), [§3.7](lsc-spec.md#37-nested-layout-fields))
+- Implicit `self : Address` in export wrapper and `Lsc.run` ([lsc-spec.md §5.1](lsc-spec.md#51-the-msgcontext-type))
 - `staticcall!` / `extcall!` with interface cast — inline in contract-module `do`-blocks ([lsc-spec.md §8.2](lsc-spec.md))
+- `call` / `staticcall` accept `ContractAt I` from `load` without cast
 - Emitter: lower `extcall!` / `staticcall!` sites in export transitive closure; `CALL` / `STATICCALL` with implicit `World` / `ctx`
 - Proof erasure for `extcall!` World effects (§8.3)
 - `@[lsc.extern_assume]` for assumed callees
@@ -476,7 +510,7 @@ Implement in `ForgeLean` / `Lsc.Prelude` per [lsc-spec.md §2.1–§2.5](lsc-spe
 
 **Phase v3**
 
-- `delegatecall` storage root in `invoke`
+- `WorldF.delegatecall` lowering; `worldDispatchDelegatecall` in `invoke` (storage root at `selfAddress` — [lsc-spec.md §8.7](lsc-spec.md#87-delegatecall-and-upgradeable-proxies-v3))
 - `Lsc.unsafe.call`
 - `CREATE` / `SELFDESTRUCT` in `World`
 
@@ -507,7 +541,7 @@ The Foundry fork ships a Lean counter beside [`testdata/src/Counter.vy`](https:/
 
 **Path (fork):** `foundry/testdata/src/Counter.lean`
 
-**Dialect note:** Contract name comes from the filename (`Counter.lean` → `Counter`). Authors write `@[lsc.external]` functions with inferred ABI; the compiler generates export wrappers and Yul. `forge build` produces deployable `out/Counter.lean/Counter.json` for `deployCode` in Solidity tests.
+**Dialect note:** Contract name comes from the filename (`Counter.lean` → `Counter`). State type is `Counter.State` (from `state!`). Storage namespace defaults to `"Counter"` (ERC-7201, [lsc-spec.md §3.3](lsc-spec.md#33-erc-7201-namespaced-storage-default-layout)). Full end-to-end example: [lsc-spec.md §1.3](lsc-spec.md#13-the-three-modules).
 
 ### `src/Counter.lean`
 
@@ -516,20 +550,21 @@ import Lsc.Prelude
 
 open Lsc
 
-structure CounterState where
-  @[lsc.public]
-  number : UInt256
+state! where
+  number : UInt256 @public
+
+@[lsc.error]
+inductive CounterError where
+  | arith : ArithError → CounterError
+
+abbrev Counter := World CounterError
 
 @[lsc.external]
-def increment (s : CounterState) : Except ArithError CounterState := do
-  let n ← s.number +? 1
-  return .ok { s with number := n }
-
-@[lsc.external]
-def setNumber (s : CounterState) (n : UInt256) : CounterState :=
-  { s with number := n }
-
--- `number` view generated from @[lsc.public] (§3.5)
+def increment : Counter Unit := do
+  let n ← load .number
+  let n' ← n +? 1
+  store [ .number := n' ]
+  return ()
 ```
 
 ### `test/CounterLemma.lean` (minimal)
@@ -538,11 +573,10 @@ def setNumber (s : CounterState) (n : UInt256) : CounterState :=
 import Counter
 
 lemma increment_increases_number
-    (s s' : CounterState)
-    (h : increment s = .ok s') :
+    (s s' : Counter.State)
+    (h : increment.run s = .ok s') :
     s'.number = s.number + 1 := by
-  rw [UInt256.eq_iff]
-  simp [increment, UInt256.addChecked_val] at h ⊢; omega
+  simp [increment, Lsc.run, load, store, LscState, UInt256.addChecked_val] at h ⊢; omega
 ```
 
 ### `test/CounterTheorem.lean` (minimal)
@@ -553,8 +587,8 @@ import CounterLemma
 
 /-- On success, increment increases number by exactly 1. -/
 theorem increment_increases_number
-    (s s' : CounterState)
-    (h : increment s = .ok s') :
+    (s s' : Counter.State)
+    (h : increment.run s = .ok s') :
     s'.number = s.number + 1 :=
   CounterLemma.increment_increases_number s s' h
 ```
@@ -582,7 +616,7 @@ contract CounterTest is Test {
 
 The [forge-lean-erc20](https://github.com/forge-lean/forge-lean-erc20) repository demonstrates the full workflow at application scale:
 
-1. **Write** — `src/Token.lean` with `ERC20State`, `@[lsc.external]` functions and `emit!` for events (§9.1). Compiler infers ABI from names and `Except` return shapes.
+1. **Write** — `src/Token.lean` with `state!`, `@[lsc.external]` functions and `Free.liftF (.emit …)` for events (§9.1). Compiler infers ABI from names and `World E` return shapes.
 2. **Theorem** — `test/TokenTheorem.lean` with human-reviewed high-level `theorem` statements; `[lsc.compliance.erc20]` enforces the theorem list on `forge test`.
 3. **Lemma** — `test/TokenLemma.lean` (LLM-assisted scaffolding + tactic proofs, kernel-checked).
 4. **Fuzz** — `test/Token.t.sol` deploys bytecode via `deployCode` and runs Foundry fuzz/invariant tests.
@@ -591,7 +625,7 @@ That repo is the canonical place for ERC-20-only documentation — not the core 
 
 ### 9.2 Composition demo (ERC-20 + TransferCounter hook)
 
-The [forge-lean-composition](https://github.com/forge-lean/forge-lean-composition) repository demonstrates **mutating external calls**: **MyToken** extends ERC-20 and **CALL**s **TransferCounter** on every successful `transfer` / `transferFrom`. Full layout, theorems, and CEI rules are in **[Appendix B](lsc-appendices.md#appendix-b--composition-pattern)**.
+The [forge-lean-composition](https://github.com/forge-lean/forge-lean-composition) repository demonstrates **mutating external calls**: **MyToken** nests the `ERC20` layout and **CALL**s **TransferCounter** on every successful `transfer` / `transferFrom`. Full layout, theorems, and CEI rules are in **[Appendix B](lsc-appendices.md#appendix-b--composition-pattern)**.
 
 **Why a separate repo:** Keeps [forge-lean-erc20](https://github.com/forge-lean/forge-lean-erc20) minimal (closed-world ERC-20 only) while this demo drives v2a `invoke` + v2b inline `extcall!` requirements.
 
@@ -610,7 +644,7 @@ This appendix documents the **[forge-lean-erc20](https://github.com/forge-lean/f
 
 - Full ERC-20 interface (constructor-only mint; no post-deploy mint/burn in the reference token)
 - `Bytes[32]` for `name` / `symbol`; mutators return `bool` on the ABI
-- `emit!` for `TransferEvent` and `ApprovalEvent` (classic emit)
+- `Free.liftF (.emit …)` for `TransferEvent` and `ApprovalEvent`
 
 ### C.2 State and prelude (demo `lib/` or `src/ERC20.lean`)
 
@@ -641,8 +675,8 @@ def transfer (ctx : MsgContext) (s : ERC20State) (to : Address) (amount : UInt25
   let newSender ← s.balances[ctx.sender] -? amount
   let newTo     ← s.balances[to] +? amount
   let s' := { s with balances := s.balances[ctx.sender := newSender][to := newTo] }
-  emit! TransferEvent ctx.sender to amount
-  return .ok (s', true)
+  Free.liftF (.emit (TransferEvent.toLog ctx.sender to amount) ())
+  return true
 ```
 
 Example revert theorem (human-reviewed `*Theorem.lean`):
@@ -650,12 +684,12 @@ Example revert theorem (human-reviewed `*Theorem.lean`):
 ```lean
 theorem transfer_no_overdraft
     (ctx : MsgContext) (to : Address) (amount : UInt256) (s : ERC20State)
-    (h : transfer ctx s to amount = .error .insufficientBalance) :
+    (h : (transfer ctx to amount).run s = .error (.contract .insufficientBalance)) :
     s.balances[ctx.sender] < amount :=
   ERC20Lemma.transfer_no_overdraft ctx to amount s h
 ```
 
-The demo defines `@[lsc.external]` functions with **`emit!`** on success paths (no hand-written export wrappers; no `Lsc.ERC20` in core).
+The demo defines `@[lsc.external]` functions with **`Free.liftF (.emit …)`** on success paths (no hand-written export wrappers; no `Lsc.ERC20` in core).
 
 ### C.3 Required theorems (`[lsc.compliance.erc20]`)
 
@@ -705,11 +739,11 @@ Full source listings are maintained in the demo repository, not duplicated here.
 
 ### 9.2 Composition demo (MyToken + TransferCounter)
 
-This appendix documents **[forge-lean-composition](https://github.com/forge-lean/forge-lean-composition)** — a reference application for **inline `extcall!`**, reentrancy-aware `World` / `invoke` (§8), and **`structure … extends`** for storage (§4.6). It is not part of the core toolchain; it is the primary driver for v2a–v2b extern support.
+This appendix documents **[forge-lean-composition](https://github.com/forge-lean/forge-lean-composition)** — a reference application for **inline `extcall!`**, reentrancy-aware `World` / `invoke` (§8), and **nested layout fields** (`token : ERC20 @namespace "ERC20"` — [lsc-spec.md §3.7](lsc-spec.md#37-nested-layout-fields)). It is not part of the core toolchain; it is the primary driver for v2a–v2b extern support.
 
 ### D.1 Goal
 
-- **MyToken** — one deployed ERC-20-compatible contract whose storage **extends** `ERC20State` with a `counter : Address` hook target.
+- **MyToken** — one deployed ERC-20-compatible contract whose storage **nests** `ERC20` layout (`@namespace "ERC20"`) plus a `counter : Address` hook target in `"MyToken"`.
 - **TransferCounter** — `{ count : UInt256 }`; exposes `onTransfer()`.
 - On every successful **`transfer`** and **`transferFrom`**, MyToken runs token logic then **CALL**s the counter (checks-effects-interactions).
 
@@ -730,8 +764,8 @@ sequenceDiagram
 
 | Path | Deployed? | Purpose |
 | ---- | --------- | ------- |
-| `lib/ERC20.lean` | No | `ERC20State`, `ERC20.transfer` and related library helpers; **no** `@[lsc.external]` |
-| `src/MyToken.lean` | Yes | `MyTokenState extends ERC20State`; full ERC-20 ABI + hook on transfer paths |
+| `lib/ERC20.lean` | No | `state! @namespace "ERC20"` layout + `ERC20.transfer` helpers; **no** `@[lsc.external]` |
+| `src/MyToken.lean` | Yes | `state! @namespace "MyToken"` with nested `token : ERC20`; full ERC-20 ABI + hook on transfer paths |
 | `src/TransferCounter.lean` | Yes | Counter contract |
 | `interfaces/ITransferCounter.lean` | No | Interface for `extcall!` / `staticcall!` validator |
 | `test/ERC20Theorem.lean` | — | Appendix C theorems over `ERC20.transfer` on `ERC20State` |
@@ -741,54 +775,52 @@ sequenceDiagram
 | `test/Composition.t.sol` | — | Deploy both; fuzz `transfer` vs `count` |
 
 
-### D.3 MyToken extends ERC20 (Lean model)
+### D.3 MyToken nests ERC20 layout (Lean model)
 
 ```lean
 -- lib/ERC20.lean
-structure ERC20State where
-  name : Bytes
-  symbol : Bytes
-  decimals : UInt256
-  totalSupply : UInt256
+state! @namespace "ERC20" where
+  name symbol : Bytes[32]
+  decimals totalSupply : UInt256
   balances : Mapping Address UInt256
   allowances : Mapping Address (Mapping Address UInt256)
-
-def ERC20.transfer (s : ERC20State) (from to : Address) (amount : UInt256)
-    : Except TokenError ERC20State := ...
 
 -- src/MyToken.lean
 import ERC20
 
-structure MyTokenState extends ERC20State where
+state! @namespace "MyToken" where
+  token   : ERC20 @namespace "ERC20"
   counter : Address   -- 0 = hook disabled in tests
 
-def MyToken.transfer (s : MyTokenState) (from to : Address) (amount : UInt256)
-    : Except TokenError MyTokenState :=
-  match ERC20.transfer s.toERC20 from to amount with
-  | .error e => .error e
-  | .ok erc' => .ok { s with toERC20 := erc' }
+@[lsc.external]
+def transfer (ctx : MsgContext) (to : Address) (amount : UInt256) : MyToken Bool := do
+  -- token logic via load/store on .token.* and .counter
+  ...
 ```
 
-- **Field access:** `s.balances` works on `MyTokenState` (flat inheritance).
-- **Appendix C theorems** target `ERC20.transfer` on `ERC20State` in `test/ERC20Theorem.lean`.
-- **MyToken exports** use inline `extcall! (s'.counter : ITransferCounter).onTransfer` after token logic (§8.2; see [Appendix B](lsc-appendices.md#b3-mytoken-exports)).
+- **Field access:** `load (.token.balances a)`, `load .counter`; proofs use `s.token.balances`, `s.counter`.
+- **ERC20 theorems** target `ERC20` snapshots on `s.token` in `test/ERC20Theorem.lean`.
+- **MyToken exports** use inline `extcall!` after token logic (§8.2; see [Appendix B](lsc-appendices.md#b3-mytoken-exports)).
 
 ### D.4 TransferCounter
 
 ```lean
-structure TransferCounterState where
+state! where
   count : UInt256
 
 @[lsc.external]
-def onTransfer (s : TransferCounterState) : Except ArithError TransferCounterState := do
-  let c ← s.count +? 1
-  return .ok { s with count := c }
+def onTransfer : TransferCounter Unit := do
+  let c ← load .count
+  let c' ← c +? 1
+  store [ .count := c' ]
 ```
 
 - No `Lsc.extern.*` in the counter (closed-world Layer 1 proofs).
 - Optional: store allowed `token : Address` and reject callers other than MyToken.
 
 ### D.5 CEI and export lowering
+
+Default exports use a **contract-wide reentrancy lock**; CEI ordering is recommended but not required when guarded. The validator warns on store-after-interaction unless `@[lsc.allow_store_after_call]` is set ([lsc-spec.md §8.5](lsc-spec.md#85-reentrancy-and-cei), [Appendix G](lsc-appendices.md#appendix-g--reentrancy-and-cei)).
 
 **Checks-effects-interactions** on `transfer` / `transferFrom`. Author writes token logic and inline `extcall!` in the same `@[Lsc.external]` function (or a helper it calls):
 
@@ -804,12 +836,12 @@ def transfer (ctx : MsgContext) (s : MyTokenState) (to : Address) (amount : UInt
     : Except TokenError (MyTokenState × Bool) := do
   -- ERC-20 checks + effects ...
   let s' := ...
-  emit! TransferEvent ctx.sender to amount
+  Free.liftF (.emit (TransferEvent.toLog ctx.sender to amount) ())
   ← notifyCounterIfHooked ctx s' to
   return .ok (s', true)
 ```
 
-The export wrapper loads state, runs the author function (lowering each `extcall!` site to `CALL` with ambient `World` / `MsgContext`), then stores on `.ok`. On callee revert → export `.error`; no self `sstore` (§8).
+The export wrapper loads state, runs the author function (lowering each `extcall!` site to `CALL` with ambient `World` / `MsgContext`), then stores on `.ok`. On callee revert → export `.error`; no self `store` (§8).
 
 **Self-transfer (`from == to`):** skip the counter call in `notifyCounterIfHooked` (`transfer_self_noop`).
 
