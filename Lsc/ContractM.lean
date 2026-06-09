@@ -30,6 +30,10 @@ def revertFail {E S α : Type} (e : E) : ContractM E S α :=
 @[simp] def revert {E S α : Type} (e : E) : ContractM E S α :=
   revertFail e
 
+-- `require cond err` — revert with `err` when `cond` is false.
+macro "require" cond:term err:term : doElem =>
+  `(doElem| unless $cond do ContractM.revert $err)
+
 macro "get" "." field:ident : term => do
   let fieldRef : Lean.Ident := Lean.mkIdent (`fields ++ field.getId)
   `(ContractM.get $fieldRef)
@@ -40,4 +44,20 @@ macro "set" "." field:ident val:term : doElem => do
 
 end ContractM
 
+-- `failWhen b err` — revert with `err` when `b` is true.
+-- Lives in the `Lsc` namespace so `open Lsc` exposes it directly.
+-- Usage in a `do` block:  `failWhen (← get .paused) .IsPausedError`
+-- Lean 4 do-notation desugars `(← e)` in term position, so the visible ←
+-- is genuine syntax, not hidden by any macro.
+def failWhen {E S : Type} (b : Bool) (err : E) : ContractM E S Unit :=
+  if b then ContractM.revert err else pure ()
+
 end Lsc
+
+namespace Bool
+
+/-- `¬b` (Bool coerced to `Prop`) rewrites to `b = false` under `simp`. -/
+@[simp] theorem not_iff_eq_false {b : Bool} : (¬b) ↔ (b = false) := by
+  cases b <;> simp
+
+end Bool

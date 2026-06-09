@@ -8,3 +8,4 @@ import Lsc.CheckedArith
 import Lsc.Word
 import Lsc.Run
 import Lsc.StateMacro
+import Lsc.ErrorMacro

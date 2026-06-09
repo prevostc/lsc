@@ -2,12 +2,9 @@ import Lsc.Prelude
 
 open Lsc
 
-@[lsc.error]
-inductive CounterError where
+error! CounterError where
+  | IsPausedError
   | arith : ArithError → CounterError
-
-instance : LscError CounterError where
-  arith := .arith
 
 state! Counter where
   number : UInt256 @public
@@ -25,7 +22,7 @@ def unpause : Counter Unit := do
 
 @[lsc.external]
 def increment : Counter Unit := do
-  unless (← get .paused) do
-    let n ← get .number
-    let n' ← n +? 1
-    set .number n'
+  failWhen (← get .paused) .IsPausedError
+  let n ← get .number
+  let n' ← n +? 1
+  set .number n'

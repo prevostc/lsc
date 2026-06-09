@@ -37,6 +37,10 @@ instance : LT UInt256 where
 def addNat (a : UInt256) (n : Nat) (h : a.val + n < 2 ^ 256) : UInt256 :=
   mk (a.val + n) h
 
+-- No `HAdd UInt256 ℕ` (and thus no `a + n` notation): contract code must use
+-- checked operators (`+?`, etc.); theorem statements should reason via `.val`
+-- or call `addNat` with an explicit overflow bound.
+
 end UInt256
 
 end Lsc

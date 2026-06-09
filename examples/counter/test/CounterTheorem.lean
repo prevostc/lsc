@@ -2,36 +2,33 @@ import Counter
 import CounterLemma
 import Lsc.Prelude
 
+open Lsc
+
 /-- On success, pause sets `paused` to `true` and leaves `number` unchanged. -/
-theorem pause_sets_paused (s s' : Counter.State) (h : (pause .run s) = .ok s') :
+theorem pause_sets_paused (s s' : Counter.State) (h : runS pause s = .ok ((), s')) :
     s'.paused = true ∧ s'.number = s.number :=
   CounterLemma.pause_sets_paused s s' h
 
 /-- On success, unpause clears `paused` and leaves `number` unchanged. -/
-theorem unpause_clears_paused (s s' : Counter.State) (h : (unpause .run s) = .ok s') :
+theorem unpause_clears_paused (s s' : Counter.State) (h : runS unpause s = .ok ((), s')) :
     s'.paused = false ∧ s'.number = s.number :=
   CounterLemma.unpause_clears_paused s s' h
 
 /-- When unpaused, increment increases `number` by exactly 1. -/
 theorem increment_increases_number_when_unpaused (s s' : Counter.State) (hp : ¬s.paused)
-    (h : (increment .run s) = .ok s') :
-    s'.number = UInt256.addNat s.number 1 (CounterLemma.increment_run_no_overflow_when_unpaused s s' hp h) ∧
-    s'.paused = s.paused := by
-  have ⟨hn, hp'⟩ := CounterLemma.increment_increases_number_when_unpaused s s' hp h
-  exact ⟨UInt256.eq_iff.mpr hn, hp'⟩
+    (h : runS increment s = .ok ((), s')) :
+    s'.number.val = s.number.val + 1 ∧ s'.paused = s.paused :=
+  CounterLemma.increment_increases_number_when_unpaused s s' hp h
 
-/-- When paused, increment is a no-op on state. -/
-theorem increment_noop_when_paused (s s' : Counter.State) (hp : s.paused)
-    (h : (increment .run s) = .ok s') :
-    s' = s :=
-  CounterLemma.increment_preserves_number_when_paused s s' hp h
+/-- When paused, increment reverts with `.IsPausedError`. -/
+theorem increment_reverts_when_paused (s : Counter.State) (hp : s.paused) :
+    runS increment s = .error (.contract .IsPausedError) :=
+  CounterLemma.increment_errors_when_paused s hp
 
 /-- When unpaused, increment increases `number` by exactly 1 (full world). -/
 theorem increment_increases_number_world_when_unpaused (w w' : World)
     (hp : ¬(Counter.view w).paused)
-    (h : (increment .run w) = Except.ok ((), w')) :
-    Counter.view w' |>.number = UInt256.addNat (Counter.view w).number 1
-      (CounterLemma.increment_run_no_overflow_world_when_unpaused w w' hp h) ∧
-    Counter.view w' |>.paused = Counter.view w |>.paused := by
-  have ⟨hn, hp'⟩ := CounterLemma.increment_increases_number_world_when_unpaused w w' hp h
-  exact ⟨UInt256.eq_iff.mpr hn, hp'⟩
+    (h : increment w = Except.ok ((), w')) :
+    (Counter.view w').number.val = (Counter.view w).number.val + 1 ∧
+    (Counter.view w').paused = (Counter.view w).paused :=
+  CounterLemma.increment_increases_number_world_when_unpaused w w' hp h
