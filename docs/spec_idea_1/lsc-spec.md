@@ -30,7 +30,7 @@ Every LSC project produces three module kinds per contract:
 | File | Role | Kernel-checked |
 |---|---|---|
 | `src/Counter.lean` | Contract — `state!` + `contract!` + `@[lsc.external]` functions | Yes (types) |
-| `test/CounterLemma.lean` | Lemma — tactic proofs | Yes (full proof check) |
+| `test/CounterProofs.lean` | Lemma — tactic proofs | Yes (full proof check) |
 | `test/CounterTheorem.lean` | Theorem — high-level requirements, one-line lemma delegations | Yes (full proof check) |
 
 The **contract** is what deploys. The **theorem** file is the requirements document — written and reviewed by humans. Each `theorem` states a readable business property inline and delegates to a homonymous `lemma` in exactly one line. The **lemma** file is AI-generated and holds all tactic proofs; humans do not review it. The Lean kernel checks both files.
@@ -71,39 +71,39 @@ def increment : Counter Unit := do
 `test/CounterTheorem.lean`:
 ```lean4
 import Counter
-import CounterLemma
+import CounterProofs
 import Lsc.Prelude
 open Lsc
 
 /-- On success, pause sets `paused` to `true` and leaves `number` unchanged. -/
 theorem pause_sets_paused (s s' : Counter.State) (h : runS pause s = .ok ((), s')) :
     s'.paused = true ∧ s'.number = s.number :=
-  CounterLemma.pause_sets_paused s s' h
+  CounterProofs.pause_sets_paused s s' h
 
 /-- On success, unpause clears `paused` and leaves `number` unchanged. -/
 theorem unpause_clears_paused (s s' : Counter.State) (h : runS unpause s = .ok ((), s')) :
     s'.paused = false ∧ s'.number = s.number :=
-  CounterLemma.unpause_clears_paused s s' h
+  CounterProofs.unpause_clears_paused s s' h
 
 /-- When unpaused, increment increases `number` by exactly 1. -/
 theorem increment_increases_number_when_unpaused (s s' : Counter.State) (hp : ¬s.paused)
     (h : runS increment s = .ok ((), s')) :
     s'.number.val = s.number.val + 1 ∧ s'.paused = s.paused :=
-  CounterLemma.increment_increases_number_when_unpaused s s' hp h
+  CounterProofs.increment_increases_number_when_unpaused s s' hp h
 
 /-- When paused, increment reverts with `.IsPausedError`. -/
 theorem increment_reverts_when_paused (s : Counter.State) (hp : s.paused) :
     runS increment s = .error (.contract .IsPausedError) :=
-  CounterLemma.increment_errors_when_paused s hp
+  CounterProofs.increment_errors_when_paused s hp
 ```
 
-`test/CounterLemma.lean`:
+`test/CounterProofs.lean`:
 ```lean4
 import Counter
 import Lsc.Prelude
 open Lsc
 
-namespace CounterLemma
+namespace CounterProofs
 
 theorem increment_increases_number_when_unpaused
     (s s' : Counter.State) (hp : ¬s.paused)
@@ -123,7 +123,7 @@ theorem increment_errors_when_paused
   have hpt : s.paused = true := hp
   simp [runS, increment, failWhen, hpt, ContractM.revert, ContractM.revertFail]
 
-end CounterLemma
+end CounterProofs
 ```
 
 ---
@@ -736,7 +736,7 @@ Theorem files are the **requirements document** — written and reviewed by huma
 theorem increment_increases_number_when_unpaused (s s' : Counter.State) (hp : ¬s.paused)
     (h : runS increment s = .ok ((), s')) :
     s'.number.val = s.number.val + 1 ∧ s'.paused = s.paused :=
-  CounterLemma.increment_increases_number_when_unpaused s s' hp h
+  CounterProofs.increment_increases_number_when_unpaused s s' hp h
 ```
 
 ### §9.3 Naming convention

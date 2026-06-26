@@ -59,7 +59,7 @@ my-project/
 ├── src/
 │   └── Counter.lean            # Lean 4 contracts (default scaffold)
 ├── test/
-│   ├── CounterLemma.lean       # AI-generated: scaffolding + lemma proofs
+│   ├── CounterProofs.lean       # AI-generated: scaffolding + proof lemmas
 │   ├── CounterTheorem.lean     # Human-reviewed: high-level theorems (one-line delegations)
 │   └── Counter.t.sol           # optional: deployCode fuzz (like Counter.vy)
 ├── cache/                      # incremental compile cache (Foundry-managed)
@@ -78,7 +78,7 @@ For a full ERC-20 walkthrough (lemmas, theorems, fuzz), see the [forge-lean-erc2
 - **`lib/*.lean`** defines shared storage/logic only; **no bytecode** is emitted from `lib/` ([lsc-spec.md Appendix B](lsc-appendices.md#appendix-b--composition-pattern)).
 - There is **no `spec/` directory**. Each contract has `test/<Contract>Lemma.lean` (AI-generated scaffolding + `lemma` proofs) and `test/<Contract>Theorem.lean` (human-reviewed high-level `theorem` statements with one-line lemma delegations). **Invalid:** `Counter.proof.lean` (dots break Lake module naming).
 - The `lean-toolchain` file at the project root pins the exact Lean version. `forge init --lean` creates it. Compilation refuses to run if this file is missing.
-- Lean imports use **Lake module paths** (e.g. `import Counter` for `src/Counter.lean`, `import CounterLemma` / `import CounterTheorem` for proof modules), not filesystem paths like `import src.Counter`.
+- Lean imports use **Lake module paths** (e.g. `import Counter` for `src/Counter.lean`, `import CounterProofs` / `import CounterTheorem` for proof modules), not filesystem paths like `import src.Counter`.
 - `test/**/*Lemma.lean` and `test/**/*Theorem.lean` are excluded from contract compilation via `skip` in `foundry.toml`.
 
 ### `lakefile.lean` (minimal)
@@ -567,7 +567,7 @@ def increment : Counter Unit := do
   return ()
 ```
 
-### `test/CounterLemma.lean` (minimal)
+### `test/CounterProofs.lean` (minimal)
 
 ```lean
 import Counter
@@ -583,14 +583,14 @@ lemma increment_increases_number
 
 ```lean
 import Counter
-import CounterLemma
+import CounterProofs
 
 /-- On success, increment increases number by exactly 1. -/
 theorem increment_increases_number
     (s s' : Counter.State)
     (h : increment.run s = .ok s') :
     s'.number = s.number + 1 :=
-  CounterLemma.increment_increases_number s s' h
+  CounterProofs.increment_increases_number s s' h
 ```
 
 No `EvmContext`, `LogEntry`, or `Lsc.ProofHelpers` import required — Layer 1 lemmas only ([lsc-spec.md §10.1](lsc-spec.md#101-layer-1--pure-default)).
@@ -610,7 +610,7 @@ contract CounterTest is Test {
 
 ### LLM prompt sketch (Counter)
 
-> Given `src/Counter.lean` and `test/CounterTheorem.lean` (high-level theorem statements), complete `test/CounterLemma.lean` with a homonymous `lemma` per theorem. Use `simp` on contract definitions. No `sorry`.
+> Given `src/Counter.lean` and `test/CounterTheorem.lean` (high-level theorem statements), complete `test/CounterProofs.lean` with a homonymous `lemma` per theorem. Use `simp` on contract definitions. No `sorry`.
 
 ### 9.1 ERC-20 showcase (external demo)
 
