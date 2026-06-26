@@ -1,8 +1,8 @@
 # Math in LSC — The `@math` Annotation
 
-> This document covers how LSC handles arithmetic-heavy functions: the `@math`
-> annotation, the automatic ℝ spec generation, the `WayRayMath` dependency,
-> and the suggested proof patterns. Read DESIGN.md first.
+This document covers arithmetic-heavy functions: the `@math` annotation, automatic ℝ spec generation, `WayRayMath`, and proof patterns. Read [DESIGN.md §10](../DESIGN.md) first.
+
+**Naming note**: `@math` generates `*.spec` lemmas in `Spec.lean` (real-number specifications). This is unrelated to the optional [`contract_spec`](CONTRACT-SPEC.md) syntax for auditor-facing propositions in `CounterSpec.lean`.
 
 ---
 
@@ -10,7 +10,7 @@
 
 DeFi developers implement mathematical formulas. The formula exists in their head
 as a real-number expression — `amountIn * reserveOut / (reserveIn + amountIn)`.
-The on-chain implementation is a chain of `wadMul`/`wadDiv` calls over `Nat`.
+The on-chain implementation is a chain of explicit rounding ops (`wadMulHalfUp`, `wadDivDown`, …) over `Nat`.
 The gap between the two is where bugs hide:
 
 - Which way does rounding go? Does it favor the user or the protocol?
@@ -31,9 +31,11 @@ Mark any pure arithmetic function with `@math`:
 contract AMM where
 
   @math
-  def computeOutput (amountIn r0 r1 : Wad) : Wad :=
-    amountIn.wadMul r1 |>.wadDiv (r0.wadAdd amountIn)
+  def computeOutput (amountIn r0 r1 : Wad) : Except ArithError Wad :=
+    (Wad.mulHalfUp amountIn r1).andThen (·.divDown (Wad.addChecked r0 amountIn |>.getD default))
 ```
+
+Inside `@math`, use **named** rounding functions (`mulHalfUp`, `divDown`, …). In `Tx` bodies, use **bracket-pair** surface syntax (`⸢*⸣?`, `⌊/⌋?`, …) or inline the same ops on `$.field` reads — see [DESIGN.md §10](../DESIGN.md).
 
 This does exactly two things:
 
@@ -67,9 +69,8 @@ The elaborator enforces a strict subset of the language. This is what makes the
 
 **Allowed:**
 
-- `Wad` and `Ray` arithmetic: `wadMul`, `wadDiv`, `wadAdd`, `wadSub`, `rayMul`,
-  `rayDiv`, `rayAdd`, `raySub`
-- `UInt256` arithmetic: `addChecked`, `subChecked`, `mulDiv`
+- `Wad` and `Ray` arithmetic: `mulDown`, `mulUp`, `mulHalfUp`, `divDown`, `divUp`, `divHalfUp` (and `Ray.*` counterparts)
+- `UInt256` arithmetic: `addChecked`, `subChecked`, `mulChecked`, `mulDiv`
 - Local `let` bindings
 - `if / else` on `Bool` (for `min`, `max`, clamp patterns)
 - Calls to other `@math` functions
@@ -77,28 +78,33 @@ The elaborator enforces a strict subset of the language. This is what makes the
 
 **Not allowed** (compile error with source position):
 
-- Storage reads or writes
+- Storage reads or writes (`$.field` is contract-body only)
 - `emit`
-- `require` / `revert` (use `.orRevert` at the call site in the `Tx` body instead)
+- `require` / `revert` (`.orRevert` at the `@math` call site in `Tx` bodies only)
 - External calls
 - Calls to non-`@math` functions
+- Bracket-pair operators (`⸢*⸣?`, …) — use named functions inside `@math`
 
-The `orRevert` pattern keeps error handling out of the math function and in the
-`Tx` body where it belongs:
+**Contract surface vs `@math`:**
+
+| Context | Syntax | Error handling |
+|---------|--------|----------------|
+| `Tx` body | `+?`, `⸢*⸣?`, `$.field` | `ContractM.revertArith` via `ContractErrors.arith` |
+| `@math` fn | `Wad.mulHalfUp`, `UInt256.addChecked` | returns `Except ArithError` |
+| `@math` call in `Tx` | `computeOutput … \|>.orRevert` | same `ContractErrors.arith` map |
 
 ```lean
 @math
 def computeOutput (amountIn r0 r1 : Wad) : Except ArithError Wad :=
-  amountIn.wadMul r1 |>.andThen (·.wadDiv (r0.wadAdd amountIn))
+  (Wad.mulHalfUp amountIn r1).andThen (·.divDown (Wad.addChecked r0 amountIn |>.getD default))
 
 def swap (amountIn : Wad) : Tx := do
-  let out ← computeOutput amountIn storage.reserve0 storage.reserve1
-              |>.orRevert .Overflow   -- error handling lives here
+  let out ← computeOutput amountIn $.reserve0 $.reserve1 |>.orRevert
+  -- overflow → ArithError.Overflow → CounterError.Overflow (1:1, not .Underflow)
   -- ...
 ```
 
-This separation means `computeOutput` proofs never touch `ContractM`. They are
-purely about numbers.
+`|>.orRevert` on `Except ArithError` is the **only** lift at `@math` boundaries — it uses the same `ContractErrors.arith` table as `+?`, not a separate per-call error argument.
 
 ---
 
@@ -109,14 +115,12 @@ what `yourFn.spec` will look like.
 
 | LSC operation | ℝ spec counterpart |
 |---|---|
-| `a.wadMul b` | `a * b` |
-| `a.wadDiv b` | `a / b` |
-| `a.wadAdd b` | `a + b` |
-| `a.wadSub b` | `a - b` |
-| `a.rayMul b` | `a * b` |
-| `a.rayDiv b` | `a / b` |
-| `a.rayAdd b` | `a + b` |
-| `a.raySub b` | `a - b` |
+| `Wad.mulHalfUp a b` / `a ⸢*⸣? b` | `a * b` |
+| `Wad.divDown a b` / `a ⌊/⌋? b` | `a / b` |
+| `Wad.addChecked a b` / `a +? b` | `a + b` |
+| `Wad.subChecked a b` / `a -? b` | `a - b` |
+| `Ray.mulHalfUp a b` / `a ⸢*⸣? b` (scoped Ray) | `a * b` |
+| `Ray.divDown a b` / `a ⌊/⌋? b` (scoped Ray) | `a / b` |
 | `UInt256.mulDiv a b c` | `a * b / c` |
 | `if h then a else b` | `if h then a else b` (preserved) |
 | `let x := e` | `let x := e.spec` |
@@ -172,7 +176,7 @@ the same way you use `Nat.add_comm` — as established facts about operations.
 ```lean
 @math
 def computeOutput (amountIn r0 r1 : Wad) : Except ArithError Wad :=
-  amountIn.wadMul r1 |>.andThen (·.wadDiv (r0.wadAdd amountIn))
+  (Wad.mulHalfUp amountIn r1).andThen (·.divDown (Wad.addChecked r0 amountIn |>.getD default))
 ```
 
 The compiler immediately makes `AMM.computeOutput.spec` available:
@@ -313,7 +317,7 @@ theorem AMM.computeOutput.safe_iff
     r0.raw + amountIn.raw ≠ 0 ∧
     -- no overflow in final division
     (amountIn.raw * r1.raw / WAD) * WAD < 2^256 * (r0.raw + amountIn.raw) := by
-  simp [computeOutput, Wad.wadMul, Wad.wadDiv, Wad.wadAdd,
+  simp [computeOutput, Wad.mulHalfUp, Wad.divDown, Wad.addChecked,
         UInt256.mulDiv, UInt256.addChecked]
   omega
 ```
@@ -353,17 +357,17 @@ EVM world   -- the compiled Wad/UInt256 operations
 
 The compiler gives you the ℝ/ℕ bridge (`computeOutput.spec` and the implicit
 `decode` mapping). You write proofs that connect them. The EVM world is handled
-by the framework's arithmetic lemmas — `wadMul_ok_value`, `wadDiv_ok_iff` etc.
+by the framework's arithmetic lemmas — `Wad.mulHalfUp_ok`, `Wad.divDown_ok`, etc.
 You rarely need to think about EVM directly.
 
 The key bridge lemma pattern, used in almost every faithfulness proof:
 
 ```lean
 -- framework-provided, once per operation:
-theorem Wad.wadMul_ok_value (a b r : Wad)
-    (h : a.wadMul b = .ok r) :
+theorem Wad.mulHalfUp_ok (a b r : Wad)
+    (h : Wad.mulHalfUp a b = .ok r) :
     r.raw = a.raw * b.raw / WAD := by
-  simp [Wad.wadMul, UInt256.mulDiv] at h; omega
+  simp [Wad.mulHalfUp, UInt256.mulDiv] at h; omega
 
 -- connects EVM result to ℕ computation
 -- then WayRayMath connects ℕ computation to ℝ spec
@@ -391,15 +395,17 @@ contract CapNetwork where
 
   @math
   def debtAt (scaledDebt supplyIndex uwIndex : Ray) : Ray :=
-    scaledDebt.rayMul (supplyIndex.rayMul uwIndex)
+    Ray.mulHalfUp scaledDebt (Ray.mulHalfUp supplyIndex uwIndex |>.getD default)
 
   @math
   def supplyInterest (scaledDebt uwIndex0 supplyIndex0 supplyIndex1 : Ray) : Ray :=
-    scaledDebt.rayMul (uwIndex0.rayMul (supplyIndex1.raySub supplyIndex0))
+    Ray.mulHalfUp scaledDebt
+      (Ray.mulHalfUp uwIndex0 (Ray.subChecked supplyIndex1 supplyIndex0 |>.getD default) |>.getD default)
 
   @math
   def premiumInterest (scaledDebt supplyIndex1 uwIndex0 uwIndex1 : Ray) : Ray :=
-    scaledDebt.rayMul (supplyIndex1.rayMul (uwIndex1.raySub uwIndex0))
+    Ray.mulHalfUp scaledDebt
+      (Ray.mulHalfUp supplyIndex1 (Ray.subChecked uwIndex1 uwIndex0 |>.getD default) |>.getD default)
 ```
 
 ### Auto-generated specs (compiler output)
@@ -479,7 +485,7 @@ theorem CapNetwork.debtAt_safe
     (hs : si.raw ≤ MAX_INDEX_RAW)
     (hu : ui.raw ≤ MAX_INDEX_RAW) :
     (debtAt d si ui).isOk := by
-  simp [debtAt, Ray.rayMul, UInt256.mulDiv]
+  simp [debtAt, Ray.mulHalfUp, UInt256.mulDiv]
   -- show that si.raw * ui.raw / RAY < 2^256
   -- and d.raw * (si.raw * ui.raw / RAY) / RAY < 2^256
   -- follows from the given bounds and RAY = 10^27
@@ -492,7 +498,7 @@ theorem CapNetwork.debtAt_safe
 
 The hardest part of Pattern 2 is arriving at a concrete `ε`. The approach:
 
-**Step 1**: Count how many `rayMul`/`wadMul` operations the formula performs.
+**Step 1**: Count how many `mulHalfUp`/`divDown` (or bracket-pair) operations the formula performs.
 Each one contributes at most `RAY_ERROR` or `WAD_ERROR` of absolute error,
 scaled by the magnitude of the other operand.
 
@@ -509,9 +515,9 @@ involves `ℝ` arithmetic), and prove `ε < 10^(-k)` for some `k` using
 ```lean
 noncomputable section
 
-/-- ε for computeOutput: one wadMul + one wadDiv = two error terms. -/
+/-- ε for computeOutput: one mulHalfUp + one divDown = two error terms. -/
 def AMM.OUTPUT_ε : ℝ :=
-  (1 + MAX_RESERVE) * WAD_ERROR +   -- from wadMul
+  (1 + MAX_RESERVE) * WAD_ERROR +   -- from mulHalfUp
   WAD_ERROR / MIN_DENOMINATOR        -- from wadDiv
 
 /-- The output error is always below 10⁻¹⁵ given the protocol bounds. -/

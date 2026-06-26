@@ -1,10 +1,8 @@
 # Implementation Guide
 
-> **Read DESIGN.md first.** This document covers *how* to build what DESIGN.md specifies.
-> It is structured as an ordered sequence of implementation steps, each building on the last.
-> Code samples are complete enough to compile; they are starting points, not pseudocode.
-> The primary inspiration is the dss2024 Imp language by javra:
-> `Syntax.lean`, `Eval.lean`, `Delab.lean`, `Optimize.lean`, `BigStep.lean`.
+> **Read [DESIGN.md](DESIGN.md) first.** This document covers *how* to build what DESIGN.md specifies.
+> Extensions: [extensions/linear-types/](extensions/linear-types/), [TYPE-CONSTRAINTS.md](extensions/TYPE-CONSTRAINTS.md), [MATH.md](extensions/MATH.md), [CONTRACT-SPEC.md](extensions/CONTRACT-SPEC.md) (optional).
+> Reference contracts: [reference/COUNTER.md](reference/COUNTER.md), [reference/AMM.md](reference/AMM.md).
 
 ---
 
@@ -149,11 +147,14 @@ structure Ray where
 
 namespace Wad
 
-def mul (a b : Wad) : Except ArithError Wad :=
-  (UInt256.mulDiv a.raw b.raw WAD).map Wad.mk
-
-def div (a b : Wad) : Except ArithError Wad :=
+def mulDown (a b : Wad) : Except ArithError Wad :=
+  (UInt256.mulDiv a.raw b.raw WAD).map Wad.mk  -- floor bias
+def mulUp (a b : Wad) : Except ArithError Wad := sorry
+def mulHalfUp (a b : Wad) : Except ArithError Wad := sorry
+def divDown (a b : Wad) : Except ArithError Wad :=
   (UInt256.mulDiv a.raw WAD b.raw).map Wad.mk
+def divUp (a b : Wad) : Except ArithError Wad := sorry
+def divHalfUp (a b : Wad) : Except ArithError Wad := sorry
 
 def add (a b : Wad) : Except ArithError Wad :=
   (UInt256.addChecked a.raw b.raw).map Wad.mk
@@ -268,14 +269,19 @@ inductive Expr : Ty → Type
   | var       : Ident → Expr t
   -- Storage reads (resolved to slot during compilation)
   | storageGet : Ident → Expr t
-  -- Arithmetic (all explicit about overflow behavior)
+  -- Arithmetic — checked (+? -? *? /?), wrapping (+↻), fixed-point (⌊*⌋? …)
   | addChecked  : Expr .uint256 → Expr .uint256 → Expr .uint256
   | subChecked  : Expr .uint256 → Expr .uint256 → Expr .uint256
   | mulChecked  : Expr .uint256 → Expr .uint256 → Expr .uint256
+  | divFloor    : Expr .uint256 → Expr .uint256 → Expr .uint256
   | addWrapping : Expr .uint256 → Expr .uint256 → Expr .uint256
+  | subWrapping : Expr .uint256 → Expr .uint256 → Expr .uint256
+  | mulWrapping : Expr .uint256 → Expr .uint256 → Expr .uint256
   | mulDiv      : Expr .uint256 → Expr .uint256 → Expr .uint256 → Expr .uint256
-  | wadMul      : Expr .wad    → Expr .wad    → Expr .wad
-  | rayMul      : Expr .ray    → Expr .ray    → Expr .ray
+  | wadMulDown | wadMulUp | wadMulHalfUp
+  | wadDivDown | wadDivUp | wadDivHalfUp
+  | rayMulDown | rayMulUp | rayMulHalfUp
+  | rayDivDown | rayDivUp | rayDivHalfUp
   -- Comparisons
   | eq   : Expr t → Expr t → Expr .bool
   | lt   : Expr .uint256 → Expr .uint256 → Expr .bool
@@ -390,17 +396,20 @@ structure ContractState (S : Type) where
 
 inductive FrameworkError
   | Reentrant
-  | ArithmeticOverflow
-  | ArithmeticUnderflow
-  | ArithmeticDivByZero
   | Unauthorized
   | InvalidSelector
   deriving Repr, DecidableEq
 
-/-- Every user error type must embed framework errors.
-    This ensures framework reverts are distinguishable from logic reverts. -/
+/-- Every user error type gets a generated instance mapping ArithError and
+    FrameworkError variants declared in the contract errors: block. -/
 class ContractErrors (Err : Type) where
+  arith         : ArithError → Err
   fromFramework : FrameworkError → Err
+
+/-- Panic arm for ArithError cases statically unreachable in a validated contract.
+    Codegen emits this for undeclared cases; the validator proves the arms are dead. -/
+def ContractErrors.unreachableArith [ContractErrors Err] (ae : ArithError) : Err :=
+  panic s!"unreachable ArithError {repr ae}"
 
 -- ─────────────────────────────────────────────
 -- The ContractM Monad
@@ -448,8 +457,18 @@ def emit (e : E) : ContractM S E Err Unit :=
 def revert [ContractErrors Err] (fe : FrameworkError) : ContractM S E Err A :=
   fun _ => .error (ContractErrors.fromFramework fe)
 
+def revertArith [ContractErrors Err] (ae : ArithError) : ContractM S E Err A :=
+  fun _ => .error (ContractErrors.arith ae)
+
 def revertUser (err : Err) : ContractM S E Err A :=
   fun _ => .error err
+
+/-- Lift `Except ArithError` into `ContractM` at @math call boundaries.
+    Uses the same `ContractErrors.arith` map as `+?`. Surface syntax: `|>.orRevert`. -/
+def Except.orRevertArith [ContractErrors Err] {A} (x : Except ArithError A) : ContractM S E Err A :=
+  match x with
+  | .ok a => pure a
+  | .error ae => revertArith ae
 
 def require [ContractErrors Err] (cond : Bool) (err : Err)
     : ContractM S E Err Unit :=
@@ -532,8 +551,8 @@ structure LocalEnv where
 deriving Inhabited
 
 /-- Evaluate a typed expression in a local environment and contract state.
-    Returns a value in ContractM to handle arithmetic errors. -/
-def Expr.eval {t : Ty} (e : Expr t) (env : LocalEnv) : ContractM S E Err UInt256 :=
+    Requires [ContractErrors Err] — satisfied by the per-contract generated instance. -/
+def Expr.eval {t : Ty} [ContractErrors Err] (e : Expr t) (env : LocalEnv) : ContractM S E Err UInt256 :=
   match e with
   | .litU256 n => pure n
   | .litBool b => pure (if b then 1 else 0)
@@ -548,10 +567,28 @@ def Expr.eval {t : Ty} (e : Expr t) (env : LocalEnv) : ContractM S E Err UInt256
     let va ← a.eval env
     let vb ← b.eval env
     match UInt256.addChecked va vb with
-    | .error _ => ContractM.revert .ArithmeticOverflow
+    | .error ae => ContractM.revertArith ae
     | .ok r    => pure r
+  | .subChecked a b => do
+    let va ← a.eval env; let vb ← b.eval env
+    match UInt256.subChecked va vb with
+    | .error ae => ContractM.revertArith ae
+    | .ok r    => pure r
+  | .divFloor a b => do
+    let va ← a.eval env; let vb ← b.eval env
+    match UInt256.divChecked va vb with
+    | .error ae => ContractM.revertArith ae
+    | .ok r    => pure r
+  | .addWrapping a b => do
+    let va ← a.eval env; let vb ← b.eval env
+    pure (UInt256.addWrapping va vb)   -- +↻: pure, no revert
+  | .wadMulHalfUp a b => do
+    let va ← a.eval env; let vb ← b.eval env
+    match Wad.mulHalfUp ⟨va⟩ ⟨vb⟩ with
+    | .error ae => ContractM.revertArith ae
+    | .ok r    => pure r.raw
   -- ... (other cases follow the same pattern)
-  | _ => ContractM.revert .Unauthorized  -- TODO: complete all cases
+  | _ => ContractM.revert .Unauthorized
 
 -- ─────────────────────────────────────────────
 -- Stmt evaluation  (the key function)
@@ -591,7 +628,27 @@ def Stmt.eval (stmt : Stmt) (env : LocalEnv)
   | _ => pure env  -- TODO: remaining cases
 ```
 
-**Important note on `storageSet` and `revert` with `sorry`**: the `Stmt.eval` function as written is parametric over `S` and `Err`, so it cannot directly write `s.reserve0 := v` — it doesn't know the shape of `S`. The resolution is that the `contract` macro generates a **specialized `eval`** for each contract where `S`, `E`, and `Err` are known concrete types. The generic `Stmt.eval` above is a specification; the macro generates the concrete version. See Step 7.
+**Important note on `storageSet` and `revert` with `sorry`**: the `Stmt.eval` function as written is parametric over `S` and `Err`, so it cannot directly write `$.reserve0 := v` — it doesn't know the shape of `S`. The resolution is that the `contract` macro generates a **specialized `eval`** for each contract where `S`, `E`, and `Err` are known concrete types. The generic `Stmt.eval` above is a specification; the macro generates the concrete version. See Step 7.
+
+### `@[simp]` bridge lemmas (required for proof ergonomics)
+
+```lean
+-- UInt256 checked (+?)
+@[simp] theorem UInt256.addCheckedNat_ok (a : UInt256) (n : Nat) (h : a.val + n < 2^256) :
+    addCheckedNat a n = .ok ⟨a.val + n, h⟩ := ...
+@[simp] theorem UInt256.addCheckedNat_error (a : UInt256) (n : Nat) (h : ¬ a.val + n < 2^256) :
+    addCheckedNat a n = ContractM.revertArith .Overflow := ...
+
+-- Storage ($.field)
+@[simp] theorem storageGet_val (field : Ident) (s : ContractState S) :
+    runS (storageGet field) s = .ok (s.storage.field, s, []) := ...
+@[simp] theorem storageSet_val (field : Ident) (v : _) (s : ContractState S) :
+    runS (storageSet field v) s = .ok ((), { s with storage := s.storage.setField field v }, []) := ...
+
+-- Wad bracket-pair ops (proofs unfold ⸢*⸣? to wadMulHalfUp)
+@[simp] theorem Wad.wadMulHalfUp_ok ...
+@[simp] theorem Wad.wadDivDown_ok ...
+```
 
 ---
 
@@ -615,11 +672,19 @@ namespace Lsc
 declare_syntax_cat lsc_ty
 declare_syntax_cat lsc_expr
 declare_syntax_cat lsc_stmt
+declare_syntax_cat lsc_store_ref   -- $.field — avoids Lean $ splice collision
 declare_syntax_cat lsc_field_decl
 declare_syntax_cat lsc_error_decl
 declare_syntax_cat lsc_event_decl
 declare_syntax_cat lsc_func_decl
 declare_syntax_cat lsc_contract_body
+
+-- ─────────────────────────────────────────────
+-- Storage reference ($.field)
+-- ─────────────────────────────────────────────
+
+syntax "$." ident : lsc_store_ref
+syntax lsc_store_ref : lsc_expr
 
 -- ─────────────────────────────────────────────
 -- Type syntax
@@ -643,9 +708,22 @@ syntax "false"                           : lsc_expr
 syntax "msg.sender"                      : lsc_expr
 syntax "msg.value"                       : lsc_expr
 syntax "block.timestamp"                 : lsc_expr
-syntax:65 lsc_expr:65 "+" lsc_expr:66   : lsc_expr
-syntax:65 lsc_expr:65 "-" lsc_expr:66   : lsc_expr
-syntax:65 lsc_expr:65 "*" lsc_expr:66   : lsc_expr
+-- Checked arithmetic (+? -? *? /?) — plain + - * / is a parse error
+syntax:65 lsc_expr:65 "+?" lsc_expr:66  : lsc_expr
+syntax:65 lsc_expr:65 "-?" lsc_expr:66  : lsc_expr
+syntax:65 lsc_expr:65 "*?" lsc_expr:66  : lsc_expr
+syntax:65 lsc_expr:65 "/?" lsc_expr:66  : lsc_expr
+-- Wrapping arithmetic (+↻ -↻ *↻) — pure UInt256
+syntax:65 lsc_expr:65 "+↻" lsc_expr:66  : lsc_expr
+syntax:65 lsc_expr:65 "-↻" lsc_expr:66  : lsc_expr
+syntax:65 lsc_expr:65 "*↻" lsc_expr:66  : lsc_expr
+-- Fixed-point rounding (bracket pairs — scale from open scoped Lsc.Wad / Lsc.Ray)
+syntax:65 lsc_expr:65 "⌊*⌋?" lsc_expr:66 : lsc_expr
+syntax:65 lsc_expr:65 "⌈*⌉?" lsc_expr:66 : lsc_expr
+syntax:65 lsc_expr:65 "⸢*⸣?" lsc_expr:66 : lsc_expr
+syntax:65 lsc_expr:65 "⌊/⌋?" lsc_expr:66 : lsc_expr
+syntax:65 lsc_expr:65 "⌈/⌉?" lsc_expr:66 : lsc_expr
+syntax:65 lsc_expr:65 "⸢/⸣?" lsc_expr:66 : lsc_expr
 syntax:45 lsc_expr:45 "==" lsc_expr:46  : lsc_expr
 syntax:45 lsc_expr:45 "!=" lsc_expr:46  : lsc_expr
 syntax:45 lsc_expr:45 "<"  lsc_expr:46  : lsc_expr
@@ -664,12 +742,15 @@ syntax lsc_expr "[" lsc_expr "]"         : lsc_expr
 syntax "skip" ";"                                              : lsc_stmt
 -- sequence via juxtaposition (same as dss2024)
 syntax lsc_stmt lsc_stmt                                       : lsc_stmt
--- local variable binding
+-- local variable binding (pure let := for non-monadic exprs; ← for ContractM binds)
 syntax "let" ident ":=" lsc_expr ";"                           : lsc_stmt
--- storage write
-syntax "storage" "." ident ":=" lsc_expr ";"                   : lsc_stmt
+syntax "let" ident "←" lsc_expr ";"                            : lsc_stmt
+syntax "let" ident "←" lsc_store_ref "+?" num ";"              : lsc_stmt
+syntax "let" ident "←" lsc_store_ref "+?" lsc_expr ";"         : lsc_stmt
+-- storage write ($.field := val)
+syntax lsc_store_ref ":=" lsc_expr ";"                           : lsc_stmt
 -- mapping write
-syntax "storage" "." ident "[" lsc_expr "]" ":=" lsc_expr ";"  : lsc_stmt
+syntax lsc_store_ref "[" lsc_expr "]" ":=" lsc_expr ";"        : lsc_stmt
 -- require
 syntax "require" "(" lsc_expr ")" "else" "revert" ident ";"   : lsc_stmt
 -- if/else
@@ -722,11 +803,21 @@ macro_rules
   | `(lsc_expr| true)           => `(Expr.litBool true)
   | `(lsc_expr| false)          => `(Expr.litBool false)
   | `(lsc_expr| $i:ident)       => `(Expr.var $(quote i.getId.toString))
+  | `(lsc_expr| $. $f)          => `(Expr.storageGet $(quote f.getId.toString))
   | `(lsc_expr| msg.sender)     => `(Expr.caller)
   | `(lsc_expr| msg.value)      => `(Expr.callvalue)
   | `(lsc_expr| block.timestamp) => `(Expr.timestamp)
-  | `(lsc_expr| $a + $b)        => `(Expr.addChecked (lsc_expr| $a) (lsc_expr| $b))
-  | `(lsc_expr| $a - $b)        => `(Expr.subChecked (lsc_expr| $a) (lsc_expr| $b))
+  | `(lsc_expr| $a +? $b)       => `(Expr.addChecked (lsc_expr| $a) (lsc_expr| $b))
+  | `(lsc_expr| $a -? $b)       => `(Expr.subChecked (lsc_expr| $a) (lsc_expr| $b))
+  | `(lsc_expr| $a *? $b)       => `(Expr.mulChecked (lsc_expr| $a) (lsc_expr| $b))
+  | `(lsc_expr| $a /? $b)       => `(Expr.divFloor (lsc_expr| $a) (lsc_expr| $b))
+  | `(lsc_expr| $a +↻ $b)       => `(Expr.addWrapping (lsc_expr| $a) (lsc_expr| $b))
+  | `(lsc_expr| $a -↻ $b)       => `(Expr.subWrapping (lsc_expr| $a) (lsc_expr| $b))
+  | `(lsc_expr| $a *↻ $b)       => `(Expr.mulWrapping (lsc_expr| $a) (lsc_expr| $b))
+  -- bracket pairs: scope (Wad/Ray) resolved at elaboration — example for Wad half-up mul:
+  | `(lsc_expr| $a ⸢*⸣? $b)     => `(Expr.wadMulHalfUp (lsc_expr| $a) (lsc_expr| $b))
+  | `(lsc_expr| $a ⌊/⌋? $b)     => `(Expr.wadDivDown (lsc_expr| $a) (lsc_expr| $b))
+  -- ... ⌊*⌋?, ⌈*⌉?, ⌈/⌉?, ⸢/⸣? + ray* variants likewise
   | `(lsc_expr| $a == $b)       => `(Expr.eq (lsc_expr| $a) (lsc_expr| $b))
   | `(lsc_expr| $a < $b)        => `(Expr.lt (lsc_expr| $a) (lsc_expr| $b))
   | `(lsc_expr| $a <= $b)       => `(Expr.le (lsc_expr| $a) (lsc_expr| $b))
@@ -741,9 +832,17 @@ macro_rules
       `(Stmt.seq (lsc_stmt| $s1) (lsc_stmt| $s2))
   | `(lsc_stmt| let $i := $e;)  =>
       `(Stmt.letBind $(quote i.getId.toString) (lsc_expr| $e))
-  | `(lsc_stmt| storage.$f := $e;) =>
+  | `(lsc_stmt| let $i ← $e;)   =>
+      `(Stmt.letBind $(quote i.getId.toString) (lsc_expr| $e))
+  | `(lsc_stmt| let $i ← $. $f +? $d:num) =>
+      `(Stmt.letBind $(quote i.getId.toString)
+        (Expr.addChecked (Expr.storageGet $(quote f.getId.toString)) (Expr.litU256 $(quote d.getNat))))
+  | `(lsc_stmt| let $i ← $. $f +? $d;) =>
+      `(Stmt.letBind $(quote i.getId.toString)
+        (Expr.addChecked (Expr.storageGet $(quote f.getId.toString)) (lsc_expr| $d)))
+  | `(lsc_stmt| $. $f := $e;) =>
       `(Stmt.storageSet $(quote f.getId.toString) (lsc_expr| $e))
-  | `(lsc_stmt| storage.$f[$k] := $v;) =>
+  | `(lsc_stmt| $. $f[$k] := $v;) =>
       `(Stmt.storageMapSet $(quote f.getId.toString) (lsc_expr| $k) (lsc_expr| $v))
   | `(lsc_stmt| require ($e) else revert $err;) =>
       `(Stmt.require (lsc_expr| $e) $(quote err.getId.toString))
@@ -756,6 +855,8 @@ macro_rules
   | `(lsc_stmt| revert $err;) =>
       `(Stmt.revert $(quote err.getId.toString))
 ```
+
+**Validator rules** (Step 8): reject plain `+ - * /` on numeric types; reject unscoped bracket-pair ops; reject `open scoped Lsc.Wad` and `open scoped Lsc.Ray` in the same module.
 
 ---
 
@@ -777,7 +878,7 @@ namespace Lsc
 
 /-- Elaborate the `contract` command.
     1. Parse the body into a ContractDef (done by macro_rules)
-    2. Run validation passes (DAG, linearity, selector collision)
+    2. Run validation passes (DAG, linearity, selector collision, arith error coverage)
     3. Generate: storage struct, error inductive, event inductive,
                  AST definitions, ContractM definitions
     All validation errors are reported with source positions. -/
@@ -795,6 +896,9 @@ elab_rules : command
     -- Step 3: generate definitions
     generateStorageStruct validated
     generateErrorInductive validated
+    generateContractErrorsInstance validated
+    -- strict 1:1: ArithError.Overflow → .Overflow, .Underflow → .Underflow, …
+    -- only for ArithError cases reachable from contract ops
     generateEventInductive validated
     generateASTDefs validated
     generateContractMDefs validated
@@ -814,6 +918,28 @@ def generateStorageStruct (c : ContractDef) : CommandElabM Unit := do
                     ($name : $leanTy := $def))
   let structName := mkIdent (c.name ++ "Storage")
   elabCommand (← `(structure $structName where $[$fields]* deriving Repr))
+
+/-- Generate `ContractErrors` instance from the errors: block.
+    Strict 1:1 ArithError mapping — each case maps to a same-named variant:
+      ArithError.Overflow       → errors: Overflow
+      ArithError.Underflow      → errors: Underflow
+      ArithError.DivisionByZero → errors: DivByZero
+    Validator checks only ArithError cases reachable from ops in the contract body.
+    No collapsing. Elaboration error if a reachable case has no matching variant. -/
+def generateContractErrorsInstance (c : ContractDef) : CommandElabM Unit := do
+  -- Example output for Counter (+? only; errors: declares Overflow):
+  -- instance : ContractErrors CounterError where
+  --   arith := fun
+  --     | .Overflow => .Overflow
+  --     | .Underflow | .DivisionByZero => ContractErrors.unreachableArith
+  -- Example output for AMM (uses +?, -?, /?):
+  -- instance : ContractErrors AMMError where
+  --   arith := fun
+  --     | .Overflow       => .Overflow
+  --     | .Underflow      => .Underflow
+  --     | .DivisionByZero => .DivByZero
+  --   fromFramework := fun | .Reentrant => ... | .Unauthorized => ...
+  sorry
 
 /-- Generate the ContractM function for each FunctionDef.
     The generated function is the semantic ground truth for proofs.
@@ -840,7 +966,7 @@ def generateContractMDefs (c : ContractDef) : CommandElabM Unit := do
 
 ## Step 8 — Validation Passes (`Lang/Checks.lean`)
 
-Three passes, run in order. Each returns `List (Syntax × String)` (position, message) for error reporting.
+Three passes, run in order, plus arith-error coverage. Each returns `List (Syntax × String)` (position, message) for error reporting.
 
 ```lean
 -- Lang/Checks.lean
@@ -895,10 +1021,23 @@ def checkSelectorCollisions (fns : List FunctionDef) : Option String :=
   then some "Selector collision detected between external functions"
   else none
 
+-- ── Pass 4: Arith error coverage (strict 1:1) ─
+
+/-- For each ArithError case reachable from checked ops in the contract body,
+    require a same-named variant in errors: (Overflow, Underflow, DivByZero).
+    Reject collapsing maps. Reject -? if Underflow not declared, etc. -/
+def checkArithErrorCoverage (c : ContractDef) : List (Syntax × String) :=
+  sorry
+
 -- ── Combined validator ────────────────────────
 
 def validateAll (c : ContractDef) : Except (List (Syntax × String)) ContractDef :=
   let errors : List (Syntax × String) := []
+  -- Pass 1: checkNoCycles
+  -- Pass 2: checkLinear (per function)
+  -- Pass 3: checkSelectorCollisions
+  -- Pass 4: checkArithErrorCoverage — reachable ArithError case must have
+  --         same-named variant in errors:; reject collapsing maps
   -- collect all errors, report with positions
   -- return .ok c if no errors
   sorry
@@ -949,7 +1088,10 @@ partial def delabExprInner : DelabM (TSyntax `lsc_expr) := do
     | Expr.addChecked _ _ =>
       let a ← withAppFn <| withAppArg delabExprInner
       let b ← withAppArg delabExprInner
-      `(lsc_expr| $a + $b)
+      `(lsc_expr| $a +? $b)
+    | Expr.storageGet _ =>
+      let f ← withAppArg delab
+      `(lsc_expr| $. $f:ident)
     | Expr.not _ =>
       let e ← withAppArg delabExprInner
       `(lsc_expr| ! $e)
@@ -1083,26 +1225,26 @@ contract Counter where
 
   events:
     | Incremented (n : UInt256)
-    | WasPaused
-    | WasUnpaused
+    | Paused
+    | Unpaused
 
   def increment : Tx := do
-    require (!storage.paused) else revert Paused;
-    let n := storage.number + 1;
-    storage.number := n;
+    require (!$.paused) else revert Paused;
+    let n ← $.number +? 1;
+    $.number := n;
     emit Incremented(n);
 
   def pause : Tx := do
-    require (msg.sender == storage.owner) else revert NotOwner;
-    require (!storage.paused) else revert Paused;
-    storage.paused := true;
-    emit WasPaused();
+    require (msg.sender == $.owner) else revert NotOwner;
+    require (!$.paused) else revert Paused;
+    $.paused := true;
+    emit Paused();
 
   def unpause : Tx := do
-    require (msg.sender == storage.owner) else revert NotOwner;
-    require (storage.paused) else revert Paused;
-    storage.paused := false;
-    emit WasUnpaused();
+    require (msg.sender == $.owner) else revert NotOwner;
+    require ($.paused) else revert Paused;
+    $.paused := false;
+    emit Unpaused();
 
 -- ── Proofs ────────────────────────────────────
 -- These theorems are the acceptance test for the framework.
@@ -1116,7 +1258,8 @@ theorem Counter.increment_increases_number
     (hpaused : s.storage.paused = false)
     (h : runS Counter.increment s = .ok ((), s', log)) :
     s'.storage.number = s.storage.number + 1 := by
-  simp [Counter.increment, runS, Stmt.eval, ContractM.require,
+  simp [Counter.increment, runS, Stmt.eval, storageGet, storageSet,
+        UInt256.addCheckedNat, ContractM.require,
         ContractM.modifyStorage, hpaused] at h
   omega
 
@@ -1264,6 +1407,19 @@ Implement in this exact order. Each step must compile before starting the next.
 ```
 
 Do not start step 12 until all counter theorems in step 11 pass. The counter proofs are the acceptance test for the entire framework.
+
+---
+
+## Post-v1 extensions (documentation only)
+
+These are specified in `extensions/` but not covered by implementation steps above:
+
+| Extension | Doc | Implementation hook |
+|-----------|-----|---------------------|
+| Field decorators | [TYPE-CONSTRAINTS.md](extensions/TYPE-CONSTRAINTS.md) | `Lang/Contract.lean` elaboration |
+| `@math` / ℝ specs | [MATH.md](extensions/MATH.md) | `@math` attribute + `Spec.lean` generation |
+| `contract_spec` | [CONTRACT-SPEC.md](extensions/CONTRACT-SPEC.md) | Optional macro alongside `contract` |
+| Linear type details | [extensions/linear-types/](extensions/linear-types/) | `Core/LinearTypes.lean`, `Lang/Checks.lean` |
 
 ---
 

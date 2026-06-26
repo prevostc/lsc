@@ -1,12 +1,8 @@
 # Type Constraints in LSC
 
-> Field-level decorators that attach invariants to storage fields. Each decorator
-> generates a named theorem and optionally inserts a runtime check. They are
-> independent tools — use none, one, or several per field depending on what the
-> field represents. They do not form a complete invariant system; they are
-> conveniences for the most common field-level properties in DeFi.
->
-> Read DESIGN.md §9 (Storage Model) and MATH.md before this document.
+Field-level decorators that attach invariants to storage fields. Each decorator generates a named theorem and optionally inserts a runtime check. They are independent tools — use none, one, or several per field depending on what the field represents.
+
+Read [DESIGN.md §9](../DESIGN.md) (Storage Model) and [MATH.md](MATH.md) before this document. AMM reserves are `Wad` — see [reference/AMM.md](../reference/AMM.md).
 
 ---
 
@@ -72,7 +68,7 @@ Available in all proof files that import the contract. No hypothesis needed.
 On every write to `supplyIndex`, the compiler inserts:
 
 ```lean
-require (newValue ≥ storage.supplyIndex) else revert .ConstraintViolated
+require (newValue ≥ $.supplyIndex) else revert .ConstraintViolated
 ```
 
 **Exception — static elimination**: if the write expression is structurally
@@ -81,7 +77,7 @@ The canonical pattern that eliminates the runtime check:
 
 ```lean
 -- write: multiply by a factor ≥ 1
-storage.supplyIndex := storage.supplyIndex.rayMul growthFactor
+$.supplyIndex := $.supplyIndex ⸢*⸣? growthFactor
 -- if the elaborator can prove growthFactor ≥ RAY, no require is inserted
 -- the check becomes a compile-time proof obligation instead
 ```
@@ -118,6 +114,40 @@ theorem interestAccrued_nonneg
 
 One `≤` comparison and a conditional revert per write, unless statically
 eliminated. For `Ray` fields: approximately 3 opcodes.
+
+---
+
+## `@antitone`
+
+### What it means
+
+The field value never increases across successful transactions. Dual of `@monotonic`.
+
+```lean
+@antitone
+discountFactor : Ray := RAY   -- starts at 1.0, only decreases
+```
+
+### Generated theorem
+
+```lean
+theorem Protocol.discountFactor_antitone
+    (s s' : ContractState ProtocolStorage)
+    (tx : Protocol.AnyTx) (h : runS tx s = .ok ((), s', _)) :
+    s'.storage.discountFactor ≤ s.storage.discountFactor
+```
+
+### Runtime behavior
+
+```lean
+require (newValue ≤ $.discountFactor) else revert .ConstraintViolated
+```
+
+Static elimination applies when the write expression is structurally antitone (e.g. multiply by a factor `≤ RAY`).
+
+### Proof ergonomics
+
+Useful for discount factors, decay rates, and any quantity that should only shrink. Pairs naturally with `@bounded(0, RAY)` to keep values in `[0, 1]`.
 
 ---
 
@@ -289,7 +319,7 @@ theorem AMM.token0_immutable
 
 ```lean
 def setToken (newToken : Address) : Tx := do
-  storage.token0 := newToken   -- COMPILE ERROR: token0 is @immutable
+  $.token0 := newToken   -- COMPILE ERROR: token0 is @immutable
 ```
 
 This is a hard compile error at the write site, reported with source position.
@@ -333,8 +363,8 @@ default and no constructor write is a compile error.
 token0 : Address        -- no default: must be set in constructor
 
 constructor (t0 t1 : Address) : Tx := do
-  storage.token0 := t0  -- valid: constructor is the one allowed write site
-  storage.token1 := t1
+  $.token0 := t0  -- valid: constructor is the one allowed write site
+  $.token1 := t1
 ```
 
 ---
@@ -372,7 +402,7 @@ Useful combinations:
 **No cross-field constraints.** `reserve0 * reserve1 ≥ K` is not expressible
 as a field decorator. That is a contract-level theorem you write manually.
 
-**No dynamic bounds.** `@min(storage.otherField)` is not allowed. Bounds are
+**No dynamic bounds.** `@min($.otherField)` is not allowed. Bounds are
 literals only. If your min depends on another field, write a manual `require`.
 
 **No mapping fields.** Decorators apply to scalar storage fields only.

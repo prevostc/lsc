@@ -1,6 +1,8 @@
 # Formally Verified EVM Smart Contract Language — Design Document
 
 > **Purpose**: This document is the single authoritative reference for all design decisions. It is intended for developers implementing the system and reviewers evaluating the design. Every significant decision is stated explicitly with its rationale. No prior knowledge of formal verification is assumed, but familiarity with Lean 4 and EVM internals is expected.
+>
+> **Documentation set**: See [README.md](README.md) for reading order. Extensions live in `extensions/` (linear types, type constraints, math, optional contract spec). Canonical examples are in `reference/`.
 
 ---
 
@@ -81,11 +83,15 @@ contract Counter where
     | Incremented (newValue : UInt256)
 
   def increment : Tx := do
-    require (¬ storage.paused) .Paused
-    let n ← storage.number.addChecked 1 |>.orRevert .Overflow
-    storage.number := n
-    emit (.Incremented n)
+    require (!$.paused) else revert Paused;
+    let n ← $.number +? 1;
+    $.number := n;
+    emit Incremented(n);
 ```
+
+**Storage access** uses a single prefix: `$.field` for reads, `$.field := val` for writes. Proofs use `s.storage.field` on `ContractState` snapshots — `$.` is author-facing DSL only.
+
+Surface syntax (`require … else revert`, `msg.sender`, `+?`, bracket-pair rounding) is defined in [IMPLEMENTATION.md](IMPLEMENTATION.md). The macro lowers to `Stmt` nodes shown below.
 
 ### What the Macro Generates
 
@@ -98,8 +104,17 @@ structure CounterStorage where
   paused : Bool    := false
   owner  : Address
 
--- 2. Error inductive
+-- 2. Error inductive + generated ContractErrors instance (strict 1:1 arith map)
 inductive CounterError | Paused | NotOwner | Overflow
+
+instance : ContractErrors CounterError where
+  arith := fun
+    | .Overflow => .Overflow
+    | .Underflow | .DivisionByZero => ContractErrors.unreachableArith
+    -- unreachableArith panics; validator proves these arms dead for +?-only bodies
+  fromFramework := fun
+    | .Reentrant     => .NotOwner
+    | .Unauthorized => .NotOwner
 
 -- 3. Event inductive
 inductive CounterEvent | Incremented (newValue : UInt256)
@@ -109,7 +124,7 @@ def Counter.increment.ast : Stmt :=
   Stmt.seq
     (Stmt.require (Expr.not (Expr.storageGet "paused")) (Expr.err .Paused))
     (Stmt.seq
-      (Stmt.letBind "n" (Expr.addChecked (Expr.storageGet "number") (Expr.lit 1) .Overflow))
+      (Stmt.letBind "n" (Expr.addChecked (Expr.storageGet "number") (Expr.lit 1)))
       (Stmt.seq
         (Stmt.storageSet "number" (Expr.var "n"))
         (Stmt.emit (Expr.event .Incremented [Expr.var "n"]))))
@@ -117,6 +132,22 @@ def Counter.increment.ast : Stmt :=
 -- 5. ContractM semantics (auto-derived, not macro-generated)
 def Counter.increment : ContractM CounterStorage CounterEvent CounterError Unit :=
   Stmt.eval Counter.increment.ast
+```
+
+Counter declares only `Overflow` because `increment` uses `+?` only. Elaboration **rejects** `-?` / `/?` unless matching `Underflow` / `DivByZero` variants exist in `errors:`. An AMM using `+?`, `-?`, and `⌊/⌋?` declares all three:
+
+```lean
+errors:
+  | Overflow
+  | Underflow
+  | DivByZero
+
+instance : ContractErrors AMMError where
+  arith := fun
+    | .Overflow       => .Overflow
+    | .Underflow      => .Underflow
+    | .DivisionByZero => .DivByZero
+  fromFramework := ...
 ```
 
 The user writes proofs against `Counter.increment` (the ContractM version). The AST version exists for the compiler. The connection is definitional: `Counter.increment = Stmt.eval Counter.increment.ast` holds by `rfl`.
@@ -168,12 +199,22 @@ inductive Expr : Ty → Type
   | litBool  : Bool → Expr .bool
   | var      : Ident → Expr t
   | storageGet : Ident → Expr t
-  -- arithmetic (all explicit about rounding/overflow)
-  | addChecked  : Expr .uint256 → Expr .uint256 → Ident → Expr .uint256
+  -- UInt256 checked (+? -? *? /?) — failures map ArithError → Err via ContractErrors.arith
+  | addChecked  : Expr .uint256 → Expr .uint256 → Expr .uint256
+  | subChecked  : Expr .uint256 → Expr .uint256 → Expr .uint256
+  | mulChecked  : Expr .uint256 → Expr .uint256 → Expr .uint256
+  | divFloor    : Expr .uint256 → Expr .uint256 → Expr .uint256
+  -- UInt256 wrapping (+↻ -↻ *↻) — pure, intentional mod-2²⁵⁶
   | addWrapping : Expr .uint256 → Expr .uint256 → Expr .uint256
+  | subWrapping : Expr .uint256 → Expr .uint256 → Expr .uint256
+  | mulWrapping : Expr .uint256 → Expr .uint256 → Expr .uint256
   | mulDiv      : Expr .uint256 → Expr .uint256 → Expr .uint256 → Expr .uint256
-  | wadMul      : Expr .wad → Expr .wad → Expr .wad
-  | rayMul      : Expr .ray → Expr .ray → Expr .ray
+  -- Wad fixed-point (⌊*⌋? ⸢*⸣? ⌊/⌋? … — no default wadMul)
+  | wadMulDown | wadMulUp | wadMulHalfUp
+  | wadDivDown | wadDivUp | wadDivHalfUp
+  -- Ray fixed-point (same rounding variants)
+  | rayMulDown | rayMulUp | rayMulHalfUp
+  | rayDivDown | rayDivUp | rayDivHalfUp
   -- logic
   | not  : Expr .bool → Expr .bool
   | and  : Expr .bool → Expr .bool → Expr .bool
@@ -307,7 +348,6 @@ structure FunctionDef where
 inductive LinearPermission
   | canMint (tokenType : Ident)
   | canBurn (tokenType : Ident)
-  | canAcquireLock
   | canFlashBorrow
 ```
 
@@ -326,27 +366,66 @@ Bounded loops may be added in v2 with explicit loop invariants as a language-lev
 ### Reverts and Error Handling
 
 ```lean
--- Framework errors (generated by framework primitives)
+-- Framework errors (reentrancy, auth, … — not arithmetic)
 inductive FrameworkError
   | Reentrant
   | Unauthorized
-  | ArithmeticOverflow
-  | ArithmeticDivByZero
 
--- User's error type must embed framework errors
+-- Core arithmetic failures (shared with @math Except layer)
+inductive ArithError
+  | Overflow
+  | Underflow
+  | DivisionByZero
+
+/-- Generated per contract from the errors: block. -/
 class ContractErrors (Err : Type) where
+  arith         : ArithError → Err
   fromFramework : FrameworkError → Err
 ```
 
-Arithmetic operations return `Except Err` where `Err` is the contract's error type. The user must explicitly handle or propagate arithmetic errors. This makes every arithmetic operation an explicit proof obligation site.
+Checked arithmetic (`+?`, `-?`, `*?`, `/?`, bracket-pair ops) lives in **`ContractM`**. On failure, eval calls `ContractM.revertArith ae`, which produces `.error (ContractErrors.arith ae)` — no error name in the AST, no `.orRevert` at each call site.
+
+Elaboration generates `ContractErrors.arith` as a **strict 1:1 map** from each `ArithError` case to a same-named variant in `errors:` (`Overflow`, `Underflow`, `DivByZero`). No collapsing — `.Underflow` never maps to `.Overflow`. The validator only requires variants for `ArithError` cases **reachable** from ops used in the contract body (e.g. `+?` alone needs `Overflow`; adding `-?` requires `Underflow`). Unmapped reachable cases and unmapped `FrameworkError` cases are **compile errors**.
 
 ```lean
--- User code (in source syntax, expanded by macro):
-let n ← storage.number.addChecked 1 |>.orRevert .Overflow
--- Proof obligation: on success, n = storage.number + 1 and no overflow occurred
+-- User code:
+let n ← $.number +? 1
+-- On overflow: .error CounterError.Overflow  (= ContractErrors.arith .Overflow)
+-- require … revert Paused: .error CounterError.Paused  (= revertUser, direct)
 ```
 
+Pure `@math` functions return `Except ArithError`; lift once with `|>.orRevert` (uses `ContractErrors.arith`, same channel as `+?`). See [extensions/MATH.md](extensions/MATH.md).
+
 On revert, all storage changes and emitted events are discarded. This matches EVM semantics.
+
+**Wiring summary** (two channels, no name-guessing at eval time):
+
+```mermaid
+flowchart LR
+  subgraph arithPath [Arithmetic +? and @math]
+    core["UInt256.addChecked → Except ArithError"]
+    revA["ContractM.revertArith ae"]
+    mapA["ContractErrors.arith ae"]
+    errA[".error CounterError.Overflow"]
+    core --> revA --> mapA --> errA
+  end
+
+  subgraph fwPath [Framework]
+    fw["FrameworkError e.g. Reentrant"]
+    revF["ContractM.revert fe"]
+    mapF["ContractErrors.fromFramework fe"]
+    errF[".error CounterError.…"]
+    fw --> revF --> mapF --> errF
+  end
+
+  subgraph domain [Domain require]
+    req["require … revert Paused"]
+    revU["ContractM.revertUser .Paused"]
+    req --> revU
+  end
+```
+
+Both maps are **generated once** from the `errors:` block at elaboration time.
 
 ### Events
 
@@ -377,81 +456,26 @@ Linear types enforce that certain values representing **permissions, obligations
 
 Linearity is enforced at the **AST level by a linearity check pass**, not by Lean's type system (which does not support linear types natively). The pass runs after macro expansion, before IR generation.
 
-The algorithm: for each function body, track each variable of a linear type. Verify it appears on exactly one branch of every control flow path — neither dropped (used zero times on some path) nor duplicated (used more than once). Report positioned errors for violations.
+At the IR level and below, linear types are **completely erased**. See [extensions/linear-types/README.md](extensions/linear-types/README.md) for the full algorithm, permission rules, and proof ergonomics.
 
-At the IR level and below, linear types are **completely erased**. A `FlashLoanReceipt` compiles to a boolean storage slot. A `ReentrancyLock` compiles to the existing `locked` field. The type existed only to constrain what the programmer could express.
+### The Linear Type Library (v1)
 
-### The Linear Type Library
+Each type is documented in its own file under [extensions/linear-types/](extensions/linear-types/):
 
-The framework ships the following linear types. Each one eliminates a named category of proof obligations.
+| Type | Eliminates (summary) | Doc |
+|------|----------------------|-----|
+| `TokenAmount` | Conservation, phantom minting | [TokenAmount.md](extensions/linear-types/TokenAmount.md) |
+| `Allowance` | `transferFrom` over-spend | [Allowance.md](extensions/linear-types/Allowance.md) |
+| `FlashLoanReceipt` | Unrepaid flash loans | [FlashLoanReceipt.md](extensions/linear-types/FlashLoanReceipt.md) |
+| `ReentrancyLock` | Unlocked external calls | [ReentrancyLock.md](extensions/linear-types/ReentrancyLock.md) |
+| `Capability` | `only_X_can_do_Y` theorems | [Capability.md](extensions/linear-types/Capability.md) |
+| `OracleReading` | Stale oracle prices | [OracleReading.md](extensions/linear-types/OracleReading.md) |
+| `WithdrawalRequest` | CEI ordering violations | [WithdrawalRequest.md](extensions/linear-types/WithdrawalRequest.md) |
+| `PositionTicket` | Unresolved debt positions | [PositionTicket.md](extensions/linear-types/PositionTicket.md) |
 
-#### `TokenAmount`
+`TwoPartyAgreement` is a v2 extension — see [TwoPartyAgreement.md](extensions/linear-types/TwoPartyAgreement.md).
 
-Represents custody of fungible tokens. Cannot be constructed from a raw `UInt256` by user code — only created via `tokenMint` (restricted to functions with `canMint` permission) or received from an external call interface. Cannot be implicitly dropped.
-
-Operations: `split`, `merge`, `burn` (restricted). No `add`, no `sub` — you must split and merge explicitly.
-
-Eliminates: `transfer_conserves_balances`, `no_phantom_minting`.
-
-Compiles to: `UInt256` value in Yul.
-
-#### `Allowance`
-
-Represents a granted permission to spend tokens on behalf of another address. Created by `Allowance.grant`. Consumed by `Allowance.consume` which returns the remainder. Cannot exceed granted amount by construction (`h : amount ≤ a.value` in the consume signature).
-
-Eliminates: `transferFrom_cannot_exceed_allowance`.
-
-Compiles to: storage slot holding remaining allowance value.
-
-#### `FlashLoanReceipt`
-
-Represents an outstanding flash loan obligation. Created by `FlashLoan.borrow`. Must be consumed by `FlashLoan.repay` — no other consumer exists. Any function that borrows must repay on all code paths or the linearity check fails.
-
-Eliminates: `flashloan_always_repaid`.
-
-Compiles to: boolean storage slot `loan_outstanding`.
-
-#### `ReentrancyLock`
-
-Represents exclusive execution access. Created by `Lock.acquire`. Must be passed to `externalCall` (the only way to make external calls). Released by `Lock.release`. Cannot acquire a second lock while holding one (the acquire checks `locked = false` and sets it to `true`).
-
-Eliminates: `external_calls_always_locked`, `no_reentrant_call_succeeds`.
-
-Compiles to: the `locked : Bool` field in `ContractState`.
-
-#### `Capability`
-
-Represents a verified permission (e.g., admin rights). Created by the framework based on `caller` identity check. Passed to privileged functions as a required argument — those functions cannot be called without one.
-
-Eliminates: all `only_X_can_do_Y` theorems.
-
-Compiles to: nothing in Yul (the identity check was already performed when the capability was created; the capability itself has no runtime representation).
-
-#### `OracleReading`
-
-Represents a fresh price reading. Created by `Oracle.fetch` which internally checks the reading's timestamp against a `maxAge` parameter. Consumed by `Oracle.consume` which returns the price as `UInt256`. Cannot be reused across transactions.
-
-Eliminates: `price_is_fresh`.
-
-Compiles to: `(UInt256, UInt256)` — price and timestamp.
-
-#### `WithdrawalRequest`
-
-Represents a staged withdrawal — state has been updated, funds have not yet moved. Created by `Withdrawal.stage` which updates internal accounting. Consumed by `Withdrawal.execute` which performs the external transfer. Enforces checks-effects-interactions order structurally.
-
-Eliminates: `state_updated_before_transfer`.
-
-Compiles to: a pending withdrawal storage record.
-
-#### `PositionTicket`
-
-Represents an open debt position. Created by `Position.open`. Must be consumed by either `Position.close` (requires full repayment, `h : repayment.value ≥ ticket.debt`) or `Position.liquidate` (requires proof of undercollateralization). Cannot be dropped.
-
-Eliminates: `bad_debt_impossible`, `positions_always_resolved`.
-
-Compiles to: position storage record (collateral, debt, owner).
-
----
+Storage reserves use `Wad`, not `TokenAmount`. `TokenAmount` wraps in-flight ERC20 custody during transactions only.
 
 ## 8. The World Model
 
@@ -498,15 +522,17 @@ structure BridgeWorld where
 
 ### Call Stack and msg.sender
 
-The `World` carries a call stack to correctly model `msg.sender` in nested calls:
+Concrete world types (e.g. `AMMWorld`) carry the call stack and ETH balances needed to model nested calls. The generic shape is:
 
 ```lean
 structure World (S : Type) (Env : Type) where
-  self      : ContractState S
-  env       : Env
-  msgStack  : List TxContext     -- top = current call context
+  self        : ContractState S
+  env         : Env
+  msgStack    : List TxContext
   ethBalances : Finmap Address UInt256
 ```
+
+Per-deployment types like `AMMWorld` embed `self`, external env fields (`token0`, `token1`), and implement [WorldSpec](#definition) for generic execution code.
 
 When your contract makes an external call, the framework pushes a new `TxContext` onto `msgStack` with `caller = your_contract_address`. When the call returns, it pops. User code reads `caller` from the top of the stack via the `ContractM.caller` primitive.
 
@@ -561,15 +587,17 @@ Each contract's storage is a plain Lean struct with typed fields:
 
 ```lean
 structure AMMStorage where
-  reserve0  : UInt256
-  reserve1  : UInt256
+  reserve0  : Wad
+  reserve1  : Wad
   lpSupply  : Wad
-  fee       : UInt256
+  fee       : Wad
   paused    : Bool
   owner     : Address
 ```
 
-At the proof level, reading and writing fields is handled by Lean's struct update syntax. Field independence (`set reserve0` does not affect `reserve1`) holds by `rfl` — no proof needed. This is alias-freedom by construction.
+Field-level invariants (`@monotonic`, `@bounded`, …) are optional decorators — see [extensions/TYPE-CONSTRAINTS.md](extensions/TYPE-CONSTRAINTS.md).
+
+At the proof level, reading and writing fields is handled by Lean's struct update syntax (`s.storage.field`, `s'.storage.field`). In contract source, reads and writes use **`$.field`** and **`$.field := val`** exclusively. Field independence (`$.reserve0 := v` does not affect `$.reserve1`) holds by `rfl` — no proof needed. This is alias-freedom by construction.
 
 ### Mappings
 
@@ -618,63 +646,93 @@ These three axioms are the complete statement of "storage is alias-free." All se
 
 ### Principles
 
-- No implicit overflow. Every arithmetic operation forces an explicit choice about overflow behavior.
-- No implicit precision loss. Fixed-point operations use appropriate intermediate precision.
-- Operations that can fail return `Except Err` where `Err` is the contract's error type.
+- Plain `+ - * /` on `UInt256` / `Wad` / `Ray` is a **parse/type error** in contract bodies.
+- Every operation picks an explicit family: checked (`?`), wrapping (`↻`), or fixed-point rounding (bracket pairs).
+- Checked and bracket-pair ops live in **`ContractM`** and revert via `ContractErrors.arith`.
+- Core arithmetic uses `ArithError` in `Core/Arithmetic.lean`; `@math` functions use `Except ArithError` and lift with `.orRevert` at call sites. Decorator violations use `ConstraintViolated` (see [TYPE-CONSTRAINTS.md](extensions/TYPE-CONSTRAINTS.md)).
 
-### UInt256 Operations
+Heavy `@math` functions, ℝ specs, and proof patterns: [extensions/MATH.md](extensions/MATH.md).
+
+### Three operator families (contract surface)
+
+Borrowed from [spec_idea_1/lsc-spec.md §2.5–§2.7](../spec_idea_1/lsc-spec.md).
+
+#### Family A — Checked (`?`) — default
+
+| Op | Syntax | Returns |
+|----|--------|---------|
+| Add | `a +? b` | `ContractM … UInt256` — `n +? 1` accepts `Nat` literal rhs |
+| Sub | `a -? b` | `ContractM … UInt256` |
+| Mul | `a *? b` | `ContractM … UInt256` |
+| Div | `a /? b` | `ContractM … UInt256` — trunc toward zero; div/0 reverts |
+
+`Wad`/`Ray` add/sub use the same `+?`/`-?` (scale-preserving checked ops).
+
+#### Family B — Wrapping (`↻`) — intentional mod-2²⁵⁶
+
+| Op | Syntax | Returns |
+|----|--------|---------|
+| Add | `a +↻ b` | `UInt256` (pure, not `ContractM`) |
+| Sub | `a -↻ b` | `UInt256` |
+| Mul | `a *↻ b` | `UInt256` |
+
+Rare in DeFi; available when mod-2²⁵⁶ is deliberate (not a silent fallback).
+
+#### Family C — Fixed-point rounding (bracket pairs + `?`)
+
+**No default `wadMul`/`rayMul`** — rounding direction must be explicit.
+
+| Rounding | Mul | Div |
+|----------|-----|-----|
+| Down | `a ⌊*⌋? b` | `a ⌊/⌋? b` |
+| Up | `a ⌈*⌉? b` | `a ⌈/⌉? b` |
+| Half-up | `a ⸢*⸣? b` | `a ⸢/⸣? b` |
+
+Bracket characters: `⌊⌋` down, `⌈⌉` up, `⸢⸣` half-up (LSC convention). Scale from `open scoped Lsc.Wad` or `open scoped Lsc.Ray` — do **not** open both in one file. All bracket-pair ops return `ContractM … Wad` (or `Ray`) and revert on overflow.
+
+```lean
+open scoped Lsc.Wad
+let out ← (amountIn ⸢*⸣? $.reserve1) ⌊/⌋? ($.reserve0 +? amountIn)
+```
+
+### UInt256 Operations (framework internals)
 
 ```lean
 namespace UInt256
-  -- checked: returns error on overflow
-  def addChecked  : UInt256 → UInt256 → Except FrameworkError UInt256
-  def subChecked  : UInt256 → UInt256 → Except FrameworkError UInt256
-  def mulChecked  : UInt256 → UInt256 → Except FrameworkError UInt256
-
-  -- wrapping: explicit modular arithmetic
+  def addChecked  : UInt256 → UInt256 → Except ArithError UInt256
+  def subChecked  : UInt256 → UInt256 → Except ArithError UInt256
+  def mulChecked  : UInt256 → UInt256 → Except ArithError UInt256
   def addWrapping : UInt256 → UInt256 → UInt256
   def subWrapping : UInt256 → UInt256 → UInt256
-
-  -- saturating: clamp to min/max
-  def addSaturating : UInt256 → UInt256 → UInt256
-
-  -- division: EVM truncates toward zero
-  def divFloor    : UInt256 → UInt256 → Except FrameworkError UInt256  -- errors on div/0
-
-  -- full-precision multiply-then-divide with 512-bit intermediate
-  -- critical for AMM math (Uniswap-style mulDiv)
-  def mulDiv      : UInt256 → UInt256 → UInt256 → Except FrameworkError UInt256
+  def mulWrapping : UInt256 → UInt256 → UInt256
+  def divFloor    : UInt256 → UInt256 → Except ArithError UInt256
+  def mulDiv      : UInt256 → UInt256 → UInt256 → Except ArithError UInt256
 end UInt256
 ```
+
+Contract surface uses `+?`/`+↻`/bracket pairs; these named functions appear in proofs via `@[simp]` bridge lemmas.
 
 ### Fixed-Point Types: Wad and Ray
 
 ```lean
--- 1 Wad = 1e18. Represents a decimal with 18 places.
 structure Wad where raw : UInt256
-
--- 1 Ray = 1e27. Represents a decimal with 27 places.
 structure Ray where raw : UInt256
 
 namespace Wad
   def WAD : UInt256 := 1_000_000_000_000_000_000
 
-  def mul (a b : Wad) : Except FrameworkError Wad :=
-    (UInt256.mulDiv a.raw b.raw WAD).map Wad.mk
+  def mulDown | mulUp | mulHalfUp : Wad → Wad → Except ArithError Wad
+  def divDown | divUp | divHalfUp : Wad → Wad → Except ArithError Wad
+  def toRay (w : Wad) : Ray := ⟨w.raw * 1_000_000_000⟩
 
-  def div (a b : Wad) : Except FrameworkError Wad :=
-    (UInt256.mulDiv a.raw WAD b.raw).map Wad.mk
-
-  def toRay (w : Wad) : Ray := ⟨w.raw * 1_000_000_000⟩  -- exact
-
-  -- Key theorems (proved once, available to all users):
-  theorem mul_comm (a b : Wad) : Wad.mul a b = Wad.mul b a
-  theorem mul_le_left (a b : Wad) (h : b.raw ≤ WAD) :
-      ∀ r, Wad.mul a b = .ok r → r.raw ≤ a.raw
+  theorem mulHalfUp_comm (a b : Wad) : Wad.mulHalfUp a b = Wad.mulHalfUp b a
+  theorem mulHalfUp_le_left (a b : Wad) (h : b.raw ≤ WAD) :
+      ∀ r, Wad.mulHalfUp a b = .ok r → r.raw ≤ a.raw
 end Wad
+-- Ray namespace: same six rounding variants (scale RAY = 10²⁷)
 ```
 
-Users write `price.mul amount` instead of `price * amount / 1e18`. The precision model is part of the type, not implicit. AMM invariant theorems are stated in terms of `Wad` and `Ray` operations, making them easier to read and prove.
+Contract authors write `a ⸢*⸣? b` (half-up mul), not `a.wadMul b`. AMM invariant theorems unfold bracket ops to `Wad.mulHalfUp`, `Wad.divDown`, etc.
 
 ---
 
@@ -772,100 +830,35 @@ theorem increment_errors_when_paused ...
 
 A theorem should state exactly the hypotheses it needs — no more. If a theorem about `increment` doesn't need the `owner` field, `owner` should not appear in its statement. Use `HonestWorld` and similar bundles only when the theorem genuinely needs all bundled assumptions.
 
+### Optional: auditor-facing specifications
+
+For teams that want spec/proof separation, an optional `contract_spec` syntax produces human-readable proposition files. Not required for v1. See [extensions/CONTRACT-SPEC.md](extensions/CONTRACT-SPEC.md).
+
 ---
 
 ## 13. Reference: The Pausable Counter
 
-The minimal reference contract. Every framework feature should be exercised by this contract before any DeFi contract is attempted.
+Minimal acceptance-test contract exercising storage, errors, events, access control, and proof ergonomics. **Canonical source, theorem list, and proof techniques**: [reference/COUNTER.md](reference/COUNTER.md).
 
-```lean
-contract Counter where
-  storage:
-    number : UInt256 := 0
-    paused : Bool    := false
-    owner  : Address
-
-  errors:
-    | Paused | NotOwner | Overflow
-
-  events:
-    | Incremented (n : UInt256)
-    | Paused | Unpaused
-
-  def increment : Tx := do
-    require (¬ storage.paused) .Paused
-    let n ← storage.number.addChecked 1 |>.orRevert .Overflow
-    storage.number := n
-    emit (.Incremented n)
-
-  def pause : Tx := do
-    require (caller == storage.owner) .NotOwner
-    require (¬ storage.paused) .Paused
-    storage.paused := true
-    emit .Paused
-
-  def unpause : Tx := do
-    require (caller == storage.owner) .NotOwner
-    require storage.paused .Paused
-    storage.paused := false
-    emit .Unpaused
-```
-
-Required theorems (these must all be provable by `simp` + `omega` + at most 5 lines):
-
-```lean
-theorem increment_increases_number_when_not_paused ...
-theorem increment_errors_when_paused ...
-theorem increment_does_not_change_paused ...
-theorem increment_does_not_change_owner ...
-theorem increment_emits_incremented ...
-theorem pause_sets_paused_when_owner ...
-theorem pause_errors_when_not_owner ...
-theorem pause_errors_when_already_paused ...
-theorem unpause_clears_paused_when_owner ...
-```
+---
 
 ## 14. Reference: The Constant Product AMM
 
-The target DeFi contract that validates the full design. Must exercise: `Wad`/`Ray` math, `TokenAmount` linear type, `IERC20` external interface, `HonestWorld` assumptions, `ReentrancyLock`, multi-field storage, and conservation invariants.
-
-Key required theorems:
-
-```lean
--- Core AMM invariant
-theorem swap_preserves_k
-    [HonestWorld AMMWorld] ... :
-    w'.reserve0 * w'.reserve1 ≥ w.reserve0 * w.reserve1
-
--- No value created from nothing
-theorem addLiquidity_conserves_tokens
-    [HonestWorld AMMWorld] ... :
-    totalTokensIn w' = totalTokensIn w + deposited
-
--- Reentrancy impossibility  
-theorem swap_not_reentrant ... :
-    ∀ reentrantCall, reentrantCall.reverts
-
--- Access control
-theorem setFee_requires_owner (cap : Capability .Owner) ... :
-    setFee fee cap s = .ok ...  -- can only succeed with capability
-```
+Target DeFi contract exercising `Wad`/`Ray` math, `TokenAmount`, IERC20, `HonestWorld`, `ReentrancyLock`, and conservation invariants. **Canonical storage model, swap flow, and required theorems**: [reference/AMM.md](reference/AMM.md).
 
 ---
 
 ## Appendix A: What Is Not in This Document
 
-The following are **implementation details** left to the implementer:
+The following are covered in [IMPLEMENTATION.md](IMPLEMENTATION.md) rather than here:
 
-- Specific Lean module structure and file organization
+- Lean module structure and file organization
 - Exact `macro_rules` syntax for the source DSL
 - EvmYulLean API usage details
 - ABI encoding implementation
-- Selector computation (standard `keccak256` of signature string)
-- `Finmap` library choice (Mathlib vs custom)
+- Selector computation
+- `Finmap` library choice
 - Test harness structure for Yul conformance tests
-
-These should be decided during implementation based on what Lean's ecosystem provides at that time.
 
 ## Appendix B: Relationship to Prior Work
 
