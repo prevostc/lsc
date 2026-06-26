@@ -1,8 +1,6 @@
-# Formally Verified EVM Smart Contract Language — Design Document
+# LSC — Design Document
 
-> **Purpose**: This document is the single authoritative reference for all design decisions. It is intended for developers implementing the system and reviewers evaluating the design. Every significant decision is stated explicitly with its rationale. No prior knowledge of formal verification is assumed, but familiarity with Lean 4 and EVM internals is expected.
->
-> **Documentation set**: See [README.md](README.md) for reading order. Extensions live in `extensions/` (linear types, type constraints, math, optional contract spec). Canonical examples are in `reference/`.
+> **Purpose**: Single authoritative reference for all design decisions. Intended for implementers and reviewers. Every significant decision is stated with its rationale. Familiarity with Lean 4 and EVM internals is expected.
 
 ---
 
@@ -11,61 +9,59 @@
 ### Goals
 
 - Allow DeFi developers to write smart contracts with **machine-checked formal proofs** of safety properties (no reentrancy, no value loss, access control, conservation invariants).
-- Produce **EVM-deployable bytecode** from those contracts via an auditable, explicit compilation path.
-- Make proofs **tractable**: a typical safety theorem should be provable with `simp` + `omega` or a short LLM-assisted proof. If a straightforward property requires more than ~10 lines of proof, the definitions are wrong.
-- Replace or significantly reduce the need for manual security audits by providing a stronger, foundational guarantee.
+- Produce **EVM-deployable bytecode** via an auditable, explicit compilation path.
+- Make proofs **tractable**: a typical safety theorem should close with `simp` + `omega` or a short LLM-assisted proof.
+- Replace or significantly reduce the need for manual security audits.
 
 ### Non-Goals
 
-- General-purpose smart contract language. This is a **restricted, DeFi-oriented language**. Features that cannot be proved about are excluded.
+- General-purpose smart contract language. This is a **restricted, DeFi-oriented** language.
 - Gas optimality. Gas inefficiency is acceptable in exchange for provability.
-- Verifying existing Solidity/Vyper contracts. This is a new language, not a verifier for existing ones.
-- Full compiler correctness proof in v1. The compilation path is **auditable and tested**, not fully proved end-to-end initially.
-
-### The Guarantee
-
-> *Your contract logic is proved correct at the semantic level. The compilation to EVM bytecode is faithful by construction, with an explicit and auditable trusted layer. Proofs are tractable: you state what your contract should do as Lean propositions, and the proof follows structurally from the contract definition.*
+- Verifying existing Solidity/Vyper contracts.
+- Full compiler correctness proof in v1 (see §11 for what is and isn't proved).
 
 ---
 
-## 2. Architecture Overview
+## 2. Architecture and Trust Boundary
 
 ```
-┌─────────────────────────────────────────────────────┐
-│  Source  (Lean macros / syntax extension)           │  ← user writes this
-├─────────────────────────────────────────────────────┤
-│  AST     (inductive Lean types)                     │  ← macro output
-│  + Linearity check pass                             │
-│  + DAG check pass (no recursion)                    │
-│  + Selector collision check                         │
-├─────────────────────────────────────────────────────┤
-│  ContractM semantics  (state monad)                 │  ← proofs live here
-│  auto-derived from AST via Stmt.eval                │
-├─────────────────────────────────────────────────────┤
-│  IR  (flat, explicit, no sugar)                     │
-├─────────────────────────────────────────────────────┤
-│  Yul  (EvmYulLean's Yul.Program type)               │  ← trusted boundary
-├─────────────────────────────────────────────────────┤
-│  EVM bytecode  (via EvmYulLean)                     │  ← trusted
-└─────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────┐
+│  Source  (Lean macros / syntax extension)        │  ← user writes this
+├──────────────────────────────────────────────────┤
+│  AST     (inductive Lean types)                  │  ← macro output (pure data)
+│  + Linearity check pass                          │
+│  + DAG check pass (no recursion)                 │
+│  + Selector collision check                      │
+├──────────────────────────────────────────────────┤
+│  ContractM semantics  (state monad)              │  ← proofs live here
+│  auto-derived via Stmt.eval                      │
+├──────────────────────────────────────────────────┤
+│  IR  (flat, linear-types erased)                 │
+├──────────────────────────────────────────────────┤
+│  Yul  (EvmYulLean Yul.Program type)              │  ← trust boundary
+├──────────────────────────────────────────────────┤
+│  EVM bytecode  (via EvmYulLean)                  │  ← trusted
+└──────────────────────────────────────────────────┘
 ```
 
-### Trust Boundary
+### What is proved in v1
 
-Everything above the Yul layer is **formally proved in Lean**. The Yul emitter is **trusted but tested** against EvmYulLean's conformance suite. EvmYulLean itself is treated as ground truth (validated against 99.99% of Ethereum tests). Users can audit the Yul output directly — it is human-readable and generated deterministically.
+- Per-construct semantic preservation theorems (one per major `Stmt` constructor and per linear-type primitive). See §11.
+- All user-stated propositions about their contract functions, via the Lean kernel.
 
-The trust surface is:
-1. The Yul emitter (tested, not proved in v1)
-2. The `storageKey` injectivity axioms (see §9)
-3. EvmYulLean's EVM model
+### What is trusted in v1 (not proved)
+
+- The **Yul emitter**: generates `Yul.Program` values; tested against EvmYulLean's conformance suite but not proved.
+- The **`storageKey` injectivity axioms** (§9): tested, not proved.
+- **EvmYulLean** itself: treated as ground truth, validated against 99.99% of Ethereum tests.
+
+The end-to-end compilation correctness theorem (AST semantics match Yul execution for all inputs) is a **v2 goal**. The Yul output is human-readable and generated deterministically — users can audit it directly.
 
 ---
 
 ## 3. The Source Layer — Lean Macros
 
-### Design
-
-The user writes contracts using **Lean 4 syntax extensions** (`declare_syntax_cat` + `macro_rules`). There is no separate compilation step, no external toolchain. Everything is Lean.
+The user writes contracts using **Lean 4 syntax extensions** (`declare_syntax_cat` + `macro_rules`). There is no separate compiler, no external toolchain. Everything is Lean.
 
 ```lean
 contract Counter where
@@ -81,21 +77,19 @@ contract Counter where
 
   events:
     | Incremented (newValue : UInt256)
+    | Paused
+    | Unpaused
 
   def increment : Tx := do
-    require (!$.paused) else revert Paused;
+    require (¬ $.paused) else revert Paused;
     let n ← $.number +? 1;
     $.number := n;
     emit Incremented(n);
 ```
 
-**Storage access** uses a single prefix: `$.field` for reads, `$.field := val` for writes. Proofs use `s.storage.field` on `ContractState` snapshots — `$.` is author-facing DSL only.
+### What the macro generates
 
-Surface syntax (`require … else revert`, `msg.sender`, `+?`, bracket-pair rounding) is defined in [IMPLEMENTATION.md](IMPLEMENTATION.md). The macro lowers to `Stmt` nodes shown below.
-
-### What the Macro Generates
-
-The macro is **syntax-to-AST only**. It never validates, never errors on domain rules, never runs logic. It produces pure data:
+The macro is **syntax-to-AST only**: pure structural translation, no validation, no domain logic.
 
 ```lean
 -- 1. Storage struct
@@ -104,332 +98,176 @@ structure CounterStorage where
   paused : Bool    := false
   owner  : Address
 
--- 2. Error inductive + generated ContractErrors instance (strict 1:1 arith map)
+-- 2. Error inductive
 inductive CounterError | Paused | NotOwner | Overflow
 
-instance : ContractErrors CounterError where
-  arith := fun
-    | .Overflow => .Overflow
-    | .Underflow | .DivisionByZero => ContractErrors.unreachableArith
-    -- unreachableArith panics; validator proves these arms dead for +?-only bodies
-  fromFramework := fun
-    | .Reentrant     => .NotOwner
-    | .Unauthorized => .NotOwner
-
 -- 3. Event inductive
-inductive CounterEvent | Incremented (newValue : UInt256)
+inductive CounterEvent | Incremented (newValue : UInt256) | Paused | Unpaused
 
--- 4. AST value
-def Counter.increment.ast : Stmt := 
-  Stmt.seq
-    (Stmt.require (Expr.not (Expr.storageGet "paused")) (Expr.err .Paused))
-    (Stmt.seq
-      (Stmt.letBind "n" (Expr.addChecked (Expr.storageGet "number") (Expr.lit 1)))
-      (Stmt.seq
-        (Stmt.storageSet "number" (Expr.var "n"))
-        (Stmt.emit (Expr.event .Incremented [Expr.var "n"]))))
+-- 4. AST value (pure data, used by compiler)
+def Counter.increment.ast : Stmt := Stmt.seq ...
 
--- 5. ContractM semantics (auto-derived, not macro-generated)
+-- 5. ContractM definition (semantic ground truth for proofs)
 def Counter.increment : ContractM CounterStorage CounterEvent CounterError Unit :=
   Stmt.eval Counter.increment.ast
 ```
 
-Counter declares only `Overflow` because `increment` uses `+?` only. Elaboration **rejects** `-?` / `/?` unless matching `Underflow` / `DivByZero` variants exist in `errors:`. An AMM using `+?`, `-?`, and `⌊/⌋?` declares all three:
+The definitional equality `Counter.increment = Stmt.eval Counter.increment.ast` holds by `rfl`. This means proofs about `Counter.increment` and proofs about the AST are interchangeable at zero proof cost.
+
+### Validation and error reporting
+
+Domain validation (selector clashes, linearity violations, DAG violations) runs in an `elab_rules` elaboration step, not in `macro_rules`. This attaches errors to exact source positions via `Lean.logErrorAt`.
+
+### User workflow
 
 ```lean
-errors:
-  | Overflow
-  | Underflow
-  | DivByZero
+-- Write the contract (macro expands automatically on file load)
+-- Write proofs in the same file or a sibling file
 
-instance : ContractErrors AMMError where
-  arith := fun
-    | .Overflow       => .Overflow
-    | .Underflow      => .Underflow
-    | .DivisionByZero => .DivByZero
-  fromFramework := ...
+#check Counter.increment.ast     -- inspect the AST
+#eval  Counter.increment.ast.toYul  -- generate Yul
+#eval  Counter.increment.ast.toABI  -- generate ABI JSON
 ```
 
-The user writes proofs against `Counter.increment` (the ContractM version). The AST version exists for the compiler. The connection is definitional: `Counter.increment = Stmt.eval Counter.increment.ast` holds by `rfl`.
-
-### Error Reporting
-
-Domain-specific validation (selector clashes, linearity violations, DAG violations) runs in an `elab_rules` elaboration step, not in `macro_rules`. This gives access to `Lean.logErrorAt : Syntax → String → CommandElabM Unit`, which attaches errors to exact source positions and displays them in the IDE at the relevant line.
-
-```lean
-elab_rules : command
-  | `(contract $name where $body) => do
-    let def ← parseContractDef body
-    match validateContract def with
-    | .error (pos, msg) => Lean.logErrorAt pos msg; return
-    | .ok validated     => generateDefinitions validated
-```
-
-Type errors in generated Lean code surface as normal Lean type errors, which are generally readable.
-
-### User Workflow
-
-```lean
--- Write the contract (macro expands automatically)
--- Write proofs in the same file or a separate file
--- #check Counter.increment.ast     -- inspect the AST
--- #eval  Counter.increment.ast.toYul  -- generate Yul
--- #eval  Counter.increment.ast.toABI  -- generate ABI JSON
--- The Lean kernel validates all proofs on file load
-```
-
-No build system, no CLI, no external compiler. Everything is a Lean command.
+No build system, no CLI, no separate compiler invocation.
 
 ---
 
 ## 4. The AST Layer
 
-### Core Types
+### Core types
 
 ```lean
 inductive Ty
   | uint256 | bool | address
-  | wad | ray                    -- fixed-point numeric types
-  | tokenAmount                  -- linear type (see §7)
-  | mapping (k v : Ty)           -- opaque, no user iteration
-  | struct (fields : List (Ident × Ty))
+  | wad | ray
+  | tokenAmount             -- linear type
+  | mapping (k v : Ty)     -- opaque; no iteration exposed
 
 inductive Expr : Ty → Type
-  | lit      : UInt256 → Expr .uint256
-  | litBool  : Bool → Expr .bool
-  | var      : Ident → Expr t
-  | storageGet : Ident → Expr t
-  -- UInt256 checked (+? -? *? /?) — failures map ArithError → Err via ContractErrors.arith
+  | lit         : UInt256 → Expr .uint256
+  | litBool     : Bool → Expr .bool
+  | var         : Ident → Expr t
+  | storageGet  : Ident → Expr t
+  -- Arithmetic — always explicit about overflow and rounding
   | addChecked  : Expr .uint256 → Expr .uint256 → Expr .uint256
-  | subChecked  : Expr .uint256 → Expr .uint256 → Expr .uint256
-  | mulChecked  : Expr .uint256 → Expr .uint256 → Expr .uint256
-  | divFloor    : Expr .uint256 → Expr .uint256 → Expr .uint256
-  -- UInt256 wrapping (+↻ -↻ *↻) — pure, intentional mod-2²⁵⁶
   | addWrapping : Expr .uint256 → Expr .uint256 → Expr .uint256
-  | subWrapping : Expr .uint256 → Expr .uint256 → Expr .uint256
-  | mulWrapping : Expr .uint256 → Expr .uint256 → Expr .uint256
   | mulDiv      : Expr .uint256 → Expr .uint256 → Expr .uint256 → Expr .uint256
-  -- Wad fixed-point (⌊*⌋? ⸢*⸣? ⌊/⌋? … — no default wadMul)
-  | wadMulDown | wadMulUp | wadMulHalfUp
-  | wadDivDown | wadDivUp | wadDivHalfUp
-  -- Ray fixed-point (same rounding variants)
-  | rayMulDown | rayMulUp | rayMulHalfUp
-  | rayDivDown | rayDivUp | rayDivHalfUp
-  -- logic
-  | not  : Expr .bool → Expr .bool
-  | and  : Expr .bool → Expr .bool → Expr .bool
-  | eq   : Expr t → Expr t → Expr .bool
-  | lt   : Expr .uint256 → Expr .uint256 → Expr .bool
-  -- context (implicit tx context, read-only)
-  | caller    : Expr .address
-  | callvalue : Expr .uint256
-  | timestamp : Expr .uint256
-  -- linear type operations (see §7)
-  | tokenMint   : Expr .uint256 → Expr .tokenAmount  -- restricted
-  | tokenBurn   : Expr .tokenAmount → Expr .uint256  -- restricted
+  | wadMulHalfUp | wadMulDown | wadDivDown | wadDivHalfUp   -- Wad variants
+  | rayMulHalfUp | rayMulDown | rayDivDown | rayDivHalfUp   -- Ray variants
+  -- Context (read-only, populated by dispatcher)
+  | caller | callvalue | timestamp
+  -- Linear type operations
+  | tokenMint   : Expr .uint256 → Expr .tokenAmount
+  | tokenBurn   : Expr .tokenAmount → Expr .uint256
   | tokenSplit  : Expr .tokenAmount → Expr .uint256 → Expr (.tokenAmount × .tokenAmount)
   | tokenMerge  : Expr .tokenAmount → Expr .tokenAmount → Expr .tokenAmount
-  -- mapping (no iteration exposed)
+  -- Mappings
   | mappingGet  : Expr (.mapping k v) → Expr k → Expr v
-  | mappingSet  : Expr (.mapping k v) → Expr k → Expr v → Expr (.mapping k v)
 
 inductive Stmt
-  | skip
-  | seq         : Stmt → Stmt → Stmt
-  | letBind     : Ident → Expr t → Stmt
-  | storageSet  : Ident → Expr t → Stmt
-  | require     : Expr .bool → Expr t → Stmt   -- second arg is error value
-  | ifThenElse  : Expr .bool → Stmt → Stmt → Stmt
-  | call        : Ident → List (Sigma Expr) → Stmt  -- internal call by name
-  | externalCall: Ident → Ident → List (Sigma Expr) → Stmt  -- interface, method, args
-  | emit        : Expr t → Stmt
-  | revert      : Expr t → Stmt
+  | skip | seq : Stmt → Stmt → Stmt
+  | letBind    : Ident → Expr t → Stmt
+  | storageSet : Ident → Expr t → Stmt
+  | require    : Expr .bool → Ident → Stmt   -- Ident is error variant name
+  | ifThenElse : Expr .bool → Stmt → Stmt → Stmt
+  | emit       : Ident → List (Sigma Expr) → Stmt
+  | revert     : Ident → Stmt
+  | call       : Ident → List (Sigma Expr) → Stmt
+  | externalCall : Ident → Ident → List (Sigma Expr) → Stmt
 ```
 
-### What Is Excluded
+### Deliberate exclusions
 
-No raw memory access, no inline assembly, no `delegatecall`, no `selfdestruct`, no recursion, no dynamic dispatch, no raw `keccak256` calls, no direct storage slot access, no loops without termination measures (v1: no loops at all; add bounded loops in v2).
+No raw memory access, no inline assembly, no `delegatecall`, no `selfdestruct`, no recursion, no dynamic dispatch, no raw `keccak256`, no direct slot access, no loops (v1; bounded loops with invariants in v2).
 
 ---
 
 ## 5. The ContractM Semantics Layer
 
-### Definition
-
 ```lean
+-- S = storage struct, E = event type, Err = error type, A = return value
 def ContractM (S E Err : Type) (A : Type) : Type :=
   ContractState S → Except Err (A × ContractState S × List E)
-```
-
-`S` is the contract-specific storage struct. `E` is the contract-specific event type. `Err` is the contract-specific error type. `A` is the return value. `List E` is the list of events emitted during execution — implicit in source syntax, explicit in Lean.
-
-### ContractState
-
-```lean
-structure TxContext where
-  caller    : Address
-  callvalue : UInt256
-  timestamp : UInt256
-  origin    : Address  -- tx.origin, available but use discouraged
 
 structure ContractState (S : Type) where
-  storage  : S
-  context  : TxContext
-  locked   : Bool      -- reentrancy guard, framework-managed
+  storage : S
+  context : TxContext
+  locked  : Bool := false    -- reentrancy guard; never accessible to user code
 ```
 
-`locked` is never directly accessible to user code. It is managed exclusively by the framework's external call primitives.
+`List E` (emitted events) is implicit in source syntax, explicit in Lean proofs and theorems.
 
-### ContractBase
+### Required `@[simp]` lemmas
 
-Rather than a typeclass, every contract state is a concrete instantiation of `ContractBase`:
-
-```lean
-abbrev ContractBase (S E Err : Type) := ContractState S
--- E and Err appear in ContractM's type, not in state
-```
-
-Framework lemmas are stated over `ContractM S E Err` with explicit type variables. User theorems are stated over their concrete types (e.g., `CounterStorage`, `CounterEvent`, `CounterError`).
-
-### Monad Operations with `@[simp]` Lemmas
-
-Every primitive monad operation must have a corresponding `@[simp]` lemma so that `simp [runS, myFunction, ...]` reduces proof goals automatically:
+Every primitive monad operation must have a `@[simp]` lemma:
 
 ```lean
 @[simp] theorem runS_pure   ...
 @[simp] theorem runS_bind   ...
 @[simp] theorem runS_get    ...
-@[simp] theorem runS_set    ...
+@[simp] theorem runS_modifyStorage ...
 @[simp] theorem runS_emit   ...
 @[simp] theorem runS_require_true  ...
 @[simp] theorem runS_require_false ...
 @[simp] theorem runS_revert ...
 ```
 
-If a proof of a straightforward property cannot be closed by `simp [runS, theFunction, ...]` followed by `omega`, the simp lemma set is incomplete — add lemmas until it can.
-
-### Deriving ContractM from AST
-
-```lean
--- Framework provides this once
-def Stmt.eval (s : Stmt) : ContractM S E Err Unit := ...
-
--- Macro generates AST, framework derives semantics
-def Counter.increment : ContractM CounterStorage CounterEvent CounterError Unit :=
-  Stmt.eval Counter.increment.ast
-
--- Connection is definitional
-theorem Counter.increment.eval_correct :
-    Counter.increment = Stmt.eval Counter.increment.ast := rfl
-```
+**Design invariant**: if a proof of a straightforward property cannot be closed by `simp [runS, theFunction, ...]` followed by `omega`, the simp lemma set is incomplete — add lemmas until it can.
 
 ---
 
 ## 6. Execution Model
 
-### Functions and Dispatch
+### Functions and dispatch
 
-Each contract declares a list of `FunctionDef`s. Entry points (`kind = .external`) are callable from outside. The ABI dispatcher is **generated by the framework** — users never write it. Users only write function bodies.
+Each `FunctionDef` has a `kind` (`external`, `internal`, `view`, `constructor`) and a `permits` list declaring which linear permissions it requires. The ABI dispatcher is **generated by the framework**; users never write it.
 
-```lean
-inductive FunctionKind
-  | external    -- ABI entry point
-  | internal    -- only callable within contract
-  | view        -- no storage mutation allowed (enforced by type)
-  | constructor -- runs at deployment, not callable after
+Selector collision is checked at elaboration time and reported as a positioned error.
 
-structure FunctionDef where
-  name       : Ident
-  kind       : FunctionKind
-  params     : List (Ident × Ty)
-  body       : Stmt
-  permits    : Finset LinearPermission  -- declared capabilities
+### No recursion — DAG enforcement
 
-inductive LinearPermission
-  | canMint (tokenType : Ident)
-  | canBurn (tokenType : Ident)
-  | canFlashBorrow
-```
+Recursive function calls are **banned in v1**. The call graph (built from `Stmt.call` nodes) must be a DAG. Checked at elaboration time. Every function call terminates by construction, which eliminates a large class of reentrancy patterns.
 
-The framework generates a Yul dispatcher that routes calls by 4-byte selector. Selector collision is checked at elaboration time and reported as a positioned error.
+### Arithmetic errors — strict 1:1 mapping
 
-### No Recursion — DAG Enforcement
+User error types must embed framework arithmetic errors via `ContractErrors.arith`. The mapping is **strict 1:1**:
 
-Recursive function calls are **banned in v1**. The call graph (built from `Stmt.call` nodes) must be a DAG. This is checked at elaboration time. Every function call terminates by structural argument. This eliminates the need for termination proofs and prevents a large class of reentrancy patterns.
+| `ArithError` variant | Required user error name |
+|----------------------|--------------------------|
+| `Overflow` | `Overflow` |
+| `Underflow` | `Underflow` |
+| `DivisionByZero` | `DivByZero` |
 
-Bounded loops may be added in v2 with explicit loop invariants as a language-level construct (the programmer supplies the invariant in source syntax).
-
-### Transaction Context
-
-`msg.sender`, `msg.value`, and `block.timestamp` are available as read-only framework primitives within `ContractM`. They are stored in `TxContext` which is populated at the start of each transaction by the dispatcher. Users never construct `TxContext` directly.
-
-### Reverts and Error Handling
+The elaborator checks that every `ArithError` variant reachable from operations in the contract body has a same-named entry in the `errors:` block. Collapsing multiple `ArithError` variants to one user error is a compile error. This makes every arithmetic operation an explicit proof obligation site.
 
 ```lean
--- Framework errors (reentrancy, auth, … — not arithmetic)
-inductive FrameworkError
-  | Reentrant
-  | Unauthorized
+-- Counter uses only +?; only Overflow is reachable → only Overflow required
+errors:
+  | Overflow
 
--- Core arithmetic failures (shared with @math Except layer)
-inductive ArithError
+-- AMM uses +?, -?, /?; all three are reachable → all three required
+errors:
   | Overflow
   | Underflow
-  | DivisionByZero
-
-/-- Generated per contract from the errors: block. -/
-class ContractErrors (Err : Type) where
-  arith         : ArithError → Err
-  fromFramework : FrameworkError → Err
+  | DivByZero
 ```
 
-Checked arithmetic (`+?`, `-?`, `*?`, `/?`, bracket-pair ops) lives in **`ContractM`**. On failure, eval calls `ContractM.revertArith ae`, which produces `.error (ContractErrors.arith ae)` — no error name in the AST, no `.orRevert` at each call site.
+`@math` functions called via `|>.orRevert` use the same `ContractErrors.arith` table — not a separate per-call argument.
 
-Elaboration generates `ContractErrors.arith` as a **strict 1:1 map** from each `ArithError` case to a same-named variant in `errors:` (`Overflow`, `Underflow`, `DivByZero`). No collapsing — `.Underflow` never maps to `.Overflow`. The validator only requires variants for `ArithError` cases **reachable** from ops used in the contract body (e.g. `+?` alone needs `Overflow`; adding `-?` requires `Underflow`). Unmapped reachable cases and unmapped `FrameworkError` cases are **compile errors**.
+### Framework errors
 
 ```lean
--- User code:
-let n ← $.number +? 1
--- On overflow: .error CounterError.Overflow  (= ContractErrors.arith .Overflow)
--- require … revert Paused: .error CounterError.Paused  (= revertUser, direct)
+class ContractErrors (Err : Type) where
+  arith         : ArithError → Err        -- strict 1:1 (see above)
+  fromFramework : FrameworkError → Err    -- reentrancy, unauthorized, etc.
 ```
 
-Pure `@math` functions return `Except ArithError`; lift once with `|>.orRevert` (uses `ContractErrors.arith`, same channel as `+?`). See [extensions/MATH.md](extensions/MATH.md).
-
-On revert, all storage changes and emitted events are discarded. This matches EVM semantics.
-
-**Wiring summary** (two channels, no name-guessing at eval time):
-
-```mermaid
-flowchart LR
-  subgraph arithPath [Arithmetic +? and @math]
-    core["UInt256.addChecked → Except ArithError"]
-    revA["ContractM.revertArith ae"]
-    mapA["ContractErrors.arith ae"]
-    errA[".error CounterError.Overflow"]
-    core --> revA --> mapA --> errA
-  end
-
-  subgraph fwPath [Framework]
-    fw["FrameworkError e.g. Reentrant"]
-    revF["ContractM.revert fe"]
-    mapF["ContractErrors.fromFramework fe"]
-    errF[".error CounterError.…"]
-    fw --> revF --> mapF --> errF
-  end
-
-  subgraph domain [Domain require]
-    req["require … revert Paused"]
-    revU["ContractM.revertUser .Paused"]
-    req --> revU
-  end
-```
-
-Both maps are **generated once** from the `errors:` block at elaboration time.
+On revert, all storage changes and emitted events are discarded (EVM semantics).
 
 ### Events
 
-Events are declared per contract as an inductive type. In source syntax, `emit` looks like a statement. In the ContractM type, events are implicit in the `List E` return component. Users only interact with events in proof statements:
+In source syntax, `emit` looks like a statement. In ContractM, events are the `List E` return component. Users interact with events only in theorem hypotheses:
 
 ```lean
 theorem increment_emits_incremented
@@ -438,52 +276,50 @@ theorem increment_emits_incremented
     log = [CounterEvent.Incremented s'.storage.number] := ...
 ```
 
-Events compile to raw EVM logs. The event inductive type is erased at the IR level; the compiler generates the ABI event signature and topic encoding. This is part of the trusted compilation layer.
-
-### Constructors and Deployment
-
-Each contract may declare one `constructor` function. Default field values in the storage struct are used if no constructor is declared. The constructor is not callable post-deployment. The ABI includes constructor parameter encoding. Storage layout is initialized at deployment by the generated dispatcher.
-
 ---
 
 ## 7. Linear Types
 
 ### Purpose
 
-Linear types enforce that certain values representing **permissions, obligations, or custody** are used exactly once per execution path. They eliminate entire categories of theorems that would otherwise need to be proved manually.
+Linear types enforce that certain values are used **exactly once** per execution path. They eliminate named categories of theorems that would otherwise need to be proved manually.
 
-### Enforcement Mechanism
+### Enforcement mechanism
 
-Linearity is enforced at the **AST level by a linearity check pass**, not by Lean's type system (which does not support linear types natively). The pass runs after macro expansion, before IR generation.
+Linearity is enforced at the **AST level** by a post-macro check pass, not by Lean's type system. The pass verifies each linear variable appears on exactly one branch of every control flow path — neither dropped nor duplicated. Violations are reported as positioned errors.
 
-At the IR level and below, linear types are **completely erased**. See [extensions/linear-types/README.md](extensions/linear-types/README.md) for the full algorithm, permission rules, and proof ergonomics.
+At the IR level and below, linear types are **completely erased**. A `FlashLoanReceipt` compiles to a boolean storage slot. The type existed only to constrain what the programmer could express.
 
-### The Linear Type Library (v1)
+### Linear type library
 
-Each type is documented in its own file under [extensions/linear-types/](extensions/linear-types/):
+Each linear type eliminates a named category of proof obligations:
 
-| Type | Eliminates (summary) | Doc |
-|------|----------------------|-----|
-| `TokenAmount` | Conservation, phantom minting | [TokenAmount.md](extensions/linear-types/TokenAmount.md) |
-| `Allowance` | `transferFrom` over-spend | [Allowance.md](extensions/linear-types/Allowance.md) |
-| `FlashLoanReceipt` | Unrepaid flash loans | [FlashLoanReceipt.md](extensions/linear-types/FlashLoanReceipt.md) |
-| `ReentrancyLock` | Unlocked external calls | [ReentrancyLock.md](extensions/linear-types/ReentrancyLock.md) |
-| `Capability` | `only_X_can_do_Y` theorems | [Capability.md](extensions/linear-types/Capability.md) |
-| `OracleReading` | Stale oracle prices | [OracleReading.md](extensions/linear-types/OracleReading.md) |
-| `WithdrawalRequest` | CEI ordering violations | [WithdrawalRequest.md](extensions/linear-types/WithdrawalRequest.md) |
-| `PositionTicket` | Unresolved debt positions | [PositionTicket.md](extensions/linear-types/PositionTicket.md) |
+| Type | Created by | Consumed by | Eliminates |
+|------|-----------|-------------|------------|
+| `TokenAmount` | `tokenMint` (restricted) or external receive | `tokenBurn`, `externalCall` | `transfer_conserves_balances`, `no_phantom_minting` |
+| `Allowance` | `Allowance.grant` | `Allowance.consume` (with `h : amount ≤ a.value`) | `transferFrom_cannot_exceed_allowance` |
+| `FlashLoanReceipt` | `FlashLoan.borrow` | `FlashLoan.repay` (only consumer) | `flashloan_always_repaid` |
+| `ReentrancyLock` | `Lock.acquire` | `Lock.release`; required by `externalCall` | `external_calls_always_locked` |
+| `Capability` | Framework identity check | Passed to privileged function | All `only_X_can_do_Y` theorems |
+| `OracleReading` | `Oracle.fetch` (checks timestamp) | `Oracle.consume` | `price_is_fresh` |
+| `WithdrawalRequest` | `Withdrawal.stage` | `Withdrawal.execute` | `state_updated_before_transfer` |
+| `PositionTicket` | `Position.open` | `Position.close` or `Position.liquidate` | `bad_debt_impossible` |
 
-`TwoPartyAgreement` is a v2 extension — see [TwoPartyAgreement.md](extensions/linear-types/TwoPartyAgreement.md).
+Detailed per-type specs: [extensions/linear-types/](extensions/linear-types/).
 
-Storage reserves use `Wad`, not `TokenAmount`. `TokenAmount` wraps in-flight ERC20 custody during transactions only.
+### Relationship to HonestWorld
+
+Linear types eliminate per-function obligations about **your contract's behavior**. `HonestWorld` (§8) eliminates per-theorem hypotheses about **external contracts' behavior**. Both are needed for cross-contract theorems like `swap_preserves_k`.
+
+---
 
 ## 8. The World Model
 
 ### Purpose
 
-The `World` models the full deployment context: your contract plus external contracts it interacts with. It is used for multi-contract theorems (e.g., AMM swap correctness depends on ERC20 token behavior).
+The `World` models the full deployment context — your contract plus external contracts it interacts with — for multi-contract theorems.
 
-### Definition
+### WorldSpec typeclass
 
 ```lean
 class WorldSpec (W : Type) where
@@ -492,153 +328,79 @@ class WorldSpec (W : Type) where
   getSelf : W → ContractState Self
   getEnv  : W → Env
   setSelf : W → ContractState Self → W
-  -- laws
+  -- roundtrip laws
   get_set : ∀ w s, getSelf (setSelf w s) = s
   set_get : ∀ w, setSelf w (getSelf w) = w
 ```
 
-`WorldSpec` is a typeclass because the execution engine (`runWorld`, external call dispatch) must be generic over deployment topology. Contract-specific theorems are stated over concrete world types.
+`WorldSpec` is a typeclass so the execution engine (`runWorld`, external call dispatch) can be generic over deployment topology.
 
-### Per-Deployment World Types
-
-Each deployment scenario defines its own concrete world:
+### Per-deployment worlds
 
 ```lean
 structure AMMWorld where
   self   : ContractState AMMStorage
   token0 : ERC20State
   token1 : ERC20State
-
-instance : WorldSpec AMMWorld where
-  Self := AMMStorage
-  Env  := AMMEnv  -- bundles token0, token1
-  ...
-
-structure BridgeWorld where
-  self    : ContractState BridgeStorage
-  token   : ERC20State
-  relayer : Unit  -- modeled abstractly
 ```
 
-### Call Stack and msg.sender
-
-Concrete world types (e.g. `AMMWorld`) carry the call stack and ETH balances needed to model nested calls. The generic shape is:
-
-```lean
-structure World (S : Type) (Env : Type) where
-  self        : ContractState S
-  env         : Env
-  msgStack    : List TxContext
-  ethBalances : Finmap Address UInt256
-```
-
-Per-deployment types like `AMMWorld` embed `self`, external env fields (`token0`, `token1`), and implement [WorldSpec](#definition) for generic execution code.
-
-When your contract makes an external call, the framework pushes a new `TxContext` onto `msgStack` with `caller = your_contract_address`. When the call returns, it pops. User code reads `caller` from the top of the stack via the `ContractM.caller` primitive.
-
-### External Contract Interfaces
-
-External contracts are modeled as **typed interfaces**, not concrete implementations:
-
-```lean
-class IERC20 (T : Type) where
-  balanceOf   : T → Address → UInt256
-  transfer    : Address → UInt256 → T → Except ExternalError T
-  transferFrom: Address → Address → UInt256 → T → Except ExternalError T
-  totalSupply : T → UInt256
-```
-
-The AMM's external calls are typed against `IERC20`. Theorems about the AMM are parameterized over any `T` that implements `IERC20`, conditional on honesty hypotheses.
-
-### Bundling Assumptions — `HonestWorld`
-
-Instead of threading individual hypotheses through every theorem, bundle them:
+### Bundling assumptions — HonestWorld
 
 ```lean
 class HonestWorld (W : Type) [WorldSpec W] where
-  token0_conserves  : transferConserves (getEnv w).token0
-  token1_conserves  : transferConserves (getEnv w).token1
-  oracle_fresh      : oracleAge (getEnv w).oracle ≤ MAX_STALENESS
+  token0_conserves   : transferConserves (getEnv w).token0
+  token1_conserves   : transferConserves (getEnv w).token1
+  oracle_fresh       : oracleAge (getEnv w).oracle ≤ MAX_STALENESS
   no_hostile_reentry : ∀ call, externalCallSafe call
-
--- theorem signature uses one instance instead of many hypotheses
-theorem swap_conserves_product
-    [HonestWorld AMMWorld]
-    (w w' : AMMWorld) (amountIn : UInt256) ... :
-    w'.self.storage.reserve0 * w'.self.storage.reserve1 ≥
-    w.self.storage.reserve0  * w.self.storage.reserve1 := ...
 ```
 
-Weaker partial variants can be defined for theorems that only rely on a subset of assumptions.
+Use `[HonestWorld AMMWorld]` instead of threading four individual hypotheses through every theorem.
 
-### Reentrancy in the World Model
+### Reentrancy in the world model
 
-During an external call: your contract's `locked` field is `true`. Any reentrant call into your contract hits the `ReentrancyLock` check and reverts before modifying your state. The external contract's state (in `env`) may change during the call. When control returns, your state is unchanged and the updated `env` is available.
-
-This must be explicitly modeled in the `runWorld` execution semantics. The theorem you get for free from `ReentrancyLock` is: if `locked = true` in `w.self`, any call to your contract reverts with `FrameworkError.Reentrant`.
+During an external call: `locked = true`. Any reentrant call into your contract reverts with `FrameworkError.Reentrant` before modifying state. The external contract's state in `env` may change; your state is unchanged when control returns.
 
 ---
 
 ## 9. Storage Model
 
-### Abstract Storage
-
-Each contract's storage is a plain Lean struct with typed fields:
+### Storage struct
 
 ```lean
 structure AMMStorage where
-  reserve0  : Wad
-  reserve1  : Wad
-  lpSupply  : Wad
-  fee       : Wad
-  paused    : Bool
-  owner     : Address
+  reserve0 : Wad
+  reserve1 : Wad
+  lpSupply : Wad
+  fee      : Wad
+  paused   : Bool
+  owner    : Address
 ```
 
-Field-level invariants (`@monotonic`, `@bounded`, …) are optional decorators — see [extensions/TYPE-CONSTRAINTS.md](extensions/TYPE-CONSTRAINTS.md).
-
-At the proof level, reading and writing fields is handled by Lean's struct update syntax (`s.storage.field`, `s'.storage.field`). In contract source, reads and writes use **`$.field`** and **`$.field := val`** exclusively. Field independence (`$.reserve0 := v` does not affect `$.reserve1`) holds by `rfl` — no proof needed. This is alias-freedom by construction.
+Field independence (`set reserve0` does not affect `reserve1`) holds by `rfl` — alias-free by construction.
 
 ### Mappings
 
-Mappings are exposed as an **opaque `Mapping k v` type** backed by `Finmap`:
-
 ```lean
-opaque Mapping (k v : Type) : Type
--- implemented as Finmap k v but opaque to users
+opaque Mapping (k v : Type) : Type   -- backed by Finmap, iteration deliberately excluded
 
 namespace Mapping
-  def get    : Mapping k v → k → v
-  def set    : Mapping k v → k → v → Mapping k v
-  def getD   : Mapping k v → k → v → v  -- with default
-  -- no toList, no fold, no iteration
+  def get  : Mapping k v → k → v
+  def set  : Mapping k v → k → v → Mapping k v
+  -- no toList, no fold, no filter
 end Mapping
 ```
 
-Iteration is deliberately excluded. Users cannot loop over a mapping. This prevents a class of gas griefing bugs and simplifies proofs (no need to reason about all keys). If a protocol genuinely needs global invariants over all mapping entries (e.g., sum of all balances), use **Option B: conservation proofs** (see §10).
+Excluding iteration prevents gas-griefing bugs and simplifies proofs. For sum-of-all-entries invariants (e.g. "total supply = sum of balances"), track the total separately and prove a conservation theorem instead.
 
-### Storage Layout Compilation
-
-The mapping from struct fields to EVM storage slots is handled by the trusted Yul emitter. The emitter assigns each field a deterministic slot index. For `Mapping k v`, the emitter uses `keccak256(abi.encode(key, slotIndex))` — standard Solidity layout.
-
-The following axioms are admitted (tested against EvmYulLean, not proved):
+### Storage layout axioms (trusted, not proved)
 
 ```lean
--- Fields map to distinct slots
-axiom storageKey_injective :
-    ∀ (f1 f2 : StorageField), f1 ≠ f2 → storageKey f1 ≠ storageKey f2
-
--- Mapping keys map to distinct slots
-axiom mappingKey_injective :
-    ∀ (slot : Nat) (k1 k2 : Word), k1 ≠ k2 →
-    mappingKey slot k1 ≠ mappingKey slot k2
-
--- Mapping slot does not collide with field slots
-axiom mappingKey_ne_storageKey :
-    ∀ slot k f, mappingKey slot k ≠ storageKey f
+axiom storageKey_injective  : ∀ f1 f2, f1 ≠ f2 → storageKey f1 ≠ storageKey f2
+axiom mappingKey_injective  : ∀ slot k1 k2, k1 ≠ k2 → mappingKey slot k1 ≠ mappingKey slot k2
+axiom mappingKey_ne_storageKey : ∀ slot k f, mappingKey slot k ≠ storageKey f
 ```
 
-These three axioms are the complete statement of "storage is alias-free." All separation lemmas in user proofs derive from these axioms. Keccak is never exposed to user code or user proofs.
+These three axioms are the complete statement of "storage is alias-free." All separation lemmas derive from them. Keccak is never exposed to user code or user proofs.
 
 ---
 
@@ -646,223 +408,171 @@ These three axioms are the complete statement of "storage is alias-free." All se
 
 ### Principles
 
-- Plain `+ - * /` on `UInt256` / `Wad` / `Ray` is a **parse/type error** in contract bodies.
-- Every operation picks an explicit family: checked (`?`), wrapping (`↻`), or fixed-point rounding (bracket pairs).
-- Checked and bracket-pair ops live in **`ContractM`** and revert via `ContractErrors.arith`.
-- Core arithmetic uses `ArithError` in `Core/Arithmetic.lean`; `@math` functions use `Except ArithError` and lift with `.orRevert` at call sites. Decorator violations use `ConstraintViolated` (see [TYPE-CONSTRAINTS.md](extensions/TYPE-CONSTRAINTS.md)).
+No implicit overflow. No implicit precision loss. Operations that can fail return `Except Err`.
 
-Heavy `@math` functions, ℝ specs, and proof patterns: [extensions/MATH.md](extensions/MATH.md).
-
-### Three operator families (contract surface)
-
-Borrowed from [spec_idea_1/lsc-spec.md §2.5–§2.7](../spec_idea_1/lsc-spec.md).
-
-#### Family A — Checked (`?`) — default
-
-| Op | Syntax | Returns |
-|----|--------|---------|
-| Add | `a +? b` | `ContractM … UInt256` — `n +? 1` accepts `Nat` literal rhs |
-| Sub | `a -? b` | `ContractM … UInt256` |
-| Mul | `a *? b` | `ContractM … UInt256` |
-| Div | `a /? b` | `ContractM … UInt256` — trunc toward zero; div/0 reverts |
-
-`Wad`/`Ray` add/sub use the same `+?`/`-?` (scale-preserving checked ops).
-
-#### Family B — Wrapping (`↻`) — intentional mod-2²⁵⁶
-
-| Op | Syntax | Returns |
-|----|--------|---------|
-| Add | `a +↻ b` | `UInt256` (pure, not `ContractM`) |
-| Sub | `a -↻ b` | `UInt256` |
-| Mul | `a *↻ b` | `UInt256` |
-
-Rare in DeFi; available when mod-2²⁵⁶ is deliberate (not a silent fallback).
-
-#### Family C — Fixed-point rounding (bracket pairs + `?`)
-
-**No default `wadMul`/`rayMul`** — rounding direction must be explicit.
-
-| Rounding | Mul | Div |
-|----------|-----|-----|
-| Down | `a ⌊*⌋? b` | `a ⌊/⌋? b` |
-| Up | `a ⌈*⌉? b` | `a ⌈/⌉? b` |
-| Half-up | `a ⸢*⸣? b` | `a ⸢/⸣? b` |
-
-Bracket characters: `⌊⌋` down, `⌈⌉` up, `⸢⸣` half-up (LSC convention). Scale from `open scoped Lsc.Wad` or `open scoped Lsc.Ray` — do **not** open both in one file. All bracket-pair ops return `ContractM … Wad` (or `Ray`) and revert on overflow.
-
-```lean
-open scoped Lsc.Wad
-let out ← (amountIn ⸢*⸣? $.reserve1) ⌊/⌋? ($.reserve0 +? amountIn)
-```
-
-### UInt256 Operations (framework internals)
+### UInt256 operations
 
 ```lean
 namespace UInt256
   def addChecked  : UInt256 → UInt256 → Except ArithError UInt256
   def subChecked  : UInt256 → UInt256 → Except ArithError UInt256
   def mulChecked  : UInt256 → UInt256 → Except ArithError UInt256
-  def addWrapping : UInt256 → UInt256 → UInt256
+  def addWrapping : UInt256 → UInt256 → UInt256   -- never fails; pure mod-2²⁵⁶
   def subWrapping : UInt256 → UInt256 → UInt256
   def mulWrapping : UInt256 → UInt256 → UInt256
   def divFloor    : UInt256 → UInt256 → Except ArithError UInt256
   def mulDiv      : UInt256 → UInt256 → UInt256 → Except ArithError UInt256
+                 -- computes (a * b) / c with 512-bit intermediate; critical for AMM math
 end UInt256
 ```
 
-Contract surface uses `+?`/`+↻`/bracket pairs; these named functions appear in proofs via `@[simp]` bridge lemmas.
-
-### Fixed-Point Types: Wad and Ray
+### Fixed-point types
 
 ```lean
-structure Wad where raw : UInt256
-structure Ray where raw : UInt256
+structure Wad where raw : UInt256   -- 1 Wad = 1e18
 
 namespace Wad
-  def WAD : UInt256 := 1_000_000_000_000_000_000
-
-  def mulDown | mulUp | mulHalfUp : Wad → Wad → Except ArithError Wad
-  def divDown | divUp | divHalfUp : Wad → Wad → Except ArithError Wad
-  def toRay (w : Wad) : Ray := ⟨w.raw * 1_000_000_000⟩
-
-  theorem mulHalfUp_comm (a b : Wad) : Wad.mulHalfUp a b = Wad.mulHalfUp b a
-  theorem mulHalfUp_le_left (a b : Wad) (h : b.raw ≤ WAD) :
-      ∀ r, Wad.mulHalfUp a b = .ok r → r.raw ≤ a.raw
+  def mulDown   : Wad → Wad → Except ArithError Wad   -- floor
+  def mulHalfUp : Wad → Wad → Except ArithError Wad   -- round to nearest
+  def divDown   : Wad → Wad → Except ArithError Wad
+  def divHalfUp : Wad → Wad → Except ArithError Wad
+  -- Key theorems proved once, available to all users:
+  theorem mul_comm   : Wad.mulHalfUp a b = Wad.mulHalfUp b a
+  theorem mul_le_left : b.raw ≤ WAD → Wad.mulHalfUp a b = .ok r → r.raw ≤ a.raw
 end Wad
--- Ray namespace: same six rounding variants (scale RAY = 10²⁷)
 ```
 
-Contract authors write `a ⸢*⸣? b` (half-up mul), not `a.wadMul b`. AMM invariant theorems unfold bracket ops to `Wad.mulHalfUp`, `Wad.divDown`, etc.
+`Ray` follows the same pattern with `1 Ray = 1e27`.
+
+### Fixed-point surface syntax
+
+In contract bodies, use bracket-pair syntax (requires `open scoped Lsc.Wad` or `Lsc.Ray`):
+
+| Bracket pair | Maps to | Rounding |
+|---|---|---|
+| `⌊a * b⌋?` | `wadMulDown` | floor |
+| `⸢a * b⸣?` | `wadMulHalfUp` | half-up |
+| `⌊a / b⌋?` | `wadDivDown` | floor |
+| `⸢a / b⸣?` | `wadDivHalfUp` | half-up |
+
+Inside `@math` functions, use the named forms (`Wad.mulHalfUp`, etc.) directly. The bracket pairs and named forms compile to the same AST node.
+
+### The `WayRayMath` dependency
+
+Proofs connecting on-chain fixed-point operations to their ℝ counterparts require the **`WayRayMath` library**, which provides error-bound lemmas:
+
+```lean
+theorem WayRayMath.wadMulHalfUp_error (a b : ℕ) :
+    |decode (wadMulHalfUp a b) - decode a * decode b| ≤ WAD_ERROR
+-- where WAD_ERROR = 10⁻¹⁸
+```
+
+See [extensions/MATH.md](extensions/MATH.md) for the full proof workflow.
 
 ---
 
 ## 11. The Compilation Pipeline
 
-### AST → IR
-
-The IR is a flat, explicit intermediate with no syntactic sugar. One AST construct maps to one or more IR constructs. The IR does not know about linear types — they have been erased by this stage.
-
-```lean
-inductive IR
-  | sload   (slot : Word)
-  | sstore  (slot : Word) (value : IRExpr)
-  | call    (target : Word) (selector : Word) (args : List IRExpr)
-  | if_     (cond : IRExpr) (thn els : IR)
-  | seq     (a b : IR)
-  | revert  (data : IRExpr)
-  | log     (topics : List IRExpr) (data : IRExpr)
-  | checkFlag (slot : Word) (expected : Bool)  -- from linear type erasure
-  | setFlag   (slot : Word) (value : Bool)
-```
-
-### IR → Yul
-
-The Yul emitter targets **EvmYulLean's `Yul.Program` type directly**, not a string. This means the output is a structured Lean value that EvmYulLean can interpret and test. `#eval contract.toYul` produces this value. Rendering to a Yul string is a separate display function.
-
-The emitter is trusted in v1. Correctness is validated by running EvmYulLean's test suite against the emitted programs.
-
-### Compilation Correctness — What Is Proved in v1
+### Compilation correctness — what is proved in v1
 
 One semantic preservation theorem per major AST construct:
 
 ```lean
--- For each core Stmt constructor:
 theorem Stmt.eval_storageSet_correct ...
 theorem Stmt.eval_require_correct ...
 theorem Stmt.eval_ifThenElse_correct ...
--- etc.
 ```
 
-And one per linear type primitive:
+And one per linear-type primitive:
 
 ```lean
 theorem FlashLoan.borrow_yul_correct ...
-theorem FlashLoan.repay_yul_correct ...
 theorem ReentrancyLock.acquire_yul_correct ...
--- etc.
 ```
 
-These are proved once by the framework. User contracts inherit them for free.
+These are proved once by the framework. User contracts inherit them.
 
-The full end-to-end compilation correctness theorem (AST semantics match Yul execution for all inputs) is a **v2 goal**, not v1. The v1 guarantee is: per-construct correctness + conformance tests on the emitter.
+The full end-to-end theorem is a **v2 goal**. See §2 for the complete trust boundary.
 
-### Deliverables Per Contract
+### Deliverables per contract
 
-When a user's Lean file compiles successfully:
+When a user's Lean file compiles:
 
-1. **Lean source** — the contract definition and all proofs, checked by the Lean kernel
-2. **Yul source** — human-readable, generated by `#eval contract.toYul.render`
-3. **ABI JSON** — generated by `#eval contract.toABI`
-4. **Proof certificate** — the Lean `.olean` file implicitly certifies that all stated theorems hold
+1. **Lean source** — contract + proofs, kernel-checked
+2. **Yul source** — human-readable, from `#eval contract.toYul.render`
+3. **ABI JSON** — from `#eval contract.toABI`
+4. **Proof certificate** — `.olean` file; certifies all stated theorems hold
 
 ---
 
 ## 12. Proof Ergonomics — Design Invariants
 
-These are not features — they are **design constraints** that must be maintained as the system evolves.
+These are **design constraints**, not features. They must be maintained as the system evolves.
 
-### The simp + omega invariant
+### The `simp + omega` invariant
 
-Any theorem of the form "on success, storage field X has value V" must be provable by:
+Any theorem of the form "on success, storage field X has value V" must close with:
 
 ```lean
 simp [runS, theFunction, fieldName, ...]
-omega  -- for arithmetic goals
+omega
 ```
 
-If this fails, add missing `@[simp]` lemmas to the monad operations or storage accessors. Do not work around it by making proofs longer.
+If this fails, add missing `@[simp]` lemmas. Do not work around it with longer proofs.
 
 ### The field independence invariant
 
-Any theorem of the form "function F does not change field X" must be provable by `rfl` or `simp` with no arithmetic. If it requires case analysis or induction, the storage model is wrong.
+Any theorem of the form "function F does not change field X" must close with `rfl` or `simp` with no arithmetic. If it requires case analysis or induction, the storage model is wrong.
 
 ### The error separation invariant
 
-Success-case and failure-case theorems must be provable independently. Do not write theorems that simultaneously handle both outcomes. Pattern:
+Prove success-case and failure-case theorems separately:
 
 ```lean
--- Prove these separately, never together:
-theorem increment_succeeds_when_not_paused ...
-theorem increment_errors_when_paused ...
+theorem increment_succeeds_when_not_paused ...  -- prove independently
+theorem increment_errors_when_paused ...        -- prove independently
 ```
+
+Never write a theorem that simultaneously handles both outcomes.
 
 ### The hypothesis minimality invariant
 
-A theorem should state exactly the hypotheses it needs — no more. If a theorem about `increment` doesn't need the `owner` field, `owner` should not appear in its statement. Use `HonestWorld` and similar bundles only when the theorem genuinely needs all bundled assumptions.
-
-### Optional: auditor-facing specifications
-
-For teams that want spec/proof separation, an optional `contract_spec` syntax produces human-readable proposition files. Not required for v1. See [extensions/CONTRACT-SPEC.md](extensions/CONTRACT-SPEC.md).
+A theorem should state exactly the hypotheses it needs. If a theorem about `increment` doesn't need the `owner` field, `owner` should not appear in its statement. Use `HonestWorld` only when the theorem genuinely needs all bundled assumptions.
 
 ---
 
-## 13. Reference: The Pausable Counter
+## 13. Reference Contracts
 
-Minimal acceptance-test contract exercising storage, errors, events, access control, and proof ergonomics. **Canonical source, theorem list, and proof techniques**: [reference/COUNTER.md](reference/COUNTER.md).
+The canonical contracts live in [reference/COUNTER.md](reference/COUNTER.md) and [reference/AMM.md](reference/AMM.md). Key constraints:
+
+**Counter**: every framework feature must be exercisable against this contract before any DeFi contract is attempted. All required theorems must close with `simp` + `omega` in at most ~5 lines.
+
+**AMM**: validates Wad/Ray math, `TokenAmount`, `IERC20` interface, `HonestWorld`, `ReentrancyLock`, multi-field storage, and conservation invariants. Key required theorems:
+
+```lean
+theorem swap_preserves_k      [HonestWorld AMMWorld] ... : w'.reserve0 * w'.reserve1 ≥ w.reserve0 * w.reserve1
+theorem addLiquidity_conserves_tokens [HonestWorld AMMWorld] ...
+theorem swap_not_reentrant    ... : ∀ reentrantCall, reentrantCall.reverts
+theorem setFee_only_owner     ... (cap : Capability .Owner) ...
+```
 
 ---
 
-## 14. Reference: The Constant Product AMM
+## Appendix A: Relationship to Prior Work
 
-Target DeFi contract exercising `Wad`/`Ray` math, `TokenAmount`, IERC20, `HonestWorld`, `ReentrancyLock`, and conservation invariants. **Canonical storage model, swap flow, and required theorems**: [reference/AMM.md](reference/AMM.md).
+- **lsc** (prior prototype): established the `ContractM` monad shape. Abandoned due to opaque bytecode emission via Lean reflection. This design replaces that path with an explicit Yul target.
+- **dss2024**: the `declare_syntax_cat` + `macro_rules` pattern for a DSL that compiles to a verified AST. The macro layer follows this pattern exactly.
+- **EvmYulLean** (Nethermind): provides Yul and EVM semantics; treated as trusted ground truth.
+- **Move Prover**: demonstrated that a restricted, DeFi-oriented language with co-designed verification is practical. Key lessons: resource types, alias-free memory, static dispatch, minimal language surface. This design independently converges on all four.
 
----
+## Appendix B: Implementation Details Intentionally Omitted
 
-## Appendix A: What Is Not in This Document
+The following are left to the implementer and should not be added to this document:
 
-The following are covered in [IMPLEMENTATION.md](IMPLEMENTATION.md) rather than here:
-
-- Lean module structure and file organization
-- Exact `macro_rules` syntax for the source DSL
+- Lean module structure and file organization (see IMPLEMENTATION.md)
+- Exact `macro_rules` syntax for the surface DSL (see IMPLEMENTATION.md)
 - EvmYulLean API usage details
 - ABI encoding implementation
 - Selector computation
 - `Finmap` library choice
-- Test harness structure for Yul conformance tests
-
-## Appendix B: Relationship to Prior Work
-
-- **lsc** (author's prior prototype): established the `ContractM` monad shape and proof workflow. Abandoned due to opaque bytecode emission via Lean reflection. This design replaces that emission path with an explicit Yul target.
-- **dss2024**: the `declare_syntax_cat` + `macro_rules` pattern for building a DSL that compiles to a verified AST. Directly inspirational — the macro layer follows this pattern exactly.
-- **EvmYulLean** (Nethermind): provides the Yul and EVM semantics. Treated as trusted ground truth.
-- **Move Prover**: demonstrated that a restricted, DeFi-oriented language with co-designed verification is practical and adopted in production (Aptos Framework, Liquidswap). Key lessons: resource types, alias-free memory, static dispatch, minimal language surface. This design independently converges on all four.
+- Test harness structure
