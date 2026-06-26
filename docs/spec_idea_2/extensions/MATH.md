@@ -69,7 +69,7 @@ The elaborator enforces a strict subset of the language. This is what makes the
 
 **Allowed:**
 
-- `Wad` and `Ray` arithmetic: `mulDown`, `mulUp`, `mulHalfUp`, `divDown`, `divUp`, `divHalfUp` (and `Ray.*` counterparts)
+- `Wei`, `Wad`, and `Ray` arithmetic: checked `+?`/`-?`/`*?`/`/?` on `Wei`; `mulDown`, `mulUp`, `mulHalfUp`, `divDown`, `divUp`, `divHalfUp` on `Wad`/`Ray` (and `Ray.*` counterparts)
 - `UInt256` arithmetic: `addChecked`, `subChecked`, `mulChecked`, `mulDiv`
 - Local `let` bindings
 - `if / else` on `Bool` (for `min`, `max`, clamp patterns)
@@ -115,6 +115,10 @@ what `yourFn.spec` will look like.
 
 | LSC operation | ℝ spec counterpart |
 |---|---|
+| `Wei.addChecked a b` / `a +? b` (Wei) | `a + b` |
+| `Wei.subChecked a b` / `a -? b` (Wei) | `a - b` |
+| `Wei.mulChecked a b` / `a *? b` (Wei) | `a * b` |
+| `Wei.divFloor a b` / `a /? b` (Wei) | `a / b` |
 | `Wad.mulHalfUp a b` / `a ⸢*⸣? b` | `a * b` |
 | `Wad.divDown a b` / `a ⌊/⌋? b` | `a / b` |
 | `Wad.addChecked a b` / `a +? b` | `a + b` |
@@ -127,6 +131,7 @@ what `yourFn.spec` will look like.
 | call to `@math g` | call to `g.spec` |
 | `Wad` literal `n` | `(n : ℝ) / WAD` |
 | `Ray` literal `n` | `(n : ℝ) / RAY` |
+| `Wei` literal `n` | `(n : ℝ)` |
 
 Rounding direction (halfUp vs floor) disappears in the spec — all operations
 become exact. This is intentional: the spec captures intent, not precision.

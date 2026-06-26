@@ -66,7 +66,7 @@ The user writes contracts using **Lean 4 syntax extensions** (`declare_syntax_ca
 ```lean
 contract Counter where
   storage:
-    number : UInt256 := 0
+    number : Wei := 0
     paused : Bool    := false
     owner  : Address
 
@@ -76,7 +76,7 @@ contract Counter where
     | Overflow
 
   events:
-    | Incremented (newValue : UInt256)
+    | Incremented (newValue : Wei)
     | Paused
     | Unpaused
 
@@ -94,7 +94,7 @@ The macro is **syntax-to-AST only**: pure structural translation, no validation,
 ```lean
 -- 1. Storage struct
 structure CounterStorage where
-  number : UInt256 := 0
+  number : Wei := 0
   paused : Bool    := false
   owner  : Address
 
@@ -102,7 +102,7 @@ structure CounterStorage where
 inductive CounterError | Paused | NotOwner | Overflow
 
 -- 3. Event inductive
-inductive CounterEvent | Incremented (newValue : UInt256) | Paused | Unpaused
+inductive CounterEvent | Incremented (newValue : Wei) | Paused | Unpaused
 
 -- 4. AST value (pure data, used by compiler)
 def Counter.increment.ast : Stmt := Stmt.seq ...
@@ -426,6 +426,24 @@ namespace UInt256
 end UInt256
 ```
 
+### Integer numeric type (`Wei`)
+
+`Wei` is the 0-decimal counterpart to `Wad` and `Ray`: a newtype over `UInt256` that makes integer quantities explicit in storage and events. `1 Wei = 1` raw unit — no scaling factor.
+
+```lean
+structure Wei where raw : UInt256   -- 1 Wei = 1 (identity encoding)
+
+namespace Wei
+  def addChecked : Wei → Wei → Except ArithError Wei
+  def subChecked : Wei → Wei → Except ArithError Wei
+  def mulChecked : Wei → Wei → Except ArithError Wei
+  def divFloor   : Wei → Wei → Except ArithError Wei
+  -- each delegates to the corresponding UInt256 op on `.raw`
+end Wei
+```
+
+Use `Wei` for counts, token amounts in base units, and other whole-number domain values. Reserve bare `UInt256` for protocol-level primitives (selectors, timestamps, mapping keys) where the type carries no unit meaning. Checked ops (`+?`, `-?`, `*?`, `/?`) work on `Wei` the same way they do on `Wad`; there are no bracket-pair rounding ops (those apply only to fixed-point types).
+
 ### Fixed-point types
 
 ```lean
@@ -545,7 +563,7 @@ A theorem should state exactly the hypotheses it needs. If a theorem about `incr
 
 The canonical contracts live in [reference/COUNTER.md](reference/COUNTER.md) and [reference/AMM.md](reference/AMM.md). Key constraints:
 
-**Counter**: every framework feature must be exercisable against this contract before any DeFi contract is attempted. All required theorems must close with `simp` + `omega` in at most ~5 lines.
+**Counter**: every framework feature must be exercisable against this contract before any DeFi contract is attempted. Uses `Wei` for the counter value (0-decimal numeric type). All required theorems must close with `simp` + `omega` in at most ~5 lines.
 
 **AMM**: validates Wad/Ray math, `TokenAmount`, `IERC20` interface, `HonestWorld`, `ReentrancyLock`, multi-field storage, and conservation invariants. Key required theorems:
 

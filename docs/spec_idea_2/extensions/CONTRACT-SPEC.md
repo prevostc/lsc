@@ -56,7 +56,7 @@ structure CounterSpec where
 def Counter.spec : CounterSpec where
   increment_increases_number :=
     ∀ s s' log, runS Counter.increment s = .ok ((), s', log) →
-      s'.storage.number = s.storage.number + 1
+      s'.storage.number.raw = s.storage.number.raw + 1
   -- ...
 ```
 

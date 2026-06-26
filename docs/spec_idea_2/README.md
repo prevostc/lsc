@@ -28,23 +28,6 @@ LSC is a Lean 4 embedded DSL for writing formally verified EVM smart contracts. 
 | `reference/COUNTER.md` | Minimal reference contract (framework acceptance test) |
 | `reference/AMM.md` | DeFi reference contract (linear types, Wad reserves, world model) |
 
-## Resolved decisions
-
-| Topic | Decision | Rationale |
-|-------|----------|-----------|
-| AMM reserves | `Wad` in storage; `TokenAmount` for in-flight ERC20 custody only | Reserves are persistent accounting; in-flight tokens need linear tracking |
-| `contract_spec` | Optional extension — not required for v1 | Keeps core small; auditors opt in |
-| Access control | `Capability` linear type retained; call-site shape (parameter vs `require`) still open | Forces explicit role checks |
-| Counter events | `Paused` / `Unpaused` (not `WasPaused`) | Present-tense matches ERC convention |
-| `require` syntax | `require (cond) else revert Error;` | Explicit revert target; mirrors Lean `if … then … else` |
-| Storage access | `$.field` reads, `$.field := val` writes; proofs use `s.storage.field` | Distinguishes surface syntax from proof terms |
-| Checked arithmetic | `+?`, `-?`, `*?`, `/?`; reverts via strict 1:1 `ContractErrors.arith` | Overflow → `Overflow`, Underflow → `Underflow`, DivByZero → `DivByZero`; no collapsing |
-| Wrapping arithmetic | `+↻`, `-↻`, `*↻` — pure mod-2²⁵⁶, never reverts | Explicit opt-in for intentional wrapping |
-| Fixed-point rounding | Bracket pairs `⌊*⌋?` `⸢*⸣?` `⌊/⌋?` etc.; activate with `open scoped Lsc.Wad` / `Lsc.Ray` | Forces naming the rounding direction; prevents silent precision loss |
-| `@math` real-number twin | Named `.ideal` (e.g. `computeOutput.ideal`) | Avoids collision with `contract_spec` / `CounterSpec.lean` naming |
-| `@math` error lift | `\|>.orRevert` on `Except ArithError` → same `ContractErrors.arith` as `+?` | One error path for all arithmetic failures |
-| Framework errors | `ContractErrors.fromFramework` (reentrancy, unauthorized) | Separates framework errors from user-defined errors |
-
 ## Open questions
 
 | Topic | Status |
@@ -62,6 +45,7 @@ LSC is a Lean 4 embedded DSL for writing formally verified EVM smart contracts. 
 | `Capability` | Linear type proving the caller passed an identity check for a role |
 | `ReentrancyLock` | Linear type representing exclusive execution access |
 | `HonestWorld` | Typeclass bundling external-contract behavior assumptions for multi-contract theorems |
+| `Wei` | 0-decimal numeric newtype (`1 Wei = 1`); checked `+?`/`-?`/`*?`/`/?` like `Wad`, no bracket-pair rounding |
 | `WayRayMath` | External Lean library supplying error-bound lemmas connecting ℕ fixed-point ops to ℝ |
 | `contract_spec` | Optional syntax for auditor-facing propositions (`CounterSpec.lean`) |
 | `@math` | Annotation generating a ℝ twin (`.ideal`) for fixed-point functions |

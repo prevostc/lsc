@@ -11,7 +11,7 @@ Surface syntax follows [IMPLEMENTATION.md](../IMPLEMENTATION.md) (`$.field`, `+?
 ```lean
 contract Counter where
   storage:
-    number : UInt256 := 0
+    number : Wei := 0
     paused : Bool    := false
     owner  : Address
 
@@ -21,7 +21,7 @@ contract Counter where
     | Overflow
 
   events:
-    | Incremented (n : UInt256)
+    | Incremented (n : Wei)
     | Paused
     | Unpaused
 
@@ -43,6 +43,8 @@ contract Counter where
     $.paused := false;
     emit Unpaused();
 ```
+
+`number` is `Wei` — the 0-decimal numeric type (like `Wad`/`Ray` but with identity encoding: `1 Wei = 1`). This makes the counter value an explicit integer quantity rather than an untyped `UInt256`.
 
 Overflow on `+? 1` reverts as `.error CounterError.Overflow` via strict 1:1 `ContractErrors.arith` (`ArithError.Overflow` → `Overflow`). Counter does not declare `Underflow` or `DivByZero` because the body uses only `+?`; adding `-?` or `/?` would require those variants in `errors:`.
 

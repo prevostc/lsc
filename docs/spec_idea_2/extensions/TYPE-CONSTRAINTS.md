@@ -440,5 +440,5 @@ never see a `sorry` in a decorator-generated theorem.
 
 Decorator values (the `v` in `@min(v)`, `lo`/`hi` in `@bounded(lo, hi)`) are
 parsed as source-level numeric literals in the field's decoded unit and
-converted to raw `UInt256` values (`v * WAD` for `Wad` fields, `v * RAY` for
-`Ray` fields) during elaboration.
+converted to raw `UInt256` values (`v` for `Wei` fields, `v * WAD` for
+`Wad` fields, `v * RAY` for `Ray` fields) during elaboration.
