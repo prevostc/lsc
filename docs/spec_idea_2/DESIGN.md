@@ -140,7 +140,7 @@ No build system, no CLI, no separate compiler invocation.
 ```lean
 inductive Ty
   | uint256 | bool | address
-  | wad | ray
+  | wei | wad | ray
   | tokenAmount             -- linear type
   | mapping (k v : Ty)     -- opaque; no iteration exposed
 
@@ -149,18 +149,22 @@ inductive Expr : Ty → Type
   | litBool     : Bool → Expr .bool
   | var         : Ident → Expr t
   | storageGet  : Ident → Expr t
-  -- Arithmetic — always explicit about overflow and rounding
-  | addChecked  : Expr .uint256 → Expr .uint256 → Expr .uint256
-  | addWrapping : Expr .uint256 → Expr .uint256 → Expr .uint256
-  | mulDiv      : Expr .uint256 → Expr .uint256 → Expr .uint256 → Expr .uint256
-  | wadMulHalfUp | wadMulDown | wadDivDown | wadDivHalfUp   -- Wad variants
-  | rayMulHalfUp | rayMulDown | rayDivDown | rayDivHalfUp   -- Ray variants
+  -- Arithmetic — only on typed numerics (Wei / Wad / Ray); never on bare UInt256
+  | weiAddChecked | weiSubChecked | weiMulChecked | weiDivFloor
+  | wadAddChecked | wadSubChecked
+  | wadMulDown | wadMulUp | wadMulHalfUp | wadDivDown | wadDivHalfUp
+  | rayAddChecked | raySubChecked
+  | rayMulDown | rayMulUp | rayMulHalfUp | rayDivDown | rayDivHalfUp
+  -- Comparisons (UInt256 allowed for ordering only — timestamps, etc.)
+  | eq   : Expr t → Expr t → Expr .bool
+  | lt   : Expr .uint256 → Expr .uint256 → Expr .bool
+  | le   : Expr .uint256 → Expr .uint256 → Expr .bool
   -- Context (read-only, populated by dispatcher)
   | caller | callvalue | timestamp
   -- Linear type operations
-  | tokenMint   : Expr .uint256 → Expr .tokenAmount
-  | tokenBurn   : Expr .tokenAmount → Expr .uint256
-  | tokenSplit  : Expr .tokenAmount → Expr .uint256 → Expr (.tokenAmount × .tokenAmount)
+  | tokenMint   : Expr .wei → Expr .tokenAmount
+  | tokenBurn   : Expr .tokenAmount → Expr .wei
+  | tokenSplit  : Expr .tokenAmount → Expr .wei → Expr (.tokenAmount × .tokenAmount)
   | tokenMerge  : Expr .tokenAmount → Expr .tokenAmount → Expr .tokenAmount
   -- Mappings
   | mappingGet  : Expr (.mapping k v) → Expr k → Expr v
@@ -408,23 +412,26 @@ These three axioms are the complete statement of "storage is alias-free." All se
 
 ### Principles
 
-No implicit overflow. No implicit precision loss. Operations that can fail return `Except Err`.
+No implicit overflow. No implicit precision loss. Operations that can fail return `Except Err`. **No arithmetic on bare `UInt256` in contract code** — all numeric computation uses `Wei`, `Wad`, or `Ray`.
 
-### UInt256 operations
+### UInt256 — representation only
+
+`UInt256` is the underlying word type for EVM storage and ABI encoding. It is **not** a numeric domain type in contract code: there are no `+?`, `-?`, `*?`, `/?`, or wrapping operators on bare `UInt256` in `Tx`/`View` bodies. Use it for opaque words (selectors, `block.timestamp`, mapping keys, external call calldata) and for ordering comparisons (`<`, `≤`, `==`).
+
+Framework-internal primitives (used to implement `Wei`/`Wad`/`Ray`, linear types, and `@math` lowering) live in a private `UInt256` namespace:
 
 ```lean
-namespace UInt256
+namespace UInt256  -- framework-internal; not in contract surface syntax
   def addChecked  : UInt256 → UInt256 → Except ArithError UInt256
   def subChecked  : UInt256 → UInt256 → Except ArithError UInt256
   def mulChecked  : UInt256 → UInt256 → Except ArithError UInt256
-  def addWrapping : UInt256 → UInt256 → UInt256   -- never fails; pure mod-2²⁵⁶
-  def subWrapping : UInt256 → UInt256 → UInt256
-  def mulWrapping : UInt256 → UInt256 → UInt256
   def divFloor    : UInt256 → UInt256 → Except ArithError UInt256
   def mulDiv      : UInt256 → UInt256 → UInt256 → Except ArithError UInt256
-                 -- computes (a * b) / c with 512-bit intermediate; critical for AMM math
+                 -- 512-bit intermediate; used by Wad/Ray mul/div
 end UInt256
 ```
+
+Contract authors never call these directly. All user-facing arithmetic goes through `Wei`, `Wad`, or `Ray`.
 
 ### Integer numeric type (`Wei`)
 
@@ -442,7 +449,7 @@ namespace Wei
 end Wei
 ```
 
-Use `Wei` for counts, token amounts in base units, and other whole-number domain values. Reserve bare `UInt256` for protocol-level primitives (selectors, timestamps, mapping keys) where the type carries no unit meaning. Checked ops (`+?`, `-?`, `*?`, `/?`) work on `Wei` the same way they do on `Wad`; there are no bracket-pair rounding ops (those apply only to fixed-point types).
+Use `Wei` for counts, token amounts in base units, and other whole-number domain values. Reserve bare `UInt256` for protocol-level primitives (selectors, timestamps, mapping keys) where the type carries no unit meaning — **compare and pass through only, never arithmetic**. Checked ops (`+?`, `-?`, `*?`, `/?`) are available on `Wei` and `Wad`/`Ray` (add/sub on fixed-point types; mul/div via bracket pairs or named forms). There are no bracket-pair rounding ops on `Wei`.
 
 ### Fixed-point types
 
@@ -450,6 +457,8 @@ Use `Wei` for counts, token amounts in base units, and other whole-number domain
 structure Wad where raw : UInt256   -- 1 Wad = 1e18
 
 namespace Wad
+  def addChecked : Wad → Wad → Except ArithError Wad
+  def subChecked : Wad → Wad → Except ArithError Wad
   def mulDown   : Wad → Wad → Except ArithError Wad   -- floor
   def mulHalfUp : Wad → Wad → Except ArithError Wad   -- round to nearest
   def divDown   : Wad → Wad → Except ArithError Wad
@@ -460,7 +469,7 @@ namespace Wad
 end Wad
 ```
 
-`Ray` follows the same pattern with `1 Ray = 1e27`.
+`Ray` follows the same pattern with `1 Ray = 1e27` (`addChecked`, `subChecked`, and mul/div variants like `Wad`).
 
 ### Fixed-point surface syntax
 

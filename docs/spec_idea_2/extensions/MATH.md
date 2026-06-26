@@ -69,8 +69,7 @@ The elaborator enforces a strict subset of the language. This is what makes the
 
 **Allowed:**
 
-- `Wei`, `Wad`, and `Ray` arithmetic: checked `+?`/`-?`/`*?`/`/?` on `Wei`; `mulDown`, `mulUp`, `mulHalfUp`, `divDown`, `divUp`, `divHalfUp` on `Wad`/`Ray` (and `Ray.*` counterparts)
-- `UInt256` arithmetic: `addChecked`, `subChecked`, `mulChecked`, `mulDiv`
+- `Wei`, `Wad`, and `Ray` arithmetic only: checked `+?`/`-?`/`*?`/`/?` on `Wei`; `+?`/`-?` plus named mul/div on `Wad`/`Ray` (and bracket pairs in `Tx` bodies)
 - Local `let` bindings
 - `if / else` on `Bool` (for `min`, `max`, clamp patterns)
 - Calls to other `@math` functions
@@ -78,6 +77,7 @@ The elaborator enforces a strict subset of the language. This is what makes the
 
 **Not allowed** (compile error with source position):
 
+- Bare `UInt256` arithmetic (`UInt256.addChecked`, `+?` on `UInt256`, wrapping ops)
 - Storage reads or writes (`$.field` is contract-body only)
 - `emit`
 - `require` / `revert` (`.orRevert` at the `@math` call site in `Tx` bodies only)
@@ -90,7 +90,7 @@ The elaborator enforces a strict subset of the language. This is what makes the
 | Context | Syntax | Error handling |
 |---------|--------|----------------|
 | `Tx` body | `+?`, `⸢*⸣?`, `$.field` | `ContractM.revertArith` via `ContractErrors.arith` |
-| `@math` fn | `Wad.mulHalfUp`, `UInt256.addChecked` | returns `Except ArithError` |
+| `@math` fn | `Wad.mulHalfUp`, `Wad.addChecked`, `Wei.addChecked` | returns `Except ArithError` |
 | `@math` call in `Tx` | `computeOutput … \|>.orRevert` | same `ContractErrors.arith` map |
 
 ```lean
@@ -125,7 +125,7 @@ what `yourFn.spec` will look like.
 | `Wad.subChecked a b` / `a -? b` | `a - b` |
 | `Ray.mulHalfUp a b` / `a ⸢*⸣? b` (scoped Ray) | `a * b` |
 | `Ray.divDown a b` / `a ⌊/⌋? b` (scoped Ray) | `a / b` |
-| `UInt256.mulDiv a b c` | `a * b / c` |
+| `Ray.subChecked a b` / `a -? b` (Ray) | `a - b` |
 | `if h then a else b` | `if h then a else b` (preserved) |
 | `let x := e` | `let x := e.spec` |
 | call to `@math g` | call to `g.spec` |
@@ -322,8 +322,7 @@ theorem AMM.computeOutput.safe_iff
     r0.raw + amountIn.raw ≠ 0 ∧
     -- no overflow in final division
     (amountIn.raw * r1.raw / WAD) * WAD < 2^256 * (r0.raw + amountIn.raw) := by
-  simp [computeOutput, Wad.mulHalfUp, Wad.divDown, Wad.addChecked,
-        UInt256.mulDiv, UInt256.addChecked]
+  simp [computeOutput, Wad.mulHalfUp, Wad.divDown, Wad.addChecked]
   omega
 ```
 

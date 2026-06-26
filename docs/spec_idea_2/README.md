@@ -46,6 +46,7 @@ LSC is a Lean 4 embedded DSL for writing formally verified EVM smart contracts. 
 | `ReentrancyLock` | Linear type representing exclusive execution access |
 | `HonestWorld` | Typeclass bundling external-contract behavior assumptions for multi-contract theorems |
 | `Wei` | 0-decimal numeric newtype (`1 Wei = 1`); checked `+?`/`-?`/`*?`/`/?` like `Wad`, no bracket-pair rounding |
+| `UInt256` | Opaque EVM word — selectors, timestamps, mapping keys; compare only (`<`, `≤`, `==`), no arithmetic in contract bodies |
 | `WayRayMath` | External Lean library supplying error-bound lemmas connecting ℕ fixed-point ops to ℝ |
 | `contract_spec` | Optional syntax for auditor-facing propositions (`CounterSpec.lean`) |
 | `@math` | Annotation generating a ℝ twin (`.ideal`) for fixed-point functions |

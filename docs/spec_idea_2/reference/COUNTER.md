@@ -44,7 +44,7 @@ contract Counter where
     emit Unpaused();
 ```
 
-`number` is `Wei` — the 0-decimal numeric type (like `Wad`/`Ray` but with identity encoding: `1 Wei = 1`). This makes the counter value an explicit integer quantity rather than an untyped `UInt256`.
+`number` is `Wei` — the 0-decimal numeric type (like `Wad`/`Ray` but with identity encoding: `1 Wei = 1`). Bare `UInt256` cannot be used for arithmetic in contract bodies; all numeric ops go through typed wrappers (`Wei`, `Wad`, `Ray`).
 
 Overflow on `+? 1` reverts as `.error CounterError.Overflow` via strict 1:1 `ContractErrors.arith` (`ArithError.Overflow` → `Overflow`). Counter does not declare `Underflow` or `DivByZero` because the body uses only `+?`; adding `-?` or `/?` would require those variants in `errors:`.
 

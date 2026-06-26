@@ -91,19 +91,22 @@ inductive ArithError
 
 namespace UInt256
 
-/-- Checked add: fails on overflow. The proof obligation at call sites is
-    that on .ok, result = a + b and no overflow occurred. -/
+/-- Framework-internal checked ops. Used by Wei/Wad/Ray wrappers — not exposed
+    in contract surface syntax. Contract bodies cannot call these on bare UInt256. -/
+
+/-- Checked add: fails on overflow. -/
 def addChecked (a b : UInt256) : Except ArithError UInt256 :=
-  -- BitVec addition wraps; detect overflow by checking result < a
   let r := a + b
   if r < a then .error .Overflow else .ok r
-
-/-- Wrapping add: explicit modular arithmetic. Never fails. -/
-def addWrapping (a b : UInt256) : UInt256 := a + b
 
 /-- Checked sub: fails on underflow (a < b). -/
 def subChecked (a b : UInt256) : Except ArithError UInt256 :=
   if a < b then .error .Underflow else .ok (a - b)
+
+/-- Checked mul: fails on overflow. -/
+def mulChecked (a b : UInt256) : Except ArithError UInt256 :=
+  let r := a * b
+  if a != 0 && r / a != b then .error .Overflow else .ok r
 
 /-- Floor division (EVM semantics: truncates toward zero).
     Fails on division by zero. -/
@@ -122,6 +125,9 @@ def mulDiv (a b c : UInt256) : Except ArithError UInt256 :=
     if r > (BitVec.allOnes 256).toNat
     then .error .Overflow
     else .ok (BitVec.ofNat 256 r)
+
+def addCheckedNat (a : UInt256) (n : Nat) : Except ArithError UInt256 :=
+  if a.val + n < 2^256 then .ok ⟨a.val + n, by omega⟩ else .error .Overflow
 
 -- Key simp lemmas (add one per operation)
 @[simp]
@@ -177,8 +183,12 @@ def divDown (a b : Wad) : Except ArithError Wad :=
 def divUp (a b : Wad) : Except ArithError Wad := sorry
 def divHalfUp (a b : Wad) : Except ArithError Wad := sorry
 
-def add (a b : Wad) : Except ArithError Wad :=
+def addChecked (a b : Wad) : Except ArithError Wad :=
   (UInt256.addChecked a.raw b.raw).map Wad.mk
+def subChecked (a b : Wad) : Except ArithError Wad :=
+  (UInt256.subChecked a.raw b.raw).map Wad.mk
+
+def add (a b : Wad) : Except ArithError Wad := addChecked a b
 
 def toRay (w : Wad) : Except ArithError Ray :=
   (UInt256.mulChecked w.raw (BitVec.ofNat 256 1_000_000_000)).map Ray.mk
@@ -285,24 +295,19 @@ inductive Ty
 inductive Expr : Ty → Type
   -- Literals
   | litU256   : UInt256 → Expr .uint256
+  | litWei    : Nat → Expr .wei
   | litBool   : Bool    → Expr .bool
   | litAddr   : Address → Expr .address
   -- Variables (by name; scope is checked during elaboration)
   | var       : Ident → Expr t
   -- Storage reads (resolved to slot during compilation)
   | storageGet : Ident → Expr t
-  -- Arithmetic — checked (+? -? *? /?), wrapping (+↻), fixed-point (⌊*⌋? …)
-  | addChecked  : Expr .uint256 → Expr .uint256 → Expr .uint256
-  | subChecked  : Expr .uint256 → Expr .uint256 → Expr .uint256
-  | mulChecked  : Expr .uint256 → Expr .uint256 → Expr .uint256
-  | divFloor    : Expr .uint256 → Expr .uint256 → Expr .uint256
+  -- Arithmetic — typed numerics only (Wei / Wad / Ray); no bare UInt256 ops
   | weiAddChecked | weiSubChecked | weiMulChecked | weiDivFloor
-  | addWrapping : Expr .uint256 → Expr .uint256 → Expr .uint256
-  | subWrapping : Expr .uint256 → Expr .uint256 → Expr .uint256
-  | mulWrapping : Expr .uint256 → Expr .uint256 → Expr .uint256
-  | mulDiv      : Expr .uint256 → Expr .uint256 → Expr .uint256 → Expr .uint256
+  | wadAddChecked | wadSubChecked
   | wadMulDown | wadMulUp | wadMulHalfUp
   | wadDivDown | wadDivUp | wadDivHalfUp
+  | rayAddChecked | raySubChecked
   | rayMulDown | rayMulUp | rayMulHalfUp
   | rayDivDown | rayDivUp | rayDivHalfUp
   -- Comparisons
@@ -319,9 +324,9 @@ inductive Expr : Ty → Type
   -- Mapping operations (no iteration)
   | mappingGet : Expr (.mapping k v) → Expr k → Expr v
   -- Linear type constructors/destructors (restricted by linearity pass)
-  | tokenMint   : Expr .uint256 → Expr .tokenAmount   -- canMint permission required
-  | tokenBurn   : Expr .tokenAmount → Expr .uint256   -- canBurn permission required
-  | tokenSplit  : Expr .tokenAmount → Expr .uint256   -- returns pair via letBind2
+  | tokenMint   : Expr .wei → Expr .tokenAmount   -- canMint permission required
+  | tokenBurn   : Expr .tokenAmount → Expr .wei   -- canBurn permission required
+  | tokenSplit  : Expr .tokenAmount → Expr .wei   -- returns pair via letBind2
   | tokenMerge  : Expr .tokenAmount → Expr .tokenAmount → Expr .tokenAmount
 
 /-- Statement AST. -/
@@ -586,25 +591,16 @@ def Expr.eval {t : Ty} [ContractErrors Err] (e : Expr t) (env : LocalEnv) : Cont
   | .caller    => ContractM.caller
   | .callvalue => ContractM.callvalue
   | .timestamp => ContractM.timestamp
-  | .addChecked a b => do
-    let va ← a.eval env
-    let vb ← b.eval env
-    match UInt256.addChecked va vb with
-    | .error ae => ContractM.revertArith ae
-    | .ok r    => pure r
-  | .subChecked a b => do
+  | .weiAddChecked a b => do
     let va ← a.eval env; let vb ← b.eval env
-    match UInt256.subChecked va vb with
+    match Wei.addChecked ⟨va⟩ ⟨vb⟩ with
     | .error ae => ContractM.revertArith ae
-    | .ok r    => pure r
-  | .divFloor a b => do
+    | .ok r    => pure r.raw
+  | .wadAddChecked a b => do
     let va ← a.eval env; let vb ← b.eval env
-    match UInt256.divChecked va vb with
+    match Wad.addChecked ⟨va⟩ ⟨vb⟩ with
     | .error ae => ContractM.revertArith ae
-    | .ok r    => pure r
-  | .addWrapping a b => do
-    let va ← a.eval env; let vb ← b.eval env
-    pure (UInt256.addWrapping va vb)   -- +↻: pure, no revert
+    | .ok r    => pure r.raw
   | .wadMulHalfUp a b => do
     let va ← a.eval env; let vb ← b.eval env
     match Wad.mulHalfUp ⟨va⟩ ⟨vb⟩ with
@@ -656,11 +652,8 @@ def Stmt.eval (stmt : Stmt) (env : LocalEnv)
 ### `@[simp]` bridge lemmas (required for proof ergonomics)
 
 ```lean
--- UInt256 checked (+?)
-@[simp] theorem UInt256.addCheckedNat_ok (a : UInt256) (n : Nat) (h : a.val + n < 2^256) :
-    addCheckedNat a n = .ok ⟨a.val + n, h⟩ := ...
-@[simp] theorem UInt256.addCheckedNat_error (a : UInt256) (n : Nat) (h : ¬ a.val + n < 2^256) :
-    addCheckedNat a n = ContractM.revertArith .Overflow := ...
+-- UInt256.addCheckedNat — framework-internal; used by Wei.addCheckedNat only
+@[simp] theorem UInt256.addCheckedNat_ok ...
 
 -- Wei checked (+? on Wei-typed storage/vars)
 @[simp] theorem Wei.addCheckedNat_ok (a : Wei) (n : Nat) (h : a.raw.val + n < 2^256) :
@@ -738,15 +731,12 @@ syntax "false"                           : lsc_expr
 syntax "msg.sender"                      : lsc_expr
 syntax "msg.value"                       : lsc_expr
 syntax "block.timestamp"                 : lsc_expr
--- Checked arithmetic (+? -? *? /?) — plain + - * / is a parse error
+-- Checked arithmetic (+? -? *? /?) — type-directed at elaboration; plain + - * / is a parse error
+-- Elaborator rejects operands typed as UInt256 (compile error: use Wei/Wad/Ray)
 syntax:65 lsc_expr:65 "+?" lsc_expr:66  : lsc_expr
 syntax:65 lsc_expr:65 "-?" lsc_expr:66  : lsc_expr
 syntax:65 lsc_expr:65 "*?" lsc_expr:66  : lsc_expr
 syntax:65 lsc_expr:65 "/?" lsc_expr:66  : lsc_expr
--- Wrapping arithmetic (+↻ -↻ *↻) — pure UInt256
-syntax:65 lsc_expr:65 "+↻" lsc_expr:66  : lsc_expr
-syntax:65 lsc_expr:65 "-↻" lsc_expr:66  : lsc_expr
-syntax:65 lsc_expr:65 "*↻" lsc_expr:66  : lsc_expr
 -- Fixed-point rounding (bracket pairs — scale from open scoped Lsc.Wad / Lsc.Ray)
 syntax:65 lsc_expr:65 "⌊*⌋?" lsc_expr:66 : lsc_expr
 syntax:65 lsc_expr:65 "⌈*⌉?" lsc_expr:66 : lsc_expr
@@ -838,13 +828,10 @@ macro_rules
   | `(lsc_expr| msg.sender)     => `(Expr.caller)
   | `(lsc_expr| msg.value)      => `(Expr.callvalue)
   | `(lsc_expr| block.timestamp) => `(Expr.timestamp)
-  | `(lsc_expr| $a +? $b)       => `(Expr.addChecked (lsc_expr| $a) (lsc_expr| $b))
-  | `(lsc_expr| $a -? $b)       => `(Expr.subChecked (lsc_expr| $a) (lsc_expr| $b))
-  | `(lsc_expr| $a *? $b)       => `(Expr.mulChecked (lsc_expr| $a) (lsc_expr| $b))
-  | `(lsc_expr| $a /? $b)       => `(Expr.divFloor (lsc_expr| $a) (lsc_expr| $b))
-  | `(lsc_expr| $a +↻ $b)       => `(Expr.addWrapping (lsc_expr| $a) (lsc_expr| $b))
-  | `(lsc_expr| $a -↻ $b)       => `(Expr.subWrapping (lsc_expr| $a) (lsc_expr| $b))
-  | `(lsc_expr| $a *↻ $b)       => `(Expr.mulWrapping (lsc_expr| $a) (lsc_expr| $b))
+  | `(lsc_expr| $a +? $b)       => `(Expr.weiAddChecked (lsc_expr| $a) (lsc_expr| $b))  -- placeholder; elaborator rewrites by operand type
+  | `(lsc_expr| $a -? $b)       => `(Expr.weiSubChecked (lsc_expr| $a) (lsc_expr| $b))
+  | `(lsc_expr| $a *? $b)       => `(Expr.weiMulChecked (lsc_expr| $a) (lsc_expr| $b))
+  | `(lsc_expr| $a /? $b)       => `(Expr.weiDivFloor (lsc_expr| $a) (lsc_expr| $b))
   -- bracket pairs: scope (Wad/Ray) resolved at elaboration — example for Wad half-up mul:
   | `(lsc_expr| $a ⸢*⸣? $b)     => `(Expr.wadMulHalfUp (lsc_expr| $a) (lsc_expr| $b))
   | `(lsc_expr| $a ⌊/⌋? $b)     => `(Expr.wadDivDown (lsc_expr| $a) (lsc_expr| $b))
@@ -867,10 +854,10 @@ macro_rules
       `(Stmt.letBind $(quote i.getId.toString) (lsc_expr| $e))
   | `(lsc_stmt| let $i ← $. $f +? $d:num) =>
       `(Stmt.letBind $(quote i.getId.toString)
-        (Expr.addChecked (Expr.storageGet $(quote f.getId.toString)) (Expr.litU256 $(quote d.getNat))))
+        (Expr.weiAddChecked (Expr.storageGet $(quote f.getId.toString)) (Expr.litWei $(quote d.getNat))))
   | `(lsc_stmt| let $i ← $. $f +? $d;) =>
       `(Stmt.letBind $(quote i.getId.toString)
-        (Expr.addChecked (Expr.storageGet $(quote f.getId.toString)) (lsc_expr| $d)))
+        (Expr.weiAddChecked (Expr.storageGet $(quote f.getId.toString)) (lsc_expr| $d)))
   | `(lsc_stmt| $. $f := $e;) =>
       `(Stmt.storageSet $(quote f.getId.toString) (lsc_expr| $e))
   | `(lsc_stmt| $. $f[$k] := $v;) =>
@@ -887,7 +874,13 @@ macro_rules
       `(Stmt.revert $(quote err.getId.toString))
 ```
 
-**Validator rules** (Step 8): reject plain `+ - * /` on numeric types; reject unscoped bracket-pair ops; reject `open scoped Lsc.Wad` and `open scoped Lsc.Ray` in the same module.
+**Validator rules** (Step 8):
+- reject plain `+ - * /` on any numeric type
+- reject `+? -? *? /?` when either operand is `UInt256` (compile error: *arithmetic on bare UInt256 is forbidden; use Wei, Wad, or Ray*)
+- reject unscoped bracket-pair ops
+- reject `open scoped Lsc.Wad` and `open scoped Lsc.Ray` in the same module
+
+**Type-directed `+?` elaboration**: after macro expansion, the elaborator inspects operand types and rewrites to the matching AST constructor (`weiAddChecked`, `wadAddChecked`, `rayAddChecked`, …). Mixed-type operands (e.g. `Wad +? Wei`) are a compile error.
 
 ---
 
@@ -997,7 +990,7 @@ def generateContractMDefs (c : ContractDef) : CommandElabM Unit := do
 
 ## Step 8 — Validation Passes (`Lang/Checks.lean`)
 
-Three passes, run in order, plus arith-error coverage. Each returns `List (Syntax × String)` (position, message) for error reporting.
+Three passes, run in order, plus typed-arithmetic and arith-error coverage. Each returns `List (Syntax × String)` (position, message) for error reporting.
 
 ```lean
 -- Lang/Checks.lean
@@ -1052,7 +1045,15 @@ def checkSelectorCollisions (fns : List FunctionDef) : Option String :=
   then some "Selector collision detected between external functions"
   else none
 
--- ── Pass 4: Arith error coverage (strict 1:1) ─
+-- ── Pass 4: No bare UInt256 arithmetic ────────
+
+/-- Reject weiAddChecked/wadAddChecked/… nodes where either operand is typed
+    as UInt256. UInt256 may be compared (`<`, `≤`, `==`) but never added,
+    subtracted, multiplied, or divided in contract bodies. -/
+def checkNoUInt256Arithmetic (c : ContractDef) : List (Syntax × String) :=
+  sorry
+
+-- ── Pass 5: Arith error coverage (strict 1:1) ─
 
 /-- For each ArithError case reachable from checked ops in the contract body,
     require a same-named variant in errors: (Overflow, Underflow, DivByZero).
@@ -1067,7 +1068,8 @@ def validateAll (c : ContractDef) : Except (List (Syntax × String)) ContractDef
   -- Pass 1: checkNoCycles
   -- Pass 2: checkLinear (per function)
   -- Pass 3: checkSelectorCollisions
-  -- Pass 4: checkArithErrorCoverage — reachable ArithError case must have
+  -- Pass 4: checkNoUInt256Arithmetic
+  -- Pass 5: checkArithErrorCoverage — reachable ArithError case must have
   --         same-named variant in errors:; reject collapsing maps
   -- collect all errors, report with positions
   -- return .ok c if no errors
@@ -1116,7 +1118,7 @@ partial def delabExprInner : DelabM (TSyntax `lsc_expr) := do
       | _ => failure
     | Expr.caller    => `(lsc_expr| msg.sender)
     | Expr.callvalue => `(lsc_expr| msg.value)
-    | Expr.addChecked _ _ =>
+    | Expr.weiAddChecked _ _ =>
       let a ← withAppFn <| withAppArg delabExprInner
       let b ← withAppArg delabExprInner
       `(lsc_expr| $a +? $b)
@@ -1130,16 +1132,16 @@ partial def delabExprInner : DelabM (TSyntax `lsc_expr) := do
   annAsTerm stx
 
 @[delab app.Lsc.Expr.litU256, delab app.Lsc.Expr.var,
-  delab app.Lsc.Expr.caller,   delab app.Lsc.Expr.addChecked,
+  delab app.Lsc.Expr.caller,   delab app.Lsc.Expr.weiAddChecked,
   delab app.Lsc.Expr.not]
 partial def delabExpr : Delab := do
   guard <| match_expr ← getExpr with
-    | Expr.litU256 _      => true
-    | Expr.var _          => true
-    | Expr.caller         => true
-    | Expr.addChecked _ _ => true
-    | Expr.not _          => true
-    | _                   => false
+    | Expr.litU256 _         => true
+    | Expr.var _             => true
+    | Expr.caller            => true
+    | Expr.weiAddChecked _ _ => true
+    | Expr.not _             => true
+    | _                      => false
   `(term| lsc_expr { $(⟨← delabExprInner⟩) })
 
 -- Stmt delaborator (same pattern, omitted for brevity — follow dss2024 exactly)
