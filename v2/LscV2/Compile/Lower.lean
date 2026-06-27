@@ -35,10 +35,19 @@ private partial def lowerExpr (cfg : Config) (e : Sigma LscV2.Expr) : Except Str
   match e with
   | ⟨Ty.wei, LscV2.Expr.litWei n⟩ => .ok (.lit n)
   | ⟨Ty.uint256, LscV2.Expr.litU256 n⟩ => .ok (.lit n.toNat)
+  | ⟨Ty.bool, LscV2.Expr.litBool b⟩ => .ok (.lit (if b then 1 else 0))
   | ⟨_, LscV2.Expr.var name⟩ => .ok (.local name)
   | ⟨_, LscV2.Expr.storageGet field⟩ => do
     let s ← resolveSlot cfg field
     .ok (.sload s)
+  | ⟨Ty.address, LscV2.Expr.caller⟩ => .ok (.local "caller")
+  | ⟨Ty.bool, LscV2.Expr.not a⟩ => do
+    let a' ← lowerExpr cfg ⟨Ty.bool, a⟩
+    .ok (.isZero a')
+  | ⟨Ty.bool, @LscV2.Expr.eq t a b⟩ => do
+    let a' ← lowerExpr cfg ⟨t, a⟩
+    let b' ← lowerExpr cfg ⟨t, b⟩
+    .ok (.eq a' b')
   | _ => .error "unsupported expression in lowering"
 
 private def checkedAddNat (cfg : Config) (field : Ident) (n : Nat) (bind : Ident) (rest : IR.Stmt) :
@@ -65,10 +74,13 @@ private partial def lowerStmt (cfg : Config) (s : LscV2.Stmt) : Except String IR
   | .letBind name tyExpr => do
     let e ← lowerExpr cfg tyExpr
     .ok (.letBind name e)
-  | .storageSet field ⟨Ty.wei, expr⟩ => do
+  | .storageSet field tyExpr => do
     let s ← resolveSlot cfg field
-    let e ← lowerExpr cfg ⟨Ty.wei, expr⟩
+    let e ← lowerExpr cfg tyExpr
     .ok (.sstore s e)
+  | .require e _ => do
+    let cond ← lowerExpr cfg ⟨Ty.bool, e⟩
+    .ok (.ifRevert (.isZero cond))
   | .emit eventName args =>
     match cfg.events.topic0 eventName with
     | some topic =>
@@ -76,6 +88,8 @@ private partial def lowerStmt (cfg : Config) (s : LscV2.Stmt) : Except String IR
       | [⟨Ty.wei, dataExpr⟩] => do
         let data ← lowerExpr cfg ⟨Ty.wei, dataExpr⟩
         .ok (.log1 topic data)
+      | [] =>
+        .ok (.log1 topic (.lit 0))
       | _ => .error s!"unsupported emit arity for {eventName}"
     | none => .error s!"unknown event {eventName}"
   | .revert _ => .ok .revert0

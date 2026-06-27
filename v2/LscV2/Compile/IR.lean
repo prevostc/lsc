@@ -9,6 +9,8 @@ inductive Expr where
   | sload : Nat → Expr
   | add : Expr → Expr → Expr
   | lt : Expr → Expr → Expr
+  | eq : Expr → Expr → Expr
+  | isZero : Expr → Expr
   deriving Repr
 
 inductive Stmt where

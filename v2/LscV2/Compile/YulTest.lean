@@ -1,9 +1,11 @@
 import LscV2.Compile.Yul
+import EvmYul.Yul.Ast
 
 open LscV2 LscV2.Compile
+open EvmYul Yul
 
 /-- Same shape as `Counter.incrementAst`. -/
-def incrementAst : Stmt :=
+def incrementAst : LscV2.Stmt :=
   Stmt.seq
     (Stmt.letBind "n" ⟨Ty.wei,
       Expr.weiAddCheckedNat (Expr.storageGet (t := .wei) "number") 1⟩)
@@ -23,9 +25,19 @@ def counterConfig : Config where
 def incrementYul : String :=
   incrementAst.toYul! counterConfig
 
-#guard incrementYul.contains "sload(0)"
-#guard incrementYul.contains "sstore(0"
+def incrementFn : Ast.FunctionDefinition :=
+  incrementAst.toYulAst! counterConfig
+
+#guard incrementYul.contains "sload(0x"
+#guard incrementYul.contains "sstore(0x"
 #guard incrementYul.contains "log1("
-#guard incrementYul.contains "revert(0, 0)"
+#guard incrementYul.contains "revert(0x"
+
+#guard incrementFn.body.length > 0
+#guard match incrementFn.body[1]! with
+  | Ast.Stmt.Let ["n"] (some _) => true
+  | _ => false
+
+#guard (incrementAst.toYulContract counterConfig "increment").isOk
 
 #eval IO.println incrementYul

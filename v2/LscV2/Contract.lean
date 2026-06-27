@@ -1,9 +1,19 @@
 import LscV2.Checks
 import LscV2.AST
+import LscV2.Syntax
+import LscV2.Eval
+import Lean
 
-namespace LscV2
+/-!
+  Contract command elaboration (IMPLEMENTATION Step 7).
 
--- Contract command elab (steps 2e–2i): see LscV2.DSL macros in Syntax.lean.
--- Next slice: CommandElabM code generation via addAndCompile / elabTerm.
+  Generic `contract $name where …` generators live here. Counter-specific
+  codegen belongs in `examples/counter/`, not in this module.
+-/
 
-end LscV2
+namespace LscV2.ContractElab
+
+/-- Placeholder until generic generators are wired; see strategy-reset plan Phase 2. -/
+def contractElabPending : String := "contract command elaboration not yet implemented"
+
+end LscV2.ContractElab

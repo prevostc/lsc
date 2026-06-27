@@ -1,45 +1,97 @@
 import LscV2.AST
 import LscV2.Compile.IR
 import LscV2.Compile.Lower
+import EvmYul.Yul.Ast
+import EvmYul.Operations
+import EvmYul.UInt256
 
 namespace LscV2.Compile
+
+open EvmYul Yul
 
 private def hex256 (n : Nat) : String :=
   "0x" ++ (BitVec.ofNat 256 n).toHex
 
-private def renderExpr (e : IR.Expr) : String :=
-  match e with
-  | .lit n => hex256 n
-  | .local name => name
-  | .sload slot => s!"sload({slot})"
-  | .add a b => s!"add({renderExpr a}, {renderExpr b})"
-  | .lt a b => s!"lt({renderExpr a}, {renderExpr b})"
+private def yulLit (n : Nat) : Ast.Expr := .Lit (UInt256.ofNat n)
 
-private partial def renderStmtInner (s : IR.Stmt) (indent : Nat) : String :=
+private def yulCall (name : String) (args : List Ast.Expr) : Ast.Expr :=
+  .Call (.inr name) args
+
+private def irExprToYul (e : IR.Expr) : Ast.Expr :=
+  match e with
+  | .lit n => yulLit n
+  | .local "caller" => .Call (.inl (Operation.CALLER (τ := .Yul))) []
+  | .local name => .Var name
+  | .sload slot => yulCall "sload" [yulLit slot]
+  | .add a b => yulCall "add" [irExprToYul a, irExprToYul b]
+  | .lt a b => yulCall "lt" [irExprToYul a, irExprToYul b]
+  | .eq a b => yulCall "eq" [irExprToYul a, irExprToYul b]
+  | .isZero a => yulCall "iszero" [irExprToYul a]
+
+private partial def irStmtToYul (s : IR.Stmt) : List Ast.Stmt :=
+  match s with
+  | .skip => []
+  | .seq s1 s2 => irStmtToYul s1 ++ irStmtToYul s2
+  | .letBind name e => [Ast.Stmt.Let [name] (some (irExprToYul e))]
+  | .sstore slot e => [Ast.Stmt.ExprStmtCall (yulCall "sstore" [yulLit slot, irExprToYul e])]
+  | .ifRevert cond =>
+    [Ast.Stmt.If (irExprToYul cond) [Ast.Stmt.ExprStmtCall (yulCall "revert" [yulLit 0, yulLit 0])]]
+  | .log1 topic data =>
+    [Ast.Stmt.ExprStmtCall (yulCall "log1" [yulLit topic, irExprToYul data])]
+  | .revert0 => [Ast.Stmt.ExprStmtCall (yulCall "revert" [yulLit 0, yulLit 0])]
+
+private def renderExpr (e : Ast.Expr) : String :=
+  match e with
+  | .Lit u => hex256 u.toNat
+  | .Var name => name
+  | .Call (.inl op) args =>
+    s!"{Ast.stringOfPrimOp op}({String.intercalate ", " (args.map renderExpr)})"
+  | .Call (.inr name) args =>
+    s!"{name}({String.intercalate ", " (args.map renderExpr)})"
+
+private partial def renderStmt (s : Ast.Stmt) (indent : Nat) : String :=
   let pad := String.ofList (List.replicate indent ' ')
   match s with
-  | .skip => ""
-  | .seq s1 s2 =>
-    let a := renderStmtInner s1 indent
-    let b := renderStmtInner s2 indent
-    if a.isEmpty then b
-    else if b.isEmpty then a
-    else a ++ "\n" ++ b
-  | .letBind name e => s!"{pad}let {name} := {renderExpr e}"
-  | .sstore slot e => s!"{pad}sstore({slot}, {renderExpr e})"
-  | .ifRevert cond => s!"{pad}if {renderExpr cond} " ++ "{ revert(0, 0) }"
-  | .log1 topic data => s!"{pad}log1({hex256 topic}, {renderExpr data})"
-  | .revert0 => s!"{pad}revert(0, 0)"
+  | .Let [name] (some expr) => s!"{pad}let {name} := {renderExpr expr}"
+  | .ExprStmtCall expr => s!"{pad}{renderExpr expr}"
+  | .If cond body =>
+    let inner := String.intercalate "\n" (body.map fun b => renderStmt b (indent + 4))
+    s!"{pad}if {renderExpr cond} " ++ "{\n" ++ inner ++ "\n" ++ pad ++ "}"
+  | .Block stmts => String.intercalate "\n" (stmts.map fun b => renderStmt b indent)
+  | _ => s!"{pad}// unsupported stmt"
 
-def renderStmt (s : IR.Stmt) : String :=
-  renderStmtInner s 4
+def renderFunction (name : Ident) (body : List Ast.Stmt) : String :=
+  let inner := String.intercalate "\n" (body.map fun s => renderStmt s 4)
+  "function " ++ name ++ "() {\n" ++ inner ++ "\n}"
 
-def renderFunction (name : Ident) (body : IR.Stmt) : String :=
-  "function " ++ name ++ "() {\n" ++ renderStmt body ++ "\n}"
+def irToYulContract (name : Ident) (body : IR.Stmt) : Ast.YulContract :=
+  { dispatcher := Ast.Stmt.Block []
+  , functions := (∅ : Finmap (fun (_ : Ast.YulFunctionName) ↦ Ast.FunctionDefinition)).insert name
+      (Ast.FunctionDefinition.Def [] [] (irStmtToYul body)) }
+
+def stmtToYulAst (cfg : Config) (s : LscV2.Stmt) : Except String Ast.FunctionDefinition :=
+  match Lower.stmt cfg s with
+  | .ok ir => .ok (Ast.FunctionDefinition.Def [] [] (irStmtToYul ir))
+  | .error e => .error e
+
+def stmtToYulAst! (cfg : Config) (s : LscV2.Stmt) : Ast.FunctionDefinition :=
+  match stmtToYulAst cfg s with
+  | .ok fn => fn
+  | .error e => panic! e
+
+def stmtToYulContract (cfg : Config) (s : LscV2.Stmt) (name : Ident) : Except String Ast.YulContract :=
+  match Lower.stmt cfg s with
+  | .ok ir => .ok (irToYulContract name ir)
+  | .error e => .error e
+
+def stmtToYulContract! (cfg : Config) (s : LscV2.Stmt) (name : Ident) : Ast.YulContract :=
+  match stmtToYulContract cfg s name with
+  | .ok c => c
+  | .error e => panic! e
 
 def stmtToYul (cfg : Config) (s : LscV2.Stmt) : Except String String :=
-  match Lower.stmt cfg s with
-  | .ok ir => .ok (renderFunction "lsc_body" ir)
+  match stmtToYulAst cfg s with
+  | .ok fn => .ok (renderFunction "lsc_body" fn.body)
   | .error e => .error e
 
 def stmtToYul! (cfg : Config) (s : LscV2.Stmt) : String :=
@@ -52,6 +104,19 @@ end LscV2.Compile
 namespace LscV2
 
 namespace Stmt
+
+def toYulAst (s : Stmt) (cfg : Compile.Config) : Except String EvmYul.Yul.Ast.FunctionDefinition :=
+  Compile.stmtToYulAst cfg s
+
+def toYulAst! (s : Stmt) (cfg : Compile.Config) : EvmYul.Yul.Ast.FunctionDefinition :=
+  Compile.stmtToYulAst! cfg s
+
+def toYulContract (s : Stmt) (cfg : Compile.Config) (name : Ident) :
+    Except String EvmYul.Yul.Ast.YulContract :=
+  Compile.stmtToYulContract cfg s name
+
+def toYulContract! (s : Stmt) (cfg : Compile.Config) (name : Ident) : EvmYul.Yul.Ast.YulContract :=
+  Compile.stmtToYulContract! cfg s name
 
 def toYul (s : Stmt) (cfg : Compile.Config) : Except String String :=
   Compile.stmtToYul cfg s
