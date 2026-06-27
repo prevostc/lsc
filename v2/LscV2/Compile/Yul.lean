@@ -74,56 +74,9 @@ def stmtToYulAst (cfg : Config) (s : LscV2.Stmt) : Except String Ast.FunctionDef
   | .ok ir => .ok (Ast.FunctionDefinition.Def [] [] (irStmtToYul ir))
   | .error e => .error e
 
-def stmtToYulAst! (cfg : Config) (s : LscV2.Stmt) : Ast.FunctionDefinition :=
-  match stmtToYulAst cfg s with
-  | .ok fn => fn
-  | .error e => panic! e
-
-def stmtToYulContract (cfg : Config) (s : LscV2.Stmt) (name : Ident) : Except String Ast.YulContract :=
-  match Lower.stmt cfg s with
-  | .ok ir => .ok (irToYulContract name ir)
-  | .error e => .error e
-
-def stmtToYulContract! (cfg : Config) (s : LscV2.Stmt) (name : Ident) : Ast.YulContract :=
-  match stmtToYulContract cfg s name with
-  | .ok c => c
-  | .error e => panic! e
-
 def stmtToYul (cfg : Config) (s : LscV2.Stmt) : Except String String :=
   match stmtToYulAst cfg s with
   | .ok fn => .ok (renderFunction "lsc_body" fn.body)
   | .error e => .error e
 
-def stmtToYul! (cfg : Config) (s : LscV2.Stmt) : String :=
-  match stmtToYul cfg s with
-  | .ok yul => yul
-  | .error e => s!"// lowering error: {e}"
-
 end LscV2.Compile
-
-namespace LscV2
-
-namespace Stmt
-
-def toYulAst (s : Stmt) (cfg : Compile.Config) : Except String EvmYul.Yul.Ast.FunctionDefinition :=
-  Compile.stmtToYulAst cfg s
-
-def toYulAst! (s : Stmt) (cfg : Compile.Config) : EvmYul.Yul.Ast.FunctionDefinition :=
-  Compile.stmtToYulAst! cfg s
-
-def toYulContract (s : Stmt) (cfg : Compile.Config) (name : Ident) :
-    Except String EvmYul.Yul.Ast.YulContract :=
-  Compile.stmtToYulContract cfg s name
-
-def toYulContract! (s : Stmt) (cfg : Compile.Config) (name : Ident) : EvmYul.Yul.Ast.YulContract :=
-  Compile.stmtToYulContract! cfg s name
-
-def toYul (s : Stmt) (cfg : Compile.Config) : Except String String :=
-  Compile.stmtToYul cfg s
-
-def toYul! (s : Stmt) (cfg : Compile.Config) : String :=
-  Compile.stmtToYul! cfg s
-
-end Stmt
-
-end LscV2

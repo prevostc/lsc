@@ -78,7 +78,9 @@ structure LinearCtx where
 
 The branch rule prevents the common bug where the error path drops a `FlashLoanReceipt` while the success path repays it.
 
-### Permission restrictions
+### Permission restrictions (redesign pending)
+
+> **v2 status:** AST-level `LinearPermission` and function `permits` fields were removed. The sketch below describes the intended v1 design; the replacement will live under `Lib/Linear/` as a capability model when linearity work resumes.
 
 Some linear type constructors are restricted to functions that declare the corresponding `LinearPermission`:
 

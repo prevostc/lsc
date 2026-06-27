@@ -30,3 +30,7 @@ https://github.com/NethermindEth/EVMYulLean
 
 Certora
 https://github.com/Layr-Labs/eigenlayer-contracts/tree/main/certora
+
+DSS2024, Intro to the Lean Theorem Prover | Jakob von Raumer (Lindy Labs)
+https://www.youtube.com/watch?v=WnKHskNts5Y
+https://github.com/javra/dss2024/blob/main/Dss2024/Eval.lean

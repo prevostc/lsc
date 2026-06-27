@@ -1,5 +1,4 @@
 import LscV2.AST
-import LscV2.Eval
 import Lean
 
 open Lean
@@ -23,8 +22,6 @@ syntax "UInt256" : lsc_ty
 syntax "Bool" : lsc_ty
 syntax "Address" : lsc_ty
 syntax "Wei" : lsc_ty
-syntax "Wad" : lsc_ty
-syntax "Ray" : lsc_ty
 
 syntax num : lsc_expr
 syntax (name := lsc_var) ident : lsc_expr
@@ -79,37 +76,34 @@ macro_rules
   | `(lsc_ty| Bool) => `(LscV2.Ty.bool)
   | `(lsc_ty| Address) => `(LscV2.Ty.address)
   | `(lsc_ty| Wei) => `(LscV2.Ty.wei)
-  | `(lsc_ty| Wad) => `(LscV2.Ty.wad)
-  | `(lsc_ty| Ray) => `(LscV2.Ty.ray)
 
 macro_rules
-  | `(lsc_expr| $n:num) => `(LscV2.Expr.litWei $(quote n.getNat))
-  | `(lsc_expr| lsc_true) => `(LscV2.Expr.litBool Bool.true)
-  | `(lsc_expr| lsc_false) => `(LscV2.Expr.litBool Bool.false)
-  | `(lsc_expr| msg.sender) => `(LscV2.Expr.caller)
+  | `(lsc_expr| $n:num) => `(LscV2.Wei.Expr.lit $(quote n.getNat))
+  | `(lsc_expr| lsc_true) => `(LscV2.CoreExpr.lit LscV2.Ty.bool (LscV2.Lit.bool Bool.true))
+  | `(lsc_expr| lsc_false) => `(LscV2.CoreExpr.lit LscV2.Ty.bool (LscV2.Lit.bool Bool.false))
+  | `(lsc_expr| msg.sender) => `(LscV2.CoreExpr.txField LscV2.TxField.caller)
   | `(lsc_expr| $. $f:ident) => do
       let fname := f.getId.toString
       match fname with
-      | "number" => `(@LscV2.Expr.storageGet LscV2.Ty.wei $(quote fname))
-      | "paused" => `(@LscV2.Expr.storageGet LscV2.Ty.bool $(quote fname))
-      | "owner" => `(@LscV2.Expr.storageGet LscV2.Ty.address $(quote fname))
-      | _ => `(@LscV2.Expr.storageGet _ $(quote fname))
+      | "number" => `(LscV2.Wei.Expr.storageGet $(quote fname))
+      | "paused" => `(@LscV2.CoreExpr.storageGet LscV2.Ty.bool $(quote fname))
+      | "owner" => `(@LscV2.CoreExpr.storageGet LscV2.Ty.address $(quote fname))
+      | _ => `(@LscV2.CoreExpr.storageGet _ $(quote fname))
   | `(lsc_expr| $i:ident) =>
-      `(@LscV2.Expr.var LscV2.Ty.wei $(quote i.getId.toString))
+      `(LscV2.Wei.Expr.var $(quote i.getId.toString))
   | `(lsc_expr| ($e:lsc_expr)) => expandLscExpr e
   | `(lsc_expr| $a:lsc_expr == $b:lsc_expr) => do
       let a ← expandLscExpr a
       let b ← expandLscExpr b
-      `(@LscV2.Expr.eq LscV2.Ty.address $a $b)
+      `(@LscV2.CoreExpr.eq LscV2.Ty.address $a $b)
   | `(lsc_expr| ! $e:lsc_expr) => do
       let e ← expandLscExpr e
-      `(LscV2.Expr.not $e)
+      `(LscV2.CoreExpr.not $e)
 
 macro_rules
   | `(lsc_stmt| let $i:ident ← $. $f:ident +? $d:num;) =>
       `(LscV2.Stmt.letBind $(quote i.getId.toString)
-        (Sigma.mk LscV2.Ty.wei
-          (@LscV2.Expr.weiAddCheckedNat (@LscV2.Expr.storageGet LscV2.Ty.wei $(quote f.getId.toString)) $(quote d.getNat))))
+        (Sigma.mk LscV2.Ty.wei (LscV2.Wei.addCheckedNatStorage $(quote f.getId.toString) $(quote d.getNat))))
   | `(lsc_stmt| $. $f:ident := $e:lsc_expr;) => do
       let e ← expandLscExpr e
       let fname := f.getId.toString

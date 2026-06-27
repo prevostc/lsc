@@ -1,43 +1,50 @@
 import LscV2.Compile.Yul
+import LscV2.TestFixtures.Counter
 import EvmYul.Yul.Ast
 
-open LscV2 LscV2.Compile
+open LscV2 LscV2.Compile LscV2.TestFixtures
 open EvmYul Yul
 
-/-- Same shape as `Counter.incrementAst`. -/
-def incrementAst : LscV2.Stmt :=
-  Stmt.seq
-    (Stmt.letBind "n" ⟨Ty.wei,
-      Expr.weiAddCheckedNat (Expr.storageGet (t := .wei) "number") 1⟩)
-    (Stmt.seq
-      (Stmt.storageSet "number" ⟨Ty.wei, Expr.var (t := .wei) "n"⟩)
-      (Stmt.emit "Incremented" [⟨Ty.wei, Expr.var (t := .wei) "n"⟩]))
-
-/-- keccak256("Incremented(uint256)") -/
 def incrementedTopic : Nat := 0x20d8a6f5a693f9d1d627a598e8820f7a55ee74c183aa8f1a30e8d4e8dd9a8d84
 
 def counterConfig : Config where
-  storage := StorageLayout.fromList [("number", 0)]
+  storage := StorageLayout.fromList [("number", 0), ("paused", 1), ("owner", 2)]
   events := { topic0 := fun
     | "Incremented" => some incrementedTopic
     | _ => none }
 
+namespace LscV2.YulTest
+
+private def stmtToYul! (cfg : Config) (s : Stmt) : String :=
+  match Compile.stmtToYul cfg s with
+  | .ok yul => yul
+  | .error e => panic! e
+
+private def stmtToYulAst! (cfg : Config) (s : Stmt) : Ast.FunctionDefinition :=
+  match Compile.stmtToYulAst cfg s with
+  | .ok fn => fn
+  | .error e => panic! e
+
+/-- Lower increment body only (Yul slice test). -/
+def incrementBodyAst : Stmt :=
+  Stmt.seq incrementLet (Stmt.seq incrementSet incrementEmit)
+
 def incrementYul : String :=
-  incrementAst.toYul! counterConfig
+  stmtToYul! counterConfig incrementBodyAst
 
 def incrementFn : Ast.FunctionDefinition :=
-  incrementAst.toYulAst! counterConfig
+  stmtToYulAst! counterConfig incrementBodyAst
 
-#guard incrementYul.contains "sload(0x"
-#guard incrementYul.contains "sstore(0x"
-#guard incrementYul.contains "log1("
-#guard incrementYul.contains "revert(0x"
+theorem increment_yul_contains_sload : incrementYul.contains "sload(0x" = true := by native_decide
 
-#guard incrementFn.body.length > 0
-#guard match incrementFn.body[1]! with
-  | Ast.Stmt.Let ["n"] (some _) => true
-  | _ => false
+theorem increment_yul_contains_sstore : incrementYul.contains "sstore(0x" = true := by native_decide
 
-#guard (incrementAst.toYulContract counterConfig "increment").isOk
+theorem increment_yul_contains_log1 : incrementYul.contains "log1(" = true := by native_decide
+
+theorem increment_yul_contains_revert : incrementYul.contains "revert(0x" = true := by native_decide
+
+theorem increment_fn_body_nonempty : incrementFn.body.length > 0 := by native_decide
 
 #eval IO.println incrementYul
+
+end LscV2.YulTest

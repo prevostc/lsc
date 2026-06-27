@@ -1,82 +1,76 @@
 import LscV2.Types
 import LscV2.Arithmetic
-import LscV2.Mapping
-import LscV2.LinearTypes
+import LscV2.Lib.Wei.Expr
 
 namespace LscV2
 
+/-- Core type tags. Extension types (wad, ray, linear) live in optional libs. -/
 inductive Ty
   | uint256
   | bool
   | address
   | wei
-  | wad
-  | ray
-  | tokenAmount
-  | allowance
-  | flashReceipt
-  | lock
-  | capability
-  | positionTicket
-  | mapping (k v : Ty)
   | unit
   deriving Repr, DecidableEq
 
-inductive Expr : Ty → Type
-    | litU256 : UInt256 → Expr .uint256
-    | litWei : Nat → Expr .wei
-    | litBool : Bool → Expr .bool
-    | litAddr : Address → Expr .address
-    | var : Ident → Expr t
-    | storageGet : Ident → Expr t
-    | weiAddChecked : Expr .wei → Expr .wei → Expr .wei
-    | weiSubChecked : Expr .wei → Expr .wei → Expr .wei
-    | weiMulChecked : Expr .wei → Expr .wei → Expr .wei
-    | weiDivFloor : Expr .wei → Expr .wei → Expr .wei
-    | weiAddCheckedNat : Expr .wei → Nat → Expr .wei
-    | wadAddChecked : Expr .wad → Expr .wad → Expr .wad
-    | wadSubChecked : Expr .wad → Expr .wad → Expr .wad
-    | wadMulDown : Expr .wad → Expr .wad → Expr .wad
-    | wadMulUp : Expr .wad → Expr .wad → Expr .wad
-    | wadMulHalfUp : Expr .wad → Expr .wad → Expr .wad
-    | wadDivDown : Expr .wad → Expr .wad → Expr .wad
-    | wadDivUp : Expr .wad → Expr .wad → Expr .wad
-    | wadDivHalfUp : Expr .wad → Expr .wad → Expr .wad
-    | rayAddChecked : Expr .ray → Expr .ray → Expr .ray
-    | raySubChecked : Expr .ray → Expr .ray → Expr .ray
-    | eq : Expr t → Expr t → Expr .bool
-    | lt : Expr .uint256 → Expr .uint256 → Expr .bool
-    | le : Expr .uint256 → Expr .uint256 → Expr .bool
-    | not : Expr .bool → Expr .bool
-    | and : Expr .bool → Expr .bool → Expr .bool
-    | or : Expr .bool → Expr .bool → Expr .bool
-    | caller : Expr .address
-    | callvalue : Expr .uint256
-    | timestamp : Expr .uint256
-    | mappingGet : Expr (.mapping k v) → Expr k → Expr v
-    | tokenMint : Expr .wei → Expr .tokenAmount
-    | tokenBurn : Expr .tokenAmount → Expr .wei
-    | tokenSplit : Expr .tokenAmount → Expr .wei
-    | tokenMerge : Expr .tokenAmount → Expr .tokenAmount → Expr .tokenAmount
+/-- Literal payload for core primitive types (not lib-owned types). -/
+inductive Lit : Ty → Type
+  | u256 : UInt256 → Lit Ty.uint256
+  | bool : Bool → Lit Ty.bool
+  | addr : Address → Lit Ty.address
 
-/-- Argument bundle for call/emit nodes. -/
+inductive TxField
+  | caller
+  | callvalue
+  | timestamp
+  deriving Repr, DecidableEq
+
+def txFieldTy : TxField → Ty
+  | .caller => .address
+  | .callvalue => .uint256
+  | .timestamp => .uint256
+
+/-- Core expression AST for primitive types (bool, address, uint256, unit). -/
+inductive CoreExpr : Ty → Type
+  | lit : (t : Ty) → Lit t → CoreExpr t
+  | var (t : Ty) : Ident → CoreExpr t
+  | storageGet (t : Ty) : Ident → CoreExpr t
+  | txField (f : TxField) : CoreExpr (txFieldTy f)
+  | eq (t : Ty) : CoreExpr t → CoreExpr t → CoreExpr Ty.bool
+  | lt : CoreExpr Ty.uint256 → CoreExpr Ty.uint256 → CoreExpr Ty.bool
+  | le : CoreExpr Ty.uint256 → CoreExpr Ty.uint256 → CoreExpr Ty.bool
+  | not : CoreExpr Ty.bool → CoreExpr Ty.bool
+  | and : CoreExpr Ty.bool → CoreExpr Ty.bool → CoreExpr Ty.bool
+  | or : CoreExpr Ty.bool → CoreExpr Ty.bool → CoreExpr Ty.bool
+  | unit : CoreExpr Ty.unit
+
+/-- Typed expressions: Wei lives in `Lib.Wei`; primitives in `CoreExpr`. -/
+def Expr : Ty → Type :=
+  fun t => match t with
+  | .wei => Wei.Expr
+  | .uint256 | .bool | .address | .unit => CoreExpr t
+
 abbrev ExprAny := Sigma Expr
+
+namespace Wei
+
+def addCheckedNatStorage (field : String) (n : Nat) : Wei.Expr :=
+  .addCheckedNat (.storageGet field) n
+
+@[simp] theorem addCheckedNatStorage_eq (field : String) (n : Nat) :
+    addCheckedNatStorage field n = .addCheckedNat (.storageGet field) n := rfl
+
+end Wei
 
 inductive Stmt
   | skip
   | seq : Stmt → Stmt → Stmt
   | letBind : Ident → (t : Ty) × Expr t → Stmt
-  | letBind2 : Ident → Ident → (t : Ty) × Expr t → Stmt
   | storageSet : Ident → (t : Ty) × Expr t → Stmt
-  | storageMapSet : Ident → (k : Ty) × Expr k → (v : Ty) × Expr v → Stmt
-  | require : Expr .bool → Ident → Stmt
-  | ifThenElse : Expr .bool → Stmt → Stmt → Stmt
-  | call : Ident → List ExprAny → Stmt
-  | externalCall : Ident → Ident → List ExprAny → Stmt
+  | require : Expr Ty.bool → Ident → Stmt
+  | ifThenElse : Expr Ty.bool → Stmt → Stmt → Stmt
   | emit : Ident → List ExprAny → Stmt
   | revert : Ident → Stmt
-  | lockAcquire : Ident → Stmt
-  | lockRelease : Expr .lock → Stmt
 
 inductive FunctionKind
   | external
@@ -85,19 +79,12 @@ inductive FunctionKind
   | constructor
   deriving Repr, DecidableEq
 
-inductive LinearPermission
-  | canMint (tokenType : Ident)
-  | canBurn (tokenType : Ident)
-  | canFlashBorrow
-  deriving Repr, DecidableEq
-
 structure FunctionDef where
   name : Ident
   kind : FunctionKind
   params : List (Ident × Ty)
   retTy : Ty
   body : Stmt
-  permits : List LinearPermission
 
 structure ContractDef where
   name : Ident

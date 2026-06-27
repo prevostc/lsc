@@ -1,9 +1,12 @@
 import LscV2.Eval
 import LscV2.Compile.Yul
+import LscV2.TestFixtures.Counter
 
-open LscV2 LscV2.Compile
+open LscV2 LscV2.Compile LscV2.TestFixtures
 
 namespace Counter
+
+set_option linter.unusedSimpArgs false
 
 structure CounterStorage where
   number : Wei := Wei.mkNat 0
@@ -35,51 +38,50 @@ instance : ContractErrors CounterError where
     | ae => ContractErrors.unreachableArith ae
   fromFramework := fun _ => .Overflow
 
-instance : StorageOps CounterStorage where
-  storageGet := fun
-    | .wei, "number", s => some (.wei s.number)
-    | .bool, "paused", s => some (.bool s.paused)
-    | .address, "owner", s => some (.addr s.owner)
-    | _, _, _ => none
-  storageSet := fun
-    | .wei, "number", (.wei v), s => { s with number := v }
-    | .bool, "paused", (.bool v), s => { s with paused := v }
-    | .address, "owner", (.addr v), s => { s with owner := v }
-    | _, _, _, s => s
+def getField (t : Ty) (field : String) (s : CounterStorage) : Option (Val t) :=
+  match t, field with
+  | .wei, "number" => some (.wei s.number)
+  | .bool, "paused" => some (.bool s.paused)
+  | .address, "owner" => some (.addr s.owner)
+  | _, _ => none
 
-@[simp] theorem storageGet_number (s : CounterStorage) :
-    StorageOps.storageGet (t := Ty.wei) "number" s = some (.wei s.number) := rfl
+def setField (t : Ty) (field : String) (v : Val t) (s : CounterStorage) : CounterStorage :=
+  match t, field, v with
+  | .wei, "number", .wei w => { s with number := w }
+  | .bool, "paused", .bool b => { s with paused := b }
+  | .address, "owner", .addr a => { s with owner := a }
+  | _, _, _ => s
 
-@[simp] theorem storageGet_paused (s : CounterStorage) :
-    StorageOps.storageGet (t := Ty.bool) "paused" s = some (.bool s.paused) := rfl
+@[simp] theorem getField_number (s : CounterStorage) :
+    getField Ty.wei "number" s = some (.wei s.number) := rfl
 
-@[simp] theorem storageGet_owner (s : CounterStorage) :
-    StorageOps.storageGet (t := Ty.address) "owner" s = some (.addr s.owner) := rfl
+@[simp] theorem getField_paused (s : CounterStorage) :
+    getField Ty.bool "paused" s = some (.bool s.paused) := rfl
 
-@[simp] theorem storageSet_number (v : Wei) (s : CounterStorage) :
-    StorageOps.storageSet (t := Ty.wei) "number" (.wei v) s =
-      { s with number := v } := rfl
+@[simp] theorem getField_owner (s : CounterStorage) :
+    getField Ty.address "owner" s = some (.addr s.owner) := rfl
 
-@[simp] theorem storageSet_paused (v : Bool) (s : CounterStorage) :
-    StorageOps.storageSet (t := Ty.bool) "paused" (.bool v) s =
-      { s with paused := v } := rfl
+@[simp] theorem setField_number (v : Wei) (s : CounterStorage) :
+    setField Ty.wei "number" (.wei v) s = { s with number := v } := rfl
 
-@[simp] theorem storageSet_owner (v : Address) (s : CounterStorage) :
-    StorageOps.storageSet (t := Ty.address) "owner" (.addr v) s =
-      { s with owner := v } := rfl
+@[simp] theorem setField_paused (v : Bool) (s : CounterStorage) :
+    setField Ty.bool "paused" (.bool v) s = { s with paused := v } := rfl
+
+@[simp] theorem setField_owner (v : Address) (s : CounterStorage) :
+    setField Ty.address "owner" (.addr v) s = { s with owner := v } := rfl
 
 def incrementRequire : Stmt :=
-  Stmt.require (Expr.not (Expr.storageGet (t := .bool) "paused")) "Paused"
+  Stmt.require (CoreExpr.not (CoreExpr.storageGet Ty.bool "paused")) "Paused"
 
 def incrementLet : Stmt :=
   Stmt.letBind "n" ⟨Ty.wei,
-    Expr.weiAddCheckedNat (Expr.storageGet (t := .wei) "number") 1⟩
+    Wei.addCheckedNatStorage "number" 1⟩
 
 def incrementSet : Stmt :=
-  Stmt.storageSet "number" ⟨Ty.wei, Expr.var (t := .wei) "n"⟩
+  Stmt.storageSet "number" ⟨Ty.wei, Wei.Expr.var "n"⟩
 
 def incrementEmit : Stmt :=
-  Stmt.emit "Incremented" [⟨Ty.wei, Expr.var (t := .wei) "n"⟩]
+  Stmt.emit "Incremented" [⟨Ty.wei, Wei.Expr.var "n"⟩]
 
 def incrementTail : Stmt := Stmt.seq incrementSet incrementEmit
 
@@ -87,44 +89,43 @@ def incrementBody : Stmt := Stmt.seq incrementLet incrementTail
 
 def incrementAst : Stmt := Stmt.seq incrementRequire incrementBody
 
-instance : ErrorResolver CounterError where
-  resolve := fun
-    | "Paused" => some .Paused
-    | "NotOwner" => some .NotOwner
-    | "Overflow" => some .Overflow
-    | _ => none
+def resolveError (name : String) : Option CounterError :=
+  match name with
+  | "Paused" => some .Paused
+  | "NotOwner" => some .NotOwner
+  | "Overflow" => some .Overflow
+  | _ => none
 
-instance : EventBuilder CounterEvent where
-  build := fun
-    | "Incremented", [⟨Ty.wei, (.wei n)⟩] => some (.Incremented n)
-    | "Paused", [] => some .Paused
-    | "Unpaused", [] => some .Unpaused
-    | _, _ => none
+def buildEvent (name : String) (vals : List (Sigma Val)) : Option CounterEvent :=
+  match name, vals with
+  | "Incremented", [⟨.wei, (.wei n)⟩] => some (.Incremented n)
+  | "Paused", [] => some .Paused
+  | "Unpaused", [] => some (.Unpaused)
+  | _, _ => none
 
-@[simp] theorem errorResolve_paused :
-    ErrorResolver.resolve (Err := CounterError) "Paused" = some .Paused := rfl
+@[simp] theorem resolveError_paused :
+    resolveError "Paused" = some .Paused := rfl
 
-@[simp] theorem errorResolve_notOwner :
-    ErrorResolver.resolve (Err := CounterError) "NotOwner" = some .NotOwner := rfl
+@[simp] theorem resolveError_notOwner :
+    resolveError "NotOwner" = some .NotOwner := rfl
 
-@[simp] theorem errorResolve_overflow :
-    ErrorResolver.resolve (Err := CounterError) "Overflow" = some .Overflow := rfl
+@[simp] theorem resolveError_overflow :
+    resolveError "Overflow" = some .Overflow := rfl
 
-@[simp] theorem eventBuild_incremented (n : Wei) :
-    EventBuilder.build (E := CounterEvent) "Incremented" [⟨Ty.wei, (.wei n)⟩] =
+@[simp] theorem buildEvent_incremented (n : Wei) :
+    buildEvent "Incremented" [⟨Ty.wei, (.wei n)⟩] =
       some (.Incremented n) := rfl
 
-@[simp] theorem eventBuild_paused :
-    EventBuilder.build (E := CounterEvent) "Paused" [] = some .Paused := rfl
+@[simp] theorem buildEvent_paused :
+    buildEvent "Paused" [] = some .Paused := rfl
 
-@[simp] theorem eventBuild_unpaused :
-    EventBuilder.build (E := CounterEvent) "Unpaused" [] = some .Unpaused := rfl
+@[simp] theorem buildEvent_unpaused :
+    buildEvent "Unpaused" [] = some .Unpaused := rfl
 
 abbrev CounterM := ContractM CounterStorage CounterEvent CounterError
 
 def incrementViaAst : CounterM LocalEnv :=
-  Stmt.eval (S := CounterStorage) (E := CounterEvent) (Err := CounterError)
-    incrementAst LocalEnv.empty
+  Stmt.eval getField resolveError buildEvent setField incrementAst LocalEnv.empty
 
 def increment : CounterM Unit := do
   let _ ← incrementViaAst
@@ -167,68 +168,65 @@ private def runIncrementEval (s : ContractState CounterStorage) :
   else
     .error CounterError.Overflow
 
-private theorem eval_var_n (env : LocalEnv) (w' : Wei)
+section bridgeEval
+
+private theorem eval_var_n (s : ContractState CounterStorage) (env : LocalEnv) (w' : Wei)
     (h : env.lookup "n" = some ⟨Ty.wei, Val.wei w'⟩) :
-    (Expr.var (t := .wei) "n").eval
-      (S := CounterStorage) (E := CounterEvent) (Err := CounterError) env =
-      pure (Val.wei w') := by
-  simp only [Expr.eval, h, decide_eq_true_eq, dif_pos trivial, show Ty.wei = Ty.wei from rfl]
+    (Expr.eval getField (show Expr Ty.wei from Wei.Expr.var "n") env : CounterM (Val .wei)) s =
+      .ok (Val.wei w', s, []) := by
+  simp only [Expr.eval, Wei.eval, h, decide_eq_true_eq, ContractM.pure_apply]
   rfl
 
 private theorem eval_incrementRequire_ok (s : ContractState CounterStorage)
     (hpaused : s.storage.paused = false) :
-    incrementRequire.eval (S := CounterStorage) (E := CounterEvent) (Err := CounterError)
-      LocalEnv.empty s = .ok (LocalEnv.empty, s, []) := by
-  simp only [incrementRequire, Stmt.eval, Expr.eval, storageGet_paused, ContractM.bind_apply,
-             ContractM.get, ContractM.pure_apply, errorResolve_paused, List.append_nil,
+    Stmt.eval getField resolveError buildEvent setField incrementRequire LocalEnv.empty s = .ok (LocalEnv.empty, s, []) := by
+  simp only [incrementRequire, Stmt.eval, Expr.eval, CoreExpr.eval, getField_paused, ContractM.bind_apply,
+             ContractM.get, ContractM.pure_apply, resolveError_paused, List.append_nil,
              Val.boolOf_bool, hpaused, Bool.not_false]
   simp [ContractM.pure_apply, List.append_nil]
 
 private theorem eval_incrementRequire_err (s : ContractState CounterStorage)
     (hp : s.storage.paused = true) :
-    incrementRequire.eval (S := CounterStorage) (E := CounterEvent) (Err := CounterError)
-      LocalEnv.empty s = .error CounterError.Paused := by
-  simp only [incrementRequire, Stmt.eval, Expr.eval, storageGet_paused, ContractM.bind_apply,
-             ContractM.get, errorResolve_paused, ContractM.revertUser, ContractM.revertUser_apply,
+    Stmt.eval getField resolveError buildEvent setField incrementRequire LocalEnv.empty s = .error CounterError.Paused := by
+  simp only [incrementRequire, Stmt.eval, Expr.eval, CoreExpr.eval, getField_paused, ContractM.bind_apply,
+             ContractM.get, resolveError_paused, ContractM.revertUser, ContractM.revertUser_apply,
              List.append_nil, Val.boolOf_bool, hp, Bool.not_true, if_false]
   simp [ContractM.revertUser_apply]
 
 private theorem eval_incrementLet_ok (s : ContractState CounterStorage) (w' : Wei)
     (hw : w' = ⟨BitVec.ofNat 256 (s.storage.number.raw.toNat + 1)⟩)
     (hno : s.storage.number.raw.toNat + 1 < 2 ^ 256) :
-    incrementLet.eval (S := CounterStorage) (E := CounterEvent) (Err := CounterError)
-      LocalEnv.empty s =
+    Stmt.eval getField resolveError buildEvent setField incrementLet LocalEnv.empty s =
       Except.ok (LocalEnv.bind "n" ⟨Ty.wei, (.wei w')⟩ LocalEnv.empty, s, []) := by
-  simp only [incrementLet, Stmt.eval, Expr.eval, storageGet_number, LocalEnv.empty, LocalEnv.bind,
+  simp only [incrementLet, Stmt.eval, Expr.eval, Wei.eval, Wei.addCheckedNatStorage_eq, getField_number, LocalEnv.empty, LocalEnv.bind,
              ContractM.bind_apply, ContractM.get, ContractM.pure_apply, hw,
              Wei.addCheckedNat_ok s.storage.number 1 hno, Val.weiOf_wei, List.append_nil]
 
 private theorem eval_incrementLet_err (s : ContractState CounterStorage)
     (hov : ¬ s.storage.number.raw.toNat + 1 < 2 ^ 256) :
-    incrementLet.eval (S := CounterStorage) (E := CounterEvent) (Err := CounterError)
-      LocalEnv.empty s = .error CounterError.Overflow := by
-  simp only [incrementLet, Stmt.eval, Expr.eval, storageGet_number, LocalEnv.empty,
+    Stmt.eval getField resolveError buildEvent setField incrementLet LocalEnv.empty s = .error CounterError.Overflow := by
+  simp only [incrementLet, Stmt.eval, Expr.eval, Wei.eval, Wei.addCheckedNatStorage_eq, getField_number, LocalEnv.empty,
              ContractM.bind_apply, ContractM.get, Wei.addCheckedNat_error s.storage.number 1 hov,
              Val.weiOf_wei, ContractM.revertArith, ContractErrors.arith, List.append_nil]
 
 private theorem eval_incrementSet_ok (s : ContractState CounterStorage) (w' : Wei) (env : LocalEnv)
     (henv : env.lookup "n" = some ⟨Ty.wei, Val.wei w'⟩) :
-    incrementSet.eval (S := CounterStorage) (E := CounterEvent) (Err := CounterError) env s =
+    Stmt.eval getField resolveError buildEvent setField incrementSet env s =
       Except.ok (env, { s with storage := { s.storage with number := w' }}, []) := by
-  simp only [incrementSet, Stmt.eval, Expr.eval, eval_var_n env w' henv, storageSet_number,
+  simp only [incrementSet, Stmt.eval, Expr.eval, eval_var_n s env w' henv, setField_number,
              ContractM.bind_apply, ContractM.modifyStorage, ContractM.pure_apply, List.append_nil]
 
 private theorem eval_incrementEmit_ok (env : LocalEnv) (s' : ContractState CounterStorage) (w' : Wei)
     (h : env.lookup "n" = some ⟨Ty.wei, Val.wei w'⟩) :
-    incrementEmit.eval (S := CounterStorage) (E := CounterEvent) (Err := CounterError) env s' =
+    Stmt.eval getField resolveError buildEvent setField incrementEmit env s' =
       Except.ok (env, s', [CounterEvent.Incremented w']) := by
   simp only [incrementEmit, Stmt.eval, List.mapM, List.mapM.loop, List.nil_append,
-             List.reverseAux_nil, List.reverse, eval_var_n env w' h, eventBuild_incremented,
+             List.reverseAux_nil, List.reverse, eval_var_n s' env w' h, buildEvent_incremented,
              ContractM.emit, ContractM.bind_apply, List.reverseAux_cons, List.append_nil]
 
 private theorem eval_incrementTail_ok (s : ContractState CounterStorage) (w' : Wei) (env : LocalEnv)
     (henv : env.lookup "n" = some ⟨Ty.wei, Val.wei w'⟩) :
-    incrementTail.eval (S := CounterStorage) (E := CounterEvent) (Err := CounterError) env s =
+    Stmt.eval getField resolveError buildEvent setField incrementTail env s =
       Except.ok (env, { s with storage := { s.storage with number := w' }},
         [CounterEvent.Incremented w']) := by
   simp only [incrementTail, Stmt.eval]
@@ -239,8 +237,7 @@ private theorem eval_incrementTail_ok (s : ContractState CounterStorage) (w' : W
 private theorem eval_incrementBody_ok (s : ContractState CounterStorage) (w' : Wei)
     (hno : s.storage.number.raw.toNat + 1 < 2 ^ 256)
     (hw : w' = ⟨BitVec.ofNat 256 (s.storage.number.raw.toNat + 1)⟩) :
-    incrementBody.eval (S := CounterStorage) (E := CounterEvent) (Err := CounterError)
-      LocalEnv.empty s = .ok (incrementOkResult s w') := by
+    Stmt.eval getField resolveError buildEvent setField incrementBody LocalEnv.empty s = .ok (incrementOkResult s w') := by
   let env' := LocalEnv.bind "n" ⟨Ty.wei, (.wei w')⟩ LocalEnv.empty
   have henv : env'.lookup "n" = some ⟨Ty.wei, Val.wei w'⟩ := by
     simp [env', LocalEnv.bind, decide_eq_true_eq]
@@ -251,16 +248,14 @@ private theorem eval_incrementBody_ok (s : ContractState CounterStorage) (w' : W
 
 private theorem eval_incrementBody_err (s : ContractState CounterStorage)
     (hov : ¬ s.storage.number.raw.toNat + 1 < 2 ^ 256) :
-    incrementBody.eval (S := CounterStorage) (E := CounterEvent) (Err := CounterError)
-      LocalEnv.empty s = .error CounterError.Overflow := by
+    Stmt.eval getField resolveError buildEvent setField incrementBody LocalEnv.empty s = .error CounterError.Overflow := by
   simp only [incrementBody, Stmt.eval]
   rw [ContractM.bind_apply_err _ _ _ _ (eval_incrementLet_err s hov)]
 
 private theorem eval_incrementAst_ok (s : ContractState CounterStorage) (w' : Wei)
     (hpaused : s.storage.paused = false) (hno : s.storage.number.raw.toNat + 1 < 2 ^ 256)
     (hw : w' = ⟨BitVec.ofNat 256 (s.storage.number.raw.toNat + 1)⟩) :
-    incrementAst.eval (S := CounterStorage) (E := CounterEvent) (Err := CounterError)
-      LocalEnv.empty s = .ok (incrementOkResult s w') := by
+    Stmt.eval getField resolveError buildEvent setField incrementAst LocalEnv.empty s = .ok (incrementOkResult s w') := by
   simp only [incrementAst, Stmt.eval]
   rw [ContractM.bind_apply_ok _ _ _ _ _ _ (eval_incrementRequire_ok s hpaused)]
   rw [eval_incrementBody_ok s w' hno hw]
@@ -268,15 +263,13 @@ private theorem eval_incrementAst_ok (s : ContractState CounterStorage) (w' : We
 
 private theorem eval_incrementAst_err_paused (s : ContractState CounterStorage)
     (hp : s.storage.paused = true) :
-    incrementAst.eval (S := CounterStorage) (E := CounterEvent) (Err := CounterError)
-      LocalEnv.empty s = .error CounterError.Paused := by
+    Stmt.eval getField resolveError buildEvent setField incrementAst LocalEnv.empty s = .error CounterError.Paused := by
   simp only [incrementAst, Stmt.eval]
   rw [ContractM.bind_apply_err _ _ _ _ (eval_incrementRequire_err s hp)]
 
 private theorem eval_incrementAst_err_overflow (s : ContractState CounterStorage)
     (hpaused : s.storage.paused = false) (hov : ¬ s.storage.number.raw.toNat + 1 < 2 ^ 256) :
-    incrementAst.eval (S := CounterStorage) (E := CounterEvent) (Err := CounterError)
-      LocalEnv.empty s = .error CounterError.Overflow := by
+    Stmt.eval getField resolveError buildEvent setField incrementAst LocalEnv.empty s = .error CounterError.Overflow := by
   simp only [incrementAst, Stmt.eval]
   rw [ContractM.bind_apply_ok _ _ _ _ _ _ (eval_incrementRequire_ok s hpaused)]
   rw [eval_incrementBody_err s hov]
@@ -305,14 +298,14 @@ private theorem incrementViaAst_eq_run (s : ContractState CounterStorage) :
       exact hl.trans hr.symm
 
 def pauseRequireOwner : Stmt :=
-  Stmt.require (Expr.eq Expr.caller (Expr.storageGet (t := .address) "owner")) "NotOwner"
+  Stmt.require (CoreExpr.eq Ty.address (CoreExpr.txField .caller) (CoreExpr.storageGet Ty.address "owner")) "NotOwner"
 
 def pauseRequireNotPaused : Stmt := incrementRequire
 
 @[simp] theorem pauseRequireNotPaused_def : pauseRequireNotPaused = incrementRequire := rfl
 
 def pauseSet : Stmt :=
-  Stmt.storageSet "paused" ⟨Ty.bool, Expr.litBool true⟩
+  Stmt.storageSet "paused" ⟨Ty.bool, CoreExpr.lit Ty.bool (.bool true)⟩
 
 def pauseEmit : Stmt := Stmt.emit "Paused" []
 
@@ -327,10 +320,10 @@ def unpauseRequireOwner : Stmt := pauseRequireOwner
 @[simp] theorem unpauseRequireOwner_def : unpauseRequireOwner = pauseRequireOwner := rfl
 
 def unpauseRequirePaused : Stmt :=
-  Stmt.require (Expr.storageGet (t := .bool) "paused") "Paused"
+  Stmt.require (CoreExpr.storageGet Ty.bool "paused") "Paused"
 
 def unpauseSet : Stmt :=
-  Stmt.storageSet "paused" ⟨Ty.bool, Expr.litBool false⟩
+  Stmt.storageSet "paused" ⟨Ty.bool, CoreExpr.lit Ty.bool (.bool false)⟩
 
 def unpauseEmit : Stmt := Stmt.emit "Unpaused" []
 
@@ -341,16 +334,14 @@ def unpauseBody : Stmt := Stmt.seq unpauseRequirePaused unpauseTail
 def unpauseAst : Stmt := Stmt.seq unpauseRequireOwner unpauseBody
 
 def pauseViaAst : CounterM LocalEnv :=
-  Stmt.eval (S := CounterStorage) (E := CounterEvent) (Err := CounterError)
-    pauseAst LocalEnv.empty
+  Stmt.eval getField resolveError buildEvent setField pauseAst LocalEnv.empty
 
 def pause : CounterM Unit := do
   let _ ← pauseViaAst
   pure ()
 
 def unpauseViaAst : CounterM LocalEnv :=
-  Stmt.eval (S := CounterStorage) (E := CounterEvent) (Err := CounterError)
-    unpauseAst LocalEnv.empty
+  Stmt.eval getField resolveError buildEvent setField unpauseAst LocalEnv.empty
 
 def unpause : CounterM Unit := do
   let _ ← unpauseViaAst
@@ -402,41 +393,39 @@ private def runUnpauseEval (s : ContractState CounterStorage) :
 
 private theorem eval_pauseRequireOwner_ok (s : ContractState CounterStorage)
     (h : (s.context.caller == s.storage.owner) = true) :
-    pauseRequireOwner.eval (S := CounterStorage) (E := CounterEvent) (Err := CounterError)
-      LocalEnv.empty s = .ok (LocalEnv.empty, s, []) := by
+    Stmt.eval getField resolveError buildEvent setField pauseRequireOwner LocalEnv.empty s = .ok (LocalEnv.empty, s, []) := by
   have hcond : Val.boolOf (Val.bool (s.context.caller == s.storage.owner)) = true := by
     simp [Val.boolOf_bool, h]
-  simp only [pauseRequireOwner, Stmt.eval, Expr.eval, storageGet_owner, ContractM.caller,
+  simp only [pauseRequireOwner, Stmt.eval, Expr.eval, CoreExpr.eval, getField_owner, ContractM.caller,
              ContractM.bind_apply, ContractM.get, ContractM.pure_apply, Val.eq_addr,
-             errorResolve_notOwner, List.append_nil, hcond]
+             resolveError_notOwner, List.append_nil, hcond]
   simp [ContractM.pure_apply, List.append_nil]
 
 private theorem eval_pauseRequireOwner_err (s : ContractState CounterStorage)
     (h : (s.context.caller == s.storage.owner) = false) :
-    pauseRequireOwner.eval (S := CounterStorage) (E := CounterEvent) (Err := CounterError)
-      LocalEnv.empty s = .error CounterError.NotOwner := by
+    Stmt.eval getField resolveError buildEvent setField pauseRequireOwner LocalEnv.empty s = .error CounterError.NotOwner := by
   have hcond : Val.boolOf (Val.bool (s.context.caller == s.storage.owner)) = false := by
     simp [Val.boolOf_bool, h]
-  simp only [pauseRequireOwner, Stmt.eval, Expr.eval, storageGet_owner, ContractM.caller,
-             ContractM.bind_apply, ContractM.get, Val.eq_addr, errorResolve_notOwner,
+  simp only [pauseRequireOwner, Stmt.eval, Expr.eval, CoreExpr.eval, getField_owner, ContractM.caller,
+             ContractM.bind_apply, ContractM.get, Val.eq_addr, resolveError_notOwner,
              ContractM.revertUser, ContractM.revertUser_apply, List.append_nil, hcond, if_false]
   simp [ContractM.revertUser_apply]
 
 private theorem eval_pauseSet_ok (s : ContractState CounterStorage) (env : LocalEnv) :
-    pauseSet.eval (S := CounterStorage) (E := CounterEvent) (Err := CounterError) env s =
+    Stmt.eval getField resolveError buildEvent setField pauseSet env s =
       .ok (env, { s with storage := { s.storage with paused := true }}, []) := by
-  simp [pauseSet, Stmt.eval, Expr.eval, storageSet_paused, ContractM.bind_apply,
+  simp [pauseSet, Stmt.eval, Expr.eval, CoreExpr.eval, setField_paused, ContractM.bind_apply,
         ContractM.modifyStorage, ContractM.pure_apply, List.append_nil]
 
 private theorem eval_pauseEmit_ok (env : LocalEnv) (s' : ContractState CounterStorage) :
-    pauseEmit.eval (S := CounterStorage) (E := CounterEvent) (Err := CounterError) env s' =
+    Stmt.eval getField resolveError buildEvent setField pauseEmit env s' =
       .ok (env, s', [.Paused]) := by
   simp only [pauseEmit, Stmt.eval, List.mapM, List.mapM.loop, List.nil_append,
-             List.reverseAux_nil, List.reverse, eventBuild_paused, ContractM.emit,
+             List.reverseAux_nil, List.reverse, buildEvent_paused, ContractM.emit,
              ContractM.bind_apply, List.reverseAux_cons, List.append_nil]
 
 private theorem eval_pauseTail_ok (s : ContractState CounterStorage) (env : LocalEnv) :
-    pauseTail.eval (S := CounterStorage) (E := CounterEvent) (Err := CounterError) env s =
+    Stmt.eval getField resolveError buildEvent setField pauseTail env s =
       .ok (env, { s with storage := { s.storage with paused := true }}, [.Paused]) := by
   simp only [pauseTail, Stmt.eval]
   rw [ContractM.bind_apply_ok _ _ _ _ _ _ (eval_pauseSet_ok s env)]
@@ -445,23 +434,20 @@ private theorem eval_pauseTail_ok (s : ContractState CounterStorage) (env : Loca
 
 private theorem eval_pauseBody_ok (s : ContractState CounterStorage)
     (hpaused : s.storage.paused = false) :
-    pauseBody.eval (S := CounterStorage) (E := CounterEvent) (Err := CounterError)
-      LocalEnv.empty s = .ok (pauseOkResult s) := by
+    Stmt.eval getField resolveError buildEvent setField pauseBody LocalEnv.empty s = .ok (pauseOkResult s) := by
   simp only [pauseBody, pauseRequireNotPaused, Stmt.eval, pauseRequireNotPaused_def]
   rw [ContractM.bind_apply_ok _ _ _ _ _ _ (eval_incrementRequire_ok s hpaused),
       eval_pauseTail_ok s LocalEnv.empty]
   simp [pauseOkResult]
 
 private theorem eval_pauseBody_err (s : ContractState CounterStorage) (hp : s.storage.paused = true) :
-    pauseBody.eval (S := CounterStorage) (E := CounterEvent) (Err := CounterError)
-      LocalEnv.empty s = .error CounterError.Paused := by
+    Stmt.eval getField resolveError buildEvent setField pauseBody LocalEnv.empty s = .error CounterError.Paused := by
   simp only [pauseBody, pauseRequireNotPaused, Stmt.eval, pauseRequireNotPaused_def]
   rw [ContractM.bind_apply_err _ _ _ _ (eval_incrementRequire_err s hp)]
 
 private theorem eval_pauseAst_ok (s : ContractState CounterStorage)
     (howner : (s.context.caller == s.storage.owner) = true) (hpaused : s.storage.paused = false) :
-    pauseAst.eval (S := CounterStorage) (E := CounterEvent) (Err := CounterError)
-      LocalEnv.empty s = .ok (pauseOkResult s) := by
+    Stmt.eval getField resolveError buildEvent setField pauseAst LocalEnv.empty s = .ok (pauseOkResult s) := by
   simp only [pauseAst, Stmt.eval]
   rw [ContractM.bind_apply_ok _ _ _ _ _ _ (eval_pauseRequireOwner_ok s howner)]
   rw [eval_pauseBody_ok s hpaused]
@@ -469,15 +455,13 @@ private theorem eval_pauseAst_ok (s : ContractState CounterStorage)
 
 private theorem eval_pauseAst_err_notOwner (s : ContractState CounterStorage)
     (h : (s.context.caller == s.storage.owner) = false) :
-    pauseAst.eval (S := CounterStorage) (E := CounterEvent) (Err := CounterError)
-      LocalEnv.empty s = .error CounterError.NotOwner := by
+    Stmt.eval getField resolveError buildEvent setField pauseAst LocalEnv.empty s = .error CounterError.NotOwner := by
   simp only [pauseAst, Stmt.eval]
   rw [ContractM.bind_apply_err _ _ _ _ (eval_pauseRequireOwner_err s h)]
 
 private theorem eval_pauseAst_err_paused (s : ContractState CounterStorage)
     (howner : (s.context.caller == s.storage.owner) = true) (hp : s.storage.paused = true) :
-    pauseAst.eval (S := CounterStorage) (E := CounterEvent) (Err := CounterError)
-      LocalEnv.empty s = .error CounterError.Paused := by
+    Stmt.eval getField resolveError buildEvent setField pauseAst LocalEnv.empty s = .error CounterError.Paused := by
   simp only [pauseAst, Stmt.eval]
   rw [ContractM.bind_apply_ok _ _ _ _ _ _ (eval_pauseRequireOwner_ok s howner)]
   rw [eval_pauseBody_err s hp]
@@ -505,20 +489,20 @@ private theorem pauseViaAst_eq_run (s : ContractState CounterStorage) :
     exact hl.trans hr.symm
 
 private theorem eval_unpauseSet_ok (s : ContractState CounterStorage) (env : LocalEnv) :
-    unpauseSet.eval (S := CounterStorage) (E := CounterEvent) (Err := CounterError) env s =
+    Stmt.eval getField resolveError buildEvent setField unpauseSet env s =
       .ok (env, { s with storage := { s.storage with paused := false }}, []) := by
-  simp [unpauseSet, Stmt.eval, Expr.eval, storageSet_paused, ContractM.bind_apply,
+  simp [unpauseSet, Stmt.eval, Expr.eval, CoreExpr.eval, setField_paused, ContractM.bind_apply,
         ContractM.modifyStorage, ContractM.pure_apply, List.append_nil]
 
 private theorem eval_unpauseEmit_ok (env : LocalEnv) (s' : ContractState CounterStorage) :
-    unpauseEmit.eval (S := CounterStorage) (E := CounterEvent) (Err := CounterError) env s' =
+    Stmt.eval getField resolveError buildEvent setField unpauseEmit env s' =
       .ok (env, s', [.Unpaused]) := by
   simp only [unpauseEmit, Stmt.eval, List.mapM, List.mapM.loop, List.nil_append,
-             List.reverseAux_nil, List.reverse, eventBuild_unpaused, ContractM.emit,
+             List.reverseAux_nil, List.reverse, buildEvent_unpaused, ContractM.emit,
              ContractM.bind_apply, List.reverseAux_cons, List.append_nil]
 
 private theorem eval_unpauseTail_ok (s : ContractState CounterStorage) (env : LocalEnv) :
-    unpauseTail.eval (S := CounterStorage) (E := CounterEvent) (Err := CounterError) env s =
+    Stmt.eval getField resolveError buildEvent setField unpauseTail env s =
       .ok (env, { s with storage := { s.storage with paused := false }}, [.Unpaused]) := by
   simp only [unpauseTail, Stmt.eval]
   rw [ContractM.bind_apply_ok _ _ _ _ _ _ (eval_unpauseSet_ok s env)]
@@ -527,25 +511,22 @@ private theorem eval_unpauseTail_ok (s : ContractState CounterStorage) (env : Lo
 
 private theorem eval_unpauseRequirePaused_ok (s : ContractState CounterStorage)
     (hp : s.storage.paused = true) :
-    unpauseRequirePaused.eval (S := CounterStorage) (E := CounterEvent) (Err := CounterError)
-      LocalEnv.empty s = .ok (LocalEnv.empty, s, []) := by
-  simp only [unpauseRequirePaused, Stmt.eval, Expr.eval, storageGet_paused, ContractM.bind_apply,
-             ContractM.get, ContractM.pure_apply, errorResolve_paused, List.append_nil,
+    Stmt.eval getField resolveError buildEvent setField unpauseRequirePaused LocalEnv.empty s = .ok (LocalEnv.empty, s, []) := by
+  simp only [unpauseRequirePaused, Stmt.eval, Expr.eval, CoreExpr.eval, getField_paused, ContractM.bind_apply,
+             ContractM.get, ContractM.pure_apply, resolveError_paused, List.append_nil,
              Val.boolOf_bool, hp]
   simp [ContractM.pure_apply, List.append_nil]
 
 private theorem eval_unpauseRequirePaused_err (s : ContractState CounterStorage)
     (hp : s.storage.paused = false) :
-    unpauseRequirePaused.eval (S := CounterStorage) (E := CounterEvent) (Err := CounterError)
-      LocalEnv.empty s = .error CounterError.Paused := by
-  simp only [unpauseRequirePaused, Stmt.eval, Expr.eval, storageGet_paused, ContractM.bind_apply,
-             ContractM.get, errorResolve_paused, ContractM.revertUser, ContractM.revertUser_apply,
+    Stmt.eval getField resolveError buildEvent setField unpauseRequirePaused LocalEnv.empty s = .error CounterError.Paused := by
+  simp only [unpauseRequirePaused, Stmt.eval, Expr.eval, CoreExpr.eval, getField_paused, ContractM.bind_apply,
+             ContractM.get, resolveError_paused, ContractM.revertUser, ContractM.revertUser_apply,
              List.append_nil, Val.boolOf_bool, hp, if_false]
   simp [ContractM.revertUser_apply]
 
 private theorem eval_unpauseBody_ok (s : ContractState CounterStorage) (hp : s.storage.paused = true) :
-    unpauseBody.eval (S := CounterStorage) (E := CounterEvent) (Err := CounterError)
-      LocalEnv.empty s = .ok (unpauseOkResult s) := by
+    Stmt.eval getField resolveError buildEvent setField unpauseBody LocalEnv.empty s = .ok (unpauseOkResult s) := by
   simp only [unpauseBody, Stmt.eval]
   rw [ContractM.bind_apply_ok _ _ _ _ _ _ (eval_unpauseRequirePaused_ok s hp),
       eval_unpauseTail_ok s LocalEnv.empty]
@@ -553,15 +534,13 @@ private theorem eval_unpauseBody_ok (s : ContractState CounterStorage) (hp : s.s
 
 private theorem eval_unpauseBody_err (s : ContractState CounterStorage)
     (hp : s.storage.paused = false) :
-    unpauseBody.eval (S := CounterStorage) (E := CounterEvent) (Err := CounterError)
-      LocalEnv.empty s = .error CounterError.Paused := by
+    Stmt.eval getField resolveError buildEvent setField unpauseBody LocalEnv.empty s = .error CounterError.Paused := by
   simp only [unpauseBody, Stmt.eval]
   rw [ContractM.bind_apply_err _ _ _ _ (eval_unpauseRequirePaused_err s hp)]
 
 private theorem eval_unpauseAst_ok (s : ContractState CounterStorage)
     (howner : (s.context.caller == s.storage.owner) = true) (hp : s.storage.paused = true) :
-    unpauseAst.eval (S := CounterStorage) (E := CounterEvent) (Err := CounterError)
-      LocalEnv.empty s = .ok (unpauseOkResult s) := by
+    Stmt.eval getField resolveError buildEvent setField unpauseAst LocalEnv.empty s = .ok (unpauseOkResult s) := by
   simp only [unpauseAst, unpauseRequireOwner_def, Stmt.eval]
   rw [ContractM.bind_apply_ok _ _ _ _ _ _ (eval_pauseRequireOwner_ok s howner)]
   rw [eval_unpauseBody_ok s hp]
@@ -569,15 +548,13 @@ private theorem eval_unpauseAst_ok (s : ContractState CounterStorage)
 
 private theorem eval_unpauseAst_err_notOwner (s : ContractState CounterStorage)
     (h : (s.context.caller == s.storage.owner) = false) :
-    unpauseAst.eval (S := CounterStorage) (E := CounterEvent) (Err := CounterError)
-      LocalEnv.empty s = .error CounterError.NotOwner := by
+    Stmt.eval getField resolveError buildEvent setField unpauseAst LocalEnv.empty s = .error CounterError.NotOwner := by
   simp only [unpauseAst, unpauseRequireOwner_def, Stmt.eval]
   rw [ContractM.bind_apply_err _ _ _ _ (eval_pauseRequireOwner_err s h)]
 
 private theorem eval_unpauseAst_err_notPaused (s : ContractState CounterStorage)
     (howner : (s.context.caller == s.storage.owner) = true) (hp : s.storage.paused = false) :
-    unpauseAst.eval (S := CounterStorage) (E := CounterEvent) (Err := CounterError)
-      LocalEnv.empty s = .error CounterError.Paused := by
+    Stmt.eval getField resolveError buildEvent setField unpauseAst LocalEnv.empty s = .error CounterError.Paused := by
   simp only [unpauseAst, unpauseRequireOwner_def, Stmt.eval]
   rw [ContractM.bind_apply_ok _ _ _ _ _ _ (eval_pauseRequireOwner_ok s howner)]
   rw [eval_unpauseBody_err s hp]
@@ -604,18 +581,19 @@ private theorem unpauseViaAst_eq_run (s : ContractState CounterStorage) :
       unfold runUnpauseEval; simp [hb]
     exact hl.trans hr.symm
 
+end bridgeEval
+
 def counterFn (name : Ident) (body : Stmt) : FunctionDef where
   name := name
   kind := .external
   params := []
   retTy := .unit
   body := body
-  permits := []
 
 def counterDef : ContractDef where
   name := "Counter"
   storage :=
-    [("number", .wei, none), ("paused", .bool, some ⟨.bool, Expr.litBool false⟩),
+    [("number", .wei, none), ("paused", .bool, some ⟨.bool, CoreExpr.lit Ty.bool (.bool false)⟩),
      ("owner", .address, none)]
   errors := ["Paused", "NotOwner", "Overflow"]
   events := [("Incremented", [("n", .wei)]), ("Paused", []), ("Unpaused", [])]
@@ -631,7 +609,10 @@ def compileConfig : Config where
     | "Incremented" => some 0x20d8a6f5a693f9d1d627a598e8820f7a55ee74c183aa8f1a30e8d4e8dd9a8d84
     | _ => none }
 
-def incrementYul : String := incrementAst.toYul! compileConfig
+def incrementYul : String :=
+  match Compile.stmtToYul compileConfig incrementAst with
+  | .ok yul => yul
+  | .error _ => ""
 
 theorem increment_increases_number_when_not_paused
     (s s' : ContractState CounterStorage)
