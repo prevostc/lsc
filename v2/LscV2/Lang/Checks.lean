@@ -1,5 +1,5 @@
-import LscV2.AST
-import LscV2.Lib.Wei.Checks
+import LscV2.Lang.AST
+import LscV2.Lib.Wei.Syntax
 import LscV2.Selectors
 
 namespace LscV2

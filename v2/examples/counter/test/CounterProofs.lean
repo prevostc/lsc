@@ -1,5 +1,5 @@
 import Counter
-import LscV2.Eval
+import LscV2.Lang.Eval
 
 open LscV2 Counter
 

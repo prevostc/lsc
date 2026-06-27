@@ -1,6 +1,7 @@
 import LscV2.Compile.Lower
 import LscV2.Compile.IR
-import LscV2.TestFixtures.Counter
+import LscV2.TestFixtures.SyntaxSmoke
+import LscV2.Lib.Wei.Optimize
 
 namespace LscV2.Compile.Correctness
 
@@ -62,27 +63,16 @@ def counterConfig : Config :=
   { storage := StorageLayout.fromList [("number", 0), ("paused", 1), ("owner", 2)]
   , events := { topic0 := fun _ => none } }
 
-/-- Expected IR for `let n ← $.number +? 1` at slot 0. -/
-def incrementLetIR : IRStmt :=
-  let old := "lsc_n_old"
-  .seq
-    (.letBind old (.sload 0))
-    (.seq
-      (.letBind "n" (.add (.local old) (.lit 1)))
-      (.seq
-        (.ifRevert (.lt (.local "n") (.local old)))
-        .skip))
-
 theorem Wei_lower_addCheckedNatStorage_shape :
-    Wei.Lower.lowerLetBind (fun f => counterConfig.storage.fieldSlot f) "n"
+    Wei.lowerLetBind (fun f => counterConfig.storage.fieldSlot f) "n"
         (Wei.addCheckedNatStorage "number" 1) =
-      .ok incrementLetIR := rfl
+      .ok Wei.incrementLetIR := rfl
 
 theorem incrementLet_lowers_ok :
     (Lower.stmt counterConfig incrementLet).isOk := by native_decide
 
 theorem incrementLet_ir_binds_incremented_local :
-    let st := evalStmt { slots := [(0, 5)] } incrementLetIR
+    let st := evalStmt { slots := [(0, 5)] } Wei.incrementLetIR
     st.lookupLocal "n" = 6 ∧ st.lookupLocal "lsc_n_old" = 5 ∧ ¬ st.reverted := by native_decide
 
 def incrementBody : Stmt :=

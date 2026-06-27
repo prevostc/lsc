@@ -1,6 +1,6 @@
 import LscV2.Types
 import LscV2.Arithmetic
-import LscV2.Lib.Wei.Expr
+import LscV2.Lib.Wei.Syntax
 
 namespace LscV2
 
@@ -51,16 +51,6 @@ def Expr : Ty → Type :=
   | .uint256 | .bool | .address | .unit => CoreExpr t
 
 abbrev ExprAny := Sigma Expr
-
-namespace Wei
-
-def addCheckedNatStorage (field : String) (n : Nat) : Wei.Expr :=
-  .addCheckedNat (.storageGet field) n
-
-@[simp] theorem addCheckedNatStorage_eq (field : String) (n : Nat) :
-    addCheckedNatStorage field n = .addCheckedNat (.storageGet field) n := rfl
-
-end Wei
 
 inductive Stmt
   | skip

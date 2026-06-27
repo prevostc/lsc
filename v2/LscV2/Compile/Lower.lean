@@ -1,7 +1,5 @@
-import LscV2.AST
-import LscV2.Lib.Wei.Expr
-import LscV2.Lib.Wei.Lower
-import LscV2.Compile.IR
+import LscV2.Lang.AST
+import LscV2.Lib.Wei.Optimize
 
 namespace LscV2.Compile
 
@@ -61,7 +59,7 @@ private partial def lowerCoreExpr (cfg : Config) {t : Ty} (e : CoreExpr t) : Exc
 
 private partial def lowerExpr (cfg : Config) {t : Ty} (e : Expr t) : Except String IR.Expr :=
   match t, e with
-  | .wei, e => Wei.Lower.lowerExpr cfg.storage.fieldSlot e
+  | .wei, e => Wei.lowerExpr cfg.storage.fieldSlot e
   | .uint256, e => lowerCoreExpr cfg e
   | .bool, e => lowerCoreExpr cfg e
   | .address, e => lowerCoreExpr cfg e
@@ -75,7 +73,7 @@ private partial def lowerStmt (cfg : Config) (s : LscV2.Stmt) : Except String IR
     let ir2 ← lowerStmt cfg s2
     .ok (.seq ir1 ir2)
   | .letBind name ⟨Ty.wei, e⟩ =>
-    Wei.Lower.lowerLetBind cfg.storage.fieldSlot name e
+    Wei.lowerLetBind cfg.storage.fieldSlot name e
   | .letBind name ⟨t, e⟩ => do
     let ir ← lowerExpr cfg (t := t) e
     .ok (.letBind name ir)
@@ -91,7 +89,7 @@ private partial def lowerStmt (cfg : Config) (s : LscV2.Stmt) : Except String IR
     | some topic =>
       match args with
       | [⟨Ty.wei, dataExpr⟩] => do
-        let data ← Wei.Lower.lowerExpr cfg.storage.fieldSlot dataExpr
+        let data ← Wei.lowerExpr cfg.storage.fieldSlot dataExpr
         .ok (.log1 topic data)
       | [] =>
         .ok (.log1 topic (.lit 0))

@@ -1,7 +1,7 @@
-import LscV2.Lib.Wei.Expr
+import LscV2.Lib.Wei.Syntax
 import LscV2.Compile.IR
 
-namespace LscV2.Wei.Lower
+namespace LscV2.Wei
 
 open LscV2.Compile.IR (Expr Stmt)
 
@@ -15,7 +15,7 @@ def lowerAddCheckedNatStorage (slot : Nat) (n : Nat) (bind : Ident) (rest : Stmt
         (.ifRevert (.lt (.local bind) (.local old)))
         rest))
 
-partial def lowerExpr (fieldSlot : Ident → Option Nat) (e : Wei.Expr) : Except String Compile.IR.Expr :=
+partial def lowerExpr (fieldSlot : Ident → Option Nat) (e : Expr) : Except String Compile.IR.Expr :=
   match e with
   | .lit n => .ok (Compile.IR.Expr.lit n)
   | .var name => .ok (Compile.IR.Expr.local name)
@@ -35,7 +35,7 @@ partial def lowerExpr (fieldSlot : Ident → Option Nat) (e : Wei.Expr) : Except
     let b' ← lowerExpr fieldSlot b
     .ok (Compile.IR.Expr.lt a' b')
 
-def lowerLetBind (fieldSlot : Ident → Option Nat) (name : Ident) (e : Wei.Expr) : Except String Compile.IR.Stmt :=
+def lowerLetBind (fieldSlot : Ident → Option Nat) (name : Ident) (e : Expr) : Except String Compile.IR.Stmt :=
   match e with
   | .addCheckedNat (.storageGet field) n =>
     match fieldSlot field with
@@ -46,4 +46,22 @@ def lowerLetBind (fieldSlot : Ident → Option Nat) (name : Ident) (e : Wei.Expr
     let ir ← lowerExpr fieldSlot e'
     .ok (Compile.IR.Stmt.letBind name ir)
 
-end LscV2.Wei.Lower
+/-- Expected IR for `let n ← $.number +? 1` at slot 0. -/
+def incrementLetIR : Stmt :=
+  let old := "lsc_n_old"
+  .seq
+    (.letBind old (.sload 0))
+    (.seq
+      (.letBind "n" (.add (.local old) (.lit 1)))
+      (.seq
+        (.ifRevert (.lt (.local "n") (.local old)))
+        .skip))
+
+private def counterNumberSlot (field : Ident) : Option Nat :=
+  if field == "number" then some 0 else none
+
+theorem lower_addCheckedNatStorage_shape :
+    lowerLetBind counterNumberSlot "n" (addCheckedNatStorage "number" 1) =
+      .ok incrementLetIR := rfl
+
+end LscV2.Wei

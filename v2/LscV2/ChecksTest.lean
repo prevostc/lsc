@@ -1,5 +1,5 @@
-import LscV2.Checks
-import LscV2.TestFixtures.Counter
+import LscV2.Lang.Checks
+import LscV2.TestFixtures.SyntaxSmoke
 
 open LscV2 LscV2.TestFixtures
 

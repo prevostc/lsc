@@ -1,9 +1,13 @@
-import LscV2.Syntax
-import LscV2.TestFixtures.Counter
+import LscV2.Lang.Syntax
+import LscV2.TestFixtures.SyntaxSmoke
 
-open LscV2 LscV2.TestFixtures
+open LscV2 LscV2.DSL LscV2.TestFixtures
 
 namespace LscV2.SyntaxTest
+
+def smokeFields : FieldMap := #[("number", .wei), ("paused", .bool), ("owner", .address)]
+
+macro "lsc!" s:lsc_stmt : term => expandLscStmtWith smokeFields s
 
 example : lsc! let n ← $.number +? 1; = incrementLet := rfl
 example : lsc! $.number := n; = incrementSet := rfl

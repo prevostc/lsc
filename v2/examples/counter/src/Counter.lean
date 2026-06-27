@@ -1,8 +1,12 @@
-import LscV2.Eval
+import LscV2.Lang.Eval
 import LscV2.Compile.Yul
-import LscV2.TestFixtures.Counter
 
-open LscV2 LscV2.Compile LscV2.TestFixtures
+/-!
+Counter example — target DSL shape is in docs/spec_idea_2/reference/COUNTER.md.
+Hand-written until contract elaboration (IMPLEMENTATION.md Step 7).
+-/
+
+open LscV2 LscV2.Compile
 
 namespace Counter
 

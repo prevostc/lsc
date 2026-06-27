@@ -1,4 +1,4 @@
-import LscV2.AST
+import LscV2.Lang.AST
 import LscV2.Core.ContractM
 import LscV2.Lib.Wei.Eval
 

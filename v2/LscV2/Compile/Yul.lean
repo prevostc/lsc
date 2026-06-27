@@ -1,4 +1,4 @@
-import LscV2.AST
+import LscV2.Lang.AST
 import LscV2.Compile.IR
 import LscV2.Compile.Lower
 import EvmYul.Yul.Ast

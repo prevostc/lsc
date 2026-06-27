@@ -1,5 +1,5 @@
 import LscV2.Compile.Yul
-import LscV2.TestFixtures.Counter
+import LscV2.TestFixtures.SyntaxSmoke
 import EvmYul.Yul.Ast
 
 open LscV2 LscV2.Compile LscV2.TestFixtures

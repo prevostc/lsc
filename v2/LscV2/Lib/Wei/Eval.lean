@@ -1,14 +1,39 @@
+import LscV2.Lib.Wei.Syntax
 import LscV2.Core.ContractM
-import LscV2.Lib.Wei.Expr
-import LscV2.Lib.Wei.Arith
+import LscV2.Lang.AST
 
 namespace LscV2.Wei
+
+def addChecked (a b : Wei) : Except ArithError Wei :=
+  (UInt256.addChecked a.raw b.raw).map Wei.mk
+
+def subChecked (a b : Wei) : Except ArithError Wei :=
+  (UInt256.subChecked a.raw b.raw).map Wei.mk
+
+def mulChecked (a b : Wei) : Except ArithError Wei :=
+  (UInt256.mulChecked a.raw b.raw).map Wei.mk
+
+def divFloor (a b : Wei) : Except ArithError Wei :=
+  (UInt256.divChecked a.raw b.raw).map Wei.mk
+
+def addCheckedNat (a : Wei) (n : Nat) : Except ArithError Wei :=
+  (UInt256.addCheckedNat a.raw n).map Wei.mk
+
+@[simp]
+theorem addCheckedNat_ok (a : Wei) (n : Nat) (h : a.raw.toNat + n < 2 ^ 256) :
+    addCheckedNat a n = .ok ⟨BitVec.ofNat 256 (a.raw.toNat + n)⟩ := by
+  simp [addCheckedNat, UInt256.addCheckedNat, h, Except.map]
+
+@[simp]
+theorem addCheckedNat_error (a : Wei) (n : Nat) (h : ¬ a.raw.toNat + n < 2 ^ 256) :
+    addCheckedNat a n = .error .Overflow := by
+  simp [addCheckedNat, UInt256.addCheckedNat, h, Except.map]
 
 variable {S E Err : Type} [ContractErrors Err]
 
 def eval
     (getField : (t : Ty) → Ident → S → Option (Val t))
-    (e : Wei.Expr) (env : LocalEnv) : ContractM S E Err Wei :=
+    (e : Expr) (env : LocalEnv) : ContractM S E Err Wei :=
   match e with
   | .lit n => pure (Wei.mkNat n)
   | .var name =>
