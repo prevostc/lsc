@@ -20,6 +20,7 @@ build_no_warnings() {
 
 echo "==> v2 library tests"
 build_no_warnings "$ROOT/v2" "LscV2.Compile.YulTest"
+build_no_warnings "$ROOT/v2" "LscV2.Compile.BytecodeTest"
 build_no_warnings "$ROOT/v2" "LscV2.Compile.Correctness"
 build_no_warnings "$ROOT/v2" "LscV2.ChecksTest"
 build_no_warnings "$ROOT/v2" "LscV2.SyntaxTest"
