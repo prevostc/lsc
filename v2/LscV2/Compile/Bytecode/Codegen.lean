@@ -12,13 +12,22 @@ structure Ctx where
   locals : List (Ident × Nat) := []
   stackDepth : Nat := 0
   labelCounter : Nat := 0
+  labelPrefix : String := ""
   deriving Repr
 
 namespace Ctx
 
 def freshLabel (ctx : Ctx) (tag : String) : String × Ctx :=
-  let lbl := tag ++ toString ctx.labelCounter
+  let lbl := ctx.labelPrefix ++ tag ++ toString ctx.labelCounter
   (lbl, { ctx with labelCounter := ctx.labelCounter + 1 })
+
+/-- Reset per-function stack/locals while keeping the global label counter. -/
+def forFunction (ctx : Ctx) (fnName : Ident) : Ctx :=
+  { locals := [], stackDepth := 0, labelCounter := ctx.labelCounter, labelPrefix := fnName ++ "." }
+
+/-- Drop function-local state after emitting a body; label counter stays global. -/
+def afterFunction (ctx : Ctx) : Ctx :=
+  { locals := [], stackDepth := 0, labelCounter := ctx.labelCounter, labelPrefix := "" }
 
 def bindLocal (ctx : Ctx) (name : Ident) : Ctx :=
   let shifted := ctx.locals.map fun (n, d) => (n, d + 1)
@@ -61,10 +70,13 @@ private def emitOp (op : Operation .EVM) : List Instr := [.op op]
 private partial def codegenExpr (ctx : Ctx) (e : Expr) : Except String (List Instr × Ctx) :=
   match e with
   | .lit n => .ok ([.push n], { ctx with stackDepth := ctx.stackDepth + 1 })
-  | .local name => do
-    let d ← ctx.lookupDepth name
-    let op ← Ctx.dupOp d
-    .ok (emitOp op, { ctx with stackDepth := ctx.stackDepth + 1 })
+  | .local name =>
+    if name == "caller" then
+      .ok (emitOp CALLER, { ctx with stackDepth := ctx.stackDepth + 1 })
+    else do
+      let d ← ctx.lookupDepth name
+      let op ← Ctx.dupOp d
+      .ok (emitOp op, { ctx with stackDepth := ctx.stackDepth + 1 })
   | .sload slot =>
     .ok ([.push slot, .op SLOAD], { ctx with stackDepth := ctx.stackDepth + 1 })
   | .add a b => do
@@ -113,21 +125,24 @@ private partial def codegenStmt (ctx : Ctx) (s : Stmt) : Except String (List Ins
     ]
     .ok (cInstr ++ jumpInstrs, c3.popStack 1)
   | .log1 topic data => do
-    let (instrs, c1) ← codegenExpr ctx data
+    let (dataInstr, c1) ← codegenExpr ctx data
+    let memStore : List Instr := [.push 0, .op MSTORE]
+    let popsAfter := List.replicate c1.locals.length (.op POP)
     let logInstrs : List Instr := [
-      .push 0,
-      .op MSTORE,
       .push 0,
       .push 32,
       .push topic,
       .op LOG1
     ]
-    .ok (instrs ++ logInstrs, c1.popStack 2)
+    .ok (dataInstr ++ memStore ++ popsAfter ++ logInstrs, { locals := [], stackDepth := 0 })
   | .revert0 =>
     .ok ([.push 0, .push 0, .op REVERT], ctx.popStack ctx.stackDepth)
 
-def stmt (s : IR.Stmt) : Except String (List Instr) :=
-  codegenStmt {} s |>.map Prod.fst
+def stmt (ctx : Ctx) (s : IR.Stmt) : Except String (List Instr × Ctx) :=
+  codegenStmt ctx s
+
+def stmtFresh (s : IR.Stmt) : Except String (List Instr) :=
+  stmt {} s |>.map Prod.fst
 
 end Codegen
 end LscV2.Compile.Bytecode

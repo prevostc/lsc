@@ -51,11 +51,33 @@ private def natToBigEndianBytes (n : Nat) (width : Nat) : ByteArray :=
     let shift := 8 * (width - 1 - i)
     UInt8.ofNat ((n / (2 ^ shift)) % 256)).toArray
 
-private def lookupLabel (labels : List (String × Nat)) (lbl : String) : Nat :=
+private def jumpDestLabels (instrs : List Instr) : List String :=
+  instrs.filterMap fun
+    | .jumpDest lbl => some lbl
+    | _ => none
+
+private def checkDuplicateLabels (instrs : List Instr) : Except String Unit := do
+  let labels := jumpDestLabels instrs
+  let dup? := labels.find? fun lbl => labels.count lbl > 1
+  match dup? with
+  | none => .ok ()
+  | some lbl => .error s!"duplicate jump label: {lbl}"
+
+private def lookupLabel (labels : List (String × Nat)) (lbl : String) : Except String Nat := do
+  let hits := labels.filter (·.1 == lbl)
+  match hits with
+  | [] => .error s!"unknown jump label: {lbl}"
+  | (lbl', pc) :: rest =>
+    if rest.any (·.1 == lbl') then
+      .error s!"duplicate jump label in layout: {lbl}"
+    else
+      .ok pc
+
+private def lookupLabelPc (labels : List (String × Nat)) (lbl : String) : Nat :=
   labels.find? (·.1 == lbl) |>.map (·.2) |>.getD 0
 
 private def labelPushSize (labels : List (String × Nat)) (lbl : String) : Nat :=
-  1 + pushWidth (lookupLabel labels lbl)
+  1 + pushWidth (lookupLabelPc labels lbl)
 
 private partial def instrByteSize (labels : List (String × Nat)) (i : Instr) : Nat :=
   match i with
@@ -90,27 +112,38 @@ private def emitPush (n : Nat) : ByteArray :=
   let header := ByteArray.mk #[serializeInstr (pushOp width)]
   header ++ natToBigEndianBytes n width
 
-private def emitPushLabel (labels : List (String × Nat)) (lbl : String) : ByteArray :=
-  emitPush (lookupLabel labels lbl)
+private def emitPushLabel (labels : List (String × Nat)) (lbl : String) : Except String ByteArray := do
+  let pc ← lookupLabel labels lbl
+  .ok (emitPush pc)
 
-private partial def emitInstrs (labels : List (String × Nat)) : List Instr → ByteArray
-  | [] => ByteArray.empty
-  | i :: rest =>
-    let head := match i with
+private partial def emitInstrs (labels : List (String × Nat)) : List Instr → Except String ByteArray
+  | [] => .ok ByteArray.empty
+  | i :: rest => do
+    let head ← match i with
       | Instr.op evmOp =>
-        if Operation.isPush evmOp then panic! "internal: use Instr.push"
-        else ByteArray.mk #[serializeInstr evmOp]
-      | .push n => emitPush n
+        if Operation.isPush evmOp then
+          .error "internal: use Instr.push"
+        else
+          .ok (ByteArray.mk #[serializeInstr evmOp])
+      | .push n => .ok (emitPush n)
       | .pushLabel lbl => emitPushLabel labels lbl
-      | .jump lbl =>
-        emitPushLabel labels lbl ++ ByteArray.mk #[serializeInstr JUMP]
-      | .jumpi lbl =>
-        emitPushLabel labels lbl ++ ByteArray.mk #[serializeInstr JUMPI]
-      | .jumpDest _ => ByteArray.mk #[serializeInstr JUMPDEST]
-    head ++ emitInstrs labels rest
+      | .jump lbl => do
+        let push ← emitPushLabel labels lbl
+        .ok (push ++ ByteArray.mk #[serializeInstr JUMP])
+      | .jumpi lbl => do
+        let push ← emitPushLabel labels lbl
+        .ok (push ++ ByteArray.mk #[serializeInstr JUMPI])
+      | .jumpDest _ => .ok (ByteArray.mk #[serializeInstr JUMPDEST])
+    let tail ← emitInstrs labels rest
+    .ok (head ++ tail)
 
-def encode (instrs : List Instr) : Except String ByteArray :=
-  .ok (emitInstrs (fixpointLabels instrs) instrs)
+def jumpDestLabelList (instrs : List Instr) : List String :=
+  jumpDestLabels instrs
+
+def encode (instrs : List Instr) : Except String ByteArray := do
+  checkDuplicateLabels instrs
+  let labels := fixpointLabels instrs
+  emitInstrs labels instrs
 
 private def byteHex (b : UInt8) : String :=
   let s := (BitVec.ofNat 8 b.toNat).toHex

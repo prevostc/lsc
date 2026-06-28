@@ -12,3 +12,7 @@ require evmyul from git
 
 lean_lib LscV2 where
   globs := #[Glob.submodules `LscV2]
+
+lean_exe «BytecodeExecSmoke» where
+  root := `LscV2.Compile.BytecodeExecTestMain
+  supportInterpreter := true

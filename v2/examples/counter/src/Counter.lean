@@ -1,5 +1,6 @@
 import LscV2.Lang.Eval
 import LscV2.Compile.Yul
+import LscV2.Compile.Bytecode
 
 /-!
 Counter example — target DSL shape is in docs/spec_idea_2/reference/COUNTER.md.
@@ -606,16 +607,22 @@ def counterDef : ContractDef where
      counterFn "unpause" unpauseAst]
   interfaces := []
 
-/-- Compile layout for Yul emission. -/
-def compileConfig : Config where
-  storage := StorageLayout.fromList [("number", 0), ("paused", 1), ("owner", 2)]
-  events := { topic0 := fun
-    | "Incremented" => some 0x20d8a6f5a693f9d1d627a598e8820f7a55ee74c183aa8f1a30e8d4e8dd9a8d84
-    | _ => none }
+/-- Compile layout for Yul / bytecode emission. -/
+def stubEventTopic0 : Ident → Option Nat
+  | "Incremented" => some 0x20d8a6f5a693f9d1d627a598e8820f7a55ee74c183aa8f1a30e8d4e8dd9a8d84
+  | name => some name.hash.toNat
+
+def compileConfig : Config :=
+  Compile.configFromContract counterDef stubEventTopic0
 
 def incrementYul : String :=
   match Compile.stmtToYul compileConfig incrementAst with
   | .ok yul => yul
+  | .error _ => ""
+
+def counterBytecodeHex : String :=
+  match Compile.contractToBytecodeHex counterDef stubEventTopic0 with
+  | .ok hex => hex
   | .error _ => ""
 
 theorem increment_increases_number_when_not_paused

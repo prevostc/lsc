@@ -2,17 +2,20 @@
 
 Deferred work for the LSC v2 compiler. Items are removed or checked off as they land.
 
-## Bytecode follow-ups (post increment-body milestone)
+## Bytecode follow-ups
 
-- [ ] ABI dispatcher (selector routing on calldata)
-- [ ] `contractToBytecode` for full `counterDef` (increment + pause + unpause)
+- [x] ABI dispatcher (selector routing on calldata)
+- [x] `contractToBytecode` for full `counterDef` (increment + pause + unpause)
+- [x] Global unique jump labels per function (fixes cross-function `JUMPI`/`JUMP` collisions)
+- [x] Encode-time duplicate `JUMPDEST` label detection
+- [x] EvmYul execution smoke test (`BytecodeExecSmoke`: increment / pause / unpause storage)
 - [ ] Creation bytecode (deploy wrapper returning runtime code)
 - [ ] Real keccak256 ABI selectors (replace `String.hash` stub in `Selectors.lean`)
+- [ ] Real keccak256 event topic0 for `Paused` / `Unpaused` (currently `name.hash` stub)
 - [ ] ABI encode/decode for revert data and return values
-- [ ] Full `incrementAst` with `require !paused` (beyond increment-body slice)
-- [ ] `pause` / `unpause` bytecode emission (needs Paused/Unpaused event topic0 in config)
-- [ ] EvmYul end-to-end execution test (load bytecode, assert storage/logs)
+- [ ] EvmYul execution with real 256-bit LOG topics (keccak topic0 currently trips gas accounting in EvmYul)
 - [ ] Gas-aware codegen / stack peephole optimization
+- [ ] Memory-spilled locals (`MSTORE`/`MLOAD` scratch slots) to simplify stack codegen for decompilers
 - [ ] Bytecode ↔ IR semantic preservation proofs (beyond structural smoke tests)
 
 ## Other compile paths (not pursued now)

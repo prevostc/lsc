@@ -21,6 +21,9 @@ build_no_warnings() {
 echo "==> v2 library tests"
 build_no_warnings "$ROOT/v2" "LscV2.Compile.YulTest"
 build_no_warnings "$ROOT/v2" "LscV2.Compile.BytecodeTest"
+echo "==> bytecode EvmYul execution smoke"
+(cd "$ROOT/v2" && lake build BytecodeExecSmoke 2>&1) | tail -3
+(cd "$ROOT/v2" && ./.lake/build/bin/BytecodeExecSmoke)
 build_no_warnings "$ROOT/v2" "LscV2.Compile.Correctness"
 build_no_warnings "$ROOT/v2" "LscV2.ChecksTest"
 build_no_warnings "$ROOT/v2" "LscV2.SyntaxTest"
