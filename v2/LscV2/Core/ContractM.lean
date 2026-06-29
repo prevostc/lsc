@@ -205,4 +205,10 @@ def bind (name : Ident) (val : Sigma Val) (env : LocalEnv) : LocalEnv :=
 
 end LocalEnv
 
+class ContractDSL (S : Type) (E : Type) (Err : Type) [ContractErrors Err] where
+  getField  : (t : Ty) → Ident → S → Option (Val t)
+  setField  : (t : Ty) → Ident → Val t → S → S
+  resolveErr : Ident → Option Err
+  buildEvent : Ident → List (Sigma Val) → Option E
+
 end LscV2

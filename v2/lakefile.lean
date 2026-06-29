@@ -10,6 +10,9 @@ require mathlib from git
 require evmyul from git
   "https://github.com/prevostc/EVMYulLean.git" @ "65124bfc495bd253dc8a615bb55d9cc7e432efa9"
 
+require KeccakEngine from git
+  "https://github.com/prevostc/lean-keccak-unrolled" @ "main"
+
 lean_lib LscV2 where
   globs := #[Glob.submodules `LscV2]
 

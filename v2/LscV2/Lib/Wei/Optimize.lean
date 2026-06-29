@@ -33,7 +33,7 @@ partial def lowerExpr (fieldSlot : Ident → Option Nat) (e : Expr) : Except Str
   | .subChecked a b => do
     let a' ← lowerExpr fieldSlot a
     let b' ← lowerExpr fieldSlot b
-    .ok (Compile.IR.Expr.lt a' b')
+    .ok (Compile.IR.Expr.sub a' b')
 
 def lowerLetBind (fieldSlot : Ident → Option Nat) (name : Ident) (e : Expr) : Except String Compile.IR.Stmt :=
   match e with

@@ -24,6 +24,7 @@ private def irExprToYul (e : IR.Expr) : Ast.Expr :=
   | .local name => .Var name
   | .sload slot => yulCall "sload" [yulLit slot]
   | .add a b => yulCall "add" [irExprToYul a, irExprToYul b]
+  | .sub a b => yulCall "sub" [irExprToYul a, irExprToYul b]
   | .lt a b => yulCall "lt" [irExprToYul a, irExprToYul b]
   | .eq a b => yulCall "eq" [irExprToYul a, irExprToYul b]
   | .isZero a => yulCall "iszero" [irExprToYul a]
@@ -36,6 +37,8 @@ private partial def irStmtToYul (s : IR.Stmt) : List Ast.Stmt :=
   | .sstore slot e => [Ast.Stmt.ExprStmtCall (yulCall "sstore" [yulLit slot, irExprToYul e])]
   | .ifRevert cond =>
     [Ast.Stmt.If (irExprToYul cond) [Ast.Stmt.ExprStmtCall (yulCall "revert" [yulLit 0, yulLit 0])]]
+  | .log0 topic =>
+    [Ast.Stmt.ExprStmtCall (yulCall "log1" [yulLit 0, yulLit 0, yulLit topic])]
   | .log1 topic data =>
     [Ast.Stmt.ExprStmtCall (yulCall "log1" [yulLit topic, irExprToYul data])]
   | .revert0 => [Ast.Stmt.ExprStmtCall (yulCall "revert" [yulLit 0, yulLit 0])]

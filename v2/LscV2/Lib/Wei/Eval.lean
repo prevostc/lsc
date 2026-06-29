@@ -29,10 +29,9 @@ theorem addCheckedNat_error (a : Wei) (n : Nat) (h : ¬ a.raw.toNat + n < 2 ^ 25
     addCheckedNat a n = .error .Overflow := by
   simp [addCheckedNat, UInt256.addCheckedNat, h, Except.map]
 
-variable {S E Err : Type} [ContractErrors Err]
+variable {S E Err : Type} [ContractErrors Err] [dsl : ContractDSL S E Err]
 
 def eval
-    (getField : (t : Ty) → Ident → S → Option (Val t))
     (e : Expr) (env : LocalEnv) : ContractM S E Err Wei :=
   match e with
   | .lit n => pure (Wei.mkNat n)
@@ -42,23 +41,23 @@ def eval
     | _ => ContractM.revert .Unauthorized
   | .storageGet field => do
     let st ← ContractM.get
-    match getField Ty.wei field st.storage with
+    match dsl.getField Ty.wei field st.storage with
     | some (.wei w) => pure w
     | _ => ContractM.revert .Unauthorized
   | .addChecked a b => do
-    let va ← eval getField a env
-    let vb ← eval getField b env
+    let va ← eval a env
+    let vb ← eval b env
     match Wei.addChecked va vb with
     | .error ae => ContractM.revertArith ae
     | .ok r => pure r
   | .addCheckedNat a n => do
-    let va ← eval getField a env
+    let va ← eval a env
     match Wei.addCheckedNat va n with
     | .error ae => ContractM.revertArith ae
     | .ok r => pure r
   | .subChecked a b => do
-    let va ← eval getField a env
-    let vb ← eval getField b env
+    let va ← eval a env
+    let vb ← eval b env
     match Wei.subChecked va vb with
     | .error ae => ContractM.revertArith ae
     | .ok r => pure r

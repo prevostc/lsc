@@ -2,62 +2,15 @@ import LscV2.Compile.Lower
 import LscV2.Compile.IR
 import LscV2.TestFixtures.SyntaxSmoke
 import LscV2.Lib.Wei.Optimize
+import LscV2.Compile.IR.Eval
 
 namespace LscV2.Compile.Correctness
 
 open LscV2.TestFixtures
+open LscV2.Compile.IR (IRState evalExpr evalStmt)
 
 abbrev IRExpr := LscV2.Compile.IR.Expr
 abbrev IRStmt := LscV2.Compile.IR.Stmt
-
-/-- Nat-valued IR state for the Counter increment slice. -/
-structure IRState where
-  locals : List (Ident × Nat) := []
-  slots : List (Nat × Nat) := []
-  logs : List (Nat × Nat) := []
-  reverted : Bool := false
-  deriving Repr
-
-namespace IRState
-
-def lookupLocal (st : IRState) (name : Ident) : Nat :=
-  match st.locals.find? (·.1 == name) with
-  | some (_, v) => v
-  | none => 0
-
-def lookupSlot (st : IRState) (slot : Nat) : Nat :=
-  match st.slots.find? (·.1 == slot) with
-  | some (_, v) => v
-  | none => 0
-
-def setLocal (st : IRState) (name : Ident) (v : Nat) : IRState :=
-  { st with locals := (name, v) :: st.locals.filter (·.1 != name) }
-
-def setSlot (st : IRState) (slot : Nat) (v : Nat) : IRState :=
-  { st with slots := (slot, v) :: st.slots.filter (·.1 != slot) }
-
-end IRState
-
-partial def evalExpr (st : IRState) (e : IRExpr) : Nat :=
-  match e with
-  | .lit n => n
-  | .local name => st.lookupLocal name
-  | .sload slot => st.lookupSlot slot
-  | .add a b => evalExpr st a + evalExpr st b
-  | .lt a b => if evalExpr st a < evalExpr st b then 1 else 0
-  | .eq a b => if evalExpr st a == evalExpr st b then 1 else 0
-  | .isZero a => if evalExpr st a == 0 then 1 else 0
-
-partial def evalStmt (st : IRState) (s : IRStmt) : IRState :=
-  match s with
-  | .skip => st
-  | .seq s1 s2 => evalStmt (evalStmt st s1) s2
-  | .letBind name e => st.setLocal name (evalExpr st e)
-  | .sstore slot e => st.setSlot slot (evalExpr st e)
-  | .ifRevert cond =>
-    if evalExpr st cond = 1 then { st with reverted := true } else st
-  | .log1 topic data => { st with logs := st.logs ++ [(topic, evalExpr st data)] }
-  | .revert0 => { st with reverted := true }
 
 def counterConfig : Config :=
   { storage := StorageLayout.fromList [("number", 0), ("paused", 1), ("owner", 2)]

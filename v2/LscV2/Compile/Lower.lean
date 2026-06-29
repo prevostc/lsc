@@ -92,7 +92,7 @@ private partial def lowerStmt (cfg : Config) (s : LscV2.Stmt) : Except String IR
         let data ← Wei.lowerExpr cfg.storage.fieldSlot dataExpr
         .ok (.log1 topic data)
       | [] =>
-        .ok (.log1 topic (.lit 0))
+        .ok (.log0 topic)
       | _ => .error s!"unsupported emit arity for {eventName}"
     | none => .error s!"unknown event {eventName}"
   | .revert _ => .ok .revert0

@@ -8,6 +8,7 @@ inductive Expr where
   | local : Ident → Expr
   | sload : Nat → Expr
   | add : Expr → Expr → Expr
+  | sub : Expr → Expr → Expr
   | lt : Expr → Expr → Expr
   | eq : Expr → Expr → Expr
   | isZero : Expr → Expr
@@ -19,6 +20,7 @@ inductive Stmt where
   | letBind : Ident → Expr → Stmt
   | sstore : Nat → Expr → Stmt
   | ifRevert : Expr → Stmt
+  | log0 : Nat → Stmt
   | log1 : Nat → Expr → Stmt
   | revert0 : Stmt
   deriving Repr

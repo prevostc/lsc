@@ -29,13 +29,17 @@ def forFunction (ctx : Ctx) (fnName : Ident) : Ctx :=
 def afterFunction (ctx : Ctx) : Ctx :=
   { locals := [], stackDepth := 0, labelCounter := ctx.labelCounter, labelPrefix := "" }
 
+-- Record the absolute 1-based stack position (from bottom) at time of binding.
+-- codegenExpr has already incremented stackDepth before this is called, so
+-- ctx.stackDepth IS the position of the new top-of-stack value.
 def bindLocal (ctx : Ctx) (name : Ident) : Ctx :=
-  let shifted := ctx.locals.map fun (n, d) => (n, d + 1)
-  { ctx with locals := (name, 1) :: shifted, stackDepth := ctx.stackDepth + 1 }
+  { ctx with locals := (name, ctx.stackDepth) :: ctx.locals }
 
+-- Compute the DUP argument from the stored absolute position.
+-- DUP n accesses the item n slots from the top (1 = top).
 def lookupDepth (ctx : Ctx) (name : Ident) : Except String Nat :=
   match ctx.locals.find? (·.1 == name) with
-  | some (_, d) => .ok d
+  | some (_, absPos) => .ok (ctx.stackDepth - absPos + 1)
   | none => .error s!"unknown local {name}"
 
 def dupOp (depth : Nat) : Except String (Operation .EVM) :=
@@ -83,6 +87,10 @@ private partial def codegenExpr (ctx : Ctx) (e : Expr) : Except String (List Ins
     let (i1, c1) ← codegenExpr ctx a
     let (i2, c2) ← codegenExpr c1 b
     .ok (i1 ++ i2 ++ emitOp ADD, { c2 with stackDepth := c2.stackDepth - 1 })
+  | .sub a b => do
+    let (i1, c1) ← codegenExpr ctx a
+    let (i2, c2) ← codegenExpr c1 b
+    .ok (i1 ++ i2 ++ emitOp SUB, { c2 with stackDepth := c2.stackDepth - 1 })
   | .lt a b => do
     let (i1, c1) ← codegenExpr ctx a
     let (i2, c2) ← codegenExpr c1 b
@@ -107,7 +115,9 @@ private partial def codegenStmt (ctx : Ctx) (s : Stmt) : Except String (List Ins
     .ok (instrs, c1.bindLocal name)
   | .sstore slot e => do
     let (instrs, c1) ← codegenExpr ctx e
-    .ok (instrs ++ [.push slot, .op SSTORE], c1.popStack 2)
+    -- c1.stackDepth = ctx.stackDepth + 1 (codegenExpr pushed e).
+    -- `push slot` adds 1, `SSTORE` pops 2: net from c1 is -1, so net from ctx is 0.
+    .ok (instrs ++ [.push slot, .op SSTORE], c1.popStack 1)
   | .ifRevert cond => do
     let (revLbl, c1) := Ctx.freshLabel ctx "rev"
     let (contLbl, c2) := Ctx.freshLabel c1 "cont"
@@ -124,6 +134,15 @@ private partial def codegenStmt (ctx : Ctx) (s : Stmt) : Except String (List Ins
       .jumpDest contLbl
     ]
     .ok (cInstr ++ jumpInstrs, c3.popStack 1)
+  | .log0 topic =>
+    let popsAfter := List.replicate ctx.locals.length (.op POP)
+    let logInstrs : List Instr := [
+      .push 0,
+      .push 0,
+      .push topic,
+      .op LOG1
+    ]
+    .ok (popsAfter ++ logInstrs, { locals := [], stackDepth := 0 })
   | .log1 topic data => do
     let (dataInstr, c1) ← codegenExpr ctx data
     let memStore : List Instr := [.push 0, .op MSTORE]
