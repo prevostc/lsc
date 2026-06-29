@@ -203,6 +203,17 @@ def empty : LocalEnv := { lookup := fun _ => none }
 def bind (name : Ident) (val : Sigma Val) (env : LocalEnv) : LocalEnv :=
   { lookup := fun n => if n == name then some val else env.lookup n }
 
+@[simp] theorem bind_lookup_self (name : String) (v : Sigma Val) (env : LocalEnv) :
+    (LocalEnv.bind name v env).lookup name = some v := by
+  simp [LocalEnv.bind]
+
+@[simp] theorem bind_lookup_ne (name key : String) (v : Sigma Val) (env : LocalEnv)
+    (h : key ≠ name) :
+    (LocalEnv.bind name v env).lookup key = env.lookup key := by
+  simp only [LocalEnv.bind]
+  rw [beq_false_of_ne h]
+  simp
+
 end LocalEnv
 
 class ContractDSL (S : Type) (E : Type) (Err : Type) [ContractErrors Err] where

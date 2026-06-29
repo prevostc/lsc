@@ -80,6 +80,22 @@ def eval
 
 attribute [reducible] eval
 
+@[simp] theorem eval_wei (e : Expr .wei) (env : LocalEnv) :
+    eval (S := S) (E := E) (Err := Err) e env =
+      (Wei.eval e env >>= fun w => pure (.wei w)) := rfl
+
+@[simp] theorem eval_uint256 (e : Expr .uint256) (env : LocalEnv) :
+    eval (S := S) (E := E) (Err := Err) e env = CoreExpr.eval e env := rfl
+
+@[simp] theorem eval_bool (e : Expr .bool) (env : LocalEnv) :
+    eval (S := S) (E := E) (Err := Err) e env = CoreExpr.eval e env := rfl
+
+@[simp] theorem eval_address (e : Expr .address) (env : LocalEnv) :
+    eval (S := S) (E := E) (Err := Err) e env = CoreExpr.eval e env := rfl
+
+@[simp] theorem eval_unit (e : Expr .unit) (env : LocalEnv) :
+    eval (S := S) (E := E) (Err := Err) e env = CoreExpr.eval e env := rfl
+
 end Expr
 
 namespace Stmt
@@ -131,11 +147,57 @@ def evalWith
 
 attribute [reducible] evalWith
 
+@[simp] theorem evalWith_skip (env : LocalEnv) :
+    evalWith (S := S) (E := E) (Err := Err) .skip env = pure env := rfl
+
+@[simp] theorem evalWith_seq (s1 s2 : Stmt) (env : LocalEnv) :
+    evalWith (S := S) (E := E) (Err := Err) (.seq s1 s2) env =
+      (evalWith s1 env >>= fun env' => evalWith s2 env') := rfl
+
+@[simp] theorem evalWith_letBind (name : Ident) (t : Ty) (expr : Expr t) (env : LocalEnv) :
+    evalWith (S := S) (E := E) (Err := Err) (.letBind name ⟨t, expr⟩) env =
+      (Expr.eval expr env >>= fun v => pure (LocalEnv.bind name ⟨t, v⟩ env)) := rfl
+
+@[simp] theorem evalWith_storageSet (field : Ident) (t : Ty) (expr : Expr t) (env : LocalEnv) :
+    evalWith (S := S) (E := E) (Err := Err) (.storageSet field ⟨t, expr⟩) env =
+      (Expr.eval expr env >>= fun v =>
+        ContractM.modifyStorage (dsl.setField t field v) >>= fun _ => pure env) := rfl
+
+@[simp] theorem evalWith_require (condExpr : Expr .bool) (errName : Ident) (env : LocalEnv) :
+    evalWith (S := S) (E := E) (Err := Err) (.require condExpr errName) env =
+      (Expr.eval condExpr env >>= fun v =>
+        if Val.boolOf v then pure env
+        else match dsl.resolveErr errName with
+          | some err => ContractM.revertUser err
+          | none => ContractM.revert .Unauthorized) := rfl
+
+@[simp] theorem evalWith_ifThenElse (cond : Expr .bool) (thn els : Stmt) (env : LocalEnv) :
+    evalWith (S := S) (E := E) (Err := Err) (.ifThenElse cond thn els) env =
+      (Expr.eval cond env >>= fun v =>
+        if Val.boolOf v then evalWith thn env else evalWith els env) := rfl
+
+@[simp] theorem evalWith_emit (eventName : Ident) (args : List ExprAny) (env : LocalEnv) :
+    evalWith (S := S) (E := E) (Err := Err) (.emit eventName args) env =
+      ((args.mapM fun ⟨t, e⟩ => Expr.eval e env >>= fun v => pure ⟨t, v⟩) >>= fun vals =>
+        match dsl.buildEvent eventName vals with
+        | some ev => ContractM.emit ev >>= fun _ => pure env
+        | none => ContractM.revert .Unauthorized) := rfl
+
+@[simp] theorem evalWith_revert (errName : Ident) (env : LocalEnv) :
+    evalWith (S := S) (E := E) (Err := Err) (.revert errName) env =
+      (match dsl.resolveErr errName with
+        | some err => ContractM.revertUser err
+        | none => ContractM.revert .Unauthorized) := rfl
+
 /-- Public evaluator: discards the internal `LocalEnv`; return type is `ContractM Unit`. -/
 def eval
     (s : Stmt) : ContractM S E Err Unit := do
   let _ ← evalWith s LocalEnv.empty
   pure ()
+
+@[simp] theorem eval_def (s : Stmt) :
+    eval (S := S) (E := E) (Err := Err) s =
+      (evalWith s LocalEnv.empty >>= fun _ => pure ()) := rfl
 
 end Stmt
 

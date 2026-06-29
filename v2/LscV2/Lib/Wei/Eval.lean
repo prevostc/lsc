@@ -19,13 +19,16 @@ def divFloor (a b : Wei) : Except ArithError Wei :=
 def addCheckedNat (a : Wei) (n : Nat) : Except ArithError Wei :=
   (UInt256.addCheckedNat a.raw n).map Wei.mk
 
+/-- `w.canAddNat n` holds iff adding `n` to `w` will not overflow 256 bits. -/
+abbrev Wei.canAddNat (w : Wei) (n : Nat) : Prop := w.raw.toNat + n < 2 ^ 256
+
 @[simp]
-theorem addCheckedNat_ok (a : Wei) (n : Nat) (h : a.raw.toNat + n < 2 ^ 256) :
+theorem addCheckedNat_ok (a : Wei) (n : Nat) (h : a.canAddNat n) :
     addCheckedNat a n = .ok ⟨BitVec.ofNat 256 (a.raw.toNat + n)⟩ := by
   simp [addCheckedNat, UInt256.addCheckedNat, h, Except.map]
 
 @[simp]
-theorem addCheckedNat_error (a : Wei) (n : Nat) (h : ¬ a.raw.toNat + n < 2 ^ 256) :
+theorem addCheckedNat_error (a : Wei) (n : Nat) (h : ¬ a.canAddNat n) :
     addCheckedNat a n = .error .Overflow := by
   simp [addCheckedNat, UInt256.addCheckedNat, h, Except.map]
 
