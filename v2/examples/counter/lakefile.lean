@@ -10,6 +10,10 @@ lean_lib Counter where
   srcDir := "src"
   roots := #[`Counter]
 
+lean_lib CounterDSL where
+  srcDir := "src"
+  roots := #[`CounterDSL]
+
 lean_lib CounterProofs where
   srcDir := "test"
   roots := #[`CounterProofs]

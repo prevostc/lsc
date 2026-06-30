@@ -1,4 +1,5 @@
 import LscV2.Lang.AST
+import LscV2.Lang.ContractTypes
 import Lean
 
 open Lean
@@ -54,14 +55,6 @@ syntax "storage" ":" lsc_field_decl*
 
 syntax "contract" ident "where" lsc_contract_body : command
 
-inductive FieldKind
-  | wei
-  | bool
-  | address
-  | uint256
-
-abbrev FieldMap := Array (String × FieldKind)
-
 def fieldKindToTy (k : FieldKind) : MacroM (TSyntax `term) :=
   match k with
   | .wei => `(LscV2.Ty.wei)
@@ -93,8 +86,8 @@ partial def expandLscExprWith (fields : FieldMap) (stx : TSyntax `lsc_expr) : Ma
   | none =>
     match stx with
     | `(lsc_expr| $n:num) => `(LscV2.Wei.Expr.lit $(quote n.getNat))
-    | `(lsc_expr| lsc_true) => `(LscV2.CoreExpr.lit LscV2.Ty.bool (LscV2.Lit.bool Bool.true))
-    | `(lsc_expr| lsc_false) => `(LscV2.CoreExpr.lit LscV2.Ty.bool (LscV2.Lit.bool Bool.false))
+    | `(lsc_expr| true) => `(LscV2.CoreExpr.lit LscV2.Ty.bool (LscV2.Lit.bool Bool.true))
+    | `(lsc_expr| false) => `(LscV2.CoreExpr.lit LscV2.Ty.bool (LscV2.Lit.bool Bool.false))
     | `(lsc_expr| msg.sender) => `(LscV2.CoreExpr.txField LscV2.TxField.caller)
     | `(lsc_expr| $. $f:ident) => do
         let fname := f.getId.toString
