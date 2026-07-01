@@ -4,8 +4,8 @@ import LscV2.Lib.Wei
 import LscV2.Lang.AST
 import LscV2.Lang.Eval
 import LscV2.Lang.Checks
-import LscV2.Lang.Syntax
-import LscV2.Lang.Contract
+import LscV2.Lang.TxM
+import LscV2.Lang.Derive
 import LscV2.Compile.Yul
 
 namespace LscV2

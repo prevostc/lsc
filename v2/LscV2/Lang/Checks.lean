@@ -67,17 +67,56 @@ def arithErrorsOfContract (c : ContractDef) : List ArithError :=
   let fromFns := c.functions.flatMap fun fn => visitStmt fn.body |>.arithErrors
   (fromStorage ++ fromFns).eraseDups
 
+/-- Name a reachable `ArithError` the way `deriving ContractError` expects a matching
+    same-named user error constructor to be spelled (see `Lang/Derive.lean`). -/
 def arithErrorName : ArithError → String
   | .Overflow => "Overflow"
   | .Underflow => "Underflow"
-  | .DivisionByZero => "DivByZero"
+  | .DivisionByZero => "DivisionByZero"
 
+/-- The checked-arithmetic operator notation that can raise this error, for actionable
+    error messages (e.g. "`+?`" for `+? : Wei → Nat/Wei → Wei`). -/
+def arithErrorOp : ArithError → String
+  | .Overflow => "+?"
+  | .Underflow => "-?"
+  | .DivisionByZero => "/?"
+
+/-- Reachable `ArithError`s per function, for per-function diagnostics. Storage
+    field initializers are attributed to a synthetic `"<storage>"` pseudo-function. -/
+def arithErrorsByFunction (c : ContractDef) : List (Ident × List ArithError) :=
+  let fromStorage :=
+    let errs := c.storage.flatMap fun (_, _, def?) =>
+      def?.map visitExprAny |>.getD {} |>.arithErrors
+    if errs.isEmpty then [] else [("<storage>", errs.eraseDups)]
+  let fromFns := c.functions.filterMap fun fn =>
+    let errs := (visitStmt fn.body).arithErrors.eraseDups
+    if errs.isEmpty then none else some (fn.name, errs)
+  fromStorage ++ fromFns
+
+/-- Walk all function bodies (and storage initializers) of `c`, find every `ArithError`
+    actually reachable via a checked-arithmetic op (`+?`/`-?`/`/?`), and ensure `c.errors`
+    declares a same-named constructor for each one — matching the naming convention
+    `deriving ContractError` (`Lang/Derive.lean`) uses to map `ArithError` variants to
+    user error constructors. This is what turns a silent `ContractErrors.unreachableArith`
+    fallback (chosen at `deriving` time, before bodies exist) into a loud compile-time
+    failure once the full picture (declared constructors *and* actual usage) is known.
+
+    `FrameworkError` (`Reentrant`/`Unauthorized`/`InvalidSelector`) is intentionally NOT
+    checked for reachability here: unlike checked-arithmetic ops, there is no AST node
+    that "raises" a `FrameworkError` the way `Wei.Expr.addChecked` raises `Overflow` —
+    those errors come from framework-level guards (e.g. reentrancy locks) outside the
+    `Stmt`/`Expr` data the contract author writes, so there's no decidable reachability
+    signal to walk yet. Revisit if/when framework guards become explicit `Stmt` nodes. -/
 def checkArithErrorCoverage (c : ContractDef) : Option String :=
-  let missing := (arithErrorsOfContract c).filter fun ae =>
-    ¬ c.errors.contains (arithErrorName ae)
+  let missing := (arithErrorsByFunction c).flatMap fun (fnName, errs) =>
+    errs.filter (fun ae => ¬ c.errors.contains (arithErrorName ae))
+      |>.map fun ae => (fnName, ae)
   match missing with
   | [] => none
-  | ae :: _ => some s!"arith error {arithErrorName ae} is reachable but not declared in errors:"
+  | (fnName, ae) :: _ =>
+    some s!"`{fnName}` uses `{arithErrorOp ae}`, which can raise `ArithError.{arithErrorName ae}`, \
+but {c.name}'s error type has no `{arithErrorName ae}` constructor — add one or write \
+`ContractErrors` by hand"
 
 partial def dfsCycle (graph : List (Ident × List Ident)) (stack : List Ident) (visited : List Ident)
     (node : Ident) : Option (List Ident) :=

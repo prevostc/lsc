@@ -8,35 +8,51 @@
 
 ## Module Structure
 
+> **This section describes the actual file layout under `v2/LscV2/`** (Lean module names use `LscV2` instead of `Lsc`, and the tree differs from the original plan in several places — most notably, `Lang/Syntax.lean`/`Contract.lean`/`ContractGen.lean`/`ContractTypes.lean` were implemented following the plan below, then **deleted** in favor of `Lang/TxM.lean` + `Lang/Derive.lean`; `Compile/` grew several files the plan didn't anticipate, e.g. `Compile/Bytecode/*` for direct EVM bytecode emission alongside Yul).
+
 ```
-Lsc/
+LscV2/
   Core/
-    Types.lean          -- UInt256, Address, Word, Ty
-    Arithmetic.lean     -- UInt256 ops, Wei, Wad, Ray
-    Mapping.lean        -- opaque Mapping k v backed by Finmap
-    LinearTypes.lean    -- TokenAmount, FlashLoanReceipt, etc.
+    UInt256.lean        -- checked UInt256 ops, ArithError
+    ContractM.lean       -- ContractState, ContractM monad, ContractErrors, FrameworkError
+  Types.lean              -- Word/UInt256/Address/Ident type aliases, Ty
+  Arithmetic.lean         -- re-exports / shared arithmetic glue
+  Lib/
+    Wei.lean, Wei/{Eval,Optimize,Syntax}.lean   -- Wei type + AST fragment + eval/lower/checks
+    Wad.lean, Ray.lean    -- fixed-point numeric types
+    Linear/TokenAmount.lean -- linear-type stub
   Lang/
-    AST.lean            -- Expr, Stmt inductives
-    Syntax.lean         -- declare_syntax_cat + macro_rules  (← dss2024 pattern)
-    Delab.lean          -- delaborators for pretty-printing   (← dss2024 pattern)
-    Eval.lean           -- ContractM, Stmt.eval               (← dss2024 pattern)
-    Checks.lean         -- linearity pass, DAG pass, selector check
+    AST.lean            -- Expr, Stmt, ContractDef, FunctionDef inductives  (unchanged in spirit)
+    Eval.lean           -- ContractM, Stmt.eval                            (unchanged in spirit)
+    TxM.lean            -- TxM := WriterT Stmt Id builder monad + combinators/notations
+                         --   (replaces the deleted Lang/Syntax.lean)
+    TxMTest.lean        -- smoke tests for TxM combinators
+    Derive.lean         -- deriving ContractStorage/ContractError/ContractEvent handlers
+                         --   + derive_contract_dsl command (replaces the deleted
+                         --   Lang/Contract.lean + Lang/ContractGen.lean + Lang/ContractTypes.lean)
+    DeriveTest.lean     -- smoke tests for the deriving handlers
+    Checks.lean         -- DAG/cycle check, selector check, UInt256-arithmetic check,
+                         --   linearity stub, arith-error-coverage check
   Compile/
-    IR.lean             -- IR inductive
+    IR.lean, IR/{Eval,EvalLemmas,FreeVars}.lean  -- flat IR + its semantics
+    IR/Opt/{FoldConsts,ElimUnusedLocals,Pipeline}.lean -- IR-level optimization passes
     Lower.lean          -- AST → IR
-    Yul.lean            -- IR → Yul.Program (EvmYulLean type)
-    ABI.lean            -- FunctionDef → ABI JSON string
-  World/
-    World.lean          -- WorldSpec typeclass, HonestWorld
-    Interfaces.lean     -- IERC20, IOracle, etc.
-  Contract/
-    Contract.lean       -- ContractDef, elaboration entry point
-  Examples/
-    Counter.lean        -- pausable counter (reference)
-    AMM.lean            -- constant product AMM (target)
+    Yul.lean            -- IR → Yul text (via EvmYulLean's `EvmYul` types)
+    Bytecode.lean, Bytecode/{Instr,Codegen,Encode,Contract}.lean
+                         -- IR → flat EVM bytecode (direct opcode emission, bypassing Yul text)
+    Correctness.lean    -- kernel-checked IR/lowering correctness lemmas (increment slice)
+  Selectors.lean        -- ABI selector computation (String.hash stub; real keccak deferred)
+  Prelude.lean          -- convenience re-export of the above for contract authors
+  ChecksTest.lean       -- Checks.lean smoke tests
+
+examples/counter/
+  src/Counter.lean      -- reference contract, written with TxM + deriving
+  test/CounterTheorem.lean  -- 9 theorems against Counter.lean
 ```
 
-Each file imports only what is below it in this list. No circular imports.
+Deleted relative to the original plan below: `Lang/Syntax.lean` (155 lines, the `declare_syntax_cat lsc_*` + `macro_rules` surface grammar), `Lang/Contract.lean` (124 lines, the `contract … where` elaborator), `Lang/ContractGen.lean` (348 lines, the raw-`Syntax.node` codegen), `Lang/ContractTypes.lean`, and the top-level `SyntaxTest.lean`. `Lang/Delab.lean` (delaborators for the custom grammar) was never implemented, since there is no custom grammar left to delaborate — ordinary Lean terms (`structure`/`inductive`/`do`) already pretty-print using Lean's own pretty printer.
+
+Each file imports only what is below it in this list (in spirit — `Lang/Derive.lean` additionally imports `Core/ContractM.lean` for the `ContractErrors`/`ContractDSL` instances it generates). No circular imports.
 
 ---
 
@@ -674,9 +690,35 @@ def Stmt.eval (stmt : Stmt) (env : LocalEnv)
 
 ---
 
-## Step 6 — Syntax Extension (`Lang/Syntax.lean`)
+## Step 6 — The `TxM` Builder Monad (`Lang/TxM.lean`)
 
-Follow dss2024 **exactly**: `declare_syntax_cat`, then `syntax` rules, then `macro_rules`. The macro only translates syntax to AST data — no logic, no validation.
+> **This step was originally written, and implemented for a while, as "Syntax Extension (`Lang/Syntax.lean`)" — a `declare_syntax_cat lsc_ty/lsc_expr/lsc_stmt/...` + `macro_rules` custom grammar following dss2024 exactly (full historical content of that approach is preserved below this section, for context on what was tried and superseded — see "Historical: the deleted `Lang/Syntax.lean` approach"). It was deleted** in favor of the approach below, after discovering that the custom-grammar approach forced `Lang/ContractGen.lean` to hand-build raw `Syntax.node` trees (`mkStructSimpleBinder`, `mkMatchArm`, …) instead of plain quasiquotes, because once `Syntax.lean`'s custom tokens were registered globally, ordinary `` `(structure ...) `` quasiquotes broke. Deleting the custom grammar removes that problem entirely.
+
+The real implementation (`v2/LscV2/Lang/TxM.lean`) gives `Stmt` `Append`/`EmptyCollection` instances (`Stmt.seq`/`Stmt.skip`) and defines:
+
+```lean
+abbrev TxM (α : Type) : Type := WriterT Stmt Id α
+```
+
+reusing Mathlib's `WriterT` (plain `WriterT` is no longer bundled in Lean core) rather than a hand-rolled free monad — `Monad`/`Bind`/`Pure` come for free from the `Append`/`EmptyCollection Stmt` instances, with zero effect on `Compile/Lower.lean`/`Yul.lean`/`Bytecode/*` (which only ever see the final `Stmt` value, never the monad that built it).
+
+`TxM.run : TxM Unit → Stmt` (`Id.run (WriterT.run m) |>.2`) is the bridge back to the unchanged `Stmt`/`Compile.*` pipeline — a `do`-block written against `TxM` becomes a plain `Stmt` value exactly like a hand-written AST.
+
+Key combinators/notations actually implemented (all in `Lang/TxM.lean`; see that file's module docstring for the full rationale, condensed here):
+
+- **Storage reads — type-tagged, not fully generic**: `wei σ.field` / `bool σ.field` / `addr σ.field` / `u256 σ.field`, implemented as `term`-level `syntax`/`macro_rules` that pattern-match the `σ.field` dotted identifier and dispatch to `weiField`/`boolField`/`addrField`/`u256Field`. A single fully-generic `σ.field` (inferring the tag from the field's declared storage type) would need either a per-contract field-type map populated by `deriving ContractStorage`, or expected-type-directed elaboration distinguishing `Wei.Expr` from `CoreExpr .bool/.address/.uint256` — neither exists yet, so the type tag is written explicitly instead.
+- **Storage writes — plain function calls, not `:=` sugar**: `setWei "field" e`, `setBool`, `setAddr`, `setU256`, each a plain `TxM Unit` value usable directly as a `do`-statement. A `<tytag> σ.field := expr` `doElem` sugar mirroring the read notation was attempted and dropped: a `doElem` syntax sharing a leading-token prefix with the *term*-level read notation produces an ambiguous `choice` parse node (since a do-element can always also be a bare term), which broke `macro_rules` pattern matching with an "unexpected do-element of kind choice" error.
+- **Evaluate-once bindings — `letWei`/`letBool`/`letAddr`/`letU256`**: `let n ← letWei "n" e` emits a real `Stmt.letBind name ⟨ty, e⟩` (evaluated exactly once, at that point in the statement sequence) and returns a `var` reference safe to reuse even after later writes to fields `e` reads. This exists to avoid a real correctness bug: a *plain* Lean `let n := wei σ.number +? 1` only binds an AST *term*; if `n` is referenced again after a subsequent write to `number`, evaluation re-runs `σ.number +? 1` against the *new* (already-updated) storage, silently double-counting. `letWei`/etc. sidestep this by emitting an actual `Stmt.letBind`, evaluated once. See `TxM.lean`'s module docstring ("Plain `let` vs. `letWei`/...") for the full example.
+- **`require <cond> else revert <err>` / `revert <err>`**: `doElem`-level macros expanding to `requireE`/`revertE` (`Stmt.require`/`Stmt.revert`), taking a bare error-constructor identifier (e.g. `revert Paused`) — the plan's `revert .Paused` anonymous-constructor-extraction sugar is not implemented; the bare name is used directly.
+- **`emit <name> <args>`**: a plain function (`Stmt.emit`) taking the event name and a `List ExprAny` of typed argument values — auto-extracting name/args from a real event-constructor application (as the plan envisioned) is not implemented; arguments are passed explicitly.
+- **`ifE (cond : CoreExpr .bool) (thn els : TxM Unit) : TxM Unit`**: contract-level branching, since a real Lean `if` needs a `Bool` known at elaboration time but the branch condition is `CoreExpr .bool` *data* evaluated later. `ifE` runs both branches through `TxM.run` (pure, since the base monad is `Id`) and wraps the result in `Stmt.ifThenElse`.
+- **Checked arithmetic**: `+?`/`-?` on `Wei.Expr` (`WeiAddChecked` typeclass lets `σ.number +? 1` accept a bare `Nat`). `*?`/`/?` are **not implemented** — `Wei.Expr` has no checked-multiply/divide AST constructors yet; this is a follow-up, not a design gap.
+- **Comparisons/booleans**: `===` (`CoreExpr.eqAuto`, type inferred from operands), `!` (`CoreExpr.not`).
+- **`msg.sender`**: `notation "msg.sender" => CoreExpr.txField TxField.caller`.
+
+### Historical: the deleted `Lang/Syntax.lean` approach
+
+The content below is preserved for historical context (what was tried before settling on `TxM`) — it does **not** reflect the current codebase. `declare_syntax_cat`, `syntax` rules, then `macro_rules`, following dss2024 exactly. The macro only translates syntax to AST data — no logic, no validation.
 
 ```lean
 -- Lang/Syntax.lean
@@ -884,9 +926,46 @@ macro_rules
 
 ---
 
-## Step 7 — Elaboration and Code Generation (`Lang/Contract.lean`)
+## Step 7 — The `deriving` Handlers and `derive_contract_dsl` (`Lang/Derive.lean`)
 
-This is where the `contract` macro expands to actual Lean definitions. It uses `elab_rules` (not `macro_rules`) so it can call `Lean.logErrorAt` for positioned error messages.
+> **Originally written as "Elaboration and Code Generation (`Lang/Contract.lean`)"** — a `contract … where` command using `elab_rules` to synthesize a storage struct, error/event inductives, AST defs, and `ContractM` defs all from one parsed custom-syntax body. That command (and its supporting `Lang/ContractGen.lean` codegen) was implemented and then deleted. (Full historical content preserved below, under "Historical: the deleted `Lang/Contract.lean` approach".) **What was actually built**: three independent `deriving` handlers attached directly to plain `structure`/`inductive` declarations, plus one small assembly command — no `contract` umbrella command at all; a contract is just a sequence of ordinary top-level commands.
+
+The real implementation lives in `v2/LscV2/Lang/Derive.lean` and registers three handlers via `Lean.Elab.registerDerivingHandler`:
+
+```lean
+-- marker classes — carry no data; deriving just needs *some* declaration to resolve to
+class ContractStorage where
+class ContractEvent where
+class ContractError where
+
+initialize registerDerivingHandler ``ContractStorage mkContractStorageHandler
+initialize registerDerivingHandler ``ContractEvent mkContractEventHandler
+initialize registerDerivingHandler ``ContractError mkContractErrorHandler
+```
+
+- **`mkContractStorageHandler`**: for a storage `structure S` (rejecting parametric structures), classifies each field's type via `fieldKindOfExpr` (one of `Wei`/`Bool`/`Address`/`UInt256`, distinguished from the *unreduced* projection type — see §3.3 of `DESIGN.md` for why this works without `whnf`), then emits `S.getField (t : Ty) (field : String) (s : S) : Option (Val t)` and `S.setField (t : Ty) (field : String) (v : Val t) (s : S) : S`, each a `match` with one arm per field plus a `none`/identity default arm. Both are generated as plain top-level `command`s via `elabCommand`, run at the root namespace (`atRootNamespace`) so fully-qualified names like `S.getField` land exactly where expected even if `deriving` runs inside a user `namespace`.
+- **`mkContractEventHandler`**: for an event `inductive E` (rejecting parametric/recursive inductives), classifies each constructor's 0-or-1 parameter (rejecting >1-parameter constructors — multi-param events aren't supported downstream yet) and emits `E.buildEvent (name : String) (vals : List (Sigma Val)) : Option E`.
+- **`mkContractErrorHandler`**: for an error `inductive Err` (rejecting parametric inductives and any constructor with parameters — error constructors must be nullary), emits `instance : Inhabited Err` (defaulting to the first declared constructor, needed by `ContractErrors.unreachableArith`), `Err.resolveError (name : String) : Option Err`, and `instance : ContractErrors Err` whose `arith` arm name-matches against `arithErrorCtorNames := #["Overflow", "Underflow", "DivisionByZero"]` (falling back to `ContractErrors.unreachableArith` for unmatched cases) and whose `fromFramework` arm maps every case to one fixed fallback constructor (preferring a same-named match against `frameworkErrorCtorNames := #["Reentrant", "Unauthorized", "InvalidSelector"]`, else the first declared `Err` constructor) — mirroring exactly what `Counter.lean`'s hand-written instance already does.
+
+```lean
+elab "derive_contract_dsl " storageId:ident errId:ident eventId:ident : command => do
+  ...
+  -- resolves each ident to its fully-qualified Name, builds `S.getField`/`S.setField`/
+  -- `Err.resolveError`/`E.buildEvent` as single fully-qualified identifiers, and emits:
+  @[reducible] instance : LscV2.ContractDSL S E Err where
+    getField   := S.getField
+    setField   := S.setField
+    resolveErr := Err.resolveError
+    buildEvent := E.buildEvent
+```
+
+(`derive_contract_dsl` resolves each identifier via `Lean.Elab.realizeGlobalConstNoOverloadWithInfo` rather than naively splicing `$storageId.getField`, since the latter either parses as one wrong dotted antiquotation, or — if parenthesized — as a value-level field projection on the *type* `S` denotes, neither of which is the intended namespaced-constant reference.)
+
+What is **not** implemented relative to the original plan: there is no source-position-attached error reporting (`Lean.logErrorAt`) for `deriving`-time failures — they're plain `throwError` calls, which Lean still attaches to the `deriving` clause's position by default, but there's no bespoke positioning logic. There is also no generic, declaration-agnostic codegen path (`generateStorageStruct`, etc., from the historical plan below) — the storage/error/event *declarations themselves* are written directly by the contract author as plain Lean, never generated; only the glue (`getField`/`setField`/`resolveError`/`buildEvent`/`ContractDSL` instance) is generated.
+
+### Historical: the deleted `Lang/Contract.lean` approach
+
+The content below is preserved for historical context — it does **not** reflect the current codebase. This is where the `contract` macro expands to actual Lean definitions. It uses `elab_rules` (not `macro_rules`) so it can call `Lean.logErrorAt` for positioned error messages.
 
 ```lean
 -- Lang/Contract.lean
@@ -990,6 +1069,8 @@ def generateContractMDefs (c : ContractDef) : CommandElabM Unit := do
 
 ## Step 8 — Validation Passes (`Lang/Checks.lean`)
 
+> **Update**: the real `v2/LscV2/Lang/Checks.lean` implements these checks (the sketch below was largely accurate in spirit) but returns `Option String`/`Except String ContractDef`, not `List (Syntax × String)` — there is no source-position attribution yet, since there's no parser producing `Syntax` positions to attribute to (contract bodies are plain elaborated Lean terms). `checkArithErrorCoverage` in particular is fully implemented (not a `sorry`): `arithErrorsByFunction` walks every function body and storage initializer via `visitStmt`/`visitExpr`/`visitWeiExpr`, collects reachable `ArithError`s per function, and `checkArithErrorCoverage` cross-checks each against `c.errors` (the error-constructor-name list), matching the `arithErrorName`/`arithErrorCtorNames` convention `Lang/Derive.lean` uses. `validateAll` runs `checkNoCycles → checkLinear → checkSelectorCollisions → checkNoUInt256Arithmetic → checkArithErrorCoverage` in sequence and is wired into `Compile.contractToBytecode`/`deployToBytecode` (`v2/LscV2/Compile/Bytecode/Contract.lean`). `checkLinear` remains a no-op stub, as originally planned. The sketch below documents the original per-pass design (mostly still accurate); only the return-type/position-reporting details above changed.
+
 Three passes, run in order, plus typed-arithmetic and arith-error coverage. Each returns `List (Syntax × String)` (position, message) for error reporting.
 
 ```lean
@@ -1080,9 +1161,9 @@ end Lsc.Checks
 
 ---
 
-## Step 9 — Delaborators (`Lang/Delab.lean`)
+## Step 9 — Delaborators (`Lang/Delab.lean`) — NOT IMPLEMENTED
 
-Follow dss2024's `Delab.lean` exactly. Delaborators make proof goals display in source syntax rather than raw AST constructors. This is essential for readability — without them, every proof goal shows `Stmt.seq (Stmt.require ...) (Stmt.seq ...)` instead of the original source.
+`Lang/Delab.lean` was never written, and is not currently planned. With the custom `lsc_*` surface grammar gone, there is no longer a bespoke syntax category to delaborate proof goals back into — contract bodies are plain `structure`/`inductive`/`do`-notation, which Lean's own pretty printer already displays reasonably (a `do`-block's `Stmt` *output*, e.g. `incrementAst`, still prints as raw `Stmt.seq (Stmt.require ...) ...` when unfolded in a proof goal, but proofs in practice `simp` straight through to a final concrete state rather than displaying intermediate `Stmt` trees — see `CounterTheorem.lean`). The sketch below is preserved for historical context only, in case bespoke pretty-printing for `Stmt`/`Expr` values becomes worth adding later.
 
 ```lean
 -- Lang/Delab.lean
@@ -1234,6 +1315,8 @@ end Lsc.Compile
 
 ## Step 11 — The Counter Reference Contract
 
+> **Update**: `v2/examples/counter/src/Counter.lean` (+ `v2/examples/counter/test/CounterTheorem.lean`) is the real, current version of this step, written with `TxM`/`deriving` as described in §6–§7 above, with all 9 required theorems (§13/`reference/COUNTER.md`) proved with **zero `sorry`s**. An earlier hand-written version of this contract (with `getField`/`setField`/etc. written by hand instead of `deriving`-generated) was kept alongside it for a while as a "what the framework expands to" reference — proof burden between the two was essentially identical (both closed with `simp` + `omega` in a handful of lines), confirming the `TxM`/`deriving` redesign didn't regress provability — and was later removed once the new approach became the sole reference. The sketch below (using the old `contract Counter where` syntax) is preserved for historical context only; see `Counter.lean` for the real, current contract and `reference/COUNTER.md` for the up-to-date theorem table.
+
 Write this before any other contract. If this contract cannot be proved, something in the framework is wrong.
 
 ```lean
@@ -1338,6 +1421,8 @@ end Lsc.Examples
 
 ## Step 12 — Key Implementation Decisions
 
+> **Update**: both sub-sections below describe the *originally planned* mechanism (a `contract` macro generating a per-contract `setField`/specialized `Stmt.eval`, and macro-time resolution of error names to concrete constructors). The actual mechanism is `deriving ContractStorage`/`deriving ContractError` generating `S.getField`/`S.setField`/`Err.resolveError` (§7 above), referenced generically through the `ContractDSL S E Err` typeclass that `Lang/Eval.lean`'s `Stmt.eval`/`Expr.eval` are written against (so `Stmt.eval` itself stays fully generic over `S`/`E`/`Err` — it does not need a per-contract specialized version at all, since `getField`/`setField`/`resolveErr`/`buildEvent` are resolved via `[ContractDSL S E Err]` instance lookup, satisfied by whatever `derive_contract_dsl` generated). Error names remain plain `String` values resolved at `Stmt.eval` time via `Err.resolveError`, not pre-resolved to concrete constructors at macro-expansion time as originally sketched. The historical sketches below are preserved for context only.
+
 ### How `storageSet` works without knowing `S`
 
 The generic `Stmt.eval` cannot write `s.reserve0 := v` because it doesn't know `S`. Resolution: the `contract` macro generates a **storage accessor table** for each contract:
@@ -1417,29 +1502,34 @@ theorem foo_does_X (s s' : ContractState FooStorage) (log) (h : runS foo s = .ok
 
 ## Dependency Order for Implementation
 
-Implement in this exact order. Each step must compile before starting the next.
+> **This reflects the real build order** (see `v2/LscV2/Prelude.lean`'s import list and `v2/examples/counter/lakefile.lean`'s dependency on the `LscV2` library) rather than the original plan's order — most notably, the syntax/codegen step is `Lang/TxM.lean` + `Lang/Derive.lean` (no `Lang/Syntax.lean`/`Contract.lean`/`Delab.lean`), and `Compile/` includes a `Bytecode/*` subtree (direct EVM opcode emission) alongside `Yul.lean`.
 
 ```
-1.  Core/Types.lean           -- no dependencies
-2.  Core/Arithmetic.lean      -- depends on Types
-3.  Core/Mapping.lean         -- depends on Types, Mathlib.Finmap
-4.  Core/LinearTypes.lean     -- depends on Types, Arithmetic
-5.  Lang/AST.lean             -- depends on all Core
+1.  Core/UInt256.lean, Types.lean, Arithmetic.lean   -- no dependencies
+2.  Core/ContractM.lean       -- depends on Core/UInt256, Types
+3.  Lib/Wei.lean (+ Wei/{Eval,Optimize,Syntax}.lean), Lib/Wad.lean, Lib/Ray.lean
+                              -- depends on Core
+4.  Lib/Linear/TokenAmount.lean -- depends on Core, Lib/Wei (stub)
+5.  Lang/AST.lean             -- depends on Core, Lib
 6.  Lang/Eval.lean            -- depends on AST
-7.  Lang/Checks.lean          -- depends on AST
-8.  Lang/Syntax.lean          -- depends on AST, Lean macro system
-9.  Lang/Delab.lean           -- depends on Syntax
-10. Lang/Contract.lean        -- depends on Eval, Checks, Syntax
-11. Examples/Counter.lean     -- depends on Contract
-    ← STOP HERE AND PROVE ALL COUNTER THEOREMS ←
-12. Compile/IR.lean           -- depends on AST
-13. Compile/Lower.lean        -- depends on IR, AST
-14. Compile/Yul.lean          -- depends on IR, EvmYulLean
-15. Compile/ABI.lean          -- depends on AST
-16. Examples/AMM.lean         -- depends on Contract, World
+7.  Lang/Checks.lean          -- depends on AST, Selectors
+8.  Lang/TxM.lean             -- depends on AST, Lib/Wei/Syntax, Lean macro system
+                              --   (replaces the deleted Lang/Syntax.lean)
+9.  Lang/Derive.lean          -- depends on Core/ContractM, AST, Lean deriving-handler API
+                              --   (replaces the deleted Lang/Contract.lean + ContractGen.lean;
+                              --   no Lang/Delab.lean — never implemented, see Step 9)
+10. examples/counter/src/Counter.lean      -- depends on TxM, Derive, Prelude/Compile
+    ← STOP HERE AND PROVE ALL COUNTER THEOREMS (Counter.lean) ←
+11. Compile/IR.lean (+ IR/{Eval,EvalLemmas,FreeVars}.lean, IR/Opt/*)  -- depends on AST
+12. Compile/Lower.lean        -- depends on IR, AST
+13. Compile/Yul.lean          -- depends on IR, EvmYulLean
+14. Compile/Bytecode.lean (+ Bytecode/{Instr,Codegen,Encode,Contract}.lean)
+                              -- depends on IR, Checks, Selectors, EvmYul.Operations
+15. Compile/Correctness.lean  -- depends on IR/Lower (kernel-checked correctness lemmas)
+16. (AMM / World model)       -- not yet implemented; remains a future step
 ```
 
-Do not start step 12 until all counter theorems in step 11 pass. The counter proofs are the acceptance test for the entire framework.
+Do not move on from step 10 until all counter theorems pass for `Counter.lean`. The counter proofs are the acceptance test for the entire framework.
 
 ---
 
@@ -1458,12 +1548,14 @@ These are specified in `extensions/` but not covered by implementation steps abo
 
 ## Appendix — What dss2024 Does That We Copy Directly
 
-| dss2024 file    | What it does                          | Our equivalent              |
-|-----------------|---------------------------------------|-----------------------------|
-| `Syntax.lean`   | `declare_syntax_cat` + `macro_rules`  | `Lang/Syntax.lean`          |
-| `Eval.lean`     | `Env`, `eval`, `@[simp]` lemmas       | `Lang/Eval.lean`            |
-| `Delab.lean`    | `@[delab]` for pretty printing        | `Lang/Delab.lean`           |
-| `Optimize.lean` | Transform + correctness theorem       | `Compile/Lower.lean`        |
-| `BigStep.lean`  | Relational semantics for proofs       | User theorem files          |
+> **Update**: the `Syntax.lean`/`Delab.lean` rows below describe the *original* plan, which was implemented and then deleted (§6, §9). They're kept here for historical traceability, not as a description of current files.
 
-The core pattern from dss2024 that we inherit: **syntax → pure AST data → separate eval function → proofs about eval**. The macro never contains logic. The eval function is the single source of truth for semantics. All proofs are about eval. This separation is what makes the system tractable.
+| dss2024 file    | What it does                          | Our equivalent (original plan, since deleted) |
+|-----------------|---------------------------------------|-----------------------------|
+| `Syntax.lean`   | `declare_syntax_cat` + `macro_rules`  | `Lang/Syntax.lean` — deleted; superseded by `Lang/TxM.lean` (a builder monad + small notations, not a custom grammar) |
+| `Eval.lean`     | `Env`, `eval`, `@[simp]` lemmas       | `Lang/Eval.lean` — unchanged, still current |
+| `Delab.lean`    | `@[delab]` for pretty printing        | `Lang/Delab.lean` — never implemented (not needed without a custom grammar) |
+| `Optimize.lean` | Transform + correctness theorem       | `Compile/Lower.lean`, `Compile/IR/Opt/*.lean` — current |
+| `BigStep.lean`  | Relational semantics for proofs       | User theorem files — current |
+
+The core pattern from dss2024 that we still inherit at the `AST.lean`/`Eval.lean` layer: **AST data → separate eval function → proofs about eval**. What changed is how the AST data gets built in the first place — not via a custom-grammar macro anymore, but via plain Lean `do`-notation over `TxM` (§6) plus `deriving`-generated glue (§7). The eval function (`Stmt.eval`) remains the single source of truth for semantics, and all proofs are still about `Stmt.eval`/`runS`, exactly as before.

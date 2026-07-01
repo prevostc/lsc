@@ -1,4 +1,5 @@
 import LscV2.Lang.AST
+import LscV2.Lang.Checks
 import LscV2.Compile.Lower
 import LscV2.Compile.Bytecode.Codegen
 import LscV2.Compile.Bytecode.Encode
@@ -142,6 +143,7 @@ def deployCode (ctorBytes runtimeBytes : ByteArray) : ByteArray :=
 end Bytecode.Contract
 
 def contractToBytecode (c : ContractDef) (topic0 : Ident → Option Nat) : Except String ByteArray := do
+  let c ← Checks.validateAll c
   let cfg := configFromContract c topic0
   let instrs ← Bytecode.Contract.contract cfg c
   encode instrs
@@ -155,6 +157,7 @@ def contractToBytecodeHex (c : ContractDef) (topic0 : Ident → Option Nat) : Ex
     storage, e.g. `owner = CALLER`), then the runtime bytecode is returned via
     the standard CODECOPY + RETURN pattern. -/
 def deployToBytecode (c : ContractDef) (topic0 : Ident → Option Nat) : Except String ByteArray := do
+  let c ← Checks.validateAll c
   let cfg := configFromContract c topic0
   let runtimeInstrs ← Bytecode.Contract.contract cfg c
   let runtimeBytes ← encode runtimeInstrs

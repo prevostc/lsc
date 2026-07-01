@@ -26,7 +26,9 @@
 
 ```
 ┌──────────────────────────────────────────────────┐
-│  Source  (Lean macros / syntax extension)        │  ← user writes this
+│  Source  (plain Lean structure/inductive/do)     │  ← user writes this
+│  + `deriving ContractStorage/ContractError/      │  ← thin reflection-based
+│    ContractEvent` + `derive_contract_dsl`        │     glue, not a custom parser
 ├──────────────────────────────────────────────────┤
 │  AST     (inductive Lean types)                  │  ← macro output (pure data)
 │  + Linearity check pass                          │
@@ -59,77 +61,107 @@ The end-to-end compilation correctness theorem (AST semantics match Yul executio
 
 ---
 
-## 3. The Source Layer — Lean Macros
+## 3. The Source Layer — Plain Lean + Three `deriving` Handlers
 
-The user writes contracts using **Lean 4 syntax extensions** (`declare_syntax_cat` + `macro_rules`). There is no separate compiler, no external toolchain. Everything is Lean.
-
-```lean
-contract Counter where
-  storage:
-    number : Wei := 0
-    paused : Bool    := false
-    owner  : Address
-
-  errors:
-    | Paused
-    | NotOwner
-    | Overflow
-
-  events:
-    | Incremented (newValue : Wei)
-    | Paused
-    | Unpaused
-
-  def increment : Tx := do
-    require (¬ $.paused) else revert Paused;
-    let n ← $.number +? 1;
-    $.number := n;
-    emit Incremented(n);
-```
-
-### What the macro generates
-
-The macro is **syntax-to-AST only**: pure structural translation, no validation, no domain logic.
+> **This section was rewritten to describe what was actually built.** The original design called for a bespoke surface grammar (`contract … where`, `declare_syntax_cat lsc_*`, `macro_rules` synthesizing raw `Syntax.node` trees). That approach was implemented, found to be ~700 lines of brittle codegen (`LscV2/Lang/Syntax.lean`, `Contract.lean`, `ContractGen.lean`, `ContractTypes.lean`), and **deleted**. What replaced it: contracts are written as **plain Lean `structure`/`inductive` declarations** with custom `deriving` handlers, plus function bodies written as ordinary `do`-blocks over a small builder monad. There is still no separate compiler or external toolchain — everything is Lean — but there is also no custom parser: every contract-author-facing construct below is either a real Lean declaration, a real `deriving` clause, or a small number of `term`/`doElem`-level notations layered on top of plain Lean syntax categories.
 
 ```lean
--- 1. Storage struct
 structure CounterStorage where
-  number : Wei := 0
-  paused : Bool    := false
-  owner  : Address
+  number : Wei := Wei.mkNat 0
+  paused : Bool := false
+  owner  : Address := 0
+  deriving Repr, LscV2.Deriving.ContractStorage
 
--- 2. Error inductive
-inductive CounterError | Paused | NotOwner | Overflow
+inductive CounterError where
+  | Paused
+  | NotOwner
+  | Overflow
+  deriving Repr, DecidableEq, LscV2.Deriving.ContractError
 
--- 3. Event inductive
-inductive CounterEvent | Incremented (newValue : Wei) | Paused | Unpaused
+inductive CounterEvent where
+  | Incremented (n : Wei)
+  | Paused
+  | Unpaused
+  deriving Repr, DecidableEq, LscV2.Deriving.ContractEvent
 
--- 4. AST value (pure data, used by compiler)
-def Counter.increment.ast : Stmt := Stmt.seq ...
+derive_contract_dsl CounterStorage CounterError CounterEvent
+abbrev CounterM := ContractM CounterStorage CounterEvent CounterError
 
--- 5. ContractM definition (semantic ground truth for proofs)
-def Counter.increment : ContractM CounterStorage CounterEvent CounterError Unit :=
-  Stmt.eval Counter.increment.ast
+def incrementTxM : TxM Unit := do
+  require !(bool σ.paused) else revert Paused
+  let n ← letWei "n" (wei σ.number +? 1)
+  setWei "number" n
+  emit "Incremented" [⟨Ty.wei, n⟩]
+
+def incrementAst : Stmt := TxM.run incrementTxM
+def increment : CounterM Unit := Stmt.eval incrementAst
 ```
 
-The definitional equality `Counter.increment = Stmt.eval Counter.increment.ast` holds by `rfl`. This means proofs about `Counter.increment` and proofs about the AST are interchangeable at zero proof cost.
+(Full contract: `v2/examples/counter/src/Counter.lean`.)
 
-### Validation and error reporting
+### 3.1 What the three `deriving` handlers generate
 
-Domain validation (selector clashes, linearity violations, DAG violations) runs in an `elab_rules` elaboration step, not in `macro_rules`. This attaches errors to exact source positions via `Lean.logErrorAt`.
+Unlike the deleted macro, these are **true Lean `deriving` handlers** (`Lean.Elab.registerDerivingHandler`), attached directly to the `structure`/`inductive` the contract author already writes — there is no separate command for this part, and (because this file imports neither the old `Syntax.lean` nor `Contract.lean`) there is no tokeniser conflict to dodge, so the handlers use plain quasiquotes (`` `(term| …) ``), not hand-built `Syntax.node` trees.
 
-### User workflow
+- **`deriving ContractStorage`** (on the storage `structure`, e.g. `CounterStorage`): introspects the structure's fields via `Lean.getStructureFields`/projection types and emits two top-level defs, `CounterStorage.getField`/`CounterStorage.setField`, each a `match` on a `(Ty, field-name)` pair.
+- **`deriving ContractEvent`** (on the event `inductive`, e.g. `CounterEvent`): introspects constructors (0 or 1 parameter each — multi-param events aren't supported by the rest of the pipeline yet, and are rejected at `deriving` time with a clear error) and emits `CounterEvent.buildEvent`.
+- **`deriving ContractError`** (on the error `inductive`, e.g. `CounterError`): emits `CounterError.resolveError` (one arm per constructor) plus an `instance : ContractErrors CounterError`, whose `arith`/`fromFramework` arms are filled in by **name-matching** against `ArithError` (`Overflow`/`Underflow`/`DivisionByZero`) and `FrameworkError` (`Reentrant`/`Unauthorized`/`InvalidSelector`) constructor names — a same-named constructor in the user's error type maps directly; an unmatched case falls back to `ContractErrors.unreachableArith` (for `arith`) or to a single fixed fallback constructor (for `fromFramework`), exactly like `Counter.lean`'s hand-written instance.
+
+All three are plain top-level `def`s/`instance`s, named by convention (`<TypeName>.getField`/`setField`/`resolveError`/`buildEvent`) — there is nothing hidden behind opaque reflection at proof time; `CounterTheorem.lean`'s proofs `simp` straight through them.
+
+One final explicit line, `derive_contract_dsl FooStorage FooError FooEvent`, assembles the three derived pieces (found by the naming convention above) plus the `ContractErrors Err` instance (found by ordinary typeclass resolution) into the `ContractDSL` instance — this one line was kept explicit rather than folded into the last `deriving` clause, since doing so would require the three types to be named consistently and saves only one line.
+
+### 3.2 Why `deriving ContractError` alone isn't the whole safety story
+
+`deriving ContractError` runs immediately after the error inductive is declared — **before any function body exists** (function bodies are written later in the file, since they need `CounterM`, which needs `derive_contract_dsl`, which needs the error type to already be fully elaborated). So at `deriving` time the handler can only check "does a same-named constructor exist for each `ArithError`/`FrameworkError` variant" — it cannot yet know which cases are actually *reachable* from the contract's real function bodies.
+
+The loud, can't-silently-panic-in-production guarantee comes from a **separate, later** pass: `LscV2.Lang.Checks.checkArithErrorCoverage` (in `v2/LscV2/Lang/Checks.lean`), which walks every function body (and storage-field initializer) once they're all known, finds every `ArithError` actually reachable through a `+?`/`-?`/`/?` operator (via `arithErrorsByFunction`/`arithErrorOp`), and fails with a clear per-function message (e.g. *"`increment` uses `+?`, which can raise `ArithError.Overflow`, but `Counter`'s error type has no `Overflow` constructor — add one or write `ContractErrors` by hand"*) if any reachable case has no matching constructor. This check is wired into `LscV2.Compile.contractToBytecode`/`deployToBytecode` (via `Checks.validateAll`), so it runs at compile/lowering time — `lake build`-time, not deploy-time or runtime. `FrameworkError` reachability is **not** checked the same way: there is no AST node that "raises" a `FrameworkError` (unlike `Wei.Expr.addChecked` raising `Overflow`), since framework guards like reentrancy locks live outside the `Stmt`/`Expr` data a contract author writes, so there's no decidable reachability signal to walk yet.
+
+### 3.3 The `Address`/`UInt256` disambiguation — a non-issue in practice
+
+The original plan worried that `deriving ContractStorage` couldn't tell an `Address`-typed field from a `UInt256`-typed one, since both are literally `abbrev`s for `Word := BitVec 256`. This turned out not to be a real problem: empirically (against this project's Lean 4.30/4.31 toolchain), a structure field's *stored* projection type (as recorded in the `ConstantInfo` Lean adds when elaborating the `structure`) is **not** auto-unfolded through reducible `abbrev`s — it stays the literal constant `LscV2.Address` (resp. `LscV2.UInt256`) until something explicitly calls `whnf`. `LscV2.Deriving.fieldKindOfExpr` relies on exactly this and never calls `whnf`, so `Address` and `UInt256` (and `Wei`/`Bool`) are distinguishable from the unreduced type alone. The one real limitation: a field spelled out as some *other* alias of `BitVec 256` (not literally `LscV2.Address`/`LscV2.UInt256`/`LscV2.Wei`/`Bool`) is rejected with a clear "unsupported field type" error at `deriving` time, rather than silently miscategorized.
+
+### 3.4 Function bodies: `do`-notation over `TxM`, not a custom statement grammar
+
+Function bodies are ordinary Lean `do`-blocks over `TxM α := WriterT Stmt Id α` (`v2/LscV2/Lang/TxM.lean`), reusing Lean's stdlib `do`-notation for sequencing/let/`do`-elaboration — there is no `lsc_stmt`/statement-juxtaposition grammar anymore. `do`-notation here is sugar for **AST construction**, not execution: a `TxM Unit` block, once run via `TxM.run`, becomes a plain `Stmt` value fed into the unchanged `Stmt.eval`/`Compile.*` pipeline exactly as a hand-written AST would be.
+
+What's available inside a `TxM` `do`-block today:
+
+- **Storage reads are type-tagged, not fully generic.** Doing a single, fully-generic `σ.field` read notation that picks the right constructor based on the field's *declared type* needs either a per-contract field-type map populated by `deriving ContractStorage`, or expected-type-directed elaboration sophisticated enough to distinguish `Wei.Expr` from `CoreExpr .bool`/`.address`/`.uint256`. Neither exists yet, so reads are a small family of type-tagged notations instead: `wei σ.field`, `bool σ.field`, `addr σ.field`, `u256 σ.field`. (`σ.field` itself is parsed as a single dotted identifier token — `wei`/`bool`/`addr`/`u256` are leading keywords that dispatch on it.)
+- **Storage writes are plain function calls, not `:=` sugar.** `σ.field := expr` was attempted as a `doElem`-level macro mirroring the read notation, but had to be dropped: declaring a `doElem` syntax with the same leading tokens as the *term*-level read notation makes Lean's parser produce an ambiguous `choice` node for that prefix, which breaks `macro_rules` pattern matching ("unexpected do-element of kind choice"). Writes are instead plain `TxM Unit`-returning function calls used directly as a `do`-statement: `setWei "number" n`, `setBool "paused" e`, `setAddr`/`setU256` likewise.
+- **`require`/`revert`/`emit`/`ifE`** are small `doElem`/term notations: `require <cond> else revert <err>`, `revert <err>`, `emit <name> <args>`, and `ifE cond thn els` for contract-level (data, not Lean-`Bool`) branching — `ifE` runs both branches through `TxM.run` and wraps the result in `Stmt.ifThenElse`, since a genuine Lean `if` would need a real `Bool` known at elaboration time, but the branch condition is a piece of `CoreExpr .bool` data evaluated later.
+- **Checked arithmetic** (`+?`/`-?` on `Wei.Expr`, via the `WeiAddChecked` typeclass so `σ.number +? 1` accepts a bare `Nat` literal) and **comparisons** (`===`, `!`) are small infix/prefix notations feeding straight into `Wei.Expr`/`CoreExpr` constructors. Only `Wei` has checked add/sub today (`Wei.Expr` has no checked multiply/divide constructors yet, so `*?`/`/?` are not defined); `Wad`/`Ray` can follow the same pattern once needed.
+
+#### `let` vs. `letWei`/`letBool`/`letAddr`/`letU256` — an important correctness subtlety
+
+This is a real, documented limitation worth calling out explicitly (see `TxM.lean`'s module docstring): a `TxM` `do`-block is *building* a `Stmt` AST, not executing one. A plain Lean `let n := wei σ.number +? 1` only binds `n` to an **AST term** at elaboration time — it does not emit a `Stmt` and does not evaluate anything yet. If that term is referenced again later in the same function body, evaluation **re-runs the whole term** — including any storage reads inside it — against whatever storage is current *at that later point*. Concretely, this is wrong:
 
 ```lean
--- Write the contract (macro expands automatically on file load)
--- Write proofs in the same file or a sibling file
-
-#check Counter.increment.ast     -- inspect the AST
-#eval  Counter.increment.ast.toYul  -- generate Yul
-#eval  Counter.increment.ast.toABI  -- generate ABI JSON
+let n := wei σ.number +? 1
+setWei "number" n                      -- evaluates "σ.number +? 1" against OLD storage: fine
+emit "Incremented" [⟨Ty.wei, n⟩]        -- evaluates "σ.number +? 1" AGAIN, now against the
+                                        -- storage `setWei` just wrote: WRONG (double-counts)
 ```
 
-No build system, no CLI, no separate compiler invocation.
+A plain `let` is only safe when its right-hand side either doesn't transitively read storage at all, or reads fields that are never written-to again before the bound name is reused. Whenever a storage-derived value will be referenced again *after* a write to a field it reads, use `letWei`/`letBool`/`letAddr`/`letU256` instead (`let n ← letWei "n" (wei σ.number +? 1)`): these emit a real `Stmt.letBind`, evaluated exactly once at that point in the sequence, and hand back a `var` reference safe to reuse after later writes. `Counter.lean`'s `incrementTxM` uses exactly this pattern (`n` is read once via `letWei`, then reused in both `setWei` and `emit`).
+
+### 3.5 Validation and error reporting
+
+Domain validation (selector clashes, the linearity stub, DAG/cycle checks, the UInt256-bare-arithmetic check, and the arith-error-coverage check from §3.2) lives in `LscV2.Checks.validateAll` (`v2/LscV2/Lang/Checks.lean`) and runs as part of `Compile.contractToBytecode`/`deployToBytecode`, returning `Except String ContractDef` — a build-time, not source-position-attached, error today (no `Lean.logErrorAt` integration yet; errors surface as plain `Except String` failures from the compile call).
+
+### 3.6 User workflow
+
+```lean
+-- Write storage/errors/events as plain `structure`/`inductive` + `deriving`
+-- Write `derive_contract_dsl`, the `CounterM` abbrev, and function bodies as `do`/TxM
+-- Write proofs in the same file or a sibling file (see CounterTheorem.lean)
+
+#check incrementAst                          -- inspect the built Stmt AST
+#eval  Compile.stmtToYul compileConfig incrementAst   -- generate Yul (Except String)
+#eval  Compile.contractToBytecodeHex counterDslDef stubEventTopic0  -- generate bytecode hex
+```
+
+No build system beyond `lake build`, no CLI, no separate compiler invocation.
 
 ---
 
@@ -237,26 +269,26 @@ Recursive function calls are **banned in v1**. The call graph (built from `Stmt.
 
 ### Arithmetic errors — strict 1:1 mapping
 
-User error types must embed framework arithmetic errors via `ContractErrors.arith`. The mapping is **strict 1:1**:
+User error types must embed framework arithmetic errors via `ContractErrors.arith`. The mapping is **name-matched, 1:1**:
 
-| `ArithError` variant | Required user error name |
+| `ArithError` variant | Required user error constructor name |
 |----------------------|--------------------------|
 | `Overflow` | `Overflow` |
 | `Underflow` | `Underflow` |
-| `DivisionByZero` | `DivByZero` |
+| `DivisionByZero` | `DivisionByZero` |
 
-The elaborator checks that every `ArithError` variant reachable from operations in the contract body has a same-named entry in the `errors:` block. Collapsing multiple `ArithError` variants to one user error is a compile error. This makes every arithmetic operation an explicit proof obligation site.
+(Implementation note: the originally-planned shorter name `DivByZero` was dropped in favor of matching `ArithError.DivisionByZero`'s spelling exactly — see `arithErrorCtorNames` in `LscV2/Lang/Derive.lean` and `arithErrorName` in `LscV2/Lang/Checks.lean`, which both must agree on these three strings.)
+
+`LscV2.Lang.Checks.checkArithErrorCoverage` checks that every `ArithError` variant reachable from checked-arithmetic operations (`+?`/`-?`/`/?`) in the contract's function bodies (and storage initializers) has a same-named constructor in the user's error inductive — this runs as part of `Compile.contractToBytecode`/`deployToBytecode`, after `deriving ContractError` has already run (see §3.2 for why it can't run at `deriving` time). Collapsing multiple `ArithError` variants onto one user error constructor is a compile error. This makes every arithmetic operation an explicit proof obligation site.
 
 ```lean
 -- Counter uses only +?; only Overflow is reachable → only Overflow required
-errors:
-  | Overflow
+inductive CounterError where
+  | Paused | NotOwner | Overflow
+  deriving Repr, DecidableEq, LscV2.Deriving.ContractError
 
--- AMM uses +?, -?, /?; all three are reachable → all three required
-errors:
-  | Overflow
-  | Underflow
-  | DivByZero
+-- A contract using +?, -?, /? would need all three reachable variants declared:
+-- | Overflow | Underflow | DivisionByZero
 ```
 
 `@math` functions called via `|>.orRevert` use the same `ContractErrors.arith` table — not a separate per-call argument.
@@ -590,7 +622,7 @@ theorem setFee_only_owner     ... (cap : Capability .Owner) ...
 ## Appendix A: Relationship to Prior Work
 
 - **lsc** (prior prototype): established the `ContractM` monad shape. Abandoned due to opaque bytecode emission via Lean reflection. This design replaces that path with an explicit Yul target.
-- **dss2024**: the `declare_syntax_cat` + `macro_rules` pattern for a DSL that compiles to a verified AST. The macro layer follows this pattern exactly.
+- **dss2024**: the `declare_syntax_cat` + `macro_rules` pattern for a DSL that compiles to a verified AST. The `Lang/AST.lean`/`Lang/Eval.lean` (typed `Expr`/`Stmt` + `ContractM`/`Stmt.eval`) layers still follow this pattern. The original *surface syntax* layer (a `declare_syntax_cat lsc_*` custom grammar following dss2024's `Syntax.lean` pattern exactly) was implemented and then deleted in favor of the plain-Lean-plus-`deriving` approach in §3 — dss2024's pattern remains a reference for the AST/eval split, not for how contracts are authored.
 - **EvmYulLean** (Nethermind): provides Yul and EVM semantics; treated as trusted ground truth.
 - **Move Prover**: demonstrated that a restricted, DeFi-oriented language with co-designed verification is practical. Key lessons: resource types, alias-free memory, static dispatch, minimal language surface. This design independently converges on all four.
 
