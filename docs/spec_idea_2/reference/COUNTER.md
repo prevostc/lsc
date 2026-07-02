@@ -6,7 +6,7 @@ Full design context: [DESIGN.md §13](../DESIGN.md). Implementation walkthrough:
 
 ## Contract
 
-Surface syntax follows the actual implementation in [IMPLEMENTATION.md](../IMPLEMENTATION.md) §6–§7 (`TxM` builder monad + `deriving ContractStorage/ContractError/ContractEvent` + `derive_contract_dsl`) — full source: `v2/examples/counter/src/Counter.lean`.
+Surface syntax follows the actual implementation: `deriving ContractStorage/ContractError/ContractEvent` + `derive_contract_dsl` for storage/errors/events, and the dss2024-style bracket-delimited `tx <name> { ... }` grammar (`LscV2/Lang/Syntax2.lean`, see [DESIGN.md §3.4](../DESIGN.md)) for function bodies — full source: `v2/examples/counter/src/Counter.lean`.
 
 ```lean
 structure CounterStorage where
@@ -30,32 +30,29 @@ inductive CounterEvent where
 derive_contract_dsl CounterStorage CounterError CounterEvent
 abbrev CounterM := ContractM CounterStorage CounterEvent CounterError
 
-def incrementTxM : TxM Unit := do
-  require !(bool σ.paused) else revert Paused
-  let n ← letWei "n" (wei σ.number +? 1)
-  setWei "number" n
-  emit "Incremented" [⟨Ty.wei, n⟩]
+tx increment {
+  require(!σ.paused, Paused);
+  var n := σ.number +? 1;
+  σ.number = n;
+  emit Incremented(n);
+}
 
-def increment : CounterM Unit := Stmt.eval (TxM.run incrementTxM)
+tx pause {
+  require(msg.sender == σ.owner, NotOwner);
+  require(!σ.paused, Paused);
+  σ.paused = true;
+  emit Paused;
+}
 
-def pauseTxM : TxM Unit := do
-  require (@CoreExpr.eqAuto Ty.address msg.sender (addr σ.owner)) else revert NotOwner
-  require !(bool σ.paused) else revert Paused
-  setBool "paused" (CoreExpr.lit Ty.bool (.bool true))
-  emit "Paused" []
-
-def pause : CounterM Unit := Stmt.eval (TxM.run pauseTxM)
-
-def unpauseTxM : TxM Unit := do
-  require (@CoreExpr.eqAuto Ty.address msg.sender (addr σ.owner)) else revert NotOwner
-  require (bool σ.paused) else revert Paused
-  setBool "paused" (CoreExpr.lit Ty.bool (.bool false))
-  emit "Unpaused" []
-
-def unpause : CounterM Unit := Stmt.eval (TxM.run unpauseTxM)
+tx unpause {
+  require(msg.sender == σ.owner, NotOwner);
+  require(σ.paused, Paused);
+  σ.paused = false;
+  emit Unpaused;
+}
 ```
 
-`number` is `Wei` — the 0-decimal numeric type (like `Wad`/`Ray` but with identity encoding: `1 Wei = 1`). Bare `UInt256` cannot be used for arithmetic in contract bodies; all numeric ops go through typed wrappers (`Wei`, `Wad`, `Ray`). Storage reads use the type-tagged `wei σ.field`/`bool σ.field`/`addr σ.field`/`u256 σ.field` notation family (not a single generic `σ.field`); storage writes are plain function calls (`setWei`/`setBool`/…), not `σ.field := e` sugar — see `IMPLEMENTATION.md` §6 for why. `n` is bound via `letWei` rather than a plain `let` because it's reused (in both `setWei` and `emit`) after a storage write — a plain `let` would silently re-evaluate against the *post-write* storage; see `IMPLEMENTATION.md` §6 / `TxM.lean`'s module docstring.
+`number` is `Wei` — the 0-decimal numeric type (like `Wad`/`Ray` but with identity encoding: `1 Wei = 1`). Bare `UInt256` cannot be used for arithmetic in contract bodies; all numeric ops go through typed wrappers (`Wei`, `Wad`, `Ray`). Each `tx <name> { ... }` block expands (via a command-level `elab`) to a plain top-level `def name : LscV2.Stmt := ...`, so `increment`/`pause`/`unpause` above are ordinary `Stmt` values usable directly in `derive_contract_def`'s function list, with no separate `TxM.run`/`Stmt.eval` wrapper. `σ.field` reads and `σ.field = e;` writes resolve the field's storage type by introspecting `CounterStorage` directly (`LscV2.Deriving.getStructureFieldKinds`, looked up via a `derive_contract_dsl`-populated registry) — no per-field type tag (there is no `wei σ.field`/`bool σ.field`/... prefix family in this grammar) and no repeated field-name string literal. `require(cond, ErrCtor);`, `revert(ErrCtor);`, and `emit Ctor;`/`emit Ctor(arg);` all elaborate their error/event argument against the real `CounterError`/`CounterEvent` inductive, so a typo or wrong arity is a compile error. `n` is bound via `var n := e;` rather than a plain Lean `let` because it's reused (in both the `σ.number = n;` write and `emit Incremented(n);`) after a storage write — `var` always emits a real, evaluated-once `Stmt.letBind` and hands back a `var`-reference, safe to reuse even after later writes to fields the original expression read; a plain re-evaluated term would silently double-count against the post-write storage. `pause`/`unpause`'s `msg.sender == σ.owner` compiles to `@CoreExpr.eqAuto Ty.address msg.sender σ.owner` under the hood, with the `==` elaborator pinning the explicit `Ty.address` type argument itself (rather than relying on implicit inference) to avoid a defeq-but-not-syntactic-equality mismatch between `msg.sender`'s and `σ.owner`'s expression types.
 
 Overflow on `+? 1` reverts as `.error CounterError.Overflow` via `deriving ContractError`'s generated `ContractErrors.arith` (`ArithError.Overflow` → `Overflow`, by name-matching), with the actual loud-failure guarantee enforced separately by `Lang.Checks.checkArithErrorCoverage` once all function bodies are known (see `DESIGN.md` §3.2). Counter does not declare `Underflow` or `DivisionByZero` because the body uses only `+?`; adding `-?` or `/?` would require those variants on `CounterError`.
 

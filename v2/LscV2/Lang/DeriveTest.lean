@@ -1,5 +1,6 @@
 import LscV2.Lang.Derive
 import LscV2.Lang.TxM
+import LscV2.Lang.Syntax2
 import LscV2.Lang.Eval
 import LscV2.Lib.Wei.Eval
 
@@ -71,37 +72,18 @@ example : TEvent.buildEvent "Paused" [] = some .Paused := rfl
 -- `ArithError.Overflow` maps to the same-named `TError.Overflow` constructor.
 example : (ContractErrors.arith (Err := TError) ArithError.Overflow) = TError.Overflow := rfl
 
--- ── A `TxM`-built function body against the derived storage ────────────
+-- ── A `Syntax2`-built function body against the derived storage ────────
 
-def incrementTxM : TxM Unit := do
-  require !(bool σ.paused) else revert Paused
-  let n ← letWei "n" (wei σ.number +? 1)
-  setWei "number" n
-  emit "Incremented" [⟨Ty.wei, n⟩]
+tx incrementTx {
+  require(!σ.paused, Paused);
+  var n := σ.number +? 1;
+  σ.number = n;
+  emit Incremented(n);
+}
 
-def incrementAst : Stmt := TxM.run incrementTxM
+def increment : TM Unit := Stmt.eval incrementTx
 
-def increment : TM Unit := Stmt.eval incrementAst
-
--- `incrementAst`, built via `do`-notation over `TxM` (step 1's builder)
--- against `TStorage`'s *derived* field names, has exactly the expected
--- `Stmt` shape — confirms the builder + the `σ.field` notations work
--- against a derived storage type, not just hand-written ASTs as in
--- `TxMTest.lean`. Note `n` is bound via `letWei`/`Stmt.letBind` (computed
--- once) and referenced via `Wei.Expr.var "n"` in both the storage-set and
--- the `emit`, matching `examples/counter/src/Counter.lean`'s hand-written
--- `incrementAst` shape exactly — see `TxM.lean`'s module docstring for why
--- a plain Lean `let` would be wrong here.
-example : incrementAst =
-    (Stmt.require (!(CoreExpr.storageGet Ty.bool "paused")) "Paused").seq
-      (((Stmt.letBind "n" ⟨Ty.wei, (Wei.Expr.storageGet "number").addCheckedNat 1⟩).seq Stmt.skip).seq
-        ((Stmt.storageSet "number" ⟨Ty.wei, Wei.Expr.var "n"⟩).seq
-          (Stmt.emit "Incremented" [⟨Ty.wei, Wei.Expr.var "n"⟩]))) := by
-  simp only [incrementAst, incrementTxM, TxM.run, TxM.runWith, letWei, setWei, emit, tellStmt,
-    requireE, WriterT.run, MonadWriter.tell, bind, pure, Id.run, Functor.map, WriterT.mk]
-  rfl
-
--- End-to-end check: running `increment` (a `TxM`-built function body)
+-- End-to-end check: running `increment` (a `tx { ... }`-built function body)
 -- through the fully *derived* `getField`/`setField`/`resolveErr`/
 -- `buildEvent`/`ContractDSL` instance on a concrete starting state
 -- produces a storage update and event — confirming the whole derived
@@ -110,12 +92,11 @@ example : incrementAst =
 -- `Except` here have no `DecidableEq` instance (not needed by the compile
 -- pipeline, so none is derived).
 --
--- Fixed (previously a bug, see git history / `TxM.lean`'s module
--- docstring): `number` now correctly ends up `1` and the emitted event
--- carries `1` too (not `2`), because `n` is bound once via `letWei`
--- (a real `Stmt.letBind`) and reused via `Wei.Expr.var "n"`, which
--- `Stmt.evalWith`'s `.letBind` case computes exactly once and resolves
--- through `LocalEnv` thereafter — unaffected by the later `setWei` write.
+-- `number` correctly ends up `1` and the emitted event carries `1` too (not
+-- `2`): `n` is bound once via `Stmt.letBind` (`Syntax2.lean`'s `var`) and
+-- reused via `Wei.Expr.var "n"`, which `Stmt.evalWith`'s `.letBind` case
+-- computes exactly once and resolves through `LocalEnv` thereafter —
+-- unaffected by the later storage write.
 #eval runS increment
   { storage := ({} : TStorage), context := { caller := 0, callvalue := 0, timestamp := 0, origin := 0 } }
 

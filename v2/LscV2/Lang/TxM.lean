@@ -1,4 +1,5 @@
 import LscV2.Lang.AST
+import LscV2.Lang.Eval
 import LscV2.Lib.Wei.Syntax
 import Mathlib.Control.Monad.Writer
 import Lean
@@ -58,7 +59,7 @@ that later point. Concretely:
 ```
 let n := wei σ.number +? 1
 setWei "number" n         -- evaluates `σ.number +? 1` against OLD storage: fine
-emit "Incremented" [⟨Ty.wei, n⟩]  -- evaluates `σ.number +? 1` AGAIN, now against
+emitEvent "Incremented" [⟨Ty.wei, n⟩]  -- evaluates `σ.number +? 1` AGAIN, now against
                                    -- the storage `setWei` just wrote: WRONG (double-counts)
 ```
 
@@ -121,6 +122,40 @@ def run (m : TxM Unit) : Stmt := (runWith m).2
 
 end TxM
 
+/-- Lets a bare `def foo : TxM Unit := do ...` be spliced directly wherever a
+`Stmt` is expected (e.g. `FunctionDef.body`), without a separately-named
+`fooAst := TxM.run foo` wrapper. Named (rather than an anonymous `fun`
+directly in the `Coe` instance) and `@[simp]` so proofs can unfold the
+coercion by name, e.g. `simp [increment, TxM.toStmt, TxM.run]`. -/
+@[simp] def TxM.toStmt (t : TxM Unit) : Stmt := TxM.run t
+
+instance : Coe (TxM Unit) Stmt := ⟨TxM.toStmt⟩
+
+/-- Lets a bare `def foo : TxM Unit := do ...` be spliced directly wherever a
+`ContractM S E Err Unit` action is expected (e.g. `runS foo s`), without a
+separately-named `foo : ContractM S E Err Unit := Stmt.eval fooAst` wrapper.
+Named + `@[simp]` for the same reason as `TxM.toStmt` above. -/
+@[simp] def TxM.toContractM {S E Err : Type} [ContractErrors Err] [ContractDSL S E Err]
+    (t : TxM Unit) : ContractM S E Err Unit :=
+  Stmt.eval (TxM.run t)
+
+instance {S E Err : Type} [ContractErrors Err] [ContractDSL S E Err] :
+    Coe (TxM Unit) (ContractM S E Err Unit) :=
+  ⟨TxM.toContractM⟩
+
+/-- Lets a bare `def foo : Stmt := ..` (e.g. a `Syntax2.lean`
+`tx foo { .. }` block) be used directly wherever a `ContractM S E Err Unit`
+action is expected (e.g. `runS foo s`), mirroring `TxM.toContractM` above
+for `Stmt`-typed defs that never went through `TxM`'s `do`-notation at
+all. -/
+@[simp] def Stmt.toContractM {S E Err : Type} [ContractErrors Err] [ContractDSL S E Err]
+    (s : Stmt) : ContractM S E Err Unit :=
+  Stmt.eval s
+
+instance {S E Err : Type} [ContractErrors Err] [ContractDSL S E Err] :
+    Coe Stmt (ContractM S E Err Unit) :=
+  ⟨Stmt.toContractM⟩
+
 -- `@[simp]` on `TxM.runWith`/`TxM.run` plus every statement-builder
 -- combinator below lets proofs that need to reduce a `TxM`-built
 -- `incrementAst`/`pauseAst`/... down to its concrete `Stmt` shape just call
@@ -149,48 +184,16 @@ primitive all other statement combinators below are defined in terms of. -/
 /-- `u256 σ.field` reads a `UInt256`-typed storage field. -/
 @[simp] def u256Field (field : Ident) : CoreExpr .uint256 := .storageGet .uint256 field
 
-/-- `σ.field` notation family: `<tytag> σ.field`, where `<tytag>` is one of
-`wei`/`bool`/`addr`/`u256`. See the module docstring for why this is
-type-tagged rather than fully generic at this step.
-
-`σ.field` is parsed as a single *compound* identifier token (Lean lexes
-`a.b` with no surrounding whitespace as one dotted name, same as
-namespaced identifiers like `Foo.bar`) — so the macro below pattern-matches
-the resulting `Name` directly (`.str (.str .anonymous "σ") field`) rather
-than trying to split `σ` and `.` and `field` into separate syntax atoms
-(which would force writing `wei σ . field` with awkward mandatory spaces). -/
-syntax (name := weiFieldGet) "wei " ident : term
-syntax (name := boolFieldGet) "bool " ident : term
-syntax (name := addrFieldGet) "addr " ident : term
-syntax (name := u256FieldGet) "u256 " ident : term
-
 /-- Extract `field` from a `σ.field`-shaped identifier, or fail with a
-clear error otherwise. -/
+clear error otherwise. Used directly by `Lang/Syntax2.lean`'s `lscExpr`/
+`lscStmt` field resolution — the `wei σ.field`/`bool σ.field`/... prefix
+notation family that used to call this from `term`-level `macro_rules` was
+removed, since `Syntax2.lean` resolves `σ.field` via its own grammar
+instead. -/
 def sigmaFieldName? (n : Lean.Name) : Option String :=
   match n with
   | .str (.str .anonymous "σ") field => some field
   | _ => none
-
-macro_rules (kind := weiFieldGet)
-  | `(wei $f:ident) => do
-      match sigmaFieldName? f.getId with
-      | some field => `(weiField $(quote field))
-      | none => Macro.throwError s!"expected `wei σ.field`, got `wei {f.getId}`"
-macro_rules (kind := boolFieldGet)
-  | `(bool $f:ident) => do
-      match sigmaFieldName? f.getId with
-      | some field => `(boolField $(quote field))
-      | none => Macro.throwError s!"expected `bool σ.field`, got `bool {f.getId}`"
-macro_rules (kind := addrFieldGet)
-  | `(addr $f:ident) => do
-      match sigmaFieldName? f.getId with
-      | some field => `(addrField $(quote field))
-      | none => Macro.throwError s!"expected `addr σ.field`, got `addr {f.getId}`"
-macro_rules (kind := u256FieldGet)
-  | `(u256 $f:ident) => do
-      match sigmaFieldName? f.getId with
-      | some field => `(u256Field $(quote field))
-      | none => Macro.throwError s!"expected `u256 σ.field`, got `u256 {f.getId}`"
 
 /-! ## Evaluate-once `let`-binding (`letWei`/`letBool`/`letAddr`/`letU256`)
 
@@ -243,30 +246,33 @@ reference safe to reuse even after later writes to fields `e` reads. -/
 
 -- Storage writes are plain `TxM Unit` actions (`setWei`/`setBool`/...
 -- above), e.g. `setWei "number" n`, used directly as a `do`-block statement.
---
--- A `<tytag> σ.field := expr` assignment-sugar `doElem` was attempted here
--- (mirroring the read notation above) but had to be dropped: declaring a
--- `doElem` syntax with the same leading tokens as the *term*-level read
--- notation makes Lean's parser produce an ambiguous `choice` node for that
--- prefix (a do-block element can always also be a bare term, so `wei
--- σ.field` parses two ways), which breaks `macro_rules` pattern matching
--- for the assignment form with an "unknown parser" / "unexpected
--- do-element of kind choice" error. Picking a non-overlapping leading
--- keyword (e.g. `set wei σ.field := expr`) would resolve it, but plain
--- function calls are simpler and unambiguous, so that's what's used for
--- writes at this step; revisit once the `deriving ContractStorage` handler
--- (step 2) can give read and write notations distinct, non-overlapping
--- surface syntax.
+-- The generic `set σ.field e` sugar and the `var x := e` binder that used to
+-- live here (both do-notation-only workarounds) were removed in favor of
+-- `Lang/Syntax2.lean`'s `tx { ... }` grammar, which has its own `σ.field =
+-- e;`/`var x := e;` productions with direct access to the field's `FieldKind`
+-- (no `SetSigma`/`LetBindable` typeclass dispatch needed there).
 
-/-! ## `require`/`revert`/`emit`
+/-! ## `require`/`revert`/`emitEvent`
 
 Errors are still referenced by bare `Ident` (a `String`), matching `Stmt`'s
-existing shape (`Stmt.require`/`Stmt.revert` both take an `Ident`). The
-plan's `revert .Paused` anonymous-constructor-application sugar — where the
-error name is extracted from a real `CounterError` constructor application —
-is left for the (not-yet-implemented) `deriving ContractError`/event-aware
-follow-up; for now write the bare constructor name, e.g.
-`require ... else revert Paused`. -/
+existing shape (`Stmt.require`/`Stmt.revert` both take an `Ident`). These are
+the low-level primitives — the recommended contract-author-facing surface is
+`revert .Ctor` / `require <cond> else revert .Ctor` / `emit Ctor args`
+(real-constructor sugar, elaborated against the contract's actual
+`Err`/`Event` inductive), declared in `LscV2.Deriving` (`Lang/Derive.lean`)
+since it needs `derive_contract_dsl`'s namespace → `(errName, eventName)`
+registry. These bare-`Ident` primitives remain directly usable (e.g. by
+`TxMTest.lean`, which builds `Stmt`s without a real derived contract).
+
+The event-emission primitive is named `emitEvent`, not `emit`: `emit` itself is
+reserved for the real-constructor sugar above, since (unlike `require`/
+`revert`, whose bare-`Ident` primitives (`requireE`/`revertE`) already have
+distinct names from their sugar) an earlier attempt at sharing the `emit`
+spelling between this primitive and the sugar ran into a genuine parser
+conflict — declaring `emit`-keyword-led syntax while a same-named plain
+identifier already existed made every existing use of that identifier
+ambiguous. See `Lang/Derive.lean`'s docstring above the `emit` sugar
+elaborator for the empirical history. -/
 
 @[simp] def requireE (cond : CoreExpr .bool) (err : Ident) : TxM Unit :=
   tellStmt (Stmt.require cond err)
@@ -274,21 +280,12 @@ follow-up; for now write the bare constructor name, e.g.
 @[simp] def revertE (err : Ident) : TxM Unit :=
   tellStmt (Stmt.revert err)
 
-/-- Generic event-emission combinator. Per the task, nicer ergonomics that
-auto-extract the name/args from a real event-constructor application wait
-for the `deriving ContractEvent` step; for now pass the event name and its
-field values explicitly. -/
-@[simp] def emit (name : Ident) (args : List ExprAny) : TxM Unit :=
+/-- Generic event-emission combinator. The recommended surface is `emit
+Ctor args` (see module docstring above); `emitEvent` remains the primitive it
+compiles down to, and stays directly usable for the rare case of a
+dynamically-built event name/arg list. -/
+@[simp] def emitEvent (name : Ident) (args : List ExprAny) : TxM Unit :=
   tellStmt (Stmt.emit name args)
-
-syntax (name := requireElseRevert) "require" term "else" "revert" ident : doElem
-syntax (name := revertOnly) "revert" ident : doElem
-
-macro_rules (kind := requireElseRevert)
-  | `(doElem| require $c else revert $err) =>
-      `(doElem| requireE $c $(quote err.getId.toString))
-macro_rules (kind := revertOnly)
-  | `(doElem| revert $err) => `(doElem| revertE $(quote err.getId.toString))
 
 /-! ## Conditional branching
 
@@ -300,48 +297,16 @@ result in `Stmt.ifThenElse`. -/
 @[simp] def ifE (cond : CoreExpr .bool) (thn els : TxM Unit) : TxM Unit :=
   tellStmt (Stmt.ifThenElse cond (TxM.run thn) (TxM.run els))
 
-/-! ## Checked arithmetic on `Wei`
+/-! ## `CoreExpr.eqAuto`
 
-`Wad`/`Ray` (other fixed-point numeric libs) can follow the exact same
-pattern once they exist; only `Wei` is implemented here since that's all
-`Counter.lean` (the reference example) needs.
-
-`Wei.Expr` only has `addChecked`/`addCheckedNat`/`subChecked` constructors
-today — there is no checked multiply/divide yet, so `*?`/`/?` are *not*
-defined below (adding them is just two more constructors + two more
-instances once `Wei.Expr` grows them; left as a follow-up, not a design
-gap in this file). -/
-
-/-- Typeclass so `+?` can accept either another `Wei.Expr` or a bare `Nat`
-literal (`σ.number +? 1`), matching `Wei.addCheckedNatStorage`'s two
-existing constructors (`addChecked`, `addCheckedNat`). -/
-class WeiAddChecked (α : Type) where
-  addChecked : Wei.Expr → α → Wei.Expr
-
-instance : WeiAddChecked Wei.Expr := ⟨Wei.Expr.addChecked⟩
-instance : WeiAddChecked Nat := ⟨Wei.Expr.addCheckedNat⟩
-
-/-- Checked addition: `e +? n` is `Wei.Expr.addChecked`/`addCheckedNat`
-depending on whether the right-hand side is a `Wei.Expr` or a `Nat`. -/
-infixl:65 " +? " => WeiAddChecked.addChecked
-
-/-- Checked subtraction on `Wei.Expr`. -/
-infixl:65 " -? " => Wei.Expr.subChecked
-
-/-! ## Boolean/comparison operators on `CoreExpr` -/
-
-/-- `CoreExpr.eq` with the type index inferred from its (necessarily equal)
-argument types, so it can be used infix. -/
+`Lang/Syntax2.lean`'s `==` elaborator calls this directly (with an explicit
+`t` argument, not relying on implicit inference — see its docstring), so the
+function stays; the `+?`/`-?`/`===`/`!`/`msg.sender` *notations* that used to
+live here (for building `Wei.Expr`/`CoreExpr` terms directly in `do`-blocks)
+were removed, since `Syntax2.lean`'s `lscExpr` grammar has its own,
+independent `+?`/`-?`/`==`/`!`/`msg.sender` productions that elaborate
+straight to `Wei.Expr.addChecked`/`CoreExpr.not`/`CoreExpr.txField`/etc.
+without going through any of these `term`-level notations. -/
 @[simp] def CoreExpr.eqAuto {t : Ty} (a b : CoreExpr t) : CoreExpr Ty.bool := CoreExpr.eq t a b
-
-@[inherit_doc] infix:50 " === " => CoreExpr.eqAuto
-
-/-- Boolean negation on `CoreExpr .bool`, thin wrapper around `CoreExpr.not`. -/
-prefix:max "!" => CoreExpr.not
-
-/-! ## Transaction-context notation -/
-
-/-- `msg.sender` → the calling address, as a contract-level expression. -/
-notation "msg.sender" => CoreExpr.txField TxField.caller
 
 end LscV2

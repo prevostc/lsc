@@ -1,5 +1,7 @@
 import LscV2.Core.ContractM
 import LscV2.Lang.AST
+import LscV2.Lang.TxM
+import LscV2.Compile.Bytecode.Contract
 import Lean
 
 /-!
@@ -58,6 +60,25 @@ open Lean Lean.Elab Lean.Elab.Command Lean.Elab.Term Lean.Meta Lean.Parser.Term
 
 namespace LscV2.Deriving
 
+/-- Maps a contract's namespace (the namespace `derive_contract_dsl` ran in, i.e. the same
+one its function bodies are written in) to its `(errorTypeName, eventTypeName)`, so the
+`revert`/`require ... else revert`/`emitEvent` real-constructor sugar below (which need to
+know *which* inductive to elaborate `.Paused`/`.Incremented` against) can find it without the
+contract author repeating it. Populated by `derive_contract_dsl`; a plain (non-persistent)
+`EnvExtension` suffices since storage/error/event types and function bodies always live in
+the same file/compilation unit. -/
+initialize contractTypesExt : EnvExtension (NameMap (Name × Name)) ←
+  registerEnvExtension (pure {})
+
+/-- Maps a contract's namespace to its storage `structure`'s name, so the `lscExpr`/`lscStmt`
+grammar's `σ.field` resolution (`Lang/Syntax2.lean`) can find *which* structure to run
+`getStructureFieldKinds` against without the contract author repeating it — the same
+`derive_contract_dsl`-populated-registry pattern as `contractTypesExt` above, kept as a
+separate extension (rather than widening `contractTypesExt`'s tuple) so existing
+`currContractTypes` callers are unaffected. -/
+initialize contractStorageExt : EnvExtension (NameMap Name) ←
+  registerEnvExtension (pure {})
+
 /-- Marker classes used purely as `deriving` targets — they carry no data
 or methods themselves; all the generated code lives in plain top-level
 `def`s/`instance`s emitted by the handlers below (see each handler's
@@ -112,6 +133,29 @@ def FieldKind.valCtor : FieldKind → TermElabM Term
   | .bool => `(LscV2.Val.bool)
   | .address => `(LscV2.Val.addr)
   | .uint256 => `(LscV2.Val.u256)
+
+/-- The *expression* (not value) Lean type carrying a field of this kind while a
+`Stmt`/`Expr` AST fragment is being built — `Wei.Expr` for `.wei`, `CoreExpr <tyConst>`
+otherwise. Used by the `σ.field`-generation below, so `σ.number : Wei.Expr` and
+`σ.paused : CoreExpr Ty.bool` come out with exactly the same Lean types the hand-written
+`wei σ.field`/`bool σ.field` notation family (`TxM.lean`) already produces. -/
+def FieldKind.exprTypeStx : FieldKind → TermElabM Term
+  | .wei => `(LscV2.Wei.Expr)
+  | .bool => `(LscV2.CoreExpr LscV2.Ty.bool)
+  | .address => `(LscV2.CoreExpr LscV2.Ty.address)
+  | .uint256 => `(LscV2.CoreExpr LscV2.Ty.uint256)
+
+/-- The default (i.e. only, since these are never written by contract authors — they're
+generated) value of a `σ.field` constant: a fresh `storageGet` expression fragment
+referencing `fieldStr`, identical in shape to what `wei σ.field`/`bool σ.field`/... build
+today (`TxM.lean`'s `weiField`/`boolField`/`addrField`/`u256Field`). -/
+def FieldKind.storageGetStx (k : FieldKind) (fieldStr : String) : TermElabM Term := do
+  let fieldLit := quote fieldStr
+  match k with
+  | .wei => `(LscV2.Wei.Expr.storageGet $fieldLit)
+  | .bool => `(LscV2.CoreExpr.storageGet LscV2.Ty.bool $fieldLit)
+  | .address => `(LscV2.CoreExpr.storageGet LscV2.Ty.address $fieldLit)
+  | .uint256 => `(LscV2.CoreExpr.storageGet LscV2.Ty.uint256 $fieldLit)
 
 /-! ## `deriving ContractStorage`
 
@@ -189,6 +233,24 @@ def mkSetFieldCmd (structName : Name) (fields : Array (Name × FieldKind)) : Ter
       match $[$discrs],* with
       $alts:matchAlt*)
 
+/-- One `def $ns.σ.$field : <exprTy> := <storageGet>` per storage field, where `$ns` is the
+namespace the storage `structure` was declared in (`structName`'s namespace — i.e. the same
+namespace a contract's function bodies are written in). This makes `σ` a plain Lean
+*namespace* (not a value + structure-field-projection trick), so `σ.number`/`σ.paused`/...
+resolve via ordinary unqualified-name lookup exactly like `getField`/`setField` already do —
+no custom parsing, no tokeniser risk, no environment-extension lookup needed at use sites.
+Replaces the hand-written `wei σ.field`/`bool σ.field`/... type-tagged prefix notation
+family (`TxM.lean`) as the recommended read syntax; those stay available underneath (this
+generates plain `def`s of the same shape their combinators already build, nothing removed). -/
+def mkSigmaFieldCmds (structName : Name) (fields : Array (Name × FieldKind)) :
+    TermElabM (Array Command) := do
+  let ns := structName.getPrefix
+  fields.mapM fun (fname, k) => do
+    let sigmaFieldName := mkIdent (ns ++ `σ ++ fname)
+    let tyStx ← k.exprTypeStx
+    let valStx ← k.storageGetStx fname.toString
+    `(command| @[simp] def $sigmaFieldName : $tyStx := $valStx)
+
 def mkContractStorageHandler : DerivingHandler := fun declNames => do
   if declNames.size != 1 then return false
   let structName := declNames[0]!
@@ -201,9 +263,11 @@ def mkContractStorageHandler : DerivingHandler := fun declNames => do
     getStructureFieldKinds structName
   let getCmd ← liftTermElabM <| mkGetFieldCmd structName fieldKinds
   let setCmd ← liftTermElabM <| mkSetFieldCmd structName fieldKinds
+  let sigmaCmds ← liftTermElabM <| mkSigmaFieldCmds structName fieldKinds
   atRootNamespace do
     elabCommand getCmd
     elabCommand setCmd
+    for c in sigmaCmds do elabCommand c
   return true
 
 initialize registerDerivingHandler ``ContractStorage mkContractStorageHandler
@@ -232,6 +296,24 @@ def getCtorFieldKind (ctorName : Name) : TermElabM (Option FieldKind) := do
     | some k => return some k
     | none =>
       throwError "deriving ContractEvent: constructor `{ctorName}`'s parameter has unsupported type `{ty}` \
+        — event payloads must be `Wei`/`Bool`/`Address`/`UInt256`"
+
+/-- Like `getCtorFieldKind`, but also returns the payload's declared parameter
+name (needed to reconstruct `ContractDef.events`'s `(paramName, ty)` shape in
+`derive_contract_def`). -/
+def getCtorFieldNameKind (ctorName : Name) : TermElabM (Option (Name × FieldKind)) := do
+  let ci ← getConstInfoCtor ctorName
+  forallTelescopeReducing ci.type fun xs _ => do
+    if xs.size == 0 then return none
+    if xs.size > 1 then
+      throwError "derive_contract_def: constructor `{ctorName}` has {xs.size} parameters; \
+        only 0- or 1-parameter events are currently supported"
+    let ty ← inferType xs[0]!
+    let paramName ← xs[0]!.fvarId!.getUserName
+    match fieldKindOfExpr ty with
+    | some k => return some (paramName, k)
+    | none =>
+      throwError "derive_contract_def: constructor `{ctorName}`'s parameter has unsupported type `{ty}` \
         — event payloads must be `Wei`/`Bool`/`Address`/`UInt256`"
 
 def mkBuildEventCmd (indName : Name) (ctors : Array Name) : TermElabM Command := do
@@ -402,8 +484,6 @@ def mkContractErrorHandler : DerivingHandler := fun declNames => do
 
 initialize registerDerivingHandler ``ContractError mkContractErrorHandler
 
-end LscV2.Deriving
-
 /-! ## `derive_contract_dsl` — final assembly command
 
 One explicit line, `derive_contract_dsl FooStorage FooError FooEvent`,
@@ -415,6 +495,92 @@ dot-notation since they're declared as `S.getField` etc.) plus the
 no naming convention needed since it's anonymous) into the final
 `ContractDSL` instance, matching `ContractGen.lean` step 8 /
 `Counter.lean`'s hand-written instance. -/
+/-! ### Auto-generated `@[simp]` DSL-projection lemmas
+
+`Stmt.evalWith`'s simp set (`Lang/Eval.lean`) only unfolds as far as
+`dsl.getField`/`dsl.setField`/`dsl.resolveErr`/`dsl.buildEvent` (the
+`ContractDSL` *projections*); without lemmas relating those projections
+back to the concrete derived defs, `simp` cannot see through the
+(reducible but not `@[simp]`) `ContractDSL` instance `derive_contract_dsl`
+assembles to actually evaluate a `getField`/`setField`/... call. Marking
+the generated defs themselves `@[simp]` (so their own `match` equations
+fire) plus relating the class projections to them via the four `rfl`
+lemmas below is what previously had to be hand-written per-contract (see
+e.g. `examples/counter/src/Counter.lean`'s history) — `derive_contract_dsl`
+now emits all of this itself. -/
+
+/-- `@ContractDSL.getField S E Err _ _ t f s = S.getField t f s`, as a `rfl` lemma. -/
+def mkDslGetFieldLemma (lemmaName storageName errName eventName : Name) : TermElabM Command := do
+  let sId := mkIdent storageName
+  let eId := mkIdent eventName
+  let errIdT := mkIdent errName
+  let getFieldRef := mkIdent (storageName ++ `getField)
+  let tId := mkIdent `t
+  let fId := mkIdent `f
+  let sVarId := mkIdent `s
+  let lemIdent := mkIdent lemmaName
+  `(command|
+    @[simp] theorem $lemIdent:ident ($tId : LscV2.Ty) ($fId : LscV2.Ident) ($sVarId : $sId) :
+        @LscV2.ContractDSL.getField $sId $eId $errIdT _ _ $tId $fId $sVarId =
+          $getFieldRef $tId $fId $sVarId := rfl)
+
+def mkDslSetFieldLemma (lemmaName storageName errName eventName : Name) : TermElabM Command := do
+  let sId := mkIdent storageName
+  let eId := mkIdent eventName
+  let errIdT := mkIdent errName
+  let setFieldRef := mkIdent (storageName ++ `setField)
+  let tId := mkIdent `t
+  let fId := mkIdent `f
+  let vId := mkIdent `v
+  let sVarId := mkIdent `s
+  let lemIdent := mkIdent lemmaName
+  `(command|
+    @[simp] theorem $lemIdent:ident
+        ($tId : LscV2.Ty) ($fId : LscV2.Ident) ($vId : LscV2.Val $tId) ($sVarId : $sId) :
+        @LscV2.ContractDSL.setField $sId $eId $errIdT _ _ $tId $fId $vId $sVarId =
+          $setFieldRef $tId $fId $vId $sVarId := rfl)
+
+def mkDslResolveErrLemma (lemmaName storageName errName eventName : Name) : TermElabM Command := do
+  let sId := mkIdent storageName
+  let eId := mkIdent eventName
+  let errIdT := mkIdent errName
+  let resolveErrRef := mkIdent (errName ++ `resolveError)
+  let nameId := mkIdent `name
+  let lemIdent := mkIdent lemmaName
+  `(command|
+    @[simp] theorem $lemIdent:ident ($nameId : LscV2.Ident) :
+        @LscV2.ContractDSL.resolveErr $sId $eId $errIdT _ _ $nameId =
+          $resolveErrRef $nameId := rfl)
+
+def mkDslBuildEventLemma (lemmaName storageName errName eventName : Name) : TermElabM Command := do
+  let sId := mkIdent storageName
+  let eId := mkIdent eventName
+  let errIdT := mkIdent errName
+  let buildEventRef := mkIdent (eventName ++ `buildEvent)
+  let nameId := mkIdent `name
+  let valsId := mkIdent `vals
+  let lemIdent := mkIdent lemmaName
+  `(command|
+    @[simp] theorem $lemIdent:ident ($nameId : LscV2.Ident) ($valsId : List (Sigma LscV2.Val)) :
+        @LscV2.ContractDSL.buildEvent $sId $eId $errIdT _ _ $nameId $valsId =
+          $buildEventRef $nameId $valsId := rfl)
+
+/-- One `@[simp]` `rfl` lemma per matched `ArithError` constructor, e.g.
+`@ContractErrors.arith Err _ ArithError.Overflow = Err.Overflow`, generalizing
+what used to be one hand-written `counterError_arith_overflow`-style lemma
+per contract to every arith case the error type actually maps (found via the
+same name-matching `deriving ContractError` already performs). -/
+def mkErrorArithLemma (lemmaName errName : Name) (ctorStr : String) : TermElabM Command := do
+  let errId := mkIdent errName
+  let aeCtorId := mkIdent (`LscV2.ArithError ++ Name.mkSimple ctorStr)
+  let errCtorId := mkIdent (errName ++ Name.mkSimple ctorStr)
+  let lemIdent := mkIdent lemmaName
+  `(command|
+    @[simp] theorem $lemIdent:ident :
+        @LscV2.ContractErrors.arith $errId _ $aeCtorId = $errCtorId := rfl)
+
+end LscV2.Deriving
+
 elab "derive_contract_dsl " storageId:ident errId:ident eventId:ident : command => do
   -- Resolve each identifier to its fully-qualified `Name` first, then build
   -- the `S.getField`/etc. references as single fully-qualified idents —
@@ -430,9 +596,186 @@ elab "derive_contract_dsl " storageId:ident errId:ident eventId:ident : command 
   let setFieldRef := mkIdent (storageName ++ `setField)
   let resolveErrRef := mkIdent (errName ++ `resolveError)
   let buildEventRef := mkIdent (eventName ++ `buildEvent)
+  -- Record this contract's `(errName, eventName)` under the current namespace, so the
+  -- `revert`/`require ... else revert`/`emitEvent` real-constructor sugar (below) can find
+  -- them later when this contract's function bodies are elaborated.
+  let currNs ← getCurrNamespace
+  modifyEnv fun env => LscV2.Deriving.contractTypesExt.modifyState env (·.insert currNs (errName, eventName))
+  modifyEnv fun env => LscV2.Deriving.contractStorageExt.modifyState env (·.insert currNs storageName)
   Lean.Elab.Command.elabCommand (← `(command|
     @[reducible] instance : LscV2.ContractDSL $storageId $eventId $errId where
       getField   := $getFieldRef
       setField   := $setFieldRef
       resolveErr := $resolveErrRef
       buildEvent := $buildEventRef))
+  -- Mark the three generated defs `@[simp]` (their own `match` equations
+  -- then fire under plain `simp`), and emit the four DSL-projection `rfl`
+  -- lemmas relating the `ContractDSL` class projections back to them.
+  Lean.Elab.Command.elabCommand (← `(command|
+    attribute [simp] $getFieldRef:ident $setFieldRef:ident $resolveErrRef:ident $buildEventRef:ident))
+  let baseStr := storageId.getId.toString
+  let getFieldLemma ← liftTermElabM <|
+    LscV2.Deriving.mkDslGetFieldLemma (Name.mkSimple (baseStr ++ "Dsl_getField")) storageName errName eventName
+  let setFieldLemma ← liftTermElabM <|
+    LscV2.Deriving.mkDslSetFieldLemma (Name.mkSimple (baseStr ++ "Dsl_setField")) storageName errName eventName
+  let resolveErrLemma ← liftTermElabM <|
+    LscV2.Deriving.mkDslResolveErrLemma (Name.mkSimple (baseStr ++ "Dsl_resolveErr")) storageName errName eventName
+  let buildEventLemma ← liftTermElabM <|
+    LscV2.Deriving.mkDslBuildEventLemma (Name.mkSimple (baseStr ++ "Dsl_buildEvent")) storageName errName eventName
+  LscV2.Deriving.atRootNamespace do
+    elabCommand getFieldLemma
+    elabCommand setFieldLemma
+    elabCommand resolveErrLemma
+    elabCommand buildEventLemma
+  -- Emit one `@[simp]` arith-mapping lemma per `ArithError` constructor name
+  -- that `errId`'s constructors actually shadow (mirrors the name-matching
+  -- `deriving ContractError`'s handler already performs for the
+  -- `ContractErrors.arith` field).
+  let errIndVal ← liftTermElabM <| getConstInfoInduct errName
+  let errCtorStrs := errIndVal.ctors.toArray.map (·.getString!)
+  for an in LscV2.Deriving.arithErrorCtorNames do
+    if errCtorStrs.contains an then
+      let lemmaName := Name.mkSimple (baseStr ++ "Error_arith_" ++ an)
+      let cmd ← liftTermElabM <| LscV2.Deriving.mkErrorArithLemma lemmaName errName an
+      LscV2.Deriving.atRootNamespace <| elabCommand cmd
+
+/-! ## `derive_contract_def` — `ContractDef` + compile outputs from introspection
+
+`derive_contract_def "Name" Storage Err Event functions topic0 (some ctor)?`
+re-derives the pieces of `ContractDef` that are already fully determined by
+`Storage`/`Err`/`Event`'s declared fields/constructors (`storage`/`errors`/
+`events`) via the same introspection `deriving ContractStorage`/
+`ContractError`/`ContractEvent` already perform, wraps each function in
+`functions` (a plain `List (String × Stmt)` — every contract function, now a
+bare `def foo : TxM Unit := ...`, coerces to `Stmt` automatically, see
+`Lang/TxM.lean`) into a `FunctionDef`, and emits, at the call site's ambient
+namespace: `contractDef`, `config`, `bytecodeHex`, `deployHex` — replacing
+the hand-written `counterFn`/`counterDef`/`compileConfig`/
+`counterBytecodeHex`/`counterDeployHex` block a contract used to need.
+
+Storage field *default values* (the third component of each
+`ContractDef.storage` entry) are always emitted as `none`: they are only
+consulted by `Lang/Checks.lean`'s arith-error-coverage check today, never
+actually written to storage at deploy time (only `constructor` is), so
+there is no real "default init value" for this command to recover from a
+structure's Lean-level field defaults (which serve a different purpose —
+e.g. `Inhabited`/`{}`-literal ergonomics — and aren't reliably safe to
+reinterpret as on-chain initial storage values). A contract that does need
+a non-zero field pre-set at deploy time should do it via `constructor`,
+exactly like `Counter`'s `owner := msg.sender` already does. -/
+elab "derive_contract_def " nameStrStx:str storageId:ident errId:ident eventId:ident
+    "(" functions:term ")" "(" topic0:term ")" "(" ctor:term ")" : command => do
+  let nameStr : Term := quote (nameStrStx.raw.isStrLit?.getD "")
+  let storageName ← Lean.Elab.Command.liftCoreM <| Lean.Elab.realizeGlobalConstNoOverloadWithInfo storageId
+  let errName ← Lean.Elab.Command.liftCoreM <| Lean.Elab.realizeGlobalConstNoOverloadWithInfo errId
+  let eventName ← Lean.Elab.Command.liftCoreM <| Lean.Elab.realizeGlobalConstNoOverloadWithInfo eventId
+  -- `storage : List (Ident × Ty × Option ExprAny)`, derived from `storageId`'s fields.
+  let storageFields ← liftTermElabM <| LscV2.Deriving.getStructureFieldKinds storageName
+  let storageEntries ← storageFields.mapM fun (fname, k) => liftTermElabM do
+    let tyConst ← k.tyConst
+    let fnameStr := quote fname.toString
+    `(($fnameStr, $tyConst, (none : Option LscV2.ExprAny)))
+  let storageTerm ← `([$storageEntries,*])
+  -- `errors : List Ident`, derived from `errId`'s constructor names.
+  let errIndVal ← liftTermElabM <| getConstInfoInduct errName
+  let errCtorStrs := errIndVal.ctors.toArray.map (·.getString!)
+  let errCtorLits : Array Term := errCtorStrs.map quote
+  let errorsTerm ← `([$errCtorLits,*])
+  -- `events : List (Ident × List (Ident × Ty))`, derived from `eventId`'s constructors.
+  let eventIndVal ← liftTermElabM <| getConstInfoInduct eventName
+  let eventEntries ← eventIndVal.ctors.toArray.mapM fun ctorName => liftTermElabM do
+    let cStr := ctorName.getString!
+    let cStrLit := quote cStr
+    match ← LscV2.Deriving.getCtorFieldNameKind ctorName with
+    | none => `(($cStrLit, ([] : List (LscV2.Ident × LscV2.Ty))))
+    | some (paramName, k) =>
+      let tyConst ← k.tyConst
+      let paramStrLit := quote paramName.toString
+      `(($cStrLit, [($paramStrLit, $tyConst)]))
+  let eventsTerm ← `([$eventEntries,*])
+  -- Built via `mkIdent` (not written as literal tokens inside the
+  -- `command|` quotations below) so the declared names stay plain,
+  -- externally-visible identifiers rather than hygienically macro-scoped
+  -- ones local to this quotation.
+  let contractDefId := mkIdent `contractDef
+  let configId := mkIdent `config
+  let bytecodeHexId := mkIdent `bytecodeHex
+  let deployHexId := mkIdent `deployHex
+  let nId := mkIdent `n
+  let bodyId := mkIdent `body
+  Lean.Elab.Command.elabCommand (← `(command|
+    def $contractDefId : LscV2.ContractDef where
+      name := $nameStr
+      storage := $storageTerm
+      errors := $errorsTerm
+      events := $eventsTerm
+      functions :=
+        ($functions : List (String × LscV2.Stmt)).map fun ($nId, $bodyId) =>
+          { name := $nId, kind := LscV2.FunctionKind.external, params := [],
+            retTy := LscV2.Ty.unit, body := $bodyId }
+      interfaces := []
+      constructor := $ctor))
+  Lean.Elab.Command.elabCommand (← `(command|
+    def $configId : LscV2.Compile.Config := LscV2.Compile.configFromContract $contractDefId $topic0))
+  Lean.Elab.Command.elabCommand (← `(command|
+    def $bytecodeHexId : String :=
+      match LscV2.Compile.contractToBytecodeHex $contractDefId $topic0 with
+      | .ok hex => hex
+      | .error _ => ""))
+  Lean.Elab.Command.elabCommand (← `(command|
+    def $deployHexId : String :=
+      match LscV2.Compile.deployToBytecodeHex $contractDefId $topic0 with
+      | .ok hex => hex
+      | .error _ => ""))
+
+/-! ## `currContractTypes`/`currContractStorageName`/`elabErrorCtorName`
+
+These helpers used to back a bare-do-notation `revert`/`require ... else revert`/`emit`
+term-level sugar declared at the very bottom of this file; that sugar was removed once
+`Lang/Syntax2.lean`'s `tx { ... }` grammar took over as the contract-author-facing surface (it
+calls these same helpers itself for its `revert(Ctor);`/`require(cond, Ctor);`/`emit
+Ctor(arg);` statement forms). The helpers/registries stay, only the old sugar `elab`s are
+gone. -/
+
+namespace LscV2.Deriving
+
+/-- Look up the current namespace's `(errName, eventName)`, registered by `derive_contract_dsl`. -/
+def currContractTypes : TermElabM (Name × Name) := do
+  let ns ← getCurrNamespace
+  let some tys := (contractTypesExt.getState (← getEnv)).find? ns
+    | throwError "no `derive_contract_dsl` found for namespace `{ns}` — declare the contract's \
+      storage/error/event types and call `derive_contract_dsl` before using `revert`/`require \
+      ... else revert`/`emit`"
+  return tys
+
+/-- Look up the current namespace's storage `structure` name, registered by
+`derive_contract_dsl`. Used by `Lang/Syntax2.lean`'s `σ.field` resolution. -/
+def currContractStorageName : TermElabM Name := do
+  let ns ← getCurrNamespace
+  let some storageName := (contractStorageExt.getState (← getEnv)).find? ns
+    | throwError "no `derive_contract_dsl` found for namespace `{ns}` — declare the contract's \
+      storage/error/event types and call `derive_contract_dsl` before using `tx`"
+  return storageName
+
+/-- Elaborate `e` against `errName`, returning the short name of the constructor it resolves
+to (or a clear error if `e` isn't a constructor application of `errName` at all). -/
+def elabErrorCtorName (e : Term) (errName : Name) : TermElabM String := do
+  let errTy ← mkConstWithFreshMVarLevels errName
+  let errVal ← elabTermEnsuringType e (some errTy)
+  let errValR ← whnf errVal
+  let some ctorName := errValR.getAppFn.constName?
+    | throwError "expected a constructor of `{errName}`, got `{errValR}`"
+  let ctorInfo ← getConstInfoCtor ctorName
+  unless ctorInfo.induct == errName do
+    throwError "`{ctorName}` is not a constructor of `{errName}`"
+  return ctorName.componentsRev.head!.toString
+
+end LscV2.Deriving
+
+-- The old bare-do-notation `revert $e`/`require $c else revert $e`/`emit $c $args,*` term-level
+-- sugar elaborators that used to live here (building on `currContractTypes`/
+-- `elabErrorCtorName`/`getCtorFieldKind` above) were removed: `Lang/Syntax2.lean`'s `tx { ... }`
+-- grammar now provides the real-constructor `revert(Ctor);`/`require(cond, Ctor);`/
+-- `emit Ctor;`/`emit Ctor(arg);` statement forms directly, calling `currContractTypes`/
+-- `elabErrorCtorName`/`getCtorFieldKind` itself. Those functions/registries (and the three
+-- `deriving` handlers/`derive_contract_dsl`/`derive_contract_def` commands above) all stay.

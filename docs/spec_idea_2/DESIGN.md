@@ -63,7 +63,7 @@ The end-to-end compilation correctness theorem (AST semantics match Yul executio
 
 ## 3. The Source Layer — Plain Lean + Three `deriving` Handlers
 
-> **This section was rewritten to describe what was actually built.** The original design called for a bespoke surface grammar (`contract … where`, `declare_syntax_cat lsc_*`, `macro_rules` synthesizing raw `Syntax.node` trees). That approach was implemented, found to be ~700 lines of brittle codegen (`LscV2/Lang/Syntax.lean`, `Contract.lean`, `ContractGen.lean`, `ContractTypes.lean`), and **deleted**. What replaced it: contracts are written as **plain Lean `structure`/`inductive` declarations** with custom `deriving` handlers, plus function bodies written as ordinary `do`-blocks over a small builder monad. There is still no separate compiler or external toolchain — everything is Lean — but there is also no custom parser: every contract-author-facing construct below is either a real Lean declaration, a real `deriving` clause, or a small number of `term`/`doElem`-level notations layered on top of plain Lean syntax categories.
+> **This section was rewritten to describe what was actually built.** The original design called for a bespoke surface grammar (`contract … where`, `declare_syntax_cat lsc_*`, `macro_rules` synthesizing raw `Syntax.node` trees). That approach was implemented, found to be ~700 lines of brittle codegen (`LscV2/Lang/Syntax.lean`, `Contract.lean`, `ContractGen.lean`, `ContractTypes.lean`), and **deleted**. What replaced it: contracts are written as **plain Lean `structure`/`inductive` declarations** with custom `deriving` handlers, plus function bodies written in a small, dss2024-style bracket-delimited `tx <name> { ... }` grammar of its own (`declare_syntax_cat lscExpr`/`lscStmt`, `LscV2/Lang/Syntax2.lean`) — fresh syntax categories that are inert everywhere outside the `tx { ... }` delimiter, not layered on Lean's `term`/`doElem`. There is still no separate compiler or external toolchain — everything is Lean — but there is also no general-purpose custom parser either: every contract-author-facing construct below is either a real Lean declaration, a real `deriving` clause, or a production of this small, purpose-built statement/expression grammar.
 
 ```lean
 structure CounterStorage where
@@ -87,15 +87,15 @@ inductive CounterEvent where
 derive_contract_dsl CounterStorage CounterError CounterEvent
 abbrev CounterM := ContractM CounterStorage CounterEvent CounterError
 
-def incrementTxM : TxM Unit := do
-  require !(bool σ.paused) else revert Paused
-  let n ← letWei "n" (wei σ.number +? 1)
-  setWei "number" n
-  emit "Incremented" [⟨Ty.wei, n⟩]
-
-def incrementAst : Stmt := TxM.run incrementTxM
-def increment : CounterM Unit := Stmt.eval incrementAst
+tx increment {
+  require(!σ.paused, Paused);
+  var n := σ.number +? 1;
+  σ.number = n;
+  emit Incremented(n);
+}
 ```
+
+Each `tx <name> { ... }` block expands to a plain top-level `def name : LscV2.Stmt := ...`, so `increment` above is an ordinary `Stmt` value usable anywhere one is expected (e.g. directly in `derive_contract_def`'s function list) — no separate `TxM.run`/`Stmt.eval` wrapper step is needed at the use site.
 
 (Full contract: `v2/examples/counter/src/Counter.lean`.)
 
@@ -121,29 +121,31 @@ The loud, can't-silently-panic-in-production guarantee comes from a **separate, 
 
 The original plan worried that `deriving ContractStorage` couldn't tell an `Address`-typed field from a `UInt256`-typed one, since both are literally `abbrev`s for `Word := BitVec 256`. This turned out not to be a real problem: empirically (against this project's Lean 4.30/4.31 toolchain), a structure field's *stored* projection type (as recorded in the `ConstantInfo` Lean adds when elaborating the `structure`) is **not** auto-unfolded through reducible `abbrev`s — it stays the literal constant `LscV2.Address` (resp. `LscV2.UInt256`) until something explicitly calls `whnf`. `LscV2.Deriving.fieldKindOfExpr` relies on exactly this and never calls `whnf`, so `Address` and `UInt256` (and `Wei`/`Bool`) are distinguishable from the unreduced type alone. The one real limitation: a field spelled out as some *other* alias of `BitVec 256` (not literally `LscV2.Address`/`LscV2.UInt256`/`LscV2.Wei`/`Bool`) is rejected with a clear "unsupported field type" error at `deriving` time, rather than silently miscategorized.
 
-### 3.4 Function bodies: `do`-notation over `TxM`, not a custom statement grammar
+### 3.4 Function bodies: a fresh `tx { ... }` statement/expression grammar
 
-Function bodies are ordinary Lean `do`-blocks over `TxM α := WriterT Stmt Id α` (`v2/LscV2/Lang/TxM.lean`), reusing Lean's stdlib `do`-notation for sequencing/let/`do`-elaboration — there is no `lsc_stmt`/statement-juxtaposition grammar anymore. `do`-notation here is sugar for **AST construction**, not execution: a `TxM Unit` block, once run via `TxM.run`, becomes a plain `Stmt` value fed into the unchanged `Stmt.eval`/`Compile.*` pipeline exactly as a hand-written AST would be.
+Function bodies are written in a small, dss2024-style bracket-delimited grammar (`LscV2/Lang/Syntax2.lean`): `declare_syntax_cat lscExpr` and `declare_syntax_cat lscStmt` introduce two **brand-new** syntax categories that are inert everywhere except inside the explicit `tx <name> { ... }` command-level delimiter, which is itself the only production that parses into them from top-level Lean syntax. Because nothing outside `tx { ... }` ever parses into `lscExpr`/`lscStmt`, there is no possibility of colliding with any existing Lean notation (`:=`, `=`, `doElem`, etc.) — the elaborator (`elabLscStmt`/`elabLscExpr`) has full `TermElabM` control over the whole block, threading a `locals : List (String × FieldKind)` association list by hand through statement elaboration, and produces a plain `def <name> : LscV2.Stmt := ...` at the end.
 
-What's available inside a `TxM` `do`-block today:
+**Why this replaced the earlier `do`-notation-over-`TxM` approach.** The previous surface (`v2/LscV2/Lang/TxM.lean`) built `Stmt` values via ordinary Lean `do`-notation over a small writer monad (`TxM α := WriterT Stmt Id α`), reusing Lean's stdlib `term`/`doElem` categories instead of declaring new ones. That approach worked, but every piece of "assignment-shaped" or "keyword-shaped" sugar it wanted had to route around a real, empirically-verified parser conflict with an *existing* Lean production, rather than being a clean grammar choice:
 
-- **Storage reads are type-tagged, not fully generic.** Doing a single, fully-generic `σ.field` read notation that picks the right constructor based on the field's *declared type* needs either a per-contract field-type map populated by `deriving ContractStorage`, or expected-type-directed elaboration sophisticated enough to distinguish `Wei.Expr` from `CoreExpr .bool`/`.address`/`.uint256`. Neither exists yet, so reads are a small family of type-tagged notations instead: `wei σ.field`, `bool σ.field`, `addr σ.field`, `u256 σ.field`. (`σ.field` itself is parsed as a single dotted identifier token — `wei`/`bool`/`addr`/`u256` are leading keywords that dispatch on it.)
-- **Storage writes are plain function calls, not `:=` sugar.** `σ.field := expr` was attempted as a `doElem`-level macro mirroring the read notation, but had to be dropped: declaring a `doElem` syntax with the same leading tokens as the *term*-level read notation makes Lean's parser produce an ambiguous `choice` node for that prefix, which breaks `macro_rules` pattern matching ("unexpected do-element of kind choice"). Writes are instead plain `TxM Unit`-returning function calls used directly as a `do`-statement: `setWei "number" n`, `setBool "paused" e`, `setAddr`/`setU256` likewise.
-- **`require`/`revert`/`emit`/`ifE`** are small `doElem`/term notations: `require <cond> else revert <err>`, `revert <err>`, `emit <name> <args>`, and `ifE cond thn els` for contract-level (data, not Lean-`Bool`) branching — `ifE` runs both branches through `TxM.run` and wraps the result in `Stmt.ifThenElse`, since a genuine Lean `if` would need a real `Bool` known at elaboration time, but the branch condition is a piece of `CoreExpr .bool` data evaluated later.
-- **Checked arithmetic** (`+?`/`-?` on `Wei.Expr`, via the `WeiAddChecked` typeclass so `σ.number +? 1` accepts a bare `Nat` literal) and **comparisons** (`===`, `!`) are small infix/prefix notations feeding straight into `Wei.Expr`/`CoreExpr` constructors. Only `Wei` has checked add/sub today (`Wei.Expr` has no checked multiply/divide constructors yet, so `*?`/`/?` are not defined); `Wad`/`Ray` can follow the same pattern once needed.
+- A generic `σ.field := e` write notation was tried twice (as a `doElem`-level macro, and later as a lower-level raw-`Syntax`-indexed macro) and dropped both times: `:=` is already claimed by Lean's builtin mutable-local-reassignment `doElem` (`doReassign`), so a second `doElem` with the identical `ident := term` shape either failed to declare at all (a quotation pattern-match rejection) or produced an ambiguous `choice` node at every `:=`-assignment site that Lean's `do`-block elaborator refused to resolve (`unexpected do-element of kind choice`).
+- `σ.field = e` was tried next, on the theory that a term-level `=` (an ordinary `infix:50` notation, not a `doElem`) might fare better, since term-level ambiguity *can* sometimes be resolved by type-checking each alternative. It didn't: a second `ident " = " term : term` production doesn't even produce a resolvable `choice` node — the parser deterministically shadows `Eq` for *every* `ident = term` occurrence project-wide, breaking ordinary equality checks and proof hypotheses (`b = false`, `... = rfl`) throughout the codebase. This was reverted immediately.
+- A generic type-tagged read family (`wei σ.field`, `bool σ.field`, `addr σ.field`, `u256 σ.field`) and a `set σ.field e` write family stood in as the workaround for the two failed attempts above, plus a `var x := e` binder (dispatching via a `LetBindable` typeclass on the bound value's Lean type) to force an evaluate-once `Stmt.letBind` instead of a plain, storage-read-re-evaluating Lean `let`.
+- Even `emit`'s naming had a parser-conflict history: sharing the `emit` spelling between the real-constructor sugar and its underlying raw primitive caused declaration-site ambiguity, resolved only by renaming the primitive out of the way (`emitEvent`) rather than the sugar.
 
-#### `let` vs. `letWei`/`letBool`/`letAddr`/`letU256` — an important correctness subtlety
+These were genuine, hard-won empirical findings (documented in full in `TxM.lean`'s docstrings) about the limits of layering new notation onto Lean's existing `term`/`doElem` grammar — not mistakes, and not wasted effort: they are exactly what motivated moving to fresh `declare_syntax_cat`s instead of trying to patch the `do`-notation approach further. With a fresh, purpose-built grammar, none of these workarounds are needed: `tx { ... }` has its own `σ.field = e;` assignment production, its own `var x := e;` binder, and its own `require`/`revert`/`emit` statement forms, none of which compete with any Lean builtin because `lscStmt`/`lscExpr` are categories Lean's core parser never enters except through the `tx { ... }` delimiter.
 
-This is a real, documented limitation worth calling out explicitly (see `TxM.lean`'s module docstring): a `TxM` `do`-block is *building* a `Stmt` AST, not executing one. A plain Lean `let n := wei σ.number +? 1` only binds `n` to an **AST term** at elaboration time — it does not emit a `Stmt` and does not evaluate anything yet. If that term is referenced again later in the same function body, evaluation **re-runs the whole term** — including any storage reads inside it — against whatever storage is current *at that later point*. Concretely, this is wrong:
+What the current `tx { ... }` grammar actually provides (see `Syntax2.lean` and `Counter.lean` for the working source):
 
-```lean
-let n := wei σ.number +? 1
-setWei "number" n                      -- evaluates "σ.number +? 1" against OLD storage: fine
-emit "Incremented" [⟨Ty.wei, n⟩]        -- evaluates "σ.number +? 1" AGAIN, now against the
-                                        -- storage `setWei` just wrote: WRONG (double-counts)
-```
+- **`σ.field` reads and writes.** `σ.field` is not its own dedicated grammar production — like `msg.sender`, Lean's lexer already tokenises a dotted identifier as a single compound `Name`, so a single `ident` production in `lscExpr` (for reads) and `lscStmt`'s `ident " = " lscExpr ";"` production (for writes, e.g. `σ.number = n;`) both dispatch on the parsed `Name`'s shape. The field's storage `Ty`/`FieldKind` is resolved by directly introspecting the contract's real storage `structure` (`LscV2.Deriving.getStructureFieldKinds`, via a `contractStorageExt` registry populated by `derive_contract_dsl`) — no per-field generated `σ.field` constants and no type-tag prefix (`wei`/`bool`/`addr`/`u256`) are needed anymore; the elaborator already knows each field's kind statically.
+- **`require(cond, ErrCtor);`** and **`revert(ErrCtor);`** resolve `ErrCtor` against the contract's real `Err` inductive (via `currContractTypes`/`elabErrorCtorName`, same lookup the old sugar used) — a typo or wrong constructor name is a genuine compile error.
+- **`emit Ctor;` / `emit Ctor(arg);`** resolve the constructor's arity/expected `Ty` by reflection against the real `Event` inductive (`getCtorFieldKind`) — 0-argument and 1-argument forms are distinct grammar productions.
+- **`σ.field = e;`** is plain assignment syntax (no separate `set` keyword needed, since this grammar isn't competing with anything else for the `=` token).
+- **`var x := e;`** is an evaluate-once local binding, unconditionally emitting a real `Stmt.letBind` — implemented directly (not deferred, and not dispatched via a typeclass on a Lean-level value type) because the elaborator already threads `locals` through the whole block by hand.
+- **`if (cond) { ... } else { ... }`** and the no-`else` form `if (cond) { ... }` are real statement-list productions, compiling to `Stmt.ifThenElse`.
+- **Operators**: `+?`/`-?` (checked `Wei` add/sub, left-associative, accepting a bare `Nat` literal on the right via `Wei.Expr.addCheckedNat`), `==` (equality between any two operands of matching `FieldKind`, pinned to an explicit `Ty` rather than relying on implicit inference — see `elabLscExpr`'s `==` case for why), `!` (boolean negation), and `msg.sender` (the caller address, same dotted-identifier trick as `σ.field`).
+- **Boolean literals** `true`/`false` are declared via `Lean.Parser.nonReservedSymbol` rather than plain fresh `syntax` atoms — the plain-atom approach was verified to break `true`/`false`'s pre-existing meaning as Lean's builtin `Bool` literal terms everywhere else in the same file (e.g. a plain `structure`'s `paused : Bool := false` field default would stop parsing); `nonReservedSymbol` registers them as usable `lscExpr` leading tokens without reserving/shadowing them for any other syntax category.
 
-A plain `let` is only safe when its right-hand side either doesn't transitively read storage at all, or reads fields that are never written-to again before the bound name is reused. Whenever a storage-derived value will be referenced again *after* a write to a field it reads, use `letWei`/`letBool`/`letAddr`/`letU256` instead (`let n ← letWei "n" (wei σ.number +? 1)`): these emit a real `Stmt.letBind`, evaluated exactly once at that point in the sequence, and hand back a `var` reference safe to reuse after later writes. `Counter.lean`'s `incrementTxM` uses exactly this pattern (`n` is read once via `letWei`, then reused in both `setWei` and `emit`).
+Only `Wei` has checked add/sub today (no checked multiply/divide constructors yet, so `*?`/`/?` are not defined); `Wad`/`Ray` can follow the same pattern once needed.
 
 ### 3.5 Validation and error reporting
 
@@ -153,11 +155,11 @@ Domain validation (selector clashes, the linearity stub, DAG/cycle checks, the U
 
 ```lean
 -- Write storage/errors/events as plain `structure`/`inductive` + `deriving`
--- Write `derive_contract_dsl`, the `CounterM` abbrev, and function bodies as `do`/TxM
+-- Write `derive_contract_dsl`, the `CounterM` abbrev, and function bodies as `tx name { ... }`
 -- Write proofs in the same file or a sibling file (see CounterTheorem.lean)
 
-#check incrementAst                          -- inspect the built Stmt AST
-#eval  Compile.stmtToYul compileConfig incrementAst   -- generate Yul (Except String)
+#check increment                             -- inspect the built Stmt AST
+#eval  Compile.stmtToYul compileConfig increment      -- generate Yul (Except String)
 #eval  Compile.contractToBytecodeHex counterDslDef stubEventTopic0  -- generate bytecode hex
 ```
 
@@ -622,7 +624,7 @@ theorem setFee_only_owner     ... (cap : Capability .Owner) ...
 ## Appendix A: Relationship to Prior Work
 
 - **lsc** (prior prototype): established the `ContractM` monad shape. Abandoned due to opaque bytecode emission via Lean reflection. This design replaces that path with an explicit Yul target.
-- **dss2024**: the `declare_syntax_cat` + `macro_rules` pattern for a DSL that compiles to a verified AST. The `Lang/AST.lean`/`Lang/Eval.lean` (typed `Expr`/`Stmt` + `ContractM`/`Stmt.eval`) layers still follow this pattern. The original *surface syntax* layer (a `declare_syntax_cat lsc_*` custom grammar following dss2024's `Syntax.lean` pattern exactly) was implemented and then deleted in favor of the plain-Lean-plus-`deriving` approach in §3 — dss2024's pattern remains a reference for the AST/eval split, not for how contracts are authored.
+- **dss2024**: the `declare_syntax_cat` + `macro_rules` pattern for a DSL that compiles to a verified AST. The `Lang/AST.lean`/`Lang/Eval.lean` (typed `Expr`/`Stmt` + `ContractM`/`Stmt.eval`) layers still follow this pattern. An earlier *surface syntax* attempt (a `declare_syntax_cat lsc_*` custom grammar building raw `Syntax.node` trees by hand, following dss2024's `Syntax.lean` pattern but reimplementing its machinery from scratch) was implemented and then deleted for being ~700 lines of brittle codegen; it was replaced first by the plain-Lean-plus-`deriving` + `TxM` do-notation approach, and then again by the current `tx { ... }` grammar (§3.4, `LscV2/Lang/Syntax2.lean`) — a fresh `declare_syntax_cat lscExpr`/`lscStmt` pair, inert outside an explicit `tx { ... }` delimiter, much closer in spirit and size to dss2024's own `Syntax.lean` than the deleted first attempt was. dss2024's bracket-delimited-fresh-syntax-category pattern is therefore **not just** a reference for the AST/eval split anymore — it is now also the actual mechanism by which contracts are authored.
 - **EvmYulLean** (Nethermind): provides Yul and EVM semantics; treated as trusted ground truth.
 - **Move Prover**: demonstrated that a restricted, DeFi-oriented language with co-designed verification is practical. Key lessons: resource types, alias-free memory, static dispatch, minimal language surface. This design independently converges on all four.
 

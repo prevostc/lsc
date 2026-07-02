@@ -9,8 +9,16 @@ over `TxM` instead of writing out `Stmt.seq`/`Stmt.require`/... by hand.
 This does *not* type-check against a real generated `CounterStorage`/
 `CounterError`/`CounterEvent` (those come from the later `deriving`-handler
 step) — it only proves the builder mechanics (sequencing, `require`,
-storage reads/writes, `emit`, checked arithmetic, `ifE`) work end-to-end.
--/
+storage reads/writes, `emitEvent`, checked arithmetic, `ifE`) work end-to-end.
+
+Uses the low-level `weiField`/`boolField`/`addrField`/`CoreExpr.eqAuto`/
+`CoreExpr.not`/`CoreExpr.txField` primitives directly (rather than the
+`wei σ.field`/`===`/`!`/`msg.sender` term-level notations, or the
+`revert .Ctor`/`require ... else revert .Ctor` real-constructor sugar in
+`Lang/Derive.lean`) — those notations were removed once `Lang/Syntax2.lean`'s
+`tx { ... }` grammar took over as the contract-author-facing surface; this
+file exercises the raw builder mechanics without going through a real
+`derive_contract_dsl`-derived contract, see this file's module docstring. -/
 
 namespace LscV2.TxMTest
 
@@ -18,30 +26,30 @@ open LscV2
 
 /-- `increment`: require not paused, `number +?= 1`, emit. -/
 def incrementTxM : TxM Unit := do
-  require !(bool σ.paused) else revert Paused
-  let n := wei σ.number +? 1
+  requireE (CoreExpr.not (boolField "paused")) "Paused"
+  let n := Wei.Expr.addCheckedNat (weiField "number") 1
   setWei "number" n
-  emit "Incremented" [⟨Ty.wei, n⟩]
+  emitEvent "Incremented" [⟨Ty.wei, n⟩]
 
 /-- `pause`: require caller is owner, require not paused, set paused. -/
 def pauseTxM : TxM Unit := do
-  require (msg.sender === addr σ.owner) else revert NotOwner
-  require !(bool σ.paused) else revert Paused
+  requireE (CoreExpr.eqAuto (CoreExpr.txField TxField.caller) (addrField "owner")) "NotOwner"
+  requireE (CoreExpr.not (boolField "paused")) "Paused"
   setBool "paused" (CoreExpr.lit Ty.bool (.bool true))
-  emit "Paused" []
+  emitEvent "Paused" []
 
 /-- `unpause`: require caller is owner, require paused, clear paused. -/
 def unpauseTxM : TxM Unit := do
-  require (msg.sender === addr σ.owner) else revert NotOwner
-  require (bool σ.paused) else revert Paused
+  requireE (CoreExpr.eqAuto (CoreExpr.txField TxField.caller) (addrField "owner")) "NotOwner"
+  requireE (boolField "paused") "Paused"
   setBool "paused" (CoreExpr.lit Ty.bool (.bool false))
-  emit "Unpaused" []
+  emitEvent "Unpaused" []
 
 /-- Exercises `ifE`: two branches each emitting a different event. -/
 def branchingTxM : TxM Unit := do
-  ifE (bool σ.paused)
-    (emit "WasPaused" [])
-    (emit "WasNotPaused" [])
+  ifE (boolField "paused")
+    (emitEvent "WasPaused" [])
+    (emitEvent "WasNotPaused" [])
 
 /-- `TxM.run` extracts a plain `Stmt` — proves the builder produces real
 data, not just a deferred computation. -/
@@ -68,13 +76,14 @@ partial def _root_.LscV2.Stmt.summary : Stmt → String
 #eval branchingAst.summary
 
 example : incrementAst =
-    (Stmt.require (!(CoreExpr.storageGet Ty.bool "paused")) "Paused").seq
+    (Stmt.require (CoreExpr.not (CoreExpr.storageGet Ty.bool "paused")) "Paused").seq
       ((Stmt.storageSet "number" ⟨Ty.wei, (Wei.Expr.storageGet "number").addCheckedNat 1⟩).seq
         (Stmt.emit "Incremented" [⟨Ty.wei, (Wei.Expr.storageGet "number").addCheckedNat 1⟩])) := rfl
 
 example : pauseAst =
-    (Stmt.require (msg.sender === CoreExpr.storageGet Ty.address "owner") "NotOwner").seq
-      ((Stmt.require (!(CoreExpr.storageGet Ty.bool "paused")) "Paused").seq
+    (Stmt.require (CoreExpr.eqAuto (CoreExpr.txField TxField.caller)
+      (CoreExpr.storageGet Ty.address "owner")) "NotOwner").seq
+      ((Stmt.require (CoreExpr.not (CoreExpr.storageGet Ty.bool "paused")) "Paused").seq
         ((Stmt.storageSet "paused" ⟨Ty.bool, CoreExpr.lit Ty.bool (Lit.bool true)⟩).seq
           (Stmt.emit "Paused" []))) := rfl
 
