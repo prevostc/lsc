@@ -3,50 +3,17 @@ import LscV2.Compile.Yul
 import LscV2.Compile.Bytecode
 import LscV2.Lang.Syntax2
 
-/-!
-Counter contract written with the Lean-first DSL: storage/error/event
-`deriving` clauses (`ContractStorage`/`ContractError`/`ContractEvent`) plus
-the two `derive_*` assembly commands (`derive_contract_dsl`/
-`derive_contract_def`) generate all boilerplate — none of it is hand-written.
-
-Function bodies (`increment`/`pause`/`unpause`) are written in the
-dss2024-style bracket-delimited `tx <name> { <stmt>* }` grammar
-(`Lang/Syntax2.lean`), e.g.:
-
-```
-tx increment {
-  require(!σ.paused) else revert Paused();
-  let n = σ.number +? 1;
-  σ.number = n;
-  emit Incremented(n);
-}
-```
-
-`σ.field` reads/writes, `require(cond) else revert ErrCtor();`/`revert ErrCtor();`,
-`emit Ctor();`/`emit Ctor(arg);`, `let x = e;`, `if (cond) { .. } else { .. }`,
-and the operators `!`/`+?`/`-?`/`==`/boolean literals (`true`/`false`) are
-all real `lscExpr`/`lscStmt` grammar productions, elaborated directly into
-`LscV2.Stmt`/`LscV2.Expr` values — no manually-repeated field-name strings,
-and error/event names are checked against `CounterError`/`CounterEvent`'s
-real constructors at compile time. Each `tx <name> { .. }` block expands to
-a plain top-level `def name : LscV2.Stmt := ..` and self-registers as a
-public function, so `increment`/`pause`/`unpause` below are both ordinary
-`Stmt` values and automatically picked up by `derive_contract_def` below —
-no hand-written `[("increment", increment), ..]` list needed.
-
-Target shape: `docs/spec_idea_2/reference/COUNTER.md`.
--/
-
 open LscV2 LscV2.Compile
 
 namespace Counter
 
 structure CounterStorage where
-  number : Wei := Wei.mkNat 0
+  number : Wei := ⟨0⟩
   paused : Bool := false
   owner : Address := 0
   deriving Repr, LscV2.Deriving.ContractStorage
 
+-- Required by `ContractM`'s default-storage handling.
 instance : Inhabited CounterStorage where
   default := {}
 
@@ -73,13 +40,6 @@ tx increment {
   emit Incremented(n);
 }
 
--- `Syntax2.lean`'s `==` elaborator pins its `CoreExpr.eqAuto` type argument to the
--- operands' shared `FieldKind`-derived `Ty` literal explicitly (rather than relying on
--- `eqAuto`'s implicit-`t` inference from the first operand), so `msg.sender == σ.owner`
--- resolves to `@CoreExpr.eqAuto Ty.address ..` here — the same annotation the old
--- hand-written version needed to add by hand to avoid a defeq-but-not-syntactic-equality
--- mismatch between `msg.sender : CoreExpr (txFieldTy .caller)` and `σ.owner : CoreExpr
--- Ty.address` (see `CoreExpr.eqAuto`'s implicit `t` argument, `Lang/TxM.lean`).
 tx pause {
   require(msg.sender == σ.owner) else revert NotOwner();
   require(!σ.paused) else revert Paused();
@@ -96,12 +56,8 @@ tx unpause {
 
 /-! ## Compilation: `ContractDef` + Yul/bytecode emission -/
 
--- Every piece `derive_contract_def` needs is already fully determined by declarations
--- above: the public-function list from `tx increment`/`tx pause`/`tx unpause` (self-registered
--- as they're declared), event LOG topics via real Keccak256 over `CounterEvent`'s
--- constructors, and the "owner = msg.sender at construction" deploy step from
--- `CounterStorage`'s `owner : Address` field — see `Lang/Derive.lean`'s
--- `derive_contract_def` docstring for the exact defaults.
+-- Public functions, event topics, and deploy step are inferred from the
+-- declarations above; see `derive_contract_def`'s docstring for defaults.
 derive_contract_def "Counter" CounterStorage CounterError CounterEvent
 
 -- Smoke-checks
