@@ -733,8 +733,8 @@ elab "derive_contract_def " nameStrStx:str storageId:ident errId:ident eventId:i
 These helpers used to back a bare-do-notation `revert`/`require ... else revert`/`emit`
 term-level sugar declared at the very bottom of this file; that sugar was removed once
 `Lang/Syntax2.lean`'s `tx { ... }` grammar took over as the contract-author-facing surface (it
-calls these same helpers itself for its `revert(Ctor);`/`require(cond, Ctor);`/`emit
-Ctor(arg);` statement forms). The helpers/registries stay, only the old sugar `elab`s are
+calls these same helpers itself for its `revert Ctor();`/`require(cond) else revert Ctor();`/
+`emit Ctor(arg);` statement forms). The helpers/registries stay, only the old sugar `elab`s are
 gone. -/
 
 namespace LscV2.Deriving
@@ -775,7 +775,7 @@ end LscV2.Deriving
 -- The old bare-do-notation `revert $e`/`require $c else revert $e`/`emit $c $args,*` term-level
 -- sugar elaborators that used to live here (building on `currContractTypes`/
 -- `elabErrorCtorName`/`getCtorFieldKind` above) were removed: `Lang/Syntax2.lean`'s `tx { ... }`
--- grammar now provides the real-constructor `revert(Ctor);`/`require(cond, Ctor);`/
--- `emit Ctor;`/`emit Ctor(arg);` statement forms directly, calling `currContractTypes`/
+-- grammar now provides the real-constructor `revert Ctor();`/`require(cond) else revert Ctor();`/
+-- `emit Ctor();`/`emit Ctor(arg);` statement forms directly, calling `currContractTypes`/
 -- `elabErrorCtorName`/`getCtorFieldKind` itself. Those functions/registries (and the three
 -- `deriving` handlers/`derive_contract_dsl`/`derive_contract_def` commands above) all stay.

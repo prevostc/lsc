@@ -249,7 +249,7 @@ reference safe to reuse even after later writes to fields `e` reads. -/
 -- The generic `set σ.field e` sugar and the `var x := e` binder that used to
 -- live here (both do-notation-only workarounds) were removed in favor of
 -- `Lang/Syntax2.lean`'s `tx { ... }` grammar, which has its own `σ.field =
--- e;`/`var x := e;` productions with direct access to the field's `FieldKind`
+-- e;`/`let x = e;` productions with direct access to the field's `FieldKind`
 -- (no `SetSigma`/`LetBindable` typeclass dispatch needed there).
 
 /-! ## `require`/`revert`/`emitEvent`

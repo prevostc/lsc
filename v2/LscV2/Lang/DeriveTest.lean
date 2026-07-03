@@ -75,8 +75,8 @@ example : (ContractErrors.arith (Err := TError) ArithError.Overflow) = TError.Ov
 -- ── A `Syntax2`-built function body against the derived storage ────────
 
 tx incrementTx {
-  require(!σ.paused, Paused);
-  var n := σ.number +? 1;
+  require(!σ.paused) else revert Paused();
+  let n = σ.number +? 1;
   σ.number = n;
   emit Incremented(n);
 }

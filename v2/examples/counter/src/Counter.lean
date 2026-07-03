@@ -15,15 +15,15 @@ dss2024-style bracket-delimited `tx <name> { <stmt>* }` grammar
 
 ```
 tx increment {
-  require(!σ.paused, Paused);
-  var n := σ.number +? 1;
+  require(!σ.paused) else revert Paused();
+  let n = σ.number +? 1;
   σ.number = n;
   emit Incremented(n);
 }
 ```
 
-`σ.field` reads/writes, `require(cond, ErrCtor);`/`revert(ErrCtor);`,
-`emit Ctor;`/`emit Ctor(arg);`, `var x := e;`, `if (cond) { .. } else { .. }`,
+`σ.field` reads/writes, `require(cond) else revert ErrCtor();`/`revert ErrCtor();`,
+`emit Ctor();`/`emit Ctor(arg);`, `let x = e;`, `if (cond) { .. } else { .. }`,
 and the operators `!`/`+?`/`-?`/`==`/boolean literals (`true`/`false`) are
 all real `lscExpr`/`lscStmt` grammar productions, elaborated directly into
 `LscV2.Stmt`/`LscV2.Expr` values — no manually-repeated field-name strings,
@@ -66,8 +66,8 @@ derive_contract_dsl CounterStorage CounterError CounterEvent
 abbrev CounterM := ContractM CounterStorage CounterEvent CounterError
 
 tx increment {
-  require(!σ.paused, Paused);
-  var n := σ.number +? 1;
+  require(!σ.paused) else revert Paused();
+  let n = σ.number +? 1;
   σ.number = n;
   emit Incremented(n);
 }
@@ -80,17 +80,17 @@ tx increment {
 -- mismatch between `msg.sender : CoreExpr (txFieldTy .caller)` and `σ.owner : CoreExpr
 -- Ty.address` (see `CoreExpr.eqAuto`'s implicit `t` argument, `Lang/TxM.lean`).
 tx pause {
-  require(msg.sender == σ.owner, NotOwner);
-  require(!σ.paused, Paused);
+  require(msg.sender == σ.owner) else revert NotOwner();
+  require(!σ.paused) else revert Paused();
   σ.paused = true;
-  emit Paused;
+  emit Paused();
 }
 
 tx unpause {
-  require(msg.sender == σ.owner, NotOwner);
-  require(σ.paused, Paused);
+  require(msg.sender == σ.owner) else revert NotOwner();
+  require(σ.paused) else revert Paused();
   σ.paused = false;
-  emit Unpaused;
+  emit Unpaused();
 }
 
 /-! ## Compilation: `ContractDef` + Yul/bytecode emission -/

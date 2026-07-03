@@ -30,7 +30,7 @@ reused here directly), so a single `ident` production in `lscExpr` covers plain 
 prototype file's alternative, reusing those generated constants via a `term` antiquotation,
 was not needed — it was reasonably simple to introspect the structure directly).
 
-## `var x := e;`: implemented, not deferred
+## `let x = e;`: implemented, not deferred
 
 Because this elaborator has full `TermElabM` control over the whole `tx { ... }` block (unlike
 `TxM.lean`'s `do`-notation macro layer, which only ever sees one `doElem` at a time with no
@@ -38,10 +38,12 @@ persistent side channel), it can thread an explicit `locals : List (String × Fi
 association list through statement elaboration by hand — no typeclass dispatch
 (`LetBindable`/`SetSigma`) is needed at all, since every `lscExpr`/`lscStmt` node's `FieldKind`
 is fully determined by *static* lookups (`locals`, `getStructureFieldKinds`, or the operator's
-own fixed contract) rather than by real Lean-level type inference. `var n := σ.number +? 1;`
+own fixed contract) rather than by real Lean-level type inference. `let n = σ.number +? 1;`
 therefore emits exactly one `Stmt.letBind`, and any later `n` in the same `tx` block resolves
-to a `var`/`storageGet`-avoiding `Expr.var` reference — the same once-evaluated semantics
-`TxM.lean`'s `letWei`/`var` provide, with a plainer surface syntax.
+to a `storageGet`-avoiding `Expr.var` reference — the same once-evaluated semantics
+`TxM.lean`'s `letWei`/`var` provide, with a plainer, Rust-shaped surface syntax (`let` keyword,
+plain `=` rather than `:=` — no collision with the separate `σ.field = e;` assignment
+production, since that one has no leading keyword and these remain unambiguous by first token).
 
 ## Arithmetic (`+?`/`-?`): direct dispatch on `FieldKind`, no typeclass hack
 
@@ -106,15 +108,19 @@ syntax:50 (name := lscExprEq) lscExpr:51 " == " lscExpr:51 : lscExpr
 with the new productions below). -/
 declare_syntax_cat lscStmt
 
-/-- `require(cond, ErrCtor);` — `cond` is now a real `lscExpr` (was a raw Lean `term` in the
-prototype); `ErrCtor` is still resolved against the contract's real `Err` inductive. -/
-syntax (name := lscRequire) "require" "(" lscExpr ", " ident ")" ";" : lscStmt
+/-- `require(cond) else revert ErrCtor();` — `cond` is a real `lscExpr`; `ErrCtor` is resolved
+against the contract's real `Err` inductive. Parens around `cond` (Solidity's `require(condition,
+"reason")` convention), `else` (Swift's `guard cond else { ... }` precedent), and the
+call-style `ErrCtor()` (matching Solidity's actual custom-error `revert Ctor();` syntax,
+0.8.4+) — see the migration plan for the full rationale. -/
+syntax (name := lscRequire) "require" "(" lscExpr ")" " else " "revert " ident "(" ")" ";" : lscStmt
 
-/-- `revert(ErrCtor);` — mirrors `require`'s error-resolution logic. -/
-syntax (name := lscRevert) "revert" "(" ident ")" ";" : lscStmt
+/-- `revert ErrCtor();` — mirrors `require`'s error-resolution logic; call-style to match
+Solidity's custom-error `revert Ctor();` syntax. -/
+syntax (name := lscRevert) "revert " ident "(" ")" ";" : lscStmt
 
-/-- `emit Ctor;` — 0-argument event. -/
-syntax (name := lscEmit0) "emit " ident ";" : lscStmt
+/-- `emit Ctor();` — 0-argument event, call-style for consistency with `emit Ctor(arg);`. -/
+syntax (name := lscEmit0) "emit " ident "(" ")" ";" : lscStmt
 
 /-- `emit Ctor(arg);` — 1-argument event. -/
 syntax (name := lscEmit1) "emit " ident "(" lscExpr ")" ";" : lscStmt
@@ -124,8 +130,11 @@ module docstring on why `σ.field` needs no dedicated production); a non-`σ.fie
 side is a clear elaboration-time error, not a silent misparse. -/
 syntax (name := lscAssign) ident " = " lscExpr ";" : lscStmt
 
-/-- `var x := e;` — evaluate-once local binding (see module docstring). -/
-syntax (name := lscVarBind) "var " ident " := " lscExpr ";" : lscStmt
+/-- `let x = e;` — evaluate-once local binding (see module docstring's "`let x = e;`" section,
+same semantics, Rust-shaped spelling: `let` keyword + plain `=`, chosen over `:=` since the
+binding reads naturally either way and this isn't competing with `Eq`/`doReassign` the way
+`TxM.lean`'s old `do`-notation attempts were). -/
+syntax (name := lscLetBind) "let " ident " = " lscExpr ";" : lscStmt
 
 /-- `if (cond) { ... } else { ... }`. -/
 syntax (name := lscIfElse) "if" "(" lscExpr ")" "{" lscStmt* "}" "else" "{" lscStmt* "}" : lscStmt
@@ -237,19 +246,19 @@ mutual
 extended `locals` list (extended only by `var`). -/
 partial def elabLscStmt (storageName : Name) (locals : List (String × LscV2.Deriving.FieldKind)) :
     TSyntax `lscStmt → TermElabM (Term × List (String × LscV2.Deriving.FieldKind))
-  | `(lscStmt| require ( $cond , $errCtor:ident ) ;) => do
+  | `(lscStmt| require ( $cond ) else revert $errCtor:ident ( ) ;) => do
       let (condTerm, k) ← elabLscExpr storageName locals cond
       unless k == .bool do throwError "`require`'s condition must be `Bool`-kind, got `{repr k}`"
       let (errName, _) ← LscV2.Deriving.currContractTypes
       let ctorTerm ← `(.$errCtor)
       let ctorStr ← LscV2.Deriving.elabErrorCtorName ctorTerm errName
       return (← `(LscV2.Stmt.require $condTerm $(quote ctorStr)), locals)
-  | `(lscStmt| revert ( $errCtor:ident ) ;) => do
+  | `(lscStmt| revert $errCtor:ident ( ) ;) => do
       let (errName, _) ← LscV2.Deriving.currContractTypes
       let ctorTerm ← `(.$errCtor)
       let ctorStr ← LscV2.Deriving.elabErrorCtorName ctorTerm errName
       return (← `(LscV2.Stmt.revert $(quote ctorStr)), locals)
-  | `(lscStmt| emit $ctor:ident ;) => do
+  | `(lscStmt| emit $ctor:ident ( ) ;) => do
       let (_, eventName) ← LscV2.Deriving.currContractTypes
       let ctorShort := ctor.getId.toString
       let ctorName := eventName ++ Name.mkSimple ctorShort
@@ -278,7 +287,7 @@ partial def elabLscStmt (storageName : Name) (locals : List (String × LscV2.Der
           let tyConst ← k.tyConst
           return (← `(LscV2.Stmt.storageSet $(quote field) ⟨$tyConst, $eTerm⟩), locals)
       | none => throwErrorAt x "expected `σ.field = e;` on the left-hand side, got `{x.getId}`"
-  | `(lscStmt| var $x:ident := $e ;) => do
+  | `(lscStmt| let $x:ident = $e ;) => do
       let (eTerm, k) ← elabLscExpr storageName locals e
       let tyConst ← k.tyConst
       let nameStr := x.getId.toString
