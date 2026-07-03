@@ -79,6 +79,15 @@ separate extension (rather than widening `contractTypesExt`'s tuple) so existing
 initialize contractStorageExt : EnvExtension (NameMap Name) ←
   registerEnvExtension (pure {})
 
+/-- Maps a contract's namespace to the list of `tx`-defined function names declared in it so
+far, in declaration order — populated by `Lang/Syntax2.lean`'s `tx` elaborator itself (every
+`tx name { .. }` already expands to a plain top-level `def name : Stmt`, and is always meant
+to be an external contract function today, see `FunctionKind.external`). Lets
+`derive_contract_def` build its `functions` list automatically instead of requiring the
+contract author to repeat every `tx` name in a hand-written `[("name", name), ...]` list. -/
+initialize contractFnsExt : EnvExtension (NameMap (List Name)) ←
+  registerEnvExtension (pure {})
+
 /-- Marker classes used purely as `deriving` targets — they carry no data
 or methods themselves; all the generated code lives in plain top-level
 `def`s/`instance`s emitted by the handlers below (see each handler's
@@ -641,7 +650,7 @@ elab "derive_contract_dsl " storageId:ident errId:ident eventId:ident : command 
 
 /-! ## `derive_contract_def` — `ContractDef` + compile outputs from introspection
 
-`derive_contract_def "Name" Storage Err Event functions topic0 (some ctor)?`
+`derive_contract_def "Name" Storage Err Event (functions)? (topic0)? (ctor)?`
 re-derives the pieces of `ContractDef` that are already fully determined by
 `Storage`/`Err`/`Event`'s declared fields/constructors (`storage`/`errors`/
 `events`) via the same introspection `deriving ContractStorage`/
@@ -653,6 +662,28 @@ namespace: `contractDef`, `config`, `bytecodeHex`, `deployHex` — replacing
 the hand-written `counterFn`/`counterDef`/`compileConfig`/
 `counterBytecodeHex`/`counterDeployHex` block a contract used to need.
 
+All three trailing groups are **optional**, consumed left-to-right
+(`functions`, then `topic0`, then `ctor` — see the elaborator below for why
+this is unambiguous), each falling back to an auto-derived default when
+omitted so the common case needs none of them:
+* `functions` defaults to every `tx name { .. }` self-registered under this
+  namespace so far (`LscV2.Deriving.contractFnsExt`), in declaration order —
+  every `tx` is already an external function today, so this is never lossy.
+* `topic0` defaults to a real Keccak256 computation
+  (`LscV2.computeEventTopic0`) over each event's ABI signature, derived from
+  the same `eventEntries` used for `ContractDef.events` — no more
+  hand-maintained topic tables (and no more non-cryptographic
+  `name.hash.toNat` stand-ins for events without a hand-pinned topic).
+* `ctor` defaults to `none`, *unless* `Storage` declares an `owner : Address`
+  field, in which case it defaults to the standard "set `owner` to the
+  deployer (`msg.sender`) at construction time" `Stmt` — the exact one-liner
+  `Counter`'s hand-written `owner := msg.sender` constructor used to spell
+  out by hand.
+
+Any of the three can still be given explicitly to override the default
+(e.g. a contract with an unrelated `owner`-named field that isn't meant to
+be deploy-initialized, or an event needing a hand-pinned topic).
+
 Storage field *default values* (the third component of each
 `ContractDef.storage` entry) are always emitted as `none`: they are only
 consulted by `Lang/Checks.lean`'s arith-error-coverage check today, never
@@ -661,10 +692,16 @@ there is no real "default init value" for this command to recover from a
 structure's Lean-level field defaults (which serve a different purpose —
 e.g. `Inhabited`/`{}`-literal ergonomics — and aren't reliably safe to
 reinterpret as on-chain initial storage values). A contract that does need
-a non-zero field pre-set at deploy time should do it via `constructor`,
-exactly like `Counter`'s `owner := msg.sender` already does. -/
+a non-`owner` field pre-set at deploy time should pass an explicit
+`ctor` override. -/
 elab "derive_contract_def " nameStrStx:str storageId:ident errId:ident eventId:ident
-    "(" functions:term ")" "(" topic0:term ")" "(" ctor:term ")" : command => do
+    fnsStx:("(" term ")")? topic0Stx:("(" term ")")? ctorStx:("(" term ")")? : command => do
+  -- The three trailing groups are optional and consumed left-to-right (`functions`, then
+  -- `topic0`, then `ctor`) — giving zero groups means "auto-derive everything", giving one
+  -- means "override just `functions`", etc. See each default's derivation below.
+  let explicitFunctions? : Option Term := fnsStx.map fun s => ⟨s.raw[1]!⟩
+  let explicitTopic0? : Option Term := topic0Stx.map fun s => ⟨s.raw[1]!⟩
+  let explicitCtor? : Option Term := ctorStx.map fun s => ⟨s.raw[1]!⟩
   let nameStr : Term := quote (nameStrStx.raw.isStrLit?.getD "")
   let storageName ← Lean.Elab.Command.liftCoreM <| Lean.Elab.realizeGlobalConstNoOverloadWithInfo storageId
   let errName ← Lean.Elab.Command.liftCoreM <| Lean.Elab.realizeGlobalConstNoOverloadWithInfo errId
@@ -693,6 +730,52 @@ elab "derive_contract_def " nameStrStx:str storageId:ident errId:ident eventId:i
       let paramStrLit := quote paramName.toString
       `(($cStrLit, [($paramStrLit, $tyConst)]))
   let eventsTerm ← `([$eventEntries,*])
+  -- `functions : List (String × Stmt)` — either the explicit override, or every `tx`
+  -- self-registered under this namespace so far (`LscV2.Deriving.contractFnsExt`), in
+  -- declaration order.
+  let functionsTerm ← match explicitFunctions? with
+    | some t => pure t
+    | none => do
+      let ns ← getCurrNamespace
+      let fnNames := (LscV2.Deriving.contractFnsExt.getState (← getEnv)).find? ns |>.getD []
+      let fnEntries ← fnNames.toArray.mapM fun fnName => liftTermElabM do
+        let fnId := mkIdent fnName
+        let fnStrLit := quote fnName.componentsRev.head!.toString
+        `(($fnStrLit, $fnId))
+      `([$fnEntries,*])
+  -- `topic0 : Ident → Option Nat` — either the explicit override, or a real Keccak256
+  -- computation (`LscV2.computeEventTopic0`) over each event's already-derived ABI
+  -- signature, matching `eventEntries` above exactly (replaces hand-written stub tables
+  -- like the old non-cryptographic `name.hash.toNat` fallback).
+  let topic0Term ← match explicitTopic0? with
+    | some t => pure t
+    | none => do
+      let topic0NameId := mkIdent `name
+      let topic0Arms ← eventIndVal.ctors.toArray.mapM fun ctorName => liftTermElabM do
+        let cStr := ctorName.getString!
+        let cStrLit := quote cStr
+        let paramsTerm ← match ← LscV2.Deriving.getCtorFieldNameKind ctorName with
+          | none => `(([] : List (LscV2.Ident × LscV2.Ty)))
+          | some (paramName, k) =>
+            let tyConst ← k.tyConst
+            let paramStrLit := quote paramName.toString
+            `([($paramStrLit, $tyConst)])
+        `(matchAltExpr| | $cStrLit => some (LscV2.computeEventTopic0 $cStrLit $paramsTerm))
+      let wc ← `(_)
+      let defaultArm ← `(matchAltExpr| | $wc => none)
+      let topic0Alts := topic0Arms.push defaultArm
+      let topic0Discrs ← liftTermElabM <| #[(topic0NameId : Term)].mapM LscV2.Deriving.mkDiscr
+      `(fun ($topic0NameId : LscV2.Ident) => match $[$topic0Discrs],* with $topic0Alts:matchAlt*)
+  -- `ctor : Option Stmt` — either the explicit override, or (if `storageId` has an
+  -- `owner : Address` field) the standard "set owner to the deployer" constructor, else
+  -- `none`. Matches what `Counter`'s hand-written `owner := msg.sender` constructor did.
+  let ctorTerm ← match explicitCtor? with
+    | some t => pure t
+    | none =>
+      if storageFields.any fun (fname, k) => fname == `owner && k == LscV2.Deriving.FieldKind.address then
+        `(some (LscV2.Stmt.storageSet "owner" ⟨LscV2.Ty.address, LscV2.CoreExpr.txField LscV2.TxField.caller⟩))
+      else
+        `((none : Option LscV2.Stmt))
   -- Built via `mkIdent` (not written as literal tokens inside the
   -- `command|` quotations below) so the declared names stay plain,
   -- externally-visible identifiers rather than hygienically macro-scoped
@@ -710,21 +793,21 @@ elab "derive_contract_def " nameStrStx:str storageId:ident errId:ident eventId:i
       errors := $errorsTerm
       events := $eventsTerm
       functions :=
-        ($functions : List (String × LscV2.Stmt)).map fun ($nId, $bodyId) =>
+        ($functionsTerm : List (String × LscV2.Stmt)).map fun ($nId, $bodyId) =>
           { name := $nId, kind := LscV2.FunctionKind.external, params := [],
             retTy := LscV2.Ty.unit, body := $bodyId }
       interfaces := []
-      constructor := $ctor))
+      constructor := $ctorTerm))
   Lean.Elab.Command.elabCommand (← `(command|
-    def $configId : LscV2.Compile.Config := LscV2.Compile.configFromContract $contractDefId $topic0))
+    def $configId : LscV2.Compile.Config := LscV2.Compile.configFromContract $contractDefId $topic0Term))
   Lean.Elab.Command.elabCommand (← `(command|
     def $bytecodeHexId : String :=
-      match LscV2.Compile.contractToBytecodeHex $contractDefId $topic0 with
+      match LscV2.Compile.contractToBytecodeHex $contractDefId $topic0Term with
       | .ok hex => hex
       | .error _ => ""))
   Lean.Elab.Command.elabCommand (← `(command|
     def $deployHexId : String :=
-      match LscV2.Compile.deployToBytecodeHex $contractDefId $topic0 with
+      match LscV2.Compile.deployToBytecodeHex $contractDefId $topic0Term with
       | .ok hex => hex
       | .error _ => ""))
 

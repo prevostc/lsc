@@ -30,4 +30,18 @@ def computeSelector (fn : FunctionDef) : UInt32 :=
     (b0 <<< 24) ||| (b1 <<< 16) ||| (b2 <<< 8) ||| b3
   else 0
 
+/-- Build the canonical ABI event signature, e.g. `"Incremented(uint256)"` — same shape as
+    `fnSignature`, but for a `derive_contract_def`-derived event entry
+    (`(name, params) : Ident × List (Ident × Ty)`, see `ContractDef.events`). -/
+def eventSignature (name : String) (params : List (Ident × Ty)) : String :=
+  let types := String.intercalate "," (params.map fun (_, t) => t.abiStr)
+  s!"{name}({types})"
+
+/-- Compute the full 256-bit LOG topic0 via Keccak256, e.g. Solidity's
+    `keccak256("Incremented(uint256)")` — big-endian bytes packed into a `Nat`
+    (arbitrary precision, so no truncation like `computeSelector`'s 4-byte selector). -/
+def computeEventTopic0 (name : String) (params : List (Ident × Ty)) : Nat :=
+  let hash := KeccakEngine.keccak256 (eventSignature name params).toUTF8
+  hash.foldl (fun acc b => acc * 256 + b.toNat) 0
+
 end LscV2

@@ -331,5 +331,12 @@ elab "tx " name:ident "{" stmts:lscStmt* "}" : command => do
     let (t, _) ← elabStmtList storageName [] stmts
     return t
   elabCommand (← `(command| def $name : LscV2.Stmt := $bodyTerm))
+  -- Self-register under the current namespace so `derive_contract_def` can build its
+  -- `functions` list automatically (see `LscV2.Deriving.contractFnsExt`'s docstring).
+  let fnName ← Lean.Elab.Command.liftCoreM <| Lean.Elab.realizeGlobalConstNoOverloadWithInfo name
+  let ns ← getCurrNamespace
+  modifyEnv fun env =>
+    LscV2.Deriving.contractFnsExt.modifyState env fun m =>
+      m.insert ns ((m.find? ns |>.getD []) ++ [fnName])
 
 end LscV2.Syntax2

@@ -29,9 +29,10 @@ all real `lscExpr`/`lscStmt` grammar productions, elaborated directly into
 `LscV2.Stmt`/`LscV2.Expr` values — no manually-repeated field-name strings,
 and error/event names are checked against `CounterError`/`CounterEvent`'s
 real constructors at compile time. Each `tx <name> { .. }` block expands to
-a plain top-level `def name : LscV2.Stmt := ..`, so `increment`/`pause`/
-`unpause` below are ordinary `Stmt` values usable anywhere one is expected
-(e.g. `derive_contract_def`'s `[("increment", increment), ..]` list).
+a plain top-level `def name : LscV2.Stmt := ..` and self-registers as a
+public function, so `increment`/`pause`/`unpause` below are both ordinary
+`Stmt` values and automatically picked up by `derive_contract_def` below —
+no hand-written `[("increment", increment), ..]` list needed.
 
 Target shape: `docs/spec_idea_2/reference/COUNTER.md`.
 -/
@@ -95,16 +96,13 @@ tx unpause {
 
 /-! ## Compilation: `ContractDef` + Yul/bytecode emission -/
 
-/-- Compile layout for Yul / bytecode emission. -/
-def stubEventTopic0 : Ident → Option Nat
-  | "Incremented" => some 0x20d8a6f5a693f9d1d627a598e8820f7a55ee74c183aa8f1a30e8d4e8dd9a8d84
-  | name => some name.hash.toNat
-
+-- Every piece `derive_contract_def` needs is already fully determined by declarations
+-- above: the public-function list from `tx increment`/`tx pause`/`tx unpause` (self-registered
+-- as they're declared), event LOG topics via real Keccak256 over `CounterEvent`'s
+-- constructors, and the "owner = msg.sender at construction" deploy step from
+-- `CounterStorage`'s `owner : Address` field — see `Lang/Derive.lean`'s
+-- `derive_contract_def` docstring for the exact defaults.
 derive_contract_def "Counter" CounterStorage CounterError CounterEvent
-  ([("increment", increment), ("pause", pause), ("unpause", unpause)])
-  (stubEventTopic0)
-  -- Set owner = msg.sender (deployer) at construction time so pause/unpause work.
-  (some (Stmt.storageSet "owner" ⟨Ty.address, CoreExpr.txField .caller⟩))
 
 -- Smoke-checks
 #check Counter.CounterStorage

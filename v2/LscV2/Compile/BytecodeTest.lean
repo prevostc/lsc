@@ -9,6 +9,11 @@ open EvmYul EvmYul.EVM Operation
 
 def incrementedTopic : Nat := 0x20d8a6f5a693f9d1d627a598e8820f7a55ee74c183aa8f1a30e8d4e8dd9a8d84
 
+/-- Regression check: `computeEventTopic0`'s real Keccak256 computation over
+`"Incremented(uint256)"` must reproduce this file's (and `derive_contract_def`'s
+auto-generated) pinned `incrementedTopic` literal exactly. -/
+example : computeEventTopic0 "Incremented" [("n", .wei)] = incrementedTopic := by native_decide
+
 /-- Stub topic0 for events without a pinned keccak (see `Selectors.computeSelector`). -/
 def stubEventTopic0 : Ident → Option Nat
   | "Incremented" => some incrementedTopic
