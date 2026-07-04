@@ -5,3 +5,5 @@
 [ ] implement constrained types extensions
 [ ] rework comments (too blobby)
 [ ] syntax delab 
+[ ] make sure no user-land code is referenced in the framework lib (incrementBody, increment_body_lowers_ok)
+[ ] compilation proofs 
