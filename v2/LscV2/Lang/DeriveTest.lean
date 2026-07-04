@@ -26,9 +26,6 @@ structure TStorage where
   owner : Address := 0
   deriving Repr, LscV2.Deriving.ContractStorage
 
-instance : Inhabited TStorage where
-  default := {}
-
 inductive TError where
   | Paused
   | NotOwner

@@ -13,10 +13,6 @@ structure CounterStorage where
   owner : Address := 0
   deriving Repr, LscV2.Deriving.ContractStorage
 
--- Required by `ContractM`'s default-storage handling.
-instance : Inhabited CounterStorage where
-  default := {}
-
 inductive CounterError where
   | Paused
   | NotOwner

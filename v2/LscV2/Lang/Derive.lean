@@ -272,6 +272,14 @@ def mkSigmaFieldCmds (structName : Name) (fields : Array (Name × FieldKind)) :
     let valStx ← k.storageGetStx fname.toString
     `(command| @[simp] def $sigmaFieldName : $tyStx := $valStx)
 
+/-- `instance : Inhabited $structName where default := {}` — every field kind
+`ContractStorage` supports (`Wei`/`Bool`/`Address`/`UInt256`) has a Lean
+default value, and storage structures are expected to give each field a
+default, so `{}` always resolves. Saves contract authors from hand-writing
+this instance (needed by `ContractM`'s default-storage handling) themselves. -/
+def mkInhabitedCmd (structName : Name) : TermElabM Command :=
+  `(command| instance : Inhabited $(mkIdent structName) where default := {})
+
 def mkContractStorageHandler : DerivingHandler := fun declNames => do
   if declNames.size != 1 then return false
   let structName := declNames[0]!
@@ -285,10 +293,12 @@ def mkContractStorageHandler : DerivingHandler := fun declNames => do
   let getCmd ← liftTermElabM <| mkGetFieldCmd structName fieldKinds
   let setCmd ← liftTermElabM <| mkSetFieldCmd structName fieldKinds
   let sigmaCmds ← liftTermElabM <| mkSigmaFieldCmds structName fieldKinds
+  let inhabitedCmd ← liftTermElabM <| mkInhabitedCmd structName
   atRootNamespace do
     elabCommand getCmd
     elabCommand setCmd
     for c in sigmaCmds do elabCommand c
+    elabCommand inhabitedCmd
   return true
 
 initialize registerDerivingHandler ``ContractStorage mkContractStorageHandler
