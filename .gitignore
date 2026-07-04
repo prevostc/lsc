@@ -2,6 +2,4 @@ foundry
 foundry-lean-erc20-demo
 
 .lake
-v1/.lake
-v2/.lake
 external/EVMYulLean/
