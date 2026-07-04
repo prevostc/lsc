@@ -71,7 +71,7 @@ initialize contractTypesExt : EnvExtension (NameMap (Name × Name)) ←
   registerEnvExtension (pure {})
 
 /-- Maps a contract's namespace to its storage `structure`'s name, so the `lscExpr`/`lscStmt`
-grammar's `σ.field` resolution (`Lang/Syntax2.lean`) can find *which* structure to run
+grammar's `σ.field` resolution (`Lang/Syntax.lean`) can find *which* structure to run
 `getStructureFieldKinds` against without the contract author repeating it — the same
 `derive_contract_dsl`-populated-registry pattern as `contractTypesExt` above, kept as a
 separate extension (rather than widening `contractTypesExt`'s tuple) so existing
@@ -80,12 +80,24 @@ initialize contractStorageExt : EnvExtension (NameMap Name) ←
   registerEnvExtension (pure {})
 
 /-- Maps a contract's namespace to the list of `tx`-defined function names declared in it so
-far, in declaration order — populated by `Lang/Syntax2.lean`'s `tx` elaborator itself (every
+far, in declaration order — populated by `Lang/Syntax.lean`'s `tx` elaborator itself (every
 `tx name { .. }` already expands to a plain top-level `def name : Stmt`, and is always meant
 to be an external contract function today, see `FunctionKind.external`). Lets
 `derive_contract_def` build its `functions` list automatically instead of requiring the
 contract author to repeat every `tx` name in a hand-written `[("name", name), ...]` list. -/
 initialize contractFnsExt : EnvExtension (NameMap (List Name)) ←
+  registerEnvExtension (pure {})
+
+/-- Maps a contract's namespace to the `tx name { .. }` blocks declared in it so far that have
+not yet been flushed into real `def name : Stmt := ...` declarations, in declaration order —
+populated by `Lang/Syntax.lean`'s `tx` elaborator, which (unlike the old design) no longer
+elaborates a `tx` body immediately: doing so let `derive_contract_dsl`'s "run before `tx`"
+requirement and `derive_contract_def`'s "run after `tx`" requirement collide whenever a caller
+wanted a single merged macro call, since a `tx` body used to be elaborated eagerly, exactly
+where it's written, straddling both. Buffering the raw `lscStmt*` syntax here instead lets any
+later command (`derive_contract_def`, or the merged `derive_contract`) flush every buffered
+`tx` at once — see `flushContractTxs` below. -/
+initialize contractTxSyntaxExt : EnvExtension (NameMap (List (Name × Syntax × Array Syntax))) ←
   registerEnvExtension (pure {})
 
 /-- Marker classes used purely as `deriving` targets — they carry no data
@@ -693,129 +705,19 @@ structure's Lean-level field defaults (which serve a different purpose —
 e.g. `Inhabited`/`{}`-literal ergonomics — and aren't reliably safe to
 reinterpret as on-chain initial storage values). A contract that does need
 a non-`owner` field pre-set at deploy time should pass an explicit
-`ctor` override. -/
-elab "derive_contract_def " nameStrStx:str storageId:ident errId:ident eventId:ident
-    fnsStx:("(" term ")")? topic0Stx:("(" term ")")? ctorStx:("(" term ")")? : command => do
-  -- The three trailing groups are optional and consumed left-to-right (`functions`, then
-  -- `topic0`, then `ctor`) — giving zero groups means "auto-derive everything", giving one
-  -- means "override just `functions`", etc. See each default's derivation below.
-  let explicitFunctions? : Option Term := fnsStx.map fun s => ⟨s.raw[1]!⟩
-  let explicitTopic0? : Option Term := topic0Stx.map fun s => ⟨s.raw[1]!⟩
-  let explicitCtor? : Option Term := ctorStx.map fun s => ⟨s.raw[1]!⟩
-  let nameStr : Term := quote (nameStrStx.raw.isStrLit?.getD "")
-  let storageName ← Lean.Elab.Command.liftCoreM <| Lean.Elab.realizeGlobalConstNoOverloadWithInfo storageId
-  let errName ← Lean.Elab.Command.liftCoreM <| Lean.Elab.realizeGlobalConstNoOverloadWithInfo errId
-  let eventName ← Lean.Elab.Command.liftCoreM <| Lean.Elab.realizeGlobalConstNoOverloadWithInfo eventId
-  -- `storage : List (Ident × Ty × Option ExprAny)`, derived from `storageId`'s fields.
-  let storageFields ← liftTermElabM <| LscV2.Deriving.getStructureFieldKinds storageName
-  let storageEntries ← storageFields.mapM fun (fname, k) => liftTermElabM do
-    let tyConst ← k.tyConst
-    let fnameStr := quote fname.toString
-    `(($fnameStr, $tyConst, (none : Option LscV2.ExprAny)))
-  let storageTerm ← `([$storageEntries,*])
-  -- `errors : List Ident`, derived from `errId`'s constructor names.
-  let errIndVal ← liftTermElabM <| getConstInfoInduct errName
-  let errCtorStrs := errIndVal.ctors.toArray.map (·.getString!)
-  let errCtorLits : Array Term := errCtorStrs.map quote
-  let errorsTerm ← `([$errCtorLits,*])
-  -- `events : List (Ident × List (Ident × Ty))`, derived from `eventId`'s constructors.
-  let eventIndVal ← liftTermElabM <| getConstInfoInduct eventName
-  let eventEntries ← eventIndVal.ctors.toArray.mapM fun ctorName => liftTermElabM do
-    let cStr := ctorName.getString!
-    let cStrLit := quote cStr
-    match ← LscV2.Deriving.getCtorFieldNameKind ctorName with
-    | none => `(($cStrLit, ([] : List (LscV2.Ident × LscV2.Ty))))
-    | some (paramName, k) =>
-      let tyConst ← k.tyConst
-      let paramStrLit := quote paramName.toString
-      `(($cStrLit, [($paramStrLit, $tyConst)]))
-  let eventsTerm ← `([$eventEntries,*])
-  -- `functions : List (String × Stmt)` — either the explicit override, or every `tx`
-  -- self-registered under this namespace so far (`LscV2.Deriving.contractFnsExt`), in
-  -- declaration order.
-  let functionsTerm ← match explicitFunctions? with
-    | some t => pure t
-    | none => do
-      let ns ← getCurrNamespace
-      let fnNames := (LscV2.Deriving.contractFnsExt.getState (← getEnv)).find? ns |>.getD []
-      let fnEntries ← fnNames.toArray.mapM fun fnName => liftTermElabM do
-        let fnId := mkIdent fnName
-        let fnStrLit := quote fnName.componentsRev.head!.toString
-        `(($fnStrLit, $fnId))
-      `([$fnEntries,*])
-  -- `topic0 : Ident → Option Nat` — either the explicit override, or a real Keccak256
-  -- computation (`LscV2.computeEventTopic0`) over each event's already-derived ABI
-  -- signature, matching `eventEntries` above exactly (replaces hand-written stub tables
-  -- like the old non-cryptographic `name.hash.toNat` fallback).
-  let topic0Term ← match explicitTopic0? with
-    | some t => pure t
-    | none => do
-      let topic0NameId := mkIdent `name
-      let topic0Arms ← eventIndVal.ctors.toArray.mapM fun ctorName => liftTermElabM do
-        let cStr := ctorName.getString!
-        let cStrLit := quote cStr
-        let paramsTerm ← match ← LscV2.Deriving.getCtorFieldNameKind ctorName with
-          | none => `(([] : List (LscV2.Ident × LscV2.Ty)))
-          | some (paramName, k) =>
-            let tyConst ← k.tyConst
-            let paramStrLit := quote paramName.toString
-            `([($paramStrLit, $tyConst)])
-        `(matchAltExpr| | $cStrLit => some (LscV2.computeEventTopic0 $cStrLit $paramsTerm))
-      let wc ← `(_)
-      let defaultArm ← `(matchAltExpr| | $wc => none)
-      let topic0Alts := topic0Arms.push defaultArm
-      let topic0Discrs ← liftTermElabM <| #[(topic0NameId : Term)].mapM LscV2.Deriving.mkDiscr
-      `(fun ($topic0NameId : LscV2.Ident) => match $[$topic0Discrs],* with $topic0Alts:matchAlt*)
-  -- `ctor : Option Stmt` — either the explicit override, or (if `storageId` has an
-  -- `owner : Address` field) the standard "set owner to the deployer" constructor, else
-  -- `none`. Matches what `Counter`'s hand-written `owner := msg.sender` constructor did.
-  let ctorTerm ← match explicitCtor? with
-    | some t => pure t
-    | none =>
-      if storageFields.any fun (fname, k) => fname == `owner && k == LscV2.Deriving.FieldKind.address then
-        `(some (LscV2.Stmt.storageSet "owner" ⟨LscV2.Ty.address, LscV2.CoreExpr.txField LscV2.TxField.caller⟩))
-      else
-        `((none : Option LscV2.Stmt))
-  -- Built via `mkIdent` (not written as literal tokens inside the
-  -- `command|` quotations below) so the declared names stay plain,
-  -- externally-visible identifiers rather than hygienically macro-scoped
-  -- ones local to this quotation.
-  let contractDefId := mkIdent `contractDef
-  let configId := mkIdent `config
-  let bytecodeHexId := mkIdent `bytecodeHex
-  let deployHexId := mkIdent `deployHex
-  let nId := mkIdent `n
-  let bodyId := mkIdent `body
-  Lean.Elab.Command.elabCommand (← `(command|
-    def $contractDefId : LscV2.ContractDef where
-      name := $nameStr
-      storage := $storageTerm
-      errors := $errorsTerm
-      events := $eventsTerm
-      functions :=
-        ($functionsTerm : List (String × LscV2.Stmt)).map fun ($nId, $bodyId) =>
-          { name := $nId, kind := LscV2.FunctionKind.external, params := [],
-            retTy := LscV2.Ty.unit, body := $bodyId }
-      interfaces := []
-      constructor := $ctorTerm))
-  Lean.Elab.Command.elabCommand (← `(command|
-    def $configId : LscV2.Compile.Config := LscV2.Compile.configFromContract $contractDefId $topic0Term))
-  Lean.Elab.Command.elabCommand (← `(command|
-    def $bytecodeHexId : String :=
-      match LscV2.Compile.contractToBytecodeHex $contractDefId $topic0Term with
-      | .ok hex => hex
-      | .error _ => ""))
-  Lean.Elab.Command.elabCommand (← `(command|
-    def $deployHexId : String :=
-      match LscV2.Compile.deployToBytecodeHex $contractDefId $topic0Term with
-      | .ok hex => hex
-      | .error _ => ""))
+`ctor` override.
+
+This command's actual `elab` lives in `Lang/Syntax.lean`, not here: it needs to flush any
+buffered `tx { .. }` bodies (`LscV2.Deriving.contractTxSyntaxExt`) into real `def`s before it can
+read `contractFnsExt`'s now-complete function list, and flushing requires `elabStmtList`, which
+lives in `Syntax.lean` (this file is imported *by* `Syntax.lean`, not the reverse, so it can't
+call back into it). -/
 
 /-! ## `currContractTypes`/`currContractStorageName`/`elabErrorCtorName`
 
 These helpers used to back a bare-do-notation `revert`/`require ... else revert`/`emit`
 term-level sugar declared at the very bottom of this file; that sugar was removed once
-`Lang/Syntax2.lean`'s `tx { ... }` grammar took over as the contract-author-facing surface (it
+`Lang/Syntax.lean`'s `tx { ... }` grammar took over as the contract-author-facing surface (it
 calls these same helpers itself for its `revert Ctor();`/`require(cond) else revert Ctor();`/
 `emit Ctor(arg);` statement forms). The helpers/registries stay, only the old sugar `elab`s are
 gone. -/
@@ -832,7 +734,7 @@ def currContractTypes : TermElabM (Name × Name) := do
   return tys
 
 /-- Look up the current namespace's storage `structure` name, registered by
-`derive_contract_dsl`. Used by `Lang/Syntax2.lean`'s `σ.field` resolution. -/
+`derive_contract_dsl`. Used by `Lang/Syntax.lean`'s `σ.field` resolution. -/
 def currContractStorageName : TermElabM Name := do
   let ns ← getCurrNamespace
   let some storageName := (contractStorageExt.getState (← getEnv)).find? ns
@@ -857,7 +759,7 @@ end LscV2.Deriving
 
 -- The old bare-do-notation `revert $e`/`require $c else revert $e`/`emit $c $args,*` term-level
 -- sugar elaborators that used to live here (building on `currContractTypes`/
--- `elabErrorCtorName`/`getCtorFieldKind` above) were removed: `Lang/Syntax2.lean`'s `tx { ... }`
+-- `elabErrorCtorName`/`getCtorFieldKind` above) were removed: `Lang/Syntax.lean`'s `tx { ... }`
 -- grammar now provides the real-constructor `revert Ctor();`/`require(cond) else revert Ctor();`/
 -- `emit Ctor();`/`emit Ctor(arg);` statement forms directly, calling `currContractTypes`/
 -- `elabErrorCtorName`/`getCtorFieldKind` itself. Those functions/registries (and the three

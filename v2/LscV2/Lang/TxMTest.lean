@@ -15,7 +15,7 @@ Uses the low-level `weiField`/`boolField`/`addrField`/`CoreExpr.eqAuto`/
 `CoreExpr.not`/`CoreExpr.txField` primitives directly (rather than the
 `wei σ.field`/`===`/`!`/`msg.sender` term-level notations, or the
 `revert .Ctor`/`require ... else revert .Ctor` real-constructor sugar in
-`Lang/Derive.lean`) — those notations were removed once `Lang/Syntax2.lean`'s
+`Lang/Derive.lean`) — those notations were removed once `Lang/Syntax.lean`'s
 `tx { ... }` grammar took over as the contract-author-facing surface; this
 file exercises the raw builder mechanics without going through a real
 `derive_contract_dsl`-derived contract, see this file's module docstring. -/

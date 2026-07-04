@@ -1,6 +1,6 @@
 import LscV2.Lang.Derive
 import LscV2.Lang.TxM
-import LscV2.Lang.Syntax2
+import LscV2.Lang.Syntax
 import LscV2.Lang.Eval
 import LscV2.Lib.Wei.Eval
 
@@ -42,8 +42,6 @@ inductive TEvent where
 
 derive_contract_dsl TStorage TError TEvent
 
-abbrev TM := ContractM TStorage TEvent TError
-
 -- ── Sanity checks on the derived glue ───────────────────────────────────
 
 #check (TStorage.getField : (t : Ty) → Ident → TStorage → Option (Val t))
@@ -72,7 +70,7 @@ example : TEvent.buildEvent "Paused" [] = some .Paused := rfl
 -- `ArithError.Overflow` maps to the same-named `TError.Overflow` constructor.
 example : (ContractErrors.arith (Err := TError) ArithError.Overflow) = TError.Overflow := rfl
 
--- ── A `Syntax2`-built function body against the derived storage ────────
+-- ── A `Syntax`-built function body against the derived storage ────────
 
 tx incrementTx {
   require(!σ.paused) else revert Paused();
@@ -80,6 +78,13 @@ tx incrementTx {
   σ.number = n;
   emit Incremented(n);
 }
+
+-- `tx` no longer elaborates its body immediately (see `Syntax.lean`'s `tx` docstring); flush
+-- the buffered body into a real `incrementTx : Stmt` def before referencing it below. This also
+-- derives the `TM` abbreviation (`ContractM TStorage TEvent TError`) used just below — the extra
+-- `contractDef`/`config`/`bytecodeHex`/`deployHex` defs `derive_contract_def` also emits are
+-- simply unused here.
+derive_contract_def "T" TStorage TError TEvent
 
 def increment : TM Unit := Stmt.eval incrementTx
 
@@ -93,7 +98,7 @@ def increment : TM Unit := Stmt.eval incrementTx
 -- pipeline, so none is derived).
 --
 -- `number` correctly ends up `1` and the emitted event carries `1` too (not
--- `2`): `n` is bound once via `Stmt.letBind` (`Syntax2.lean`'s `var`) and
+-- `2`): `n` is bound once via `Stmt.letBind` (`Syntax.lean`'s `var`) and
 -- reused via `Wei.Expr.var "n"`, which `Stmt.evalWith`'s `.letBind` case
 -- computes exactly once and resolves through `LocalEnv` thereafter —
 -- unaffected by the later storage write.

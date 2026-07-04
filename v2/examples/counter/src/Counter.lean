@@ -1,7 +1,7 @@
 import LscV2.Prelude
 import LscV2.Compile.Yul
 import LscV2.Compile.Bytecode
-import LscV2.Lang.Syntax2
+import LscV2.Lang.Syntax
 
 open LscV2 LscV2.Compile
 
@@ -29,10 +29,6 @@ inductive CounterEvent where
   | Unpaused
   deriving Repr, DecidableEq, LscV2.Deriving.ContractEvent
 
-derive_contract_dsl CounterStorage CounterError CounterEvent
-
-abbrev CounterM := ContractM CounterStorage CounterEvent CounterError
-
 tx increment {
   require(!σ.paused) else revert Paused();
   let n = σ.number +? 1;
@@ -54,11 +50,11 @@ tx unpause {
   emit Unpaused();
 }
 
-/-! ## Compilation: `ContractDef` + Yul/bytecode emission -/
+/-! ## DSL wiring + compilation: `ContractDSL` instance, `ContractDef` + Yul/bytecode emission -/
 
--- Public functions, event topics, and deploy step are inferred from the
--- declarations above; see `derive_contract_def`'s docstring for defaults.
-derive_contract_def "Counter" CounterStorage CounterError CounterEvent
+-- Public functions, event topics, deploy step, and the `CounterM` monad abbreviation are all
+-- inferred from the declarations above; see `derive_contract`'s docstring for defaults.
+derive_contract "Counter" CounterStorage CounterError CounterEvent
 
 -- Smoke-checks
 #check Counter.CounterStorage

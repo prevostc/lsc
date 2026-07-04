@@ -143,7 +143,7 @@ instance {S E Err : Type} [ContractErrors Err] [ContractDSL S E Err] :
     Coe (TxM Unit) (ContractM S E Err Unit) :=
   ⟨TxM.toContractM⟩
 
-/-- Lets a bare `def foo : Stmt := ..` (e.g. a `Syntax2.lean`
+/-- Lets a bare `def foo : Stmt := ..` (e.g. a `Syntax.lean`
 `tx foo { .. }` block) be used directly wherever a `ContractM S E Err Unit`
 action is expected (e.g. `runS foo s`), mirroring `TxM.toContractM` above
 for `Stmt`-typed defs that never went through `TxM`'s `do`-notation at
@@ -185,10 +185,10 @@ primitive all other statement combinators below are defined in terms of. -/
 @[simp] def u256Field (field : Ident) : CoreExpr .uint256 := .storageGet .uint256 field
 
 /-- Extract `field` from a `σ.field`-shaped identifier, or fail with a
-clear error otherwise. Used directly by `Lang/Syntax2.lean`'s `lscExpr`/
+clear error otherwise. Used directly by `Lang/Syntax.lean`'s `lscExpr`/
 `lscStmt` field resolution — the `wei σ.field`/`bool σ.field`/... prefix
 notation family that used to call this from `term`-level `macro_rules` was
-removed, since `Syntax2.lean` resolves `σ.field` via its own grammar
+removed, since `Syntax.lean` resolves `σ.field` via its own grammar
 instead. -/
 def sigmaFieldName? (n : Lean.Name) : Option String :=
   match n with
@@ -248,7 +248,7 @@ reference safe to reuse even after later writes to fields `e` reads. -/
 -- above), e.g. `setWei "number" n`, used directly as a `do`-block statement.
 -- The generic `set σ.field e` sugar and the `var x := e` binder that used to
 -- live here (both do-notation-only workarounds) were removed in favor of
--- `Lang/Syntax2.lean`'s `tx { ... }` grammar, which has its own `σ.field =
+-- `Lang/Syntax.lean`'s `tx { ... }` grammar, which has its own `σ.field =
 -- e;`/`let x = e;` productions with direct access to the field's `FieldKind`
 -- (no `SetSigma`/`LetBindable` typeclass dispatch needed there).
 
@@ -299,11 +299,11 @@ result in `Stmt.ifThenElse`. -/
 
 /-! ## `CoreExpr.eqAuto`
 
-`Lang/Syntax2.lean`'s `==` elaborator calls this directly (with an explicit
+`Lang/Syntax.lean`'s `==` elaborator calls this directly (with an explicit
 `t` argument, not relying on implicit inference — see its docstring), so the
 function stays; the `+?`/`-?`/`===`/`!`/`msg.sender` *notations* that used to
 live here (for building `Wei.Expr`/`CoreExpr` terms directly in `do`-blocks)
-were removed, since `Syntax2.lean`'s `lscExpr` grammar has its own,
+were removed, since `Syntax.lean`'s `lscExpr` grammar has its own,
 independent `+?`/`-?`/`==`/`!`/`msg.sender` productions that elaborate
 straight to `Wei.Expr.addChecked`/`CoreExpr.not`/`CoreExpr.txField`/etc.
 without going through any of these `term`-level notations. -/
