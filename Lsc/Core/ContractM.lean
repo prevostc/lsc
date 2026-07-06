@@ -198,27 +198,40 @@ theorem eq_addr (x y : Address) : Val.eq (.addr x) (.addr y) = (x == y) := rfl
 
 end Val
 
-structure LocalEnv where
-  lookup : Ident → Option (Sigma Val)
+/-- Local variable environment for `tx` bodies, threaded through `Stmt.evalWith`.
+
+Represented as a plain inductive snoc-list rather than the closure
+(`Ident → Option (Sigma Val)`) it used to be: `lookup` on a closure-based env can only be
+unfolded via `simp` (function extensionality / `funext`-style reasoning), never via cheap
+`dsimp`/`rfl` iota-reduction — and that, compounded across nested `let`s and interacting with
+other case splits (e.g. two chained checked arithmetic ops) in the same goal, is what made
+`simp` explode on `tx` bodies with 2+ sequential `let`s (see `Wad/Eval.lean`'s module docstring
+and `examples/interest`'s `accrueInterest` proofs for the concrete case this was diagnosed on).
+`lookup` on this inductive form is ordinary structural recursion: once `env` is a concrete chain
+of `.bind`s (always true at a call site, since it's built by `Stmt.evalWith` as it goes), each
+step is a plain constructor match that `dsimp`/`rfl` reduces for free, leaving only the
+(still-necessary) `Ident` `BEq` check per step — no closure/funext machinery involved. -/
+inductive LocalEnv where
+  | empty
+  | bind (name : Ident) (val : Sigma Val) (env : LocalEnv)
   deriving Inhabited
 
 namespace LocalEnv
 
-def empty : LocalEnv := { lookup := fun _ => none }
+def lookup : LocalEnv → Ident → Option (Sigma Val)
+  | .empty, _ => none
+  | .bind name val env, n => if n == name then some val else env.lookup n
 
-@[simp] theorem empty_eq : empty = { lookup := fun _ => none } := rfl
-
-def bind (name : Ident) (val : Sigma Val) (env : LocalEnv) : LocalEnv :=
-  { lookup := fun n => if n == name then some val else env.lookup n }
+@[simp] theorem lookup_empty (n : Ident) : (LocalEnv.empty).lookup n = none := rfl
 
 @[simp] theorem bind_lookup_self (name : String) (v : Sigma Val) (env : LocalEnv) :
     (LocalEnv.bind name v env).lookup name = some v := by
-  simp [LocalEnv.bind]
+  simp [LocalEnv.lookup]
 
 @[simp] theorem bind_lookup_ne (name key : String) (v : Sigma Val) (env : LocalEnv)
     (h : key ≠ name) :
     (LocalEnv.bind name v env).lookup key = env.lookup key := by
-  simp only [LocalEnv.bind]
+  simp only [LocalEnv.lookup]
   rw [beq_false_of_ne h]
   simp
 

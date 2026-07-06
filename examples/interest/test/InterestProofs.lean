@@ -20,16 +20,36 @@ universally quantified alongside the `ContractState`, with preconditions like
 
 `accrueInterest`'s two `native_decide` lemmas (below) are the exception: they're stated against a
 fully *concrete* `ContractState` (not just concrete `principal`/`rate` fields on an otherwise-
-abstract `s`) and proved by `native_decide` rather than `simp`. `accrueInterest`'s body reads
-`σ.principal` *twice* (once inside `⸢*⸣?`, once inside the following `+?`) — with `s` left
-abstract, `simp`'s general-purpose congruence search over the resulting nested
-`Except`/`ContractM` nesting (nested `getField`/`setField` matches interacting with two chained
-`Stmt.letBind`s) does not converge in a reasonable amount of time (observed: still running,
-multi-GB of memory, after several minutes — a strictly worse case of the same 256-bit-numeral
-blowup risk called out in `deposit`/`setRate`'s docstrings, just triggered by unification search
-rather than kernel `decide`). Pinning `s` to a fully concrete value sidesteps that: `native_decide`
-compiles the (fully computable, since `s` is now closed) `runS` call to native code and runs it
-directly, which is fast regardless of term size. -/
+abstract `s`) and proved by `native_decide` rather than `simp`.
+
+Root cause, confirmed by direct experimentation: it is *not* about `σ.principal` being read twice,
+nor about `ContractDSL`/`getField`'s field-name dispatch. It *is* about `LocalEnv`
+(`Lsc/Core/ContractM.lean`), the structure threading `tx`-local `let`-bound variables through
+`Stmt.evalWith`: it used to be represented as an opaque closure (`Ident → Option (Sigma Val)`),
+which can only be unfolded via `simp`'s function-extensionality machinery, never via cheap
+`dsimp`/`rfl` iota-reduction — and that, compounded across `accrueInterest`'s two sequential
+`let`s (`interest`, then `p`) interacting with the checked-op case split each `let` needs, is what
+made `simp` diverge (multi-GB memory, no bound). This has been fixed at the language level:
+`LocalEnv` is now a plain inductive snoc-list, so `lookup` is ordinary structural recursion that
+`dsimp`/`simp` reduce for free, with no closure/funext reasoning involved. That fix is real and
+general — it converts what used to be an *unbounded* blowup into a *bounded, deterministic*
+`simp` run for any `tx` body, regardless of how many `let`s it chains.
+
+For `accrueInterest` specifically, that bounded run (~110s) now fully resolves the `LocalEnv`/
+`getField`/`setField` plumbing and the checked-op case splits (using the `rw`-friendly ok/error
+lemmas `Wad.addChecked_eq_ok_of`/`_error_of`, `Wad.mulHalfUpChecked_eq_ok_of`/`_error_of` in
+`Lsc/Lib/Wad/Eval.lean`), leaving only a small, fully concrete residual goal about the single
+`emit` argument's `List.mapM` traversal — but closing *that* residual with any further tactic
+(`rfl`, `dsimp`, or more `simp` lemmas) re-triggers the same class of cost purely from the sheer
+size of the already-substituted surrounding term (kernel type-checking cost, not tactic search —
+confirmed by a `(kernel) deep recursion detected` failure on one attempt). So `native_decide`
+remains the pragmatic choice for `accrueInterest` today, but the *reason* has narrowed
+considerably: it's no longer "chained storage reads make `simp` diverge unboundedly", it's "this
+one `emit`-with-argument residual needs one more targeted proof step that hasn't been found yet".
+`deposit`/`setRate` never needed any of this, since they each only chain one checked op and don't
+read a variable back out via `emit`. Pinning `s` to a fully concrete value sidesteps the issue
+entirely for `accrueInterest`: `native_decide` compiles the (fully computable, since `s` is now
+closed) `runS` call to native code and runs it directly, independent of term size. -/
 
 open Lsc Interest
 

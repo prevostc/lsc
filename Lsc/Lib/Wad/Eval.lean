@@ -59,6 +59,66 @@ theorem addCheckedNat_error (a : Wad) (n : Nat) (h : ¬ a.canAddNat n) :
     addCheckedNat a n = .error .Overflow := by
   simp [addCheckedNat, UInt256.addCheckedNat, h, Except.map]
 
+/-- `a.raw.toNat + b.raw.toNat < 2 ^ 256` — the two-`Wad` analogue of `canAddNat`, needed for
+`addChecked`'s ok/error characterization lemmas below (two real `Wad` operands, not a bare
+`Nat`). -/
+abbrev canAdd (a b : Wad) : Prop := a.raw.toNat + b.raw.toNat < 2 ^ 256
+
+/-- `Wad.addChecked` in the no-overflow case, stated as a pure-`Nat` sum equality rather than a
+raw `BitVec`/`Except` computation, so `rw`/`apply` can use it as a single deterministic rewrite
+step. See the module docstring below ("chained checked ops") for why this — used via `rw`, not
+handed to `simp` as one more lemma among many — matters for tx bodies that chain more than one
+checked arithmetic op. -/
+theorem addChecked_eq_ok_of (a b : Wad) (n : Nat)
+    (hn : a.raw.toNat + b.raw.toNat = n) (hbound : n < 2 ^ 256) :
+    addChecked a b = .ok (mkNat n) := by
+  have hlt : a.raw.toNat + b.raw.toNat < 2 ^ 256 := hn ▸ hbound
+  have htoNat : (a.raw + b.raw).toNat = a.raw.toNat + b.raw.toNat :=
+    BitVec.toNat_add_of_lt hlt
+  have heq : a.raw + b.raw = BitVec.ofNat 256 n := by
+    apply BitVec.eq_of_toNat_eq
+    rw [htoNat, hn, BitVec.toNat_ofNat, Nat.mod_eq_of_lt hbound]
+  have hnolt : ¬ a.raw + b.raw < a.raw := by
+    rw [BitVec.lt_def, htoNat]; omega
+  simp only [addChecked, UInt256.addChecked, heq]
+  rw [if_neg (heq ▸ hnolt)]
+  simp [Except.map, mkNat]
+
+/-- `Wad.addChecked` in the overflow case — the error-case counterpart of
+`addChecked_eq_ok_of` above. -/
+theorem addChecked_eq_error_of (a b : Wad) (h : a.raw.toNat + b.raw.toNat ≥ 2 ^ 256) :
+    addChecked a b = .error .Overflow := by
+  have hb : b.raw.toNat < 2 ^ 256 := b.raw.isLt
+  have htoNat : (a.raw + b.raw).toNat = (a.raw.toNat + b.raw.toNat) % 2 ^ 256 :=
+    BitVec.toNat_add a.raw b.raw
+  have hlt : (a.raw + b.raw).toNat < a.raw.toNat := by
+    rw [htoNat, Nat.mod_eq_sub_mod h]
+    have hlt2 : a.raw.toNat + b.raw.toNat - 2 ^ 256 < 2 ^ 256 := by omega
+    rw [Nat.mod_eq_of_lt hlt2]
+    omega
+  have hlt' : a.raw + b.raw < a.raw := by rw [BitVec.lt_def]; exact hlt
+  simp only [addChecked, UInt256.addChecked]
+  rw [if_pos hlt']
+  rfl
+
+/-- `Wad.mulHalfUpChecked` in the no-overflow case, as a pure-`Nat` equality — same rationale
+and same `rw`-not-`simp` usage pattern as `addChecked_eq_ok_of` above. -/
+theorem mulHalfUpChecked_eq_ok_of (a b : Wad) (n : Nat)
+    (hn : (a.raw.toNat * b.raw.toNat + WAD / 2) / WAD = n) (hbound : n < 2 ^ 256) :
+    mulHalfUpChecked a b = .ok (mkNat n) := by
+  simp only [mulHalfUpChecked, hn]
+  rw [if_neg]
+  simp only [BitVec.toNat_allOnes]
+  omega
+
+/-- `Wad.mulHalfUpChecked` in the overflow case — the error-case counterpart of
+`mulHalfUpChecked_eq_ok_of` above. -/
+theorem mulHalfUpChecked_eq_error_of (a b : Wad)
+    (h : (a.raw.toNat * b.raw.toNat + WAD / 2) / WAD > (BitVec.allOnes 256).toNat) :
+    mulHalfUpChecked a b = .error .Overflow := by
+  simp only [mulHalfUpChecked]
+  rw [if_pos h]
+
 variable {S E Err : Type} [ContractErrors Err] [dsl : ContractDSL S E Err]
 
 /-- `ContractM`-based evaluator for `Wad.Expr`, mirroring `Wei.eval` exactly. -/
