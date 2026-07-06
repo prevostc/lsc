@@ -16,6 +16,14 @@ def foldConsts : Expr → Expr
     match foldConsts a, foldConsts b with
     | .lit i, .lit j => .lit (i - j)
     | a', b' => .sub a' b'
+  | .mul a b =>
+    match foldConsts a, foldConsts b with
+    | .lit i, .lit j => .lit (i * j)
+    | a', b' => .mul a' b'
+  | .div a b =>
+    match foldConsts a, foldConsts b with
+    | .lit i, .lit j => .lit (i / j)
+    | a', b' => .div a' b'
   | .lt a b =>
     match foldConsts a, foldConsts b with
     | .lit i, .lit j => if i < j then .lit 1 else .lit 0
@@ -55,6 +63,20 @@ theorem foldConsts_correct (st : IRState) (e : Expr) :
       simp only [evalExpr]
       rw [← ih_a, ← ih_b]
   | sub a b ih_a ih_b =>
+    simp only [foldConsts]
+    cases ha : foldConsts a <;> cases hb : foldConsts b
+    all_goals
+      simp only [ha, hb, evalExpr] at ih_a ih_b
+      simp only [evalExpr]
+      rw [← ih_a, ← ih_b]
+  | mul a b ih_a ih_b =>
+    simp only [foldConsts]
+    cases ha : foldConsts a <;> cases hb : foldConsts b
+    all_goals
+      simp only [ha, hb, evalExpr] at ih_a ih_b
+      simp only [evalExpr]
+      rw [← ih_a, ← ih_b]
+  | div a b ih_a ih_b =>
     simp only [foldConsts]
     cases ha : foldConsts a <;> cases hb : foldConsts b
     all_goals

@@ -95,13 +95,21 @@ syntax:max (name := lscExprParen) "(" lscExpr ")" : lscExpr
 /-- Boolean negation, binds tighter than `==`/`+?`/`-?`. -/
 syntax:75 (name := lscExprNot) "!" lscExpr:75 : lscExpr
 
-/-- Checked addition (`Wei`-kind only), left-associative. -/
+/-- Checked addition (`Wei`-kind or `Wad`-kind only), left-associative. -/
 syntax:65 (name := lscExprAdd) lscExpr:65 " +? " lscExpr:66 : lscExpr
 
-/-- Checked subtraction (`Wei`-kind only), left-associative. -/
+/-- Checked subtraction (`Wei`-kind or `Wad`-kind only), left-associative. -/
 syntax:65 (name := lscExprSub) lscExpr:65 " -? " lscExpr:66 : lscExpr
 
-/-- Equality (any matching non-`Wei` kind). -/
+/-- Checked, half-up-rounding `Wad` multiplication (`Wad.mulHalfUpChecked`), left-associative.
+Surface syntax per `docs/reference/AMM.md`. -/
+syntax:65 (name := lscExprMul) lscExpr:65 " ⸢*⸣? " lscExpr:66 : lscExpr
+
+/-- Checked, round-down `Wad` division (`Wad.divDownChecked`), left-associative. Surface syntax
+per `docs/reference/AMM.md`. -/
+syntax:65 (name := lscExprDiv) lscExpr:65 " ⌊/⌋? " lscExpr:66 : lscExpr
+
+/-- Equality (any matching non-`Wei`/`Wad` kind). -/
 syntax:50 (name := lscExprEq) lscExpr:51 " == " lscExpr:51 : lscExpr
 
 /-- Fresh, inert-everywhere-else statement category (unchanged from the prototype, extended
@@ -142,6 +150,44 @@ syntax (name := lscIfElse) "if" "(" lscExpr ")" "{" lscStmt* "}" "else" "{" lscS
 /-- `if (cond) { ... }` — no-`else` form, compiles to `Stmt.ifThenElse cond thn Stmt.skip`. -/
 syntax (name := lscIf) "if" "(" lscExpr ")" "{" lscStmt* "}" : lscStmt
 
+/-! ## `tx` parameters -/
+
+/-- One `tx` parameter declaration: `(name : ty)`, e.g. `(amount : wad)`. `ty` is parsed as a
+plain `ident` (not a dedicated keyword-token grammar) purely to avoid reserving `uint256`/
+`bool`/`address`/`wei`/`wad` as global tokens (see `elabLscTyIdent` below, which resolves the
+five supported spellings by string match, the same style `emit $ctor:ident`/`revert
+$errCtor:ident` already use for resolving *their* idents against real declarations). Declared
+as its own `lscTxParam` syntax category (rather than inlined anonymous groups in `tx`'s own
+`elab` declaration below) so it can be repeated zero or more times via a plain `lscTxParam*`,
+exactly like `lscStmt*` — giving `tx foo { .. }` (zero groups) and `tx foo(a : ty) { .. }`
+(one or more groups) the same shape/ergonomics as Solidity's parameter lists while keeping the
+*zero-arg* case byte-for-byte unchanged from before this feature existed. -/
+declare_syntax_cat lscTxParam
+syntax (name := lscTxParamDecl) "(" ident " : " ident ")" : lscTxParam
+
+/-- Resolve a `tx` parameter's `ty` identifier to a `FieldKind`, by string match against the
+five supported spellings — the same five `Lsc.Deriving.FieldKind` already supports for storage
+fields/`let`-locals, so a `tx` parameter is usable inside the body exactly like a `let`-bound
+local (see this file's module docstring's "`let x = e;`" section: a parameter and a `let`-local
+are structurally the same kind of thing, just supplied by the caller instead of computed by an
+expression). -/
+def elabLscTyIdent (ty : Lean.Ident) : TermElabM Lsc.Deriving.FieldKind :=
+  match ty.getId.toString with
+  | "uint256" => return .uint256
+  | "bool" => return .bool
+  | "address" => return .address
+  | "wei" => return .wei
+  | "wad" => return .wad
+  | other => throwErrorAt ty "unsupported `tx` parameter type `{other}` \
+      — expected one of `uint256`/`bool`/`address`/`wei`/`wad`"
+
+/-- Elaborate one `(name : ty)` parameter group into `(paramNameString, FieldKind)`. -/
+def elabTxParam : TSyntax `lscTxParam → TermElabM (String × Lsc.Deriving.FieldKind)
+  | `(lscTxParam| ($x:ident : $ty:ident)) => do
+      let k ← elabLscTyIdent ty
+      return (x.getId.toString, k)
+  | stx => throwErrorAt stx "Syntax.elabTxParam: unsupported `lscTxParam` node"
+
 /-! ## Elaboration -/
 
 /-- If `stx` is literally a bare numeral (`lscExprNum`), return its value — used by `+?`/`-?`
@@ -179,34 +225,69 @@ partial def elabLscExpr (storageName : Name) (locals : List (String × Lsc.Deriv
       return (← `(Lsc.CoreExpr.not $t), .bool)
   | `(lscExpr| $a +? $b) => do
       let (at_, ak) ← elabLscExpr storageName locals a
-      unless ak == .wei do
-        throwError "`+?`'s left-hand side must be `Wei`-kind, got `{repr ak}`"
-      match lscExprAsNatLit? b with
-      | some n => return (← `(Lsc.Wei.Expr.addCheckedNat $at_ $(quote n)), .wei)
-      | none =>
-          let (bt, bk) ← elabLscExpr storageName locals b
-          unless bk == .wei do
-            throwError "`+?`'s right-hand side must be `Wei`-kind or a numeral, got `{repr bk}`"
-          return (← `(Lsc.Wei.Expr.addChecked $at_ $bt), .wei)
-  | `(lscExpr| $a -? $b) => do
-      let (at_, ak) ← elabLscExpr storageName locals a
-      unless ak == .wei do
-        throwError "`-?`'s left-hand side must be `Wei`-kind, got `{repr ak}`"
-      let bt ← match lscExprAsNatLit? b with
-        | some n => `(Lsc.Wei.Expr.lit $(quote n))
-        | none => do
+      match ak with
+      | .wei =>
+        match lscExprAsNatLit? b with
+        | some n => return (← `(Lsc.Wei.Expr.addCheckedNat $at_ $(quote n)), .wei)
+        | none =>
             let (bt, bk) ← elabLscExpr storageName locals b
             unless bk == .wei do
-              throwError "`-?`'s right-hand side must be `Wei`-kind or a numeral, got `{repr bk}`"
-            pure bt
-      return (← `(Lsc.Wei.Expr.subChecked $at_ $bt), .wei)
+              throwError "`+?`'s right-hand side must be `Wei`-kind or a numeral, got `{repr bk}`"
+            return (← `(Lsc.Wei.Expr.addChecked $at_ $bt), .wei)
+      | .wad =>
+        match lscExprAsNatLit? b with
+        | some n => return (← `(Lsc.Wad.Expr.addCheckedNat $at_ $(quote n)), .wad)
+        | none =>
+            let (bt, bk) ← elabLscExpr storageName locals b
+            unless bk == .wad do
+              throwError "`+?`'s right-hand side must be `Wad`-kind or a numeral, got `{repr bk}`"
+            return (← `(Lsc.Wad.Expr.addChecked $at_ $bt), .wad)
+      | _ => throwError "`+?`'s left-hand side must be `Wei`- or `Wad`-kind, got `{repr ak}`"
+  | `(lscExpr| $a -? $b) => do
+      let (at_, ak) ← elabLscExpr storageName locals a
+      match ak with
+      | .wei =>
+        let bt ← match lscExprAsNatLit? b with
+          | some n => `(Lsc.Wei.Expr.lit $(quote n))
+          | none => do
+              let (bt, bk) ← elabLscExpr storageName locals b
+              unless bk == .wei do
+                throwError "`-?`'s right-hand side must be `Wei`-kind or a numeral, got `{repr bk}`"
+              pure bt
+        return (← `(Lsc.Wei.Expr.subChecked $at_ $bt), .wei)
+      | .wad =>
+        let bt ← match lscExprAsNatLit? b with
+          | some n => `(Lsc.Wad.Expr.lit $(quote n))
+          | none => do
+              let (bt, bk) ← elabLscExpr storageName locals b
+              unless bk == .wad do
+                throwError "`-?`'s right-hand side must be `Wad`-kind or a numeral, got `{repr bk}`"
+              pure bt
+        return (← `(Lsc.Wad.Expr.subChecked $at_ $bt), .wad)
+      | _ => throwError "`-?`'s left-hand side must be `Wei`- or `Wad`-kind, got `{repr ak}`"
+  | `(lscExpr| $a ⸢*⸣? $b) => do
+      let (at_, ak) ← elabLscExpr storageName locals a
+      unless ak == .wad do
+        throwError "`⸢*⸣?`'s left-hand side must be `Wad`-kind, got `{repr ak}`"
+      let (bt, bk) ← elabLscExpr storageName locals b
+      unless bk == .wad do
+        throwError "`⸢*⸣?`'s right-hand side must be `Wad`-kind, got `{repr bk}`"
+      return (← `(Lsc.Wad.Expr.mulHalfUpChecked $at_ $bt), .wad)
+  | `(lscExpr| $a ⌊/⌋? $b) => do
+      let (at_, ak) ← elabLscExpr storageName locals a
+      unless ak == .wad do
+        throwError "`⌊/⌋?`'s left-hand side must be `Wad`-kind, got `{repr ak}`"
+      let (bt, bk) ← elabLscExpr storageName locals b
+      unless bk == .wad do
+        throwError "`⌊/⌋?`'s right-hand side must be `Wad`-kind, got `{repr bk}`"
+      return (← `(Lsc.Wad.Expr.divDownChecked $at_ $bt), .wad)
   | `(lscExpr| $a == $b) => do
       let (at_, ak) ← elabLscExpr storageName locals a
       let (bt, bk) ← elabLscExpr storageName locals b
       unless ak == bk do
         throwError "`==` between mismatched kinds `{repr ak}` and `{repr bk}`"
-      if ak == .wei then
-        throwError "`==` is not yet supported on `Wei`-kind expressions"
+      if ak == .wei || ak == .wad then
+        throwError "`==` is not yet supported on `{repr ak}`-kind expressions"
       -- Explicit `t` (rather than `eqAuto`'s implicit-`t` inference from `a`) avoids the same
       -- defeq-but-not-syntactic-equality trap the hand-written `pause`/`unpause` needed
       -- `@CoreExpr.eqAuto Ty.address ...` to route around (e.g. `msg.sender : CoreExpr
@@ -233,6 +314,7 @@ partial def elabLscExpr (storageName : Name) (locals : List (String × Lsc.Deriv
               let nameLit := quote nameStr
               let t ← match k with
                 | .wei => `(Lsc.Wei.Expr.var $nameLit)
+                | .wad => `(Lsc.Wad.Expr.var $nameLit)
                 | .bool => `(Lsc.CoreExpr.var Lsc.Ty.bool $nameLit)
                 | .address => `(Lsc.CoreExpr.var Lsc.Ty.address $nameLit)
                 | .uint256 => `(Lsc.CoreExpr.var Lsc.Ty.uint256 $nameLit)
@@ -331,16 +413,17 @@ buffers its raw `lscStmt*` syntax under the current namespace
 (`Lsc.Deriving.contractTxSyntaxExt`); `Lsc.Deriving.flushContractTxs` (run by
 `derive_contract_def`/`derive_contract`) elaborates and emits the real `def name : Stmt := ...`
 declarations later, all at once. -/
-elab "tx " name:ident "{" stmts:lscStmt* "}" : command => do
+elab "tx " name:ident params:lscTxParam* "{" stmts:lscStmt* "}" : command => do
   let ns ← getCurrNamespace
   let fnName := ns ++ name.getId
+  let paramsResolved ← liftTermElabM <| params.toList.mapM elabTxParam
   -- `name.raw` (the plain, un-namespaced ident) is kept alongside `fnName` (the fully-qualified
   -- one) so `flushContractTxs` can later declare `def name : Stmt := ...` with the *plain* name
   -- — letting Lean prepend the (then-current) namespace itself, exactly once — while still using
   -- `fnName` for `contractFnsExt` bookkeeping/cross-referencing.
   modifyEnv fun env =>
     Lsc.Deriving.contractTxSyntaxExt.modifyState env fun m =>
-      m.insert ns ((m.find? ns |>.getD []) ++ [(fnName, name.raw, stmts.map (·.raw))])
+      m.insert ns ((m.find? ns |>.getD []) ++ [(fnName, name.raw, paramsResolved, stmts.map (·.raw))])
 
 /-- Elaborate and emit every `tx name { .. }` body buffered so far under the current namespace
 (`Lsc.Deriving.contractTxSyntaxExt`) into a real `def name : Lsc.Stmt := ...`, exactly as
@@ -353,19 +436,50 @@ unchanged. Clears the namespace's buffer once flushed, so re-running (e.g. a str
 def flushContractTxs : CommandElabM Unit := do
   let ns ← getCurrNamespace
   let pending := (Lsc.Deriving.contractTxSyntaxExt.getState (← getEnv)).find? ns |>.getD []
-  for (fnName, nameRaw, stmtsRaw) in pending do
+  for (fnName, nameRaw, params, stmtsRaw) in pending do
     let stmts : Array (TSyntax `lscStmt) := stmtsRaw.map (⟨·⟩)
     let bodyTerm ← liftTermElabM do
       let storageName ← Lsc.Deriving.currContractStorageName
-      let (t, _) ← elabStmtList storageName [] stmts
+      let (t, _) ← elabStmtList storageName params stmts
       return t
     -- The *plain* (un-namespaced) ident, so Lean prepends the current namespace itself, exactly
     -- once — see `tx`'s docstring above on why the fully-qualified `fnName` isn't used here.
     let nameId : Lean.Ident := ⟨nameRaw⟩
-    elabCommand (← `(command| def $nameId : Lsc.Stmt := $bodyTerm))
+    -- `stmtDefFnName` is the fully-qualified name of whichever `def` actually holds the
+    -- parameter-free `Stmt` value (`fn.body`'s ABI/bytecode-facing shape — see
+    -- `Lsc.Deriving.contractFnsExt`'s docstring): for the zero-arg (unchanged) case that's just
+    -- `nameId` itself; for the parameterized case it's a separate, hidden `nameId.Impl` def
+    -- holding the raw (still-`Expr.var`-parameterized) body, with `nameId` itself instead
+    -- becoming the real *callable* `def nameId (p1 : ty1) ... : Stmt := ...` — see this
+    -- function's module-level design note in `Lsc.Deriving.contractFnsExt`.
+    let stmtDefFnName ← if params.isEmpty then
+        elabCommand (← `(command| def $nameId : Lsc.Stmt := $bodyTerm))
+        pure fnName
+      else do
+        let implId := mkIdent (Name.mkSimple (nameRaw.getId.toString ++ "Impl"))
+        elabCommand (← `(command| def $implId : Lsc.Stmt := $bodyTerm))
+        let sigTerm ← liftTermElabM do
+          let paramTys ← params.mapM (·.2.leanTypeStx)
+          paramTys.foldrM (init := (← `(Lsc.Stmt))) fun ty acc => `($ty → $acc)
+        let lamBody ← liftTermElabM do
+          params.foldrM (init := (← `($implId))) fun (pname, k) acc => do
+            let pid : Term := ⟨mkIdent (Name.mkSimple pname)⟩
+            let tyConst ← k.tyConst
+            let litStx ← k.embedLitStx pid
+            `(Lsc.Stmt.seq (Lsc.Stmt.letBind $(quote pname) ⟨$tyConst, $litStx⟩) $acc)
+        -- Fold `fun p1 => fun p2 => ... => lamBody` from the *last* parameter inward, rather
+        -- than a single `fun p1 p2 ... => lamBody` splice, to avoid needing a
+        -- `TSyntaxArray \`Lean.Parser.Term.funBinder` (plain `Ident`s aren't directly
+        -- splice-compatible with that category).
+        let wrappedBody ← liftTermElabM do
+          params.foldrM (init := lamBody) fun (pname, _) acc => do
+            let pid := mkIdent (Name.mkSimple pname)
+            `(fun $pid:ident => $acc)
+        elabCommand (← `(command| def $nameId : $sigTerm := $wrappedBody))
+        pure (ns ++ Name.mkSimple (nameRaw.getId.toString ++ "Impl"))
     modifyEnv fun env =>
       Lsc.Deriving.contractFnsExt.modifyState env fun m =>
-        m.insert ns ((m.find? ns |>.getD []) ++ [fnName])
+        m.insert ns ((m.find? ns |>.getD []) ++ [(fnName, stmtDefFnName, params)])
   modifyEnv fun env => Lsc.Deriving.contractTxSyntaxExt.modifyState env (·.insert ns [])
 
 /-- The shared body of `derive_contract_def`/`derive_contract` once their three trailing optional
@@ -408,13 +522,34 @@ def elabContractDefBody (nameStrStx : TSyntax `Lean.Parser.Term.str) (storageId 
   -- `functions : List (String × Stmt)` — either the explicit override, or every `tx`
   -- self-registered under this namespace so far (`Lsc.Deriving.contractFnsExt`), in
   -- declaration order.
+  -- `paramsForFn : String → List (Lsc.Ident × Lsc.Ty)` — a per-function-name lookup for
+  -- `FunctionDef.params`, built from the same `tx (p : ty, ...)` declarations
+  -- `Lsc.Deriving.contractFnsExt` records. Only meaningful (non-`[]`-defaulting) when
+  -- `functions` itself is auto-derived: an explicit `functions` override has no matching
+  -- per-name param info available here, so every function it lists gets `params := []` (an
+  -- existing, documented limitation of overriding `functions` explicitly, not a regression —
+  -- an override can always be written with a real ABI signature by hand if needed).
+  let ns ← getCurrNamespace
+  let fnEntries2 := (Lsc.Deriving.contractFnsExt.getState (← getEnv)).find? ns |>.getD []
+  let paramsForFnTerm ← liftTermElabM do
+    let nId := mkIdent `n
+    let paramsArms ← fnEntries2.toArray.mapM fun (fnName, _stmtDefName, params) => do
+      let fnStrLit := quote fnName.componentsRev.head!.toString
+      let paramEntries ← params.toArray.mapM fun (pname, k) => do
+        let tyConst ← k.tyConst
+        `(($(quote pname), $tyConst))
+      let paramsListTerm ← `([$paramEntries,*])
+      `(matchAltExpr| | $fnStrLit => $paramsListTerm)
+    let wc ← `(_)
+    let defaultArm ← `(matchAltExpr| | $wc => ([] : List (Lsc.Ident × Lsc.Ty)))
+    let alts := paramsArms.push defaultArm
+    let discrs ← #[(nId : Term)].mapM Lsc.Deriving.mkDiscr
+    `(fun ($nId : String) => match $[$discrs],* with $alts:matchAlt*)
   let functionsTerm ← match explicitFunctions? with
     | some t => pure t
     | none => do
-      let ns ← getCurrNamespace
-      let fnNames := (Lsc.Deriving.contractFnsExt.getState (← getEnv)).find? ns |>.getD []
-      let fnEntries ← fnNames.toArray.mapM fun fnName => liftTermElabM do
-        let fnId := mkIdent fnName
+      let fnEntries ← fnEntries2.toArray.mapM fun (fnName, stmtDefName, _params) => liftTermElabM do
+        let fnId := mkIdent stmtDefName
         let fnStrLit := quote fnName.componentsRev.head!.toString
         `(($fnStrLit, $fnId))
       `([$fnEntries,*])
@@ -476,7 +611,7 @@ def elabContractDefBody (nameStrStx : TSyntax `Lean.Parser.Term.str) (storageId 
       events := $eventsTerm
       functions :=
         ($functionsTerm : List (String × Lsc.Stmt)).map fun ($nId, $bodyId) =>
-          { name := $nId, kind := Lsc.FunctionKind.external, params := [],
+          { name := $nId, kind := Lsc.FunctionKind.external, params := $paramsForFnTerm $nId,
             retTy := Lsc.Ty.unit, body := $bodyId }
       interfaces := []
       constructor := $ctorTerm))

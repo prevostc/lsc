@@ -1,5 +1,6 @@
 import Lsc.Lang.AST
 import Lsc.Lib.Wei.Optimize
+import Lsc.Lib.Wad.Optimize
 
 namespace Lsc.Compile
 
@@ -60,6 +61,7 @@ private partial def lowerCoreExpr (cfg : Config) {t : Ty} (e : CoreExpr t) : Exc
 private partial def lowerExpr (cfg : Config) {t : Ty} (e : Expr t) : Except String IR.Expr :=
   match t, e with
   | .wei, e => Wei.lowerExpr cfg.storage.fieldSlot e
+  | .wad, e => Wad.lowerExpr cfg.storage.fieldSlot e
   | .uint256, e => lowerCoreExpr cfg e
   | .bool, e => lowerCoreExpr cfg e
   | .address, e => lowerCoreExpr cfg e
@@ -90,6 +92,9 @@ private partial def lowerStmt (cfg : Config) (s : Lsc.Stmt) : Except String IR.S
       match args with
       | [⟨Ty.wei, dataExpr⟩] => do
         let data ← Wei.lowerExpr cfg.storage.fieldSlot dataExpr
+        .ok (.log1 topic data)
+      | [⟨Ty.wad, dataExpr⟩] => do
+        let data ← Wad.lowerExpr cfg.storage.fieldSlot dataExpr
         .ok (.log1 topic data)
       | [] =>
         .ok (.log0 topic)

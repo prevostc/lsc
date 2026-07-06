@@ -1,6 +1,7 @@
 import Lsc.Lang.AST
 import Lsc.Core.ContractM
 import Lsc.Lib.Wei.Eval
+import Lsc.Lib.Wad.Eval
 
 namespace Lsc
 
@@ -75,6 +76,9 @@ def eval
   | .wei => do
     let w ← Wei.eval e env
     pure (.wei w)
+  | .wad => do
+    let w ← Wad.eval e env
+    pure (.wad w)
   | .uint256 | .bool | .address | .unit =>
     CoreExpr.eval e env
 
@@ -83,6 +87,10 @@ attribute [reducible] eval
 @[simp] theorem eval_wei (e : Expr .wei) (env : LocalEnv) :
     eval (S := S) (E := E) (Err := Err) e env =
       (Wei.eval e env >>= fun w => pure (.wei w)) := rfl
+
+@[simp] theorem eval_wad (e : Expr .wad) (env : LocalEnv) :
+    eval (S := S) (E := E) (Err := Err) e env =
+      (Wad.eval e env >>= fun w => pure (.wad w)) := rfl
 
 @[simp] theorem eval_uint256 (e : Expr .uint256) (env : LocalEnv) :
     eval (S := S) (E := E) (Err := Err) e env = CoreExpr.eval e env := rfl

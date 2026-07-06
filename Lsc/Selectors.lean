@@ -9,6 +9,7 @@ def Ty.abiStr : Ty → String
   | .bool    => "bool"
   | .address => "address"
   | .wei     => "uint256"
+  | .wad     => "uint256"
   | .unit    => ""
 
 /-- Build the canonical ABI function signature, e.g. `"increment()"` or `"transfer(address,uint256)"`. -/

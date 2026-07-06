@@ -1,6 +1,7 @@
 import Lsc.Lang.AST
 import Lsc.Lang.Eval
 import Lsc.Lib.Wei.Syntax
+import Lsc.Lib.Wad.Syntax
 import Mathlib.Control.Monad.Writer
 import Lean
 
@@ -175,6 +176,9 @@ primitive all other statement combinators below are defined in terms of. -/
 /-- `wei σ.field` reads a `Wei`-typed storage field. -/
 @[simp] def weiField (field : Ident) : Wei.Expr := .storageGet field
 
+/-- `wad σ.field` reads a `Wad`-typed storage field. -/
+@[simp] def wadField (field : Ident) : Wad.Expr := .storageGet field
+
 /-- `bool σ.field` reads a `Bool`-typed storage field. -/
 @[simp] def boolField (field : Ident) : CoreExpr .bool := .storageGet .bool field
 
@@ -215,6 +219,11 @@ reference safe to reuse even after later writes to fields `e` reads. -/
   tellStmt (Stmt.letBind name ⟨Ty.wei, e⟩)
   pure (Wei.Expr.var name)
 
+/-- `let w ← letWad name e`, the `Wad`-typed analogue of `letWei`. -/
+@[simp] def letWad (name : Ident) (e : Wad.Expr) : TxM Wad.Expr := do
+  tellStmt (Stmt.letBind name ⟨Ty.wad, e⟩)
+  pure (Wad.Expr.var name)
+
 /-- `let b ← letBool name e`, the `Bool`-typed analogue of `letWei`. -/
 @[simp] def letBool (name : Ident) (e : CoreExpr .bool) : TxM (CoreExpr .bool) := do
   tellStmt (Stmt.letBind name ⟨Ty.bool, e⟩)
@@ -234,6 +243,9 @@ reference safe to reuse even after later writes to fields `e` reads. -/
 
 @[simp] def setWei (field : Ident) (e : Wei.Expr) : TxM Unit :=
   tellStmt (Stmt.storageSet field ⟨Ty.wei, e⟩)
+
+@[simp] def setWad (field : Ident) (e : Wad.Expr) : TxM Unit :=
+  tellStmt (Stmt.storageSet field ⟨Ty.wad, e⟩)
 
 @[simp] def setBool (field : Ident) (e : CoreExpr .bool) : TxM Unit :=
   tellStmt (Stmt.storageSet field ⟨Ty.bool, e⟩)

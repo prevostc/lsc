@@ -79,25 +79,42 @@ separate extension (rather than widening `contractTypesExt`'s tuple) so existing
 initialize contractStorageExt : EnvExtension (NameMap Name) ←
   registerEnvExtension (pure {})
 
-/-- Maps a contract's namespace to the list of `tx`-defined function names declared in it so
-far, in declaration order — populated by `Lang/Syntax.lean`'s `tx` elaborator itself (every
-`tx name { .. }` already expands to a plain top-level `def name : Stmt`, and is always meant
-to be an external contract function today, see `FunctionKind.external`). Lets
-`derive_contract_def` build its `functions` list automatically instead of requiring the
-contract author to repeat every `tx` name in a hand-written `[("name", name), ...]` list. -/
-initialize contractFnsExt : EnvExtension (NameMap (List Name)) ←
+/-- Storage-field type tag. See the module docstring for why/how
+`Address` and `UInt256` are distinguishable here despite both being
+`abbrev`s for the same underlying `Word`/`BitVec 256` type. Moved above
+`contractFnsExt`/`contractTxSyntaxExt` (which both reference it) — was
+originally declared further below, alongside `fieldKindOfExpr`/`tyConst`/etc. -/
+inductive FieldKind
+  | wei | wad | bool | address | uint256
+  deriving Repr, DecidableEq
+
+/-- Each registered function's `(abiName, stmtDefName, params)`:
+* `abiName` is the fully-qualified name `tx` itself was declared under (e.g. `Smoke.deposit`) —
+  the one whose *last component* becomes the ABI-visible function name (`FunctionDef.name`,
+  `fnSignature`'s `"deposit(uint256)"`).
+* `stmtDefName` is the fully-qualified name of whichever `def` actually holds the parameter-free
+  `Stmt` value: for the original zero-arg `tx name { .. }` shape these two coincide (`name`
+  itself is both); for a parameterized `tx name(p : ty) { .. }`, `name` instead becomes the real
+  *callable* `def name (p : ty) : Stmt := ...` (see `Lang/Syntax.lean`'s `flushContractTxs`), so
+  `stmtDefName` points at a separate, hidden `name.Impl` def holding the raw
+  (still-`Expr.var`-parameterized) body instead.
+* `params` is the declared parameter list (`[]` for the zero-arg shape) — lets
+  `derive_contract_def`'s auto-derived `functions` default fill in `FunctionDef.params` for real
+  (previously always `[]`), which in turn is what `Lsc.fnSignature`/`Lsc.computeSelector`
+  (`Selectors.lean`) need to compute a parameterized function's real ABI selector (e.g.
+  `deposit(uint256)`, not `deposit()`). -/
+initialize contractFnsExt :
+    EnvExtension (NameMap (List (Name × Name × List (String × FieldKind)))) ←
   registerEnvExtension (pure {})
 
-/-- Maps a contract's namespace to the `tx name { .. }` blocks declared in it so far that have
-not yet been flushed into real `def name : Stmt := ...` declarations, in declaration order —
-populated by `Lang/Syntax.lean`'s `tx` elaborator, which (unlike the old design) no longer
-elaborates a `tx` body immediately: doing so let `derive_contract_dsl`'s "run before `tx`"
-requirement and `derive_contract_def`'s "run after `tx`" requirement collide whenever a caller
-wanted a single merged macro call, since a `tx` body used to be elaborated eagerly, exactly
-where it's written, straddling both. Buffering the raw `lscStmt*` syntax here instead lets any
-later command (`derive_contract_def`, or the merged `derive_contract`) flush every buffered
-`tx` at once — see `flushContractTxs` below. -/
-initialize contractTxSyntaxExt : EnvExtension (NameMap (List (Name × Syntax × Array Syntax))) ←
+/-- Buffered `tx` entries: `(fnName, plainNameSyntax, params, stmtsSyntax)`, where `params` is
+the declared `tx name(p1 : ty1, p2 : ty2) { .. }` parameter list (`[]` for the zero-arg shape),
+each resolved to its `FieldKind` already (parsing/resolving the type annotation happens in
+`tx`'s own elaborator, immediately — only the `lscStmt*` body needs to stay unelaborated, since
+only *that* depends on the not-yet-registered storage/error/event types; a parameter's `ty`
+annotation is one of the five fixed `FieldKind` names and needs no such deferral). -/
+initialize contractTxSyntaxExt :
+    EnvExtension (NameMap (List (Name × Syntax × List (String × FieldKind) × Array Syntax))) ←
   registerEnvExtension (pure {})
 
 /-- Marker classes used purely as `deriving` targets — they carry no data
@@ -122,18 +139,12 @@ inside `namespace Foo`). -/
 def atRootNamespace (cont : CommandElabM α) : CommandElabM α :=
   withScope (fun sc => { sc with currNamespace := Name.anonymous, openDecls := [] }) cont
 
-/-- Storage-field type tag. See the module docstring for why/how
-`Address` and `UInt256` are distinguishable here despite both being
-`abbrev`s for the same underlying `Word`/`BitVec 256` type. -/
-inductive FieldKind
-  | wei | bool | address | uint256
-  deriving Repr, DecidableEq
-
 /-- Classify a (necessarily un-`whnf`'d) field-type `Expr` by its literal
-head constant. Returns `none` for any type other than the four supported
+head constant. Returns `none` for any type other than the five supported
 ones (see module docstring). -/
 def fieldKindOfExpr (e : Lean.Expr) : Option FieldKind :=
   if e.isConstOf ``Lsc.Wei then some .wei
+  else if e.isConstOf ``Lsc.Wad then some .wad
   else if e.isConstOf ``Bool then some .bool
   else if e.isConstOf ``Lsc.Address then some .address
   else if e.isConstOf ``Lsc.UInt256 then some .uint256
@@ -141,9 +152,42 @@ def fieldKindOfExpr (e : Lean.Expr) : Option FieldKind :=
 
 def FieldKind.tyConst : FieldKind → TermElabM Term
   | .wei => `(Lsc.Ty.wei)
+  | .wad => `(Lsc.Ty.wad)
   | .bool => `(Lsc.Ty.bool)
   | .address => `(Lsc.Ty.address)
   | .uint256 => `(Lsc.Ty.uint256)
+
+/-- The real Lean *value* type a `tx` parameter of this kind is declared with on the generated
+callable `def name (p : <leanTypeStx>) : Stmt := ...` (see `Lang/Syntax.lean`'s `flushContractTxs`)
+— distinct from `exprTypeStx` above, which is the *expression-builder* type (`Wei.Expr`/
+`CoreExpr _`) used while a `Stmt`/`Expr` AST fragment is still being built, not the concrete
+runtime value type a caller actually supplies. -/
+def FieldKind.leanTypeStx : FieldKind → TermElabM Term
+  | .wei => `(Lsc.Wei)
+  | .wad => `(Lsc.Wad)
+  | .bool => `(Bool)
+  | .address => `(Lsc.Address)
+  | .uint256 => `(Lsc.UInt256)
+
+/-- Embed a `tx` parameter's real Lean *value* (`paramId : leanTypeStx`) as a literal
+`Expr`/`CoreExpr` AST node of the matching kind — the bridge between "generated `def` takes a
+real Lean function argument" and "the `Stmt` AST's `Expr.var` needs a `LocalEnv` binding": rather
+than threading a `LocalEnv` through `Stmt.eval`'s public entry point (a much larger change), the
+generated callable `def` instead wraps the parameter-free body `Stmt` in one extra
+`Stmt.letBind paramName ⟨ty, <this literal>⟩` per parameter, so `Stmt.eval`'s existing
+`LocalEnv.empty` start is populated by the *first* statements it evaluates, exactly the same
+"evaluate-once local binding" mechanism `let x = e;`/`letWei`/... already rely on (see
+`Lang/Syntax.lean`'s module docstring). `Wei`/`Wad`'s `Expr.lit` only stores a `Nat`
+(`w.raw.toNat`), which round-trips exactly back to `w` via `Wei.mkNat`/`Wad.mkNat` since `raw` is
+already a 256-bit `BitVec`; `CoreExpr.lit`'s `Lit` constructors instead store the real value
+type directly (`UInt256`/`Bool`/`Address`), needing no such round-trip. -/
+def FieldKind.embedLitStx (k : FieldKind) (paramId : Term) : TermElabM Term :=
+  match k with
+  | .wei => `(Lsc.Wei.Expr.lit ($paramId).raw.toNat)
+  | .wad => `(Lsc.Wad.Expr.lit ($paramId).raw.toNat)
+  | .bool => `(Lsc.CoreExpr.lit Lsc.Ty.bool (Lsc.Lit.bool $paramId))
+  | .address => `(Lsc.CoreExpr.lit Lsc.Ty.address (Lsc.Lit.addr $paramId))
+  | .uint256 => `(Lsc.CoreExpr.lit Lsc.Ty.uint256 (Lsc.Lit.u256 $paramId))
 
 /-- Wrap a plain term as a `matchDiscr` for splicing into `match $[$discrs],* with …`. -/
 def mkDiscr (t : Term) : TermElabM (TSyntax ``Lean.Parser.Term.matchDiscr) :=
@@ -151,6 +195,7 @@ def mkDiscr (t : Term) : TermElabM (TSyntax ``Lean.Parser.Term.matchDiscr) :=
 
 def FieldKind.valCtor : FieldKind → TermElabM Term
   | .wei => `(Lsc.Val.wei)
+  | .wad => `(Lsc.Val.wad)
   | .bool => `(Lsc.Val.bool)
   | .address => `(Lsc.Val.addr)
   | .uint256 => `(Lsc.Val.u256)
@@ -162,6 +207,7 @@ otherwise. Used by the `σ.field`-generation below, so `σ.number : Wei.Expr` an
 `wei σ.field`/`bool σ.field` notation family (`TxM.lean`) already produces. -/
 def FieldKind.exprTypeStx : FieldKind → TermElabM Term
   | .wei => `(Lsc.Wei.Expr)
+  | .wad => `(Lsc.Wad.Expr)
   | .bool => `(Lsc.CoreExpr Lsc.Ty.bool)
   | .address => `(Lsc.CoreExpr Lsc.Ty.address)
   | .uint256 => `(Lsc.CoreExpr Lsc.Ty.uint256)
@@ -174,6 +220,7 @@ def FieldKind.storageGetStx (k : FieldKind) (fieldStr : String) : TermElabM Term
   let fieldLit := quote fieldStr
   match k with
   | .wei => `(Lsc.Wei.Expr.storageGet $fieldLit)
+  | .wad => `(Lsc.Wad.Expr.storageGet $fieldLit)
   | .bool => `(Lsc.CoreExpr.storageGet Lsc.Ty.bool $fieldLit)
   | .address => `(Lsc.CoreExpr.storageGet Lsc.Ty.address $fieldLit)
   | .uint256 => `(Lsc.CoreExpr.storageGet Lsc.Ty.uint256 $fieldLit)
@@ -203,7 +250,7 @@ def getStructureFieldKinds (structName : Name) : TermElabM (Array (Name × Field
     | some k => return (fname, k)
     | none =>
       throwError "deriving ContractStorage: field `{fname}` of `{structName}` has unsupported type `{fieldTy}` \
-        — storage fields must be declared with exactly one of `Wei`/`Bool`/`Address`/`UInt256` written literally \
+        — storage fields must be declared with exactly one of `Wei`/`Wad`/`Bool`/`Address`/`UInt256` written literally \
         (see `Lsc.Deriving`'s module docstring for why this can't be fully generic)"
 
 def mkGetFieldCmd (structName : Name) (fields : Array (Name × FieldKind)) : TermElabM Command := do
@@ -273,7 +320,7 @@ def mkSigmaFieldCmds (structName : Name) (fields : Array (Name × FieldKind)) :
     `(command| @[simp] def $sigmaFieldName : $tyStx := $valStx)
 
 /-- `instance : Inhabited $structName where default := {}` — every field kind
-`ContractStorage` supports (`Wei`/`Bool`/`Address`/`UInt256`) has a Lean
+`ContractStorage` supports (`Wei`/`Wad`/`Bool`/`Address`/`UInt256`) has a Lean
 default value, and storage structures are expected to give each field a
 default, so `{}` always resolves. Saves contract authors from hand-writing
 this instance (needed by `ContractM`'s default-storage handling) themselves. -/
@@ -327,7 +374,7 @@ def getCtorFieldKind (ctorName : Name) : TermElabM (Option FieldKind) := do
     | some k => return some k
     | none =>
       throwError "deriving ContractEvent: constructor `{ctorName}`'s parameter has unsupported type `{ty}` \
-        — event payloads must be `Wei`/`Bool`/`Address`/`UInt256`"
+        — event payloads must be `Wei`/`Wad`/`Bool`/`Address`/`UInt256`"
 
 /-- Like `getCtorFieldKind`, but also returns the payload's declared parameter
 name (needed to reconstruct `ContractDef.events`'s `(paramName, ty)` shape in
@@ -345,7 +392,7 @@ def getCtorFieldNameKind (ctorName : Name) : TermElabM (Option (Name × FieldKin
     | some k => return some (paramName, k)
     | none =>
       throwError "derive_contract_def: constructor `{ctorName}`'s parameter has unsupported type `{ty}` \
-        — event payloads must be `Wei`/`Bool`/`Address`/`UInt256`"
+        — event payloads must be `Wei`/`Wad`/`Bool`/`Address`/`UInt256`"
 
 def mkBuildEventCmd (indName : Name) (ctors : Array Name) : TermElabM Command := do
   let evtId := mkIdent indName
@@ -466,7 +513,13 @@ def mkContractErrorsInstanceCmd (indName : Name) (ctorStrs : Array String) : Ter
   let aeWc := mkIdent `ae
   let fallbackBody ← `(Lsc.ContractErrors.unreachableArith $aeWc)
   let arithDefault ← `(matchAltExpr| | $aeWc => $fallbackBody)
-  let arithAlts := arithArms.push arithDefault
+  -- If every `ArithError` constructor already has a same-named `Err` arm above (e.g. a
+  -- contract using both `Wei` and `Wad` arithmetic, whose error type names all three of
+  -- `Overflow`/`Underflow`/`DivisionByZero`), a trailing wildcard default arm is dead code —
+  -- Lean's match compiler rejects it outright ("Redundant alternative") rather than silently
+  -- ignoring it, so it must be omitted in that case rather than always appended.
+  let arithAlts :=
+    if arithErrorCtorNames.all ctorStrs.contains then arithArms else arithArms.push arithDefault
   let arithDiscrs ← #[(aeWc : Term)].mapM mkDiscr
   let arithMatch ← `(fun $aeWc => match $[$arithDiscrs],* with $arithAlts:matchAlt*)
   -- `fromFramework`: every case maps to one fixed fallback constructor,

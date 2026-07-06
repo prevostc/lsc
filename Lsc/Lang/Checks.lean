@@ -1,5 +1,6 @@
 import Lsc.Lang.AST
 import Lsc.Lib.Wei.Syntax
+import Lsc.Lib.Wad.Syntax
 import Lsc.Selectors
 
 namespace Lsc
@@ -28,6 +29,11 @@ partial def visitWeiExpr (e : Wei.Expr) : VisitResult :=
   { arithErrors := Wei.arithErrors e
   , usesUInt256Arith := false }
 
+/-- Mirrors `visitWeiExpr`, for `Wad.Expr`'s checked mul/div coverage. -/
+partial def visitWadExpr (e : Wad.Expr) : VisitResult :=
+  { arithErrors := Wad.arithErrors e
+  , usesUInt256Arith := false }
+
 partial def visitCoreExpr : {t : Ty} → CoreExpr t → VisitResult
   | _, .lit _ l =>
     match l with
@@ -43,6 +49,7 @@ partial def visitCoreExpr : {t : Ty} → CoreExpr t → VisitResult
 
 partial def visitExpr : {t : Ty} → Expr t → VisitResult
   | .wei, e => visitWeiExpr e
+  | .wad, e => visitWadExpr e
   | .uint256, e => visitCoreExpr e
   | .bool, e => visitCoreExpr e
   | .address, e => visitCoreExpr e

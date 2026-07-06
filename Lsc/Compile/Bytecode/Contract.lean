@@ -58,14 +58,34 @@ private def selectorDispatch (fns : List FunctionDef) (ctx : Ctx) : List Instr �
   ] ++ dispatchRevert
   (instrs, ctx1)
 
+/-- Decode each of `fn`'s ABI parameters from calldata (one 32-byte-aligned word per parameter,
+starting right after the 4-byte selector — `uint256`/`bool`/`address`/`wei`/`wad` are all a
+single word wide, see `Ty.abiStr`) onto the stack, `bindLocal`-ing each one under its declared
+parameter name exactly as `codegenStmt`'s `.letBind` case already does for `let`-locals — so the
+function body's `Expr.var paramName` references (lowered to `IR.Expr.local paramName` by
+`Lower.lean`, unchanged) resolve via the ordinary `Ctx.lookupDepth`/`DUP` mechanism with zero
+further special-casing. -/
+private partial def emitParamLoadsGo :
+    List (Ident × Ty) → Nat → List Instr × Ctx → List Instr × Ctx
+  | [], _, acc => acc
+  | (name, _ty) :: rest, i, (instrs, c) =>
+    let offset := 4 + 32 * i
+    let c1 := { c with stackDepth := c.stackDepth + 1 }
+    let c2 := c1.bindLocal name
+    emitParamLoadsGo rest (i + 1) (instrs ++ [.push offset, .op CALLDATALOAD], c2)
+
+private def emitParamLoads (ctx : Ctx) (params : List (Ident × Ty)) : List Instr × Ctx :=
+  emitParamLoadsGo params 0 ([], ctx)
+
 private def emitFunctionBodies (cfg : Config) (fns : List FunctionDef) (ctx : Ctx) :
     Except String (List Instr × Ctx) :=
   fns.foldlM (init := ([], ctx)) fun (acc, ctx) fn => do
     let ir ← Lower.stmt cfg fn.body
     let fnCtx := Ctx.forFunction ctx fn.name
-    let (body, ctx') ← Codegen.stmt fnCtx (IR.Opt.optimizeStmt ir)
+    let (paramInstrs, fnCtx') := emitParamLoads fnCtx fn.params
+    let (body, ctx') ← Codegen.stmt fnCtx' (IR.Opt.optimizeStmt ir)
     let ctxOut := Ctx.afterFunction ctx'
-    .ok (acc ++ [.jumpDest fn.name] ++ body ++ [.op STOP], ctxOut)
+    .ok (acc ++ [.jumpDest fn.name] ++ paramInstrs ++ body ++ [.op STOP], ctxOut)
 
 private def externalFunctions (c : ContractDef) : List FunctionDef :=
   c.functions.filter fun fn => fn.kind == .external

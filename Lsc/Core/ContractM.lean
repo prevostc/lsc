@@ -154,6 +154,7 @@ inductive Val : Ty → Type
   | bool : Bool → Val .bool
   | addr : Address → Val .address
   | wei : Wei → Val .wei
+  | wad : Wad → Val .wad
   | unit : Val .unit
 
 namespace Val
@@ -170,6 +171,12 @@ def weiOf (v : Val .wei) : Wei :=
 @[simp]
 theorem weiOf_wei (w : Wei) : Val.weiOf (.wei w) = w := rfl
 
+def wadOf (v : Val .wad) : Wad :=
+  match v with | .wad w => w
+
+@[simp]
+theorem wadOf_wad (w : Wad) : Val.wadOf (.wad w) = w := rfl
+
 def addrOf (v : Val .address) : Address :=
   match v with | .addr a => a
 
@@ -182,6 +189,7 @@ def eq {t : Ty} (a b : Val t) : Bool :=
   | .bool, .bool x, .bool y => x == y
   | .address, .addr x, .addr y => x == y
   | .wei, .wei x, .wei y => x == y
+  | .wad, .wad x, .wad y => x == y
   | .unit, .unit, .unit => true
   | _, _, _ => false
 

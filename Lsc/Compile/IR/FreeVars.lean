@@ -10,6 +10,8 @@ def freeVarsExpr : Expr → List Ident
   | .sload _ => []
   | .add a b => freeVarsExpr a ++ freeVarsExpr b
   | .sub a b => freeVarsExpr a ++ freeVarsExpr b
+  | .mul a b => freeVarsExpr a ++ freeVarsExpr b
+  | .div a b => freeVarsExpr a ++ freeVarsExpr b
   | .lt a b => freeVarsExpr a ++ freeVarsExpr b
   | .eq a b => freeVarsExpr a ++ freeVarsExpr b
   | .isZero a => freeVarsExpr a

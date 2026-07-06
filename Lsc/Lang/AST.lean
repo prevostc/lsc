@@ -1,15 +1,19 @@
 import Lsc.Types
 import Lsc.Arithmetic
 import Lsc.Lib.Wei.Syntax
+import Lsc.Lib.Wad.Syntax
 
 namespace Lsc
 
-/-- Core type tags. Extension types (wad, ray, linear) live in optional libs. -/
+/-- Core type tags. `wei`/`wad` are lib-owned numeric types wired in exactly
+alike (see `Expr` below); further extension types (ray, linear) live in
+optional libs. -/
 inductive Ty
   | uint256
   | bool
   | address
   | wei
+  | wad
   | unit
   deriving Repr, DecidableEq
 
@@ -44,10 +48,11 @@ inductive CoreExpr : Ty → Type
   | or : CoreExpr Ty.bool → CoreExpr Ty.bool → CoreExpr Ty.bool
   | unit : CoreExpr Ty.unit
 
-/-- Typed expressions: Wei lives in `Lib.Wei`; primitives in `CoreExpr`. -/
+/-- Typed expressions: Wei/Wad live in `Lib.Wei`/`Lib.Wad`; primitives in `CoreExpr`. -/
 def Expr : Ty → Type :=
   fun t => match t with
   | .wei => Wei.Expr
+  | .wad => Wad.Expr
   | .uint256 | .bool | .address | .unit => CoreExpr t
 
 abbrev ExprAny := Sigma Expr

@@ -91,6 +91,14 @@ private partial def codegenExpr (ctx : Ctx) (e : Expr) : Except String (List Ins
     let (i1, c1) ← codegenExpr ctx a
     let (i2, c2) ← codegenExpr c1 b
     .ok (i1 ++ i2 ++ emitOp SUB, { c2 with stackDepth := c2.stackDepth - 1 })
+  | .mul a b => do
+    let (i1, c1) ← codegenExpr ctx a
+    let (i2, c2) ← codegenExpr c1 b
+    .ok (i1 ++ i2 ++ emitOp MUL, { c2 with stackDepth := c2.stackDepth - 1 })
+  | .div a b => do
+    let (i1, c1) ← codegenExpr ctx a
+    let (i2, c2) ← codegenExpr c1 b
+    .ok (i1 ++ i2 ++ emitOp DIV, { c2 with stackDepth := c2.stackDepth - 1 })
   | .lt a b => do
     let (i1, c1) ← codegenExpr ctx a
     let (i2, c2) ← codegenExpr c1 b

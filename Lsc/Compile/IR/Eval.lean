@@ -57,6 +57,8 @@ def evalExpr (st : IRState) (e : Expr) : Nat :=
   | .sload slot => st.lookupSlot slot
   | .add a b => evalExpr st a + evalExpr st b
   | .sub a b => evalExpr st a - evalExpr st b
+  | .mul a b => evalExpr st a * evalExpr st b
+  | .div a b => evalExpr st a / evalExpr st b
   | .lt a b => if evalExpr st a < evalExpr st b then 1 else 0
   | .eq a b => if evalExpr st a == evalExpr st b then 1 else 0
   | .isZero a => if evalExpr st a == 0 then 1 else 0
@@ -74,6 +76,12 @@ def evalExpr (st : IRState) (e : Expr) : Nat :=
 
 @[simp] theorem evalExpr_sub (st : IRState) (a b : Expr) :
     evalExpr st (.sub a b) = evalExpr st a - evalExpr st b := rfl
+
+@[simp] theorem evalExpr_mul (st : IRState) (a b : Expr) :
+    evalExpr st (.mul a b) = evalExpr st a * evalExpr st b := rfl
+
+@[simp] theorem evalExpr_div (st : IRState) (a b : Expr) :
+    evalExpr st (.div a b) = evalExpr st a / evalExpr st b := rfl
 
 @[simp] theorem evalExpr_lt (st : IRState) (a b : Expr) :
     evalExpr st (.lt a b) = if evalExpr st a < evalExpr st b then 1 else 0 := rfl

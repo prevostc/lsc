@@ -9,6 +9,8 @@ inductive Expr where
   | sload : Nat → Expr
   | add : Expr → Expr → Expr
   | sub : Expr → Expr → Expr
+  | mul : Expr → Expr → Expr
+  | div : Expr → Expr → Expr
   | lt : Expr → Expr → Expr
   | eq : Expr → Expr → Expr
   | isZero : Expr → Expr

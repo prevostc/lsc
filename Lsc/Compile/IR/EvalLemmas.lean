@@ -58,6 +58,14 @@ theorem evalExpr_setLocal_unused (st : IRState) (name : Ident) (v : Nat) (e : Ex
     simp only [freeVarsExpr, List.mem_append] at h
     simp [evalExpr, evalExpr_setLocal_unused st name v a (not_mem_or_left h),
       evalExpr_setLocal_unused st name v b (not_mem_or_right h)]
+  | .mul a b =>
+    simp only [freeVarsExpr, List.mem_append] at h
+    simp [evalExpr, evalExpr_setLocal_unused st name v a (not_mem_or_left h),
+      evalExpr_setLocal_unused st name v b (not_mem_or_right h)]
+  | .div a b =>
+    simp only [freeVarsExpr, List.mem_append] at h
+    simp [evalExpr, evalExpr_setLocal_unused st name v a (not_mem_or_left h),
+      evalExpr_setLocal_unused st name v b (not_mem_or_right h)]
   | .lt a b =>
     simp only [freeVarsExpr, List.mem_append] at h
     simp [evalExpr, evalExpr_setLocal_unused st name v a (not_mem_or_left h),
@@ -90,6 +98,14 @@ theorem evalExpr_obs_agree (st1 st2 : IRState) (e : Expr) (hobs : observablyEqua
     simp [evalExpr, evalExpr_obs_agree st1 st2 a hobs (λ id hmem => hlookup id (Or.inl hmem)),
       evalExpr_obs_agree st1 st2 b hobs (λ id hmem => hlookup id (Or.inr hmem))]
   | .sub a b =>
+    simp only [freeVarsExpr, List.mem_append] at hlookup ⊢
+    simp [evalExpr, evalExpr_obs_agree st1 st2 a hobs (λ id hmem => hlookup id (Or.inl hmem)),
+      evalExpr_obs_agree st1 st2 b hobs (λ id hmem => hlookup id (Or.inr hmem))]
+  | .mul a b =>
+    simp only [freeVarsExpr, List.mem_append] at hlookup ⊢
+    simp [evalExpr, evalExpr_obs_agree st1 st2 a hobs (λ id hmem => hlookup id (Or.inl hmem)),
+      evalExpr_obs_agree st1 st2 b hobs (λ id hmem => hlookup id (Or.inr hmem))]
+  | .div a b =>
     simp only [freeVarsExpr, List.mem_append] at hlookup ⊢
     simp [evalExpr, evalExpr_obs_agree st1 st2 a hobs (λ id hmem => hlookup id (Or.inl hmem)),
       evalExpr_obs_agree st1 st2 b hobs (λ id hmem => hlookup id (Or.inr hmem))]

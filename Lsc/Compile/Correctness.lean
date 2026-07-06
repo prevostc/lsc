@@ -58,19 +58,19 @@ theorem incrementLet_ir_binds_symbolic (v : Nat) :
   have hne : "n" ≠ "lsc_n_old" := by decide
   have h3 : st2.lookupLocal "lsc_n_old" = v := by
     change (st1.setLocal "n" (v + 1)).lookupLocal "lsc_n_old" = v
-    simpa [h1] using IRState.lookupLocal_setLocal_ne st1 "n" "lsc_n_old" (v + 1) hne
+    simp only [IRState.lookupLocal_setLocal_ne st1 "n" "lsc_n_old" (v + 1) hne, h1]
   have h4 : evalExpr st2 (.lt (.local "n") (.local "lsc_n_old")) = 0 := by
     simp [evalExpr_lt, h2, h3, Nat.not_lt.mpr (Nat.le_add_right v 1)]
   have hs1 : evalStmt st0 (.letBind "lsc_n_old" (.sload 0)) = st1 := by
     simp [evalStmt_letBind, evalExpr_sload, h0, st1]
   have hs2 : evalStmt st1 (.letBind "n" (.add (.local "lsc_n_old") (.lit 1))) = st2 := by
-    simp [evalStmt_letBind, evalExpr, evalExpr_add, evalExpr_local, evalExpr_lit, st1, st2, h1]
+    simp [evalStmt_letBind, evalExpr, st1, st2, h1]
   have hs3 : evalStmt st2 (.ifRevert (.lt (.local "n") (.local "lsc_n_old"))) = st2 := by
     simp [evalStmt_ifRevert, h4]
   have h5 : evalStmt (IRState.fromSlots [(0, v)]) Wei.incrementLetIR = st2 := by
     change evalStmt st0 Wei.incrementLetIR = st2
     dsimp [Wei.incrementLetIR, st1, st2]
-    simp [evalStmt_seq, hs1, hs2, hs3, h0]
+    simp [h0]
   simp [h5, h2]
 
 /-- The IR produced by `Wei.lowerLetBind` for `incrementLet` (see
