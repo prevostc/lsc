@@ -16,7 +16,7 @@ namespace Lsc.SafeExternalCallTest
 
 /-- A representative `safeExternalCall`, addressing a `local "target"` callee with calldata
 already sitting at memory `[0, 4)` — the exact shape `exec Token.transfer(recipient, amount);`
-would eventually lower to once real ABI-encoded-calldata generation lands (`TODO.md`'s N-contract
+would eventually lower to once real ABI-encoded-calldata generation lands (`docs/todo/backlog.md`'s N-contract
 dispatch registry item). -/
 def sampleCallNoBoolCheck : IR.Stmt :=
   .safeExternalCall (.local "target") (.lit 0) (.lit 4) false

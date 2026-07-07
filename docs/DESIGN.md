@@ -127,14 +127,11 @@ The original plan worried that `deriving ContractStorage` couldn't tell an `Addr
 
 Function bodies are written in a small, dss2024-style bracket-delimited grammar (`Lsc/Lang/Syntax.lean`): `declare_syntax_cat lscExpr` and `declare_syntax_cat lscStmt` introduce two **brand-new** syntax categories that are inert everywhere except inside the explicit `tx <name> { ... }` command-level delimiter, which is itself the only production that parses into them from top-level Lean syntax. Because nothing outside `tx { ... }` ever parses into `lscExpr`/`lscStmt`, there is no possibility of colliding with any existing Lean notation (`:=`, `=`, `doElem`, etc.) — the elaborator (`elabLscStmt`/`elabLscExpr`) has full `TermElabM` control over the whole block, threading a `locals : List (String × FieldKind)` association list by hand through statement elaboration. Each `tx` block is buffered when parsed, and the trailing `derive_contract`/`derive_contract_def` command later flushes it into a plain `def <name> : Lsc.Stmt := ...`.
 
-**Why this replaced the earlier `do`-notation-over-`TxM` approach.** An intermediate surface (`Lsc/Lang/TxM.lean`) built `Stmt` values via ordinary Lean `do`-notation over a small writer monad (`TxM α := WriterT Stmt Id α`), reusing Lean's stdlib `term`/`doElem` categories instead of declaring new ones. That approach worked, but every piece of "assignment-shaped" or "keyword-shaped" sugar it wanted had to route around a real, empirically-verified parser conflict with an *existing* Lean production, rather than being a clean grammar choice:
-
-- A generic `σ.field := e` write notation was tried twice (as a `doElem`-level macro, and later as a lower-level raw-`Syntax`-indexed macro) and dropped both times: `:=` is already claimed by Lean's builtin mutable-local-reassignment `doElem` (`doReassign`), so a second `doElem` with the identical `ident := term` shape either failed to declare at all (a quotation pattern-match rejection) or produced an ambiguous `choice` node at every `:=`-assignment site that Lean's `do`-block elaborator refused to resolve (`unexpected do-element of kind choice`).
-- `σ.field = e` was tried next, on the theory that a term-level `=` (an ordinary `infix:50` notation, not a `doElem`) might fare better, since term-level ambiguity *can* sometimes be resolved by type-checking each alternative. It didn't: a second `ident " = " term : term` production doesn't even produce a resolvable `choice` node — the parser deterministically shadows `Eq` for *every* `ident = term` occurrence project-wide, breaking ordinary equality checks and proof hypotheses (`b = false`, `... = rfl`) throughout the codebase. This was reverted immediately.
-- A generic type-tagged read family (`wei σ.field`, `bool σ.field`, `addr σ.field`, `u256 σ.field`) and a `set σ.field e` write family stood in as the workaround for the two failed attempts above, plus a `var x := e` binder (dispatching via a `LetBindable` typeclass on the bound value's Lean type) to force an evaluate-once `Stmt.letBind` instead of a plain, storage-read-re-evaluating Lean `let`.
-- Even `emit`'s naming had a parser-conflict history: sharing the `emit` spelling between the real-constructor sugar and its underlying raw primitive caused declaration-site ambiguity, resolved only by renaming the primitive out of the way (`emitEvent`) rather than the sugar.
-
-These were genuine, hard-won empirical findings (documented in full in `TxM.lean`'s docstrings) about the limits of layering new notation onto Lean's existing `term`/`doElem` grammar — not mistakes, and not wasted effort: they are exactly what motivated moving to fresh `declare_syntax_cat`s instead of trying to patch the `do`-notation approach further. With a fresh, purpose-built grammar, none of these workarounds are needed: `tx { ... }` has its own `σ.field = e;` assignment production, its own `let x = e;` binder, and its own `require`/`revert`/`emit` statement forms, none of which compete with any Lean builtin because `lscStmt`/`lscExpr` are categories Lean's core parser never enters except through the `tx { ... }` delimiter. `TxM.lean` itself remains in the codebase as the underlying builder/combinator layer the `tx { ... }` elaborator desugars into, and is still directly exercised by `Lang/TxMTest.lean`.
+This grammar replaced an earlier `do`-notation-over-`TxM` surface, dropped after repeated parser
+conflicts with Lean's builtin `doElem`/`term` productions — see
+[`docs/decisions/0001-txm-superseded-by-syntax.md`](decisions/0001-txm-superseded-by-syntax.md)
+for the full history. `TxM.lean` remains in the codebase as the underlying builder/combinator
+layer `tx { ... }` desugars into, still directly exercised by `Lang/TxMTest.lean`.
 
 What the current `tx { ... }` grammar actually provides (see `Syntax.lean` and `Counter.lean` for the working source):
 
@@ -678,8 +675,8 @@ theorem setFee_only_owner     ... (cap : Capability .Owner) ...
 
 The following are left to the implementer and should not be added to this document:
 
-- Lean module structure and file organization (see IMPLEMENTATION.md)
-- Exact `macro_rules` syntax for the surface DSL (see IMPLEMENTATION.md)
+- Lean module structure and file organization (see `framework/IMPLEMENTATION.md`)
+- Exact `macro_rules` syntax for the surface DSL (see `framework/IMPLEMENTATION.md`)
 - EvmYulLean API usage details
 - ABI encoding implementation
 - Selector computation

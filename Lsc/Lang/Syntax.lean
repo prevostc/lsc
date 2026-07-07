@@ -4,58 +4,31 @@ import Lsc.Lang.Derive
 import Lean
 
 /-!
-# `lscExpr`/`lscStmt`: the full dss2024-style bracket-delimited grammar
+# `lscExpr`/`lscStmt`: the `tx { ... }` grammar
 
-Builds out the prototype's `tx <name> { ... }` delimiter (`require`-only) into the full
-minimal grammar the migration plan calls for: a fresh `lscExpr` expression category plus
-the remaining `lscStmt` statement productions (assignment, `revert`, `emit`, `if`/`else`,
-`var`), all elaborated directly into `Lsc.Stmt`/`Lsc.Expr` values, reusing
-`Lang/Derive.lean`'s `FieldKind`/`getStructureFieldKinds`/`elabErrorCtorName`/
-`getCtorFieldKind` machinery rather than reimplementing any of it.
+The contract-author surface: a fresh `lscExpr` expression category plus `lscStmt` statement
+productions (assignment, `require`/`revert`, `emit`, `if`/`else`, `let`), elaborated directly
+into `Lsc.Stmt`/`Lsc.Expr` values. Reuses `Lang/Derive.lean`'s `FieldKind`/
+`getStructureFieldKinds`/`elabErrorCtorName`/`getCtorFieldKind` machinery rather than
+reimplementing it. See `docs/decisions/0001-txm-superseded-by-syntax.md` for why this grammar
+exists instead of extending `TxM.lean`'s `do`-notation surface.
 
-## `σ.field` resolution: fresh grammar + `FieldKind` introspection (plan's preferred option)
+A few mechanisms worth knowing when reading this file:
 
-`σ.field` is *not* parsed as its own dedicated production — like `msg.sender`, Lean's lexer
-already tokenises a dotted identifier (`σ.field`) as a single compound `Name`
-(`.str (.str .anonymous "σ") "field"`, see `TxM.lean`'s docstring on `sigmaFieldName?`,
-reused here directly), so a single `ident` production in `lscExpr` covers plain local names,
-`σ.field`, and `msg.sender` alike; the elaborator (`elabLscExpr`) dispatches on the parsed
-`Name`'s shape. For the `σ.field` case specifically, this file resolves the field's storage
-`Ty` by calling `Lsc.Deriving.getStructureFieldKinds` against the contract's *real* storage
-`structure` — found via a new `Lsc.Deriving.contractStorageExt` registry (a same-namespace
-`Name → Name` map, `derive_contract_dsl`-populated, analogous to the existing
-`contractTypesExt`), **not** by depending on the `deriving ContractStorage`-generated
-`$ns.σ.$field` constants. This matches the plan's explicit "avoids depending on the
-`deriving ContractStorage`-generated `σ` namespace constants going forward" preference (the
-prototype file's alternative, reusing those generated constants via a `term` antiquotation,
-was not needed — it was reasonably simple to introspect the structure directly).
-
-## `let x = e;`: implemented, not deferred
-
-Because this elaborator has full `TermElabM` control over the whole `tx { ... }` block (unlike
-`TxM.lean`'s `do`-notation macro layer, which only ever sees one `doElem` at a time with no
-persistent side channel), it can thread an explicit `locals : List (String × FieldKind)`
-association list through statement elaboration by hand — no typeclass dispatch
-(`LetBindable`/`SetSigma`) is needed at all, since every `lscExpr`/`lscStmt` node's `FieldKind`
-is fully determined by *static* lookups (`locals`, `getStructureFieldKinds`, or the operator's
-own fixed contract) rather than by real Lean-level type inference. `let n = σ.number +? 1;`
-therefore emits exactly one `Stmt.letBind`, and any later `n` in the same `tx` block resolves
-to a `storageGet`-avoiding `Expr.var` reference — the same once-evaluated semantics
-`TxM.lean`'s `letWei`/`var` provide, with a plainer, Rust-shaped surface syntax (`let` keyword,
-plain `=` rather than `:=` — no collision with the separate `σ.field = e;` assignment
-production, since that one has no leading keyword and these remain unambiguous by first token).
-
-## Arithmetic (`+?`/`-?`): direct dispatch on `FieldKind`, no typeclass hack
-
-`TxM.lean`'s `WeiAddChecked`/`LetBindable`/`SetSigma` typeclasses exist purely to let plain
-Lean notation (`+?`, `var`, `set`) dispatch on a *value*'s Lean type inside ordinary
-`do`-notation, where the elaborator has no other way to know which combinator to call. Here,
-every `lscExpr` node's `FieldKind` is already computed by `elabLscExpr` as it recurses, so
-`+?`/`-?` simply pattern-match on the already-known left/right `FieldKind`s directly — no
-typeclasses needed. `Wei.Expr`'s `addCheckedNat` (bare-`Nat` right-hand side, e.g.
-`σ.number +? 1`) is detected syntactically (`lscExprAsNatLit?`, peeking at the raw `lscExpr`
-node before elaborating it) so `1` doesn't need to round-trip through a `CoreExpr`/`Wei.Expr`
-literal it isn't.
+- **`σ.field`** is not its own grammar production: Lean's lexer already tokenises the dotted
+  identifier as one compound `Name`, so a single `ident` production in `lscExpr` covers plain
+  local names, `σ.field`, and `msg.sender` alike; `elabLscExpr` dispatches on the parsed
+  `Name`'s shape and resolves `σ.field`'s storage `Ty` via `Lsc.Deriving.getStructureFieldKinds`
+  against the contract's real storage `structure`.
+- **`let x = e;`** is implemented directly (not deferred behind a typeclass): the elaborator
+  threads an explicit `locals : List (String × FieldKind)` association list through statement
+  elaboration by hand, so every node's `FieldKind` is a static lookup. `let n = σ.number +? 1;`
+  emits one `Stmt.letBind`; later references to `n` resolve to an `Expr.var`, not a re-evaluated
+  `storageGet` — same once-evaluated semantics as `TxM.lean`'s `letWei`/`var`, without needing
+  its typeclass dispatch.
+- **`+?`/`-?`** pattern-match directly on the already-known left/right `FieldKind`s (no
+  typeclass needed, unlike `TxM.lean`'s `WeiAddChecked`). A bare-`Nat` right-hand side (e.g.
+  `σ.number +? 1`) is detected syntactically (`lscExprAsNatLit?`) before elaboration.
 -/
 
 open Lean Lean.Elab Lean.Elab.Command Lean.Elab.Term Lean.Meta Lean.Parser.Term
@@ -189,50 +162,24 @@ returned value of — harmless, but not a construct `tx` authors have any reason
 The `view` elaborator below is the only place that ever emits this node from surface syntax. -/
 syntax (name := lscReturn) "return " lscExpr ";" : lscStmt
 
-/-- `exec Target.fn(arg1, arg2);` / `read Target.fn(arg1, arg2);` — REAL, black-box
-cross-contract invocations into a specific, statically-named other contract. `exec` is a
-state-mutating invocation; `read` is a read-only one whose resulting callee state/log changes
-are always discarded (see `Lsc.ContractM.PairM.exec`/`PairM.read` in `Core/ContractM.lean` for
-the exact semantics, and `examples/escrow/src/Escrow.lean` for a real usage).
+/-- `exec Target.fn(arg1, arg2);` / `read Target.fn(arg1, arg2);` — black-box cross-contract
+invocations into a specific, statically-named other contract. `exec` is state-mutating; `read`
+discards the callee's resulting state/log changes. See `Lsc.ContractM.PairM.exec`/`PairM.read`
+(`Core/ContractM.lean`) for the semantics and `docs/decisions/0003-exec-read-black-box.md` for
+why they're black box; `examples/escrow/src/Escrow.lean` has a real usage.
 
-Deliberately **not** named `call`/`staticcall` (which would imply exact EVM-opcode-level
-semantics like gas forwarding or EVM-enforced write-protection this framework doesn't actually
-model) and not `query` (ambiguous about whether it could still write) — `exec`/`read` are plain,
-unambiguous verbs for "black box, definitely mutates" vs. "black box, definitely doesn't".
+`Target.fn` is a single dotted identifier naming the callee's tx-derived function directly (e.g.
+`Token.transfer`). Arguments must be plain identifiers — real Lean values (`tx` params or
+in-scope contract-local `def`s), not arbitrary `lscExpr` sub-expressions like `amount +? 1` —
+since the callee expects real Lean values, not this contract's own AST.
 
-Both are **black box**: unlike the earlier `externalCall2` this replaces, there is no
-`using toErr, toEvent` clause and no requirement that the caller know the callee's exact
-`ErrT`/`ET` types at all. On success the caller only ever observes the callee's return value; on
-failure the caller observes a single opaque `FrameworkError.ExternalCallFailed` (via
-`ContractErrors.fromFramework`), never the callee's real error. Neither call folds the callee's
-events into the caller's own event log (mirrors real EVM logs — a callee's logs are separate
-topics, not re-emitted under the caller's own ABI).
-
-`Target.fn` is a single dotted identifier (lexed as one token — same trick `σ.field`/
-`msg.sender` already rely on, see this file's module docstring) naming the callee contract's
-tx-derived function directly, e.g. `Token.transfer`. `arg1`, `arg2`, ... are plain identifiers —
-either `tx` parameters or (bare, unqualified) contract-local `def`s in scope — spliced as
-genuine Lean *values* (not `lscExpr`/`CoreExpr` AST nodes) directly into the callee call, since
-the callee (`Target.fn : ty1 → ty2 → ... → Stmt`) expects real Lean values, not this contract's
-own `Expr`/`Stmt` AST. This is the one deliberate, documented restriction versus the rest of
-`lscExpr`'s grammar: arguments to `exec`/`read` cannot yet be arbitrary `lscExpr`
-sub-expressions (e.g. `amount +? 1`), only bare names — sufficient for `Escrow.release`, and a
-narrow, well-scoped follow-up if a future contract needs more.
-
-**Whole-`tx`-body monad switch:** any `tx` whose body contains one or more of these nodes (at
-top level only — see `stmtsUseExecOrRead` below, and its "not nested" scope note) has its
-*entire* body elaborated as a `Lsc.ContractM.PairM S T E Err Unit` term instead of the usual
-`Lsc.Stmt` value — `T`/`ET`/`ErrT` are never named explicitly here at all, left to ordinary Lean
-unification against `Target.fn`'s result type (via the existing `Coe Stmt (ContractM T ET ErrT
-Unit)` instance, `Lang/TxM.lean`) once elaborated — see `elabExecOrReadTerm`/`elabStmtListPairM`/
-`flushContractTxs` below for exactly how. Ordinary (non-`exec`/`read`) statements around it keep
-using the plain `lscStmt`/`Lsc.Stmt` grammar unchanged; they are just individually lifted into
-`PairM` via `PairM.liftCaller ∘ Stmt.eval` wrapping (see `elabStmtListPairM`), the same segments
-a plain `tx` would have compiled to anyway. `@nonreentrant` is still required — enforced
-immediately here, by `tx`'s own elaborator (see below), since a cross-contract `tx` is
-deliberately never added to `ContractDef.functions` (see `Lsc.Deriving.contractCrossCallExt`'s
-docstring) and so could never be reached by a deferred, `ContractDef`-walking check at all —
-this is this feature's own, immediate enforcement for this representation. -/
+**Whole-`tx`-body monad switch:** a `tx` whose body contains one of these nodes at top level has
+its *entire* body elaborated as a `PairM S T E Err Unit` term instead of the usual `Lsc.Stmt`
+value (see `elabExecOrReadTerm`/`elabStmtListPairM`/`flushContractTxs` below); ordinary
+statements around it are individually lifted into `PairM` via `PairM.liftCaller`.
+`@nonreentrant` is required immediately by `tx`'s own elaborator, since a cross-contract `tx` is
+never added to `ContractDef.functions` (`Lsc.Deriving.contractCrossCallExt`) and so couldn't be
+caught by a later, `ContractDef`-walking check. -/
 syntax (name := lscExec) "exec " ident " ( " ident,* " ) " ";" : lscStmt
 
 /-- See `lscExec`'s docstring — the read-only counterpart. -/
@@ -782,16 +729,11 @@ def elabStmtListPairM (storageName : Name) (locals params : List (String × Lsc.
     segments := segments.push (← elabOrdinarySegment storageName locals params buf)
   composeSegments segments.toList
 
-/-- `tx <name> { <lscStmt>* }` — the delimiter/entry point, unchanged in shape from the
-prototype (see that file's original docstring for why this command-level shape was chosen).
-Unlike the prototype, this no longer elaborates the body immediately: doing so required
-`σ.field`'s storage `Ty` (via `Lsc.Deriving.currContractStorageName`) to already be
-registered, which forced `derive_contract_dsl` to run before every `tx` and `derive_contract_def`
-to run after every `tx`, permanently straddling any single merged macro call. Instead, `tx` just
-buffers its raw `lscStmt*` syntax under the current namespace
-(`Lsc.Deriving.contractTxSyntaxExt`); `Lsc.Deriving.flushContractTxs` (run by
-`derive_contract_def`/`derive_contract`) elaborates and emits the real `def name : Stmt := ...`
-declarations later, all at once.
+/-- `tx <name> { <lscStmt>* }` — the delimiter/entry point. Buffers its raw `lscStmt*` syntax
+under the current namespace (`Lsc.Deriving.contractTxSyntaxExt`) rather than elaborating
+immediately; `Lsc.Deriving.flushContractTxs` (run by `derive_contract_def`/`derive_contract`)
+elaborates and emits the real `def name : Stmt := ...` declarations later, all at once — see
+`docs/decisions/0007-tx-body-elaboration-deferred.md` for why.
 
 `@nonreentrant` — decorates the immediately-following `tx`, marking it as expected to perform a
 real cross-contract call (`exec`/`read`). This `elab` itself requires the decorator on (and only

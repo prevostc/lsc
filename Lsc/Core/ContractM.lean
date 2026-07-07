@@ -23,17 +23,8 @@ inductive FrameworkError
   | Reentrant
   | Unauthorized
   | InvalidSelector
-  /-- A black-box cross-contract invocation (`PairM.exec`/`PairM.read`, see their docstrings)
-      failed. The caller never learns the callee's real error — only that the call did not
-      succeed — which is what makes `exec`/`read` genuinely black box: a caller's own error type
-      never needs to mention or convert the callee's. At today's Lean-semantics level this is the
-      *only* way a black-box call fails (`exec`/`read` match the callee's `Except` result
-      directly) — see `exec_never_silently_swallows_failure` below. Note: the real EVM `CALL`
-      codegen path (`Lsc/Compile/Yul.lean`'s `safeExternalCall` lowering) additionally reverts on
-      a callee returning an ABI-encoded `false` (the "non-compliant ERC20" pattern OpenZeppelin's
-      `SafeERC20.safeTransfer` guards against), but that is not yet wired to `exec`/`read` at all
-      and today produces a plain EVM revert with no distinguishable Lean-level error — see
-      `docs/reference/ESCROW.md` and `TODO.md`. -/
+  /-- A black-box cross-contract call (`PairM.exec`/`PairM.read`) failed; the only way such a
+      call can fail today (`docs/decisions/0003-exec-read-black-box.md`). -/
   | ExternalCallFailed
   deriving Repr, DecidableEq
 
@@ -121,41 +112,16 @@ def caller : ContractM S E Err Address :=
 
 /-! ## Real cross-contract calls: `PairM` — two *different* storage types
 
-A caller contract calling into a genuinely different callee contract, with its own storage
-type `T`, its own event type `ET`, and its own error type `ErrT` — all distinct from the
-caller's `S`/`E`/`Err`.
+`PairM S T E Err A` threads an explicit pair of states, `ContractState S × ContractState T`,
+through a transaction where `S`/`E`/`Err` are the caller's and `T`/`ET`/`ErrT` (the callee's) are
+genuinely different types. `exec`/`read` invoke the callee's `ContractM T ET ErrT A`, black box.
+Design rationale: `docs/decisions/0002` (statically-typed pair vs. N-contract registry) and
+`docs/decisions/0003` (black box, no `toErr`/`toEvent`).
 
-**Chosen model (deliberately narrow, not a generic N-contract registry):** rather than
-building a full `WorldSpec`/address-book/ABI-encoded-calldata dispatch layer (explicitly out
-of scope — see `TODO.md`), a caller contract that is specifically written to call one named
-other contract type threads an explicit **pair of states**, `ContractState S × ContractState
-T`, through its whole transaction. `PairM S T E Err A` is exactly `ContractM`'s shape
-(`ContractState S → ContractState S → Except Err (...)`-style state-passing), generalized to
-two states. `exec`/`read` are the pair-level primitives that actually invoke the callee's
-`ContractM T ET ErrT A` computation — **black box**: the caller never needs to know the
-callee's `ErrT`/`ET` at all (no `toErr`/`toEvent` conversion functions), only ever observing
-either the callee's return value or a single opaque `FrameworkError.ExternalCallFailed`. This
-is deliberate (see the plan discussion in `docs/reference/INTERFACES.md`): treating an
-external call as an opaque, "could fail in unknown ways" boundary is what lets composable DeFi
-contracts be written and proved without each caller needing to pin down every possible
-callee's exact error/event taxonomy up front. A future, explicitly opt-in "interface" layer
-(also `INTERFACES.md`) may let a caller trade some of that flexibility for a stronger, more
-specific typed contract when the callee's real spec is known and trusted.
-
-**Reentrancy, made structural rather than merely guarded:** because the callee's type
-`ContractM T ET ErrT A` has no way to mention `S`, `PairM`, `exec`, or `read` at all, it is
-*architecturally impossible* for a callee written this way to call back into the caller —
-there is no nested `exec`/`read` it could even attempt to write down. Both still carry a
-`locked`-flag guard (checked against the *caller's* `S` state), to cover the one residual
-scenario this model does *not* rule out structurally: `release` being invoked *while the
-caller state is already `locked`* (e.g. from some future, more general dispatch path that
-reenters `Escrow` itself mid-call) — see `exec_locked` below.
-
-**Scope limitation:** this only supports a *statically fixed pair* of specific, named
-contract types (`S`/`T` are concrete types chosen by the contract author, e.g. `Escrow`
-hard-codes `T := TokenStorage`), not a general address-indexed N-contract world. There is
-also no real ABI-encoded calldata or EVM `CALL` codegen for this yet — see
-`Lsc/Compile/Lower.lean` and `examples/escrow`'s docs for the concrete follow-up scope. -/
+Since the callee's type can't mention `S`/`PairM`/`exec`/`read`, it's architecturally impossible
+for a callee to call back into the caller. Both primitives still carry a `locked`-flag guard on
+the *caller's* state for the one residual case this doesn't rule out structurally: being invoked
+while the caller is already `locked` — see `exec_locked` below. -/
 def PairM (S T E Err : Type) (A : Type) : Type :=
   ContractState S → ContractState T →
     Except Err (A × ContractState S × ContractState T × List E)
@@ -213,15 +179,10 @@ def liftCallee (m : ContractM T E Err A) : PairM S T E Err A :=
     | .error e => .error e
     | .ok (a, t', log) => .ok (a, s, t', log)
 
-/-- The black-box, state-mutating cross-contract call primitive: invoke a callee contract with
-its own storage `T`, event type `ET`, and error type `ErrT`, threading and actually updating
-the callee's real state `T`. Unlike a whitebox conversion-based design, the caller never learns
-`ErrT`/`ET` at all: on success only the callee's return value `A` survives (its events are
-*not* folded into the caller's own log `E` — mirrors real EVM logs, where a callee's logs are
-separate topics, not re-emitted under the caller's own ABI); on failure the caller observes a
-single opaque `FrameworkError.ExternalCallFailed`, never the callee's real `ErrT`. Guarded by
-the caller's `locked` flag (see the section docstring above for why real reentrancy is already
-ruled out structurally by `callee`'s type, and what residual case this guard still covers). -/
+/-- The black-box, state-mutating cross-contract call primitive: invokes `callee` against its
+real state `T`, actually updating it. On success only `A` survives (the callee's events are not
+folded into `E`); on failure the caller observes a single opaque `ExternalCallFailed`, never
+`ErrT`. Guarded by the caller's `locked` flag — see the section docstring above. -/
 def exec [ContractErrors Err] {ET ErrT : Type} (callee : ContractM T ET ErrT A) :
     PairM S T E Err A :=
   fun s t =>
@@ -254,13 +215,10 @@ theorem exec_unlocked_err [ContractErrors Err] {ET ErrT : Type} (callee : Contra
       .error (ContractErrors.fromFramework .ExternalCallFailed) := by
   simp [exec, h, hcall]
 
-/-- The black-box, read-only cross-contract call primitive: like `exec`, but **discards** any
-state change and events `callee` would have produced — only the return value `A` survives
-(when it succeeds at all). The callee's underlying `ContractM T ET ErrT A` value is not
-prevented from *declaring* a mutation; `read` simply never lets it take effect from the
-caller's point of view, matching real `STATICCALL`-style semantics without claiming EVM-opcode
-fidelity (see `Lang/Syntax.lean`'s `lscRead` docstring for the surface-syntax naming
-rationale). -/
+/-- `exec`'s read-only counterpart: **discards** any state change/events `callee` would have
+produced — only the return value `A` survives. `callee` isn't prevented from *declaring* a
+mutation; `read` just never lets it take effect from the caller's point of view (real
+`STATICCALL`-style semantics, without claiming EVM-opcode fidelity). -/
 def read [ContractErrors Err] {ET ErrT : Type} (callee : ContractM T ET ErrT A) :
     PairM S T E Err A :=
   fun s t =>
@@ -293,20 +251,12 @@ theorem read_unlocked_err [ContractErrors Err] {ET ErrT : Type} (callee : Contra
       .error (ContractErrors.fromFramework .ExternalCallFailed) := by
   simp [read, h, hcall]
 
-/-- **Safe by default, made explicit**: `exec`/`read` never let a callee's failure pass through
-unnoticed — there is no return value a caller could accidentally ignore (unlike a raw Solidity
-`address.call(...)`, which returns `(bool success, bytes data)` that a careless caller really can
-just not check). Every one of `exec`'s three outcomes (`Reentrant`/`ExternalCallFailed`/success,
-`exec_locked`/`exec_unlocked_err`/`exec_unlocked_ok` above) is either a genuine `Except.error`
-that aborts the *whole* caller `tx` right there, or the callee's real success value — there is no
-fourth, silently-ignored-failure outcome to reach at all. This is a property of `exec`'s *type*,
-not just its current definition: `PairM S T E Err A`'s codomain is `Except Err (..)`, a sum type
-with no way to smuggle a "the call happened but nobody checked whether it worked" value through
-that isn't already a case this theorem covers. Stated once, generically over both branches
-(rather than duplicating `exec_locked`/`exec_unlocked_ok`/`exec_unlocked_err`'s case split), so a
-reader (or the real EVM `CALL`-codegen path this is meant to survive into, see
-`Lsc/Compile/Yul.lean`'s `safeExternalCall`) has one lemma to cite for "this primitive cannot
-silently swallow a callee failure." -/
+/-- **Safe by default, made explicit**: `exec` never lets a callee's failure pass through
+unnoticed — unlike Solidity's `address.call(...)`, whose `(bool success, bytes data)` a careless
+caller really can just not check. Every outcome is either a genuine `Except.error` aborting the
+whole caller `tx`, or the callee's real success value; there is no third,
+silently-ignored-failure outcome, since `PairM`'s codomain is `Except Err (..)`, a sum type with
+no room to smuggle one through. -/
 theorem exec_never_silently_swallows_failure [ContractErrors Err] {ET ErrT : Type}
     (callee : ContractM T ET ErrT A) (s : ContractState S) (t : ContractState T) :
     (∃ a s' t', exec (S := S) (E := E) (Err := Err) callee s t = .ok (a, s', t', [])) ∨
@@ -318,9 +268,7 @@ theorem exec_never_silently_swallows_failure [ContractErrors Err] {ET ErrT : Typ
     · exact .inr ⟨.ExternalCallFailed, rfl⟩
     · exact .inl ⟨_, _, _, rfl⟩
 
-/-- `read`'s counterpart of `exec_never_silently_swallows_failure` — identical shape, since
-`read` shares `exec`'s exact `locked`/callee-`Except` case split (it only differs in *discarding*
-the callee's state/log on success, never in how failure is surfaced). -/
+/-- `read`'s counterpart of `exec_never_silently_swallows_failure`. -/
 theorem read_never_silently_swallows_failure [ContractErrors Err] {ET ErrT : Type}
     (callee : ContractM T ET ErrT A) (s : ContractState S) (t : ContractState T) :
     (∃ a s', read (S := S) (E := E) (Err := Err) callee s t = .ok (a, s', t, [])) ∨

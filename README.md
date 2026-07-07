@@ -19,7 +19,7 @@ Lean 4.30 implementation of the [design](docs/) contract language.
 | `examples/counter/src/Counter.lean` | Reference contract, written with the `tx { ... }` grammar + `derive_contract` |
 | `examples/counter/test/CounterTheorem.lean` | Theorems from `reference/COUNTER.md`, proved against `Counter.lean` |
 
-> Note: an earlier, hand-written version of `Counter.lean` (with `getField`/`setField`/etc. written by hand instead of `deriving`-generated) was kept alongside the current one for a while as a comparison reference; once the `TxM`/`deriving` approach was proven out it replaced the hand-written version outright, so there is now a single `Counter.lean`. See `docs/DESIGN.md` and `IMPLEMENTATION.md` for the full history of the surface-syntax redesign.
+> Note: an earlier, hand-written version of `Counter.lean` (with `getField`/`setField`/etc. written by hand instead of `deriving`-generated) was kept alongside the current one for a while as a comparison reference; once the `TxM`/`deriving` approach was proven out it replaced the hand-written version outright, so there is now a single `Counter.lean`. See `docs/DESIGN.md` and `docs/framework/IMPLEMENTATION.md` for the full history of the surface-syntax redesign.
 
 ## Build
 

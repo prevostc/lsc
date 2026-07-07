@@ -20,15 +20,12 @@ parsed and elaborated through `Lang/Syntax.lean`, proving:
       requirement (`usesExecOrRead → nonReentrant`), never a mandate that every
       `@nonreentrant`-decorated `tx` must actually contain one.
 
-**(ii), the rejection case, is deliberately NOT exercised here as a compiling example:**
-unlike the old toy `externalCall { .. }` mechanism (checked later, by
-`Checks.validateAll`/`ContractDef`-walking, so a badly-annotated contract still *elaborated*
-and could be checked to fail), a `tx` using `exec`/`read` without `@nonreentrant` is now
-rejected immediately, at `tx`-elaboration time itself (`Lang/Syntax.lean`'s `tx` elaborator) —
-see that elaborator's docstring. There is no way to write such a `tx` in a file that still
-compiles, so (unlike `Lang/ChecksTest.lean`'s "expect elaboration to fail" precedent), this
-codebase has no harness for asserting a *command* itself fails to elaborate; this omission is
-intentional, not an oversight. -/
+**(ii), the rejection case, is deliberately NOT exercised here as a compiling example:** a `tx`
+using `exec`/`read` without `@nonreentrant` is rejected immediately at `tx`-elaboration time
+itself (`Lang/Syntax.lean`'s `tx` elaborator) — there is no way to write such a `tx` in a file
+that still compiles, so this codebase has no harness for asserting a *command* itself fails to
+elaborate (unlike `Lang/ChecksTest.lean`'s "expect elaboration to fail" precedent, which works at
+the term level). This omission is intentional, not an oversight. -/
 
 open Lsc
 

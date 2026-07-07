@@ -2,7 +2,7 @@
 
 Authoritative reference for the linear type system: motivation, enforcement, proof ergonomics, and the type library.
 
-Read [DESIGN.md §7](../../DESIGN.md) and [IMPLEMENTATION.md](../../IMPLEMENTATION.md) first.
+Read [DESIGN.md §7](../../DESIGN.md) and [framework/IMPLEMENTATION.md](../../framework/IMPLEMENTATION.md) first.
 
 ## Type library
 

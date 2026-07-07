@@ -111,14 +111,9 @@ def evalStmt (st : IRState) (s : Stmt) : IRState :=
   -- preserving no-op. `e` is still evaluated eagerly for a real EVM (`Codegen.lean`'s `.ret`
   -- case pushes `e`'s value before `RETURN`), just not observed here.
   | .ret _ => st
-  -- Not yet produced by any lowering/optimizer pass (`Lower.lean` has no `Lsc.Stmt` case that
-  -- emits it; it's only constructed directly for the Yul-lowering test in
-  -- `Lsc/Compile/Yul.lean`'s `safeExternalCallToYul`, see `IR.lean`'s docstring), so this
-  -- reference interpreter — used purely for optimizer-soundness proofs about passes that only
-  -- ever see `Lower.lean`'s actual output — has no real case to model it against yet. Treated as
-  -- a pure, state-preserving no-op for now, exactly like `.ret`'s case above; a genuine `slots`/
-  -- `logs`/`reverted`-affecting reference model (the call could revert, i.e. affect `reverted`)
-  -- is real follow-up work for whenever a real lowering path targets this node.
+  -- Not yet produced by `Lower.lean` (only constructed directly by the Yul-lowering test in
+  -- `Yul.lean`'s `safeExternalCallToYul`), so this reference interpreter has no real case to
+  -- model it against yet; treated as a pure no-op like `.ret` above. See docs/todo/backlog.md.
   | .safeExternalCall .. => st
 
 @[simp] theorem evalStmt_skip (st : IRState) : evalStmt st .skip = st := rfl

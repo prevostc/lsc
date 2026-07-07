@@ -2,7 +2,7 @@
 
 Canonical minimal reference contract. Every framework feature should be exercised here before attempting DeFi contracts.
 
-Full design context: [DESIGN.md §13](../DESIGN.md). Implementation walkthrough: [IMPLEMENTATION.md Step 11](../IMPLEMENTATION.md).
+Full design context: [DESIGN.md §13](../DESIGN.md). Implementation walkthrough (framework developers): [framework/IMPLEMENTATION.md Step 11](../framework/IMPLEMENTATION.md).
 
 ## Contract
 
@@ -51,7 +51,13 @@ tx unpause {
 derive_contract "Counter" CounterStorage CounterError CounterEvent
 ```
 
-`number` is `Wei` — the 0-decimal numeric type (like `Wad`/`Ray` but with identity encoding: `1 Wei = 1`). Bare `UInt256` cannot be used for arithmetic in contract bodies; all numeric ops go through typed wrappers (`Wei`, `Wad`, `Ray`). Each `tx <name> { ... }` block is buffered by the elaborator and, once the trailing `derive_contract` command runs, expands to a plain top-level `def name : Lsc.Stmt := ...` — so `increment`/`pause`/`unpause` end up as ordinary `Stmt` values, auto-collected into the contract's function list with no separate `TxM.run`/`Stmt.eval` wrapper and no need to name them explicitly. `derive_contract "Counter" CounterStorage CounterError CounterEvent` is the single call a contract author writes: internally it runs the `derive_contract_dsl`-equivalent assembly step (wiring up the `ContractDSL` instance and auto-emitting the `CounterM := ContractM CounterStorage CounterEvent CounterError` abbreviation) and then flushes the buffered `tx` bodies into real defs — there is no separate `derive_contract_dsl`/`CounterM` declaration for the contract author to write by hand. `σ.field` reads and `σ.field = e;` writes resolve the field's storage type by introspecting `CounterStorage` directly (`Lsc.Deriving.getStructureFieldKinds`, looked up via a registry populated as part of `derive_contract`) — no per-field type tag (there is no `wei σ.field`/`bool σ.field`/... prefix family in this grammar) and no repeated field-name string literal. `require(cond) else revert ErrCtor();`, standalone `revert ErrCtor();`, and `emit Ctor();`/`emit Ctor(arg);` all elaborate their error/event argument against the real `CounterError`/`CounterEvent` inductive, so a typo or wrong arity is a compile error — the parenthesized condition and call-style constructors (`Paused()`, even zero-arg) mirror Solidity's `require(condition, "reason")` and its custom-error `revert Ctor();` syntax, while `else` mirrors Swift's `guard cond else { ... }` guard-clause idiom. `n` is bound via `let n = e;` rather than a plain Lean `let` (this is already inside a fresh `lscStmt` grammar, so `let` here is `Syntax.lean`'s own production, not Lean's) because it's reused (in both the `σ.number = n;` write and `emit Incremented(n);`) after a storage write — `let` always emits a real, evaluated-once `Stmt.letBind` and hands back a variable reference, safe to reuse even after later writes to fields the original expression read; a plain re-evaluated term would silently double-count against the post-write storage. `pause`/`unpause`'s `msg.sender == σ.owner` compiles to `@CoreExpr.eqAuto Ty.address msg.sender σ.owner` under the hood, with the `==` elaborator pinning the explicit `Ty.address` type argument itself (rather than relying on implicit inference) to avoid a defeq-but-not-syntactic-equality mismatch between `msg.sender`'s and `σ.owner`'s expression types.
+`number` is `Wei` — the 0-decimal numeric type (like `Wad`/`Ray` but with identity encoding: `1 Wei
+= 1`). Bare `UInt256` cannot be used for arithmetic in contract bodies; all numeric ops go through
+typed wrappers (`Wei`, `Wad`, `Ray`). `require(cond) else revert ErrCtor();`, standalone `revert
+ErrCtor();`, and `emit Ctor(..);` all elaborate their argument against the real
+`CounterError`/`CounterEvent` inductive, so a typo or wrong arity is a compile error. `derive_contract
+"Counter" CounterStorage CounterError CounterEvent` is the single call a contract author writes —
+see `Lsc/Lang/Syntax.lean`'s docstring for what it expands each `tx`/this call into.
 
 Overflow on `+? 1` reverts as `.error CounterError.Overflow` via `deriving ContractError`'s generated `ContractErrors.arith` (`ArithError.Overflow` → `Overflow`, by name-matching), with the actual loud-failure guarantee enforced separately by `Lang.Checks.checkArithErrorCoverage` once all function bodies are known (see `DESIGN.md` §3.2). Counter does not declare `Underflow` or `DivisionByZero` because the body uses only `+?`; adding `-?` or `/?` would require those variants on `CounterError`.
 

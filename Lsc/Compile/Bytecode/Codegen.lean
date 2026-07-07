@@ -172,12 +172,7 @@ private partial def codegenStmt (ctx : Ctx) (s : Stmt) : Except String (List Ins
     let retInstrs : List Instr := [.push 0, .op MSTORE, .push 32, .push 0, .op RETURN]
     .ok (eInstr ++ retInstrs, c1.popStack 1)
   | .safeExternalCall .. =>
-    -- Not yet supported by this raw stack-machine backend (`CALL`'s 7 stack arguments need
-    -- careful DUP-free ordering this backend's simple `codegenExpr`-per-operand shape doesn't
-    -- give for free) — the Yul backend (`Lsc.Compile.Yul.irToYulContract`/`safeExternalCallToYul`)
-    -- is the one real, tested lowering for this node today; rejecting cleanly here rather than
-    -- emitting wrong bytecode is the deliberate choice (mirrors this file's existing
-    -- `Lower.lean`'s "reject cleanly, don't silently miscompile" precedent).
+    -- See docs/decisions/0005-bytecode-backend-scope.md.
     .error "IR.Stmt.safeExternalCall is not yet supported by the raw bytecode codegen backend \
       — use the Yul backend (Lsc.Compile.Yul) instead"
 

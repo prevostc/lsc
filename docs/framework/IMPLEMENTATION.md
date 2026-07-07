@@ -1,14 +1,19 @@
 # Implementation Guide
 
-> **Read [DESIGN.md](DESIGN.md) first.** This document covers *how* to build what DESIGN.md specifies.
-> Extensions: [extensions/linear-types/](extensions/linear-types/), [TYPE-CONSTRAINTS.md](extensions/TYPE-CONSTRAINTS.md), [MATH.md](extensions/MATH.md), [CONTRACT-SPEC.md](extensions/CONTRACT-SPEC.md) (optional).
-> Reference contracts: [reference/COUNTER.md](reference/COUNTER.md), [reference/AMM.md](reference/AMM.md).
+> **Read [DESIGN.md](../DESIGN.md) first.** This document covers *how* to build what DESIGN.md specifies.
+> Extensions: [extensions/linear-types/](../extensions/linear-types/), [TYPE-CONSTRAINTS.md](../extensions/TYPE-CONSTRAINTS.md), [MATH.md](../extensions/MATH.md), [CONTRACT-SPEC.md](../extensions/CONTRACT-SPEC.md) (optional).
+> Reference contracts: [reference/COUNTER.md](../reference/COUNTER.md), [reference/AMM.md](../reference/AMM.md).
 
 ---
 
 ## Module Structure
 
-> **This section describes the actual file layout under `Lsc/`** at the repo root. The tree differs from the original plan in several places — most notably, a first-attempt `Lang/Syntax.lean`/`Contract.lean`/`ContractGen.lean`/`ContractTypes.lean` (a `declare_syntax_cat lsc_*` custom grammar) was implemented following the plan below, then deleted in favor of a `Lang/TxM.lean` `do`-notation surface, which was itself later superseded by the **current, second** `Lang/Syntax.lean` — a different, fresh-grammar `tx { ... }` surface (§3.4 of DESIGN.md) that is the live contract-author-facing module today. `Compile/` also grew several files the plan didn't anticipate, e.g. `Compile/Bytecode/*` for direct EVM bytecode emission alongside Yul.
+> **This section describes the actual file layout under `Lsc/`** at the repo root. See
+> [`decisions/0001`](../decisions/0001-txm-superseded-by-syntax.md) and
+> [`decisions/0008`](../decisions/0008-syntax-and-contract-macro-migrations.md) for why this differs
+> from an earlier plan (two deleted custom-grammar/codegen attempts along the way).
+> `Compile/` also grew several files the plan didn't anticipate, e.g. `Compile/Bytecode/*` for
+> direct EVM bytecode emission alongside Yul.
 
 ```
 Lsc/
@@ -57,7 +62,12 @@ examples/counter/
   test/CounterTheorem.lean  -- 10 theorems against Counter.lean
 ```
 
-Deleted relative to the original plan below: the **first** `Lang/Syntax.lean` (155 lines, the `declare_syntax_cat lsc_*` + `macro_rules` surface grammar), `Lang/Contract.lean` (124 lines, the `contract … where` elaborator), `Lang/ContractGen.lean` (348 lines, the raw-`Syntax.node` codegen), `Lang/ContractTypes.lean`, and the top-level `SyntaxTest.lean`. The **current** `Lang/Syntax.lean` is an unrelated, later, second file that reused the same name for a different fresh-grammar approach (§3.4 of DESIGN.md) — it was not restored from the deleted one. `Lang/Delab.lean` (delaborators for a custom grammar) has still not been implemented; ordinary Lean terms (`structure`/`inductive`) pretty-print using Lean's own pretty printer, and the `tx { ... }` grammar itself has no delaborator either.
+Deleted relative to the original plan below: the first `Lang/Syntax.lean`, `Lang/Contract.lean`,
+`Lang/ContractGen.lean`, `Lang/ContractTypes.lean`, and the top-level `SyntaxTest.lean` (see the
+decision records linked above). The current `Lang/Syntax.lean` is an unrelated, later, second
+file that reused the same name. `Lang/Delab.lean` (delaborators for a custom grammar) has still
+not been implemented; ordinary Lean terms pretty-print using Lean's own pretty printer, and the
+`tx { ... }` grammar itself has no delaborator either.
 
 Each file imports only what is below it in this list (in spirit — `Lang/Derive.lean` additionally imports `Core/ContractM.lean` for the `ContractErrors`/`ContractDSL` instances it generates). No circular imports.
 
@@ -699,9 +709,12 @@ def Stmt.eval (stmt : Stmt) (env : LocalEnv)
 
 ## Step 6 — The `TxM` Builder Monad (`Lang/TxM.lean`) — historical intermediate step
 
-> **This step was originally written, and implemented for a while, as "Syntax Extension (`Lang/Syntax.lean`)" — a `declare_syntax_cat lsc_ty/lsc_expr/lsc_stmt/...` + `macro_rules` custom grammar following dss2024 exactly (full historical content of that approach is preserved below this section, for context on what was tried and superseded — see "Historical: the deleted `Lang/Syntax.lean` approach"). It was deleted** in favor of the `TxM` approach below, after discovering that the custom-grammar approach forced `Lang/ContractGen.lean` to hand-build raw `Syntax.node` trees (`mkStructSimpleBinder`, `mkMatchArm`, …) instead of plain quasiquotes, because once `Syntax.lean`'s custom tokens were registered globally, ordinary `` `(structure ...) `` quasiquotes broke. Deleting the custom grammar removes that problem entirely.
->
-> **This `TxM` `do`-notation surface was itself later superseded** by a third, current surface: a fresh `tx { ... }` bracket-delimited grammar living in a *new* file that reuses the name `Lang/Syntax.lean` (see §3.4 of DESIGN.md and Step 9 below) — not the same file as the deleted first attempt referenced above. `TxM.lean` remains in the codebase as the builder/combinator layer the `tx { ... }` grammar desugars into, and is still directly tested by `Lang/TxMTest.lean`, but it is no longer the contract-author-facing surface.
+`TxM` was itself later superseded as the contract-author surface by the current `tx { ... }`
+grammar (§3.4 of DESIGN.md) — `TxM.lean` remains as the builder/combinator layer that grammar
+desugars into. See
+[`decisions/0001-txm-superseded-by-syntax.md`](../decisions/0001-txm-superseded-by-syntax.md) and
+[`decisions/0008-syntax-and-contract-macro-migrations.md`](../decisions/0008-syntax-and-contract-macro-migrations.md)
+for the full history of what was tried before this, including a deleted custom-grammar attempt.
 
 The `TxM` implementation (`Lsc/Lang/TxM.lean`) gives `Stmt` `Append`/`EmptyCollection` instances (`Stmt.seq`/`Stmt.skip`) and defines:
 
@@ -725,219 +738,15 @@ Key combinators/notations actually implemented (all in `Lang/TxM.lean`; see that
 - **Comparisons/booleans**: `===` (`CoreExpr.eqAuto`, type inferred from operands), `!` (`CoreExpr.not`).
 - **`msg.sender`**: `notation "msg.sender" => CoreExpr.txField TxField.caller`.
 
-### Historical: the deleted `Lang/Syntax.lean` approach
-
-The content below is preserved for historical context (what was tried before settling on `TxM`) — it does **not** reflect the current codebase. `declare_syntax_cat`, `syntax` rules, then `macro_rules`, following dss2024 exactly. The macro only translates syntax to AST data — no logic, no validation.
-
-```lean
--- Lang/Syntax.lean
-import Lsc.Lang.AST
-import Lean
-
-open Lean
-
-namespace Lsc
-
--- ─────────────────────────────────────────────
--- Declare syntax categories
--- ─────────────────────────────────────────────
-
-declare_syntax_cat lsc_ty
-declare_syntax_cat lsc_expr
-declare_syntax_cat lsc_stmt
-declare_syntax_cat lsc_store_ref   -- $.field — avoids Lean $ splice collision
-declare_syntax_cat lsc_field_decl
-declare_syntax_cat lsc_error_decl
-declare_syntax_cat lsc_event_decl
-declare_syntax_cat lsc_func_decl
-declare_syntax_cat lsc_contract_body
-
--- ─────────────────────────────────────────────
--- Storage reference ($.field)
--- ─────────────────────────────────────────────
-
-syntax "$." ident : lsc_store_ref
-syntax lsc_store_ref : lsc_expr
-
--- ─────────────────────────────────────────────
--- Type syntax
--- ─────────────────────────────────────────────
-
-syntax "UInt256"  : lsc_ty
-syntax "Bool"     : lsc_ty
-syntax "Address"  : lsc_ty
-syntax "Wei"      : lsc_ty
-syntax "Wad"      : lsc_ty
-syntax "Ray"      : lsc_ty
-syntax "Mapping" "(" lsc_ty "=>" lsc_ty ")" : lsc_ty
-
--- ─────────────────────────────────────────────
--- Expression syntax
--- ─────────────────────────────────────────────
-
-syntax num                               : lsc_expr
-syntax ident                             : lsc_expr
-syntax "true"                            : lsc_expr
-syntax "false"                           : lsc_expr
-syntax "msg.sender"                      : lsc_expr
-syntax "msg.value"                       : lsc_expr
-syntax "block.timestamp"                 : lsc_expr
--- Checked arithmetic (+? -? *? /?) — type-directed at elaboration; plain + - * / is a parse error
--- Elaborator rejects operands typed as UInt256 (compile error: use Wei/Wad/Ray)
-syntax:65 lsc_expr:65 "+?" lsc_expr:66  : lsc_expr
-syntax:65 lsc_expr:65 "-?" lsc_expr:66  : lsc_expr
-syntax:65 lsc_expr:65 "*?" lsc_expr:66  : lsc_expr
-syntax:65 lsc_expr:65 "/?" lsc_expr:66  : lsc_expr
--- Fixed-point rounding (bracket pairs — scale from open scoped Lsc.Wad / Lsc.Ray)
-syntax:65 lsc_expr:65 "⌊*⌋?" lsc_expr:66 : lsc_expr
-syntax:65 lsc_expr:65 "⌈*⌉?" lsc_expr:66 : lsc_expr
-syntax:65 lsc_expr:65 "⸢*⸣?" lsc_expr:66 : lsc_expr
-syntax:65 lsc_expr:65 "⌊/⌋?" lsc_expr:66 : lsc_expr
-syntax:65 lsc_expr:65 "⌈/⌉?" lsc_expr:66 : lsc_expr
-syntax:65 lsc_expr:65 "⸢/⸣?" lsc_expr:66 : lsc_expr
-syntax:45 lsc_expr:45 "==" lsc_expr:46  : lsc_expr
-syntax:45 lsc_expr:45 "!=" lsc_expr:46  : lsc_expr
-syntax:45 lsc_expr:45 "<"  lsc_expr:46  : lsc_expr
-syntax:45 lsc_expr:45 "<=" lsc_expr:46  : lsc_expr
-syntax:40 "!" lsc_expr                   : lsc_expr
-syntax:35 lsc_expr:35 "&&" lsc_expr:36  : lsc_expr
-syntax:30 lsc_expr:30 "||" lsc_expr:31  : lsc_expr
--- Mapping read
-syntax lsc_expr "[" lsc_expr "]"         : lsc_expr
-
--- ─────────────────────────────────────────────
--- Statement syntax
--- ─────────────────────────────────────────────
-
--- skip (rarely written explicitly but needed for completeness)
-syntax "skip" ";"                                              : lsc_stmt
--- sequence via juxtaposition (same as dss2024)
-syntax lsc_stmt lsc_stmt                                       : lsc_stmt
--- local variable binding (pure let := for non-monadic exprs; ← for ContractM binds)
-syntax "let" ident ":=" lsc_expr ";"                           : lsc_stmt
-syntax "let" ident "←" lsc_expr ";"                            : lsc_stmt
-syntax "let" ident "←" lsc_store_ref "+?" num ";"              : lsc_stmt
-syntax "let" ident "←" lsc_store_ref "+?" lsc_expr ";"         : lsc_stmt
--- storage write ($.field := val)
-syntax lsc_store_ref ":=" lsc_expr ";"                           : lsc_stmt
--- mapping write
-syntax lsc_store_ref "[" lsc_expr "]" ":=" lsc_expr ";"        : lsc_stmt
--- require
-syntax "require" "(" lsc_expr ")" "else" "revert" ident ";"   : lsc_stmt
--- if/else
-syntax "if" "(" lsc_expr ")" "{" lsc_stmt "}"
-       "else" "{" lsc_stmt "}"                                 : lsc_stmt
--- if without else (desugars to if/skip)
-syntax "if" "(" lsc_expr ")" "{" lsc_stmt "}"                  : lsc_stmt
--- emit event
-syntax "emit" ident "(" lsc_expr,* ")" ";"                    : lsc_stmt
--- revert
-syntax "revert" ident ";"                                      : lsc_stmt
--- internal call
-syntax "call" ident "(" lsc_expr,* ")" ";"                    : lsc_stmt
--- do-notation sugar (desugars to seq)
-syntax "do" lsc_stmt                                           : lsc_stmt
-
--- ─────────────────────────────────────────────
--- Contract-level declarations
--- ─────────────────────────────────────────────
-
-syntax ident ":" lsc_ty (":=" lsc_expr)?                       : lsc_field_decl
-syntax "|" ident ("(" ident ":" lsc_ty ")")*                  : lsc_error_decl
-syntax "|" ident ("(" ident ":" lsc_ty ")")*                  : lsc_event_decl
-
-syntax "def" ident ":" "Tx" ":=" "do" lsc_stmt                : lsc_func_decl
-syntax "def" ident ":" "View" ":=" "do" lsc_stmt               : lsc_func_decl
-
-syntax "storage" ":" lsc_field_decl+
-       "errors"  ":" lsc_error_decl+
-       "events"  ":" lsc_event_decl+
-       lsc_func_decl+                                          : lsc_contract_body
-
-syntax "contract" ident "where" lsc_contract_body              : command
-
--- ─────────────────────────────────────────────
--- macro_rules: syntax → AST data
--- NO validation here. Pure structural translation.
--- Mirrors dss2024's macro_rules exactly.
--- ─────────────────────────────────────────────
-
-macro_rules
-  | `(lsc_ty| UInt256)  => `(Ty.uint256)
-  | `(lsc_ty| Bool)     => `(Ty.bool)
-  | `(lsc_ty| Address)  => `(Ty.address)
-  | `(lsc_ty| Wei)      => `(Ty.wei)
-  | `(lsc_ty| Wad)      => `(Ty.wad)
-  | `(lsc_ty| Ray)      => `(Ty.ray)
-
-macro_rules
-  | `(lsc_expr| $n:num)         => `(Expr.litU256 $(quote n.getNat))
-  | `(lsc_expr| true)           => `(Expr.litBool true)
-  | `(lsc_expr| false)          => `(Expr.litBool false)
-  | `(lsc_expr| $i:ident)       => `(Expr.var $(quote i.getId.toString))
-  | `(lsc_expr| $. $f)          => `(Expr.storageGet $(quote f.getId.toString))
-  | `(lsc_expr| msg.sender)     => `(Expr.caller)
-  | `(lsc_expr| msg.value)      => `(Expr.callvalue)
-  | `(lsc_expr| block.timestamp) => `(Expr.timestamp)
-  | `(lsc_expr| $a +? $b)       => `(Expr.weiAddChecked (lsc_expr| $a) (lsc_expr| $b))  -- placeholder; elaborator rewrites by operand type
-  | `(lsc_expr| $a -? $b)       => `(Expr.weiSubChecked (lsc_expr| $a) (lsc_expr| $b))
-  | `(lsc_expr| $a *? $b)       => `(Expr.weiMulChecked (lsc_expr| $a) (lsc_expr| $b))
-  | `(lsc_expr| $a /? $b)       => `(Expr.weiDivFloor (lsc_expr| $a) (lsc_expr| $b))
-  -- bracket pairs: scope (Wad/Ray) resolved at elaboration — example for Wad half-up mul:
-  | `(lsc_expr| $a ⸢*⸣? $b)     => `(Expr.wadMulHalfUp (lsc_expr| $a) (lsc_expr| $b))
-  | `(lsc_expr| $a ⌊/⌋? $b)     => `(Expr.wadDivDown (lsc_expr| $a) (lsc_expr| $b))
-  -- ... ⌊*⌋?, ⌈*⌉?, ⌈/⌉?, ⸢/⸣? + ray* variants likewise
-  | `(lsc_expr| $a == $b)       => `(Expr.eq (lsc_expr| $a) (lsc_expr| $b))
-  | `(lsc_expr| $a < $b)        => `(Expr.lt (lsc_expr| $a) (lsc_expr| $b))
-  | `(lsc_expr| $a <= $b)       => `(Expr.le (lsc_expr| $a) (lsc_expr| $b))
-  | `(lsc_expr| ! $e)           => `(Expr.not (lsc_expr| $e))
-  | `(lsc_expr| $a && $b)       => `(Expr.and (lsc_expr| $a) (lsc_expr| $b))
-  | `(lsc_expr| $a || $b)       => `(Expr.or  (lsc_expr| $a) (lsc_expr| $b))
-  | `(lsc_expr| $m[$k])         => `(Expr.mappingGet (lsc_expr| $m) (lsc_expr| $k))
-
-macro_rules
-  | `(lsc_stmt| skip;)          => `(Stmt.skip)
-  | `(lsc_stmt| $s1:lsc_stmt $s2:lsc_stmt) =>
-      `(Stmt.seq (lsc_stmt| $s1) (lsc_stmt| $s2))
-  | `(lsc_stmt| let $i := $e;)  =>
-      `(Stmt.letBind $(quote i.getId.toString) (lsc_expr| $e))
-  | `(lsc_stmt| let $i ← $e;)   =>
-      `(Stmt.letBind $(quote i.getId.toString) (lsc_expr| $e))
-  | `(lsc_stmt| let $i ← $. $f +? $d:num) =>
-      `(Stmt.letBind $(quote i.getId.toString)
-        (Expr.weiAddChecked (Expr.storageGet $(quote f.getId.toString)) (Expr.litWei $(quote d.getNat))))
-  | `(lsc_stmt| let $i ← $. $f +? $d;) =>
-      `(Stmt.letBind $(quote i.getId.toString)
-        (Expr.weiAddChecked (Expr.storageGet $(quote f.getId.toString)) (lsc_expr| $d)))
-  | `(lsc_stmt| $. $f := $e;) =>
-      `(Stmt.storageSet $(quote f.getId.toString) (lsc_expr| $e))
-  | `(lsc_stmt| $. $f[$k] := $v;) =>
-      `(Stmt.storageMapSet $(quote f.getId.toString) (lsc_expr| $k) (lsc_expr| $v))
-  | `(lsc_stmt| require ($e) else revert $err;) =>
-      `(Stmt.require (lsc_expr| $e) $(quote err.getId.toString))
-  | `(lsc_stmt| if ($e) { $s1 } else { $s2 }) =>
-      `(Stmt.ifThenElse (lsc_expr| $e) (lsc_stmt| $s1) (lsc_stmt| $s2))
-  | `(lsc_stmt| if ($e) { $s }) =>
-      `(Stmt.ifThenElse (lsc_expr| $e) (lsc_stmt| $s) Stmt.skip)
-  | `(lsc_stmt| emit $name($args,*);) =>
-      `(Stmt.emit $(quote name.getId.toString) [$[((lsc_expr| $args))],*])
-  | `(lsc_stmt| revert $err;) =>
-      `(Stmt.revert $(quote err.getId.toString))
-```
-
-**Validator rules** (Step 8):
-- reject plain `+ - * /` on any numeric type
-- reject `+? -? *? /?` when either operand is `UInt256` (compile error: *arithmetic on bare UInt256 is forbidden; use Wei, Wad, or Ray*)
-- reject unscoped bracket-pair ops
-- reject `open scoped Lsc.Wad` and `open scoped Lsc.Ray` in the same module
-
-**Type-directed `+?` elaboration**: after macro expansion, the elaborator inspects operand types and rewrites to the matching AST constructor (`weiAddChecked`, `wadAddChecked`, `rayAddChecked`, …). Mixed-type operands (e.g. `Wad +? Wei`) are a compile error.
-
----
-
 ## Step 7 — The `deriving` Handlers and `derive_contract_dsl` (`Lang/Derive.lean`)
 
-> **Originally written as "Elaboration and Code Generation (`Lang/Contract.lean`)"** — a `contract … where` command using `elab_rules` to synthesize a storage struct, error/event inductives, AST defs, and `ContractM` defs all from one parsed custom-syntax body. That command (and its supporting `Lang/ContractGen.lean` codegen) was implemented and then deleted. (Full historical content preserved below, under "Historical: the deleted `Lang/Contract.lean` approach".) **What was actually built**: three independent `deriving` handlers attached directly to plain `structure`/`inductive` declarations, plus one small assembly command — no `contract` umbrella command at all; a contract is just a sequence of ordinary top-level commands.
+> An earlier `contract … where` command (`Lang/Contract.lean`/`Lang/ContractGen.lean`) tried to
+> synthesize a storage struct, error/event inductives, AST defs, and `ContractM` defs all from
+> one parsed custom-syntax body, using hand-built raw `Syntax.node` trees. It was deleted — see
+> [`decisions/0008-syntax-and-contract-macro-migrations.md`](../decisions/0008-syntax-and-contract-macro-migrations.md).
+> **What was actually built**: three independent `deriving` handlers attached directly to plain
+> `structure`/`inductive` declarations, plus one small assembly command — no `contract` umbrella
+> command at all; a contract is just a sequence of ordinary top-level commands.
 
 The real implementation lives in `Lsc/Lang/Derive.lean` and registers three handlers via `Lean.Elab.registerDerivingHandler`:
 
@@ -972,109 +781,12 @@ elab "derive_contract_dsl " storageId:ident errId:ident eventId:ident : command 
 
 What is **not** implemented relative to the original plan: there is no source-position-attached error reporting (`Lean.logErrorAt`) for `deriving`-time failures — they're plain `throwError` calls, which Lean still attaches to the `deriving` clause's position by default, but there's no bespoke positioning logic. There is also no generic, declaration-agnostic codegen path (`generateStorageStruct`, etc., from the historical plan below) — the storage/error/event *declarations themselves* are written directly by the contract author as plain Lean, never generated; only the glue (`getField`/`setField`/`resolveError`/`buildEvent`/`ContractDSL` instance) is generated.
 
-### Historical: the deleted `Lang/Contract.lean` approach
-
-The content below is preserved for historical context — it does **not** reflect the current codebase. This is where the `contract` macro expands to actual Lean definitions. It uses `elab_rules` (not `macro_rules`) so it can call `Lean.logErrorAt` for positioned error messages.
-
-```lean
--- Lang/Contract.lean
-import Lsc.Lang.AST
-import Lsc.Lang.Syntax
-import Lsc.Lang.Eval
-import Lsc.Lang.Checks
-import Lean
-
-open Lean Elab Command
-
-namespace Lsc
-
-/-- Elaborate the `contract` command.
-    1. Parse the body into a ContractDef (done by macro_rules)
-    2. Run validation passes (DAG, linearity, selector collision, arith error coverage)
-    3. Generate: storage struct, error inductive, event inductive,
-                 AST definitions, ContractM definitions
-    All validation errors are reported with source positions. -/
-elab_rules : command
-  | `(command| contract $name where $body) => do
-    -- Step 1: body was already macro-expanded to ContractDef fields
-    -- Step 2: validate
-    let contractDef ← parseContractBody name body
-    match Checks.validateAll contractDef with
-    | .error errors =>
-      for (pos, msg) in errors do
-        Lean.logErrorAt pos msg
-      return
-    | .ok validated =>
-    -- Step 3: generate definitions
-    generateStorageStruct validated
-    generateErrorInductive validated
-    generateContractErrorsInstance validated
-    -- strict 1:1: ArithError.Overflow → .Overflow, .Underflow → .Underflow, …
-    -- only for ArithError cases reachable from contract ops
-    generateEventInductive validated
-    generateASTDefs validated
-    generateContractMDefs validated
-    generateDispatcher validated
-
-/-- Generate the storage struct.
-    `contract Counter where storage: number : Wei := 0`
-    produces:
-    `structure CounterStorage where number : Wei := 0` -/
-def generateStorageStruct (c : ContractDef) : CommandElabM Unit := do
-  let fields ← c.storage.mapM fun (name, ty, default) => do
-    let leanTy ← tyToLean ty
-    match default with
-    | none     => `(Lean.Parser.Command.structExplicitBinder|
-                    ($name : $leanTy))
-    | some def => `(Lean.Parser.Command.structExplicitBinder|
-                    ($name : $leanTy := $def))
-  let structName := mkIdent (c.name ++ "Storage")
-  elabCommand (← `(structure $structName where $[$fields]* deriving Repr))
-
-/-- Generate `ContractErrors` instance from the errors: block.
-    Strict 1:1 ArithError mapping — each case maps to a same-named variant:
-      ArithError.Overflow       → errors: Overflow
-      ArithError.Underflow      → errors: Underflow
-      ArithError.DivisionByZero → errors: DivByZero
-    Validator checks only ArithError cases reachable from ops in the contract body.
-    No collapsing. Elaboration error if a reachable case has no matching variant. -/
-def generateContractErrorsInstance (c : ContractDef) : CommandElabM Unit := do
-  -- Example output for Counter (+? only; errors: declares Overflow):
-  -- instance : ContractErrors CounterError where
-  --   arith := fun
-  --     | .Overflow => .Overflow
-  --     | .Underflow | .DivisionByZero => ContractErrors.unreachableArith
-  -- Example output for AMM (uses +?, -?, /?):
-  -- instance : ContractErrors AMMError where
-  --   arith := fun
-  --     | .Overflow       => .Overflow
-  --     | .Underflow      => .Underflow
-  --     | .DivisionByZero => .DivByZero
-  --   fromFramework := fun | .Reentrant => ... | .Unauthorized => ...
-  sorry
-
-/-- Generate the ContractM function for each FunctionDef.
-    The generated function is the semantic ground truth for proofs.
-    It is NOT the AST — it calls the AST eval. -/
-def generateContractMDefs (c : ContractDef) : CommandElabM Unit := do
-  let storageTy := mkIdent (c.name ++ "Storage")
-  let eventTy   := mkIdent (c.name ++ "Event")
-  let errorTy   := mkIdent (c.name ++ "Error")
-  for fn in c.functions do
-    let fnName    := mkIdent (c.name ++ "." ++ fn.name)
-    let astName   := mkIdent (c.name ++ "." ++ fn.name ++ ".ast")
-    -- The ContractM def is just Stmt.eval applied to the AST
-    -- This makes Counter.increment = Stmt.eval Counter.increment.ast
-    -- which holds by rfl — the key definitional equality for proofs
-    elabCommand (← `(
-      def $fnName : ContractM $storageTy $eventTy $errorTy Unit :=
-        Stmt.eval $astName LocalEnv.empty
-    ))
-```
-
-**The definitional equality trick**: by defining `Counter.increment` as literally `Stmt.eval Counter.increment.ast`, the theorem `Counter.increment = Stmt.eval Counter.increment.ast` holds by `rfl`. This means proofs about `Counter.increment` and proofs about the AST are interchangeable without any proof effort.
-
----
+One idea from that deleted approach is worth keeping in mind even though the command itself is
+gone: the **definitional equality trick** — defining a function like `Counter.increment` as
+literally `Stmt.eval Counter.increment.ast` makes `Counter.increment = Stmt.eval
+Counter.increment.ast` hold by `rfl`, so proofs about the function and proofs about its AST are
+interchangeable without extra proof effort. The current `deriving`/`tx` pipeline preserves this
+property.
 
 ## Step 8 — Validation Passes (`Lang/Checks.lean`)
 
@@ -1548,10 +1260,10 @@ These are specified in `extensions/` but not covered by implementation steps abo
 
 | Extension | Doc | Implementation hook |
 |-----------|-----|---------------------|
-| Field decorators | [TYPE-CONSTRAINTS.md](extensions/TYPE-CONSTRAINTS.md) | `Lang/Contract.lean` elaboration |
-| `@math` / ℝ specs | [MATH.md](extensions/MATH.md) | `@math` attribute + `Spec.lean` generation |
-| `contract_spec` | [CONTRACT-SPEC.md](extensions/CONTRACT-SPEC.md) | Optional macro alongside `contract` |
-| Linear type details | [extensions/linear-types/](extensions/linear-types/) | `Core/LinearTypes.lean`, `Lang/Checks.lean` |
+| Field decorators | [TYPE-CONSTRAINTS.md](../extensions/TYPE-CONSTRAINTS.md) | `Lang/Contract.lean` elaboration |
+| `@math` / ℝ specs | [MATH.md](../extensions/MATH.md) | `@math` attribute + `Spec.lean` generation |
+| `contract_spec` | [CONTRACT-SPEC.md](../extensions/CONTRACT-SPEC.md) | Optional macro alongside `contract` |
+| Linear type details | [extensions/linear-types/](../extensions/linear-types/) | `Core/LinearTypes.lean`, `Lang/Checks.lean` |
 
 ---
 

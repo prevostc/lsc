@@ -7,53 +7,12 @@ import Lean
 /-!
 # Custom `deriving` handlers for the storage/error/event glue
 
-This is step 2 of the Lean-first DSL redesign (see the migration plan and
-the "Resolved: `ContractError` derivation example" section of the plan
-doc). It replaces `Lsc.Lang.ContractGen`'s storage/error/event/dispatch
-codegen (which synthesized everything from a bespoke custom-syntax parse
-tree, see `ContractGen.lean`'s header comment) with three real `deriving`
-handlers attached directly to plain `structure`/`inductive` declarations,
-plus one small `derive_contract_dsl` assembly command.
-
-This file does **not** touch `ContractGen.lean`/`Contract.lean`/
-`Syntax.lean` — those are deleted in a later migration step.
-
-## True `deriving X` handlers (no command fallback needed)
-
-Unlike the old `contract … where` macro (which had to hand-build raw
-`Syntax.node` trees to dodge a tokeniser conflict with `Syntax.lean`'s
-`lsc_*` categories), this file imports neither `Syntax.lean` nor
-`Contract.lean`, so plain Lean quasiquotes (`` `(term| …) ``) work
-perfectly normally here. Lean's `Lean.Elab.registerDerivingHandler` API
-(see `Lean.Elab.Deriving.Basic`/`Lean.Elab.Deriving.BEq` for the upstream
-pattern this file follows) only needs to be told the *names* of the
-declarations `deriving Foo` was attached to — by the time the handler
-runs, the `structure`/`inductive` is already fully elaborated and sitting
-in the environment, so ordinary introspection (`getStructureFields`,
-`getConstInfoInduct`, `getConstInfoCtor`) gives everything needed. So this
-step uses **true `deriving ContractStorage` / `deriving ContractEvent` /
-`deriving ContractError` syntax**, not a command-based fallback.
-
-## The `Address`/`UInt256` ambiguity — resolved, not just worked around
-
-`Address` and `UInt256` are both literally `abbrev`s for `Word := BitVec
-256` (`Types.lean`), so a fully-`whnf`'d field type cannot distinguish
-them. However, empirically (verified against this project's Lean 4.31
-toolchain), a structure's field-projection *type*, as stored in the
-`ConstantInfo` Lean adds to the environment when elaborating `structure …
-where field : Address`, is **not** auto-unfolded through reducible
-`abbrev`s — it remains the literal constant application `Lsc.Address`
-(resp. `Lsc.UInt256`), distinct from `Lsc.Wei`/`Bool`/each other,
-until something explicitly calls `whnf`/unfolds it. `fieldKindOfExpr`
-below relies on exactly this and never calls `whnf`, so it can tell
-`Address` and `UInt256` apart from the *unreduced* stored type alone.
-
-The one real limitation this leaves: a field declared with some *other*
-alias of `Word`/`BitVec 256` (not literally `Lsc.Address`/
-`Lsc.UInt256`/`Lsc.Wei`/`Bool`), e.g. spelling the type out as
-`BitVec 256` directly, is rejected with a clear "unsupported field type"
-error at `deriving` time rather than silently miscategorized — this is
-intentional and documented, not a silent foot-gun.
+Three `deriving` handlers (`ContractStorage`/`ContractEvent`/`ContractError`), attached directly
+to plain `structure`/`inductive` declarations, plus one small `derive_contract_dsl` assembly
+command that wires their output into a `ContractDef`. See
+`docs/decisions/0006-deriving-handlers-replace-contractgen.md` for why this replaced an earlier
+bespoke-syntax codegen approach, including the resolved `Address`/`UInt256` field-kind ambiguity
+`fieldKindOfExpr` (below) relies on.
 -/
 
 open Lean Lean.Elab Lean.Elab.Command Lean.Elab.Term Lean.Meta Lean.Parser.Term
@@ -123,23 +82,16 @@ initialize contractTxSyntaxExt :
     EnvExtension (NameMap (List (Name × Syntax × List (String × FieldKind) × Array Syntax))) ←
   registerEnvExtension (pure {})
 
-/-- `fnName ↦ [(paramName, originalTypeName), ...]` — the author's *exact*, fully-resolved
-declared type for each parameter of a `tx`/`view` (e.g. `Token.Amount`, not the `FieldKind` it
-resolves to), populated by both `tx`'s and `view`'s own elaborators (via `Lang/Syntax.lean`'s
-`stashParamTys`), keyed by the fully-qualified `fnName` (e.g. `Token.transfer`) — deliberately
-**not** namespace-scoped/cleared the way `contractTxSyntaxExt`/`contractViewSyntaxExt` are (once
-flushed), since this is looked up from a *different* contract's module later: an
-`exec Target.fn(..)`/`read Target.fn(..)` call site (`Lang/Syntax.lean`'s `elabExecOrReadTerm`)
-needs `fn`'s own author-declared parameter types to correctly ascribe/`Fixed.retag`-bridge each
-argument, exactly reproducing the same "preserve the exact declared type, not
-`FieldKind.leanTypeStx`'s generic `Lsc.Wad`" fix `flushContractTxs`'s cross-call branch already
-applies to *its own* parameters. Stored as the fully-resolved `Name` (not the raw, possibly
-namespace-relative `ty` syntax an author actually wrote, e.g. bare `Amount` from inside
-`namespace Token`) precisely so it can be soundly re-spliced (via a fresh `mkIdent`) from a
-*different* module's own namespace/`open` scope later, without depending on any Lean-hygiene
-scope-travel guarantee for plain source-parsed identifiers — see `Lsc.Wad.Fixed`'s docstring
-(`Lsc/Lib/Wad/Syntax.lean`) for why this exact-type preservation, on *both* ends of an `exec`/
-`read` call, is what makes mixing up two different tokens' amounts a compile error. -/
+/-- `fnName ↦ [(paramName, originalTypeName), ...]` — the author's exact, fully-resolved declared
+type for each parameter of a `tx`/`view` (e.g. `Token.Amount`, not the generic `FieldKind` it
+resolves to), keyed by fully-qualified `fnName`. Unlike `contractTxSyntaxExt`/
+`contractViewSyntaxExt`, this is **not** namespace-scoped/cleared on flush, since it's looked up
+from a *different* contract's module later: an `exec`/`read` call site
+(`Lang/Syntax.lean`'s `elabExecOrReadTerm`) needs `fn`'s real declared parameter types to
+correctly ascribe/`Fixed.retag`-bridge each argument. Stored as a fully-resolved `Name` (not the
+raw, possibly namespace-relative syntax as written) so it can be soundly re-spliced from a
+different module's namespace later — see `Lsc.Wad.Fixed`'s docstring for why this exact-type
+preservation is what makes mixing up two different tokens' amounts a compile error. -/
 initialize contractParamTyExt : EnvExtension (NameMap (List (String × Name))) ←
   registerEnvExtension (pure {})
 
@@ -151,18 +103,13 @@ deferred) and consulted by `elabContractDefBody` when assembling each auto-deriv
 initialize contractNonReentrantExt : EnvExtension (NameMap Bool) ←
   registerEnvExtension (pure {})
 
-/-- Set of fully-qualified `tx` names (`fnName`) whose raw body contains a real, black-box
-cross-contract call (`exec Target.fn(..);`/`read Target.fn(..);`, `Lang/Syntax.lean`'s
-`lscExec`/`lscRead` nodes) at top level. Populated by `tx`'s own elaborator (which must scan the
-raw, not-yet-elaborated `lscStmt*` syntax to decide this, since only *after* knowing it can it
-pick which of the two elaboration paths — plain `Stmt`-valued, or `PairM`-valued —
-`flushContractTxs` should later use for this particular `tx`; see that function's docstring).
-Any `tx` recorded here is **not** added to `contractFnsExt`/`ContractDef.functions` — a
-cross-contract `tx` is a real, callable, proof-friendly Lean `def` (exactly like the framework's
-`ContractM`/`PairM` combinators), but (like the hand-written `Escrow.release` this feature
-replaces) it is deliberately kept out of the single-storage `ContractDef`/bytecode/Yul pipeline,
-which has no representation for a second contract's storage type at all — see
-`Lsc/Compile/Lower.lean`'s module docstring for the precise, documented boundary this leaves. -/
+/-- Set of fully-qualified `tx` names (`fnName`) whose raw body contains a top-level `exec`/
+`read` node. Populated by `tx`'s elaborator scanning the raw, unelaborated `lscStmt*` syntax, so
+it knows before elaborating which path to use — plain `Stmt`-valued or `PairM`-valued (see
+`flushContractTxs`). Any `tx` recorded here is **not** added to `contractFnsExt`/
+`ContractDef.functions`: it's a real, callable, proof-friendly `def`, but deliberately kept out
+of the single-storage `ContractDef`/bytecode/Yul pipeline (see `Lsc/Compile/Lower.lean`'s module
+docstring). -/
 initialize contractCrossCallExt : EnvExtension (NameMap Bool) ←
   registerEnvExtension (pure {})
 
@@ -238,7 +185,7 @@ the `WAD = 10^18` scale, so silently accepting e.g. `Fixed 6` here would let a m
 `⌊/⌋?` compile without error instead of being rejected. A genuinely non-18-decimals `Fixed d`
 token needs to be authored as a hand-written `ContractM` contract (bypassing this DSL layer
 entirely, exactly like `Escrow.release`'s `exec`/`read` already do) until `FieldKind`/`Wad.Expr`
-gain real per-`d` scaling — tracked as a follow-up in `TODO.md`. -/
+gain real per-`d` scaling — tracked as a follow-up in `docs/todo/backlog.md`. -/
 def fieldKindOfExpr (e : Lean.Expr) : Option FieldKind :=
   if e.isConstOf ``Lsc.Wei then some .wei
   else if e.isConstOf ``Lsc.Wad then some .wad

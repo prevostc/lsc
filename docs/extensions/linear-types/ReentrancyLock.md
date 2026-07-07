@@ -18,7 +18,7 @@ end ReentrancyLock
 
 ## External calls
 
-At the AST level, external calls use `lockAcquire`, `externalCall`, and `lockRelease` as separate statement nodes (see [DESIGN.md §6](../../DESIGN.md) and [IMPLEMENTATION.md](../../IMPLEMENTATION.md)). The recommended DSL pattern wraps these:
+At the AST level, external calls use `lockAcquire`, `externalCall`, and `lockRelease` as separate statement nodes (see [DESIGN.md §6](../../DESIGN.md) and [framework/IMPLEMENTATION.md](../../framework/IMPLEMENTATION.md)). The recommended DSL pattern wraps these:
 
 ```lean
 def externalCall

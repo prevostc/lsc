@@ -4,19 +4,13 @@ import Lsc.Lib.Wad.Optimize
 
 namespace Lsc.Compile
 
-/-! ## Cross-contract calls (`exec`/`read`) — explicitly out of scope here
+/-! ## Cross-contract calls (`exec`/`read`) — out of scope here
 
-A REAL cross-contract call (`Lsc.Syntax.lscExec`/`lscRead`'s `exec Target.fn(..);`/
-`read Target.fn(..);`, `Lsc/Lang/Syntax.lean`) never reaches this file *at all*: any `tx` using
-it has its whole body elaborated directly to a `Lsc.ContractM.PairM S T E Err Unit`-valued `def`
-(see `Lsc.Syntax.elabStmtListPairM`), not the `Lsc.Stmt` value this `Lower`/`IR` pipeline
-operates on, and is deliberately never registered in `ContractDef.functions` (see
-`Lsc.Deriving.contractCrossCallExt`'s docstring) — so `Lower.lean`/`IR.lean` structurally never
-see it, rather than needing to reject it with a special-cased error here. Real EVM `CALL`-opcode
-codegen for a cross-contract call remains a documented, concrete follow-up: it would need (at
-minimum) a first-order `IR.Stmt`/`Stmt` node carrying the callee's ABI selector/calldata layout,
-which this pipeline has no representation for yet (see `examples/escrow/src/Escrow.lean`'s
-module docstring for the full scope note). -/
+A cross-contract `tx` (`exec Target.fn(..);`/`read Target.fn(..);`, `Lsc/Lang/Syntax.lean`) has
+its whole body elaborated directly to a `PairM S T E Err Unit`-valued `def`, not the `Lsc.Stmt`
+value this `Lower`/`IR` pipeline operates on, and is never registered in `ContractDef.functions`
+— so this file structurally never sees it. Real EVM `CALL`-opcode codegen for such a call is
+tracked in `docs/todo/backlog.md`. -/
 
 /-- Storage field → sequential EVM slot (Solidity layout, v1). -/
 structure StorageLayout where

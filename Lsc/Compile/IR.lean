@@ -41,7 +41,7 @@ inductive Stmt where
       `addr`/`inOffset`/`inSize` are the callee address and the already-ABI-encoded calldata's
       memory span (`argsOffset`/`argsSize`) — this node does not itself encode a callee's
       arguments; that remains the documented, separate "real ABI-encoded calldata" follow-up
-      (`TODO.md`'s N-contract dispatch registry item, `Lsc/Compile/Lower.lean`'s module
+      (`docs/todo/backlog.md`'s N-contract dispatch registry item, `Lsc/Compile/Lower.lean`'s module
       docstring) `exec`/`read` still needs before this can be wired to real `lscExec`/`lscRead`
       surface syntax end-to-end.
 

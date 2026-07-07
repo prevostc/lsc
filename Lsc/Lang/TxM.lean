@@ -10,11 +10,10 @@ open Lean
 /-!
 # `TxM`: a free-monad-style builder for `Stmt`
 
-This is step 1 of the Lean-first DSL redesign (see
-`docs/DESIGN.md` and the migration plan). The goal is to let
-contract authors build `Stmt` values using ordinary Lean `do`-notation
-instead of a bespoke custom grammar (`Lsc.Lang.Syntax`, kept around for
-now but superseded by this file).
+`TxM` lets `Stmt` values be built using ordinary Lean `do`-notation. It is the underlying
+builder/combinator layer that `tx { .. }` (`Lsc.Lang.Syntax`, the actual contract-author surface)
+desugars into — see `docs/decisions/0001-txm-superseded-by-syntax.md` for why `Syntax.lean`'s
+custom grammar is the surface and `TxM` is not.
 
 `TxM` does not *execute* anything — it is a "writer" that accumulates a
 `Stmt` fragment via `Stmt.seq`/`Stmt.skip` as its monoid operations. Once a

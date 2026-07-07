@@ -1,8 +1,36 @@
-# Compile pipeline backlog
+# Backlog
 
-Deferred work for the LSC v2 compiler. Items are removed or checked off as they land.
+Project-wide TODO list. Items are removed or checked off as they land. Clusters
+that outgrow a checkbox and need real design writeups get their own file in
+this directory (e.g. [`interfaces.md`](interfaces.md)) instead of growing inline here.
 
-## Bytecode follow-ups
+- [ ] evaluate if we should add Optional<Address> to replace Address 0
+- [ ] reentrancy lock is cumbersome, define better
+- [ ] define public/private variables access
+- [ ] implement math decorator extension
+- [ ] implement constrained types extensions
+- [ ] rework comments (too blobby)
+- [ ] syntax delab, make sure errors are amazing
+- [ ] make sure no user-land code is referenced in the framework lib (incrementBody, increment_body_lowers_ok)
+- [ ] compilation proofs
+- [ ] handle proofs against oracle manipulation attacks
+- [ ] handle proofs against sandwitch attacks
+- [ ] handle proofs against flashloans attacks
+- [ ] approve/transferFrom for Token (needs a double-keyed Address -> Address -> Wad allowance
+      mapping; current mapping storage only supports single-keyed Address -> Wad)
+- [ ] generalize Lang/Derive.lean's FieldKind/Wad.Expr pipeline to real per-decimals scaling (today
+      only Fixed 18 (= Wad) is accepted by the tx/storage-field grammar, Lsc.Deriving.
+      fieldKindOfExpr's docstring) so a genuinely non-18-decimals token (e.g. Fixed 6) can be
+      authored directly in the DSL instead of as a hand-written ContractM contract
+
+See [`interfaces.md`](interfaces.md) for the N-contract dispatch / `exec`/`read` wiring cluster
+(interface concept, ABI-encoded calldata, "callee returned false" signal).
+
+## Compile pipeline
+
+Deferred work for the LSC v2 compiler.
+
+### Bytecode follow-ups
 
 - [x] ABI dispatcher (selector routing on calldata)
 - [x] `contractToBytecode` for full `counterDef` (increment + pause + unpause)
@@ -17,18 +45,18 @@ Deferred work for the LSC v2 compiler. Items are removed or checked off as they 
 - [ ] Gas-aware codegen / stack peephole optimization
 - [ ] Memory-spilled locals (`MSTORE`/`MLOAD` scratch slots) to simplify stack codegen for decompilers
 
-## Proof obligations
+### Proof obligations
 
-Smoke tests and `native_decide` shape checks exist; the items below are the theorems still to prove. Target module: extend [`Correctness.lean`](Correctness.lean) (IR reference semantics) and add bytecode-specific lemmas as needed.
+Smoke tests and `native_decide` shape checks exist; the items below are the theorems still to prove. Target module: extend [`Correctness.lean`](../../Lsc/Compile/Correctness.lean) (IR reference semantics) and add bytecode-specific lemmas as needed.
 
-### Lower (`Stmt` → `IR`)
+#### Lower (`Stmt` → `IR`)
 
 - [ ] `Lower.stmt` preserves a formal `Stmt` big-step semantics (or refines `Lang/Eval` once wired)
 - [ ] `Wei.lowerLetBind` / `lowerAddCheckedNatStorage`: checked add matches `Wei` overflow semantics (extend existing shape lemma)
 - [ ] `require` lowers to `ifRevert (isZero cond)` with correct revert condition
 - [ ] `storageSet` / `emit` resolve slots and topic0 from `Config` correctly
 
-### Codegen (`IR` → `Instr`)
+#### Codegen (`IR` → `Instr`)
 
 - [ ] Reference semantics for `IR.Expr` / `IR.Stmt` (`evalExpr` / `evalStmt` in `Correctness.lean`) is sound and complete for the fragment we lower
 - [ ] `Codegen.stmt`: compiling then executing instrs (via EvmYul `Ξ`) refines `evalStmt` on reachable states
@@ -37,7 +65,7 @@ Smoke tests and `native_decide` shape checks exist; the items below are the theo
 - [ ] Global label threading: prefixed labels do not change codegen semantics, only jump targets
 - [ ] Stack cleanup (`log1` local pops): does not alter observable storage / logs / revert outcome
 
-### Encode (`Instr` → `ByteArray`)
+#### Encode (`Instr` → `ByteArray`)
 
 - [ ] `fixpointLabels` converges and is stable for all emitted instr lists
 - [ ] `layoutLabels` assigns each `jumpDest` the PC of its opcode in the final byte stream
@@ -45,14 +73,14 @@ Smoke tests and `native_decide` shape checks exist; the items below are the theo
 - [ ] `encode` is injective on label names: duplicate detection implies layout correctness
 - [ ] `serializeInstr` + push width agree with EvmYul `decode` / `parseInstr` (round-trip on emitted bytes)
 
-### Contract (`Config` + `ContractDef` → full instr list)
+#### Contract (`Config` + `ContractDef` → full instr list)
 
 - [ ] Dispatcher: calldata `< 4` bytes reverts; selector `calldataload(0) >> 224` matches `computeSelector`
 - [ ] Dispatcher: unknown selector reverts; known selector jumps to the correct function entry `jumpDest`
 - [ ] Function bodies preserve per-function semantics when entered with empty stack (fresh `Ctx.forFunction`)
 - [ ] `contractToBytecode` = `encode ∘ contract` succeeds iff label set is duplicate-free
 
-### Counter end-to-end (`counterDef`)
+#### Counter end-to-end (`counterDef`)
 
 Prove (or reduce to the lemmas above) for `increment` / `pause` / `unpause`:
 
@@ -62,13 +90,13 @@ Prove (or reduce to the lemmas above) for `increment` / `pause` / `unpause`:
 - [ ] **Events**: `Incremented` / `Paused` / `Unpaused` emit expected topic0 and data (once keccak topics land)
 - [ ] **Dispatcher + bodies**: full `contractToBytecode counterDef` behavior matches composing the three function proofs
 
-### EvmYul bridge
+#### EvmYul bridge
 
 - [ ] Define a map from `IRState` (or account storage + logs) to EvmYul post-`Ξ` state
 - [ ] `BytecodeExecSmoke` properties (slot 0/1 after call) as formal theorems, not only `IO` smoke
 - [ ] Execution with real 256-bit LOG topics refines the same spec (blocked on EvmYul gas accounting fix)
 
-### What is already checked (not proofs)
+#### What is already checked (not proofs)
 
 | Check | Where |
 |---|---|
@@ -78,7 +106,7 @@ Prove (or reduce to the lemmas above) for `increment` / `pause` / `unpause`:
 | Jump label uniqueness | `BytecodeTest.lean` (`counter_jumpdest_labels_unique`) |
 | Storage mutation via EvmYul | `BytecodeExecTest.lean` + `BytecodeExecSmoke` exe |
 
-## Other compile paths (not pursued now)
+### Other compile paths (not pursued now)
 
 - [ ] Yul text emission via `Yul.lean` — kept in tree, not on critical path
 - [ ] `solc` / strict-assembly pipeline
