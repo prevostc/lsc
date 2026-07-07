@@ -149,6 +149,8 @@ theorem lookupLocal_evalStmt_unused (st : IRState) (s : Stmt) (id : Ident)
     simp only [freeVarsStmt] at h
     simp [evalStmt, IRState.lookupLocal]
   | .revert0 => simp [evalStmt, IRState.lookupLocal]
+  | .ret _ => rfl
+  | .safeExternalCall .. => rfl
 
 mutual
   theorem lookupLocal_after_eval_agree (st1 st2 : IRState) (s : Stmt) (hobs : observablyEqual st1 st2)
@@ -226,6 +228,12 @@ mutual
       intro id hmem
       simpa [evalStmt, IRState.lookupLocal, freeVarsStmt] using
         hlookup id (by cases hmem)
+    | .ret e =>
+      intro id hmem
+      exact hlookup id hmem
+    | .safeExternalCall .. =>
+      intro id hmem
+      exact hlookup id hmem
 
   theorem evalStmt_obs_congr (st1 st2 : IRState) (s : Stmt) (hobs : observablyEqual st1 st2)
       (hlookup : ∀ id ∈ freeVarsStmt s, st1.lookupLocal id = st2.lookupLocal id) :
@@ -287,6 +295,8 @@ mutual
     | .revert0 =>
       simp only [evalStmt_revert0, observablyEqual]
       exact ⟨hobs.1, hobs.2.1, trivial⟩
+    | .ret _ => exact hobs
+    | .safeExternalCall .. => exact hobs
 end
 
 mutual
@@ -342,6 +352,12 @@ mutual
       simp only [freeVarsStmt, readVarsStmt] at hfv hnot
       exact absurd hfv hnot
     | .revert0 => cases hfv
+    | .ret e =>
+      simp only [freeVarsStmt, readVarsStmt] at hfv hnot
+      exact absurd hfv hnot
+    | .safeExternalCall .. =>
+      simp only [freeVarsStmt, readVarsStmt] at hfv hnot
+      exact absurd hfv hnot
 
   theorem lookupLocal_eval_pre_read (st1 st2 : IRState) (s1 : Stmt) (id : Ident)
       (hobs : observablyEqual st1 st2)
@@ -437,6 +453,12 @@ mutual
       intro id hmem
       simpa [evalStmt, IRState.lookupLocal, readVarsStmt] using
         hlookup id (by simp [readVarsStmt] at hmem)
+    | .ret e =>
+      intro id hmem
+      exact hlookup id hmem
+    | .safeExternalCall .. =>
+      intro id hmem
+      exact hlookup id hmem
 
   theorem evalStmt_obs_congr_read (st1 st2 : IRState) (s : Stmt) (hobs : observablyEqual st1 st2)
       (hlookup : ∀ id ∈ readVarsStmt s, st1.lookupLocal id = st2.lookupLocal id) :
@@ -498,6 +520,8 @@ mutual
     | .revert0 =>
       simp only [evalStmt_revert0, observablyEqual]
       exact ⟨hobs.1, hobs.2.1, trivial⟩
+    | .ret _ => exact hobs
+    | .safeExternalCall .. => exact hobs
 end
 
 theorem evalStmt_setLocal_unused_obs (st : IRState) (name : Ident) (v : Nat) (s : Stmt)
@@ -561,6 +585,13 @@ theorem evalStmt_setLocal_unused_obs (st : IRState) (name : Ident) (v : Nat) (s 
   | revert0 =>
     simp only [evalStmt_revert0, observablyEqual]
     trivial
+  | ret e =>
+    simp only [evalStmt_ret, observablyEqual]
+    exact observablyEqual_setLocal st name v
+  | safeExternalCall addr inOffset inSize checkBoolReturn =>
+    -- `evalStmt`'s no-op case for this node (see `IR/Eval.lean`'s docstring) means the goal
+    -- reduces exactly like `skip`/`ret` above, regardless of `addr`/`inOffset`/`inSize`.
+    simpa only [evalStmt] using observablyEqual_setLocal st name v
 
 theorem evalStmt_unused_bind_ignored (st : IRState) (name : Ident) (e : Expr) (rest : Stmt)
     (h : name ∉ freeVarsStmt rest) :

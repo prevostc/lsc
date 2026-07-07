@@ -45,6 +45,12 @@ partial def lowerExpr (fieldSlot : Ident → Option Nat) (e : Expr) : Except Str
     match fieldSlot field with
     | some s => .ok (Compile.IR.Expr.sload s)
     | none => .error s!"unknown storage field {field}"
+  | .mapGet field _key =>
+    -- No EVM/Yul lowering for mapping storage yet (see `Lang/AST.lean`'s `Stmt.mapSet`
+    -- docstring / `docs/reference/TOKEN.md`): a real slot layout for a `WadMap` field would
+    -- need keccak256-based dynamic slot addressing (`keccak256(key ++ baseSlot)`, Solidity's
+    -- own mapping layout), not yet implemented in this lowering pipeline.
+    .error s!"unsupported: mapping field {field} has no EVM storage layout yet"
   | .addChecked a b => do
     let a' ← lowerExpr fieldSlot a
     let b' ← lowerExpr fieldSlot b

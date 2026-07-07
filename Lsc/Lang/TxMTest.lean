@@ -65,10 +65,12 @@ partial def _root_.Lsc.Stmt.summary : Stmt → String
   | .seq a b => s!"{a.summary}; {b.summary}"
   | .letBind n _ => s!"let {n}"
   | .storageSet n _ => s!"σ.{n} := _"
+  | .mapSet n _ _ => s!"σ.{n}[_] := _"
   | .require _ err => s!"require _ else revert {err}"
   | .ifThenElse _ t e => s!"if _ then ({t.summary}) else ({e.summary})"
   | .emit n _ => s!"emit {n}"
   | .revert err => s!"revert {err}"
+  | .ret _ => "return _"
 
 #eval incrementAst.summary
 #eval pauseAst.summary

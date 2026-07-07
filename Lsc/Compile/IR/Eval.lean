@@ -103,6 +103,23 @@ def evalStmt (st : IRState) (s : Stmt) : IRState :=
   | .log0 topic => { st with logs := st.logs ++ [(topic, 0)] }
   | .log1 topic data => { st with logs := st.logs ++ [(topic, evalExpr st data)] }
   | .revert0 => { st with reverted := true }
+  -- The reference model only tracks `slots`/`logs`/`reverted` (`observablyEqual`'s components,
+  -- below) — a `.ret e` node halts execution with a real returned *value* at the actual
+  -- bytecode level (`Bytecode/Codegen.lean`'s `RETURN`), but that value is never itself
+  -- storage/a log/a revert flag, so this reference interpreter (used only for optimizer-
+  -- soundness proofs against those three fields, `Opt/*.lean`) treats it as a pure, state-
+  -- preserving no-op. `e` is still evaluated eagerly for a real EVM (`Codegen.lean`'s `.ret`
+  -- case pushes `e`'s value before `RETURN`), just not observed here.
+  | .ret _ => st
+  -- Not yet produced by any lowering/optimizer pass (`Lower.lean` has no `Lsc.Stmt` case that
+  -- emits it; it's only constructed directly for the Yul-lowering test in
+  -- `Lsc/Compile/Yul.lean`'s `safeExternalCallToYul`, see `IR.lean`'s docstring), so this
+  -- reference interpreter — used purely for optimizer-soundness proofs about passes that only
+  -- ever see `Lower.lean`'s actual output — has no real case to model it against yet. Treated as
+  -- a pure, state-preserving no-op for now, exactly like `.ret`'s case above; a genuine `slots`/
+  -- `logs`/`reverted`-affecting reference model (the call could revert, i.e. affect `reverted`)
+  -- is real follow-up work for whenever a real lowering path targets this node.
+  | .safeExternalCall .. => st
 
 @[simp] theorem evalStmt_skip (st : IRState) : evalStmt st .skip = st := rfl
 
@@ -127,5 +144,7 @@ def evalStmt (st : IRState) (s : Stmt) : IRState :=
       { st with logs := st.logs ++ [(topic, evalExpr st data)] } := rfl
 
 @[simp] theorem evalStmt_revert0 (st : IRState) : evalStmt st .revert0 = { st with reverted := true } := rfl
+
+@[simp] theorem evalStmt_ret (st : IRState) (e : Expr) : evalStmt st (.ret e) = st := rfl
 
 end Lsc.Compile.IR

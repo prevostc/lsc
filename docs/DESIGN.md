@@ -602,6 +602,52 @@ Never write a theorem that simultaneously handles both outcomes.
 
 A theorem should state exactly the hypotheses it needs. If a theorem about `increment` doesn't need the `owner` field, `owner` should not appear in its statement. Use `HonestWorld` only when the theorem genuinely needs all bundled assumptions.
 
+### The human-statement-first invariant
+
+**Every theorem must be writable, in English, as a sentence a non-Lean-reading reviewer would
+recognize as "the property I asked for" — before a line of Lean is written.** Concretely, follow
+this order every time:
+
+1. **State it like a human would say it.** E.g. "transferring debits the sender and credits the
+   recipient, and this holds for every account and every amount" — not "there exists a `Nat` `n`
+   such that some `if`/`then`/`else` tree evaluates to `n`". If you can't say the property in one
+   plain sentence, it isn't ready to formalize yet.
+2. **Transcribe that sentence into a Lean theorem statement**, universally quantified over
+   whatever the human sentence quantified over (every state, every address, every amount — not
+   one fixed witness). Read the *statement* back against the sentence from step 1 before writing
+   any proof.
+3. **Only then prove it.**
+
+This was violated early in `Escrow`/`Token`'s test suites in two specific, recurring ways — watch
+for both when reviewing new proofs:
+
+- **Concrete-witness tests standing in for theorems.** A theorem like `runS (transfer bob 30) s₀
+  = .ok (...)` for one hand-picked `s₀`/`bob`/`30` is a unit test, not a proof of "`transfer`
+  debits the sender" — it says nothing about any other state/address/amount. Escrow's
+  `EscrowTheorem.lean`/`TokenTheorem.lean` and Interest's `InterestTheorems.lean` `deposit`/
+  `setRate` theorems were rewritten from `native_decide`-on-a-witness to fully `∀`-quantified
+  statements once a tractable symbolic proof existed (`simp` unfolding + `omega`, composed through
+  `PairM`'s `bind_apply`/`liftCaller_apply`/`exec_unlocked_ok` lemmas for cross-contract calls).
+  `native_decide` on a concrete state remains the pragmatic fallback *only* where a fully symbolic
+  characterization genuinely isn't tractable (e.g. `Interest.accrueInterest`'s chained
+  multiply-then-divide-then-add — see `INTEREST.md`); that tradeoff must be stated explicitly in
+  the surrounding doc comment, not left implicit.
+- **Dense `∀ a, if .. then .. else if .. then .. else ..` formulas masquerading as readable
+  theorems.** A single theorem correctly characterizing *every* address at once
+  (`EscrowProofs.runTransferOk`/`TokenProofs.runTransferOk`, `EscrowProofs.runReleaseOk`) is the
+  right **Tier 1** building block, but is not itself something a human would ever say out loud —
+  don't expose it as one of the "required theorems" a reviewer reads. Split it into the separate,
+  named claims a human actually makes (`release_debits_escrow`, `release_credits_recipient`,
+  `release_preserves_other_balances`, `release_self_release_is_noop`; `transfer_debits_sender`,
+  `transfer_credits_recipient`, `transfer_preserves_other_balances`,
+  `transfer_self_transfer_is_noop`), each a one-line corollary of the Tier 1 lemma via `obtain`
+  + `simp`/`simpa`. This is the standard **two-tier proof structure**: Tier 1
+  (`*Proofs.lean`) proves one dense, fully general characterization lemma per contract function;
+  Tier 2 (`*Theorem.lean`) states every human-readable required property as a short corollary of
+  the matching Tier 1 lemma, and is the only file a reviewer should need to read to know *what*
+  was proved. `EscrowProofs.lean`/`EscrowTheorem.lean`, `TokenProofs.lean`/`TokenTheorem.lean`, and
+  `InterestProofs.lean`/`InterestTheorems.lean` are the reference examples of this split.
+
 ---
 
 ## 13. Reference Contracts

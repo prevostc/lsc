@@ -110,25 +110,45 @@ namespace Stmt
 
 variable {S E Err : Type} [ContractErrors Err] [dsl : ContractDSL S E Err]
 
-/-- Internal evaluator: threads `LocalEnv` through sequential statements for variable scoping. -/
+/-- Internal evaluator: threads `LocalEnv` through sequential statements for variable scoping,
+alongside an optional "returned value" (`Sigma Val`, only ever produced by `.ret` — see that
+constructor's docstring in `Lang/AST.lean`). Once a `.ret` fires, `.seq`'s second branch is
+skipped entirely — this is what gives `return e;` real early-return semantics inside `view`
+function bodies, matching how `Checks.checkViewReturns` statically reasons about "every path
+returns". `tx`/`.external` bodies never contain `.ret` (enforced by `checkViewPurity`'s
+counterpart on the `tx` side — `.ret` is only ever emitted by the `view` elaborator, see
+`Lang/Syntax.lean`), so for them the returned-value component is always `none` and `Stmt.eval`
+below simply discards it. -/
 def evalWith
-    (stmt : Stmt) (env : LocalEnv) : ContractM S E Err LocalEnv :=
+    (stmt : Stmt) (env : LocalEnv) : ContractM S E Err (LocalEnv × Option (Sigma Val)) :=
   match stmt with
-  | .skip => pure env
+  | .skip => pure (env, none)
   | .seq s1 s2 => do
-    let env' ← evalWith s1 env
-    evalWith s2 env'
+    let (env', ret?) ← evalWith s1 env
+    match ret? with
+    | some _ => pure (env', ret?)
+    | none => evalWith s2 env'
   | .letBind name ⟨t, expr⟩ => do
     let v ← Expr.eval expr env
-    pure (LocalEnv.bind name ⟨t, v⟩ env)
+    pure (LocalEnv.bind name ⟨t, v⟩ env, none)
   | .storageSet field ⟨t, expr⟩ => do
     let v ← Expr.eval expr env
     ContractM.modifyStorage (dsl.setField t field v)
-    pure env
+    pure (env, none)
+  | .mapSet field key expr => do
+    let addr ← match key with
+      | .caller => ContractM.caller
+      | .var name =>
+        match env.lookup name with
+        | some ⟨Ty.address, .addr a⟩ => pure a
+        | _ => ContractM.revert .Unauthorized
+    let w ← Wad.eval expr env
+    ContractM.modifyStorage (dsl.setMapField field addr w)
+    pure (env, none)
   | .require condExpr errName => do
     let v ← Expr.eval condExpr env
     if Val.boolOf v then
-      pure env
+      pure (env, none)
     else
       match dsl.resolveErr errName with
       | some err => ContractM.revertUser err
@@ -146,35 +166,41 @@ def evalWith
     match dsl.buildEvent eventName vals with
     | some ev => do
       ContractM.emit ev
-      pure env
+      pure (env, none)
     | none => ContractM.revert .Unauthorized
   | .revert errName =>
     match dsl.resolveErr errName with
     | some err => ContractM.revertUser err
     | none => ContractM.revert .Unauthorized
+  | .ret ⟨t, expr⟩ => do
+    let v ← Expr.eval expr env
+    pure (env, some ⟨t, v⟩)
 
 attribute [reducible] evalWith
 
 @[simp] theorem evalWith_skip (env : LocalEnv) :
-    evalWith (S := S) (E := E) (Err := Err) .skip env = pure env := rfl
+    evalWith (S := S) (E := E) (Err := Err) .skip env = pure (env, none) := rfl
 
 @[simp] theorem evalWith_seq (s1 s2 : Stmt) (env : LocalEnv) :
     evalWith (S := S) (E := E) (Err := Err) (.seq s1 s2) env =
-      (evalWith s1 env >>= fun env' => evalWith s2 env') := rfl
+      (evalWith s1 env >>= fun (env', ret?) =>
+        match ret? with
+        | some _ => pure (env', ret?)
+        | none => evalWith s2 env') := rfl
 
 @[simp] theorem evalWith_letBind (name : Ident) (t : Ty) (expr : Expr t) (env : LocalEnv) :
     evalWith (S := S) (E := E) (Err := Err) (.letBind name ⟨t, expr⟩) env =
-      (Expr.eval expr env >>= fun v => pure (LocalEnv.bind name ⟨t, v⟩ env)) := rfl
+      (Expr.eval expr env >>= fun v => pure (LocalEnv.bind name ⟨t, v⟩ env, none)) := rfl
 
 @[simp] theorem evalWith_storageSet (field : Ident) (t : Ty) (expr : Expr t) (env : LocalEnv) :
     evalWith (S := S) (E := E) (Err := Err) (.storageSet field ⟨t, expr⟩) env =
       (Expr.eval expr env >>= fun v =>
-        ContractM.modifyStorage (dsl.setField t field v) >>= fun _ => pure env) := rfl
+        ContractM.modifyStorage (dsl.setField t field v) >>= fun _ => pure (env, none)) := rfl
 
 @[simp] theorem evalWith_require (condExpr : Expr .bool) (errName : Ident) (env : LocalEnv) :
     evalWith (S := S) (E := E) (Err := Err) (.require condExpr errName) env =
       (Expr.eval condExpr env >>= fun v =>
-        if Val.boolOf v then pure env
+        if Val.boolOf v then pure (env, none)
         else match dsl.resolveErr errName with
           | some err => ContractM.revertUser err
           | none => ContractM.revert .Unauthorized) := rfl
@@ -188,7 +214,7 @@ attribute [reducible] evalWith
     evalWith (S := S) (E := E) (Err := Err) (.emit eventName args) env =
       ((args.mapM fun ⟨t, e⟩ => Expr.eval e env >>= fun v => pure ⟨t, v⟩) >>= fun vals =>
         match dsl.buildEvent eventName vals with
-        | some ev => ContractM.emit ev >>= fun _ => pure env
+        | some ev => ContractM.emit ev >>= fun _ => pure (env, none)
         | none => ContractM.revert .Unauthorized) := rfl
 
 @[simp] theorem evalWith_revert (errName : Ident) (env : LocalEnv) :
@@ -197,7 +223,13 @@ attribute [reducible] evalWith
         | some err => ContractM.revertUser err
         | none => ContractM.revert .Unauthorized) := rfl
 
-/-- Public evaluator: discards the internal `LocalEnv`; return type is `ContractM Unit`. -/
+@[simp] theorem evalWith_ret (t : Ty) (expr : Expr t) (env : LocalEnv) :
+    evalWith (S := S) (E := E) (Err := Err) (.ret ⟨t, expr⟩) env =
+      (Expr.eval expr env >>= fun v => pure (env, some ⟨t, v⟩)) := rfl
+
+/-- Public evaluator: discards the internal `LocalEnv`/returned value; return type is
+`ContractM Unit`. Used for `.external`/`tx` bodies, which never contain a `.ret` (see
+`evalWith`'s docstring). -/
 def eval
     (s : Stmt) : ContractM S E Err Unit := do
   let _ ← evalWith s LocalEnv.empty
@@ -206,6 +238,21 @@ def eval
 @[simp] theorem eval_def (s : Stmt) :
     eval (S := S) (E := E) (Err := Err) s =
       (evalWith s LocalEnv.empty >>= fun _ => pure ()) := rfl
+
+/-- Public evaluator for `view` function bodies: runs `s`, requires that it hit a `.ret` of
+exactly the expected `Ty` `t` (a `checkViewReturns`-passing body always does — this is the
+runtime counterpart of that static check), and returns the unwrapped value. Reverts with
+`.Unauthorized` if the body somehow returns no value or a mismatched `Ty` (should be
+unreachable for any body accepted by `Checks.validateAll`). -/
+def evalView (t : Ty) (s : Stmt) : ContractM S E Err (Val t) := do
+  let (_, ret?) ← evalWith s LocalEnv.empty
+  match ret? with
+  | some ⟨t', v⟩ =>
+    if ht : t = t' then
+      pure (cast (by simp [ht]) v)
+    else
+      ContractM.revert .Unauthorized
+  | none => ContractM.revert .Unauthorized
 
 end Stmt
 

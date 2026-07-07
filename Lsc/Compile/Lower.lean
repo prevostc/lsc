@@ -4,6 +4,20 @@ import Lsc.Lib.Wad.Optimize
 
 namespace Lsc.Compile
 
+/-! ## Cross-contract calls (`exec`/`read`) — explicitly out of scope here
+
+A REAL cross-contract call (`Lsc.Syntax.lscExec`/`lscRead`'s `exec Target.fn(..);`/
+`read Target.fn(..);`, `Lsc/Lang/Syntax.lean`) never reaches this file *at all*: any `tx` using
+it has its whole body elaborated directly to a `Lsc.ContractM.PairM S T E Err Unit`-valued `def`
+(see `Lsc.Syntax.elabStmtListPairM`), not the `Lsc.Stmt` value this `Lower`/`IR` pipeline
+operates on, and is deliberately never registered in `ContractDef.functions` (see
+`Lsc.Deriving.contractCrossCallExt`'s docstring) — so `Lower.lean`/`IR.lean` structurally never
+see it, rather than needing to reject it with a special-cased error here. Real EVM `CALL`-opcode
+codegen for a cross-contract call remains a documented, concrete follow-up: it would need (at
+minimum) a first-order `IR.Stmt`/`Stmt` node carrying the callee's ABI selector/calldata layout,
+which this pipeline has no representation for yet (see `examples/escrow/src/Escrow.lean`'s
+module docstring for the full scope note). -/
+
 /-- Storage field → sequential EVM slot (Solidity layout, v1). -/
 structure StorageLayout where
   slots : List (Ident × Nat)
@@ -101,6 +115,9 @@ private partial def lowerStmt (cfg : Config) (s : Lsc.Stmt) : Except String IR.S
       | _ => .error s!"unsupported emit arity for {eventName}"
     | none => .error s!"unknown event {eventName}"
   | .revert _ => .ok .revert0
+  | .ret ⟨t, e⟩ => do
+    let ir ← lowerExpr cfg (t := t) e
+    .ok (.ret ir)
   | _ => .error "unsupported statement in lowering"
 
 def stmt (cfg : Config) (s : Lsc.Stmt) : Except String IR.Stmt :=

@@ -62,10 +62,22 @@ inductive Stmt
   | seq : Stmt → Stmt → Stmt
   | letBind : Ident → (t : Ty) × Expr t → Stmt
   | storageSet : Ident → (t : Ty) × Expr t → Stmt
+  /-- `σ.field[key] = e;` — write one entry of an address-keyed `Lsc.Wad.WadMap` storage field
+      (see that type's docstring, `Lib/Wad/Syntax.lean`). Kept as its own `Stmt` node (rather
+      than folded into `storageSet`, which is `Ty`-indexed and `WadMap` is not a `Ty` at all —
+      it is a storage-only `FieldKind`, see `Lang/Derive.lean`) since a mapping write needs both
+      a key (`Wad.MapKey`) and a `Wad`-kinded value, not just a bare `Ty`-tagged value. -/
+  | mapSet : Ident → Wad.MapKey → Wad.Expr → Stmt
   | require : Expr Ty.bool → Ident → Stmt
   | ifThenElse : Expr Ty.bool → Stmt → Stmt → Stmt
   | emit : Ident → List ExprAny → Stmt
   | revert : Ident → Stmt
+  /-- `return e;` — only ever produced by `view` function bodies (`Lang/Syntax.lean`'s
+      `lscReturn`), never by `tx` bodies (checked by `Checks.checkViewReturns`/purity at
+      elaboration time). `Eval.lean`'s `Stmt.evalWith` threads the returned value out alongside
+      `LocalEnv`, short-circuiting any following `.seq` sibling exactly like a real early
+      `return`. -/
+  | ret : (t : Ty) × Expr t → Stmt
 
 inductive FunctionKind
   | external
@@ -80,6 +92,14 @@ structure FunctionDef where
   params : List (Ident × Ty)
   retTy : Ty
   body : Stmt
+  /-- Whether this `tx` was declared `@nonreentrant`. Required for any `tx` whose body performs
+      a real cross-contract call (`exec`/`read`, `Lang/Syntax.lean`) — checked eagerly, at
+      `tx`-elaboration time, rather than via a `ContractDef`-walking pass (a cross-contract `tx`
+      is never added to `ContractDef.functions` at all, see
+      `Lsc.Deriving.contractCrossCallExt`'s docstring). Optional/no-op otherwise. Defaults to
+      `false` so every existing `FunctionDef` literal (hand-written or auto-derived) that
+      predates this field keeps compiling unchanged. -/
+  nonReentrant : Bool := false
 
 structure ContractDef where
   name : Ident

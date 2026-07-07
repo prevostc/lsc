@@ -5,13 +5,13 @@ import Lsc.Lang.AST
 namespace Lsc.Wad
 
 def addChecked (a b : Wad) : Except ArithError Wad :=
-  (UInt256.addChecked a.raw b.raw).map Wad.mk
+  (UInt256.addChecked a.raw b.raw).map Fixed.mk
 
 def subChecked (a b : Wad) : Except ArithError Wad :=
-  (UInt256.subChecked a.raw b.raw).map Wad.mk
+  (UInt256.subChecked a.raw b.raw).map Fixed.mk
 
 def addCheckedNat (a : Wad) (n : Nat) : Except ArithError Wad :=
-  (UInt256.addCheckedNat a.raw n).map Wad.mk
+  (UInt256.addCheckedNat a.raw n).map Fixed.mk
 
 /-- Multiply two `Wad`s with half-up rounding, checked for overflow.
 
@@ -101,6 +101,35 @@ theorem addChecked_eq_error_of (a b : Wad) (h : a.raw.toNat + b.raw.toNat ≥ 2 
   rw [if_pos hlt']
   rfl
 
+/-- `b.raw.toNat ≤ a.raw.toNat` — the subtraction-side analogue of `canAdd`, needed for
+`subChecked`'s ok/error characterization lemmas below (`a -? b` doesn't underflow iff `a ≥ b`). -/
+abbrev canSub (a b : Wad) : Prop := b.raw.toNat ≤ a.raw.toNat
+
+/-- `Wad.subChecked` in the no-underflow case, stated as a pure-`Nat` difference equality —
+same `rw`-not-`simp` rationale as `addChecked_eq_ok_of` above. -/
+theorem subChecked_eq_ok_of (a b : Wad) (n : Nat) (hn : a.raw.toNat = b.raw.toNat + n) :
+    subChecked a b = .ok (mkNat n) := by
+  have hbound : n < 2 ^ 256 := by have := a.raw.isLt; omega
+  have hle : b.raw ≤ a.raw := by rw [BitVec.le_def]; omega
+  have hnolt : ¬ a.raw < b.raw := by rw [BitVec.lt_def]; omega
+  have htoNat : (a.raw - b.raw).toNat = n := by
+    rw [BitVec.toNat_sub_of_le hle]; omega
+  have heq : a.raw - b.raw = BitVec.ofNat 256 n := by
+    apply BitVec.eq_of_toNat_eq
+    rw [htoNat, BitVec.toNat_ofNat, Nat.mod_eq_of_lt hbound]
+  simp only [subChecked, UInt256.subChecked, heq]
+  rw [if_neg hnolt]
+  simp [Except.map, mkNat]
+
+/-- `Wad.subChecked` in the underflow case — the error-case counterpart of
+`subChecked_eq_ok_of` above. -/
+theorem subChecked_eq_error_of (a b : Wad) (h : a.raw.toNat < b.raw.toNat) :
+    subChecked a b = .error .Underflow := by
+  have hlt : a.raw < b.raw := by rw [BitVec.lt_def]; exact h
+  simp only [subChecked, UInt256.subChecked]
+  rw [if_pos hlt]
+  rfl
+
 /-- `Wad.mulHalfUpChecked` in the no-overflow case, as a pure-`Nat` equality — same rationale
 and same `rw`-not-`simp` usage pattern as `addChecked_eq_ok_of` above. -/
 theorem mulHalfUpChecked_eq_ok_of (a b : Wad) (n : Nat)
@@ -135,6 +164,17 @@ def eval
     match dsl.getField Ty.wad field st.storage with
     | some (.wad w) => pure w
     | _ => ContractM.revert .Unauthorized
+  | .mapGet field key => do
+    let addr ← match key with
+      | .caller => ContractM.caller
+      | .var name =>
+        match env.lookup name with
+        | some ⟨Ty.address, .addr a⟩ => pure a
+        | _ => ContractM.revert .Unauthorized
+    let st ← ContractM.get
+    match dsl.getMapField field addr st.storage with
+    | some w => pure w
+    | none => ContractM.revert .Unauthorized
   | .addChecked a b => do
     let va ← eval a env
     let vb ← eval b env

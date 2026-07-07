@@ -86,6 +86,12 @@ initialize contractStorageExt : EnvExtension (NameMap Name) ←
 originally declared further below, alongside `fieldKindOfExpr`/`tyConst`/etc. -/
 inductive FieldKind
   | wei | wad | bool | address | uint256
+  /-- An address-keyed `Lsc.Wad.WadMap` storage field (e.g. ERC20-style per-holder balances,
+      `docs/reference/TOKEN.md`) — storage-only: unlike the other five kinds, there is no `Ty`
+      case for it at all (it can't be a `tx` parameter, `let`-local, or event payload), so it is
+      excluded from every scalar-`Val`-based helper below (`tyConst`/`leanTypeStx`/`valCtor`/...)
+      and instead handled by its own dedicated `getMapField`/`setMapField` codegen. -/
+  | wadMap
   deriving Repr, DecidableEq
 
 /-- Each registered function's `(abiName, stmtDefName, params)`:
@@ -117,6 +123,72 @@ initialize contractTxSyntaxExt :
     EnvExtension (NameMap (List (Name × Syntax × List (String × FieldKind) × Array Syntax))) ←
   registerEnvExtension (pure {})
 
+/-- `fnName ↦ [(paramName, originalTypeName), ...]` — the author's *exact*, fully-resolved
+declared type for each parameter of a `tx`/`view` (e.g. `Token.Amount`, not the `FieldKind` it
+resolves to), populated by both `tx`'s and `view`'s own elaborators (via `Lang/Syntax.lean`'s
+`stashParamTys`), keyed by the fully-qualified `fnName` (e.g. `Token.transfer`) — deliberately
+**not** namespace-scoped/cleared the way `contractTxSyntaxExt`/`contractViewSyntaxExt` are (once
+flushed), since this is looked up from a *different* contract's module later: an
+`exec Target.fn(..)`/`read Target.fn(..)` call site (`Lang/Syntax.lean`'s `elabExecOrReadTerm`)
+needs `fn`'s own author-declared parameter types to correctly ascribe/`Fixed.retag`-bridge each
+argument, exactly reproducing the same "preserve the exact declared type, not
+`FieldKind.leanTypeStx`'s generic `Lsc.Wad`" fix `flushContractTxs`'s cross-call branch already
+applies to *its own* parameters. Stored as the fully-resolved `Name` (not the raw, possibly
+namespace-relative `ty` syntax an author actually wrote, e.g. bare `Amount` from inside
+`namespace Token`) precisely so it can be soundly re-spliced (via a fresh `mkIdent`) from a
+*different* module's own namespace/`open` scope later, without depending on any Lean-hygiene
+scope-travel guarantee for plain source-parsed identifiers — see `Lsc.Wad.Fixed`'s docstring
+(`Lsc/Lib/Wad/Syntax.lean`) for why this exact-type preservation, on *both* ends of an `exec`/
+`read` call, is what makes mixing up two different tokens' amounts a compile error. -/
+initialize contractParamTyExt : EnvExtension (NameMap (List (String × Name))) ←
+  registerEnvExtension (pure {})
+
+/-- Set of fully-qualified `tx` names (`fnName`, as recorded in `contractFnsExt`) declared
+`@nonreentrant` (`Lang/Syntax.lean`'s `tx` decorator). Populated by `tx`'s own elaborator at
+buffering time (the decorator is parsed and known immediately, unlike the body, which stays
+deferred) and consulted by `elabContractDefBody` when assembling each auto-derived
+`FunctionDef.nonReentrant`. -/
+initialize contractNonReentrantExt : EnvExtension (NameMap Bool) ←
+  registerEnvExtension (pure {})
+
+/-- Set of fully-qualified `tx` names (`fnName`) whose raw body contains a real, black-box
+cross-contract call (`exec Target.fn(..);`/`read Target.fn(..);`, `Lang/Syntax.lean`'s
+`lscExec`/`lscRead` nodes) at top level. Populated by `tx`'s own elaborator (which must scan the
+raw, not-yet-elaborated `lscStmt*` syntax to decide this, since only *after* knowing it can it
+pick which of the two elaboration paths — plain `Stmt`-valued, or `PairM`-valued —
+`flushContractTxs` should later use for this particular `tx`; see that function's docstring).
+Any `tx` recorded here is **not** added to `contractFnsExt`/`ContractDef.functions` — a
+cross-contract `tx` is a real, callable, proof-friendly Lean `def` (exactly like the framework's
+`ContractM`/`PairM` combinators), but (like the hand-written `Escrow.release` this feature
+replaces) it is deliberately kept out of the single-storage `ContractDef`/bytecode/Yul pipeline,
+which has no representation for a second contract's storage type at all — see
+`Lsc/Compile/Lower.lean`'s module docstring for the precise, documented boundary this leaves. -/
+initialize contractCrossCallExt : EnvExtension (NameMap Bool) ←
+  registerEnvExtension (pure {})
+
+/-- Buffered `view` entries: `(fnName, plainNameSyntax, params, retKind, stmtsSyntax)` — the
+`view` counterpart of `contractTxSyntaxExt`, with one extra `retKind` (the declared `: RetTy`
+return kind, resolved the same way a `tx` parameter's kind already is — immediately, at
+buffering time — see `contractTxSyntaxExt`'s docstring for why the body itself still has to
+wait). `stmtsSyntax` is always a real `lscStmt*` block by the time it is buffered here: the
+expression-shorthand `view name(..) : Ty => e;` surface form is desugared into a single
+synthetic `return e;` node before buffering, so `flushContractViews` only ever has one shape to
+elaborate (see `Lang/Syntax.lean`'s `view` elaborators). -/
+initialize contractViewSyntaxExt :
+    EnvExtension (NameMap (List (Name × Syntax × List (String × FieldKind) × FieldKind × Array Syntax))) ←
+  registerEnvExtension (pure {})
+
+/-- Registered `view` functions: `(abiName, stmtDefName, params, retKind)` — the `view`
+counterpart of `contractFnsExt`. Unlike `contractFnsExt`, `stmtDefName` *always* points at a
+separate hidden `name.Impl` def holding the raw, `Expr.var`-parameterized body (even for a
+zero-parameter `view`), since the real, ABI-facing `name` def here is never `Stmt`-valued at all
+— it's a callable `ContractM S E Err (Val retKind)` value/function built via `Stmt.evalView`
+(`Lang/Syntax.lean`'s `flushContractViews`), so it can never double as the raw body
+`elabContractDefBody` needs to embed into `FunctionDef.body` for the bytecode/Yul pipeline. -/
+initialize contractViewFnsExt :
+    EnvExtension (NameMap (List (Name × Name × List (String × FieldKind) × FieldKind))) ←
+  registerEnvExtension (pure {})
+
 /-- Marker classes used purely as `deriving` targets — they carry no data
 or methods themselves; all the generated code lives in plain top-level
 `def`s/`instance`s emitted by the handlers below (see each handler's
@@ -139,16 +211,86 @@ inside `namespace Foo`). -/
 def atRootNamespace (cont : CommandElabM α) : CommandElabM α :=
   withScope (fun sc => { sc with currNamespace := Name.anonymous, openDecls := [] }) cont
 
+/-- Pull a raw `Nat` literal out of `e` without ever calling `whnf` (matching `fieldKindOfExpr`'s
+own "never `whnf`" discipline, see its docstring below) — a plain numeral like `18`, once
+elaborated against an expected `Nat` type, is actually `@OfNat.ofNat Nat 18 (instOfNatNat 18)`,
+not a bare `Expr.lit` (`Expr.rawNatLit?` only ever matches the latter); the literal `18` is
+nonetheless sitting right there, un-reduced, as `OfNat.ofNat`'s own `n` argument, needing no
+`whnf` at all to reach. -/
+def natLitOfExpr? (e : Lean.Expr) : Option Nat :=
+  match e.rawNatLit? with
+  | some n => some n
+  | none =>
+    if e.getAppFn.isConstOf ``OfNat.ofNat then
+      match e.getAppArgs with
+      | #[_, nExpr, _] => nExpr.rawNatLit?
+      | _ => none
+    else none
+
 /-- Classify a (necessarily un-`whnf`'d) field-type `Expr` by its literal
 head constant. Returns `none` for any type other than the five supported
-ones (see module docstring). -/
+ones (see module docstring).
+
+**Only `Lsc.Wad.Fixed 18` is accepted** for the `Fixed`-applied case (matching `Lsc.Wad` itself)
+— not an arbitrary `Fixed d`: the rest of the `.wad`-kind pipeline (`Wad.Expr`'s
+`⸢*⸣?`/`⌊/⌋?` operators, `Lsc/Lib/Wad/Eval.lean`'s `mulHalfUpChecked`/`divDownChecked`) hardcodes
+the `WAD = 10^18` scale, so silently accepting e.g. `Fixed 6` here would let a mis-scaled `⸢*⸣?`/
+`⌊/⌋?` compile without error instead of being rejected. A genuinely non-18-decimals `Fixed d`
+token needs to be authored as a hand-written `ContractM` contract (bypassing this DSL layer
+entirely, exactly like `Escrow.release`'s `exec`/`read` already do) until `FieldKind`/`Wad.Expr`
+gain real per-`d` scaling — tracked as a follow-up in `TODO.md`. -/
 def fieldKindOfExpr (e : Lean.Expr) : Option FieldKind :=
   if e.isConstOf ``Lsc.Wei then some .wei
   else if e.isConstOf ``Lsc.Wad then some .wad
   else if e.isConstOf ``Bool then some .bool
   else if e.isConstOf ``Lsc.Address then some .address
   else if e.isConstOf ``Lsc.UInt256 then some .uint256
+  else if e.isConstOf ``Lsc.Wad.WadMap then some .wadMap
+  else if e.getAppFn.isConstOf ``Lsc.Wad.Fixed then
+    -- `Fixed` now takes two explicit args (`decimals`, `tag` — see that structure's docstring);
+    -- `tag` is intentionally ignored here: it's purely a Lean-level nominal marker distinguishing
+    -- *which token* an amount belongs to, invisible to `FieldKind`/`Ty`/`Val`/codegen, which stay
+    -- homogeneous across every token (the tag is threaded through separately, at the
+    -- `tx`/`view` Lean-signature level only — see `Lang/Syntax.lean`'s `flushContractTxs`/
+    -- `flushContractViews`).
+    match e.getAppArgs with
+    | #[dExpr, _tagExpr] => if natLitOfExpr? dExpr == some 18 then some .wad else none
+    | _ => none
   else none
+
+/-- Best-effort alias resolution for a field type that isn't *literally* `Lsc.Wad`/
+`Lsc.Wad.Fixed 18` (`fieldKindOfExpr`'s own two `Wad`-shaped cases above), e.g. a token
+declaring `abbrev Token.Amount := Lsc.Wad` right next to its storage, so `Escrow`-style callers
+can name that token's own unit instead of the generic `Wad` (see `docs/reference/TOKEN.md`).
+Only ever unfolds a chain of bare `def`/`abbrev` *names* one level at a time, stopping the
+moment a level's value isn't itself a plain constant — it deliberately never calls `whnf`, so it
+can never walk into `BitVec 256` and collapse `Address`/`UInt256` into each other (see this
+file's module docstring's "`Address`/`UInt256` ambiguity" section: that guarantee depends on
+*never* generically unfolding, which this preserves — the fallback below only ever fires for a
+name whose *unfolded* value is itself found to be `Wad`-shaped, never for `BitVec`/`Address`/
+`UInt256` itself, since those never reduce to that shape). Still only ever accepts an eventual
+`Fixed 18` (never a different `d`), for the same soundness reason `fieldKindOfExpr` restricts its
+own direct `Fixed`-applied case — see that docstring. Bounded fuel purely to guarantee
+termination against a (framework-impossible, since `deriving` runs on well-founded declarations)
+cyclic alias chain. -/
+partial def resolveFixedAlias (e : Lean.Expr) (fuel : Nat := 8) : TermElabM Bool := do
+  if fieldKindOfExpr e == some .wad then return true
+  else
+    match fuel, e.constName? with
+    | 0, _ | _, none => return false
+    | fuel + 1, some n =>
+      match (← getConstInfo n).value? with
+      | some v => resolveFixedAlias v fuel
+      | none => return false
+
+/-- `fieldKindOfExpr`'s monadic counterpart — tries the pure, purely-syntactic check first, then
+falls back to `resolveFixedAlias` for a `Wad`-shaped named alias (e.g. `Token.Amount`). All three
+call sites below are already in `TermElabM`, so this costs nothing extra when the pure check
+already succeeds (the common case for the original five keyword-named types). -/
+def fieldKindOfExprM (e : Lean.Expr) : TermElabM (Option FieldKind) := do
+  match fieldKindOfExpr e with
+  | some k => return some k
+  | none => return if (← resolveFixedAlias e) then some .wad else none
 
 def FieldKind.tyConst : FieldKind → TermElabM Term
   | .wei => `(Lsc.Ty.wei)
@@ -156,6 +298,7 @@ def FieldKind.tyConst : FieldKind → TermElabM Term
   | .bool => `(Lsc.Ty.bool)
   | .address => `(Lsc.Ty.address)
   | .uint256 => `(Lsc.Ty.uint256)
+  | .wadMap => throwError "internal error: `FieldKind.wadMap` has no `Ty` (storage-only kind)"
 
 /-- The real Lean *value* type a `tx` parameter of this kind is declared with on the generated
 callable `def name (p : <leanTypeStx>) : Stmt := ...` (see `Lang/Syntax.lean`'s `flushContractTxs`)
@@ -168,6 +311,7 @@ def FieldKind.leanTypeStx : FieldKind → TermElabM Term
   | .bool => `(Bool)
   | .address => `(Lsc.Address)
   | .uint256 => `(Lsc.UInt256)
+  | .wadMap => throwError "internal error: `FieldKind.wadMap` is storage-only (not a `tx` parameter kind)"
 
 /-- Embed a `tx` parameter's real Lean *value* (`paramId : leanTypeStx`) as a literal
 `Expr`/`CoreExpr` AST node of the matching kind — the bridge between "generated `def` takes a
@@ -188,6 +332,7 @@ def FieldKind.embedLitStx (k : FieldKind) (paramId : Term) : TermElabM Term :=
   | .bool => `(Lsc.CoreExpr.lit Lsc.Ty.bool (Lsc.Lit.bool $paramId))
   | .address => `(Lsc.CoreExpr.lit Lsc.Ty.address (Lsc.Lit.addr $paramId))
   | .uint256 => `(Lsc.CoreExpr.lit Lsc.Ty.uint256 (Lsc.Lit.u256 $paramId))
+  | .wadMap => throwError "internal error: `FieldKind.wadMap` is storage-only (not embeddable as a literal)"
 
 /-- Wrap a plain term as a `matchDiscr` for splicing into `match $[$discrs],* with …`. -/
 def mkDiscr (t : Term) : TermElabM (TSyntax ``Lean.Parser.Term.matchDiscr) :=
@@ -199,6 +344,23 @@ def FieldKind.valCtor : FieldKind → TermElabM Term
   | .bool => `(Lsc.Val.bool)
   | .address => `(Lsc.Val.addr)
   | .uint256 => `(Lsc.Val.u256)
+  | .wadMap => throwError "internal error: `FieldKind.wadMap` has no `Val` case (storage-only kind)"
+
+/-- Bridge a `.wad`-kind value between its field's *own* possibly-tagged type (e.g.
+`Token.Amount`, `Lsc.Wad.Fixed 18 Token.Tag`) and `Val.wad`'s generic, always-`Untagged`-tagged
+`Lsc.Wad` — a plain identity for every other `FieldKind` (whose declared type is never an alias
+at all, only ever the one literal type `fieldKindOfExpr` accepts). Needed at every
+`getField`/`setField`/`buildEvent` call site touching a `.wad`-kind field/event-payload: since
+`Val`/`Ty` (`valCtor`'s targets) are the DSL's single, global, tag-erased types (see
+`Lang/Syntax.lean`'s `flushContractViews`' docstring for the fuller story), a storage field or
+event payload declared with a token's own tagged `Amount` is no longer *defeq* to the generic
+`Wad` `Val.wad`/`Val.wadOf` expect, now that `Fixed`'s `tag` parameter is a genuine nominal
+marker (`Lsc.Wad.Fixed`'s docstring) — `Fixed.retag` is the sound, zero-cost (same `raw` field,
+no value change at all) bridge in both directions. -/
+def FieldKind.bridgeGeneric (k : FieldKind) (e : Term) : TermElabM Term :=
+  match k with
+  | .wad => `(Lsc.Wad.Fixed.retag $e)
+  | _ => pure e
 
 /-- The *expression* (not value) Lean type carrying a field of this kind while a
 `Stmt`/`Expr` AST fragment is being built — `Wei.Expr` for `.wei`, `CoreExpr <tyConst>`
@@ -211,6 +373,9 @@ def FieldKind.exprTypeStx : FieldKind → TermElabM Term
   | .bool => `(Lsc.CoreExpr Lsc.Ty.bool)
   | .address => `(Lsc.CoreExpr Lsc.Ty.address)
   | .uint256 => `(Lsc.CoreExpr Lsc.Ty.uint256)
+  | .wadMap =>
+    throwError "internal error: `FieldKind.wadMap` has no plain `σ.field` expression form \
+      (index it with `σ.field[key]` instead)"
 
 /-- The default (i.e. only, since these are never written by contract authors — they're
 generated) value of a `σ.field` constant: a fresh `storageGet` expression fragment
@@ -224,6 +389,9 @@ def FieldKind.storageGetStx (k : FieldKind) (fieldStr : String) : TermElabM Term
   | .bool => `(Lsc.CoreExpr.storageGet Lsc.Ty.bool $fieldLit)
   | .address => `(Lsc.CoreExpr.storageGet Lsc.Ty.address $fieldLit)
   | .uint256 => `(Lsc.CoreExpr.storageGet Lsc.Ty.uint256 $fieldLit)
+  | .wadMap =>
+    throwError "internal error: `FieldKind.wadMap` has no plain `σ.field` expression form \
+      (index it with `σ.field[key]` instead)"
 
 /-! ## `deriving ContractStorage`
 
@@ -246,11 +414,12 @@ def getStructureFieldKinds (structName : Name) : TermElabM (Array (Name × Field
     -- supported cases) — `bindingBody!` extracts `FieldType` without
     -- triggering any `whnf`/unfolding (see module docstring).
     let fieldTy := ci.type.bindingBody!
-    match fieldKindOfExpr fieldTy with
+    match ← fieldKindOfExprM fieldTy with
     | some k => return (fname, k)
     | none =>
       throwError "deriving ContractStorage: field `{fname}` of `{structName}` has unsupported type `{fieldTy}` \
-        — storage fields must be declared with exactly one of `Wei`/`Wad`/`Bool`/`Address`/`UInt256` written literally \
+        — storage fields must be declared with exactly one of `Wei`/`Wad`/`Bool`/`Address`/`UInt256` written literally, \
+        or a named `Wad`/`Lsc.Wad.Fixed d`-shaped alias (e.g. `Token.Amount`) \
         (see `Lsc.Deriving`'s module docstring for why this can't be fully generic)"
 
 def mkGetFieldCmd (structName : Name) (fields : Array (Name × FieldKind)) : TermElabM Command := do
@@ -259,13 +428,17 @@ def mkGetFieldCmd (structName : Name) (fields : Array (Name × FieldKind)) : Ter
   let tId := mkIdent `t
   let fieldId := mkIdent `field
   let sId := mkIdent `s
+  -- `wadMap` fields have no `Ty`/`Val` case at all (storage-only, see `FieldKind.wadMap`'s
+  -- docstring) — never matched here, only through the dedicated `getMapField` below.
+  let fields := fields.filter (·.2 != .wadMap)
   let arms ← fields.mapM fun (fname, k) => do
     let tyConst ← k.tyConst
     let valCtor ← k.valCtor
     let fId := mkIdent fname
     let fieldStr := quote fname.toString
     let pats : Array Term := #[tyConst, fieldStr]
-    `(matchAltExpr| | $[$pats],* => some ($valCtor $sId.$fId))
+    let bridged ← k.bridgeGeneric (← `($sId.$fId))
+    `(matchAltExpr| | $[$pats],* => some ($valCtor $bridged))
   let wc ← `(_)
   let wcPats : Array Term := #[wc, wc]
   let defaultArm ← `(matchAltExpr| | $[$wcPats],* => none)
@@ -282,6 +455,7 @@ def mkSetFieldCmd (structName : Name) (fields : Array (Name × FieldKind)) : Ter
   let fieldId := mkIdent `field
   let vId := mkIdent `v
   let sId := mkIdent `s
+  let fields := fields.filter (·.2 != .wadMap)
   let arms ← fields.mapM fun (fname, k) => do
     let valCtor ← k.valCtor
     let tyConst ← k.tyConst
@@ -289,7 +463,8 @@ def mkSetFieldCmd (structName : Name) (fields : Array (Name × FieldKind)) : Ter
     let fieldStr := quote fname.toString
     let varId ← `(x)
     let valPat ← `($valCtor $varId)
-    let body ← `({ $sId with $fId:ident := $varId })
+    let bridged ← k.bridgeGeneric varId
+    let body ← `({ $sId with $fId:ident := $bridged })
     let pats : Array Term := #[tyConst, fieldStr, valPat]
     `(matchAltExpr| | $[$pats],* => $body)
   let wc ← `(_)
@@ -298,6 +473,61 @@ def mkSetFieldCmd (structName : Name) (fields : Array (Name × FieldKind)) : Ter
   let alts := arms.push defaultArm
   let discrs ← #[tId, fieldId, vId].mapM mkDiscr
   `(command| def $setFieldName ($tId : Lsc.Ty) ($fieldId : String) ($vId : Lsc.Val $tId) ($sId : $structId) : $structId :=
+      match $[$discrs],* with
+      $alts:matchAlt*)
+
+/-- `def S.getMapField (field : String) (a : Lsc.Address) (s : S) : Option Lsc.Wad.Wad`, one
+match arm per `wadMap`-kinded field of `structName` — always generated (even as just the
+default `| _ => none` arm, if `structName` declares no `wadMap` field at all), so
+`derive_contract_dsl`'s generated `ContractDSL` instance can uniformly reference
+`S.getMapField` regardless of whether `S` happens to have a mapping field. -/
+def mkGetMapFieldCmd (structName : Name) (fields : Array (Name × FieldKind)) : TermElabM Command := do
+  let structId := mkIdent structName
+  let getMapFieldName := mkIdent (structName ++ `getMapField)
+  let fieldId := mkIdent `field
+  let aId := mkIdent `a
+  let sId := mkIdent `s
+  let mapFields := fields.filter (·.2 == .wadMap)
+  let arms ← mapFields.mapM fun (fname, _) => do
+    let fId := mkIdent fname
+    let fieldStr := quote fname.toString
+    `(matchAltExpr| | $fieldStr => some ($sId.$fId $aId))
+  let wc ← `(_)
+  let defaultArm ← `(matchAltExpr| | $wc => none)
+  let alts := arms.push defaultArm
+  let discrs ← #[(fieldId : Term)].mapM mkDiscr
+  `(command|
+    def $getMapFieldName ($fieldId : String) ($aId : Lsc.Address) ($sId : $structId) :
+        Option Lsc.Wad.Wad :=
+      match $[$discrs],* with
+      $alts:matchAlt*)
+
+/-- `def S.setMapField (field : String) (a : Lsc.Address) (v : Lsc.Wad.Wad) (s : S) : S`, the
+write-side counterpart of `mkGetMapFieldCmd` — a no-op (`s` unchanged) if `field` doesn't name a
+`wadMap` field. The generated `fun a' => if a' == a then v else $fId a'` update matches
+`Lsc.Wad.WadMap`'s "total function" model exactly (see that type's docstring). -/
+def mkSetMapFieldCmd (structName : Name) (fields : Array (Name × FieldKind)) : TermElabM Command := do
+  let structId := mkIdent structName
+  let setMapFieldName := mkIdent (structName ++ `setMapField)
+  let fieldId := mkIdent `field
+  let aId := mkIdent `a
+  let vId := mkIdent `v
+  let sId := mkIdent `s
+  let mapFields := fields.filter (·.2 == .wadMap)
+  let arms ← mapFields.mapM fun (fname, _) => do
+    let fId := mkIdent fname
+    let fieldStr := quote fname.toString
+    let aPrimeId := mkIdent `a'
+    let updated ← `(fun ($aPrimeId : Lsc.Address) => if $aPrimeId == $aId then $vId else $sId.$fId $aPrimeId)
+    let body ← `({ $sId with $fId:ident := $updated })
+    `(matchAltExpr| | $fieldStr => $body)
+  let wc ← `(_)
+  let defaultArm ← `(matchAltExpr| | $wc => $sId)
+  let alts := arms.push defaultArm
+  let discrs ← #[(fieldId : Term)].mapM mkDiscr
+  `(command|
+    def $setMapFieldName ($fieldId : String) ($aId : Lsc.Address) ($vId : Lsc.Wad.Wad) ($sId : $structId) :
+        $structId :=
       match $[$discrs],* with
       $alts:matchAlt*)
 
@@ -313,6 +543,9 @@ generates plain `def`s of the same shape their combinators already build, nothin
 def mkSigmaFieldCmds (structName : Name) (fields : Array (Name × FieldKind)) :
     TermElabM (Array Command) := do
   let ns := structName.getPrefix
+  -- A `wadMap` field has no plain `σ.field` form at all — only `σ.field[key]`
+  -- (`Lang/Syntax.lean`'s dedicated grammar), so it's excluded here.
+  let fields := fields.filter (·.2 != .wadMap)
   fields.mapM fun (fname, k) => do
     let sigmaFieldName := mkIdent (ns ++ `σ ++ fname)
     let tyStx ← k.exprTypeStx
@@ -339,11 +572,15 @@ def mkContractStorageHandler : DerivingHandler := fun declNames => do
     getStructureFieldKinds structName
   let getCmd ← liftTermElabM <| mkGetFieldCmd structName fieldKinds
   let setCmd ← liftTermElabM <| mkSetFieldCmd structName fieldKinds
+  let getMapCmd ← liftTermElabM <| mkGetMapFieldCmd structName fieldKinds
+  let setMapCmd ← liftTermElabM <| mkSetMapFieldCmd structName fieldKinds
   let sigmaCmds ← liftTermElabM <| mkSigmaFieldCmds structName fieldKinds
   let inhabitedCmd ← liftTermElabM <| mkInhabitedCmd structName
   atRootNamespace do
     elabCommand getCmd
     elabCommand setCmd
+    elabCommand getMapCmd
+    elabCommand setMapCmd
     for c in sigmaCmds do elabCommand c
     elabCommand inhabitedCmd
   return true
@@ -370,11 +607,11 @@ def getCtorFieldKind (ctorName : Name) : TermElabM (Option FieldKind) := do
       throwError "deriving ContractEvent: constructor `{ctorName}` has {xs.size} parameters; \
         only 0- or 1-parameter events are currently supported"
     let ty ← inferType xs[0]!
-    match fieldKindOfExpr ty with
+    match ← fieldKindOfExprM ty with
     | some k => return some k
     | none =>
       throwError "deriving ContractEvent: constructor `{ctorName}`'s parameter has unsupported type `{ty}` \
-        — event payloads must be `Wei`/`Wad`/`Bool`/`Address`/`UInt256`"
+        — event payloads must be `Wei`/`Wad`/`Bool`/`Address`/`UInt256` (or a `Wad`-shaped alias)"
 
 /-- Like `getCtorFieldKind`, but also returns the payload's declared parameter
 name (needed to reconstruct `ContractDef.events`'s `(paramName, ty)` shape in
@@ -388,11 +625,11 @@ def getCtorFieldNameKind (ctorName : Name) : TermElabM (Option (Name × FieldKin
         only 0- or 1-parameter events are currently supported"
     let ty ← inferType xs[0]!
     let paramName ← xs[0]!.fvarId!.getUserName
-    match fieldKindOfExpr ty with
+    match ← fieldKindOfExprM ty with
     | some k => return some (paramName, k)
     | none =>
       throwError "derive_contract_def: constructor `{ctorName}`'s parameter has unsupported type `{ty}` \
-        — event payloads must be `Wei`/`Wad`/`Bool`/`Address`/`UInt256`"
+        — event payloads must be `Wei`/`Wad`/`Bool`/`Address`/`UInt256` (or a `Wad`-shaped alias)"
 
 def mkBuildEventCmd (indName : Name) (ctors : Array Name) : TermElabM Command := do
   let evtId := mkIdent indName
@@ -416,7 +653,8 @@ def mkBuildEventCmd (indName : Name) (ctors : Array Name) : TermElabM Command :=
       let valPat ← `($valCtor $varId)
       let listPat ← `([⟨$tyConst, $valPat⟩])
       let fullCtorId := mkIdent ctorName
-      let body ← `(some ($fullCtorId $varId))
+      let bridged ← k.bridgeGeneric varId
+      let body ← `(some ($fullCtorId $bridged))
       let pats : Array Term := #[nameStr, listPat]
       `(matchAltExpr| | $[$pats],* => $body)
   let wc ← `(_)
@@ -454,13 +692,21 @@ Naming convention: for an error inductive `Err`, this emits:
 * `instance : Lsc.ContractErrors Err` — `arith`/`fromFramework` arms are
   filled in by *name-matching* against `ArithError`
   (`Overflow`/`Underflow`/`DivisionByZero`) and `FrameworkError`
-  (`Reentrant`/`Unauthorized`/`InvalidSelector`) constructors: a
+  (`Reentrant`/`Unauthorized`/`InvalidSelector`/`ExternalCallFailed`)
+  constructors: a
   same-named constructor in `Err` maps directly; an unmatched case falls
   back to `ContractErrors.unreachableArith` (for `arith`) or the first
-  matching-by-name framework constructor found, else the first declared
-  `Err` constructor (for `fromFramework`) — mirroring exactly what
-  `Counter.lean`'s hand-written instance already does today (it maps
-  every `FrameworkError` case to one fixed fallback constructor).
+  declared `Err` constructor (for `fromFramework`) — **per `FrameworkError`
+  constructor**, independently: e.g. an `Err` with both `Reentrant` and
+  `ExternalCallFailed` constructors gets each mapped to itself, while an
+  `Err` with only `Reentrant` gets `Unauthorized`/`InvalidSelector`/
+  `ExternalCallFailed` all falling back to the first declared `Err`
+  constructor (typically `Reentrant` itself, if declared first) — this
+  generalizes `Counter.lean`'s original hand-written instance (which only
+  ever had one fixed fallback constructor for *every* `FrameworkError`
+  case, unable to give `ExternalCallFailed` its own distinct mapping the
+  way `Escrow`'s hand-written instance needs, see `docs/reference/
+  ESCROW.md`).
 
   IMPORTANT (intentional, see the plan's "Resolved: `ContractError`
   derivation example" section): this handler only does what's decidable
@@ -474,7 +720,15 @@ Naming convention: for an error inductive `Err`, this emits:
   of the migration plan), which runs after all function bodies are known. -/
 
 def arithErrorCtorNames : Array String := #["Overflow", "Underflow", "DivisionByZero"]
-def frameworkErrorCtorNames : Array String := #["Reentrant", "Unauthorized", "InvalidSelector"]
+
+/-- Must list *every* `Lsc.FrameworkError` constructor (`Lsc/Core/ContractM.lean`), in
+declaration order — `mkContractErrorsInstanceCmd`'s `fromFramework` match is built directly from
+this list and relies on it being exhaustive over the real inductive's shape (no trailing
+wildcard arm is emitted); adding a new `FrameworkError` constructor without adding it here would
+make the generated `fromFramework` non-exhaustive, a compile error at every contract's own
+`deriving ContractError` site rather than a silent gap. -/
+def frameworkErrorCtorNames : Array String :=
+  #["Reentrant", "Unauthorized", "InvalidSelector", "ExternalCallFailed"]
 
 def mkResolveErrorCmd (indName : Name) (ctorStrs : Array String) : TermElabM Command := do
   let errId := mkIdent indName
@@ -522,16 +776,21 @@ def mkContractErrorsInstanceCmd (indName : Name) (ctorStrs : Array String) : Ter
     if arithErrorCtorNames.all ctorStrs.contains then arithArms else arithArms.push arithDefault
   let arithDiscrs ← #[(aeWc : Term)].mapM mkDiscr
   let arithMatch ← `(fun $aeWc => match $[$arithDiscrs],* with $arithAlts:matchAlt*)
-  -- `fromFramework`: every case maps to one fixed fallback constructor,
-  -- same pattern as `Counter.lean`'s hand-written instance — preferring a
-  -- same-named `Err` constructor for any `FrameworkError` case if one
-  -- exists, else the first declared `Err` constructor.
-  let matchedFramework := frameworkErrorCtorNames.filter ctorStrs.contains
-  let fallbackCtorStr := matchedFramework[0]?.getD ctorStrs[0]!
-  let fallbackCtorId := mkIdent (Name.mkSimple fallbackCtorStr)
-  let feWc ← `(_fe)
-  let fwBody ← `(.$fallbackCtorId)
-  let fwMatch ← `(fun $feWc => $fwBody)
+  -- `fromFramework`: real per-constructor matching — each of `FrameworkError`'s constructors
+  -- independently prefers a same-named `Err` constructor if one is declared, else falls back to
+  -- the first declared `Err` constructor. This is exhaustive over `FrameworkError`'s fixed shape
+  -- (`frameworkErrorCtorNames`, kept in lockstep with the real inductive by hand — see that
+  -- `def`'s docstring), so no trailing wildcard arm is needed.
+  let firstCtorStr := ctorStrs[0]!
+  let feId := mkIdent `fe
+  let fwArms ← frameworkErrorCtorNames.mapM fun fen => do
+    let fwPat := mkIdent (`Lsc.FrameworkError ++ Name.mkSimple fen)
+    let targetCtorStr := if ctorStrs.contains fen then fen else firstCtorStr
+    let targetCtorId := mkIdent (Name.mkSimple targetCtorStr)
+    let body ← `(.$targetCtorId)
+    `(matchAltExpr| | $fwPat:term => $body)
+  let fwDiscrs ← #[(feId : Term)].mapM mkDiscr
+  let fwMatch ← `(fun $feId => match $[$fwDiscrs],* with $fwArms:matchAlt*)
   `(command|
     instance : Lsc.ContractErrors $errId where
       arith := $arithMatch
@@ -624,6 +883,43 @@ def mkDslSetFieldLemma (lemmaName storageName errName eventName : Name) : TermEl
         @Lsc.ContractDSL.setField $sId $eId $errIdT _ _ $tId $fId $vId $sVarId =
           $setFieldRef $tId $fId $vId $sVarId := rfl)
 
+/-- `getMapField`/`setMapField`'s own `ContractDSL`-projection bridging lemma, exactly mirroring
+`mkDslGetFieldLemma`/`mkDslSetFieldLemma` above (see those docstrings) — without this, `simp`
+has no way to unfold `@ContractDSL.getMapField/setMapField S E Err _ _ ...` (a structure
+projection applied to the `@[reducible] instance` `derive_contract_dsl` builds below) back down
+to the concrete, `match`-based `$storageId.getMapField`/`setMapField` those instance fields are
+literally assigned to — needed for any symbolic (non-`native_decide`) proof about a `tx` that
+reads/writes a `Lsc.Wad.WadMap` storage field (e.g. `examples/escrow`'s `Token.transfer`). -/
+def mkDslGetMapFieldLemma (lemmaName storageName errName eventName : Name) : TermElabM Command := do
+  let sId := mkIdent storageName
+  let eId := mkIdent eventName
+  let errIdT := mkIdent errName
+  let getMapFieldRef := mkIdent (storageName ++ `getMapField)
+  let fId := mkIdent `f
+  let aId := mkIdent `a
+  let sVarId := mkIdent `s
+  let lemIdent := mkIdent lemmaName
+  `(command|
+    @[simp] theorem $lemIdent:ident ($fId : Lsc.Ident) ($aId : Lsc.Address) ($sVarId : $sId) :
+        @Lsc.ContractDSL.getMapField $sId $eId $errIdT _ _ $fId $aId $sVarId =
+          $getMapFieldRef $fId $aId $sVarId := rfl)
+
+def mkDslSetMapFieldLemma (lemmaName storageName errName eventName : Name) : TermElabM Command := do
+  let sId := mkIdent storageName
+  let eId := mkIdent eventName
+  let errIdT := mkIdent errName
+  let setMapFieldRef := mkIdent (storageName ++ `setMapField)
+  let fId := mkIdent `f
+  let aId := mkIdent `a
+  let vId := mkIdent `v
+  let sVarId := mkIdent `s
+  let lemIdent := mkIdent lemmaName
+  `(command|
+    @[simp] theorem $lemIdent:ident
+        ($fId : Lsc.Ident) ($aId : Lsc.Address) ($vId : Lsc.Wad.Wad) ($sVarId : $sId) :
+        @Lsc.ContractDSL.setMapField $sId $eId $errIdT _ _ $fId $aId $vId $sVarId =
+          $setMapFieldRef $fId $aId $vId $sVarId := rfl)
+
 def mkDslResolveErrLemma (lemmaName storageName errName eventName : Name) : TermElabM Command := do
   let sId := mkIdent storageName
   let eId := mkIdent eventName
@@ -678,6 +974,8 @@ elab "derive_contract_dsl " storageId:ident errId:ident eventId:ident : command 
   let eventName ← Lean.Elab.Command.liftCoreM <| Lean.Elab.realizeGlobalConstNoOverloadWithInfo eventId
   let getFieldRef := mkIdent (storageName ++ `getField)
   let setFieldRef := mkIdent (storageName ++ `setField)
+  let getMapFieldRef := mkIdent (storageName ++ `getMapField)
+  let setMapFieldRef := mkIdent (storageName ++ `setMapField)
   let resolveErrRef := mkIdent (errName ++ `resolveError)
   let buildEventRef := mkIdent (eventName ++ `buildEvent)
   -- Record this contract's `(errName, eventName)` under the current namespace, so the
@@ -690,6 +988,8 @@ elab "derive_contract_dsl " storageId:ident errId:ident eventId:ident : command 
     @[reducible] instance : Lsc.ContractDSL $storageId $eventId $errId where
       getField   := $getFieldRef
       setField   := $setFieldRef
+      getMapField := $getMapFieldRef
+      setMapField := $setMapFieldRef
       resolveErr := $resolveErrRef
       buildEvent := $buildEventRef))
   -- Mark the three generated defs `@[simp]` (their own `match` equations
@@ -702,6 +1002,10 @@ elab "derive_contract_dsl " storageId:ident errId:ident eventId:ident : command 
     Lsc.Deriving.mkDslGetFieldLemma (Name.mkSimple (baseStr ++ "Dsl_getField")) storageName errName eventName
   let setFieldLemma ← liftTermElabM <|
     Lsc.Deriving.mkDslSetFieldLemma (Name.mkSimple (baseStr ++ "Dsl_setField")) storageName errName eventName
+  let getMapFieldLemma ← liftTermElabM <|
+    Lsc.Deriving.mkDslGetMapFieldLemma (Name.mkSimple (baseStr ++ "Dsl_getMapField")) storageName errName eventName
+  let setMapFieldLemma ← liftTermElabM <|
+    Lsc.Deriving.mkDslSetMapFieldLemma (Name.mkSimple (baseStr ++ "Dsl_setMapField")) storageName errName eventName
   let resolveErrLemma ← liftTermElabM <|
     Lsc.Deriving.mkDslResolveErrLemma (Name.mkSimple (baseStr ++ "Dsl_resolveErr")) storageName errName eventName
   let buildEventLemma ← liftTermElabM <|
@@ -709,6 +1013,8 @@ elab "derive_contract_dsl " storageId:ident errId:ident eventId:ident : command 
   Lsc.Deriving.atRootNamespace do
     elabCommand getFieldLemma
     elabCommand setFieldLemma
+    elabCommand getMapFieldLemma
+    elabCommand setMapFieldLemma
     elabCommand resolveErrLemma
     elabCommand buildEventLemma
   -- Emit one `@[simp]` arith-mapping lemma per `ArithError` constructor name

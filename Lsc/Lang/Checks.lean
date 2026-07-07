@@ -63,10 +63,12 @@ partial def visitStmt : Stmt → VisitResult
   | .seq s1 s2 => visitStmt s1 |>.merge (visitStmt s2)
   | .letBind _ e => visitExpr e.2
   | .storageSet _ e => visitExpr e.2
+  | .mapSet _ _ e => visitWadExpr e
   | .require e _ => visitExpr e
   | .ifThenElse e s1 s2 => visitExpr e |>.merge (visitStmt s1) |>.merge (visitStmt s2)
   | .emit _ args => args.foldl (init := {}) fun acc e => acc.merge (visitExpr e.2)
   | .revert _ => {}
+  | .ret e => visitExprAny e
 
 def arithErrorsOfContract (c : ContractDef) : List ArithError :=
   let fromStorage := c.storage.flatMap fun (_, _, def?) =>
@@ -162,15 +164,73 @@ def checkNoUInt256Arithmetic (c : ContractDef) : Option String :=
     none
 
 def checkSelectorCollisions (c : ContractDef) : Option String :=
-  let externals := c.functions.filter (·.kind == .external)
-  let selectors := externals.map computeSelector
+  -- `view` functions share the same 4-byte ABI selector dispatch table as `external` ones
+  -- (`Bytecode/Contract.lean`'s `selectorDispatch` jumps into both kinds off one shared
+  -- calldata-selector check), so collisions must be checked across both kinds together.
+  let dispatched := c.functions.filter fun fn => fn.kind == .external || fn.kind == .view
+  let selectors := dispatched.map computeSelector
   if selectors.length ≠ selectors.eraseDups.length then
-    some "Selector collision detected between external functions"
+    some "Selector collision detected between external/view functions"
   else
     none
 
+/-- A `view` function's body must never mutate storage or emit an event — it is meant to be a
+pure, `STATICCALL`-style read (see `Core/ContractM.lean`'s `PairM.read` docstring). `require`/
+`revert` are still allowed (a lookup can validly reject bad input), and cross-contract `exec`/
+`read` statements never reach `Stmt` at all (`Lang/Syntax.lean`'s cross-call elaborator bypasses
+`Stmt` entirely), so neither needs special-casing here. -/
+partial def hasViewMutation : Stmt → Bool
+  | .storageSet _ _ => true
+  | .mapSet _ _ _ => true
+  | .emit _ _ => true
+  | .seq s1 s2 => hasViewMutation s1 || hasViewMutation s2
+  | .ifThenElse _ s1 s2 => hasViewMutation s1 || hasViewMutation s2
+  | _ => false
+
+def checkViewPurity (fn : FunctionDef) : Option String :=
+  if hasViewMutation fn.body then
+    some s!"`{fn.name}` is a `view` function but its body mutates storage or emits an event"
+  else
+    none
+
+/-- Every control-flow path through a `view` body must end in a `return` of the declared
+`retTy` — mirrors the early-return semantics `Eval.lean`'s `Stmt.evalWith` implements at
+runtime (`.seq`'s second branch is skipped once the first branch already returned), so a body
+this check accepts is guaranteed to make `Stmt.evalView` succeed rather than fall through to its
+`Unauthorized` fallback. -/
+partial def allPathsReturn (t : Ty) : Stmt → Bool
+  | .ret ⟨t', _⟩ => t == t'
+  | .seq s1 s2 => allPathsReturn t s1 || allPathsReturn t s2
+  | .ifThenElse _ s1 s2 => allPathsReturn t s1 && allPathsReturn t s2
+  | _ => false
+
+def checkViewReturns (fn : FunctionDef) : Option String :=
+  if allPathsReturn fn.retTy fn.body then
+    none
+  else
+    some s!"`{fn.name}` is a `view` function whose body does not return a `{repr fn.retTy}` on \
+every path"
+
+def checkViews (c : ContractDef) : Option String :=
+  let views := c.functions.filter (·.kind == .view)
+  views.foldl (init := none) fun acc fn =>
+    match acc with
+    | some e => some e
+    | none =>
+      match checkViewPurity fn with
+      | some e => some e
+      | none => checkViewReturns fn
+
 /-- Linearity pass stub — see `docs/extensions/linear-types/`. -/
 def checkLinear (_c : ContractDef) : Option String := none
+
+-- `checkNonReentrant`/`usesExternalCall`-style deferred, `ContractDef`-walking enforcement used
+-- to live here for the toy `externalCall { .. }` block (`Stmt.externalCall`, now removed — see
+-- `Lang/AST.lean`'s module history). Real cross-contract calls (`exec`/`read`, `Lang/Syntax.lean`)
+-- are never added to `ContractDef.functions` at all (see `Lsc.Deriving.contractCrossCallExt`'s
+-- docstring), so they could never be reached by a check like this one anyway; `@nonreentrant`
+-- enforcement for `exec`/`read` instead happens eagerly, at `tx`-elaboration time, directly in
+-- `Lang/Syntax.lean`'s `tx` elaborator.
 
 def validateAll (c : ContractDef) : Except String ContractDef :=
   if let some err := checkNoCycles c then .error err
@@ -178,6 +238,7 @@ def validateAll (c : ContractDef) : Except String ContractDef :=
   else if let some err := checkSelectorCollisions c then .error err
   else if let some err := checkNoUInt256Arithmetic c then .error err
   else if let some err := checkArithErrorCoverage c then .error err
+  else if let some err := checkViews c then .error err
   else .ok c
 
 end Checks

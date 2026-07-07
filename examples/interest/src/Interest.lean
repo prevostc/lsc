@@ -25,7 +25,7 @@ inductive InterestEvent where
   | RateChanged (newRate : Wad)
   deriving Repr, DecidableEq, ContractEvent
 
-tx deposit(amount : wad) {
+tx deposit(amount : Wad) {
   let p = σ.principal +? amount;
   σ.principal = p;
   emit Deposited(amount);
@@ -38,7 +38,7 @@ tx accrueInterest {
   emit InterestAccrued(p);
 }
 
-tx setRate(newRate : wad) {
+tx setRate(newRate : Wad) {
   require(msg.sender == σ.owner) else revert NotOwner();
   σ.rate = newRate;
   emit RateChanged(newRate);

@@ -31,6 +31,41 @@ private def irExprToYul (e : IR.Expr) : Ast.Expr :=
   | .eq a b => yulCall "eq" [irExprToYul a, irExprToYul b]
   | .isZero a => yulCall "iszero" [irExprToYul a]
 
+/-- Lowering for `IR.Stmt.safeExternalCall` (see that constructor's docstring for the full
+rationale) — the one and only Yul shape this node can ever produce, with **no parameter to skip
+either check**:
+
+```
+let success := call(gas(), addr, 0, inOffset, inSize, 0, 32)
+if iszero(success) { revert(0, 0) }
+-- only emitted when checkBoolReturn is true:
+if gt(returndatasize(), 0) {
+  if iszero(mload(0)) { revert(0, 0) }
+}
+```
+
+`call`'s own `retOffset`/`retSize` (`0`/`32`) already ask the EVM to copy up to the first 32
+bytes of return data into memory at offset `0` as part of the `CALL` itself — no separate
+`returndatacopy` is needed for the single-word `bool` this checks. A callee returning zero-length
+return data (`returndatasize() == 0` — real-world tokens that omit `transfer`'s `bool` return
+entirely) skips the `mload`-based check altogether and is treated as success, matching
+`SafeERC20.safeTransfer`'s own handling of that case. -/
+private def safeExternalCallToYul (addr inOffset inSize : IR.Expr) (checkBoolReturn : Bool) :
+    List Ast.Stmt :=
+  let callExpr := yulCall "call"
+    [yulCall "gas" [], irExprToYul addr, yulLit 0, irExprToYul inOffset, irExprToYul inSize,
+     yulLit 0, yulLit 32]
+  let successCheck : Ast.Stmt :=
+    Ast.Stmt.If (yulCall "iszero" [.Var "lsc_call_success"])
+      [Ast.Stmt.ExprStmtCall (yulCall "revert" [yulLit 0, yulLit 0])]
+  let boolReturnCheck : List Ast.Stmt :=
+    if checkBoolReturn then
+      [Ast.Stmt.If (yulCall "gt" [yulCall "returndatasize" [], yulLit 0])
+        [Ast.Stmt.If (yulCall "iszero" [yulCall "mload" [yulLit 0]])
+          [Ast.Stmt.ExprStmtCall (yulCall "revert" [yulLit 0, yulLit 0])]]]
+    else []
+  [Ast.Stmt.Let ["lsc_call_success"] (some callExpr), successCheck] ++ boolReturnCheck
+
 private partial def irStmtToYul (s : IR.Stmt) : List Ast.Stmt :=
   match s with
   | .skip => []
@@ -44,6 +79,10 @@ private partial def irStmtToYul (s : IR.Stmt) : List Ast.Stmt :=
   | .log1 topic data =>
     [Ast.Stmt.ExprStmtCall (yulCall "log1" [yulLit topic, irExprToYul data])]
   | .revert0 => [Ast.Stmt.ExprStmtCall (yulCall "revert" [yulLit 0, yulLit 0])]
+  | .ret e =>
+    [Ast.Stmt.ExprStmtCall (yulCall "mstore" [yulLit 0, irExprToYul e]),
+     Ast.Stmt.ExprStmtCall (yulCall "return" [yulLit 0, yulLit 32])]
+  | .safeExternalCall addr inOffset inSize checkBoolReturn => safeExternalCallToYul addr inOffset inSize checkBoolReturn
 
 private def renderExpr (e : Ast.Expr) : String :=
   match e with
@@ -83,5 +122,12 @@ def stmtToYul (cfg : Config) (s : Lsc.Stmt) : Except String String :=
   match stmtToYulAst cfg s with
   | .ok fn => .ok (renderFunction "lsc_body" fn.body)
   | .error e => .error e
+
+/-- Render a raw `IR.Stmt` directly to a Yul function body string, bypassing `Lower.lean`
+entirely — needed for `IR.Stmt.safeExternalCall` specifically, since nothing lowers an
+`Lsc.Stmt` to it yet (see that constructor's docstring, `IR.lean`); this is the one way to
+exercise/test its Yul codegen (`safeExternalCallToYul`) today. -/
+def irStmtToYulString (s : IR.Stmt) : String :=
+  renderFunction "lsc_body" (irStmtToYul s)
 
 end Lsc.Compile

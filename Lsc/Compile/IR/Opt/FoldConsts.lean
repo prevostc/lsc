@@ -46,6 +46,9 @@ def foldConstsStmt : Stmt → Stmt
   | .log0 topic => .log0 topic
   | .log1 topic data => .log1 topic (foldConsts data)
   | .revert0 => .revert0
+  | .ret e => .ret (foldConsts e)
+  | .safeExternalCall addr inOffset inSize checkBoolReturn =>
+    .safeExternalCall (foldConsts addr) (foldConsts inOffset) (foldConsts inSize) checkBoolReturn
 
 namespace FoldConsts
 
@@ -126,6 +129,8 @@ theorem foldConstsStmt_correct (st : IRState) (s : Stmt) :
   | .log1 topic data =>
     simp only [foldConstsStmt, evalStmt, foldConsts_correct st data]
   | .revert0 => rfl
+  | .ret _ => rfl
+  | .safeExternalCall .. => rfl
 
 end FoldConsts
 

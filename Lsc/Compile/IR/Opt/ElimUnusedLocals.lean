@@ -64,6 +64,16 @@ theorem elimUnusedLocals_correct (st : IRState) (s : Stmt) :
                       .seq .revert0 (elimUnusedLocals s2) from rfl,
                  evalStmt_seq]
       exact ih2 _
+    | ret e =>
+      simp only [show elimUnusedLocals (.seq (.ret e) s2) =
+                      .seq (.ret e) (elimUnusedLocals s2) from rfl,
+                 evalStmt_seq]
+      exact ih2 _
+    | safeExternalCall addr inOffset inSize checkBoolReturn =>
+      simp only [show elimUnusedLocals (.seq (.safeExternalCall addr inOffset inSize checkBoolReturn) s2) =
+                      .seq (.safeExternalCall addr inOffset inSize checkBoolReturn) (elimUnusedLocals s2) from rfl,
+                 evalStmt_seq]
+      exact ih2 _
   | skip => exact observablyEqual_refl _
   | letBind name e => exact observablyEqual_refl _
   | sstore slot e => exact observablyEqual_refl _
@@ -71,6 +81,8 @@ theorem elimUnusedLocals_correct (st : IRState) (s : Stmt) :
   | log0 topic => exact observablyEqual_refl _
   | log1 topic data => exact observablyEqual_refl _
   | revert0 => exact observablyEqual_refl _
+  | ret e => exact observablyEqual_refl _
+  | safeExternalCall addr inOffset inSize checkBoolReturn => exact observablyEqual_refl _
 
 end ElimUnusedLocals
 

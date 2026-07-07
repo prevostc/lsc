@@ -164,6 +164,22 @@ private partial def codegenStmt (ctx : Ctx) (s : Stmt) : Except String (List Ins
     .ok (dataInstr ++ memStore ++ popsAfter ++ logInstrs, { locals := [], stackDepth := 0 })
   | .revert0 =>
     .ok ([.push 0, .push 0, .op REVERT], ctx.popStack ctx.stackDepth)
+  | .ret e => do
+    -- Every supported `Ty` is a single 32-byte word (`IR.lean`'s `.ret` docstring) — write it
+    -- to memory offset 0 and `RETURN` exactly those 32 bytes, the minimal-viable ABI encoding
+    -- for a scalar return value (matches Solidity's own codegen for a single-word return type).
+    let (eInstr, c1) ← codegenExpr ctx e
+    let retInstrs : List Instr := [.push 0, .op MSTORE, .push 32, .push 0, .op RETURN]
+    .ok (eInstr ++ retInstrs, c1.popStack 1)
+  | .safeExternalCall .. =>
+    -- Not yet supported by this raw stack-machine backend (`CALL`'s 7 stack arguments need
+    -- careful DUP-free ordering this backend's simple `codegenExpr`-per-operand shape doesn't
+    -- give for free) — the Yul backend (`Lsc.Compile.Yul.irToYulContract`/`safeExternalCallToYul`)
+    -- is the one real, tested lowering for this node today; rejecting cleanly here rather than
+    -- emitting wrong bytecode is the deliberate choice (mirrors this file's existing
+    -- `Lower.lean`'s "reject cleanly, don't silently miscompile" precedent).
+    .error "IR.Stmt.safeExternalCall is not yet supported by the raw bytecode codegen backend \
+      — use the Yul backend (Lsc.Compile.Yul) instead"
 
 def stmt (ctx : Ctx) (s : IR.Stmt) : Except String (List Instr × Ctx) :=
   codegenStmt ctx s

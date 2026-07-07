@@ -85,13 +85,23 @@ private def emitFunctionBodies (cfg : Config) (fns : List FunctionDef) (ctx : Ct
     let (paramInstrs, fnCtx') := emitParamLoads fnCtx fn.params
     let (body, ctx') ← Codegen.stmt fnCtx' (IR.Opt.optimizeStmt ir)
     let ctxOut := Ctx.afterFunction ctx'
-    .ok (acc ++ [.jumpDest fn.name] ++ paramInstrs ++ body ++ [.op STOP], ctxOut)
+    -- A `.view` function's body always ends in a `return e;` (`Checks.checkViewReturns`,
+    -- enforced by `Checks.validateAll` before this ever runs), which `Codegen.lean`'s `.ret`
+    -- case already lowers to a real `RETURN` — that halts execution on its own, so appending a
+    -- trailing `STOP` after it would be genuinely unreachable, dead bytecode (harmless, but
+    -- pointless). An `.external`/`tx` body, by contrast, never contains `.ret` at all (see
+    -- `Lang/AST.lean`'s `Stmt.ret` docstring) and always needs the explicit `STOP` to halt.
+    let haltInstrs : List Instr := if fn.kind == .view then [] else [.op STOP]
+    .ok (acc ++ [.jumpDest fn.name] ++ paramInstrs ++ body ++ haltInstrs, ctxOut)
 
-private def externalFunctions (c : ContractDef) : List FunctionDef :=
-  c.functions.filter fun fn => fn.kind == .external
+/-- Functions reachable via the shared ABI selector-dispatch jump table: both `.external`
+(state-mutating) and `.view` (read-only) — see `Checks.checkSelectorCollisions`'s docstring for
+why both kinds share one selector namespace. -/
+private def dispatchedFunctions (c : ContractDef) : List FunctionDef :=
+  c.functions.filter fun fn => fn.kind == .external || fn.kind == .view
 
 def contract (cfg : Config) (c : ContractDef) : Except String (List Instr) := do
-  let fns := externalFunctions c
+  let fns := dispatchedFunctions c
   if fns.isEmpty then
     .error "contract has no external functions"
   else do
