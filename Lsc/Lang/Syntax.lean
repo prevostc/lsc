@@ -1224,46 +1224,25 @@ def unwrapContractDefTrailingGroups
     Option Term × Option Term × Option Term :=
   (fnsStx.map fun s => ⟨s.raw[1]!⟩, topic0Stx.map fun s => ⟨s.raw[1]!⟩, ctorStx.map fun s => ⟨s.raw[1]!⟩)
 
-/-- `flush_contract_txs` — a standalone way to run `flushContractTxs` (emit every buffered
-`tx { .. }` body under the current namespace as a real `def`) *without* also deriving a full
-`ContractDef`/bytecode/Yul output the way `derive_contract_def`/`derive_contract` always do.
-Useful for any contract module (e.g. `examples/escrow/src/Escrow.lean`) whose `tx`s include real
-`exec`/`read` cross-contract calls, which — unlike ordinary `tx`s — are deliberately never added
-to `ContractDef.functions`/the bytecode/Yul pipeline at all (see
-`Lsc.Deriving.contractCrossCallExt`'s docstring): such a contract can call `flush_contract_txs`
-on its own once every `tx` (cross-contract or not) has been declared, then separately call
-`derive_contract_def`/`derive_contract` if/when it also wants a real `ContractDef` for its
-ordinary, non-cross-contract functions. -/
-elab "flush_contract_txs" : command => do
-  flushContractTxs
-  flushContractViews
-
-/-- `derive_contract_def "Name" Storage Err Event (functions)? (topic0)? (ctor)?` — flushes any
-buffered `tx` bodies, then re-derives the pieces of `ContractDef` (and the `config`/
-`bytecodeHex`/`deployHex` compile outputs) already fully determined by `Storage`/`Err`/`Event`'s
-declared fields/constructors — see `elabContractDefBody`/`Lang/Derive.lean`'s docstring for the
-full rationale/defaults. -/
-elab "derive_contract_def " nameStrStx:str storageId:ident errId:ident eventId:ident
-    fnsStx:("(" term ")")? topic0Stx:("(" term ")")? ctorStx:("(" term ")")? : command => do
+/-- Shared body of `derive_contract`: DSL assembly, flush buffered `tx`/`view` bodies, then
+emit `ContractDef` + compile outputs. -/
+def elabDeriveContract (nameStrStx : TSyntax `Lean.Parser.Term.str)
+    (storageId errId eventId : Lean.Ident)
+    (fnsStx topic0Stx ctorStx : Option (TSyntax Name.anonymous)) : CommandElabM Unit := do
+  Lsc.Deriving.elabDeriveContractDsl storageId errId eventId
   flushContractTxs
   flushContractViews
   let (fns?, topic0?, ctor?) := unwrapContractDefTrailingGroups fnsStx topic0Stx ctorStx
   elabContractDefBody nameStrStx storageId errId eventId fns? topic0? ctor?
 
-/-- `derive_contract "Name" Storage Err Event (functions)? (topic0)? (ctor)?` — the single-call
-merge of `derive_contract_dsl Storage Err Event` followed by `derive_contract_def "Name" Storage
-Err Event ...`: runs the `derive_contract_dsl` assembly first (so `Lsc.ContractDSL`/
-`σ.field`-resolution registries exist), then flushes and derives `ContractDef` exactly as
-`derive_contract_def` does. Because `tx { .. }` bodies are now buffered rather than elaborated
-immediately (see `tx`'s docstring above), this single call can sit once, *after* every `tx`
-block, instead of needing one call before `tx` (for `σ.field`/`revert`/`emit` resolution) and a
-separate one after (to collect the buffered bodies). -/
+/-- `derive_contract "Name" Storage Err Event (functions)? (topic0)? (ctor)?` — the single
+author-facing closing command for a contract module: assembles `ContractDSL` from the three
+`deriving`-generated glue defs, flushes every buffered `tx`/`view` body into real `def`s, and
+emits `{Name}M`, `contractDef`, `config`, `bytecodeHex`, `deployHex`. Because `tx { .. }`
+bodies are buffered rather than elaborated immediately (see `tx`'s docstring above), this call
+sits once, *after* every `tx`/`view` block. -/
 elab "derive_contract " nameStrStx:str storageId:ident errId:ident eventId:ident
     fnsStx:("(" term ")")? topic0Stx:("(" term ")")? ctorStx:("(" term ")")? : command => do
-  elabCommand (← `(command| derive_contract_dsl $storageId $errId $eventId))
-  flushContractTxs
-  flushContractViews
-  let (fns?, topic0?, ctor?) := unwrapContractDefTrailingGroups fnsStx topic0Stx ctorStx
-  elabContractDefBody nameStrStx storageId errId eventId fns? topic0? ctor?
+  elabDeriveContract nameStrStx storageId errId eventId fnsStx topic0Stx ctorStx
 
 end Lsc.Syntax

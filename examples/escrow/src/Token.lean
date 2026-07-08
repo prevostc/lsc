@@ -44,8 +44,6 @@ inductive TokenEvent where
   | Mint (amount : Amount)
   deriving Repr, DecidableEq, ContractEvent
 
-derive_contract_dsl TokenStorage TokenError TokenEvent
-
 -- Read-only query; `view` makes this callable via `read Token.balanceOf(who);` from another
 -- contract. Never reverts, since every address has some balance (`0` if never written).
 view balanceOf(who : Address) : Amount => σ.balances[who];
@@ -68,7 +66,9 @@ tx mint(recipient : Address, amount : Amount) {
 
 /-! ## DSL wiring + compilation: `ContractDef` + Yul/bytecode emission -/
 
-derive_contract_def "Token" TokenStorage TokenError TokenEvent
+-- Public functions, event topics, deploy step, and the `TokenM` monad abbreviation are all
+-- inferred from the declarations above; see `derive_contract`'s docstring for defaults.
+derive_contract "Token" TokenStorage TokenError TokenEvent
 
 -- Smoke-checks
 #check Token.TokenStorage

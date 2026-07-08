@@ -48,15 +48,13 @@ inductive CalleeEvent where
   | Bumped
   deriving Repr, DecidableEq, Lsc.Deriving.ContractEvent
 
-derive_contract_dsl CalleeStorage CalleeError CalleeEvent
-
 tx bump {
   let m = σ.n +? 1;
   σ.n = m;
   emit Bumped();
 }
 
-derive_contract_def "Callee" CalleeStorage CalleeError CalleeEvent
+derive_contract "Callee" CalleeStorage CalleeError CalleeEvent
 
 end Callee
 
@@ -77,8 +75,6 @@ inductive CallerError where
 inductive CallerEvent where
   | Bumped
   deriving Repr, DecidableEq, Lsc.Deriving.ContractEvent
-
-derive_contract_dsl CallerStorage CallerError CallerEvent
 
 -- (i) Marked `@nonreentrant`, and does use `exec` — the required pairing. An ordinary
 -- statement (`emit`) is included alongside the cross-call: since `exec`/`read` are fully
@@ -116,7 +112,7 @@ tx decoratedButUnused {
   σ.n = m;
 }
 
-derive_contract_def "Caller" CallerStorage CallerError CallerEvent
+derive_contract "Caller" CallerStorage CallerError CallerEvent
 
 example : (Checks.validateAll contractDef).isOk := by native_decide
 

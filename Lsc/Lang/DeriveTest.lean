@@ -6,11 +6,11 @@ import Lsc.Lib.Wei.Eval
 
 /-!
 # Smoke test for the `ContractStorage`/`ContractEvent`/`ContractError`
-deriving handlers + `derive_contract_dsl`
+deriving handlers + `derive_contract`
 
 A miniature Counter-shaped contract: declares storage/error/event types
 using the three `deriving` clauses from `Derive.lean`, wires them together
-with `derive_contract_dsl`, and writes a small `TxM`-based function body
+with `derive_contract`, and writes a small `TxM`-based function body
 against the result, then evaluates it via `Stmt.eval`/`runS` to confirm
 the whole pipeline (introspection-derived glue + step 1's builder monad)
 actually works end-to-end.
@@ -37,15 +37,12 @@ inductive TEvent where
   | Paused
   deriving Repr, DecidableEq, Lsc.Deriving.ContractEvent
 
-derive_contract_dsl TStorage TError TEvent
-
--- ── Sanity checks on the derived glue ───────────────────────────────────
+-- ── Sanity checks on the `deriving`-generated glue (no `ContractDSL` yet) ─
 
 #check (TStorage.getField : (t : Ty) → Ident → TStorage → Option (Val t))
 #check (TStorage.setField : (t : Ty) → Ident → Val t → TStorage → TStorage)
 #check (TError.resolveError : String → Option TError)
 #check (TEvent.buildEvent : String → List (Sigma Val) → Option TEvent)
-#check (inferInstance : ContractDSL TStorage TEvent TError)
 
 example (s : TStorage) : TStorage.getField Ty.wei "number" s = some (.wei s.number) := rfl
 example (s : TStorage) : TStorage.getField Ty.bool "paused" s = some (.bool s.paused) := rfl
@@ -64,9 +61,6 @@ example (n : Wei) :
     TEvent.buildEvent "Incremented" [⟨Ty.wei, .wei n⟩] = some (.Incremented n) := rfl
 example : TEvent.buildEvent "Paused" [] = some .Paused := rfl
 
--- `ArithError.Overflow` maps to the same-named `TError.Overflow` constructor.
-example : (ContractErrors.arith (Err := TError) ArithError.Overflow) = TError.Overflow := rfl
-
 -- ── A `Syntax`-built function body against the derived storage ────────
 
 tx incrementTx {
@@ -78,10 +72,13 @@ tx incrementTx {
 
 -- `tx` no longer elaborates its body immediately (see `Syntax.lean`'s `tx` docstring); flush
 -- the buffered body into a real `incrementTx : Stmt` def before referencing it below. This also
--- derives the `TM` abbreviation (`ContractM TStorage TEvent TError`) used just below — the extra
--- `contractDef`/`config`/`bytecodeHex`/`deployHex` defs `derive_contract_def` also emits are
--- simply unused here.
-derive_contract_def "T" TStorage TError TEvent
+-- derives the `TM` abbreviation (`ContractM TStorage TEvent TError`) used just below.
+derive_contract "T" TStorage TError TEvent
+
+#check (inferInstance : ContractDSL TStorage TEvent TError)
+
+-- `ArithError.Overflow` maps to the same-named `TError.Overflow` constructor.
+example : (ContractErrors.arith (Err := TError) ArithError.Overflow) = TError.Overflow := rfl
 
 def increment : TM Unit := Stmt.eval incrementTx
 

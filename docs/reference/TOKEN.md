@@ -30,8 +30,6 @@ inductive TokenEvent where
   | Mint (amount : Amount)
   deriving Repr, DecidableEq, ContractEvent
 
-derive_contract_dsl TokenStorage TokenError TokenEvent
-
 view balanceOf(who : Address) : Amount => σ.balances[who];
 
 tx transfer(recipient : Address, amount : Amount) {
@@ -47,7 +45,7 @@ tx mint(recipient : Address, amount : Amount) {
   emit Mint(amount);
 }
 
-derive_contract_def "Token" TokenStorage TokenError TokenEvent
+derive_contract "Token" TokenStorage TokenError TokenEvent
 ```
 
 `declare_token_amount Amount` (see [src/Token.lean](../../examples/escrow/src/Token.lean)) names

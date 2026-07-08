@@ -12,6 +12,23 @@ For why this looks the way it does — `PairM` vs. a general N-contract registry
 ## Contract
 
 ```lean
+structure EscrowStorage where
+  owner : Address := 0
+  released : Token.Amount := ⟨0⟩
+  deriving Repr, ContractStorage
+
+inductive EscrowError where
+  | NotOwner
+  | Overflow
+  | Underflow
+  | Reentrant
+  | ExternalCallFailed
+  deriving Repr, DecidableEq, ContractError
+
+inductive EscrowEvent where
+  | Released (amount : Token.Amount)
+  deriving Repr, DecidableEq, ContractEvent
+
 @nonreentrant
 tx release(recipient : Address, amount : Token.Amount) {
   require (msg.sender == σ.owner) else revert NotOwner();
@@ -20,6 +37,8 @@ tx release(recipient : Address, amount : Token.Amount) {
   σ.released = r;
   emit Released(amount);
 }
+
+derive_contract "Escrow" EscrowStorage EscrowError EscrowEvent
 ```
 
 `exec Target.fn(args);`/`read Target.fn(args);` call another contract's real `tx`/`view` directly

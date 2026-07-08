@@ -11,9 +11,9 @@ Lean 4.30 implementation of the [design](docs/) contract language.
 | `Lsc/Lib/Linear/TokenAmount.lean` | Linear-type stub (no capability model yet — see below) |
 | `Lsc/Lang/AST.lean` | `Expr`/`Stmt`/`ContractDef`/`FunctionDef` inductives |
 | `Lsc/Lang/Eval.lean` | `ContractM`, `Stmt.eval`, `Expr.eval` |
-| `Lsc/Lang/Syntax.lean` | The `tx { ... }` contract-body grammar (current author surface) plus `derive_contract`/`derive_contract_def`, which assemble a contract from `tx` blocks + `deriving`-generated storage/error/event handlers |
+| `Lsc/Lang/Syntax.lean` | The `tx { ... }` contract-body grammar (current author surface) plus `derive_contract`, which assembles a contract from `tx`/`view` blocks + `deriving`-generated storage/error/event handlers |
 | `Lsc/Lang/TxM.lean` | `TxM := WriterT Stmt Id` builder monad + combinators/notations underlying `Syntax.lean`'s desugaring (not the contract-author surface itself) |
-| `Lsc/Lang/Derive.lean` | `deriving ContractStorage/ContractError/ContractEvent` handlers + `derive_contract_dsl` assembly command |
+| `Lsc/Lang/Derive.lean` | `deriving ContractStorage/ContractError/ContractEvent` handlers + internal DSL assembly used by `derive_contract` |
 | `Lsc/Lang/Checks.lean` | Static validation (cycles, selectors, UInt256, arith-error coverage) |
 | `Lsc/Compile/` | IR lowering → EvmYulLean AST → Yul text, plus `Bytecode/` (direct EVM opcode emission); `Correctness.lean` IR eval lemmas |
 | `examples/counter/src/Counter.lean` | Reference contract, written with the `tx { ... }` grammar + `derive_contract` |

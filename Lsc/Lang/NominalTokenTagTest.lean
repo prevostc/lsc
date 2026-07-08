@@ -33,13 +33,11 @@ inductive TokenAEvent where
   | Dummy
   deriving Repr, DecidableEq, ContractEvent
 
-derive_contract_dsl TokenAStorage TokenAError TokenAEvent
-
 tx setBal(amount : Amount) {
   σ.bal = amount;
 }
 
-derive_contract_def "TokenA" TokenAStorage TokenAError TokenAEvent
+derive_contract "TokenA" TokenAStorage TokenAError TokenAEvent
 
 end TokenA
 
@@ -59,13 +57,11 @@ inductive TokenBEvent where
   | Dummy
   deriving Repr, DecidableEq, ContractEvent
 
-derive_contract_dsl TokenBStorage TokenBError TokenBEvent
-
 tx setBal(amount : Amount) {
   σ.bal = amount;
 }
 
-derive_contract_def "TokenB" TokenBStorage TokenBError TokenBEvent
+derive_contract "TokenB" TokenBStorage TokenBError TokenBEvent
 
 end TokenB
 
@@ -83,15 +79,13 @@ inductive CallerEvent where
   | Dummy
   deriving Repr, DecidableEq, ContractEvent
 
-derive_contract_dsl CallerStorage CallerError CallerEvent
-
 -- Same-token use compiles fine: `TokenA.Amount` in, `exec TokenA.setBal` out.
 @nonreentrant
 tx moveA(amount : TokenA.Amount) {
   exec TokenA.setBal(amount);
 }
 
-derive_contract_def "Caller" CallerStorage CallerError CallerEvent
+derive_contract "Caller" CallerStorage CallerError CallerEvent
 
 -- Positive control: same-token amounts really do compile and really do reach `TokenA` unchanged.
 example :

@@ -1,5 +1,7 @@
 import Lsc.Prelude
 import Lsc.Core.ContractM
+import Lsc.Compile.Yul
+import Lsc.Compile.Bytecode
 import Lsc.Lib.Wad.Eval
 import Lsc.Lang.Syntax
 import Token
@@ -17,7 +19,7 @@ of how much this `Escrow` has ever released back to the token holder (the actual
 
 namespace Escrow
 
-open Lsc
+open Lsc Lsc.Compile
 open Lsc.ContractM (PairM)
 open Lsc.Deriving
 
@@ -40,10 +42,6 @@ inductive EscrowEvent where
   | Released (amount : Token.Amount)
   deriving Repr, DecidableEq, ContractEvent
 
-abbrev EscrowM := ContractM EscrowStorage EscrowEvent EscrowError
-
-derive_contract_dsl EscrowStorage EscrowError EscrowEvent
-
 -- `Escrow`'s owner releases `amount` of the token it holds back to `recipient`, by calling
 -- `Token.transfer` via the cross-contract `exec` primitive. `@nonreentrant` is required on any
 -- `tx` that uses `exec`/`read`.
@@ -56,6 +54,10 @@ tx release(recipient : Address, amount : Token.Amount) {
   emit Released(amount);
 }
 
-flush_contract_txs
+/-! ## DSL wiring + compilation: `ContractDSL` instance, `ContractDef` + Yul/bytecode emission -/
+
+-- Public functions, event topics, deploy step, and the `EscrowM` monad abbreviation are all
+-- inferred from the declarations above; see `derive_contract`'s docstring for defaults.
+derive_contract "Escrow" EscrowStorage EscrowError EscrowEvent
 
 end Escrow
