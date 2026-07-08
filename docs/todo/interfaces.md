@@ -46,7 +46,7 @@ meant to be additive, not a replacement for the black-box default.
 ## Note: bool-return decoding is already solved without this
 
 Decoding a callee's real ABI-encoded `bool` return value (the ERC20 `transfer`/`transferFrom`
-convention) doesn't need this mechanism: `IR.Stmt.safeExternalCall`'s `checkBoolReturn` flag
+convention) doesn't need this mechanism: `IR.Stmt.externalCall`'s `checkBoolReturn` flag
 (`Lsc/Compile/IR.lean`) already handles it generically for any callee whose declared return type
 is `bool`, with no per-call-site annotation. `interface` is still needed for everything else on
 this page — event shapes, error constructors, and extra assumed theorems.

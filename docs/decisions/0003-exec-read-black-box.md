@@ -39,8 +39,7 @@ later.
   on the callee's *real* behavior (e.g. "if `Token.transfer` succeeds, `totalSupply` is
   unchanged") — see [`docs/todo/interfaces.md`](../todo/interfaces.md) for the tracked, opt-in
   richer-interface follow-up.
-- The real EVM `CALL` codegen path (`safeExternalCall`, `Lsc/Compile/IR.lean`/`Yul.lean`)
-  additionally reverts on a non-compliant ERC20-style callee that returns `false` without
-  reverting, but this is a plain, untagged EVM revert today with no Lean-level `FrameworkError`
-  counterpart — `exec`/`read` aren't wired to that codegen path yet (see
-  [`docs/todo/backlog.md`](../todo/backlog.md)).
+- The real EVM `CALL` codegen path (`externalCall`, `Lsc/Compile/IR.lean`/`Yul.lean`) additionally
+  reverts on a non-compliant ERC20-style callee that returns `false` without reverting. `exec`
+  elaborates to `Stmt.externalExec` and lowers through that path; the direct bytecode backend
+  still rejects `externalCall`/`staticCall` nodes (see [`0005`](0005-bytecode-backend-scope.md)).

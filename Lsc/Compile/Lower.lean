@@ -4,15 +4,9 @@ import Lsc.Lib.Wad.Optimize
 
 namespace Lsc.Compile
 
-/-! ## Cross-contract calls (`exec`/`read`) — out of scope here
+/-! Cross-contract `exec`/`read` lower to `IR.externalCall`/`IR.staticCall` with ABI-packed
+calldata. `Stmt.reentrancyGuard` lowers to transient-storage lock IR. -/
 
-A cross-contract `tx` (`exec Target.fn(..);`/`read Target.fn(..);`, `Lsc/Lang/Syntax.lean`) has
-its whole body elaborated directly to a `PairM S T E Err Unit`-valued `def`, not the `Lsc.Stmt`
-value this `Lower`/`IR` pipeline operates on, and is never registered in `ContractDef.functions`
-— so this file structurally never sees it. Real EVM `CALL`-opcode codegen for such a call is
-tracked in `docs/todo/backlog.md`. -/
-
-/-- Storage field → sequential EVM slot (Solidity layout, v1). -/
 structure StorageLayout where
   slots : List (Ident × Nat)
   deriving Repr
@@ -75,6 +69,22 @@ private partial def lowerExpr (cfg : Config) {t : Ty} (e : Expr t) : Except Stri
   | .address, e => lowerCoreExpr cfg e
   | .unit, e => lowerCoreExpr cfg e
 
+private def lowerExprAny (cfg : Config) (e : ExprAny) : Except String IR.Expr :=
+  lowerExpr cfg e.2
+
+/-- Calldata size in bytes: 4-byte selector + 32 bytes per argument. -/
+private def calldataSize (args : List IR.Expr) : Nat :=
+  4 + 32 * args.length
+
+/-- Lower argument expressions for an external call (already in IR.Expr form). -/
+private def lowerExternalArgs (cfg : Config) (args : List ExprAny) : Except String (List IR.Expr) :=
+  args.mapM (lowerExprAny cfg)
+
+/-- Address of the callee: `sload` of the `targetField` storage slot. -/
+private def lowerCalleeAddr (cfg : Config) (targetField : Ident) : Except String IR.Expr := do
+  let slot ← resolveSlot cfg targetField
+  .ok (.sload slot)
+
 private partial def lowerStmt (cfg : Config) (s : Lsc.Stmt) : Except String IR.Stmt :=
   match s with
   | .skip => .ok .skip
@@ -112,6 +122,18 @@ private partial def lowerStmt (cfg : Config) (s : Lsc.Stmt) : Except String IR.S
   | .ret ⟨t, e⟩ => do
     let ir ← lowerExpr cfg (t := t) e
     .ok (.ret ir)
+  | .reentrancyGuard body => do
+    let irBody ← lowerStmt cfg body
+    .ok (.seq (.seq (.seq .checkReentrancyLock (.setReentrancyLock true)) irBody)
+      (.setReentrancyLock false))
+  | .externalExec targetField selector checkBoolReturn args => do
+    let addr ← lowerCalleeAddr cfg targetField
+    let argExprs ← lowerExternalArgs cfg args
+    .ok (.externalCall addr selector argExprs checkBoolReturn)
+  | .externalRead targetField selector retWords args => do
+    let addr ← lowerCalleeAddr cfg targetField
+    let argExprs ← lowerExternalArgs cfg args
+    .ok (.staticCall addr selector argExprs retWords)
   | _ => .error "unsupported statement in lowering"
 
 def stmt (cfg : Config) (s : Lsc.Stmt) : Except String IR.Stmt :=

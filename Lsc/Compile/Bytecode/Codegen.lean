@@ -165,15 +165,36 @@ private partial def codegenStmt (ctx : Ctx) (s : Stmt) : Except String (List Ins
   | .revert0 =>
     .ok ([.push 0, .push 0, .op REVERT], ctx.popStack ctx.stackDepth)
   | .ret e => do
-    -- Every supported `Ty` is a single 32-byte word (`IR.lean`'s `.ret` docstring) — write it
-    -- to memory offset 0 and `RETURN` exactly those 32 bytes, the minimal-viable ABI encoding
-    -- for a scalar return value (matches Solidity's own codegen for a single-word return type).
     let (eInstr, c1) ← codegenExpr ctx e
     let retInstrs : List Instr := [.push 0, .op MSTORE, .push 32, .push 0, .op RETURN]
     .ok (eInstr ++ retInstrs, c1.popStack 1)
-  | .safeExternalCall .. =>
-    -- See docs/decisions/0005-bytecode-backend-scope.md.
-    .error "IR.Stmt.safeExternalCall is not yet supported by the raw bytecode codegen backend \
+  | .checkReentrancyLock =>
+    let (revLbl, c1) := Ctx.freshLabel ctx "lockrev"
+    let (contLbl, c2) := Ctx.freshLabel c1 "lockcont"
+    let lockInstrs : List Instr := [
+      .push IR.reentrancyLockSlot,
+      .op TLOAD,
+      .op ISZERO,
+      .op ISZERO,
+      .pushLabel revLbl,
+      .op JUMPI,
+      .pushLabel contLbl,
+      .op JUMP,
+      .jumpDest revLbl,
+      .push 0,
+      .push 0,
+      .op REVERT,
+      .jumpDest contLbl
+    ]
+    .ok (lockInstrs, c2.popStack 1)
+  | .setReentrancyLock held =>
+    let val := if held then 1 else 0
+    .ok ([.push val, .push IR.reentrancyLockSlot, .op TSTORE], ctx)
+  | .externalCall .. =>
+    .error "IR.Stmt.externalCall is not yet supported by the raw bytecode codegen backend \
+      — use the Yul backend (Lsc.Compile.Yul) instead"
+  | .staticCall .. =>
+    .error "IR.Stmt.staticCall is not yet supported by the raw bytecode codegen backend \
       — use the Yul backend (Lsc.Compile.Yul) instead"
 
 def stmt (ctx : Ctx) (s : IR.Stmt) : Except String (List Instr × Ctx) :=

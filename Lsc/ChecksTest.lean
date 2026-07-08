@@ -83,4 +83,21 @@ OverflowMissing's error type has no `Overflow` constructor — add one or write 
 -- The same contract is also rejected end-to-end via the compile pipeline.
 example : ¬ (Checks.validateAll overflowMissingDef).isOk := by native_decide
 
+-- `exec` without `@nonreentrant` / `reentrancyGuard` is rejected by `checkNonReentrant`.
+def bareExecBody : Stmt :=
+  Stmt.externalExec "token" 0 false []
+
+def bareExecDef : ContractDef where
+  name := "BareExec"
+  storage := [("token", .address, none)]
+  errors := ["Reentrant", "ExternalCallFailed"]
+  events := []
+  functions :=
+    [{ name := "release", kind := .external, params := [], retTy := .unit, body := bareExecBody,
+       nonReentrant := false }]
+  interfaces := []
+
+example : Checks.checkNonReentrant bareExecDef |>.isSome := by native_decide
+example : ¬ (Checks.validateAll bareExecDef).isOk := by native_decide
+
 end Lsc.ChecksTest

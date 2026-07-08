@@ -91,7 +91,7 @@ callee's state change is **discarded**: the caller observes the callee's storage
 example :
     (ContractM.PairM.read (S := Nat) (T := Nat) (E := Unit) (Err := CallerErr) wellBehavedCallee)
       (mkCallerState) (mkCalleeState) =
-      .ok (42, { mkCallerState with locked := false }, mkCalleeState, []) := by
+      .ok (42, mkCallerState, mkCalleeState, []) := by
   rfl
 
 /-- (f) `read` still surfaces callee failure as the same opaque `ExternalCallFailed`. -/
@@ -100,10 +100,11 @@ example :
       (mkCallerState) (mkCalleeState) = .error .ExternalCallFailed := by
   rfl
 
-/-- (g) `read`, like `exec`, is rejected with `Reentrant` when the caller is already locked. -/
+/-- (g) `read` is **not** blocked by the caller's reentrancy lock (STATICCALL exemption). -/
 example :
     (ContractM.PairM.read (S := Nat) (T := Nat) (E := Unit) (Err := CallerErr) wellBehavedCallee)
-      (mkCallerState (locked := true)) (mkCalleeState) = .error .Reentrant := by
+      (mkCallerState (locked := true)) (mkCalleeState) =
+      .ok (42, mkCallerState (locked := true), mkCalleeState, []) := by
   rfl
 
 end Lsc.ExternalCallTest

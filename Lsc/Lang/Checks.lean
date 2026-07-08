@@ -69,6 +69,9 @@ partial def visitStmt : Stmt → VisitResult
   | .emit _ args => args.foldl (init := {}) fun acc e => acc.merge (visitExpr e.2)
   | .revert _ => {}
   | .ret e => visitExprAny e
+  | .externalExec _ _ _ args => args.foldl (init := {}) fun acc e => acc.merge (visitExpr e.2)
+  | .externalRead _ _ _ args => args.foldl (init := {}) fun acc e => acc.merge (visitExpr e.2)
+  | .reentrancyGuard body => visitStmt body
 
 def arithErrorsOfContract (c : ContractDef) : List ArithError :=
   let fromStorage := c.storage.flatMap fun (_, _, def?) =>
@@ -224,13 +227,33 @@ def checkViews (c : ContractDef) : Option String :=
 /-- Linearity pass stub — see `docs/extensions/linear-types/`. -/
 def checkLinear (_c : ContractDef) : Option String := none
 
--- `checkNonReentrant`/`usesExternalCall`-style deferred, `ContractDef`-walking enforcement used
--- to live here for the toy `externalCall { .. }` block (`Stmt.externalCall`, now removed — see
--- `Lang/AST.lean`'s module history). Real cross-contract calls (`exec`/`read`, `Lang/Syntax.lean`)
--- are never added to `ContractDef.functions` at all (see `Lsc.Deriving.contractCrossCallExt`'s
--- docstring), so they could never be reached by a check like this one anyway; `@nonreentrant`
--- enforcement for `exec`/`read` instead happens eagerly, at `tx`-elaboration time, directly in
--- `Lang/Syntax.lean`'s `tx` elaborator.
+/-- Whether `s` contains an `externalExec` node. -/
+partial def usesExternalExec : Stmt → Bool
+  | .skip => false
+  | .seq s1 s2 => usesExternalExec s1 || usesExternalExec s2
+  | .externalExec .. => true
+  | .reentrancyGuard body => usesExternalExec body
+  | .ifThenElse _ s1 s2 => usesExternalExec s1 || usesExternalExec s2
+  | _ => false
+
+/-- Whether `s` is wrapped in `reentrancyGuard` at its outermost layer. -/
+def hasReentrancyGuard : Stmt → Bool
+  | .reentrancyGuard _ => true
+  | _ => false
+
+/-- Any function using `externalExec` must be `@nonreentrant` with a `reentrancyGuard` body. -/
+def checkNonReentrant (c : ContractDef) : Option String :=
+  c.functions.findSome? fun fn =>
+    if usesExternalExec fn.body then
+      if !fn.nonReentrant then
+        some s!"`{fn.name}` uses `exec` but is not marked `@nonreentrant`"
+      else if !hasReentrancyGuard fn.body then
+        some s!"`{fn.name}` uses `exec` but its body is not wrapped in `reentrancyGuard`"
+      else none
+    else none
+
+-- `checkNonReentrant` replaces the old deferred check that lived here when cross-call txs
+-- bypassed `ContractDef`. Cross-contract calls are now `Stmt.externalExec`/`externalRead`.
 
 def validateAll (c : ContractDef) : Except String ContractDef :=
   if let some err := checkNoCycles c then .error err
@@ -238,6 +261,7 @@ def validateAll (c : ContractDef) : Except String ContractDef :=
   else if let some err := checkSelectorCollisions c then .error err
   else if let some err := checkNoUInt256Arithmetic c then .error err
   else if let some err := checkArithErrorCoverage c then .error err
+  else if let some err := checkNonReentrant c then .error err
   else if let some err := checkViews c then .error err
   else .ok c
 

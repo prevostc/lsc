@@ -88,6 +88,14 @@ def get : ContractM S E Err (ContractState S) :=
 def modifyStorage (f : S → S) : ContractM S E Err Unit :=
   fun s => .ok ((), { s with storage := f s.storage }, [])
 
+/-- Set the caller's reentrancy lock flag (mirrors `Stmt.reentrancyGuard` / `IR.setReentrancyLock`). -/
+def setLocked (held : Bool) : ContractM S E Err Unit :=
+  fun s => .ok ((), { s with locked := held }, [])
+
+@[simp]
+theorem setLocked_apply (held : Bool) (s : ContractState S) :
+    (setLocked held : ContractM S E Err Unit) s = .ok ((), { s with locked := held }, []) := rfl
+
 def emit (e : E) : ContractM S E Err Unit :=
   fun s => .ok ((), s, [e])
 
@@ -222,34 +230,24 @@ mutation; `read` just never lets it take effect from the caller's point of view 
 def read [ContractErrors Err] {ET ErrT : Type} (callee : ContractM T ET ErrT A) :
     PairM S T E Err A :=
   fun s t =>
-    if s.locked then
-      .error (ContractErrors.fromFramework .Reentrant)
-    else
-      match callee t with
-      | .error _ => .error (ContractErrors.fromFramework .ExternalCallFailed)
-      | .ok (a, _t', _log) => .ok (a, { s with locked := false }, t, [])
-
-@[simp]
-theorem read_locked [ContractErrors Err] {ET ErrT : Type} (callee : ContractM T ET ErrT A)
-    (s : ContractState S) (t : ContractState T) (h : s.locked = true) :
-    (read (S := S) (E := E) (Err := Err) callee) s t =
-      .error (ContractErrors.fromFramework .Reentrant) := by
-  simp [read, h]
+    match callee t with
+    | .error _ => .error (ContractErrors.fromFramework .ExternalCallFailed)
+    | .ok (a, _t', _log) => .ok (a, s, t, [])
 
 theorem read_unlocked_ok [ContractErrors Err] {ET ErrT : Type} (callee : ContractM T ET ErrT A)
-    (s : ContractState S) (t : ContractState T) (h : s.locked = false)
+    (s : ContractState S) (t : ContractState T)
     (a : A) (t' : ContractState T) (log : List ET)
     (hcall : callee t = .ok (a, t', log)) :
     (read (S := S) (E := E) (Err := Err) callee) s t =
-      .ok (a, { s with locked := false }, t, []) := by
-  simp [read, h, hcall]
+      .ok (a, s, t, []) := by
+  simp [read, hcall]
 
 theorem read_unlocked_err [ContractErrors Err] {ET ErrT : Type} (callee : ContractM T ET ErrT A)
-    (s : ContractState S) (t : ContractState T) (h : s.locked = false) (e : ErrT)
+    (s : ContractState S) (t : ContractState T) (e : ErrT)
     (hcall : callee t = .error e) :
     (read (S := S) (E := E) (Err := Err) callee) s t =
       .error (ContractErrors.fromFramework .ExternalCallFailed) := by
-  simp [read, h, hcall]
+  simp [read, hcall]
 
 /-- **Safe by default, made explicit**: `exec` never lets a callee's failure pass through
 unnoticed — unlike Solidity's `address.call(...)`, whose `(bool success, bytes data)` a careless
@@ -275,10 +273,8 @@ theorem read_never_silently_swallows_failure [ContractErrors Err] {ET ErrT : Typ
     (∃ fe, read (S := S) (E := E) (Err := Err) callee s t = .error (ContractErrors.fromFramework fe)) := by
   unfold read
   split
-  · exact .inr ⟨.Reentrant, rfl⟩
-  · split
-    · exact .inr ⟨.ExternalCallFailed, rfl⟩
-    · exact .inl ⟨_, _, rfl⟩
+  · exact .inr ⟨.ExternalCallFailed, rfl⟩
+  · exact .inl ⟨_, _, rfl⟩
 
 /-- Run a `PairM` computation on explicit caller/callee states — the two-contract analogue of
 `runS`. -/

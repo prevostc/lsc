@@ -78,6 +78,18 @@ inductive Stmt
       `LocalEnv`, short-circuiting any following `.seq` sibling exactly like a real early
       `return`. -/
   | ret : (t : Ty) × Expr t → Stmt
+  /-- `exec Target.fn(args);` — mutating cross-contract call. `targetField` holds the callee
+      contract address (`Token` module → `token` storage field); `selector` is the 4-byte ABI
+      selector; `args` are the already-elaborated argument expressions. -/
+  | externalExec (targetField : Ident) (selector : Nat) (checkBoolReturn : Bool)
+      (args : List ExprAny) : Stmt
+  /-- `read Target.fn(args);` — read-only cross-contract call (`STATICCALL`). Same addressing
+      convention as `externalExec`; no reentrancy guard required. -/
+  | externalRead (targetField : Ident) (selector : Nat) (retWords : Nat)
+      (args : List ExprAny) : Stmt
+  /-- `@nonreentrant` desugaring — wraps a `tx` body; lowers to transient-storage lock
+      prologue/epilogue (`TLOAD`/`TSTORE`). Visible to `Checks` and proofs. -/
+  | reentrancyGuard (body : Stmt) : Stmt
 
 inductive FunctionKind
   | external
@@ -92,13 +104,9 @@ structure FunctionDef where
   params : List (Ident × Ty)
   retTy : Ty
   body : Stmt
-  /-- Whether this `tx` was declared `@nonreentrant`. Required for any `tx` whose body performs
-      a real cross-contract call (`exec`/`read`, `Lang/Syntax.lean`) — checked eagerly, at
-      `tx`-elaboration time, rather than via a `ContractDef`-walking pass (a cross-contract `tx`
-      is never added to `ContractDef.functions` at all, see
-      `Lsc.Deriving.contractCrossCallExt`'s docstring). Optional/no-op otherwise. Defaults to
-      `false` so every existing `FunctionDef` literal (hand-written or auto-derived) that
-      predates this field keeps compiling unchanged. -/
+  /-- Whether this `tx` was declared `@nonreentrant`. Required for any `tx` whose body contains
+      `Stmt.externalExec` — checked by `Checks.checkNonReentrant` and at `tx`-elaboration time.
+      The decorator desugars to `Stmt.reentrancyGuard` on the body. Optional/no-op otherwise. -/
   nonReentrant : Bool := false
 
 structure ContractDef where

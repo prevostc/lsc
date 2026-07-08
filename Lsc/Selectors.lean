@@ -31,6 +31,11 @@ def computeSelector (fn : FunctionDef) : UInt32 :=
     (b0 <<< 24) ||| (b1 <<< 16) ||| (b2 <<< 8) ||| b3
   else 0
 
+/-- Compute an ABI selector from a function name and parameter types directly. -/
+def computeSelectorFromParams (name : String) (paramTys : List Ty) : UInt32 :=
+  let params := paramTys.map fun ty => ("_", ty)
+  computeSelector ⟨name, .external, params, .unit, .skip, false⟩
+
 /-- Build the canonical ABI event signature, e.g. `"Incremented(uint256)"` — same shape as
     `fnSignature`, but for a `derive_contract_def`-derived event entry
     (`(name, params) : Ident × List (Ident × Ty)`, see `ContractDef.events`). -/

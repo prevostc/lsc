@@ -9,9 +9,11 @@ import Token
 /-!
 # `Escrow` — a cross-contract call into `Token`
 
-`release` makes a real cross-contract call into `Token`, via `exec Token.transfer(..);`. See
-[`docs/reference/ESCROW.md`](../../../docs/reference/ESCROW.md) for how `exec`/`read` and `PairM`
-work, and [`docs/decisions/`](../../../docs/decisions/) for why they're black box.
+`release` makes a real cross-contract call into `Token`, via `exec Token.transfer(..);`. The body
+elaborates to visible `Stmt` nodes (`externalExec` inside `reentrancyGuard`) for codegen and
+Checks; a separate `PairM` `def` is also emitted for the Escrow proof layer. See
+[`docs/reference/ESCROW.md`](../../../docs/reference/ESCROW.md) and
+[`docs/decisions/`](../../../docs/decisions/) for the full cross-contract model.
 
 `Escrow.owner` is the one address allowed to call `release`; `Escrow.released` is a running total
 of how much this `Escrow` has ever released back to the token holder (the actual balances live in
@@ -44,7 +46,7 @@ inductive EscrowEvent where
 
 -- `Escrow`'s owner releases `amount` of the token it holds back to `recipient`, by calling
 -- `Token.transfer` via the cross-contract `exec` primitive. `@nonreentrant` is required on any
--- `tx` that uses `exec`/`read`.
+-- `tx` that uses `exec` (not on read-only `read` txs); it desugars to `Stmt.reentrancyGuard`.
 @nonreentrant
 tx release(recipient : Address, amount : Token.Amount) {
   require (msg.sender == σ.owner) else revert NotOwner();

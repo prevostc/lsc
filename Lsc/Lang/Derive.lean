@@ -54,6 +54,19 @@ inductive FieldKind
   | wadMap
   deriving Repr, DecidableEq
 
+def FieldKind.toTy : FieldKind → Ty
+  | .wei => .wei
+  | .wad => .wad
+  | .bool => .bool
+  | .address => .address
+  | .uint256 => .uint256
+  | .wadMap => .uint256
+
+/-- Callee module prefix → caller storage field holding its address (`Token` → `"token"`). -/
+def moduleTargetField (moduleName : Name) : String :=
+  let s := moduleName.componentsRev.head!.toString
+  if s.isEmpty then s else s.set 0 s.front.toLower
+
 /-- Each registered function's `(abiName, stmtDefName, params)`:
 * `abiName` is the fully-qualified name `tx` itself was declared under (e.g. `Smoke.deposit`) —
   the one whose *last component* becomes the ABI-visible function name (`FunctionDef.name`,
@@ -104,14 +117,10 @@ deferred) and consulted by `elabContractDefBody` when assembling each auto-deriv
 initialize contractNonReentrantExt : EnvExtension (NameMap Bool) ←
   registerEnvExtension (pure {})
 
-/-- Set of fully-qualified `tx` names (`fnName`) whose raw body contains a top-level `exec`/
-`read` node. Populated by `tx`'s elaborator scanning the raw, unelaborated `lscStmt*` syntax, so
-it knows before elaborating which path to use — plain `Stmt`-valued or `PairM`-valued (see
-`flushContractTxs`). Any `tx` recorded here is **not** added to `contractFnsExt`/
-`ContractDef.functions`: it's a real, callable, proof-friendly `def`, but deliberately kept out
-of the single-storage `ContractDef`/bytecode/Yul pipeline (see `Lsc/Compile/Lower.lean`'s module
-docstring). -/
-initialize contractCrossCallExt : EnvExtension (NameMap Bool) ←
+/-- Set of fully-qualified `tx` names whose raw body contains a top-level `exec` node.
+   Used to additionally emit a `PairM` Lean `def` for proof-layer compatibility
+   (`examples/escrow/test/EscrowProofs.lean`) while the `Stmt` body is in `ContractDef`. -/
+initialize contractExecCallExt : EnvExtension (NameMap Bool) ←
   registerEnvExtension (pure {})
 
 /-- Buffered `view` entries: `(fnName, plainNameSyntax, params, retKind, stmtsSyntax)` — the

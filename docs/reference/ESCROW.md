@@ -48,11 +48,12 @@ discards any state change/events, keeping only the return value — unused here 
 genuinely mutates `Token`'s balances, but that's what a hypothetical `previewRelease` would use to
 call `Token.balanceOf` without risk of mutating `Token`'s storage.
 
-`@nonreentrant` is required on any `tx` using `exec`/`read` (enforced at elaboration time). Two
-independent reasons this call can't reenter `Escrow`: structurally, `Token.transfer`'s own type has
-no way to even mention `EscrowStorage`/`PairM` (see `ContractM.lean`'s `PairM` docstring); and as a
-guarded fallback, `exec`/`read` still check the same `locked` flag as any other external call —
-`release_rejects_when_already_locked` proves this.
+`@nonreentrant` is required on any `tx` using `exec` (enforced at elaboration time and again by
+`Checks.checkNonReentrant`); read-only `read` txs are exempt. Two independent reasons this call
+can't reenter `Escrow`: structurally, `Token.transfer`'s own type has no way to even mention
+`EscrowStorage`/`PairM` (see `ContractM.lean`'s `PairM` docstring); and `@nonreentrant` desugars
+to `Stmt.reentrancyGuard`, which lowers to a transient-storage lock (`TLOAD`/`TSTORE`) in Yul —
+`release_rejects_when_already_locked` proves the proof-layer mirror of this guard.
 
 `amount`'s type is `Token.Amount`, not the generic `Wad` — see [TOKEN.md](TOKEN.md) for why passing
 some other token's amount here is a compile error, not a runtime bug.
@@ -65,14 +66,11 @@ from ever needing to mention `Token.TokenError`/`Token.TokenEvent` (see
 and `exec_never_silently_swallows_failure`/`read_never_silently_swallows_failure`
 (`Lsc/Core/ContractM.lean`) prove there's no third "call happened but nobody checked" outcome.
 
-**Not yet in bytecode.** `Lsc/Compile/*` has no representation yet for a second contract's storage
-type, so `release` is deliberately excluded from `Escrow`'s compiled `ContractDef`/bytecode/Yul
-output — its Lean-level semantics are real and proved correct regardless
-(`examples/escrow/test/EscrowTheorem.lean`). The EVM `CALL` opcode itself already has a real, tested
-lowering (`Lsc/Compile/IR.lean`/`Yul.lean`'s `safeExternalCallToYul`,
-`Lsc/Compile/SafeExternalCallTest.lean`, always-revert-on-failure, no raw-call opt-out); wiring
-`exec`/`read` to it is tracked in [`docs/todo/backlog.md`](../todo/backlog.md), alongside the
-general address-indexed N-contract dispatch registry this would need.
+**Bytecode.** `release` is in `Escrow`'s `ContractDef`; `exec Token.transfer(..)` lowers to a
+checked `CALL` via `Stmt.externalExec` → `IR.externalCall` → Yul. Callee address wiring still
+uses the v1 `token : Address` storage-field convention (see `docs/todo/interfaces.md` for the
+full N-contract dispatch registry). The proof layer keeps a separate `PairM` `def` for
+`examples/escrow/test/EscrowProofs.lean`.
 
 ## Required theorems
 

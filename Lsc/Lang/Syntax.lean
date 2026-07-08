@@ -164,22 +164,21 @@ syntax (name := lscReturn) "return " lscExpr ";" : lscStmt
 
 /-- `exec Target.fn(arg1, arg2);` / `read Target.fn(arg1, arg2);` — black-box cross-contract
 invocations into a specific, statically-named other contract. `exec` is state-mutating; `read`
-discards the callee's resulting state/log changes. See `Lsc.ContractM.PairM.exec`/`PairM.read`
-(`Core/ContractM.lean`) for the semantics and `docs/decisions/0003-exec-read-black-box.md` for
-why they're black box; `examples/escrow/src/Escrow.lean` has a real usage.
+discards the callee's resulting state/log changes. Both elaborate to visible `Stmt` nodes
+(`externalExec` / `externalRead`) that lower to checked `CALL` / `STATICCALL` in IR/Yul.
+See `Lsc.ContractM.PairM.exec`/`PairM.read` (`Core/ContractM.lean`) for the proof-layer
+semantics and `docs/decisions/0003-exec-read-black-box.md` for why they're black box;
+`examples/escrow/src/Escrow.lean` has a real `exec` usage.
 
 `Target.fn` is a single dotted identifier naming the callee's tx-derived function directly (e.g.
 `Token.transfer`). Arguments must be plain identifiers — real Lean values (`tx` params or
 in-scope contract-local `def`s), not arbitrary `lscExpr` sub-expressions like `amount +? 1` —
 since the callee expects real Lean values, not this contract's own AST.
 
-**Whole-`tx`-body monad switch:** a `tx` whose body contains one of these nodes at top level has
-its *entire* body elaborated as a `PairM S T E Err Unit` term instead of the usual `Lsc.Stmt`
-value (see `elabExecOrReadTerm`/`elabStmtListPairM`/`flushContractTxs` below); ordinary
-statements around it are individually lifted into `PairM` via `PairM.liftCaller`.
-`@nonreentrant` is required immediately by `tx`'s own elaborator, since a cross-contract `tx` is
-never added to `ContractDef.functions` (`Lsc.Deriving.contractCrossCallExt`) and so couldn't be
-caught by a later, `ContractDef`-walking check. -/
+**`exec` txs** also emit a `PairM` Lean `def` (for `examples/escrow/test/EscrowProofs.lean`)
+alongside the `Stmt` body in `ContractDef` (`flushContractTxs`). `@nonreentrant` is required
+immediately by `tx`'s own elaborator on any body containing top-level `exec` (not `read` alone);
+it desugars to `Stmt.reentrancyGuard`, which `Checks.checkNonReentrant` also enforces. -/
 syntax (name := lscExec) "exec " ident " ( " ident,* " ) " ";" : lscStmt
 
 /-- See `lscExec`'s docstring — the read-only counterpart. -/
@@ -442,6 +441,108 @@ partial def elabCheckedSubWith (storageName : Name) (locals : List (String × Ls
 
 end
 
+/-- Fallback callee lookup via the callee's elaborated Lean type (survives cross-module import). -/
+def lookupCalleeParamsFromEnv (calleeGlobal : Name) (isRead : Bool) :
+    TermElabM (String × List (String × Lsc.Deriving.FieldKind)) := do
+  let shortName := calleeGlobal.componentsRev.head!.toString
+  let info ← getConstInfo calleeGlobal
+  let telescopeResult ← Meta.forallTelescope info.type fun xs retBody => do
+    let mut collected : List (String × Lsc.Deriving.FieldKind) := []
+    for i in [:xs.size] do
+      let x := xs[i]!
+      let ty ← Meta.inferType x
+      let k ← match ← Lsc.Deriving.fieldKindOfExprM ty with
+        | some k => pure k
+        | none =>
+          if isRead then
+            throwError "unsupported parameter type `{ty}` on `{calleeGlobal}` for `read`"
+          else
+            throwError "unsupported parameter type `{ty}` on `{calleeGlobal}` for `exec`"
+      collected := collected ++ [(x.fvarId!.name.toString, k)]
+    pure (collected, retBody)
+  let params := telescopeResult.1
+  let retTyExpr : Lean.Expr := telescopeResult.2
+  if isRead then
+    unless retTyExpr.getAppFn.isConstOf ``Lsc.ContractM do
+      throwError "unknown view callee `{calleeGlobal}` for `read`"
+  else
+    unless retTyExpr.isConstOf ``Lsc.Stmt do
+      throwError "unknown tx callee `{calleeGlobal}` for `exec`"
+  return (shortName, params)
+
+/-- Look up a callee's ABI name and parameter kinds from `contractFnsExt`/`contractViewFnsExt`,
+or from the callee's real Lean type when the extension isn't populated (cross-module import). -/
+def lookupCalleeParams (calleeGlobal : Name) (isRead : Bool) : TermElabM (String × List (String × Lsc.Deriving.FieldKind)) := do
+  let shortName := calleeGlobal.componentsRev.head!.toString
+  let calleeNs := calleeGlobal.getPrefix
+  let env ← getEnv
+  if isRead then
+    let views := (Lsc.Deriving.contractViewFnsExt.getState env).find? calleeNs |>.getD []
+    match views.find? fun (fnName, _, _, _) => fnName == calleeGlobal with
+    | some (_, _, params, _) => return (shortName, params)
+    | none => lookupCalleeParamsFromEnv calleeGlobal isRead
+  else
+    let fns := (Lsc.Deriving.contractFnsExt.getState env).find? calleeNs |>.getD []
+    match fns.find? fun (fnName, _, _) => fnName == calleeGlobal with
+    | some (_, _, params) => return (shortName, params)
+    | none => lookupCalleeParamsFromEnv calleeGlobal isRead
+
+/-- Elaborate argument idents for an `exec`/`read` call against the callee's declared param kinds. -/
+def elabExternalArgExprs (storageName : Name) (locals : List (String × Lsc.Deriving.FieldKind))
+    (calleeParams : List (String × Lsc.Deriving.FieldKind)) (argIdents : TSyntaxArray `ident) :
+    TermElabM (Array Term) := do
+  if argIdents.size != calleeParams.length then
+    throwError "argument count mismatch: expected {calleeParams.length}, got {argIdents.size}"
+  let mut terms : Array Term := #[]
+  for i in [:argIdents.size] do
+    let arg := argIdents[i]!
+    let (eTerm, _) ← elabLscExpr storageName locals (← `(lscExpr| $arg:ident))
+    terms := terms.push eTerm
+  return terms
+
+/-- Build `List ExprAny` term from elaborated expression terms and their kinds. -/
+def mkExprAnyListTerm (exprs : Array Term) (kinds : List Lsc.Deriving.FieldKind) : TermElabM Term := do
+  let pairs ← kinds.zip exprs.toList |>.mapM fun (k, e) => do
+    let tyConst ← k.tyConst
+    `(⟨$tyConst, $e⟩)
+  let mut result : Term ← `(List.nil)
+  for t in pairs.reverse do
+    result ← `(List.cons $t $result)
+  return result
+
+def elabExternalExecStmt (storageName : Name) (locals : List (String × Lsc.Deriving.FieldKind))
+    (fn : Lean.Ident) (argIdents : TSyntaxArray `ident) (checkBoolReturn : Bool) :
+    TermElabM (Term × List (String × Lsc.Deriving.FieldKind)) := do
+  let targetNs := fn.getId.getPrefix
+  if targetNs == Name.anonymous then
+    throwErrorAt fn "`exec` expects a dotted `Target.fn` name (e.g. `Token.transfer`)"
+  let calleeGlobal ← Lean.resolveGlobalConstNoOverload fn
+  let (shortName, calleeParams) ← lookupCalleeParams calleeGlobal false
+  let targetField := Lsc.Deriving.moduleTargetField targetNs
+  let paramTys := calleeParams.map (·.2.toTy)
+  let selector := (Lsc.computeSelectorFromParams shortName paramTys).toNat
+  let argExprs ← elabExternalArgExprs storageName locals calleeParams argIdents
+  let argKinds := calleeParams.map (·.2)
+  let argsTerm ← mkExprAnyListTerm argExprs argKinds
+  return (← `(Lsc.Stmt.externalExec $(quote targetField) $(quote selector) $(quote checkBoolReturn) $argsTerm), locals)
+
+def elabExternalReadStmt (storageName : Name) (locals : List (String × Lsc.Deriving.FieldKind))
+    (fn : Lean.Ident) (argIdents : TSyntaxArray `ident) :
+    TermElabM (Term × List (String × Lsc.Deriving.FieldKind)) := do
+  let targetNs := fn.getId.getPrefix
+  if targetNs == Name.anonymous then
+    throwErrorAt fn "`read` expects a dotted `Target.fn` name (e.g. `Token.balanceOf`)"
+  let calleeGlobal ← Lean.resolveGlobalConstNoOverload fn
+  let (shortName, calleeParams) ← lookupCalleeParams calleeGlobal true
+  let targetField := Lsc.Deriving.moduleTargetField targetNs
+  let paramTys := calleeParams.map (·.2.toTy)
+  let selector := (Lsc.computeSelectorFromParams shortName paramTys).toNat
+  let argExprs ← elabExternalArgExprs storageName locals calleeParams argIdents
+  let argKinds := calleeParams.map (·.2)
+  let argsTerm ← mkExprAnyListTerm argExprs argKinds
+  let retWords : Nat := 0
+  return (← `(Lsc.Stmt.externalRead $(quote targetField) $(quote selector) $(quote retWords) $argsTerm), locals)
+
 mutual
 
 /-- Elaborate one `lscStmt` node into a `Lsc.Stmt`-valued `Term`, alongside the possibly-
@@ -562,6 +663,10 @@ partial def elabLscStmt (storageName : Name) (locals : List (String × Lsc.Deriv
       let (eTerm, k) ← elabLscExpr storageName locals e
       let tyConst ← k.tyConst
       return (← `(Lsc.Stmt.ret ⟨$tyConst, $eTerm⟩), locals)
+  | `(lscStmt| exec $fn:ident ( $args,* ) ;) =>
+      elabExternalExecStmt storageName locals fn args.getElems false
+  | `(lscStmt| read $fn:ident ( $args,* ) ;) =>
+      elabExternalReadStmt storageName locals fn args.getElems
   | stx => throwErrorAt stx "Syntax.elabLscStmt: unsupported `lscStmt` node"
 
 /-- Fold a sequence of `lscStmt` nodes into one chained `Lsc.Stmt` term via
@@ -579,27 +684,32 @@ partial def elabStmtList (storageName : Name) (locals : List (String × Lsc.Deri
 
 end
 
-/-! ## Real cross-contract calls (`exec`/`read`): detection + `PairM` codegen -/
+/-! ## Real cross-contract calls (`exec`/`read`): Stmt nodes + optional PairM proofs -/
 
-/-- Whether `s` is (syntactically) one `exec Target.fn(..);` or `read Target.fn(..);` node —
-see `lscExec`'s docstring above. -/
-def isExecOrReadStmt (s : TSyntax `lscStmt) : Bool :=
+/-- Whether `s` is (syntactically) one `exec Target.fn(..);` node. -/
+def isExecStmt (s : TSyntax `lscStmt) : Bool :=
   match s with
   | `(lscStmt| exec $_:ident ( $_,* ) ;) => true
+  | _ => false
+
+/-- Whether `s` is (syntactically) one `read Target.fn(..);` node. -/
+def isReadStmt (s : TSyntax `lscStmt) : Bool :=
+  match s with
   | `(lscStmt| read $_:ident ( $_,* ) ;) => true
   | _ => false
 
-/-- Whether any *top-level* statement in `stmts` is an `exec`/`read` node — the pre-elaboration
-scan `tx`'s own elaborator uses to decide, before elaborating anything at all, whether this
-`tx`'s whole body must target `Lsc.ContractM.PairM` rather than plain `Lsc.Stmt` (see `lscExec`'s
-docstring's "Whole-`tx`-body monad switch" section).
+/-- Whether any *top-level* statement in `stmts` is an `exec` node. -/
+def stmtsUseExec (stmts : Array (TSyntax `lscStmt)) : Bool :=
+  stmts.any isExecStmt
 
-**Scope note:** deliberately *not* recursive into `if`'s nested `lscStmt*` bodies — a real
-cross-contract call is only supported as a direct top-level statement of the `tx` body it
-appears in (exactly the shape `Escrow.release` needs), not nested inside conditionals. A future
-extension could recurse the same way `Checks.visitStmt` does once `Stmt` itself can represent
-(or a moral-equivalent representation of) a cross-contract call node — see this feature's
-docstring/report for the concrete follow-up this leaves. -/
+/-- Whether any *top-level* statement in `stmts` is a `read` node. -/
+def stmtsUseRead (stmts : Array (TSyntax `lscStmt)) : Bool :=
+  stmts.any isReadStmt
+
+/-- Whether any *top-level* statement in `stmts` is an `exec`/`read` node. -/
+def isExecOrReadStmt (s : TSyntax `lscStmt) : Bool :=
+  isExecStmt s || isReadStmt s
+
 def stmtsUseExecOrRead (stmts : Array (TSyntax `lscStmt)) : Bool :=
   stmts.any isExecOrReadStmt
 
@@ -694,9 +804,8 @@ def wrapSegmentParams (params : List (String × Lsc.Deriving.FieldKind)) (stmtTe
 /-- Elaborate a run of consecutive ordinary (non-`exec`/`read`) `lscStmt`s into one `PairM`
 segment `Term`: builds the plain `Lsc.Stmt` via the existing `elabStmtList` (unchanged, reused
 as-is), wraps it with `wrapSegmentParams`, then lifts the whole thing into `PairM` via
-`PairM.liftCaller ∘ Stmt.eval` (`Lsc.ContractM.PairM.liftCaller`, `Core/ContractM.lean`) — the
-"ordinary statements just get individually lifted" half of the whole-body monad switch (see
-`lscExec`'s docstring). -/
+`PairM.liftCaller ∘ Stmt.eval` (`Lsc.ContractM.PairM.liftCaller`, `Core/ContractM.lean`) — used
+when building the proof-layer `PairM` `def` for `exec` txs (`elabStmtListPairM`). -/
 def elabOrdinarySegment (storageName : Name) (locals params : List (String × Lsc.Deriving.FieldKind))
     (buf : Array (TSyntax `lscStmt)) : TermElabM Term := do
   let (stmtTerm, _) ← elabStmtList storageName locals buf
@@ -735,15 +844,14 @@ immediately; `Lsc.Deriving.flushContractTxs` (run by `derive_contract_def`/`deri
 elaborates and emits the real `def name : Stmt := ...` declarations later, all at once — see
 `docs/decisions/0007-tx-body-elaboration-deferred.md` for why.
 
-`@nonreentrant` — decorates the immediately-following `tx`, marking it as expected to perform a
-real cross-contract call (`exec`/`read`). This `elab` itself requires the decorator on (and only
-on) any `tx` whose body actually contains a top-level `exec`/`read` node (see below); a `tx`
-with neither at all compiles the same whether or not it is decorated (the decorator is a
-requirement, not a universal precondition). Modeled as a plain optional leading atom on `tx`'s
-own `elab` (rather than Lean's general `declModifiers`/`@[attr]` machinery, which targets
-`structure`/`def`/... declarations `tx` isn't one of) — the same "optional trailing/leading
-Syntax group" technique `derive_contract_def`'s `(functions)?`/`(topic0)?`/`(ctor)?` groups
-already use just below. -/
+`@nonreentrant` — decorates the immediately-following `tx`, marking it as performing a mutating
+cross-contract `exec`. This `elab` requires the decorator on (and only on) any `tx` whose body
+contains a top-level `exec` node; `read`-only txs are exempt. A `tx` with neither compiles the
+same whether or not it is decorated (the decorator is a requirement for `exec`, not a universal
+precondition). Modeled as a plain optional leading atom on `tx`'s own `elab` (rather than Lean's
+general `declModifiers`/`@[attr]` machinery, which targets `structure`/`def`/... declarations
+`tx` isn't one of) — the same "optional trailing/leading Syntax group" technique
+`derive_contract_def`'s `(functions)?`/`(topic0)?`/`(ctor)?` groups already use just below. -/
 elab nrStx:("@nonreentrant")? "tx " name:ident params:(optional("(" lscTxParam,* ")")) "{" stmts:lscStmt* "}" : command => do
   let ns ← getCurrNamespace
   let fnName := ns ++ name.getId
@@ -768,17 +876,14 @@ elab nrStx:("@nonreentrant")? "tx " name:ident params:(optional("(" lscTxParam,*
   stashParamTys fnName paramsStx
   if isNonReentrant then
     modifyEnv fun env => Lsc.Deriving.contractNonReentrantExt.modifyState env (·.insert fnName true)
-  -- Real cross-contract call detection (`exec`/`read`, see that syntax's docstring's
-  -- "Whole-`tx`-body monad switch" section): a cross-contract `tx` is never added to
-  -- `ContractDef.functions` at all (see `Lsc.Deriving.contractCrossCallExt`'s docstring), so it
-  -- could never be reached by a deferred, `ContractDef`-walking check — `@nonreentrant` is
-  -- instead required immediately, right here, before this `tx`'s body is even buffered.
-  if stmtsUseExecOrRead stmts then
+  -- `exec` requires `@nonreentrant` (desugars to `Stmt.reentrancyGuard`); `read` alone does not.
+  -- Syntax rejects bare `exec` early; `Checks.checkNonReentrant` enforces the same on `ContractDef`.
+  if stmtsUseExec stmts then
     unless isNonReentrant do
-      throwErrorAt name "`{name.getId}` uses `exec`/`read`, but is not marked \
+      throwErrorAt name "`{name.getId}` uses `exec`, but is not marked \
 `@nonreentrant` — add `@nonreentrant` immediately before `tx {name.getId}(...)` \
 (i.e. `@nonreentrant tx {name.getId}(...) \{ ... }`)"
-    modifyEnv fun env => Lsc.Deriving.contractCrossCallExt.modifyState env (·.insert fnName true)
+    modifyEnv fun env => Lsc.Deriving.contractExecCallExt.modifyState env (·.insert fnName true)
 
 /-- `view name(params) : RetTy { <lscStmt>* }` — a read-only, value-returning function
 declaration (the DSL counterpart of a hand-written hand-written `def balanceOf (..) : ContractM
@@ -913,58 +1018,40 @@ unchanged. Clears the namespace's buffer once flushed, so re-running (e.g. a str
 def flushContractTxs : CommandElabM Unit := do
   let ns ← getCurrNamespace
   let pending := (Lsc.Deriving.contractTxSyntaxExt.getState (← getEnv)).find? ns |>.getD []
-  let crossCallState := Lsc.Deriving.contractCrossCallExt.getState (← getEnv)
+  let execCallState := Lsc.Deriving.contractExecCallExt.getState (← getEnv)
+  let nonReentrantState := Lsc.Deriving.contractNonReentrantExt.getState (← getEnv)
   let paramTyState := Lsc.Deriving.contractParamTyExt.getState (← getEnv)
   for (fnName, nameRaw, params, stmtsRaw) in pending do
     let stmts : Array (TSyntax `lscStmt) := stmtsRaw.map (⟨·⟩)
-    -- The *plain* (un-namespaced) ident, so Lean prepends the current namespace itself, exactly
-    -- once — see `tx`'s docstring above on why the fully-qualified `fnName` isn't used here.
     let nameId : Lean.Ident := ⟨nameRaw⟩
-    if (crossCallState.find? fnName).getD false then
-      -- Real cross-contract call (`exec`/`read`, see that syntax's docstring): the WHOLE body
-      -- elaborates directly to a `Lsc.ContractM.PairM S T E Err Unit`-valued `Term`, never a
-      -- `Lsc.Stmt` — so this emits a real, callable, ordinary Lean `def` (exactly like the
-      -- hand-written `Escrow.release` this feature replaces), deliberately NOT registered in
-      -- `Lsc.Deriving.contractFnsExt`/`ContractDef.functions` (see
-      -- `Lsc.Deriving.contractCrossCallExt`'s docstring for why) — so it is also, correctly,
-      -- never reached by `Checks.lean`'s `ContractDef`-walking passes or the bytecode/Yul
-      -- pipeline (`Compile/Lower.lean` simply never sees it at all, rather than needing to
-      -- reject it — see that file's module docstring for the precise, documented boundary).
-      let bodyTerm ← liftTermElabM do
+    let bodyTerm ← liftTermElabM do
+      let storageName ← Lsc.Deriving.currContractStorageName
+      let (t, _) ← elabStmtList storageName params stmts
+      let wrapped ← if (nonReentrantState.find? fnName).getD false then
+          `(Lsc.Stmt.reentrancyGuard $t)
+        else
+          pure t
+      return wrapped
+    let isExecTx := (execCallState.find? fnName).getD false
+    -- PairM proof-layer `def` for `exec` txs (Escrow proofs) alongside Stmt `ContractDef` body.
+    if isExecTx then
+      let bodyPairM ← liftTermElabM do
         let storageName ← Lsc.Deriving.currContractStorageName
         let (errName, eventName) ← Lsc.Deriving.currContractTypes
         let raw ← elabStmtListPairM storageName params params stmts
-        -- Pin `S`/`E`/`Err` explicitly to this contract's own storage/event/error types: a body
-        -- consisting of *only* a top-level `exec`/`read` (no surrounding ordinary segment, unlike
-        -- `Escrow.release`'s `σ.released +? amount` bracketing) never otherwise gets its caller-
-        -- side `PairM S T E Err A` pinned (`elabOrdinarySegment`'s own `(S := ..)` annotation is
-        -- the only place that normally happens), leaving typeclass resolution for `[ContractErrors
-        -- Err]` stuck on a bare metavariable.
         let storageId := mkIdent storageName
         let errId := mkIdent errName
         let eventId := mkIdent eventName
         `(($raw : Lsc.ContractM.PairM $storageId _ $eventId $errId _))
-      -- Look up this `tx`'s author-declared parameter types verbatim
-      -- (`Lsc.Deriving.contractTxParamTyExt`) — a cross-contract `tx`'s real callable `def`
-      -- parameter binder uses the *exact* declared type (e.g. `Token.Amount`), not
-      -- `FieldKind.leanTypeStx`'s generic `Lsc.Wad`, so that two different tokens' amounts
-      -- (even same-decimals ones) are genuinely different Lean types at the one place — an
-      -- `exec`/`read` call site — where mixing them up would otherwise be possible (see
-      -- `Lsc.Wad.Fixed`'s docstring, `Lsc/Lib/Wad/Syntax.lean`).
       let origParamTys : List (String × Name) := paramTyState.find? fnName |>.getD []
-      let wrappedBody ← liftTermElabM do
-        params.foldrM (init := bodyTerm) fun (pname, k) acc => do
+      let wrappedPairM ← liftTermElabM do
+        params.foldrM (init := bodyPairM) fun (pname, k) acc => do
           let pid := mkIdent (Name.mkSimple pname)
           let tyStx : Term ← match origParamTys.find? (·.1 == pname) with
             | some (_, tyName) => pure ⟨mkIdent tyName⟩
             | none => k.leanTypeStx
           `(fun ($pid : $tyStx) => $acc)
-      elabCommand (← `(command| def $nameId := $wrappedBody))
-      continue
-    let bodyTerm ← liftTermElabM do
-      let storageName ← Lsc.Deriving.currContractStorageName
-      let (t, _) ← elabStmtList storageName params stmts
-      return t
+      elabCommand (← `(command| def $nameId := $wrappedPairM))
     -- `stmtDefFnName` is the fully-qualified name of whichever `def` actually holds the
     -- parameter-free `Stmt` value (`fn.body`'s ABI/bytecode-facing shape — see
     -- `Lsc.Deriving.contractFnsExt`'s docstring): for the zero-arg (unchanged) case that's just
@@ -972,7 +1059,14 @@ def flushContractTxs : CommandElabM Unit := do
     -- holding the raw (still-`Expr.var`-parameterized) body, with `nameId` itself instead
     -- becoming the real *callable* `def nameId (p1 : ty1) ... : Stmt := ...` — see this
     -- function's module-level design note in `Lsc.Deriving.contractFnsExt`.
-    let stmtDefFnName ← if params.isEmpty then
+    -- `exec` txs reserve the plain `nameId` for the PairM proof `def` above, so their Stmt
+    -- body always lives in a hidden `nameImpl` def instead (same suffix as the parameterized
+    -- non-`exec` case).
+    let stmtDefFnName ← if isExecTx then
+        let implId := mkIdent (Name.mkSimple (nameRaw.getId.toString ++ "Impl"))
+        elabCommand (← `(command| def $implId : Lsc.Stmt := $bodyTerm))
+        pure (ns ++ Name.mkSimple (nameRaw.getId.toString ++ "Impl"))
+      else if params.isEmpty then
         elabCommand (← `(command| def $nameId : Lsc.Stmt := $bodyTerm))
         pure fnName
       else do

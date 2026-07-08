@@ -175,6 +175,17 @@ def evalWith
   | .ret ⟨t, expr⟩ => do
     let v ← Expr.eval expr env
     pure (env, some ⟨t, v⟩)
+  | .reentrancyGuard body => do
+    let st ← ContractM.get
+    if st.locked then
+      ContractM.revert .Reentrant
+    else do
+      ContractM.setLocked true
+      let r ← evalWith body env
+      ContractM.setLocked false
+      pure r
+  | .externalExec .. => pure (env, none)
+  | .externalRead .. => pure (env, none)
 
 attribute [reducible] evalWith
 

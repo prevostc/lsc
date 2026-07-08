@@ -150,7 +150,12 @@ theorem lookupLocal_evalStmt_unused (st : IRState) (s : Stmt) (id : Ident)
     simp [evalStmt, IRState.lookupLocal]
   | .revert0 => simp [evalStmt, IRState.lookupLocal]
   | .ret _ => rfl
-  | .safeExternalCall .. => rfl
+  | .externalCall .. => rfl
+  | .checkReentrancyLock => simp [evalStmt_checkReentrancyLock, IRState.lookupLocal]
+  | .setReentrancyLock _ =>
+    simp only [freeVarsStmt] at h
+    simp [evalStmt_setReentrancyLock, IRState.lookupLocal]
+  | .staticCall .. => rfl
 
 mutual
   theorem lookupLocal_after_eval_agree (st1 st2 : IRState) (s : Stmt) (hobs : observablyEqual st1 st2)
@@ -231,7 +236,16 @@ mutual
     | .ret e =>
       intro id hmem
       exact hlookup id hmem
-    | .safeExternalCall .. =>
+    | .externalCall .. =>
+      intro id hmem
+      exact hlookup id hmem
+    | .checkReentrancyLock =>
+      intro id hmem
+      simp [freeVarsStmt] at hmem
+    | .setReentrancyLock _ =>
+      intro id hmem
+      simp [freeVarsStmt] at hmem
+    | .staticCall .. =>
       intro id hmem
       exact hlookup id hmem
 
@@ -293,10 +307,12 @@ mutual
       simp only [evalStmt_log1, observablyEqual, heval]
       exact ⟨hobs.1, hlogs, hobs.2.2⟩
     | .revert0 =>
-      simp only [evalStmt_revert0, observablyEqual]
-      exact ⟨hobs.1, hobs.2.1, trivial⟩
+      exact ⟨hobs.1, hobs.2.1, (by simp [evalStmt_revert0, observablyEqual])⟩
     | .ret _ => exact hobs
-    | .safeExternalCall .. => exact hobs
+    | .externalCall .. => exact hobs
+    | .checkReentrancyLock => exact hobs
+    | .setReentrancyLock _ => exact hobs
+    | .staticCall .. => exact hobs
 end
 
 mutual
@@ -355,7 +371,16 @@ mutual
     | .ret e =>
       simp only [freeVarsStmt, readVarsStmt] at hfv hnot
       exact absurd hfv hnot
-    | .safeExternalCall .. =>
+    | .externalCall .. =>
+      simp only [freeVarsStmt, readVarsStmt] at hfv hnot
+      exact absurd hfv hnot
+    | .checkReentrancyLock =>
+      simp only [freeVarsStmt, readVarsStmt] at hfv hnot
+      exact absurd hfv hnot
+    | .setReentrancyLock _ =>
+      simp only [freeVarsStmt, readVarsStmt] at hfv hnot
+      exact absurd hfv hnot
+    | .staticCall .. =>
       simp only [freeVarsStmt, readVarsStmt] at hfv hnot
       exact absurd hfv hnot
 
@@ -456,7 +481,16 @@ mutual
     | .ret e =>
       intro id hmem
       exact hlookup id hmem
-    | .safeExternalCall .. =>
+    | .externalCall .. =>
+      intro id hmem
+      exact hlookup id hmem
+    | .checkReentrancyLock =>
+      intro id hmem
+      simp [readVarsStmt, freeVarsStmt] at hmem
+    | .setReentrancyLock _ =>
+      intro id hmem
+      simp [readVarsStmt, freeVarsStmt] at hmem
+    | .staticCall .. =>
       intro id hmem
       exact hlookup id hmem
 
@@ -518,10 +552,12 @@ mutual
       simp only [evalStmt_log1, observablyEqual, heval]
       exact ⟨hobs.1, hlogs, hobs.2.2⟩
     | .revert0 =>
-      simp only [evalStmt_revert0, observablyEqual]
-      exact ⟨hobs.1, hobs.2.1, trivial⟩
+      exact ⟨hobs.1, hobs.2.1, (by simp [evalStmt_revert0, observablyEqual])⟩
     | .ret _ => exact hobs
-    | .safeExternalCall .. => exact hobs
+    | .externalCall .. => exact hobs
+    | .checkReentrancyLock => exact hobs
+    | .setReentrancyLock _ => exact hobs
+    | .staticCall .. => exact hobs
 end
 
 theorem evalStmt_setLocal_unused_obs (st : IRState) (name : Ident) (v : Nat) (s : Stmt)
@@ -588,9 +624,15 @@ theorem evalStmt_setLocal_unused_obs (st : IRState) (name : Ident) (v : Nat) (s 
   | ret e =>
     simp only [evalStmt_ret, observablyEqual]
     exact observablyEqual_setLocal st name v
-  | safeExternalCall addr inOffset inSize checkBoolReturn =>
-    -- `evalStmt`'s no-op case for this node (see `IR/Eval.lean`'s docstring) means the goal
-    -- reduces exactly like `skip`/`ret` above, regardless of `addr`/`inOffset`/`inSize`.
+  | externalCall addr selector args checkBoolReturn =>
+    simpa only [evalStmt] using observablyEqual_setLocal st name v
+  | checkReentrancyLock =>
+    simp only [freeVarsStmt] at h
+    simp [evalStmt_checkReentrancyLock, observablyEqual, IRState.setLocal]
+  | setReentrancyLock _ =>
+    simp only [freeVarsStmt] at h
+    simp [evalStmt_setReentrancyLock, observablyEqual, IRState.setLocal]
+  | staticCall addr selector args retWords =>
     simpa only [evalStmt] using observablyEqual_setLocal st name v
 
 theorem evalStmt_unused_bind_ignored (st : IRState) (name : Ident) (e : Expr) (rest : Stmt)

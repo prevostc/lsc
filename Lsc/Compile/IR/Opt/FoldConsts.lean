@@ -47,8 +47,12 @@ def foldConstsStmt : Stmt → Stmt
   | .log1 topic data => .log1 topic (foldConsts data)
   | .revert0 => .revert0
   | .ret e => .ret (foldConsts e)
-  | .safeExternalCall addr inOffset inSize checkBoolReturn =>
-    .safeExternalCall (foldConsts addr) (foldConsts inOffset) (foldConsts inSize) checkBoolReturn
+  | .checkReentrancyLock => .checkReentrancyLock
+  | .setReentrancyLock held => .setReentrancyLock held
+  | .externalCall addr selector args checkBoolReturn =>
+    .externalCall (foldConsts addr) selector (args.map foldConsts) checkBoolReturn
+  | .staticCall addr selector args retWords =>
+    .staticCall (foldConsts addr) selector (args.map foldConsts) retWords
 
 namespace FoldConsts
 
@@ -130,7 +134,10 @@ theorem foldConstsStmt_correct (st : IRState) (s : Stmt) :
     simp only [foldConstsStmt, evalStmt, foldConsts_correct st data]
   | .revert0 => rfl
   | .ret _ => rfl
-  | .safeExternalCall .. => rfl
+  | .checkReentrancyLock => rfl
+  | .setReentrancyLock _ => rfl
+  | .externalCall .. => rfl
+  | .staticCall .. => rfl
 
 end FoldConsts
 

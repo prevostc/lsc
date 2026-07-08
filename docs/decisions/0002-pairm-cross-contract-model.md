@@ -32,7 +32,7 @@ encoding, an abstract `dispatch_not_reentrant` framework theorem) that doesn't e
   or `read`, it is architecturally impossible for a callee written this way to call back into the
   caller — reentrancy across `PairM` calls is ruled out structurally, not just guarded (see
   [`0003`](0003-exec-read-black-box.md) for the residual guard that's still needed).
-- Follow-up: once a real N-contract registry exists, `exec`/`read` can be wired to the real
-  `IR.Stmt.safeExternalCall`/Yul codegen path that already exists (`Lsc/Compile/IR.lean`,
-  `Yul.lean`, `SafeExternalCallTest.lean`) — tracked in
-  [`docs/todo/backlog.md`](../todo/backlog.md) and [`docs/todo/interfaces.md`](../todo/interfaces.md).
+- Follow-up: once a real N-contract registry exists, callee addresses can be resolved beyond the
+  v1 `token : Address` storage-field convention — tracked in
+  [`docs/todo/interfaces.md`](../todo/interfaces.md). `exec`/`read` already lower to
+  `IR.externalCall`/`IR.staticCall` via Yul (`SafeExternalCallTest.lean`, `StaticCallTest.lean`).

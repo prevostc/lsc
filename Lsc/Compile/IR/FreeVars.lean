@@ -29,8 +29,10 @@ def freeVarsStmt : Stmt → List Ident
   | .log1 _ data => freeVarsExpr data
   | .revert0 => []
   | .ret e => freeVarsExpr e
-  | .safeExternalCall addr inOffset inSize _ =>
-    freeVarsExpr addr ++ freeVarsExpr inOffset ++ freeVarsExpr inSize
+  | .checkReentrancyLock => []
+  | .setReentrancyLock _ => []
+  | .externalCall addr _ args _ => freeVarsExpr addr ++ freeVarsExprs args
+  | .staticCall addr _ args _ => freeVarsExpr addr ++ freeVarsExprs args
 
 /-- Variables whose incoming `lookupLocal` value can affect evaluation. -/
 def readVarsStmt : Stmt → List Ident
@@ -43,7 +45,9 @@ def readVarsStmt : Stmt → List Ident
   | .log1 _ data => freeVarsExpr data
   | .revert0 => []
   | .ret e => freeVarsExpr e
-  | .safeExternalCall addr inOffset inSize _ =>
-    freeVarsExpr addr ++ freeVarsExpr inOffset ++ freeVarsExpr inSize
+  | .checkReentrancyLock => []
+  | .setReentrancyLock _ => []
+  | .externalCall addr _ args _ => freeVarsExpr addr ++ freeVarsExprs args
+  | .staticCall addr _ args _ => freeVarsExpr addr ++ freeVarsExprs args
 
 end Lsc.Compile.IR

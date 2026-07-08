@@ -10,6 +10,7 @@ structure IRState where
   slots : List (Nat × Nat) := []
   logs : List (Nat × Nat) := []
   reverted : Bool := false
+  transientLock : Nat := 0
 
 namespace IRState
 
@@ -111,10 +112,10 @@ def evalStmt (st : IRState) (s : Stmt) : IRState :=
   -- preserving no-op. `e` is still evaluated eagerly for a real EVM (`Codegen.lean`'s `.ret`
   -- case pushes `e`'s value before `RETURN`), just not observed here.
   | .ret _ => st
-  -- Not yet produced by `Lower.lean` (only constructed directly by the Yul-lowering test in
-  -- `Yul.lean`'s `safeExternalCallToYul`), so this reference interpreter has no real case to
-  -- model it against yet; treated as a pure no-op like `.ret` above. See docs/todo/backlog.md.
-  | .safeExternalCall .. => st
+  | .checkReentrancyLock => st
+  | .setReentrancyLock _ => st
+  | .externalCall .. => st
+  | .staticCall .. => st
 
 @[simp] theorem evalStmt_skip (st : IRState) : evalStmt st .skip = st := rfl
 
@@ -141,5 +142,11 @@ def evalStmt (st : IRState) (s : Stmt) : IRState :=
 @[simp] theorem evalStmt_revert0 (st : IRState) : evalStmt st .revert0 = { st with reverted := true } := rfl
 
 @[simp] theorem evalStmt_ret (st : IRState) (e : Expr) : evalStmt st (.ret e) = st := rfl
+
+@[simp] theorem evalStmt_checkReentrancyLock (st : IRState) :
+    evalStmt st .checkReentrancyLock = st := rfl
+
+@[simp] theorem evalStmt_setReentrancyLock (st : IRState) (held : Bool) :
+    evalStmt st (.setReentrancyLock held) = st := rfl
 
 end Lsc.Compile.IR

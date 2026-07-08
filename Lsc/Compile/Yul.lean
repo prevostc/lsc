@@ -31,40 +31,58 @@ private def irExprToYul (e : IR.Expr) : Ast.Expr :=
   | .eq a b => yulCall "eq" [irExprToYul a, irExprToYul b]
   | .isZero a => yulCall "iszero" [irExprToYul a]
 
-/-- Lowering for `IR.Stmt.safeExternalCall` (see that constructor's docstring for the full
-rationale) — the one and only Yul shape this node can ever produce, with **no parameter to skip
-either check**:
+private def revertEmpty : Ast.Stmt :=
+  Ast.Stmt.ExprStmtCall (yulCall "revert" [yulLit 0, yulLit 0])
 
-```
-let success := call(gas(), addr, 0, inOffset, inSize, 0, 32)
-if iszero(success) { revert(0, 0) }
--- only emitted when checkBoolReturn is true:
-if gt(returndatasize(), 0) {
-  if iszero(mload(0)) { revert(0, 0) }
-}
-```
+/-- ABI-pack `selector` and `args` into memory starting at offset 0. -/
+private def packCalldataToYul (selector : Nat) (args : List IR.Expr) : List Ast.Stmt :=
+  let selectorStore :=
+    [Ast.Stmt.ExprStmtCall (yulCall "mstore" [yulLit 0, yulCall "shl" [yulLit 224, yulLit selector]])]
+  let rec go (i : Nat) (rest : List IR.Expr) : List Ast.Stmt :=
+    match rest with
+    | [] => []
+    | arg :: tail =>
+      Ast.Stmt.ExprStmtCall (yulCall "mstore" [yulLit (4 + 32 * i), irExprToYul arg]) :: go (i + 1) tail
+  selectorStore ++ go 0 args
 
-`call`'s own `retOffset`/`retSize` (`0`/`32`) already ask the EVM to copy up to the first 32
-bytes of return data into memory at offset `0` as part of the `CALL` itself — no separate
-`returndatacopy` is needed for the single-word `bool` this checks. A callee returning zero-length
-return data (`returndatasize() == 0` — real-world tokens that omit `transfer`'s `bool` return
-entirely) skips the `mload`-based check altogether and is treated as success, matching
-`SafeERC20.safeTransfer`'s own handling of that case. -/
-private def safeExternalCallToYul (addr inOffset inSize : IR.Expr) (checkBoolReturn : Bool) :
-    List Ast.Stmt :=
+private def calldataSize (args : List IR.Expr) : Nat :=
+  4 + 32 * args.length
+
+private def checkReentrancyLockToYul : List Ast.Stmt :=
+  let held := yulCall "tload" [yulLit IR.reentrancyLockSlot]
+  [Ast.Stmt.Let ["lsc_lock_held"] (some held),
+   Ast.Stmt.If (yulCall "iszero" [yulCall "iszero" [.Var "lsc_lock_held"]]) [revertEmpty]]
+
+private def setReentrancyLockToYul (held : Bool) : List Ast.Stmt :=
+  [Ast.Stmt.ExprStmtCall (yulCall "tstore" [yulLit IR.reentrancyLockSlot, yulLit (if held then 1 else 0)])]
+
+/-- `IR.externalCall` — `CALL` with mandatory success check (optional ERC20 bool decode). -/
+private def externalCallToYul (addr : IR.Expr) (selector : Nat) (args : List IR.Expr)
+    (checkBoolReturn : Bool) : List Ast.Stmt :=
+  let inSize := calldataSize args
   let callExpr := yulCall "call"
-    [yulCall "gas" [], irExprToYul addr, yulLit 0, irExprToYul inOffset, irExprToYul inSize,
-     yulLit 0, yulLit 32]
+    [yulCall "gas" [], irExprToYul addr, yulLit 0, yulLit 0, yulLit inSize, yulLit 0, yulLit 32]
   let successCheck : Ast.Stmt :=
-    Ast.Stmt.If (yulCall "iszero" [.Var "lsc_call_success"])
-      [Ast.Stmt.ExprStmtCall (yulCall "revert" [yulLit 0, yulLit 0])]
+    Ast.Stmt.If (yulCall "iszero" [.Var "lsc_call_success"]) [revertEmpty]
   let boolReturnCheck : List Ast.Stmt :=
     if checkBoolReturn then
       [Ast.Stmt.If (yulCall "gt" [yulCall "returndatasize" [], yulLit 0])
-        [Ast.Stmt.If (yulCall "iszero" [yulCall "mload" [yulLit 0]])
-          [Ast.Stmt.ExprStmtCall (yulCall "revert" [yulLit 0, yulLit 0])]]]
+        [Ast.Stmt.If (yulCall "iszero" [yulCall "mload" [yulLit 0]]) [revertEmpty]]]
     else []
-  [Ast.Stmt.Let ["lsc_call_success"] (some callExpr), successCheck] ++ boolReturnCheck
+  packCalldataToYul selector args ++
+    [Ast.Stmt.Let ["lsc_call_success"] (some callExpr), successCheck] ++ boolReturnCheck
+
+/-- `IR.staticCall` — `STATICCALL` with mandatory success check; no reentrancy lock. -/
+private def staticCallToYul (addr : IR.Expr) (selector : Nat) (args : List IR.Expr)
+    (retWords : Nat) : List Ast.Stmt :=
+  let inSize := calldataSize args
+  let retSize := 32 * retWords
+  let callExpr := yulCall "staticcall"
+    [yulCall "gas" [], irExprToYul addr, yulLit 0, yulLit inSize, yulLit 0, yulLit retSize]
+  let successCheck : Ast.Stmt :=
+    Ast.Stmt.If (yulCall "iszero" [.Var "lsc_static_success"]) [revertEmpty]
+  packCalldataToYul selector args ++
+    [Ast.Stmt.Let ["lsc_static_success"] (some callExpr), successCheck]
 
 private partial def irStmtToYul (s : IR.Stmt) : List Ast.Stmt :=
   match s with
@@ -73,16 +91,21 @@ private partial def irStmtToYul (s : IR.Stmt) : List Ast.Stmt :=
   | .letBind name e => [Ast.Stmt.Let [name] (some (irExprToYul e))]
   | .sstore slot e => [Ast.Stmt.ExprStmtCall (yulCall "sstore" [yulLit slot, irExprToYul e])]
   | .ifRevert cond =>
-    [Ast.Stmt.If (irExprToYul cond) [Ast.Stmt.ExprStmtCall (yulCall "revert" [yulLit 0, yulLit 0])]]
+    [Ast.Stmt.If (irExprToYul cond) [revertEmpty]]
   | .log0 topic =>
     [Ast.Stmt.ExprStmtCall (yulCall "log1" [yulLit 0, yulLit 0, yulLit topic])]
   | .log1 topic data =>
     [Ast.Stmt.ExprStmtCall (yulCall "log1" [yulLit topic, irExprToYul data])]
-  | .revert0 => [Ast.Stmt.ExprStmtCall (yulCall "revert" [yulLit 0, yulLit 0])]
+  | .revert0 => [revertEmpty]
   | .ret e =>
     [Ast.Stmt.ExprStmtCall (yulCall "mstore" [yulLit 0, irExprToYul e]),
      Ast.Stmt.ExprStmtCall (yulCall "return" [yulLit 0, yulLit 32])]
-  | .safeExternalCall addr inOffset inSize checkBoolReturn => safeExternalCallToYul addr inOffset inSize checkBoolReturn
+  | .checkReentrancyLock => checkReentrancyLockToYul
+  | .setReentrancyLock held => setReentrancyLockToYul held
+  | .externalCall addr selector args checkBoolReturn =>
+    externalCallToYul addr selector args checkBoolReturn
+  | .staticCall addr selector args retWords =>
+    staticCallToYul addr selector args retWords
 
 private def renderExpr (e : Ast.Expr) : String :=
   match e with
@@ -101,7 +124,7 @@ private partial def renderStmt (s : Ast.Stmt) (indent : Nat) : String :=
   | .If cond body =>
     let inner := String.intercalate "\n" (body.map fun b => renderStmt b (indent + 4))
     s!"{pad}if {renderExpr cond} " ++ "{\n" ++ inner ++ "\n" ++ pad ++ "}"
-  | .Block stmts => String.intercalate "\n" (stmts.map fun b => renderStmt b indent)
+  | .Block stmts => String.intercalate "\n" (stmts.map fun s => renderStmt s indent)
   | _ => s!"{pad}// unsupported stmt"
 
 def renderFunction (name : Ident) (body : List Ast.Stmt) : String :=
@@ -123,10 +146,6 @@ def stmtToYul (cfg : Config) (s : Lsc.Stmt) : Except String String :=
   | .ok fn => .ok (renderFunction "lsc_body" fn.body)
   | .error e => .error e
 
-/-- Render a raw `IR.Stmt` directly to a Yul function body string, bypassing `Lower.lean`
-entirely — needed for `IR.Stmt.safeExternalCall` specifically, since nothing lowers an
-`Lsc.Stmt` to it yet (see that constructor's docstring, `IR.lean`); this is the one way to
-exercise/test its Yul codegen (`safeExternalCallToYul`) today. -/
 def irStmtToYulString (s : IR.Stmt) : String :=
   renderFunction "lsc_body" (irStmtToYul s)
 
