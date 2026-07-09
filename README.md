@@ -14,28 +14,57 @@ LSC is **DeFi-focused and proof-first** — not a Solidity replacement or a gas-
 
 Write the contract in a small `tx { ... }` DSL. Prove safety properties as ordinary Lean theorems against the same semantics the compiler uses.
 
-**Contract** ([`examples/counter/src/Counter.lean`](examples/counter/src/Counter.lean)):
+**Contract** ([`examples/counter/src/Counter.lean`](examples/counter/src/Counter.lean)) — `structure`/`inductive` define storage, errors, and events; `derive_contract` wires them into the compiler:
 
 ```lean
+structure CounterStorage where
+  number : Wei := ⟨0⟩
+  paused : Bool := false
+  owner  : Address := 0
+  deriving Repr, ContractStorage
+
+inductive CounterError where | Paused | NotOwner | Overflow
+  deriving Repr, DecidableEq, ContractError
+
+inductive CounterEvent where
+  | Incremented (n : Wei) | Paused | Unpaused
+  deriving Repr, DecidableEq, ContractEvent
+
 tx increment {
-  require(!σ.paused) else revert Paused();
-  let n = σ.number +? 1;
+  require(!σ.paused) else revert Paused();  -- σ = on-chain storage
+  let n = σ.number +? 1;  -- no implicit overflow: +? reverts, +↻ wraps
   σ.number = n;
   emit Incremented(n);
 }
+
+derive_contract "Counter" CounterStorage CounterError CounterEvent
 ```
 
-**Proof** ([`examples/counter/test/CounterTheorem.lean`](examples/counter/test/CounterTheorem.lean)):
+**Proof** ([`examples/counter/test/CounterTheorem.lean`](examples/counter/test/CounterTheorem.lean)) — `theorem` states a property; `runS` runs the tx against the same semantics proofs and compiler share:
 
 ```lean
 theorem increment_errors_when_paused
+    -- for any current state
     (s : ContractState CounterStorage)
-    (hp : s.storage.paused) :
+    -- assume paused
+    (hp : s.storage.paused) : 
+    -- running increment result in an error 
     runS (increment : CounterM Unit) s = .error CounterError.Paused := by
   simp [runS, increment, TxM.toContractM, TxM.run, show s.storage.paused = true from hp]
 ```
 
 The Lean kernel checks this theorem — if the proof breaks, the build fails. No separate test suite or external prover required.
+
+**Generated output** — `increment` lowers to this AST and bytecode (function body only; `Counter.bytecodeHex` is the full contract with pause/unpause and selector dispatch):
+
+```
+AST:  require (not σ.paused) else revert Paused;
+      σ.number := (σ.number +? 1);
+      emit Incremented(n);
+
+bytecode:
+0x5f5480600101808210600f576013565b5f5ffd5b805f55805f5250505f60207f20d8a6f5a693f9d1d627a598e8820f7a55ee74c183aa8f1a30e8d4e8dd9a8d84a1
+```
 
 ## How it works
 
