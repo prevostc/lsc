@@ -1,6 +1,7 @@
 import Lsc.Lang.AST
 import Lsc.Lang.TxM
 import Lsc.Lang.Derive
+import Lsc.Lib.Interfaces.IERC20
 import Lean
 
 /-!
@@ -370,8 +371,14 @@ partial def elabLscExpr (storageName : Name) (locals : List (String × Lsc.Deriv
       match Lsc.sigmaFieldName? name with
       | some field => do
           let k ← storageFieldKind storageName field
-          let t ← k.storageGetStx field
-          return (t, k)
+          let (k', t) ← match k with
+            | .interface _ =>
+              let t ← `(Lsc.CoreExpr.storageGet Lsc.Ty.address $(quote field))
+              pure (.address, t)
+            | _ =>
+              let t ← k.storageGetStx field
+              pure (k, t)
+          return (t, k')
       | none =>
           let nameStr := name.toString
           match locals.find? (·.1 == nameStr) with
@@ -384,6 +391,7 @@ partial def elabLscExpr (storageName : Name) (locals : List (String × Lsc.Deriv
                 | .address => `(Lsc.CoreExpr.var Lsc.Ty.address $nameLit)
                 | .uint256 => `(Lsc.CoreExpr.var Lsc.Ty.uint256 $nameLit)
                 | .wadMap => throwErrorAt x "`{nameStr}` is a mapping field, not a local value"
+                | .interface _ => throwErrorAt x "`{nameStr}` is an interface field, not a local value"
               return (t, k)
           | none => throwErrorAt x "unbound identifier `{nameStr}` in `lscExpr`"
   | stx => throwErrorAt stx "Syntax.elabLscExpr: unsupported `lscExpr` node"
@@ -510,8 +518,98 @@ def mkExprAnyListTerm (exprs : Array Term) (kinds : List Lsc.Deriving.FieldKind)
     result ← `(List.cons $t $result)
   return result
 
+/-- If `n` is `σ.field.method` (or `…σ.field.method`), return `(field, method)`. Lean lexes the
+whole callee as one dotted `ident`, so interface calls share `exec ident(..)` with module calls. -/
+def splitSigmaMethodCall? (n : Name) : Option (String × String) :=
+  let parts := n.toString.splitOn "."
+  match parts.findIdx? (· == "σ") with
+  | some i =>
+    if h : i + 2 < parts.length then
+      some (parts[i + 1], parts[parts.length - 1])
+    else
+      none
+  | none => none
+
+def mkSigmaFieldIdent (field : String) : Lean.Ident :=
+  mkIdent (Name.str (Name.str Name.anonymous "σ") field)
+
+/-- Map an ABI `Ty` to a `FieldKind` for interface-method argument checking. -/
+def tyToFieldKind (t : Ty) : Option Lsc.Deriving.FieldKind :=
+  match t with
+  | .wei => some .wei
+  | .wad => some .wad
+  | .bool => some .bool
+  | .address => some .address
+  | .uint256 => some .uint256
+  | .unit => none
+
+/-- Require `receiver` to be a `σ.field` on an interface-typed storage slot; return field name
+and interface name (`"IERC20"`, …). -/
+def resolveInterfaceReceiver (storageName : Name) (receiver : Lean.Ident) :
+    TermElabM (String × String) := do
+  match Lsc.sigmaFieldName? receiver.getId with
+  | none => throwErrorAt receiver "`exec σ.field.method(..)` expects a storage receiver \
+    like `σ.token`, got `{receiver.getId}`"
+  | some field =>
+    let k ← storageFieldKind storageName field
+    match Lsc.Deriving.FieldKind.interfaceName? k with
+    | some iface => return (field, iface)
+    | none => throwErrorAt receiver "storage field `{field}` is not an interface type \
+      (expected e.g. `token : IERC20`)"
+
+def lookupInterfaceMethod (iface method : String) : TermElabM Lsc.Interfaces.IERC20.MethodSpec := do
+  unless iface == Lsc.Interfaces.IERC20.interfaceName do
+    throwError "unknown interface `{iface}` — only `IERC20` is supported today"
+  match Lsc.Interfaces.IERC20.lookupMethod method with
+  | some spec => return spec
+  | none => throwError "interface `{iface}` has no method `{method}`"
+
+def elabExternalInterfaceExecStmt (storageName : Name)
+    (locals : List (String × Lsc.Deriving.FieldKind))
+    (receiver : Lean.Ident) (method : Lean.Ident) (argIdents : TSyntaxArray `ident) :
+    TermElabM (Term × List (String × Lsc.Deriving.FieldKind)) := do
+  let (targetField, iface) ← resolveInterfaceReceiver storageName receiver
+  let spec ← lookupInterfaceMethod iface method.getId.toString
+  unless spec.mutating do
+    throwErrorAt method "`{method.getId}` is read-only on `{iface}` — use \
+`read {receiver.getId}.{method.getId}(..);` instead"
+  let calleeParams := spec.params.filterMap fun (n, t) =>
+    tyToFieldKind t |>.map (n, ·)
+  if argIdents.size != calleeParams.length then
+    throwError "argument count mismatch for `{iface}.{method.getId}`: \
+expected {calleeParams.length}, got {argIdents.size}"
+  let paramTys := spec.params.map (·.2)
+  let selector := (Lsc.computeSelectorFromParams method.getId.toString paramTys).toNat
+  let argExprs ← elabExternalArgExprs storageName locals calleeParams argIdents
+  let argKinds := calleeParams.map (·.2)
+  let argsTerm ← mkExprAnyListTerm argExprs argKinds
+  return (← `(Lsc.Stmt.externalExec $(quote targetField) $(quote selector)
+      $(quote spec.checkBoolReturn) $argsTerm), locals)
+
+def elabExternalInterfaceReadStmt (storageName : Name)
+    (locals : List (String × Lsc.Deriving.FieldKind))
+    (receiver : Lean.Ident) (method : Lean.Ident) (argIdents : TSyntaxArray `ident) :
+    TermElabM (Term × List (String × Lsc.Deriving.FieldKind)) := do
+  let (targetField, iface) ← resolveInterfaceReceiver storageName receiver
+  let spec ← lookupInterfaceMethod iface method.getId.toString
+  if spec.mutating then
+    throwErrorAt method "`{method.getId}` mutates `{iface}` state — use \
+`exec {receiver.getId}.{method.getId}(..);` instead"
+  let calleeParams := spec.params.filterMap fun (n, t) =>
+    tyToFieldKind t |>.map (n, ·)
+  if argIdents.size != calleeParams.length then
+    throwError "argument count mismatch for `{iface}.{method.getId}`: \
+expected {calleeParams.length}, got {argIdents.size}"
+  let paramTys := spec.params.map (·.2)
+  let selector := (Lsc.computeSelectorFromParams method.getId.toString paramTys).toNat
+  let argExprs ← elabExternalArgExprs storageName locals calleeParams argIdents
+  let argKinds := calleeParams.map (·.2)
+  let argsTerm ← mkExprAnyListTerm argExprs argKinds
+  return (← `(Lsc.Stmt.externalRead $(quote targetField) $(quote selector)
+      $(quote spec.retWords) $argsTerm), locals)
+
 def elabExternalExecStmt (storageName : Name) (locals : List (String × Lsc.Deriving.FieldKind))
-    (fn : Lean.Ident) (argIdents : TSyntaxArray `ident) (checkBoolReturn : Bool) :
+    (fn : Lean.Ident) (argIdents : TSyntaxArray `ident) :
     TermElabM (Term × List (String × Lsc.Deriving.FieldKind)) := do
   let targetNs := fn.getId.getPrefix
   if targetNs == Name.anonymous then
@@ -524,7 +622,7 @@ def elabExternalExecStmt (storageName : Name) (locals : List (String × Lsc.Deri
   let argExprs ← elabExternalArgExprs storageName locals calleeParams argIdents
   let argKinds := calleeParams.map (·.2)
   let argsTerm ← mkExprAnyListTerm argExprs argKinds
-  return (← `(Lsc.Stmt.externalExec $(quote targetField) $(quote selector) $(quote checkBoolReturn) $argsTerm), locals)
+  return (← `(Lsc.Stmt.externalExec $(quote targetField) $(quote selector) false $argsTerm), locals)
 
 def elabExternalReadStmt (storageName : Name) (locals : List (String × Lsc.Deriving.FieldKind))
     (fn : Lean.Ident) (argIdents : TSyntaxArray `ident) :
@@ -664,9 +762,17 @@ partial def elabLscStmt (storageName : Name) (locals : List (String × Lsc.Deriv
       let tyConst ← k.tyConst
       return (← `(Lsc.Stmt.ret ⟨$tyConst, $eTerm⟩), locals)
   | `(lscStmt| exec $fn:ident ( $args,* ) ;) =>
-      elabExternalExecStmt storageName locals fn args.getElems false
+      match splitSigmaMethodCall? fn.getId with
+      | some (field, method) =>
+          elabExternalInterfaceExecStmt storageName locals (mkSigmaFieldIdent field)
+            (mkIdent (Name.mkSimple method)) args.getElems
+      | none => elabExternalExecStmt storageName locals fn args.getElems
   | `(lscStmt| read $fn:ident ( $args,* ) ;) =>
-      elabExternalReadStmt storageName locals fn args.getElems
+      match splitSigmaMethodCall? fn.getId with
+      | some (field, method) =>
+          elabExternalInterfaceReadStmt storageName locals (mkSigmaFieldIdent field)
+            (mkIdent (Name.mkSimple method)) args.getElems
+      | none => elabExternalReadStmt storageName locals fn args.getElems
   | stx => throwErrorAt stx "Syntax.elabLscStmt: unsupported `lscStmt` node"
 
 /-- Fold a sequence of `lscStmt` nodes into one chained `Lsc.Stmt` term via
@@ -738,6 +844,26 @@ def resolveExecReadCallee (fn : Lean.Ident) : TermElabM Lean.Ident := do
   else
     return fn
 
+def elabExecOrReadTermCore (fn : Lean.Ident) (args : Array (TSyntax `ident)) : TermElabM Term := do
+  let targetNs := fn.getId.getPrefix
+  if targetNs == Name.anonymous then
+    throwErrorAt fn "`exec` expects a dotted `Target.fn` name (e.g. `Token.transfer`), \
+got `{fn.getId}`"
+  let monadName := targetNs ++ Name.mkSimple (targetNs.componentsRev.head!.toString ++ "M")
+  let monadId := mkIdent monadName
+  let callee ← resolveExecReadCallee fn
+  `(Lsc.ContractM.PairM.exec (($callee $args*) : $monadId Unit))
+
+def elabReadOrReadTermCore (fn : Lean.Ident) (args : Array (TSyntax `ident)) : TermElabM Term := do
+  let targetNs := fn.getId.getPrefix
+  if targetNs == Name.anonymous then
+    throwErrorAt fn "`read` expects a dotted `Target.fn` name (e.g. `Token.balanceOf`), \
+got `{fn.getId}`"
+  let monadName := targetNs ++ Name.mkSimple (targetNs.componentsRev.head!.toString ++ "M")
+  let monadId := mkIdent monadName
+  let callee ← resolveExecReadCallee fn
+  `(Lsc.ContractM.PairM.read (($callee $args*) : $monadId Unit))
+
 /-- Elaborate one `exec Target.fn(arg1, ..);` or `read Target.fn(arg1, ..);` node directly into
 a `Lsc.ContractM.PairM S T E Err Unit`-valued `Term` (never a `Lsc.Stmt` — there is no `Stmt`
 constructor for this, see `lscExec`'s docstring). `arg1`, ... are spliced as bare identifier
@@ -746,32 +872,30 @@ constructor for this, see `lscExec`'s docstring). `arg1`, ... are spliced as bar
 ordinary unification (against `$fn`'s `Coe Stmt (ContractM T ET ErrT Unit)`-mediated result type,
 `Lang/TxM.lean`) rather than being named anywhere in this function. Both `exec`/`read` are black
 box — no `toErr`/`toEvent` conversion functions are needed at all (see `lscExec`'s docstring). -/
+def elabInterfaceExecTermCore (method : Lean.Ident) (args : Array (TSyntax `ident)) :
+    TermElabM Term := do
+  let _ ← lookupInterfaceMethod Lsc.Interfaces.IERC20.interfaceName method.getId.toString
+  match method.getId.toString with
+  | "transfer" =>
+    `(Lsc.ContractM.PairM.exec (@Lsc.Interfaces.IERC20Spec.transferTyped _ $args*))
+  | m =>
+    throwError "abstract interface `exec` not implemented for `{m}` — only `transfer` is supported today"
+
+def elabInterfaceReadTermCore (method : Lean.Ident) (_args : Array (TSyntax `ident)) :
+    TermElabM Term := do
+  let _ ← lookupInterfaceMethod Lsc.Interfaces.IERC20.interfaceName method.getId.toString
+  throwError "abstract interface `read σ.token.{method.getId}(..)` is not yet supported — \
+use black-box `read Target.{method.getId}(..)` for a concrete callee module"
+
 def elabExecOrReadTerm : TSyntax `lscStmt → TermElabM Term
-  | `(lscStmt| exec $fn:ident ( $args,* ) ;) => do
-      -- `$fn` (e.g. `Token.transfer`) returns a bare `Lsc.Stmt`, which only coerces to the
-      -- right `ContractM T ET ErrT A` (`Lang/TxM.lean`'s `Coe Stmt (ContractM S E Err Unit)`
-      -- instance) once `T`/`ET`/`ErrT` are already resolved — plain application leaves them as
-      -- unresolved metavariables (nothing here pins them), so this pins `T` explicitly via an
-      -- ascription to `$targetNs.${targetNs}M`, the `derive_contract`-generated `ContractM`-
-      -- abbrev naming convention (`Lang/Syntax.lean`'s `elabContractDefBody`'s `mId`) every
-      -- `derive_contract "Name" ...`-declared contract already follows.
-      let targetNs := fn.getId.getPrefix
-      if targetNs == Name.anonymous then
-        throwErrorAt fn "`exec` expects a dotted `Target.fn` name (e.g. `Token.transfer`), \
-got `{fn.getId}`"
-      let monadName := targetNs ++ Name.mkSimple (targetNs.componentsRev.head!.toString ++ "M")
-      let monadId := mkIdent monadName
-      let callee ← resolveExecReadCallee fn
-      `(Lsc.ContractM.PairM.exec (($callee $args*) : $monadId Unit))
-  | `(lscStmt| read $fn:ident ( $args,* ) ;) => do
-      let targetNs := fn.getId.getPrefix
-      if targetNs == Name.anonymous then
-        throwErrorAt fn "`read` expects a dotted `Target.fn` name (e.g. `Token.balanceOf`), \
-got `{fn.getId}`"
-      let monadName := targetNs ++ Name.mkSimple (targetNs.componentsRev.head!.toString ++ "M")
-      let monadId := mkIdent monadName
-      let callee ← resolveExecReadCallee fn
-      `(Lsc.ContractM.PairM.read (($callee $args*) : $monadId Unit))
+  | `(lscStmt| exec $fn:ident ( $args,* ) ;) =>
+      match splitSigmaMethodCall? fn.getId with
+      | some (_, method) => elabInterfaceExecTermCore (mkIdent (Name.mkSimple method)) args.getElems
+      | none => elabExecOrReadTermCore fn args.getElems
+  | `(lscStmt| read $fn:ident ( $args,* ) ;) =>
+      match splitSigmaMethodCall? fn.getId with
+      | some (_, method) => elabInterfaceReadTermCore (mkIdent (Name.mkSimple method)) args.getElems
+      | none => elabReadOrReadTermCore fn args.getElems
   | stx => throwErrorAt stx "Syntax.elabExecOrReadTerm: unsupported `lscStmt` node"
 
 /-- Fold a list of already-elaborated `PairM`-valued segment `Term`s into one right-associated
@@ -1178,6 +1302,14 @@ def elabContractDefBody (nameStrStx : TSyntax `Lean.Parser.Term.str) (storageId 
   -- existing, documented limitation of overriding `functions` explicitly, not a regression —
   -- an override can always be written with a real ABI signature by hand if needed).
   let ns ← getCurrNamespace
+  let interfaceEntries := (Lsc.Deriving.contractInterfacesExt.getState (← getEnv)).find? ns |>.getD []
+  let interfacesTerm ← liftTermElabM do
+    let mut acc : Term ← `([])
+    for (field, iface) in interfaceEntries do
+      let fieldLit := quote field
+      let ifaceLit := quote iface
+      acc ← `(List.cons ($fieldLit, $ifaceLit) $acc)
+    return acc
   let fnEntries2 := (Lsc.Deriving.contractFnsExt.getState (← getEnv)).find? ns |>.getD []
   let paramsForFnTerm ← liftTermElabM do
     let nId := mkIdent `n
@@ -1294,7 +1426,7 @@ def elabContractDefBody (nameStrStx : TSyntax `Lean.Parser.Term.str) (storageId 
           { name := $nId, kind := Lsc.FunctionKind.external, params := $paramsForFnTerm $nId,
             retTy := Lsc.Ty.unit, body := $bodyId, nonReentrant := $nonReentrantForFnTerm $nId })
         ++ $viewFunctionsTerm
-      interfaces := []
+      interfaces := $interfacesTerm
       constructor := $ctorTerm))
   Lean.Elab.Command.elabCommand (← `(command|
     def $configId : Lsc.Compile.Config := Lsc.Compile.configFromContract $contractDefId $topic0Term))

@@ -1,60 +1,55 @@
-# Backlog: opt-in "interfaces" for `exec`/`read`
+# Opt-in interface calls / `HonestERC20` (Escrow v1)
 
-**Status: design sketch, not implemented.** Nothing described on this page exists in the
-codebase yet — `exec`/`read` (`Lsc/Core/ContractM.lean`'s `PairM.exec`/`PairM.read`, see
-[reference/ESCROW.md](../reference/ESCROW.md)) are fully black box today, with no opt-in
-mechanism at all. This page tracks the black-box default's one real limitation — strictly weaker
-proofs at a cross-contract call site than would be possible if the callee's real spec were known
-and trusted — as a concrete follow-up plan.
+**Status: partially implemented** — see [`decisions/0009`](../decisions/0009-ierc20-interface-honest-assumptions.md)
+and [`reference/ESCROW.md`](../reference/ESCROW.md).
 
-## Why black box isn't the end of the story
+## Implemented today
 
-The black-box model (no `toErr`/`toEvent`, every failure collapses to one opaque
-`FrameworkError.ExternalCallFailed`, callee events never fold into the caller's log — see
-[reference/ESCROW.md](../reference/ESCROW.md)) is the right *default* for composability: a caller
-shouldn't need to enumerate every way an arbitrary callee could fail just to call it, and it keeps
-proofs about the caller robust even if the callee later changes its exact error/event shape. But
-it's strictly less useful when the callee's real spec genuinely *is* known and trusted (e.g.
-another `Lsc`-defined contract in the same project) — today a caller can't prove anything
-conditional on the callee's real behavior (e.g. "if `Token.transfer` succeeds, `Token.totalSupply`
-is unchanged"), only whether the opaque call succeeded or failed at all.
+| Piece | Location |
+|-------|----------|
+| `token : IERC20` storage fields | `Lsc/Lib/Interfaces/IERC20.lean`, `Lsc/Lang/Derive.lean` |
+| `exec σ.token.transfer(..)` / `read σ.token.balanceOf(..)` | `Lsc/Lang/Syntax.lean` |
+| `checkBoolReturn` for IERC20 `transfer` | `Lsc/Lang/Syntax.lean` → `IR.externalCall` |
+| `ContractDef.interfaces` from storage field types | `Lsc/Deriving.contractInterfacesExt` |
+| `HonestERC20` typeclass + compositional lemmas | `Lsc/Lib/Interfaces/IERC20.lean` |
+| Reference instance | `examples/escrow/test/TokenHonest.lean` |
+| Escrow proof tiers A/B | `examples/escrow/test/EscrowProofs.lean`, `EscrowTheorem.lean` |
 
-## Sketch: a richer, opt-in `interface` declaration
+Black-box `exec Token.fn(..)` (module call, no interface field) remains for co-developed LSC callees.
 
-An `interface` declaration would name a callee contract's *assumed* spec — richer than a Solidity
-`interface` (function signatures only) — by additionally letting the author attach:
+## Still backlog
 
-* the callee's real event shapes, so a caller could choose to observe/prove about them instead of
-  discarding them,
-* the callee's real error constructors, so a caller could pattern-match on the actual failure
-  reason instead of always collapsing to `ExternalCallFailed`,
-* extra assumed constraints/theorems about the callee's behavior beyond its type signature — e.g.
-  "`Token.transfer` never decreases `Token.totalSupply`" — that a call site could opt into
-  *trusting* (not reproving locally) for a stronger conditional proof.
+* Call-site cast for secondary interfaces on the same address (e.g. `(σ.token : IERC2612).permit`)
+* Rich `interface` declarations (events, callee errors, attached theorems) beyond `HonestERC20`
+* N-contract dispatch registry / `HonestWorld`
+* Mechanically checking `[HonestERC20]` for arbitrary Solidity tokens (operational: allowlist/audit)
 
-## Sketch: per-call-site opt-in syntax
+## Trust model
 
-A call site would opt in explicitly, e.g. (exact syntax TBD):
+An interface-typed storage field is an **assumption** the author vouches for. When the callee is
+another LSC contract in-repo (`Token`), the assumption is proved (`TokenHonest`). For external
+mainnet tokens, the author must separately argue the token is standard/honest ERC20 — LSC does not
+verify Solidity bytecode today.
+
+## Call syntax
 
 ```lean
-exec[TokenInterface] Token.transfer(recipient, amount);
+structure EscrowStorage where
+  token : IERC20 := default
+  ...
+
+exec σ.token.transfer(recipient, amount);   -- mutating; bool return check
+read σ.token.balanceOf(owner);              -- read-only STATICCALL
+exec Token.transfer(recipient, amount);     -- black-box LSC module call (reference tests)
 ```
 
-Calls without the `[..]` annotation stay exactly as black-box as `exec`/`read` are today — this is
-meant to be additive, not a replacement for the black-box default.
+Lean lexes `σ.token.transfer` as one dotted ident; elaboration splits it into receiver + method.
 
-## Note: bool-return decoding is already solved without this
+## Original sketch (broader vision)
 
-Decoding a callee's real ABI-encoded `bool` return value (the ERC20 `transfer`/`transferFrom`
-convention) doesn't need this mechanism: `IR.Stmt.externalCall`'s `checkBoolReturn` flag
-(`Lsc/Compile/IR.lean`) already handles it generically for any callee whose declared return type
-is `bool`, with no per-call-site annotation. `interface` is still needed for everything else on
-this page — event shapes, error constructors, and extra assumed theorems.
+The black-box model is the right *default* for composability. Interface-typed fields recover
+conditional proofs ("if transfer succeeds, balances moved correctly") without forcing every caller
+to know the callee's full error/event taxonomy.
 
-## Trust model (needs its own design pass before implementation)
-
-An `interface` is an *assumption* the contract author vouches for about a callee whose source they
-don't control — not automatically verified against the callee's real implementation, unless the
-callee happens to be another `Lsc`-defined contract in the same project (in which case it could
-eventually be mechanically checked or derived, rather than merely assumed). Getting this trust
-boundary right needs a dedicated design pass before any code ships.
+Richer `interface` declarations (events, error shapes, extra theorems) remain future work — see
+[`decisions/0009`](../decisions/0009-ierc20-interface-honest-assumptions.md).

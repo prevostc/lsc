@@ -223,6 +223,14 @@ theorem exec_unlocked_err [ContractErrors Err] {ET ErrT : Type} (callee : Contra
       .error (ContractErrors.fromFramework .ExternalCallFailed) := by
   simp [exec, h, hcall]
 
+/-- When `exec` fails, a subsequent `>>=` segment never runs. -/
+theorem bind_exec_err_left [ContractErrors Err] {ET ErrT : Type} (callee : ContractM T ET ErrT A)
+    (f : A → PairM S T E Err B) (s : ContractState S) (t : ContractState T)
+    (h : s.locked = false) (e : ErrT) (hcall : callee t = .error e) :
+    (exec (S := S) (E := E) (Err := Err) callee >>= f) s t =
+      .error (ContractErrors.fromFramework .ExternalCallFailed) := by
+  simp [bind_apply, exec_unlocked_err callee s t h e hcall]
+
 /-- `exec`'s read-only counterpart: **discards** any state change/events `callee` would have
 produced — only the return value `A` survives. `callee` isn't prevented from *declaring* a
 mutation; `read` just never lets it take effect from the caller's point of view (real
@@ -285,6 +293,8 @@ def run (m : PairM S T E Err A) (s : ContractState S) (t : ContractState T) :
     run m s t = m s t := rfl
 
 end PairM
+
+/-- Opt-in interface proofs compose through `Lsc.Interfaces.HonestERC20Lemmas.exec_transfer_ok`. -/
 
 @[simp]
 theorem runS_pure (a : A) (s : ContractState S) :

@@ -14,6 +14,7 @@ doc-comments in the code itself, or [`../reference/`](../reference/) for per-con
 | [0003](0003-exec-read-black-box.md) | `exec`/`read` are black box (no `toErr`/`toEvent`), replacing the earlier `externalCall2` whitebox model |
 | [0004](0004-escrow-hand-written-dsl-wiring.md) | `Escrow` no longer needs hand-written `ContractDSL`/`ContractErrors` glue, now that `exec`/`read` are black box |
 | [0005](0005-bytecode-backend-scope.md) | The direct bytecode backend rejects constructs it can't yet lower, rather than emitting wrong bytecode |
+| [0009](0009-ierc20-interface-honest-assumptions.md) | `IERC20` storage fields + `exec σ.token.transfer` + `HonestERC20` for conditional cross-contract proofs (Escrow token trust boundary) |
 
 ## Template
 

@@ -82,6 +82,20 @@ itself, reverting with `Underflow`.
 * **Owner-gated `mint`.** ERC20 itself doesn't standardize minting access control; gating on a
   fixed `owner` (like `Counter`'s `pause`/`unpause`) is the simplest faithful choice.
 
+## Role in cross-contract proofs (`HonestERC20`)
+
+`Token` is the **reference callee** for the escrow example — not a stand-in for every on-chain
+ERC20. It witnesses that [`HonestERC20`](../decisions/0009-ierc20-interface-honest-assumptions.md)
+(`Lsc/Lib/Interfaces/IERC20.lean`) is satisfiable:
+
+* `examples/escrow/test/TokenHonest.lean` — `instance : HonestERC20 TokenStorage` from
+  `EscrowProofs.runTransferOk` (mechanical, not assumed).
+* Escrow calls the on-chain token via `exec σ.token.transfer(..)` (interface-typed storage field),
+  not `exec Token.transfer(..)`. Tier-B balance theorems for arbitrary tokens require
+  `[HonestERC20 T]`; the reference `Token` corollaries show the instance for the co-developed token.
+
+Excluded from `HonestERC20`: fee-on-transfer, rebasing, callback/reentrancy hooks — see ADR 0009.
+
 ## Required theorems
 
 Two-tier proof style (`docs/DESIGN.md`'s "state it like a human first" invariant): Tier 1

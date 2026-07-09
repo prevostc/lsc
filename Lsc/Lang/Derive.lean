@@ -52,6 +52,9 @@ inductive FieldKind
       excluded from every scalar-`Val`-based helper below (`tyConst`/`leanTypeStx`/`valCtor`/...)
       and instead handled by its own dedicated `getMapField`/`setMapField` codegen. -/
   | wadMap
+  /-- Interface-typed storage field (e.g. `token : IERC20`) — codegen uses one `Address` word;
+      the interface name (`"IERC20"`, …) is recorded in `ContractDef.interfaces`. -/
+  | interface (iface : String)
   deriving Repr, DecidableEq
 
 def FieldKind.toTy : FieldKind → Ty
@@ -61,6 +64,12 @@ def FieldKind.toTy : FieldKind → Ty
   | .address => .address
   | .uint256 => .uint256
   | .wadMap => .uint256
+  | .interface _ => .address
+
+def FieldKind.interfaceName? (k : FieldKind) : Option String :=
+  match k with
+  | .interface iface => some iface
+  | _ => none
 
 /-- Callee module prefix → caller storage field holding its address (`Token` → `"token"`). -/
 def moduleTargetField (moduleName : Name) : String :=
@@ -121,6 +130,11 @@ initialize contractNonReentrantExt : EnvExtension (NameMap Bool) ←
    Used to additionally emit a `PairM` Lean `def` for proof-layer compatibility
    (`examples/escrow/test/EscrowProofs.lean`) while the `Stmt` body is in `ContractDef`. -/
 initialize contractExecCallExt : EnvExtension (NameMap Bool) ←
+  registerEnvExtension (pure {})
+
+/-- Per-contract `(storageField, interfaceName)` pairs from interface-typed storage fields
+(`token : IERC20`) — populated by `deriving ContractStorage`, consumed by `derive_contract`. -/
+initialize contractInterfacesExt : EnvExtension (NameMap (List (String × String))) ←
   registerEnvExtension (pure {})
 
 /-- Buffered `view` entries: `(fnName, plainNameSyntax, params, retKind, stmtsSyntax)` — the
@@ -203,6 +217,7 @@ def fieldKindOfExpr (e : Lean.Expr) : Option FieldKind :=
   else if e.isConstOf ``Lsc.Address then some .address
   else if e.isConstOf ``Lsc.UInt256 then some .uint256
   else if e.isConstOf ``Lsc.Wad.WadMap then some .wadMap
+  else if e.constName?.map (·.toString) == some "Lsc.Interfaces.IERC20" then some (.interface "IERC20")
   else if e.getAppFn.isConstOf ``Lsc.Wad.Fixed then
     -- `Fixed` now takes two explicit args (`decimals`, `tag` — see that structure's docstring);
     -- `tag` is intentionally ignored here: it's purely a Lean-level nominal marker distinguishing
@@ -256,12 +271,8 @@ def FieldKind.tyConst : FieldKind → TermElabM Term
   | .address => `(Lsc.Ty.address)
   | .uint256 => `(Lsc.Ty.uint256)
   | .wadMap => throwError "internal error: `FieldKind.wadMap` has no `Ty` (storage-only kind)"
+  | .interface _ => `(Lsc.Ty.address)
 
-/-- The real Lean *value* type a `tx` parameter of this kind is declared with on the generated
-callable `def name (p : <leanTypeStx>) : Stmt := ...` (see `Lang/Syntax.lean`'s `flushContractTxs`)
-— distinct from `exprTypeStx` above, which is the *expression-builder* type (`Wei.Expr`/
-`CoreExpr _`) used while a `Stmt`/`Expr` AST fragment is still being built, not the concrete
-runtime value type a caller actually supplies. -/
 def FieldKind.leanTypeStx : FieldKind → TermElabM Term
   | .wei => `(Lsc.Wei)
   | .wad => `(Lsc.Wad)
@@ -269,6 +280,10 @@ def FieldKind.leanTypeStx : FieldKind → TermElabM Term
   | .address => `(Lsc.Address)
   | .uint256 => `(Lsc.UInt256)
   | .wadMap => throwError "internal error: `FieldKind.wadMap` is storage-only (not a `tx` parameter kind)"
+  | .interface iface =>
+    match iface with
+    | "IERC20" => `(Lsc.Interfaces.IERC20)
+    | _ => throwError "internal error: unknown interface storage type `{iface}`"
 
 /-- Embed a `tx` parameter's real Lean *value* (`paramId : leanTypeStx`) as a literal
 `Expr`/`CoreExpr` AST node of the matching kind — the bridge between "generated `def` takes a
@@ -290,6 +305,7 @@ def FieldKind.embedLitStx (k : FieldKind) (paramId : Term) : TermElabM Term :=
   | .address => `(Lsc.CoreExpr.lit Lsc.Ty.address (Lsc.Lit.addr $paramId))
   | .uint256 => `(Lsc.CoreExpr.lit Lsc.Ty.uint256 (Lsc.Lit.u256 $paramId))
   | .wadMap => throwError "internal error: `FieldKind.wadMap` is storage-only (not embeddable as a literal)"
+  | .interface _ => throwError "internal error: interface fields are not embeddable as `tx` parameters"
 
 /-- Wrap a plain term as a `matchDiscr` for splicing into `match $[$discrs],* with …`. -/
 def mkDiscr (t : Term) : TermElabM (TSyntax ``Lean.Parser.Term.matchDiscr) :=
@@ -302,6 +318,7 @@ def FieldKind.valCtor : FieldKind → TermElabM Term
   | .address => `(Lsc.Val.addr)
   | .uint256 => `(Lsc.Val.u256)
   | .wadMap => throwError "internal error: `FieldKind.wadMap` has no `Val` case (storage-only kind)"
+  | .interface _ => `(Lsc.Val.addr)
 
 /-- Bridge a `.wad`-kind value between its field's *own* possibly-tagged type (e.g.
 `Token.Amount`, `Lsc.Wad.Fixed 18 Token.Tag`) and `Val.wad`'s generic, always-`Untagged`-tagged
@@ -317,6 +334,7 @@ no value change at all) bridge in both directions. -/
 def FieldKind.bridgeGeneric (k : FieldKind) (e : Term) : TermElabM Term :=
   match k with
   | .wad => `(Lsc.Wad.Fixed.retag $e)
+  | .interface _ => `(Lsc.Interfaces.IERC20.mk $e)
   | _ => pure e
 
 /-- The *expression* (not value) Lean type carrying a field of this kind while a
@@ -333,6 +351,7 @@ def FieldKind.exprTypeStx : FieldKind → TermElabM Term
   | .wadMap =>
     throwError "internal error: `FieldKind.wadMap` has no plain `σ.field` expression form \
       (index it with `σ.field[key]` instead)"
+  | .interface _ => `(Lsc.CoreExpr Lsc.Ty.address)
 
 /-- The default (i.e. only, since these are never written by contract authors — they're
 generated) value of a `σ.field` constant: a fresh `storageGet` expression fragment
@@ -349,6 +368,7 @@ def FieldKind.storageGetStx (k : FieldKind) (fieldStr : String) : TermElabM Term
   | .wadMap =>
     throwError "internal error: `FieldKind.wadMap` has no plain `σ.field` expression form \
       (index it with `σ.field[key]` instead)"
+  | .interface _ => `(Lsc.CoreExpr.storageGet Lsc.Ty.address $fieldLit)
 
 /-! ## `deriving ContractStorage`
 
@@ -375,8 +395,8 @@ def getStructureFieldKinds (structName : Name) : TermElabM (Array (Name × Field
     | some k => return (fname, k)
     | none =>
       throwError "deriving ContractStorage: field `{fname}` of `{structName}` has unsupported type `{fieldTy}` \
-        — storage fields must be declared with exactly one of `Wei`/`Wad`/`Bool`/`Address`/`UInt256` written literally, \
-        or a named `Wad`/`Lsc.Wad.Fixed d`-shaped alias (e.g. `Token.Amount`) \
+        — storage fields must be declared with exactly one of `Wei`/`Wad`/`Bool`/`Address`/`UInt256`/`IERC20` \
+        written literally, or a named `Wad`/`Lsc.Wad.Fixed d`-shaped alias (e.g. `Token.Amount`) \
         (see `Lsc.Deriving`'s module docstring for why this can't be fully generic)"
 
 def mkGetFieldCmd (structName : Name) (fields : Array (Name × FieldKind)) : TermElabM Command := do
@@ -389,13 +409,19 @@ def mkGetFieldCmd (structName : Name) (fields : Array (Name × FieldKind)) : Ter
   -- docstring) — never matched here, only through the dedicated `getMapField` below.
   let fields := fields.filter (·.2 != .wadMap)
   let arms ← fields.mapM fun (fname, k) => do
-    let tyConst ← k.tyConst
-    let valCtor ← k.valCtor
     let fId := mkIdent fname
     let fieldStr := quote fname.toString
-    let pats : Array Term := #[tyConst, fieldStr]
-    let bridged ← k.bridgeGeneric (← `($sId.$fId))
-    `(matchAltExpr| | $[$pats],* => some ($valCtor $bridged))
+    match k with
+    | .interface _ =>
+      let tyConst ← `(Lsc.Ty.address)
+      let pats : Array Term := #[tyConst, fieldStr]
+      `(matchAltExpr| | $[$pats],* => some (Lsc.Val.addr ($sId.$fId).addr))
+    | _ =>
+      let tyConst ← k.tyConst
+      let valCtor ← k.valCtor
+      let pats : Array Term := #[tyConst, fieldStr]
+      let bridged ← k.bridgeGeneric (← `($sId.$fId))
+      `(matchAltExpr| | $[$pats],* => some ($valCtor $bridged))
   let wc ← `(_)
   let wcPats : Array Term := #[wc, wc]
   let defaultArm ← `(matchAltExpr| | $[$wcPats],* => none)
@@ -414,16 +440,24 @@ def mkSetFieldCmd (structName : Name) (fields : Array (Name × FieldKind)) : Ter
   let sId := mkIdent `s
   let fields := fields.filter (·.2 != .wadMap)
   let arms ← fields.mapM fun (fname, k) => do
-    let valCtor ← k.valCtor
-    let tyConst ← k.tyConst
     let fId := mkIdent fname
     let fieldStr := quote fname.toString
     let varId ← `(x)
-    let valPat ← `($valCtor $varId)
-    let bridged ← k.bridgeGeneric varId
-    let body ← `({ $sId with $fId:ident := $bridged })
-    let pats : Array Term := #[tyConst, fieldStr, valPat]
-    `(matchAltExpr| | $[$pats],* => $body)
+    match k with
+    | .interface _ =>
+      let tyConst ← `(Lsc.Ty.address)
+      let valPat ← `(Lsc.Val.addr $varId)
+      let body ← `({ $sId with $fId:ident := { addr := $varId } })
+      let pats : Array Term := #[tyConst, fieldStr, valPat]
+      `(matchAltExpr| | $[$pats],* => $body)
+    | _ =>
+      let valCtor ← k.valCtor
+      let tyConst ← k.tyConst
+      let valPat ← `($valCtor $varId)
+      let bridged ← k.bridgeGeneric varId
+      let body ← `({ $sId with $fId:ident := $bridged })
+      let pats : Array Term := #[tyConst, fieldStr, valPat]
+      `(matchAltExpr| | $[$pats],* => $body)
   let wc ← `(_)
   let wcPats : Array Term := #[wc, wc, wc]
   let defaultArm ← `(matchAltExpr| | $[$wcPats],* => $sId)
@@ -527,6 +561,16 @@ def mkContractStorageHandler : DerivingHandler := fun declNames => do
     if indVal.numParams != 0 then
       throwError "deriving ContractStorage: parametric structures are not supported (`{structName}`)"
     getStructureFieldKinds structName
+  let interfaceEntries := fieldKinds.filterMap fun (fname, k) =>
+    match k with
+    | .interface iface => some (fname.toString, iface)
+    | _ => none
+  if !interfaceEntries.isEmpty then
+    let ns := structName.getPrefix
+    modifyEnv fun env =>
+      contractInterfacesExt.modifyState env fun m =>
+        let prev := m.find? ns |>.getD []
+        m.insert ns (prev ++ interfaceEntries.toList)
   let getCmd ← liftTermElabM <| mkGetFieldCmd structName fieldKinds
   let setCmd ← liftTermElabM <| mkSetFieldCmd structName fieldKinds
   let getMapCmd ← liftTermElabM <| mkGetMapFieldCmd structName fieldKinds
