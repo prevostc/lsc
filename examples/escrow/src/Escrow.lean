@@ -24,8 +24,8 @@ declare_token_amount EscrowAmount
 structure EscrowStorage where
   owner : Address := 0
   released : EscrowAmount := ⟨0⟩
-  token : IERC20 := default
-  deriving Repr, ContractStorage
+  token : IERC20
+  deriving ContractStorage
 
 inductive EscrowError where
   | NotOwner
@@ -46,6 +46,10 @@ tx release(recipient : Address, amount : EscrowAmount) {
   let r = σ.released +? amount;
   σ.released = r;
   emit Released(amount);
+}
+
+constructor (token_ : IERC20) {
+  σ.token = token_;
 }
 
 derive_contract "Escrow" EscrowStorage EscrowError EscrowEvent

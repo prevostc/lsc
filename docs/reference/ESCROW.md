@@ -15,12 +15,16 @@ For why this looks the way it does — `PairM` vs. a general N-contract registry
 ```lean
 structure EscrowStorage where
   owner : Address := 0
-  released : Token.Amount := ⟨0⟩
-  token : IERC20 := default
+  released : EscrowAmount := ⟨0⟩
+  token : IERC20
   deriving Repr, ContractStorage
 
+constructor (token_ : IERC20) {
+  σ.token = token_;
+}
+
 @nonreentrant
-tx release(recipient : Address, amount : Token.Amount) {
+tx release(recipient : Address, amount : EscrowAmount) {
   require (msg.sender == σ.owner) else revert NotOwner();
   exec σ.token.transfer(recipient, amount);
   let r = σ.released +? amount;
@@ -30,6 +34,9 @@ tx release(recipient : Address, amount : Token.Amount) {
 
 derive_contract "Escrow" EscrowStorage EscrowError EscrowEvent
 ```
+
+Deploy calldata is a single ABI-encoded `address` at word 0 (no selector) — the token contract
+the escrow will call via `release`. `owner` is set automatically to `msg.sender` (the deployer).
 
 `exec σ.token.transfer(..);` is Solidity-style interface syntax: the callee address is loaded from
 the `token : IERC20` storage field (`"token"` slot at codegen), and `transfer` enables ERC20-style

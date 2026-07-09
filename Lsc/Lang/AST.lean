@@ -116,8 +116,9 @@ structure ContractDef where
   events : List (Ident × List (Ident × Ty))
   functions : List FunctionDef
   interfaces : List (Ident × Ident)
-  /-- Optional constructor body. When present, `deployToBytecode` wraps runtime
-      bytecode with an EVM deploy transaction (CODECOPY + RETURN pattern). -/
-  constructor : Option Stmt := none
+  /-- Optional deploy initializer. When present, `deployToBytecode` wraps runtime bytecode
+      with an EVM deploy transaction (CODECOPY + RETURN pattern). Params are ABI-decoded from
+      deploy calldata at word offset 0 (no selector). -/
+  deployFn : Option FunctionDef := none
 
 end Lsc

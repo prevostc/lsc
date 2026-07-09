@@ -22,8 +22,9 @@ def stubEventTopic0 : Ident → Option Nat
 def counterDef : ContractDef where
   name := "Counter"
   storage :=
-    [("number", .wei, none), ("paused", .bool, some ⟨.bool, CoreExpr.lit Ty.bool (.bool false)⟩),
-     ("owner", .address, none)]
+    [("number", .wei, some ⟨.wei, Wei.Expr.lit 0⟩),
+     ("paused", .bool, some ⟨.bool, CoreExpr.lit Ty.bool (.bool false)⟩),
+     ("owner", .address, some ⟨.address, CoreExpr.lit Ty.address (.addr 0)⟩)]
   errors := ["Paused", "NotOwner", "Overflow"]
   events := [("Incremented", [("n", .wei)]), ("Paused", []), ("Unpaused", [])]
   functions :=
@@ -148,6 +149,39 @@ theorem counter_jumpdest_labels_unique :
 
 theorem counter_jumpdest_count_sufficient :
     counterJumpDestLabels.length ≥ 4 := by native_decide
+
+/-- Constructor with one `address` param loads calldata word 0 (no selector prefix). -/
+def ctorDeployDef : ContractDef where
+  name := "CtorDeploy"
+  storage := [("token", .address, none)]
+  errors := []
+  events := []
+  functions := []
+  interfaces := []
+  deployFn := some {
+    name := "deploy", kind := .constructor, params := [("token_", .address)],
+    retTy := .unit,
+    body := Stmt.storageSet "token" ⟨.address, CoreExpr.var .address "token_"⟩,
+    nonReentrant := false }
+
+def ctorDeployCfg : Config := configFromContract ctorDeployDef stubEventTopic0
+
+def ctorParamLoadHex : String :=
+  match ctorDeployDef.deployFn with
+  | some fn =>
+    match Bytecode.Contract.constructorInstrs ctorDeployCfg fn with
+    | .ok instrs =>
+      match Bytecode.encode instrs with
+      | .ok bytes => Bytecode.toHex bytes
+      | .error e => panic! e
+    | .error e => panic! e
+  | none => panic! "missing deployFn"
+
+theorem ctor_deploy_contains_calldataload :
+    ctorParamLoadHex.contains "35" = true := by native_decide
+
+theorem ctor_deploy_pushes_offset_zero :
+    ctorParamLoadHex.contains "5f35" = true := by native_decide
 
 #eval IO.println incrementBytecodeHex
 #eval IO.println counterBytecodeHex

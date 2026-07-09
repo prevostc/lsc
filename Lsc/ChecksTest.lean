@@ -8,8 +8,9 @@ namespace Lsc.ChecksTest
 def counterDef : ContractDef where
   name := "Counter"
   storage :=
-    [("number", .wei, none), ("paused", .bool, some ⟨.bool, CoreExpr.lit Ty.bool (.bool false)⟩),
-     ("owner", .address, none)]
+    [("number", .wei, some ⟨.wei, Wei.Expr.lit 0⟩),
+     ("paused", .bool, some ⟨.bool, CoreExpr.lit Ty.bool (.bool false)⟩),
+     ("owner", .address, some ⟨.address, CoreExpr.lit Ty.address (.addr 0)⟩)]
   errors := ["Paused", "NotOwner", "Overflow"]
   events := [("Incremented", [("n", .wei)]), ("Paused", []), ("Unpaused", [])]
   functions :=
@@ -19,6 +20,32 @@ def counterDef : ContractDef where
   interfaces := []
 
 example : (Checks.validateAll counterDef).isOk := by native_decide
+
+def missingCtorDef : ContractDef where
+  name := "MissingCtor"
+  storage := [("token", .address, none)]
+  errors := []
+  events := []
+  functions := []
+  interfaces := []
+
+example : Checks.checkStorageInitialization missingCtorDef |>.isSome := by native_decide
+
+def ctorOkDef : ContractDef where
+  name := "CtorOk"
+  storage := [("token", .address, none)]
+  errors := []
+  events := []
+  functions := []
+  interfaces := []
+  deployFn := some {
+    name := "deploy", kind := .constructor, params := [("token_", .address)],
+    retTy := .unit,
+    body := Stmt.storageSet "token" ⟨.address, CoreExpr.var .address "token_"⟩,
+    nonReentrant := false }
+
+example : Checks.checkStorageInitialization ctorOkDef = none := by native_decide
+example : (Checks.validateAll ctorOkDef).isOk := by native_decide
 
 def badUInt256Body : Stmt :=
   Stmt.letBind "n" ⟨Ty.uint256, CoreExpr.lit Ty.uint256 (.u256 1)⟩

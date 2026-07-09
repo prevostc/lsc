@@ -2,6 +2,7 @@ import Lsc.Core.ContractM
 import Lsc.Lang.AST
 import Lsc.Lang.TxM
 import Lsc.Compile.Bytecode.Contract
+import Lsc.Lib.Interfaces.IERC20
 import Lean
 
 /-!
@@ -103,6 +104,18 @@ only *that* depends on the not-yet-registered storage/error/event types; a param
 annotation is one of the five fixed `FieldKind` names and needs no such deferral). -/
 initialize contractTxSyntaxExt :
     EnvExtension (NameMap (List (Name × Syntax × List (String × FieldKind) × Array Syntax))) ←
+  registerEnvExtension (pure {})
+
+/-- Buffered `constructor` entry: `(params, stmtsSyntax)` — same deferred-elaboration pattern as
+`contractTxSyntaxExt`, at most one per namespace. -/
+initialize contractCtorSyntaxExt :
+    EnvExtension (NameMap (Option (List (String × FieldKind) × Array Syntax))) ←
+  registerEnvExtension (pure {})
+
+/-- Flushed constructor: `(implFnName, params)` — `implFnName` holds the raw `Stmt` body
+(`Expr.var`-parameterized when `params` is non-empty) embedded into `ContractDef.deployFn`. -/
+initialize contractCtorFnsExt :
+    EnvExtension (NameMap (Option (Name × List (String × FieldKind)))) ←
   registerEnvExtension (pure {})
 
 /-- `fnName ↦ [(paramName, originalTypeName), ...]` — the author's exact, fully-resolved declared
@@ -399,6 +412,83 @@ def getStructureFieldKinds (structName : Name) : TermElabM (Array (Name × Field
         written literally, or a named `Wad`/`Lsc.Wad.Fixed d`-shaped alias (e.g. `Token.Amount`) \
         (see `Lsc.Deriving`'s module docstring for why this can't be fully generic)"
 
+/-- Whether `structName`'s field `fname` has a Lean structure default (`:= ...`). -/
+def structureFieldHasDefault? (structName : Name) (fname : Name) : TermElabM Bool := do
+  let env ← getEnv
+  return (Lean.getEffectiveDefaultFnForField? env structName fname).isSome
+
+/-- Extract a `Nat` literal from a default-value `Expr` (Wei/Wad/Address/UInt256 `0`, etc.). -/
+partial def defaultNatLit? (e : Lean.Expr) : Option Nat :=
+  match natLitOfExpr? e with
+  | some n => some n
+  | none =>
+    if e.getAppFn.isConstOf ``OfNat.ofNat then
+      match e.getAppArgs with
+      | #[_, nExpr, _] => natLitOfExpr? nExpr
+      | _ => none
+    else if e.getAppFn.isConstOf ``Inhabited.default then
+      some 0
+    else none
+
+/-- Walk a default-value `Expr` for any embedded `Nat` literal (handles `Wei.mkNat`, `Wad.mkNat`,
+`⟨BitVec.ofNat 256 n⟩`, nested `OfNat`, etc.). -/
+partial def findDefaultNatLit? (e : Lean.Expr) : TermElabM (Option Nat) := do
+  let e ← whnf e
+  let mut best := defaultNatLit? e
+  if e.isApp then
+    for arg in e.getAppArgs do
+      if let some n ← findDefaultNatLit? arg then
+        best := some n
+  return best
+
+/-- Best-effort: turn a structure field's Lean default expression into an `Option ExprAny` term
+for `ContractDef.storage`'s third component. Returns `none` when the field has no default or
+the default cannot be statically embedded. -/
+def embedStorageDefaultExpr (k : FieldKind) (defaultExpr : Lean.Expr) : TermElabM (Option Term) := do
+  let e ← whnf defaultExpr
+  match k with
+  | .bool =>
+    if e.isConstOf ``Bool.false then
+      return some (← `(some (Sigma.mk Lsc.Ty.bool (Lsc.CoreExpr.lit Lsc.Ty.bool (Lsc.Lit.bool false)))))
+    else if e.isConstOf ``Bool.true then
+      return some (← `(some (Sigma.mk Lsc.Ty.bool (Lsc.CoreExpr.lit Lsc.Ty.bool (Lsc.Lit.bool true)))))
+    else return none
+  | .address =>
+    if let some n ← findDefaultNatLit? e then
+      return some (← `(some (Sigma.mk Lsc.Ty.address
+        (Lsc.CoreExpr.lit Lsc.Ty.address (Lsc.Lit.addr (BitVec.ofNat 256 $(quote n)))))))
+    else return none
+  | .uint256 =>
+    if let some n ← findDefaultNatLit? e then
+      return some (← `(some (Sigma.mk Lsc.Ty.uint256
+        (Lsc.CoreExpr.lit Lsc.Ty.uint256 (Lsc.Lit.u256 (BitVec.ofNat 256 $(quote n)))))))
+    else return none
+  | .wei =>
+    if let some n ← findDefaultNatLit? e then
+      return some (← `(some (Sigma.mk Lsc.Ty.wei (Lsc.Wei.Expr.lit $(quote n)))))
+    else return none
+  | .wad =>
+    if let some n ← findDefaultNatLit? e then
+      return some (← `(some (Sigma.mk Lsc.Ty.wad (Lsc.Wad.Expr.lit $(quote n)))))
+    else return none
+  | .interface _ =>
+    if let some n ← findDefaultNatLit? e then
+      return some (← `(some (Sigma.mk Lsc.Ty.address
+        (Lsc.CoreExpr.lit Lsc.Ty.address (Lsc.Lit.addr (BitVec.ofNat 256 $(quote n)))))))
+    else return none
+  | .wadMap => return none
+
+/-- Return `some defaultExpr` for a field with a Lean structure default, else `none`. -/
+def getStructureFieldDefaultExpr? (structName : Name) (fname : Name) : TermElabM (Option Lean.Expr) := do
+  let env ← getEnv
+  match Lean.getEffectiveDefaultFnForField? env structName fname with
+  | none => return none
+  | some defFn =>
+    let ci ← getConstInfo defFn
+    match ci with
+    | .defnInfo val => return val.value
+    | _ => return none
+
 def mkGetFieldCmd (structName : Name) (fields : Array (Name × FieldKind)) : TermElabM Command := do
   let structId := mkIdent structName
   let getFieldName := mkIdent (structName ++ `getField)
@@ -548,8 +638,13 @@ def mkSigmaFieldCmds (structName : Name) (fields : Array (Name × FieldKind)) :
 default value, and storage structures are expected to give each field a
 default, so `{}` always resolves. Saves contract authors from hand-writing
 this instance (needed by `ContractM`'s default-storage handling) themselves. -/
-def mkInhabitedCmd (structName : Name) : TermElabM Command :=
-  `(command| instance : Inhabited $(mkIdent structName) where default := {})
+def mkInhabitedCmd (structName : Name) (fieldKinds : Array (Name × FieldKind)) : TermElabM (Option Command) := do
+  let allHaveDefaults ← fieldKinds.allM fun (fname, _) =>
+    structureFieldHasDefault? structName fname
+  if allHaveDefaults then
+    return some (← `(command| instance : Inhabited $(mkIdent structName) where default := {}))
+  else
+    return none
 
 def mkContractStorageHandler : DerivingHandler := fun declNames => do
   if declNames.size != 1 then return false
@@ -576,14 +671,15 @@ def mkContractStorageHandler : DerivingHandler := fun declNames => do
   let getMapCmd ← liftTermElabM <| mkGetMapFieldCmd structName fieldKinds
   let setMapCmd ← liftTermElabM <| mkSetMapFieldCmd structName fieldKinds
   let sigmaCmds ← liftTermElabM <| mkSigmaFieldCmds structName fieldKinds
-  let inhabitedCmd ← liftTermElabM <| mkInhabitedCmd structName
+  let inhabitedCmd? ← liftTermElabM <| mkInhabitedCmd structName fieldKinds
   atRootNamespace do
     elabCommand getCmd
     elabCommand setCmd
     elabCommand getMapCmd
     elabCommand setMapCmd
     for c in sigmaCmds do elabCommand c
-    elabCommand inhabitedCmd
+    if let some inhabitedCmd := inhabitedCmd? then
+      elabCommand inhabitedCmd
   return true
 
 initialize registerDerivingHandler ``ContractStorage mkContractStorageHandler

@@ -66,16 +66,17 @@ function body's `Expr.var paramName` references (lowered to `IR.Expr.local param
 `Lower.lean`, unchanged) resolve via the ordinary `Ctx.lookupDepth`/`DUP` mechanism with zero
 further special-casing. -/
 private partial def emitParamLoadsGo :
-    List (Ident × Ty) → Nat → List Instr × Ctx → List Instr × Ctx
-  | [], _, acc => acc
-  | (name, _ty) :: rest, i, (instrs, c) =>
-    let offset := 4 + 32 * i
+    List (Ident × Ty) → Nat → Nat → List Instr × Ctx → List Instr × Ctx
+  | [], _, _, acc => acc
+  | (name, _ty) :: rest, i, baseOffset, (instrs, c) =>
+    let offset := baseOffset + 32 * i
     let c1 := { c with stackDepth := c.stackDepth + 1 }
     let c2 := c1.bindLocal name
-    emitParamLoadsGo rest (i + 1) (instrs ++ [.push offset, .op CALLDATALOAD], c2)
+    emitParamLoadsGo rest (i + 1) baseOffset (instrs ++ [.push offset, .op CALLDATALOAD], c2)
 
-private def emitParamLoads (ctx : Ctx) (params : List (Ident × Ty)) : List Instr × Ctx :=
-  emitParamLoadsGo params 0 ([], ctx)
+private def emitParamLoads (ctx : Ctx) (params : List (Ident × Ty)) (baseOffset : Nat := 4) :
+    List Instr × Ctx :=
+  emitParamLoadsGo params 0 baseOffset ([], ctx)
 
 private def emitFunctionBodies (cfg : Config) (fns : List FunctionDef) (ctx : Ctx) :
     Except String (List Instr × Ctx) :=
@@ -109,12 +110,14 @@ def contract (cfg : Config) (c : ContractDef) : Except String (List Instr) := do
     let (bodies, _) ← emitFunctionBodies cfg fns ctx1
     .ok (dispatch ++ bodies)
 
-/-- Lower and codegen a constructor `Stmt` to a flat list of `Instr`.
-    The caller `CALLER` opcode is the deployer address during construction. -/
-def constructorInstrs (cfg : Config) (s : Lsc.Stmt) : Except String (List Instr) := do
-  let ir ← Lower.stmt cfg s
-  let (instrs, _) ← Codegen.stmt {} (IR.Opt.optimizeStmt ir)
-  .ok instrs
+/-- Lower and codegen a constructor `FunctionDef` to a flat list of `Instr`.
+    Deploy calldata params are loaded from word offset 0 (no selector). The `CALLER` opcode
+    is the deployer address during construction. -/
+def constructorInstrs (cfg : Config) (fn : FunctionDef) : Except String (List Instr) := do
+  let ir ← Lower.stmt cfg fn.body
+  let (paramInstrs, ctx') := emitParamLoads {} fn.params 0
+  let (body, _) ← Codegen.stmt ctx' (IR.Opt.optimizeStmt ir)
+  .ok (paramInstrs ++ body)
 
 /-- Number of bytes occupied by a `Instr.push n` (PUSH0 = 1 byte, PUSHk = 1+k bytes). -/
 private def pushByteSize (n : Nat) : Nat :=
@@ -182,19 +185,18 @@ def contractToBytecodeHex (c : ContractDef) (topic0 : Ident → Option Nat) : Ex
   contractToBytecode c topic0 |>.map Bytecode.toHex
 
 /-- Produce a full EVM **deploy transaction** payload.
-    When `c.constructor = none` this is identical to `contractToBytecode`.
-    When `c.constructor = some stmt` the constructor body runs first (setting
-    storage, e.g. `owner = CALLER`), then the runtime bytecode is returned via
-    the standard CODECOPY + RETURN pattern. -/
+    When `c.deployFn = none` this is identical to `contractToBytecode`.
+    When `c.deployFn = some fn` the deploy initializer runs first (setting storage from deploy
+    calldata and/or `CALLER`), then the runtime bytecode is returned via CODECOPY + RETURN. -/
 def deployToBytecode (c : ContractDef) (topic0 : Ident → Option Nat) : Except String ByteArray := do
   let c ← Checks.validateAll c
   let cfg := configFromContract c topic0
   let runtimeInstrs ← Bytecode.Contract.contract cfg c
   let runtimeBytes ← encode runtimeInstrs
-  match c.constructor with
+  match c.deployFn with
   | none => .ok runtimeBytes
-  | some ctorStmt =>
-    let cInstrs ← Bytecode.Contract.constructorInstrs cfg ctorStmt
+  | some ctorFn =>
+    let cInstrs ← Bytecode.Contract.constructorInstrs cfg ctorFn
     let ctorBytes ← encode cInstrs
     .ok (Bytecode.Contract.deployCode ctorBytes runtimeBytes)
 

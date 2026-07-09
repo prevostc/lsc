@@ -71,6 +71,9 @@ partial def _root_.Lsc.Stmt.summary : Stmt → String
   | .emit n _ => s!"emit {n}"
   | .revert err => s!"revert {err}"
   | .ret _ => "return _"
+  | .externalExec _ _ _ _ => "externalExec"
+  | .externalRead _ _ _ _ => "externalRead"
+  | .reentrancyGuard b => s!"reentrancyGuard ({b.summary})"
 
 #eval incrementAst.summary
 #eval pauseAst.summary

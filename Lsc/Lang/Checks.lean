@@ -77,7 +77,10 @@ def arithErrorsOfContract (c : ContractDef) : List ArithError :=
   let fromStorage := c.storage.flatMap fun (_, _, def?) =>
     def?.map visitExprAny |>.getD {} |>.arithErrors
   let fromFns := c.functions.flatMap fun fn => visitStmt fn.body |>.arithErrors
-  (fromStorage ++ fromFns).eraseDups
+  let fromCtor := match c.deployFn with
+    | none => []
+    | some fn => visitStmt fn.body |>.arithErrors
+  (fromStorage ++ fromFns ++ fromCtor).eraseDups
 
 /-- Name a reachable `ArithError` the way `deriving ContractError` expects a matching
     same-named user error constructor to be spelled (see `Lang/Derive.lean`). -/
@@ -252,6 +255,34 @@ def checkNonReentrant (c : ContractDef) : Option String :=
       else none
     else none
 
+/-- Collect field names written by `σ.field = ...` (`Stmt.storageSet`) in a `Stmt` tree. -/
+partial def collectStorageSets : Stmt → List Ident
+  | .storageSet field _ => [field]
+  | .seq s1 s2 => collectStorageSets s1 ++ collectStorageSets s2
+  | .ifThenElse _ s1 s2 => collectStorageSets s1 ++ collectStorageSets s2
+  | .reentrancyGuard body => collectStorageSets body
+  | _ => []
+
+/-- Every scalar storage field must be initialized either via a struct default
+(`ContractDef.storage`'s third component is `some`) or an explicit `σ.field = ...` in the
+constructor body. -/
+def checkStorageInitialization (c : ContractDef) : Option String :=
+  let requiredFields := c.storage.filterMap fun (name, _, def?) =>
+    if def?.isNone then some name else none
+  if requiredFields.isEmpty then none
+  else
+    let ctorWrites := match c.deployFn with
+      | some fn => collectStorageSets fn.body
+      | none => []
+    let missing := requiredFields.filter fun f => !ctorWrites.contains f
+    if missing.isEmpty then none
+    else if c.deployFn.isNone then
+      some s!"storage field `{missing.head!}` has no struct default and no constructor is \
+declared — add `:= ...` or a `constructor` block that sets it"
+    else
+      some s!"constructor does not initialize `{missing.head!}` — add `σ.{missing.head!} = ...` \
+or a struct default"
+
 -- `checkNonReentrant` replaces the old deferred check that lived here when cross-call txs
 -- bypassed `ContractDef`. Cross-contract calls are now `Stmt.externalExec`/`externalRead`.
 
@@ -260,6 +291,7 @@ def validateAll (c : ContractDef) : Except String ContractDef :=
   else if let some err := checkLinear c then .error err
   else if let some err := checkSelectorCollisions c then .error err
   else if let some err := checkNoUInt256Arithmetic c then .error err
+  else if let some err := checkStorageInitialization c then .error err
   else if let some err := checkArithErrorCoverage c then .error err
   else if let some err := checkNonReentrant c then .error err
   else if let some err := checkViews c then .error err

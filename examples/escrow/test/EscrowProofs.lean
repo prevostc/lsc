@@ -9,9 +9,9 @@ Escrow calls an external token via `exec σ.token.transfer(..);` — proofs char
 
 open Lsc Escrow Lsc.Interfaces
 
-def mkEscrowState (owner : Address) (released : EscrowAmount)
+def mkEscrowState (owner : Address) (released : EscrowAmount) (token : IERC20)
     (caller : Address := owner) (locked : Bool := false) : ContractState EscrowStorage :=
-  { storage := { owner := owner, released := released, token := default }
+  { storage := { owner := owner, released := released, token := token }
     context := { caller := caller, callvalue := 0, timestamp := 0, origin := 0 }
     locked := locked }
 
