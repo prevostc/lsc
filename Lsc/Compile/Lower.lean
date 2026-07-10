@@ -206,17 +206,9 @@ private partial def lowerStmt (cfg : Config) (s : Lsc.Stmt) : Except String IR.S
     .ok (.ifRevertSelector (.isZero cond) sel)
   | .emit eventName args =>
     match cfg.events.topic0 eventName with
-    | some topic =>
-      match args with
-      | [⟨Ty.wei, dataExpr⟩] => do
-        let data ← Wei.lowerExpr cfg.storage.fieldSlot dataExpr
-        .ok (.log1 topic data)
-      | [⟨Ty.wad, dataExpr⟩] => do
-        let data ← Wad.lowerExpr cfg.storage.fieldSlot cfg.storage.mapFieldSlot dataExpr
-        .ok (.log1 topic data)
-      | [] =>
-        .ok (.log0 topic)
-      | _ => .error s!"unsupported emit arity for {eventName}"
+    | some topic => do
+      let datas ← args.mapM (lowerExprAny cfg)
+      .ok (.log topic datas)
     | none => .error s!"unknown event {eventName}"
   | .revert errName => do
     let sel ← resolveErrorSelector cfg errName

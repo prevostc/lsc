@@ -157,10 +157,17 @@ partial def irStmtToYul (s : IR.Stmt) : List Ast.Stmt :=
     [Ast.Stmt.ExprStmtCall (yulCall "sstore" [irExprToYul slot, irExprToYul val])]
   | .ifRevertSelector cond selector =>
     [Ast.Stmt.If (irExprToYul cond) (revertWithSelector selector)]
-  | .log0 topic =>
-    [Ast.Stmt.ExprStmtCall (yulCall "log1" [yulLit 0, yulLit 0, yulLit topic])]
-  | .log1 topic data =>
-    [Ast.Stmt.ExprStmtCall (yulCall "log1" [yulLit topic, irExprToYul data])]
+  | .log topic datas =>
+    match datas with
+    | [] =>
+      [Ast.Stmt.ExprStmtCall (yulCall "log1" [yulLit 0, yulLit 0, yulLit topic])]
+    | [data] =>
+      [Ast.Stmt.ExprStmtCall (yulCall "log1" [yulLit topic, irExprToYul data])]
+    | _ =>
+      let (stores, _) := datas.foldl (init := ([], 0)) fun (acc, i) d =>
+        (acc ++ [Ast.Stmt.ExprStmtCall (yulCall "mstore" [yulLit (32 * i), irExprToYul d])], i + 1)
+      let dataLen := 32 * datas.length
+      stores ++ [Ast.Stmt.ExprStmtCall (yulCall "log1" [yulLit 0, yulLit dataLen, yulLit topic])]
   | .revertSelector selector => revertWithSelector selector
   | .ret (.dynSload (.mapSlot base key)) =>
     let (setup, slotExpr) := mapSlotToYul base key

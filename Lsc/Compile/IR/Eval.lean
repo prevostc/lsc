@@ -101,6 +101,11 @@ def evalExpr (st : IRState) (e : Expr) : Nat :=
 @[simp] theorem evalExpr_isZero (st : IRState) (a : Expr) :
     evalExpr st (.isZero a) = if evalExpr st a == 0 then 1 else 0 := rfl
 
+/-- Pack multiple 32-byte log words into one `Nat` for the reference interpreter's
+`(topic, data)` log trace (arbitrary-precision, so no truncation). -/
+def packLogWords (words : List Nat) : Nat :=
+  words.foldl (fun acc w => acc * (2 ^ 256) + w) 0
+
 def evalStmt (st : IRState) (s : Stmt) : IRState :=
   match s with
   | .skip => st
@@ -110,8 +115,9 @@ def evalStmt (st : IRState) (s : Stmt) : IRState :=
   | .sstoreDyn slot e => st.setSlot (evalExpr st slot) (evalExpr st e)
   | .ifRevertSelector cond _ =>
     if evalExpr st cond = 1 then { st with reverted := true } else st
-  | .log0 topic => { st with logs := st.logs ++ [(topic, 0)] }
-  | .log1 topic data => { st with logs := st.logs ++ [(topic, evalExpr st data)] }
+  | .log topic datas =>
+    let words := datas.map (evalExpr st)
+    { st with logs := st.logs ++ [(topic, packLogWords words)] }
   | .revertSelector _ => { st with reverted := true }
   -- The reference model only tracks `slots`/`logs`/`reverted` (`observablyEqual`'s components,
   -- below) — a `.ret e` node halts execution with a real returned *value* at the actual
@@ -146,12 +152,9 @@ def evalStmt (st : IRState) (s : Stmt) : IRState :=
     evalStmt st (.ifRevertSelector cond sel) =
       if evalExpr st cond = 1 then { st with reverted := true } else st := rfl
 
-@[simp] theorem evalStmt_log0 (st : IRState) (topic : Nat) :
-    evalStmt st (.log0 topic) = { st with logs := st.logs ++ [(topic, 0)] } := rfl
-
-@[simp] theorem evalStmt_log1 (st : IRState) (topic : Nat) (data : Expr) :
-    evalStmt st (.log1 topic data) =
-      { st with logs := st.logs ++ [(topic, evalExpr st data)] } := rfl
+@[simp] theorem evalStmt_log (st : IRState) (topic : Nat) (datas : List Expr) :
+    evalStmt st (.log topic datas) =
+      { st with logs := st.logs ++ [(topic, packLogWords (datas.map (evalExpr st)))] } := rfl
 
 @[simp] theorem evalStmt_revertSelector (st : IRState) (sel : Nat) :
     evalStmt st (.revertSelector sel) = { st with reverted := true } := rfl

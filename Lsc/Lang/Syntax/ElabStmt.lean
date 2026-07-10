@@ -367,21 +367,29 @@ partial def elabLscStmt (storageName : Name) (locals : List (String × Lsc.Deriv
       let (_, eventName) ← Lsc.Deriving.currContractTypes
       let ctorShort := ctor.getId.toString
       let ctorName := eventName ++ Name.mkSimple ctorShort
-      match ← Lsc.Deriving.getCtorFieldKind ctorName with
-      | none => return (← `(Lsc.Stmt.emit $(quote ctorShort) ([] : List Lsc.ExprAny)), locals)
-      | some _ => throwErrorAt ctor "`emit {ctorShort}` requires exactly one argument"
-  | `(lscStmt| emit $ctor:ident ( $arg ) ;) => do
+      match ← Lsc.Deriving.getCtorFieldNameKinds ctorName with
+      | [] => return (← `(Lsc.Stmt.emit $(quote ctorShort) ([] : List Lsc.ExprAny)), locals)
+      | _ => throwErrorAt ctor "`emit {ctorShort}` requires arguments"
+  | `(lscStmt| emit $ctor:ident ( $args,* ) ;) => do
       let (_, eventName) ← Lsc.Deriving.currContractTypes
       let ctorShort := ctor.getId.toString
       let ctorName := eventName ++ Name.mkSimple ctorShort
-      match ← Lsc.Deriving.getCtorFieldKind ctorName with
-      | none => throwErrorAt ctor "`emit {ctorShort}` takes no arguments"
-      | some k => do
-          let (argTerm, ak) ← elabLscExpr storageName locals arg
-          unless ak == k do
-            throwErrorAt ctor "`emit {ctorShort}` expects a `{repr k}`-kind argument, got `{repr ak}`"
-          let tyConst ← k.tyConst
-          return (← `(Lsc.Stmt.emit $(quote ctorShort) [⟨$tyConst, $argTerm⟩]), locals)
+      let fields ← Lsc.Deriving.getCtorFieldNameKinds ctorName
+      let argArr := args.getElems
+      if fields.isEmpty then
+        throwErrorAt ctor "`emit {ctorShort}` takes no arguments"
+      let argsList := argArr.toList
+      unless fields.length == argsList.length do
+        throwErrorAt ctor "`emit {ctorShort}` expects {fields.length} argument(s), got {argsList.length}"
+      let mut emitArgs : Array Term := #[]
+      for (p, arg) in fields.zip argsList do
+        let (_, k) := p
+        let (argTerm, ak) ← elabLscExpr storageName locals arg
+        unless ak == k do
+          throwErrorAt arg "`emit {ctorShort}` expects `{repr k}`-kind argument, got `{repr ak}`"
+        let tyConst ← k.tyConst
+        emitArgs := emitArgs.push (← `(⟨$tyConst, $argTerm⟩))
+      return (← `(Lsc.Stmt.emit $(quote ctorShort) [$emitArgs,*]), locals)
   | `(lscStmt| $x:ident = $e ;) => do
       match Lsc.sigmaFieldName? x.getId with
       | some field => do

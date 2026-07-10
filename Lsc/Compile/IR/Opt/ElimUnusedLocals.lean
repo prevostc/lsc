@@ -52,14 +52,9 @@ theorem elimUnusedLocals_correct (st : IRState) (s : Stmt) :
     | ifRevertSelector cond sel =>
       simp only [evalStmt_seq]
       exact ih2 _
-    | log0 topic =>
-      simp only [show elimUnusedLocals (.seq (.log0 topic) s2) =
-                      .seq (.log0 topic) (elimUnusedLocals s2) from rfl,
-                 evalStmt_seq]
-      exact ih2 _
-    | log1 topic data =>
-      simp only [show elimUnusedLocals (.seq (.log1 topic data) s2) =
-                      .seq (.log1 topic data) (elimUnusedLocals s2) from rfl,
+    | log topic datas =>
+      simp only [show elimUnusedLocals (.seq (.log topic datas) s2) =
+                      .seq (.log topic datas) (elimUnusedLocals s2) from rfl,
                  evalStmt_seq]
       exact ih2 _
     | revertSelector sel =>
@@ -103,8 +98,7 @@ theorem elimUnusedLocals_correct (st : IRState) (s : Stmt) :
   | sstore slot e => exact observablyEqual_refl _
   | sstoreDyn _ _ => exact observablyEqual_refl _
   | ifRevertSelector cond _ => exact observablyEqual_refl _
-  | log0 topic => exact observablyEqual_refl _
-  | log1 topic data => exact observablyEqual_refl _
+  | log topic datas => exact observablyEqual_refl _
   | revertSelector _ => exact observablyEqual_refl _
   | ret e => exact observablyEqual_refl _
   | checkReentrancyLock _ => exact observablyEqual_refl _

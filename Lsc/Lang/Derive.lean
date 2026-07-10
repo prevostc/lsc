@@ -830,46 +830,44 @@ initialize registerDerivingHandler ``ContractStorage mkContractStorageHandler
 /-! ## `deriving ContractEvent`
 
 Naming convention: for an event inductive `E`, this emits a top-level
-`E.buildEvent`. Per `ContractGen.lean`/`Counter.lean`, event constructors
-support 0 or 1 parameter today — multi-param events aren't supported by
-the rest of the pipeline yet, so a constructor with more than one
-parameter is a clear `deriving`-time error rather than a silent
-mis-generation. -/
+`E.buildEvent`. Event constructors support 0 or more parameters (each payload
+must be `Wei`/`Wad`/`Bool`/`Address`/`UInt256` or a `Wad`-shaped alias). -/
 
-/-- For a 0- or 1-arg constructor, return `none` (no payload) or
-`some (paramName, kind)`. Throws for >1 params (unsupported, see above)
-or for a payload type outside the four supported tags. -/
+/-- All payload parameters of an event constructor, in declaration order. -/
+def getCtorFieldNameKinds (ctorName : Name) : TermElabM (List (Name × FieldKind)) := do
+  let ci ← getConstInfoCtor ctorName
+  forallTelescopeReducing ci.type fun xs _ => do
+    let mut fields : List (Name × FieldKind) := []
+    for x in xs do
+      let ty ← inferType x
+      let paramName ← x.fvarId!.getUserName
+      match ← fieldKindOfExprM ty with
+      | some k => fields := fields ++ [(paramName, k)]
+      | none =>
+        throwError "deriving ContractEvent: constructor `{ctorName}`'s parameter `{paramName}` \
+          has unsupported type `{ty}` — event payloads must be `Wei`/`Wad`/`Bool`/`Address`/`UInt256` \
+          (or a `Wad`-shaped alias)"
+    return fields
+
+/-- For a 0- or 1-arg constructor, return `none` (no payload) or `some kind`.
+Throws if the constructor has more than one parameter — use `getCtorFieldNameKinds` instead. -/
 def getCtorFieldKind (ctorName : Name) : TermElabM (Option FieldKind) := do
-  let ci ← getConstInfoCtor ctorName
-  forallTelescopeReducing ci.type fun xs _ => do
-    if xs.size == 0 then return none
-    if xs.size > 1 then
-      throwError "deriving ContractEvent: constructor `{ctorName}` has {xs.size} parameters; \
-        only 0- or 1-parameter events are currently supported"
-    let ty ← inferType xs[0]!
-    match ← fieldKindOfExprM ty with
-    | some k => return some k
-    | none =>
-      throwError "deriving ContractEvent: constructor `{ctorName}`'s parameter has unsupported type `{ty}` \
-        — event payloads must be `Wei`/`Wad`/`Bool`/`Address`/`UInt256` (or a `Wad`-shaped alias)"
+  match ← getCtorFieldNameKinds ctorName with
+  | [] => return none
+  | [(_, k)] => return some k
+  | _ =>
+    throwError "deriving ContractEvent: constructor `{ctorName}` has multiple parameters; \
+      use `getCtorFieldNameKinds`"
 
-/-- Like `getCtorFieldKind`, but also returns the payload's declared parameter
-name (needed to reconstruct `ContractDef.events`'s `(paramName, ty)` shape in
-`derive_contract_def`). -/
+/-- Like `getCtorFieldKind`, but also returns the payload's declared parameter name.
+Throws if the constructor has more than one parameter — use `getCtorFieldNameKinds` instead. -/
 def getCtorFieldNameKind (ctorName : Name) : TermElabM (Option (Name × FieldKind)) := do
-  let ci ← getConstInfoCtor ctorName
-  forallTelescopeReducing ci.type fun xs _ => do
-    if xs.size == 0 then return none
-    if xs.size > 1 then
-      throwError "derive_contract_def: constructor `{ctorName}` has {xs.size} parameters; \
-        only 0- or 1-parameter events are currently supported"
-    let ty ← inferType xs[0]!
-    let paramName ← xs[0]!.fvarId!.getUserName
-    match ← fieldKindOfExprM ty with
-    | some k => return some (paramName, k)
-    | none =>
-      throwError "derive_contract_def: constructor `{ctorName}`'s parameter has unsupported type `{ty}` \
-        — event payloads must be `Wei`/`Wad`/`Bool`/`Address`/`UInt256` (or a `Wad`-shaped alias)"
+  match ← getCtorFieldNameKinds ctorName with
+  | [] => return none
+  | [nk] => return some nk
+  | _ =>
+    throwError "derive_contract_def: constructor `{ctorName}` has multiple parameters; \
+      use `getCtorFieldNameKinds`"
 
 def mkBuildEventCmd (indName : Name) (ctors : Array Name) : TermElabM Command := do
   let evtId := mkIdent indName
@@ -879,22 +877,27 @@ def mkBuildEventCmd (indName : Name) (ctors : Array Name) : TermElabM Command :=
   let arms ← ctors.mapM fun ctorName => do
     let cStr := ctorName.getString!
     let nameStr := quote cStr
-    match ← getCtorFieldKind ctorName with
-    | none =>
+    match ← getCtorFieldNameKinds ctorName with
+    | [] =>
       let ctorShortId := mkIdent (Name.mkSimple cStr)
       let emptyList ← `(([] : List (Sigma Lsc.Val)))
       let body ← `(some (.$ctorShortId : $evtId))
       let pats : Array Term := #[nameStr, emptyList]
       `(matchAltExpr| | $[$pats],* => $body)
-    | some k =>
-      let tyConst ← k.tyConst
-      let valCtor ← k.valCtor
-      let varId ← `(x)
-      let valPat ← `($valCtor $varId)
-      let listPat ← `([⟨$tyConst, $valPat⟩])
-      let fullCtorId := mkIdent ctorName
-      let bridged ← k.bridgeGeneric varId
-      let body ← `(some ($fullCtorId $bridged))
+    | fields =>
+      let mut valPats : Array Term := #[]
+      let mut ctorApp : Term := mkIdent ctorName
+      let mut i : Nat := 0
+      for (_, k) in fields do
+        let tyConst ← k.tyConst
+        let valCtor ← k.valCtor
+        let varId := mkIdent (Name.mkSimple s!"x{i}")
+        let valPat ← `($valCtor $varId)
+        valPats := valPats.push (← `(⟨$tyConst, $valPat⟩))
+        ctorApp := (← `( $ctorApp $(← k.bridgeGeneric varId) ))
+        i := i + 1
+      let listPat ← `([$valPats,*])
+      let body ← `(some $ctorApp)
       let pats : Array Term := #[nameStr, listPat]
       `(matchAltExpr| | $[$pats],* => $body)
   let wc ← `(_)

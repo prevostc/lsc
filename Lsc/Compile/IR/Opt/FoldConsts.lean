@@ -48,8 +48,7 @@ def foldConstsStmt : Stmt → Stmt
   | .sstore slot e => .sstore slot (foldConsts e)
   | .sstoreDyn slot val => .sstoreDyn (foldConsts slot) (foldConsts val)
   | .ifRevertSelector cond sel => .ifRevertSelector (foldConsts cond) sel
-  | .log0 topic => .log0 topic
-  | .log1 topic data => .log1 topic (foldConsts data)
+  | .log topic datas => .log topic (datas.map foldConsts)
   | .revertSelector sel => .revertSelector sel
   | .ret e => .ret (foldConsts e)
   | .checkReentrancyLock sel => .checkReentrancyLock sel
@@ -150,9 +149,15 @@ theorem foldConstsStmt_correct (st : IRState) (s : Stmt) :
     simp only [foldConstsStmt, evalStmt, foldConsts_correct st slot, foldConsts_correct st val]
   | .ifRevertSelector cond sel =>
     simp only [foldConstsStmt, evalStmt, foldConsts_correct st cond]
-  | .log0 topic => rfl
-  | .log1 topic data =>
-    simp only [foldConstsStmt, evalStmt, foldConsts_correct st data]
+  | .log topic datas =>
+    have hdatas : datas.map (evalExpr st ∘ foldConsts) = datas.map (evalExpr st) := by
+      induction datas with
+      | nil => rfl
+      | cons d ds ih =>
+        simp [List.map, foldConsts_correct st d, ih]
+    have hcomp : (datas.map foldConsts).map (evalExpr st) = datas.map (evalExpr st) := by
+      simpa [Function.comp, List.map_map] using hdatas
+    simp only [foldConstsStmt, evalStmt_log, hcomp]
   | .revertSelector _ => rfl
   | .ret _ => rfl
   | .checkReentrancyLock _ => rfl

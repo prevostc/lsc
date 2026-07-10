@@ -37,8 +37,9 @@ inductive Stmt where
   /-- `sstore` at a computed slot (mapping entries). -/
   | sstoreDyn : Expr → Expr → Stmt
   | ifRevertSelector : Expr → Nat → Stmt
-  | log0 : Nat → Stmt
-  | log1 : Nat → Expr → Stmt
+  /-- `LOG1` with topic0 `topic` and `datas.length` contiguous 32-byte ABI words in memory
+  (offsets `0`, `32`, …). Empty `datas` emits zero data bytes. -/
+  | log : Nat → List Expr → Stmt
   | revertSelector : Nat → Stmt
   /-- `return e;` (`view` functions only, `Lang/AST.lean`'s `Stmt.ret`) — ABI-encodes `e`'s
       single 32-byte-word value into memory and halts with `RETURN (`Bytecode/Codegen.lean`'s

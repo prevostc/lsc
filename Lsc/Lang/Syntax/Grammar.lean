@@ -128,11 +128,11 @@ syntax (name := lscRequire) "require" "(" lscExpr ")" " else " "revert " ident "
 Solidity's custom-error `revert Ctor();` syntax. -/
 syntax (name := lscRevert) "revert " ident "(" ")" ";" : lscStmt
 
-/-- `emit Ctor();` — 0-argument event, call-style for consistency with `emit Ctor(arg);`. -/
+/-- `emit Ctor();` — 0-argument event, call-style for consistency with `emit Ctor(arg, ..);`. -/
 syntax (name := lscEmit0) "emit " ident "(" ")" ";" : lscStmt
 
-/-- `emit Ctor(arg);` — 1-argument event. -/
-syntax (name := lscEmit1) "emit " ident "(" lscExpr ")" ";" : lscStmt
+/-- `emit Ctor(arg);` / `emit Ctor(arg1, arg2, ..);` — 1-or-more-argument event. -/
+syntax (name := lscEmitN) "emit " ident "(" lscExpr,+ ")" ";" : lscStmt
 
 /-- `σ.field = e;` — storage assignment. The left-hand side is a plain `ident` (see the
 module docstring on why `σ.field` needs no dedicated production); a non-`σ.field` left-hand

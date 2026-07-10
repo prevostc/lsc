@@ -321,26 +321,28 @@ private partial def codegenStmt (ctx : Ctx) (s : Stmt) : Except String (List Ins
       .jumpDest contLbl
     ]
     .ok (cInstr ++ jumpInstrs, c3.popStack 1)
-  | .log0 topic =>
-    let popsAfter := List.replicate ctx.locals.length (.op POP)
-    let logInstrs : List Instr := [
-      .push 0,
-      .push 0,
-      .push topic,
-      .op LOG1
-    ]
-    .ok (popsAfter ++ logInstrs, { locals := [], stackDepth := 0 })
-  | .log1 topic data => do
-    let (dataInstr, c1) ← codegenExpr ctx data
-    let memStore : List Instr := [.push 0, .op MSTORE]
-    let popsAfter := List.replicate c1.locals.length (.op POP)
-    let logInstrs : List Instr := [
-      .push 0,
-      .push 32,
-      .push topic,
-      .op LOG1
-    ]
-    .ok (dataInstr ++ memStore ++ popsAfter ++ logInstrs, { locals := [], stackDepth := 0 })
+  | .log topic datas =>
+    match datas with
+    | [] =>
+      let popsAfter := List.replicate ctx.locals.length (.op POP)
+      let logInstrs : List Instr := [.push 0, .push 0, .push topic, .op LOG1]
+      .ok (popsAfter ++ logInstrs, { locals := [], stackDepth := 0 })
+    | [data] => do
+      let (dataInstr, c1) ← codegenExpr ctx data
+      let memStore : List Instr := [.push 0, .op MSTORE]
+      let popsAfter := List.replicate c1.locals.length (.op POP)
+      let logInstrs : List Instr := [.push 0, .push 32, .push topic, .op LOG1]
+      .ok (dataInstr ++ memStore ++ popsAfter ++ logInstrs, { locals := [], stackDepth := 0 })
+    | _ => do
+      let (instrs, c) ← (datas.zip (List.range datas.length)).foldlM
+        (fun (instrs, c) (d, i) => do
+          let (dataInstr, c1) ← codegenExpr c d
+          pure (instrs ++ dataInstr ++ [.push (32 * i), .op MSTORE], c1))
+        ([], ctx)
+      let dataLen := 32 * datas.length
+      let popsAfter := List.replicate c.locals.length (.op POP)
+      let logInstrs : List Instr := [.push 0, .push dataLen, .push topic, .op LOG1]
+      .ok (instrs ++ popsAfter ++ logInstrs, { locals := [], stackDepth := 0 })
   | .revertSelector selector =>
     .ok (emitCustomErrorRevert selector, ctx.popStack ctx.stackDepth)
   | .ret e => do

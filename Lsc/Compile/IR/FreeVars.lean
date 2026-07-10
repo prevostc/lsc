@@ -30,8 +30,7 @@ def freeVarsStmt : Stmt → List Ident
   | .sstore _ e => freeVarsExpr e
   | .sstoreDyn slot val => freeVarsExpr slot ++ freeVarsExpr val
   | .ifRevertSelector cond _ => freeVarsExpr cond
-  | .log0 _ => []
-  | .log1 _ data => freeVarsExpr data
+  | .log _ datas => freeVarsExprs datas
   | .revertSelector _ => []
   | .ret e => freeVarsExpr e
   | .checkReentrancyLock _ => []
@@ -49,8 +48,7 @@ def readVarsStmt : Stmt → List Ident
   | .sstore _ e => freeVarsExpr e
   | .sstoreDyn slot val => freeVarsExpr slot ++ freeVarsExpr val
   | .ifRevertSelector cond _ => freeVarsExpr cond
-  | .log0 _ => []
-  | .log1 _ data => freeVarsExpr data
+  | .log _ datas => freeVarsExprs datas
   | .revertSelector _ => []
   | .ret e => freeVarsExpr e
   | .checkReentrancyLock _ => []

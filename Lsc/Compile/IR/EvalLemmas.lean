@@ -92,6 +92,37 @@ private theorem lookupLocal_setSlot (st : IRState) (slot : Nat) (v : Nat) (name 
     (st.setSlot slot v).lookupLocal name = st.lookupLocal name := by
   simp [IRState.lookupLocal, IRState.setSlot]
 
+theorem freeVarsExprs_foldl_init (acc0 : List Ident) (xs : List Expr) :
+    List.foldl (fun acc e => acc ++ freeVarsExpr e) acc0 xs = acc0 ++ freeVarsExprs xs := by
+  induction xs generalizing acc0 with
+  | nil => simp [freeVarsExprs]
+  | cons e xs ih =>
+    simp only [List.foldl]
+    have hxs : freeVarsExprs (e :: xs) = freeVarsExpr e ++ freeVarsExprs xs := by
+      simpa [freeVarsExprs, List.foldl] using ih (freeVarsExpr e)
+    rw [hxs, ih (acc0 ++ freeVarsExpr e), List.append_assoc]
+
+theorem mem_freeVarsExprs_cons (e : Expr) (es : List Expr) (id : Ident) :
+    id ∈ freeVarsExprs (e :: es) ↔ id ∈ freeVarsExpr e ∨ id ∈ freeVarsExprs es := by
+  have h :
+      freeVarsExprs (e :: es) = freeVarsExpr e ++ freeVarsExprs es := by
+    simpa [freeVarsExprs, List.foldl] using freeVarsExprs_foldl_init (freeVarsExpr e) es
+  rw [h, List.mem_append]
+
+theorem evalExprs_setLocal_unused (st : IRState) (name : Ident) (v : Nat) (exprs : List Expr)
+    (h : name ∉ freeVarsExprs exprs) :
+    exprs.map (evalExpr (st.setLocal name v)) = exprs.map (evalExpr st) := by
+  induction exprs with
+  | nil => rfl
+  | cons e es ih =>
+    simp only [List.map]
+    have hL : name ∉ freeVarsExpr e :=
+      fun hmem => h ((mem_freeVarsExprs_cons e es name).mpr (Or.inl hmem))
+    have hR : name ∉ freeVarsExprs es :=
+      fun hmem => h ((mem_freeVarsExprs_cons e es name).mpr (Or.inr hmem))
+    have he := evalExpr_setLocal_unused st name v e hL
+    simp [he, ih hR]
+
 private theorem lookupSlot_eq (st1 st2 : IRState) (slot : Nat) (h : st1.slots = st2.slots) :
     st1.lookupSlot slot = st2.lookupSlot slot := by
   simp [IRState.lookupSlot, h]
@@ -140,6 +171,17 @@ theorem evalExpr_obs_agree (st1 st2 : IRState) (e : Expr) (hobs : observablyEqua
     simp only [freeVarsExpr] at hlookup ⊢
     simp [evalExpr, evalExpr_obs_agree st1 st2 a hobs hlookup]
 
+theorem evalExprs_obs_agree (st1 st2 : IRState) (exprs : List Expr) (hobs : observablyEqual st1 st2)
+    (hlookup : ∀ id ∈ freeVarsExprs exprs, st1.lookupLocal id = st2.lookupLocal id) :
+    exprs.map (evalExpr st1) = exprs.map (evalExpr st2) := by
+  induction exprs with
+  | nil => rfl
+  | cons e es ih =>
+    simp only [List.map]
+    have he := evalExpr_obs_agree st1 st2 e hobs fun id hmem =>
+      hlookup id ((mem_freeVarsExprs_cons e es id).mpr (Or.inl hmem))
+    simp [he, ih fun id hmem => hlookup id ((mem_freeVarsExprs_cons e es id).mpr (Or.inr hmem))]
+
 theorem lookupLocal_evalStmt_unused (st : IRState) (s : Stmt) (id : Ident)
     (h : id ∉ freeVarsStmt s) :
     (evalStmt st s).lookupLocal id = st.lookupLocal id := by
@@ -164,10 +206,7 @@ theorem lookupLocal_evalStmt_unused (st : IRState) (s : Stmt) (id : Ident)
   | .ifRevertSelector cond _ =>
     simp only [freeVarsStmt] at h
     by_cases hc : evalExpr st cond = 1 <;> simp [evalStmt, hc, IRState.lookupLocal]
-  | .log0 topic =>
-    simp only [freeVarsStmt] at h
-    simp [evalStmt, IRState.lookupLocal]
-  | .log1 topic data =>
+  | .log topic datas =>
     simp only [freeVarsStmt] at h
     simp [evalStmt, IRState.lookupLocal]
   | .revertSelector _ => simp [evalStmt, IRState.lookupLocal]
@@ -250,13 +289,14 @@ mutual
           exact hc h
         simp [evalStmt_ifRevertSelector, hc, hc2, IRState.lookupLocal]
         exact hlookup id hmem
-    | .log0 topic =>
+    | .log topic datas =>
       intro id hmem
-      simp [freeVarsStmt] at hmem
-    | .log1 topic data =>
-      intro id hmem
-      simpa [evalStmt, IRState.lookupLocal, freeVarsStmt] using
-        hlookup id (by simpa [freeVarsStmt] using hmem)
+      by_cases hd : datas = []
+      · subst hd
+        simp [freeVarsStmt] at hmem
+        cases hmem
+      · simpa [evalStmt, IRState.lookupLocal, freeVarsStmt] using
+          hlookup id (by simpa [freeVarsStmt] using hmem)
     | .revertSelector _ =>
       intro id hmem
       simpa [evalStmt, IRState.lookupLocal, freeVarsStmt] using
@@ -338,18 +378,16 @@ mutual
           exact hc h
         simp only [evalStmt_ifRevertSelector, observablyEqual, hc, hc2]
         exact ⟨hobs.1, hobs.2.1, hobs.2.2.1, hobs.2.2.2⟩
-    | .log0 topic =>
-      have hlogs : st1.logs ++ [(topic, 0)] = st2.logs ++ [(topic, 0)] := by simp [hobs.2.1]
-      simp only [evalStmt_log0, observablyEqual]
-      exact ⟨hobs.1, hlogs, hobs.2.2.1, hobs.2.2.2⟩
-    | .log1 topic data =>
-      have hfree : ∀ id ∈ freeVarsExpr data, st1.lookupLocal id = st2.lookupLocal id := by
+    | .log topic datas =>
+      have hfree : ∀ id ∈ freeVarsExprs datas, st1.lookupLocal id = st2.lookupLocal id := by
         intro id hmem
         exact hlookup id (by simpa [freeVarsStmt] using hmem)
-      have heval := evalExpr_obs_agree st1 st2 data hobs hfree
-      have hlogs : st1.logs ++ [(topic, evalExpr st2 data)] = st2.logs ++ [(topic, evalExpr st2 data)] := by
-        simp [hobs.2.1]
-      simp only [evalStmt_log1, observablyEqual, heval]
+      have hevals := evalExprs_obs_agree st1 st2 datas hobs hfree
+      have hlogs :
+          st1.logs ++ [(topic, packLogWords (datas.map (evalExpr st2)))] =
+            st2.logs ++ [(topic, packLogWords (datas.map (evalExpr st2)))] := by
+        simp [hobs.2.1, hevals]
+      simp only [evalStmt_log, observablyEqual, hevals]
       exact ⟨hobs.1, hlogs, hobs.2.2.1, hobs.2.2.2⟩
     | .revertSelector _ =>
       exact ⟨hobs.1, hobs.2.1, (by simp [evalStmt_revertSelector]), hobs.2.2.2⟩
@@ -411,10 +449,7 @@ mutual
     | .ifRevertSelector cond _ =>
       simp only [freeVarsStmt, readVarsStmt] at hfv hnot
       exact absurd hfv hnot
-    | .log0 _ =>
-      simp only [freeVarsStmt, readVarsStmt] at hfv hnot
-      exact absurd hfv hnot
-    | .log1 _ data =>
+    | .log _ datas =>
       simp only [freeVarsStmt, readVarsStmt] at hfv hnot
       exact absurd hfv hnot
     | .revertSelector _ => cases hfv
@@ -527,13 +562,14 @@ mutual
           exact hc h
         simp [evalStmt_ifRevertSelector, hc, hc2, IRState.lookupLocal]
         exact hlookup id hmem
-    | .log0 _ =>
+    | .log _ datas =>
       intro id hmem
-      simp [readVarsStmt] at hmem
-    | .log1 _ data =>
-      intro id hmem
-      simpa [evalStmt, IRState.lookupLocal, readVarsStmt] using
-        hlookup id (by simpa [readVarsStmt] using hmem)
+      by_cases hd : datas = []
+      · subst hd
+        simp [readVarsStmt] at hmem
+        cases hmem
+      · simpa [evalStmt, IRState.lookupLocal, readVarsStmt] using
+          hlookup id (by simpa [readVarsStmt] using hmem)
     | .revertSelector _ =>
       intro id hmem
       simpa [evalStmt, IRState.lookupLocal, readVarsStmt] using
@@ -615,18 +651,16 @@ mutual
           exact hc h
         simp only [evalStmt_ifRevertSelector, observablyEqual, hc, hc2]
         exact ⟨hobs.1, hobs.2.1, hobs.2.2.1, hobs.2.2.2⟩
-    | .log0 topic =>
-      have hlogs : st1.logs ++ [(topic, 0)] = st2.logs ++ [(topic, 0)] := by simp [hobs.2.1]
-      simp only [evalStmt_log0, observablyEqual]
-      exact ⟨hobs.1, hlogs, hobs.2.2.1, hobs.2.2.2⟩
-    | .log1 topic data =>
-      have hfree : ∀ id ∈ freeVarsExpr data, st1.lookupLocal id = st2.lookupLocal id := by
+    | .log topic datas =>
+      have hfree : ∀ id ∈ freeVarsExprs datas, st1.lookupLocal id = st2.lookupLocal id := by
         intro id hmem
         exact hlookup id (by simpa [readVarsStmt] using hmem)
-      have heval := evalExpr_obs_agree st1 st2 data hobs hfree
-      have hlogs : st1.logs ++ [(topic, evalExpr st2 data)] = st2.logs ++ [(topic, evalExpr st2 data)] := by
-        simp [hobs.2.1]
-      simp only [evalStmt_log1, observablyEqual, heval]
+      have hevals := evalExprs_obs_agree st1 st2 datas hobs hfree
+      have hlogs :
+          st1.logs ++ [(topic, packLogWords (datas.map (evalExpr st2)))] =
+            st2.logs ++ [(topic, packLogWords (datas.map (evalExpr st2)))] := by
+        simp [hobs.2.1, hevals]
+      simp only [evalStmt_log, observablyEqual, hevals]
       exact ⟨hobs.1, hlogs, hobs.2.2.1, hobs.2.2.2⟩
     | .revertSelector _ =>
       exact ⟨hobs.1, hobs.2.1, (by simp [evalStmt_revertSelector]), hobs.2.2.2⟩
@@ -697,13 +731,10 @@ theorem evalStmt_setLocal_unused_obs (st : IRState) (name : Ident) (v : Nat) (s 
       trivial
     · simp [evalStmt_ifRevertSelector, observablyEqual, evalExpr_setLocal_unused st name v cond h, hc]
       trivial
-  | log0 topic =>
+  | log topic datas =>
     simp only [freeVarsStmt] at h
-    simp only [evalStmt_log0, observablyEqual]
-    trivial
-  | log1 topic data =>
-    simp only [freeVarsStmt] at h
-    simp only [evalStmt_log1, observablyEqual, evalExpr_setLocal_unused st name v data h]
+    have hevals := evalExprs_setLocal_unused st name v datas h
+    simp only [evalStmt_log, observablyEqual, hevals]
     trivial
   | revertSelector _ =>
     simp only [evalStmt_revertSelector, observablyEqual]

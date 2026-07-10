@@ -409,12 +409,13 @@ def elabContractDefBody (nameStrStx : TSyntax `Lean.Parser.Term.str) (storageId 
   let eventEntries ← eventIndVal.ctors.toArray.mapM fun ctorName => liftTermElabM do
     let cStr := ctorName.getString!
     let cStrLit := quote cStr
-    match ← Lsc.Deriving.getCtorFieldNameKind ctorName with
-    | none => `(($cStrLit, ([] : List (Lsc.Ident × Lsc.Ty))))
-    | some (paramName, k) =>
+    let fields ← Lsc.Deriving.getCtorFieldNameKinds ctorName
+    let paramEntries ← fields.toArray.mapM fun (paramName, k) => do
       let tyConst ← k.tyConst
       let paramStrLit := quote paramName.toString
-      `(($cStrLit, [($paramStrLit, $tyConst)]))
+      `(($(paramStrLit), $tyConst))
+    let paramsListTerm ← `([$paramEntries,*])
+    `(($cStrLit, $paramsListTerm))
   let eventsTerm ← `([$eventEntries,*])
   -- `functions : List (String × Stmt)` — either the explicit override, or every `tx`
   -- self-registered under this namespace so far (`Lsc.Deriving.contractFnsExt`), in
@@ -501,12 +502,13 @@ def elabContractDefBody (nameStrStx : TSyntax `Lean.Parser.Term.str) (storageId 
       let topic0Arms ← eventIndVal.ctors.toArray.mapM fun ctorName => liftTermElabM do
         let cStr := ctorName.getString!
         let cStrLit := quote cStr
-        let paramsTerm ← match ← Lsc.Deriving.getCtorFieldNameKind ctorName with
-          | none => `(([] : List (Lsc.Ident × Lsc.Ty)))
-          | some (paramName, k) =>
+        let paramsTerm ← do
+          let fields ← Lsc.Deriving.getCtorFieldNameKinds ctorName
+          let paramEntries ← fields.toArray.mapM fun (paramName, k) => do
             let tyConst ← k.tyConst
             let paramStrLit := quote paramName.toString
-            `([($paramStrLit, $tyConst)])
+            `(($(paramStrLit), $tyConst))
+          `([$paramEntries,*])
         `(matchAltExpr| | $cStrLit => some (Lsc.computeEventTopic0 $cStrLit $paramsTerm))
       let wc ← `(_)
       let defaultArm ← `(matchAltExpr| | $wc => none)
