@@ -1,10 +1,12 @@
 import Lsc.Compile.IR
+import Lsc.Compile.Abi
 import Lsc.Compile.Bytecode.Instr
 import EvmYul.Operations
 
 namespace Lsc.Compile.Bytecode
 
 open Lsc.Compile.IR
+open Lsc.Compile.Abi
 open EvmYul Operation
 open Instr
 
@@ -83,9 +85,9 @@ private def emitOp (op : Operation .EVM) : List Instr := [.op op]
 private def calldataSize (args : List Expr) : Nat :=
   4 + 32 * args.length
 
-/-- `mstore(0, shl(224, selector))` — leaves stack unchanged. -/
+/-- `mstore(0, paddedSelector selector)` — leaves stack unchanged. -/
 private def packSelector (ctx : Ctx) (selector : Nat) : List Instr × Ctx :=
-  ( [.push 224, .push selector, .op SHL, .push 0, .op MSTORE]
+  ( [.push (paddedSelector selector), .push 0, .op MSTORE]
   , ctx )
 
 /-- Revert when the stack top is zero (`ISZERO` then `JUMPI`). -/

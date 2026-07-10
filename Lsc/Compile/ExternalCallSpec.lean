@@ -186,6 +186,27 @@ def emitsLog1 (stmts : List Ast.Stmt) : Bool :=
 def hasRevertPath (stmts : List Ast.Stmt) : Bool :=
   hasCallNamed stmts "revert"
 
+/-- **Property:** generated Yul calls builtin `name` (e.g. `shl`). -/
+def usesBuiltin (stmts : List Ast.Stmt) (name : String) : Bool :=
+  hasCallNamed stmts name
+
+private partial def exprMstoresLitAt (e : Ast.Expr) (offset val : Nat) : Bool :=
+  match e with
+  | .Call (.inr "mstore") [.Lit off, .Lit v] => off.toNat == offset && v.toNat == val
+  | .Call _ args => args.any (exprMstoresLitAt · offset val)
+  | _ => false
+
+private partial def stmtMstoresLitAt (s : Ast.Stmt) (offset val : Nat) : Bool :=
+  match s with
+  | .ExprStmtCall e => exprMstoresLitAt e offset val
+  | .If _ body => body.any (stmtMstoresLitAt · offset val)
+  | .Block body => body.any (stmtMstoresLitAt · offset val)
+  | _ => false
+
+/-- **Property:** generated Yul stores literal `val` at memory offset `offset`. -/
+def mstoresLitAt (stmts : List Ast.Stmt) (offset val : Nat) : Bool :=
+  stmts.any (stmtMstoresLitAt · offset val)
+
 /-- **Property:** generated Yul `call` targets a named local callee address. -/
 def callTargetsLocal (stmts : List Ast.Stmt) (name : String) : Bool :=
   stmtsAny stmts fun s =>

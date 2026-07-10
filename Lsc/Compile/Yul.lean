@@ -1,5 +1,6 @@
 import Lsc.Lang.AST
 import Lsc.Compile.IR
+import Lsc.Compile.Abi
 import Lsc.Compile.Lower
 import EvmYul.Yul.Ast
 import EvmYul.Operations
@@ -8,6 +9,7 @@ import EvmYul.UInt256
 namespace Lsc.Compile
 
 open EvmYul Yul
+open Lsc.Compile.Abi
 
 private def hex256 (n : Nat) : String :=
   "0x" ++ (BitVec.ofNat 256 n).toHex
@@ -46,7 +48,7 @@ private def revertEmpty : Ast.Stmt :=
 /-- ABI-pack `selector` and `args` into memory starting at offset 0. -/
 private def packCalldataToYul (selector : Nat) (args : List IR.Expr) : List Ast.Stmt :=
   let selectorStore :=
-    [Ast.Stmt.ExprStmtCall (yulCall "mstore" [yulLit 0, yulCall "shl" [yulLit 224, yulLit selector]])]
+    [Ast.Stmt.ExprStmtCall (yulCall "mstore" [yulLit 0, yulLit (paddedSelector selector)])]
   let rec go (i : Nat) (rest : List IR.Expr) : List Ast.Stmt :=
     match rest with
     | [] => []

@@ -153,6 +153,25 @@ def codegenCallUsesAddrInStmt (stmt : IR.Stmt) (instrs : List Instr) (addr : IR.
 private def instrUsesOp (instrs : List Instr) (target : Operation .EVM) : Bool :=
   instrs.any fun i => match i with | .op o => o == target | _ => false
 
+/-- **Property:** bytecode uses opcode `target`. -/
+def usesOp (instrs : List Instr) (target : Operation .EVM) : Bool :=
+  instrUsesOp instrs target
+
+private def hasPushPushOpTriple (instrs : List Instr) (val offset : Nat) (target : Operation .EVM) : Bool :=
+  let rec go (rest : List Instr) : Bool :=
+    match rest with
+    | [] => false
+    | .push v :: .push o :: instr :: tail =>
+      match instr with
+      | .op opcode => (v == val && o == offset && opcode == target) || go tail
+      | _ => go tail
+    | _ :: tail => go tail
+  go instrs
+
+/-- **Property:** bytecode stores `val` at memory offset `offset` via `MSTORE`. -/
+def mstoresAt (instrs : List Instr) (offset val : Nat) : Bool :=
+  hasPushPushOpTriple instrs val offset MSTORE
+
 private def hasPushOpPair (instrs : List Instr) (slot : Nat) (target : Operation .EVM) : Bool :=
   let rec go (rest : List Instr) : Bool :=
     match rest with

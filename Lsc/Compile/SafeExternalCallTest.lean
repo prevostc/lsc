@@ -1,4 +1,5 @@
 import Lsc.Compile.Yul
+import Lsc.Compile.Abi
 import Lsc.Compile.Bytecode
 import Lsc.Compile.Bytecode.Codegen
 import Lsc.Compile.Bytecode.CodegenInvariant
@@ -11,7 +12,8 @@ High-level properties for `IR.externalCall` / `IR.externalCallBind` lowering.
 Each theorem states a plain-English guarantee first, then encodes it via `ExternalCallSpec` or
 `CodegenInvariant` predicates — never raw opcode hex substrings. -/
 
-open Lsc Lsc.Compile Lsc.Compile.IR Lsc.Compile.Bytecode
+open Lsc Lsc.Compile Lsc.Compile.IR Lsc.Compile.Bytecode Lsc.Compile.Abi
+open EvmYul.Operation
 
 namespace Lsc.SafeExternalCallTest
 
@@ -132,5 +134,25 @@ theorem transfer_bind_lowers_to_token_call :
     externalCallSites transferBindStmt =
       [ExternalCallSite.callBind (.local "token") 0xa9059cbb
         [.local "recipient", .local "amount"] "ok"] := by native_decide
+
+/-! ### ABI selector constant folding -/
+
+/-- **Property:** Transfer calldata packing does not emit runtime `SHL` in bytecode. -/
+theorem transfer_bind_bytecode_omits_shl :
+    Bytecode.usesOp (bytecodeInstrs transferBindStmt) SHL = false := by native_decide
+
+/-- **Property:** Transfer calldata packing stores the compile-time padded selector at offset 0. -/
+theorem transfer_bind_bytecode_mstores_padded_selector :
+    Bytecode.mstoresAt (bytecodeInstrs transferBindStmt) 0 (paddedSelector 0xa9059cbb) = true :=
+  by native_decide
+
+/-- **Property:** Transfer calldata packing does not emit runtime `shl` in Yul. -/
+theorem transfer_bind_yul_omits_shl :
+    YulSpec.usesBuiltin (yulStmts transferBindStmt) "shl" = false := by native_decide
+
+/-- **Property:** Transfer calldata packing stores the compile-time padded selector at offset 0 in Yul. -/
+theorem transfer_bind_yul_mstores_padded_selector :
+    YulSpec.mstoresLitAt (yulStmts transferBindStmt) 0 (paddedSelector 0xa9059cbb) = true :=
+  by native_decide
 
 end Lsc.SafeExternalCallTest

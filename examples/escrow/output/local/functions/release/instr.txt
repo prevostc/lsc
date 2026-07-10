@@ -38,68 +38,66 @@
   37  EvmYul.Operation.Env (EvmYul.Operation.EOp.CALLDATALOAD)
   38  PUSH 2
   39  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.SLOAD)
-  40  PUSH 224
-  41  PUSH 2835717307
-  42  EvmYul.Operation.CompBit (EvmYul.Operation.CBLOp.SHL)
-  43  PUSH 0
-  44  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.MSTORE)
-  45  EvmYul.Operation.Dup (EvmYul.Operation.DOp.DUP2)
-  46  PUSH 4
-  47  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.MSTORE)
-  48  EvmYul.Operation.Dup (EvmYul.Operation.DOp.DUP3)
-  49  PUSH 36
-  50  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.MSTORE)
-  51  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.GAS)
-  52  PUSH 2
-  53  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.SLOAD)
-  54  PUSH 0
+  40  PUSH 76450787359836037641860180984291677749980919077056822294353438043884394381312
+  41  PUSH 0
+  42  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.MSTORE)
+  43  EvmYul.Operation.Dup (EvmYul.Operation.DOp.DUP2)
+  44  PUSH 4
+  45  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.MSTORE)
+  46  EvmYul.Operation.Dup (EvmYul.Operation.DOp.DUP3)
+  47  PUSH 36
+  48  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.MSTORE)
+  49  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.GAS)
+  50  PUSH 2
+  51  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.SLOAD)
+  52  PUSH 0
+  53  PUSH 0
+  54  PUSH 68
   55  PUSH 0
-  56  PUSH 68
-  57  PUSH 0
-  58  PUSH 32
-  59  EvmYul.Operation.System (EvmYul.Operation.SOp.CALL)
-  60  EvmYul.Operation.CompBit (EvmYul.Operation.CBLOp.ISZERO)
-  61  PUSH @release.callfail4
-  62  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.JUMPI)
-  63  PUSH @release.callok5
-  64  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.JUMP)
-  65  @:release.callfail4
-  66  PUSH 0
-  67  PUSH 0
-  68  EvmYul.Operation.System (EvmYul.Operation.SOp.REVERT)
-  69  @:release.callok5
-  70  PUSH 0
-  71  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.MLOAD)
-  72  EvmYul.Operation.Dup (EvmYul.Operation.DOp.DUP1)
-  73  EvmYul.Operation.CompBit (EvmYul.Operation.CBLOp.ISZERO)
-  74  PUSH @release.rev6
-  75  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.JUMPI)
-  76  PUSH @release.cont7
-  77  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.JUMP)
-  78  @:release.rev6
-  79  PUSH 0
-  80  PUSH 0
-  81  EvmYul.Operation.System (EvmYul.Operation.SOp.REVERT)
-  82  @:release.cont7
-  83  PUSH 1
-  84  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.SLOAD)
-  85  EvmYul.Operation.Dup (EvmYul.Operation.DOp.DUP1)
-  86  EvmYul.Operation.StopArith (EvmYul.Operation.SAOp.ADD)
-  87  PUSH 1
-  88  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.SSTORE)
-  89  EvmYul.Operation.Dup (EvmYul.Operation.DOp.DUP1)
-  90  PUSH 0
-  91  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.MSTORE)
+  56  PUSH 32
+  57  EvmYul.Operation.System (EvmYul.Operation.SOp.CALL)
+  58  EvmYul.Operation.CompBit (EvmYul.Operation.CBLOp.ISZERO)
+  59  PUSH @release.callfail4
+  60  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.JUMPI)
+  61  PUSH @release.callok5
+  62  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.JUMP)
+  63  @:release.callfail4
+  64  PUSH 0
+  65  PUSH 0
+  66  EvmYul.Operation.System (EvmYul.Operation.SOp.REVERT)
+  67  @:release.callok5
+  68  PUSH 0
+  69  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.MLOAD)
+  70  EvmYul.Operation.Dup (EvmYul.Operation.DOp.DUP1)
+  71  EvmYul.Operation.CompBit (EvmYul.Operation.CBLOp.ISZERO)
+  72  PUSH @release.rev6
+  73  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.JUMPI)
+  74  PUSH @release.cont7
+  75  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.JUMP)
+  76  @:release.rev6
+  77  PUSH 0
+  78  PUSH 0
+  79  EvmYul.Operation.System (EvmYul.Operation.SOp.REVERT)
+  80  @:release.cont7
+  81  PUSH 1
+  82  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.SLOAD)
+  83  EvmYul.Operation.Dup (EvmYul.Operation.DOp.DUP1)
+  84  EvmYul.Operation.StopArith (EvmYul.Operation.SAOp.ADD)
+  85  PUSH 1
+  86  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.SSTORE)
+  87  EvmYul.Operation.Dup (EvmYul.Operation.DOp.DUP1)
+  88  PUSH 0
+  89  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.MSTORE)
+  90  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.POP)
+  91  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.POP)
   92  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.POP)
   93  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.POP)
   94  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.POP)
   95  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.POP)
-  96  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.POP)
-  97  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.POP)
-  98  PUSH 0
-  99  PUSH 32
- 100  PUSH 113760171627843794782990335253337969203451784626518736770681975682414705952101
- 101  EvmYul.Operation.Log (EvmYul.Operation.LOp.LOG1)
- 102  PUSH 0
- 103  PUSH 0
- 104  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.TSTORE)
+  96  PUSH 0
+  97  PUSH 32
+  98  PUSH 113760171627843794782990335253337969203451784626518736770681975682414705952101
+  99  EvmYul.Operation.Log (EvmYul.Operation.LOp.LOG1)
+ 100  PUSH 0
+ 101  PUSH 0
+ 102  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.TSTORE)
