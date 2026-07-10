@@ -45,6 +45,14 @@ inductive CoreExpr : Ty → Type
   | eq (t : Ty) : CoreExpr t → CoreExpr t → CoreExpr Ty.bool
   | lt : CoreExpr Ty.uint256 → CoreExpr Ty.uint256 → CoreExpr Ty.bool
   | le : CoreExpr Ty.uint256 → CoreExpr Ty.uint256 → CoreExpr Ty.bool
+  /-- `a < b` on two `Wad`-kind (or `declare_token_amount`-tagged `Amount`) operands — `Wad.Expr`
+      itself only ever produces a `Wad` value, never a `Bool`, so (mirroring `eq`'s own generic
+      `CoreExpr t → CoreExpr t → CoreExpr Ty.bool` shape, which can't be reused here since `Wad`
+      lives outside the `CoreExpr` type family, see `Expr`'s docstring) these comparisons are two
+      more `CoreExpr Ty.bool`-producing leaves that happen to take `Wad.Expr` operands directly. -/
+  | wadLt : Wad.Expr → Wad.Expr → CoreExpr Ty.bool
+  /-- `a ≤ b` on two `Wad`-kind operands — the `≤` counterpart of `wadLt`. -/
+  | wadLe : Wad.Expr → Wad.Expr → CoreExpr Ty.bool
   | not : CoreExpr Ty.bool → CoreExpr Ty.bool
   | and : CoreExpr Ty.bool → CoreExpr Ty.bool → CoreExpr Ty.bool
   | or : CoreExpr Ty.bool → CoreExpr Ty.bool → CoreExpr Ty.bool

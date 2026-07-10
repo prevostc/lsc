@@ -81,6 +81,24 @@ private partial def lowerCoreExpr (cfg : Config) {t : Ty} (e : CoreExpr t) : Exc
     let a' ← lowerCoreExpr cfg a
     let b' ← lowerCoreExpr cfg b
     .ok (.eq a' b')
+  | .lt a b => do
+    let a' ← lowerCoreExpr cfg a
+    let b' ← lowerCoreExpr cfg b
+    .ok (.lt a' b')
+  -- `a ≤ b ↔ ¬(b < a)` — EVM has no native `LE`; reuse `LT` + `ISZERO` (same trick as `!`'s own
+  -- `.not` lowering just above), rather than adding a fresh IR/codegen/Yul constructor.
+  | .le a b => do
+    let a' ← lowerCoreExpr cfg a
+    let b' ← lowerCoreExpr cfg b
+    .ok (.isZero (.lt b' a'))
+  | .wadLt a b => do
+    let a' ← Wad.lowerExpr cfg.storage.fieldSlot cfg.storage.mapFieldSlot a
+    let b' ← Wad.lowerExpr cfg.storage.fieldSlot cfg.storage.mapFieldSlot b
+    .ok (.lt a' b')
+  | .wadLe a b => do
+    let a' ← Wad.lowerExpr cfg.storage.fieldSlot cfg.storage.mapFieldSlot a
+    let b' ← Wad.lowerExpr cfg.storage.fieldSlot cfg.storage.mapFieldSlot b
+    .ok (.isZero (.lt b' a'))
   | _ => .error "unsupported expression in lowering"
 
 private partial def lowerExpr (cfg : Config) {t : Ty} (e : Expr t) : Except String IR.Expr :=

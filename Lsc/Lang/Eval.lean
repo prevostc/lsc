@@ -60,6 +60,14 @@ def eval
     let va ← eval a env
     let vb ← eval b env
     pure (.bool (Val.u256Of va ≤ Val.u256Of vb))
+  | .wadLt a b => do
+    let va ← Wad.eval a env
+    let vb ← Wad.eval b env
+    pure (.bool (va.n < vb.n))
+  | .wadLe a b => do
+    let va ← Wad.eval a env
+    let vb ← Wad.eval b env
+    pure (.bool (va.n ≤ vb.n))
   | .unit => pure (.unit)
 
 attribute [simp] eval

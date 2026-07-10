@@ -100,6 +100,19 @@ syntax:65 (name := lscExprDiv) lscExpr:65 " ⌊/⌋? " lscExpr:66 : lscExpr
 /-- Equality (any matching non-`Wei`/`Wad` kind). -/
 syntax:50 (name := lscExprEq) lscExpr:51 " == " lscExpr:51 : lscExpr
 
+/-- `a <= b` — `Uint256`- or `Wad`-kind (or `declare_token_amount`-tagged `Amount`) comparison.
+Same precedence as `==`. -/
+syntax:50 (name := lscExprLe) lscExpr:51 " <= " lscExpr:51 : lscExpr
+
+/-- `a >= b` — the `≥` counterpart of `lscExprLe`. -/
+syntax:50 (name := lscExprGe) lscExpr:51 " >= " lscExpr:51 : lscExpr
+
+/-- `a < b` — the strict counterpart of `lscExprLe`. -/
+syntax:50 (name := lscExprLt) lscExpr:51 " < " lscExpr:51 : lscExpr
+
+/-- `a > b` — the strict counterpart of `lscExprGe`. -/
+syntax:50 (name := lscExprGt) lscExpr:51 " > " lscExpr:51 : lscExpr
+
 /-- Fresh, inert-everywhere-else statement category (unchanged from the prototype, extended
 with the new productions below). -/
 declare_syntax_cat lscStmt

@@ -42,6 +42,8 @@ partial def visitCoreExpr : {t : Ty} → CoreExpr t → VisitResult
   | _, .eq _ a b => visitCoreExpr a |>.merge (visitCoreExpr b)
   | _, .lt a b => visitCoreExpr a |>.merge (visitCoreExpr b)
   | _, .le a b => visitCoreExpr a |>.merge (visitCoreExpr b)
+  | _, .wadLt a b => visitWadExpr a |>.merge (visitWadExpr b)
+  | _, .wadLe a b => visitWadExpr a |>.merge (visitWadExpr b)
   | _, .not a => visitCoreExpr a
   | _, .and a b => visitCoreExpr a |>.merge (visitCoreExpr b)
   | _, .or a b => visitCoreExpr a |>.merge (visitCoreExpr b)

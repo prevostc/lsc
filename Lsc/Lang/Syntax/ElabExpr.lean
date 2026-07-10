@@ -41,6 +41,29 @@ def elabMapKey (key : TSyntax `lscExpr) : TermElabM Term :=
   | stx => throwErrorAt stx "unsupported mapping key `{stx}` — expected `msg.sender` or a \
 bare local identifier"
 
+/-- Shared elaborator for `<=`/`>=`/`<`/`>`, given both sides' already-elaborated `Term`/
+`FieldKind`. Only `Uint256`- and `Wad`-kind operands are supported (see `AST.lean`'s `CoreExpr
+.lt`/`.le`/`.wadLt`/`.wadLe` docstrings — a tagged `Amount` is still plain `Wad`-kind at the DSL
+level, `Fixed`'s `tag` being purely a Lean-side marker with no AST footprint, so it's covered by
+the `Wad` case for free). `strict = false` picks `≤`-shaped nodes (`le`/`wadLe`), `strict = true`
+picks `<`-shaped ones (`lt`/`wadLt`); `swap = true` flips the two operands, which is exactly how
+`>`/`≥` are expressed in terms of `<`/`≤` without needing their own AST nodes (`a > b ↔ b < a`,
+`a ≥ b ↔ b ≤ a`). -/
+def elabComparison (opName : String) (ak : Lsc.Deriving.FieldKind) (at_ : Term)
+    (bk : Lsc.Deriving.FieldKind) (bt : Term) (swap strict : Bool) :
+    TermElabM (Term × Lsc.Deriving.FieldKind) := do
+  unless ak == bk do
+    throwError "`{opName}` between mismatched kinds `{repr ak}` and `{repr bk}`"
+  let (lhs, rhs) := if swap then (bt, at_) else (at_, bt)
+  match ak with
+  | .uint256 =>
+    let t ← if strict then `(Lsc.CoreExpr.lt $lhs $rhs) else `(Lsc.CoreExpr.le $lhs $rhs)
+    return (t, .bool)
+  | .wad =>
+    let t ← if strict then `(Lsc.CoreExpr.wadLt $lhs $rhs) else `(Lsc.CoreExpr.wadLe $lhs $rhs)
+    return (t, .bool)
+  | _ => throwError "`{opName}` is not supported on `{repr ak}`-kind expressions"
+
 mutual
 
 /-- Elaborate one `lscExpr` node into a `Lsc.Expr`-valued `Term`, alongside the `FieldKind`
@@ -98,6 +121,22 @@ partial def elabLscExpr (storageName : Name) (locals : List (String × Lsc.Deriv
       -- `Ty`-headed rather than stuck on whichever operand happened to be elaborated first.
       let tyConst ← ak.tyConst
       return (← `(@Lsc.CoreExpr.eqAuto $tyConst $at_ $bt), .bool)
+  | `(lscExpr| $a <= $b) => do
+      let (at_, ak) ← elabLscExpr storageName locals a
+      let (bt, bk) ← elabLscExpr storageName locals b
+      elabComparison "<=" ak at_ bk bt (swap := false) (strict := false)
+  | `(lscExpr| $a >= $b) => do
+      let (at_, ak) ← elabLscExpr storageName locals a
+      let (bt, bk) ← elabLscExpr storageName locals b
+      elabComparison ">=" ak at_ bk bt (swap := true) (strict := false)
+  | `(lscExpr| $a < $b) => do
+      let (at_, ak) ← elabLscExpr storageName locals a
+      let (bt, bk) ← elabLscExpr storageName locals b
+      elabComparison "<" ak at_ bk bt (swap := false) (strict := true)
+  | `(lscExpr| $a > $b) => do
+      let (at_, ak) ← elabLscExpr storageName locals a
+      let (bt, bk) ← elabLscExpr storageName locals b
+      elabComparison ">" ak at_ bk bt (swap := true) (strict := true)
   | `(lscExpr| $n:num) => do
       let litTerm ← `(Lsc.Lit.u256 $(quote n.getNat))
       return (← `(Lsc.CoreExpr.lit Lsc.Ty.uint256 $litTerm), .uint256)
