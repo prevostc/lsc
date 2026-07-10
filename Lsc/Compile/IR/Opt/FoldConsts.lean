@@ -46,21 +46,21 @@ def foldConstsStmt : Stmt → Stmt
   | .letBind name e => .letBind name (foldConsts e)
   | .sstore slot e => .sstore slot (foldConsts e)
   | .sstoreDyn slot val => .sstoreDyn (foldConsts slot) (foldConsts val)
-  | .ifRevert cond => .ifRevert (foldConsts cond)
+  | .ifRevertSelector cond sel => .ifRevertSelector (foldConsts cond) sel
   | .log0 topic => .log0 topic
   | .log1 topic data => .log1 topic (foldConsts data)
-  | .revert0 => .revert0
+  | .revertSelector sel => .revertSelector sel
   | .ret e => .ret (foldConsts e)
-  | .checkReentrancyLock => .checkReentrancyLock
+  | .checkReentrancyLock sel => .checkReentrancyLock sel
   | .setReentrancyLock held => .setReentrancyLock held
-  | .externalCall addr selector args checkBoolReturn =>
-    .externalCall (foldConsts addr) selector (args.map foldConsts) checkBoolReturn
-  | .externalCallBind addr selector args bindName =>
-    .externalCallBind (foldConsts addr) selector (args.map foldConsts) bindName
-  | .staticCall addr selector args retWords =>
-    .staticCall (foldConsts addr) selector (args.map foldConsts) retWords
-  | .staticCallBind addr selector args bindName =>
-    .staticCallBind (foldConsts addr) selector (args.map foldConsts) bindName
+  | .externalCall addr selector args checkBoolReturn failSel =>
+    .externalCall (foldConsts addr) selector (args.map foldConsts) checkBoolReturn failSel
+  | .externalCallBind addr selector args bindName failSel =>
+    .externalCallBind (foldConsts addr) selector (args.map foldConsts) bindName failSel
+  | .staticCall addr selector args retWords failSel =>
+    .staticCall (foldConsts addr) selector (args.map foldConsts) retWords failSel
+  | .staticCallBind addr selector args bindName failSel =>
+    .staticCallBind (foldConsts addr) selector (args.map foldConsts) bindName failSel
 
 namespace FoldConsts
 
@@ -144,14 +144,14 @@ theorem foldConstsStmt_correct (st : IRState) (s : Stmt) :
     simp only [foldConstsStmt, evalStmt, foldConsts_correct st e]
   | .sstoreDyn slot val =>
     simp only [foldConstsStmt, evalStmt, foldConsts_correct st slot, foldConsts_correct st val]
-  | .ifRevert cond =>
+  | .ifRevertSelector cond sel =>
     simp only [foldConstsStmt, evalStmt, foldConsts_correct st cond]
   | .log0 topic => rfl
   | .log1 topic data =>
     simp only [foldConstsStmt, evalStmt, foldConsts_correct st data]
-  | .revert0 => rfl
+  | .revertSelector _ => rfl
   | .ret _ => rfl
-  | .checkReentrancyLock => rfl
+  | .checkReentrancyLock _ => rfl
   | .setReentrancyLock _ => rfl
   | .externalCall .. => rfl
   | .externalCallBind .. => rfl

@@ -107,11 +107,11 @@ def evalStmt (st : IRState) (s : Stmt) : IRState :=
   | .letBind name e => st.setLocal name (evalExpr st e)
   | .sstore slot e => st.setSlot slot (evalExpr st e)
   | .sstoreDyn slot e => st.setSlot (evalExpr st slot) (evalExpr st e)
-  | .ifRevert cond =>
+  | .ifRevertSelector cond _ =>
     if evalExpr st cond = 1 then { st with reverted := true } else st
   | .log0 topic => { st with logs := st.logs ++ [(topic, 0)] }
   | .log1 topic data => { st with logs := st.logs ++ [(topic, evalExpr st data)] }
-  | .revert0 => { st with reverted := true }
+  | .revertSelector _ => { st with reverted := true }
   -- The reference model only tracks `slots`/`logs`/`reverted` (`observablyEqual`'s components,
   -- below) — a `.ret e` node halts execution with a real returned *value* at the actual
   -- bytecode level (`Bytecode/Codegen.lean`'s `RETURN`), but that value is never itself
@@ -120,7 +120,7 @@ def evalStmt (st : IRState) (s : Stmt) : IRState :=
   -- preserving no-op. `e` is still evaluated eagerly for a real EVM (`Codegen.lean`'s `.ret`
   -- case pushes `e`'s value before `RETURN`), just not observed here.
   | .ret _ => st
-  | .checkReentrancyLock => st
+  | .checkReentrancyLock _ => st
   | .setReentrancyLock _ => st
   | .externalCall .. => st
   | .externalCallBind .. => st
@@ -141,8 +141,8 @@ def evalStmt (st : IRState) (s : Stmt) : IRState :=
 @[simp] theorem evalStmt_sstoreDyn (st : IRState) (slot val : Expr) :
     evalStmt st (.sstoreDyn slot val) = st.setSlot (evalExpr st slot) (evalExpr st val) := rfl
 
-@[simp] theorem evalStmt_ifRevert (st : IRState) (cond : Expr) :
-    evalStmt st (.ifRevert cond) =
+@[simp] theorem evalStmt_ifRevertSelector (st : IRState) (cond : Expr) (sel : Nat) :
+    evalStmt st (.ifRevertSelector cond sel) =
       if evalExpr st cond = 1 then { st with reverted := true } else st := rfl
 
 @[simp] theorem evalStmt_log0 (st : IRState) (topic : Nat) :
@@ -152,12 +152,13 @@ def evalStmt (st : IRState) (s : Stmt) : IRState :=
     evalStmt st (.log1 topic data) =
       { st with logs := st.logs ++ [(topic, evalExpr st data)] } := rfl
 
-@[simp] theorem evalStmt_revert0 (st : IRState) : evalStmt st .revert0 = { st with reverted := true } := rfl
+@[simp] theorem evalStmt_revertSelector (st : IRState) (sel : Nat) :
+    evalStmt st (.revertSelector sel) = { st with reverted := true } := rfl
 
 @[simp] theorem evalStmt_ret (st : IRState) (e : Expr) : evalStmt st (.ret e) = st := rfl
 
-@[simp] theorem evalStmt_checkReentrancyLock (st : IRState) :
-    evalStmt st .checkReentrancyLock = st := rfl
+@[simp] theorem evalStmt_checkReentrancyLock (st : IRState) (_sel : Nat) :
+    evalStmt st (.checkReentrancyLock _sel) = st := rfl
 
 @[simp] theorem evalStmt_setReentrancyLock (st : IRState) (held : Bool) :
     evalStmt st (.setReentrancyLock held) = st := rfl

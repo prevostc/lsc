@@ -49,10 +49,8 @@ theorem elimUnusedLocals_correct (st : IRState) (s : Stmt) :
                       .seq (.sstoreDyn slot val) (elimUnusedLocals s2) from rfl,
                  evalStmt_seq]
       exact ih2 _
-    | ifRevert cond =>
-      simp only [show elimUnusedLocals (.seq (.ifRevert cond) s2) =
-                      .seq (.ifRevert cond) (elimUnusedLocals s2) from rfl,
-                 evalStmt_seq]
+    | ifRevertSelector cond sel =>
+      simp only [evalStmt_seq]
       exact ih2 _
     | log0 topic =>
       simp only [show elimUnusedLocals (.seq (.log0 topic) s2) =
@@ -64,39 +62,37 @@ theorem elimUnusedLocals_correct (st : IRState) (s : Stmt) :
                       .seq (.log1 topic data) (elimUnusedLocals s2) from rfl,
                  evalStmt_seq]
       exact ih2 _
-    | revert0 =>
-      simp only [show elimUnusedLocals (.seq .revert0 s2) =
-                      .seq .revert0 (elimUnusedLocals s2) from rfl,
-                 evalStmt_seq]
+    | revertSelector sel =>
+      simp only [evalStmt_seq]
       exact ih2 _
     | ret e =>
       simp only [show elimUnusedLocals (.seq (.ret e) s2) =
                       .seq (.ret e) (elimUnusedLocals s2) from rfl,
                  evalStmt_seq]
       exact ih2 _
-    | externalCall addr selector args checkBoolReturn =>
-      simp only [show elimUnusedLocals (.seq (.externalCall addr selector args checkBoolReturn) s2) =
-                      .seq (.externalCall addr selector args checkBoolReturn) (elimUnusedLocals s2) from rfl,
+    | externalCall addr selector args checkBoolReturn failSel =>
+      simp only [show elimUnusedLocals (.seq (.externalCall addr selector args checkBoolReturn failSel) s2) =
+                      .seq (.externalCall addr selector args checkBoolReturn failSel) (elimUnusedLocals s2) from rfl,
                  evalStmt_seq]
       exact ih2 _
-    | externalCallBind addr selector args bindName =>
-      simp only [show elimUnusedLocals (.seq (.externalCallBind addr selector args bindName) s2) =
-                      .seq (.externalCallBind addr selector args bindName) (elimUnusedLocals s2) from rfl,
+    | externalCallBind addr selector args bindName failSel =>
+      simp only [show elimUnusedLocals (.seq (.externalCallBind addr selector args bindName failSel) s2) =
+                      .seq (.externalCallBind addr selector args bindName failSel) (elimUnusedLocals s2) from rfl,
                  evalStmt_seq]
       exact ih2 _
-    | staticCall addr selector args retWords =>
-      simp only [show elimUnusedLocals (.seq (.staticCall addr selector args retWords) s2) =
-                      .seq (.staticCall addr selector args retWords) (elimUnusedLocals s2) from rfl,
+    | staticCall addr selector args retWords failSel =>
+      simp only [show elimUnusedLocals (.seq (.staticCall addr selector args retWords failSel) s2) =
+                      .seq (.staticCall addr selector args retWords failSel) (elimUnusedLocals s2) from rfl,
                  evalStmt_seq]
       exact ih2 _
-    | staticCallBind addr selector args bindName =>
-      simp only [show elimUnusedLocals (.seq (.staticCallBind addr selector args bindName) s2) =
-                      .seq (.staticCallBind addr selector args bindName) (elimUnusedLocals s2) from rfl,
+    | staticCallBind addr selector args bindName failSel =>
+      simp only [show elimUnusedLocals (.seq (.staticCallBind addr selector args bindName failSel) s2) =
+                      .seq (.staticCallBind addr selector args bindName failSel) (elimUnusedLocals s2) from rfl,
                  evalStmt_seq]
       exact ih2 _
-    | checkReentrancyLock =>
-      simp only [show elimUnusedLocals (.seq .checkReentrancyLock s2) =
-                      .seq .checkReentrancyLock (elimUnusedLocals s2) from rfl, evalStmt_seq]
+    | checkReentrancyLock sel =>
+      simp only [show elimUnusedLocals (.seq (.checkReentrancyLock sel) s2) =
+                      .seq (.checkReentrancyLock sel) (elimUnusedLocals s2) from rfl, evalStmt_seq]
       exact ih2 _
     | setReentrancyLock held =>
       simp only [show elimUnusedLocals (.seq (.setReentrancyLock held) s2) =
@@ -106,17 +102,17 @@ theorem elimUnusedLocals_correct (st : IRState) (s : Stmt) :
   | letBind name e => exact observablyEqual_refl _
   | sstore slot e => exact observablyEqual_refl _
   | sstoreDyn _ _ => exact observablyEqual_refl _
-  | ifRevert cond => exact observablyEqual_refl _
+  | ifRevertSelector cond _ => exact observablyEqual_refl _
   | log0 topic => exact observablyEqual_refl _
   | log1 topic data => exact observablyEqual_refl _
-  | revert0 => exact observablyEqual_refl _
+  | revertSelector _ => exact observablyEqual_refl _
   | ret e => exact observablyEqual_refl _
-  | checkReentrancyLock => exact observablyEqual_refl _
+  | checkReentrancyLock _ => exact observablyEqual_refl _
   | setReentrancyLock held => exact observablyEqual_refl _
-  | externalCall addr selector args checkBoolReturn => exact observablyEqual_refl _
-  | externalCallBind addr selector args bindName => exact observablyEqual_refl _
-  | staticCall addr selector args retWords => exact observablyEqual_refl _
-  | staticCallBind addr selector args bindName => exact observablyEqual_refl _
+  | externalCall addr selector args checkBoolReturn failSel => exact observablyEqual_refl _
+  | externalCallBind addr selector args bindName failSel => exact observablyEqual_refl _
+  | staticCall addr selector args retWords failSel => exact observablyEqual_refl _
+  | staticCallBind addr selector args bindName failSel => exact observablyEqual_refl _
 
 end ElimUnusedLocals
 

@@ -90,8 +90,17 @@ private def packSelector (ctx : Ctx) (selector : Nat) : List Instr × Ctx :=
   ( [.push (paddedSelector selector), .push 0, .op MSTORE]
   , ctx )
 
+/-- Custom-error revert: `mstore(0, selector); revert(0, 4)`. -/
+private def emitCustomErrorRevert (selector : Nat) : List Instr :=
+  [ .push (paddedSelector selector)
+  , .push 0
+  , .op MSTORE
+  , .push 0
+  , .push 4
+  , .op REVERT ]
+
 /-- Revert when the stack top is zero (`ISZERO` then `JUMPI`). -/
-private def emitRevertIfZero (ctx : Ctx) : List Instr × Ctx :=
+private def emitRevertIfZero (ctx : Ctx) (failSelector : Nat) : List Instr × Ctx :=
   let (revLbl, c1) := Ctx.freshLabel ctx "callfail"
   let (contLbl, c2) := Ctx.freshLabel c1 "callok"
   ( [ .op ISZERO
@@ -99,21 +108,13 @@ private def emitRevertIfZero (ctx : Ctx) : List Instr × Ctx :=
     , .op JUMPI
     , .pushLabel contLbl
     , .op JUMP
-    , .jumpDest revLbl
-    , .push 0
-    , .push 0
-    , .op REVERT
-    , .jumpDest contLbl ]
+    , .jumpDest revLbl ]
+    ++ emitCustomErrorRevert failSelector
+    ++ [ .jumpDest contLbl ]
   , c2.popStack 1 )
 
-/-- `mload(0)` — binds the loaded word as `bindName`. -/
-private def emitMloadBind (ctx : Ctx) (bindName : Ident) : List Instr × Ctx :=
-  let c1 := { ctx with stackDepth := ctx.stackDepth + 1 }
-  ( [.push 0, .op MLOAD]
-  , c1.bindLocal bindName )
-
 /-- Legacy ERC20 bool guard: revert when `returndatasize() > 0` and `mload(0) == 0`. -/
-private def emitBoolReturnCheck (ctx : Ctx) : List Instr × Ctx :=
+private def emitBoolReturnCheck (ctx : Ctx) (failSelector : Nat) : List Instr × Ctx :=
   let (revLbl, c1) := Ctx.freshLabel ctx "boolfail"
   let (skipLbl, c2) := Ctx.freshLabel c1 "boolskip"
   let (contLbl, c3) := Ctx.freshLabel c2 "boolcont"
@@ -128,11 +129,9 @@ private def emitBoolReturnCheck (ctx : Ctx) : List Instr × Ctx :=
     , .op JUMPI
     , .pushLabel contLbl
     , .op JUMP
-    , .jumpDest revLbl
-    , .push 0
-    , .push 0
-    , .op REVERT
-    , .jumpDest skipLbl
+    , .jumpDest revLbl ]
+    ++ emitCustomErrorRevert failSelector
+    ++ [ .jumpDest skipLbl
     , .pushLabel contLbl
     , .op JUMP
     , .jumpDest contLbl ]
@@ -235,39 +234,45 @@ private def emitStaticCall (ctx : Ctx) (addr : Expr) (inSize outSize : Nat) :
     [.push 0, .push inSize, .push 0, .push outSize, .op STATICCALL]
   .ok (gasInstr ++ addrInstr ++ callInstrs, { c2 with stackDepth := c2.stackDepth - 4 })
 
+/-- `mload(0)` — binds the loaded word as `bindName`. -/
+private def emitMloadBind (ctx : Ctx) (bindName : Ident) : List Instr × Ctx :=
+  let c1 := { ctx with stackDepth := ctx.stackDepth + 1 }
+  ( [.push 0, .op MLOAD]
+  , c1.bindLocal bindName )
+
 private def codegenExternalCall (ctx : Ctx) (addr : Expr) (selector : Nat) (args : List Expr)
-    (checkBoolReturn : Bool) : Except String (List Instr × Ctx) := do
+    (checkBoolReturn : Bool) (failSelector : Nat) : Except String (List Instr × Ctx) := do
   let inSize := calldataSize args
   let (packInstr, c1) ← packCalldata ctx selector args
   let (callInstr, c2) ← emitCall c1 addr inSize 32
-  let (revInstr, c3) := emitRevertIfZero c2
-  let (boolInstr, c4) := if checkBoolReturn then emitBoolReturnCheck c3 else ([], c3)
+  let (revInstr, c3) := emitRevertIfZero c2 failSelector
+  let (boolInstr, c4) := if checkBoolReturn then emitBoolReturnCheck c3 failSelector else ([], c3)
   .ok (packInstr ++ callInstr ++ revInstr ++ boolInstr, c4)
 
 private def codegenExternalCallBind (ctx : Ctx) (addr : Expr) (selector : Nat)
-    (args : List Expr) (bindName : Ident) : Except String (List Instr × Ctx) := do
+    (args : List Expr) (bindName : Ident) (failSelector : Nat) : Except String (List Instr × Ctx) := do
   let inSize := calldataSize args
   let (packInstr, c1) ← packCalldata ctx selector args
   let (callInstr, c2) ← emitCall c1 addr inSize 32
-  let (revInstr, c3) := emitRevertIfZero c2
+  let (revInstr, c3) := emitRevertIfZero c2 failSelector
   let (loadInstr, c4) := emitMloadBind c3 bindName
   .ok (packInstr ++ callInstr ++ revInstr ++ loadInstr, c4)
 
 private def codegenStaticCall (ctx : Ctx) (addr : Expr) (selector : Nat) (args : List Expr)
-    (retWords : Nat) : Except String (List Instr × Ctx) := do
+    (retWords : Nat) (failSelector : Nat) : Except String (List Instr × Ctx) := do
   let inSize := calldataSize args
   let outSize := 32 * retWords
   let (packInstr, c1) ← packCalldata ctx selector args
   let (callInstr, c2) ← emitStaticCall c1 addr inSize outSize
-  let (revInstr, c3) := emitRevertIfZero c2
+  let (revInstr, c3) := emitRevertIfZero c2 failSelector
   .ok (packInstr ++ callInstr ++ revInstr, c3)
 
 private def codegenStaticCallBind (ctx : Ctx) (addr : Expr) (selector : Nat)
-    (args : List Expr) (bindName : Ident) : Except String (List Instr × Ctx) := do
+    (args : List Expr) (bindName : Ident) (failSelector : Nat) : Except String (List Instr × Ctx) := do
   let inSize := calldataSize args
   let (packInstr, c1) ← packCalldata ctx selector args
   let (callInstr, c2) ← emitStaticCall c1 addr inSize 32
-  let (revInstr, c3) := emitRevertIfZero c2
+  let (revInstr, c3) := emitRevertIfZero c2 failSelector
   let (loadInstr, c4) := emitMloadBind c3 bindName
   .ok (packInstr ++ callInstr ++ revInstr ++ loadInstr, c4)
 
@@ -290,7 +295,7 @@ private partial def codegenStmt (ctx : Ctx) (s : Stmt) : Except String (List Ins
     let (valInstr, c1) ← codegenExpr ctx e
     let (slotInstr, c2) ← codegenExpr c1 slotExpr
     .ok (valInstr ++ slotInstr ++ [.op SSTORE], c2.popStack 2)
-  | .ifRevert cond => do
+  | .ifRevertSelector cond selector => do
     let (revLbl, c1) := Ctx.freshLabel ctx "rev"
     let (contLbl, c2) := Ctx.freshLabel c1 "cont"
     let (cInstr, c3) ← codegenExpr c2 cond
@@ -299,10 +304,8 @@ private partial def codegenStmt (ctx : Ctx) (s : Stmt) : Except String (List Ins
       .op JUMPI,
       .pushLabel contLbl,
       .op JUMP,
-      .jumpDest revLbl,
-      .push 0,
-      .push 0,
-      .op REVERT,
+      .jumpDest revLbl
+    ] ++ emitCustomErrorRevert selector ++ [
       .jumpDest contLbl
     ]
     .ok (cInstr ++ jumpInstrs, c3.popStack 1)
@@ -326,13 +329,13 @@ private partial def codegenStmt (ctx : Ctx) (s : Stmt) : Except String (List Ins
       .op LOG1
     ]
     .ok (dataInstr ++ memStore ++ popsAfter ++ logInstrs, { locals := [], stackDepth := 0 })
-  | .revert0 =>
-    .ok ([.push 0, .push 0, .op REVERT], ctx.popStack ctx.stackDepth)
+  | .revertSelector selector =>
+    .ok (emitCustomErrorRevert selector, ctx.popStack ctx.stackDepth)
   | .ret e => do
     let (eInstr, c1) ← codegenExpr ctx e
     let retInstrs : List Instr := [.push 0, .op MSTORE, .push 32, .push 0, .op RETURN]
     .ok (eInstr ++ retInstrs, c1.popStack 1)
-  | .checkReentrancyLock =>
+  | .checkReentrancyLock reentrantSelector =>
     let (revLbl, c1) := Ctx.freshLabel ctx "lockrev"
     let (contLbl, c2) := Ctx.freshLabel c1 "lockcont"
     let lockInstrs : List Instr := [
@@ -344,24 +347,22 @@ private partial def codegenStmt (ctx : Ctx) (s : Stmt) : Except String (List Ins
       .op JUMPI,
       .pushLabel contLbl,
       .op JUMP,
-      .jumpDest revLbl,
-      .push 0,
-      .push 0,
-      .op REVERT,
+      .jumpDest revLbl
+    ] ++ emitCustomErrorRevert reentrantSelector ++ [
       .jumpDest contLbl
     ]
     .ok (lockInstrs, c2)
   | .setReentrancyLock held =>
     let val := if held then 1 else 0
     .ok ([.push val, .push IR.reentrancyLockSlot, .op TSTORE], ctx)
-  | .externalCall addr selector args checkBoolReturn =>
-    codegenExternalCall ctx addr selector args checkBoolReturn
-  | .externalCallBind addr selector args bindName =>
-    codegenExternalCallBind ctx addr selector args bindName
-  | .staticCall addr selector args retWords =>
-    codegenStaticCall ctx addr selector args retWords
-  | .staticCallBind addr selector args bindName =>
-    codegenStaticCallBind ctx addr selector args bindName
+  | .externalCall addr selector args checkBoolReturn failSelector =>
+    codegenExternalCall ctx addr selector args checkBoolReturn failSelector
+  | .externalCallBind addr selector args bindName failSelector =>
+    codegenExternalCallBind ctx addr selector args bindName failSelector
+  | .staticCall addr selector args retWords failSelector =>
+    codegenStaticCall ctx addr selector args retWords failSelector
+  | .staticCallBind addr selector args bindName failSelector =>
+    codegenStaticCallBind ctx addr selector args bindName failSelector
 
 def stmt (ctx : Ctx) (s : IR.Stmt) : Except String (List Instr × Ctx) :=
   codegenStmt ctx s

@@ -1,4 +1,5 @@
 import Lsc.Compile.BytecodeTest
+import Lsc.Selectors
 import EvmYul.Wheels
 import EvmYul.EVM.Semantics
 import EvmYul.State.AccountOps
@@ -29,6 +30,15 @@ def execEventTopic0 : Ident → Option Nat := fun _ => some 0
 
 def execConfig : Config :=
   configFromContract counterDef execEventTopic0
+
+private def fnSelector (name : Ident) : Nat :=
+  match counterDef.functions.find? (·.name == name) with
+  | some fn => (computeSelector fn).toNat
+  | none => 0
+
+def incrementSelector : Nat := fnSelector "increment"
+def pauseSelector : Nat := fnSelector "pause"
+def unpauseSelector : Nat := fnSelector "unpause"
 
 def execCounterBytecode : ByteArray :=
   match contractToBytecode counterDef execEventTopic0 with

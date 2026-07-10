@@ -159,7 +159,7 @@ theorem lookupLocal_evalStmt_unused (st : IRState) (s : Stmt) (id : Ident)
   | .sstoreDyn slot e =>
     simp only [freeVarsStmt, List.mem_append] at h
     simp [evalStmt, lookupLocal_setSlot st (evalExpr st slot) (evalExpr st e) id]
-  | .ifRevert cond =>
+  | .ifRevertSelector cond _ =>
     simp only [freeVarsStmt] at h
     by_cases hc : evalExpr st cond = 1 <;> simp [evalStmt, hc, IRState.lookupLocal]
   | .log0 topic =>
@@ -168,11 +168,11 @@ theorem lookupLocal_evalStmt_unused (st : IRState) (s : Stmt) (id : Ident)
   | .log1 topic data =>
     simp only [freeVarsStmt] at h
     simp [evalStmt, IRState.lookupLocal]
-  | .revert0 => simp [evalStmt, IRState.lookupLocal]
+  | .revertSelector _ => simp [evalStmt, IRState.lookupLocal]
   | .ret _ => rfl
   | .externalCall .. => rfl
   | .externalCallBind .. => rfl
-  | .checkReentrancyLock => simp [evalStmt_checkReentrancyLock, IRState.lookupLocal]
+  | .checkReentrancyLock _ => simp [evalStmt_checkReentrancyLock, IRState.lookupLocal]
   | .setReentrancyLock _ =>
     simp only [freeVarsStmt] at h
     simp [evalStmt_setReentrancyLock, IRState.lookupLocal]
@@ -234,19 +234,19 @@ mutual
       intro id hmem
       simpa [evalStmt, lookupLocal_setSlot, freeVarsStmt, List.mem_append] using
         hlookup id (by simpa [freeVarsStmt, List.mem_append] using hmem)
-    | .ifRevert cond =>
+    | .ifRevertSelector cond _ =>
       intro id hmem
       have heval := evalExpr_obs_agree st1 st2 cond hobs
         (λ id hmem => hlookup id (by simpa [freeVarsStmt] using hmem))
       by_cases hc : evalExpr st1 cond = 1
       · have hc2 : evalExpr st2 cond = 1 := by simpa [heval] using hc
-        simp [evalStmt_ifRevert, hc, hc2, IRState.lookupLocal]
+        simp [evalStmt_ifRevertSelector, hc, hc2, IRState.lookupLocal]
         exact hlookup id hmem
       · have hc2 : evalExpr st2 cond ≠ 1 := by
           intro h
           rw [← heval] at h
           exact hc h
-        simp [evalStmt_ifRevert, hc, hc2, IRState.lookupLocal]
+        simp [evalStmt_ifRevertSelector, hc, hc2, IRState.lookupLocal]
         exact hlookup id hmem
     | .log0 topic =>
       intro id hmem
@@ -255,7 +255,7 @@ mutual
       intro id hmem
       simpa [evalStmt, IRState.lookupLocal, freeVarsStmt] using
         hlookup id (by simpa [freeVarsStmt] using hmem)
-    | .revert0 =>
+    | .revertSelector _ =>
       intro id hmem
       simpa [evalStmt, IRState.lookupLocal, freeVarsStmt] using
         hlookup id (by cases hmem)
@@ -268,7 +268,7 @@ mutual
     | .externalCallBind .. =>
       intro id hmem
       exact hlookup id hmem
-    | .checkReentrancyLock =>
+    | .checkReentrancyLock _ =>
       intro id hmem
       simp [freeVarsStmt] at hmem
     | .setReentrancyLock _ =>
@@ -321,20 +321,20 @@ mutual
       have hevalVal := evalExpr_obs_agree st1 st2 val hobs hfreeVal
       simp only [evalStmt_sstoreDyn, observablyEqual, hevalSlot, hevalVal, IRState.setSlot]
       exact ⟨by simp [hobs.1], hobs.2.1, hobs.2.2.1, hobs.2.2.2⟩
-    | .ifRevert cond =>
+    | .ifRevertSelector cond _ =>
       have hfree : ∀ id ∈ freeVarsExpr cond, st1.lookupLocal id = st2.lookupLocal id := by
         intro id hmem
         exact hlookup id (by simpa [freeVarsStmt] using hmem)
       have heval := evalExpr_obs_agree st1 st2 cond hobs hfree
       by_cases hc : evalExpr st1 cond = 1
       · have hc2 : evalExpr st2 cond = 1 := by simpa [heval] using hc
-        simp only [evalStmt_ifRevert, observablyEqual, hc, hc2]
+        simp only [evalStmt_ifRevertSelector, observablyEqual, hc, hc2]
         exact ⟨hobs.1, hobs.2.1, rfl, hobs.2.2.2⟩
       · have hc2 : evalExpr st2 cond ≠ 1 := by
           intro h
           rw [← heval] at h
           exact hc h
-        simp only [evalStmt_ifRevert, observablyEqual, hc, hc2]
+        simp only [evalStmt_ifRevertSelector, observablyEqual, hc, hc2]
         exact ⟨hobs.1, hobs.2.1, hobs.2.2.1, hobs.2.2.2⟩
     | .log0 topic =>
       have hlogs : st1.logs ++ [(topic, 0)] = st2.logs ++ [(topic, 0)] := by simp [hobs.2.1]
@@ -349,12 +349,12 @@ mutual
         simp [hobs.2.1]
       simp only [evalStmt_log1, observablyEqual, heval]
       exact ⟨hobs.1, hlogs, hobs.2.2.1, hobs.2.2.2⟩
-    | .revert0 =>
-      exact ⟨hobs.1, hobs.2.1, (by simp [evalStmt_revert0]), hobs.2.2.2⟩
+    | .revertSelector _ =>
+      exact ⟨hobs.1, hobs.2.1, (by simp [evalStmt_revertSelector]), hobs.2.2.2⟩
     | .ret _ => exact hobs
     | .externalCall .. => exact hobs
     | .externalCallBind .. => exact hobs
-    | .checkReentrancyLock => exact hobs
+    | .checkReentrancyLock _ => exact hobs
     | .setReentrancyLock _ => exact hobs
     | .staticCall .. => exact hobs
     | .staticCallBind .. => exact hobs
@@ -406,7 +406,7 @@ mutual
     | .sstoreDyn _ _ =>
       simp only [freeVarsStmt, readVarsStmt] at hfv hnot
       exact absurd hfv hnot
-    | .ifRevert cond =>
+    | .ifRevertSelector cond _ =>
       simp only [freeVarsStmt, readVarsStmt] at hfv hnot
       exact absurd hfv hnot
     | .log0 _ =>
@@ -415,7 +415,7 @@ mutual
     | .log1 _ data =>
       simp only [freeVarsStmt, readVarsStmt] at hfv hnot
       exact absurd hfv hnot
-    | .revert0 => cases hfv
+    | .revertSelector _ => cases hfv
     | .ret e =>
       simp only [freeVarsStmt, readVarsStmt] at hfv hnot
       exact absurd hfv hnot
@@ -425,7 +425,7 @@ mutual
     | .externalCallBind .. =>
       simp only [freeVarsStmt, readVarsStmt] at hfv hnot
       exact absurd hfv hnot
-    | .checkReentrancyLock =>
+    | .checkReentrancyLock _ =>
       simp only [freeVarsStmt, readVarsStmt] at hfv hnot
       exact absurd hfv hnot
     | .setReentrancyLock _ =>
@@ -511,19 +511,19 @@ mutual
       intro id hmem
       simpa [evalStmt, lookupLocal_setSlot, readVarsStmt, List.mem_append] using
         hlookup id (by simpa [readVarsStmt, List.mem_append] using hmem)
-    | .ifRevert cond =>
+    | .ifRevertSelector cond _ =>
       intro id hmem
       have heval := evalExpr_obs_agree st1 st2 cond hobs
         (λ id hmem => hlookup id (by simpa [readVarsStmt] using hmem))
       by_cases hc : evalExpr st1 cond = 1
       · have hc2 : evalExpr st2 cond = 1 := by simpa [heval] using hc
-        simp [evalStmt_ifRevert, hc, hc2, IRState.lookupLocal]
+        simp [evalStmt_ifRevertSelector, hc, hc2, IRState.lookupLocal]
         exact hlookup id hmem
       · have hc2 : evalExpr st2 cond ≠ 1 := by
           intro h
           rw [← heval] at h
           exact hc h
-        simp [evalStmt_ifRevert, hc, hc2, IRState.lookupLocal]
+        simp [evalStmt_ifRevertSelector, hc, hc2, IRState.lookupLocal]
         exact hlookup id hmem
     | .log0 _ =>
       intro id hmem
@@ -532,7 +532,7 @@ mutual
       intro id hmem
       simpa [evalStmt, IRState.lookupLocal, readVarsStmt] using
         hlookup id (by simpa [readVarsStmt] using hmem)
-    | .revert0 =>
+    | .revertSelector _ =>
       intro id hmem
       simpa [evalStmt, IRState.lookupLocal, readVarsStmt] using
         hlookup id (by simp [readVarsStmt] at hmem)
@@ -545,7 +545,7 @@ mutual
     | .externalCallBind .. =>
       intro id hmem
       exact hlookup id hmem
-    | .checkReentrancyLock =>
+    | .checkReentrancyLock _ =>
       intro id hmem
       simp [readVarsStmt] at hmem
     | .setReentrancyLock _ =>
@@ -598,20 +598,20 @@ mutual
       have hevalVal := evalExpr_obs_agree st1 st2 val hobs hfreeVal
       simp only [evalStmt_sstoreDyn, observablyEqual, hevalSlot, hevalVal, IRState.setSlot]
       exact ⟨by simp [hobs.1], hobs.2.1, hobs.2.2.1, hobs.2.2.2⟩
-    | .ifRevert cond =>
+    | .ifRevertSelector cond _ =>
       have hfree : ∀ id ∈ freeVarsExpr cond, st1.lookupLocal id = st2.lookupLocal id := by
         intro id hmem
         exact hlookup id (by simpa [readVarsStmt] using hmem)
       have heval := evalExpr_obs_agree st1 st2 cond hobs hfree
       by_cases hc : evalExpr st1 cond = 1
       · have hc2 : evalExpr st2 cond = 1 := by simpa [heval] using hc
-        simp only [evalStmt_ifRevert, observablyEqual, hc, hc2]
+        simp only [evalStmt_ifRevertSelector, observablyEqual, hc, hc2]
         exact ⟨hobs.1, hobs.2.1, rfl, hobs.2.2.2⟩
       · have hc2 : evalExpr st2 cond ≠ 1 := by
           intro h
           rw [← heval] at h
           exact hc h
-        simp only [evalStmt_ifRevert, observablyEqual, hc, hc2]
+        simp only [evalStmt_ifRevertSelector, observablyEqual, hc, hc2]
         exact ⟨hobs.1, hobs.2.1, hobs.2.2.1, hobs.2.2.2⟩
     | .log0 topic =>
       have hlogs : st1.logs ++ [(topic, 0)] = st2.logs ++ [(topic, 0)] := by simp [hobs.2.1]
@@ -626,12 +626,12 @@ mutual
         simp [hobs.2.1]
       simp only [evalStmt_log1, observablyEqual, heval]
       exact ⟨hobs.1, hlogs, hobs.2.2.1, hobs.2.2.2⟩
-    | .revert0 =>
-      exact ⟨hobs.1, hobs.2.1, (by simp [evalStmt_revert0]), hobs.2.2.2⟩
+    | .revertSelector _ =>
+      exact ⟨hobs.1, hobs.2.1, (by simp [evalStmt_revertSelector]), hobs.2.2.2⟩
     | .ret _ => exact hobs
     | .externalCall .. => exact hobs
     | .externalCallBind .. => exact hobs
-    | .checkReentrancyLock => exact hobs
+    | .checkReentrancyLock _ => exact hobs
     | .setReentrancyLock _ => exact hobs
     | .staticCall .. => exact hobs
     | .staticCallBind .. => exact hobs
@@ -688,12 +688,12 @@ theorem evalStmt_setLocal_unused_obs (st : IRState) (name : Ident) (v : Nat) (s 
       evalExpr_setLocal_unused st name v slot hs,
       evalExpr_setLocal_unused st name v val hv, IRState.setSlot]
     trivial
-  | ifRevert cond =>
+  | ifRevertSelector cond _ =>
     simp only [freeVarsStmt] at h
     by_cases hc : evalExpr st cond = 1
-    · simp [evalStmt_ifRevert, observablyEqual, evalExpr_setLocal_unused st name v cond h, hc]
+    · simp [evalStmt_ifRevertSelector, observablyEqual, evalExpr_setLocal_unused st name v cond h, hc]
       trivial
-    · simp [evalStmt_ifRevert, observablyEqual, evalExpr_setLocal_unused st name v cond h, hc]
+    · simp [evalStmt_ifRevertSelector, observablyEqual, evalExpr_setLocal_unused st name v cond h, hc]
       trivial
   | log0 topic =>
     simp only [freeVarsStmt] at h
@@ -703,25 +703,25 @@ theorem evalStmt_setLocal_unused_obs (st : IRState) (name : Ident) (v : Nat) (s 
     simp only [freeVarsStmt] at h
     simp only [evalStmt_log1, observablyEqual, evalExpr_setLocal_unused st name v data h]
     trivial
-  | revert0 =>
-    simp only [evalStmt_revert0, observablyEqual]
+  | revertSelector _ =>
+    simp only [evalStmt_revertSelector, observablyEqual]
     trivial
   | ret e =>
     simp only [evalStmt_ret, observablyEqual]
     exact observablyEqual_setLocal st name v
-  | externalCall addr selector args checkBoolReturn =>
+  | externalCall addr selector args checkBoolReturn _ =>
     simpa only [evalStmt] using observablyEqual_setLocal st name v
-  | externalCallBind _ _ _ _ =>
+  | externalCallBind _ _ _ _ _ =>
     simpa only [evalStmt] using observablyEqual_setLocal st name v
-  | checkReentrancyLock =>
+  | checkReentrancyLock _ =>
     simp only [freeVarsStmt] at h
     simp [evalStmt_checkReentrancyLock, observablyEqual, IRState.setLocal]
   | setReentrancyLock _ =>
     simp only [freeVarsStmt] at h
     simp [evalStmt_setReentrancyLock, observablyEqual, IRState.setLocal]
-  | staticCall addr selector args retWords =>
+  | staticCall _ _ _ _ _ =>
     simpa only [evalStmt] using observablyEqual_setLocal st name v
-  | staticCallBind _ _ _ _ =>
+  | staticCallBind _ _ _ _ _ =>
     simpa only [evalStmt] using observablyEqual_setLocal st name v
 
 theorem evalStmt_unused_bind_ignored (st : IRState) (name : Ident) (e : Expr) (rest : Stmt)

@@ -4,8 +4,10 @@ import Lsc.Compile.Bytecode
 import Lsc.Compile.Bytecode.CodegenInvariant
 import Lsc.Compile.ExternalCallSpec
 import Lsc.Compile.IR.Opt.Pipeline
+import Lsc.Selectors
+import Lsc.Tools.AbiJson
 
-open Lsc Lsc.Compile Escrow EvmYul Yul
+open Lsc Lsc.Compile Escrow EvmYul Yul Lsc.Tools
 open Lsc.Compile.Bytecode
 
 namespace EscrowCompileTest
@@ -62,5 +64,20 @@ example : gasSloadSlotBeforeCall releaseInstrs 2 = true := by native_decide
 
 /-- **Property:** `release` bytecode loads the CALL callee after `GAS` (via `SLOAD` or `DUP`). -/
 example : gasLoadsCalleeBeforeCall releaseInstrs 2 = true := by native_decide
+
+/-- **Property:** `release` generated Yul uses custom-error reverts (`revert(0, 4)`). -/
+theorem release_yul_uses_custom_error_reverts :
+    YulSpec.usesCustomErrorRevert releaseYulStmts = true := by native_decide
+
+/-- **Property:** Escrow ABI JSON includes declared custom errors. -/
+example : contractAbiJson Escrow.contractDef |>.contains "\"type\":\"error\"" := by native_decide
+
+example :
+    contractAbiJson Escrow.contractDef |>.contains
+      ("\"name\":\"" ++ "NotOwner" ++ "\"") := by native_decide
+
+example :
+    (computeErrorSelector "ExternalCallFailed" []).toNat =
+      (Escrow.config.errors.errorSelector "ExternalCallFailed").getD 0 := by native_decide
 
 end EscrowCompileTest

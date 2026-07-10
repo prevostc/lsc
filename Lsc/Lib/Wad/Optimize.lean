@@ -5,38 +5,6 @@ namespace Lsc.Wad
 
 open Lsc.Compile.IR (Expr Stmt)
 
-/-- Lower a `Wad.Expr` to flat IR, mirroring `Wei.lowerExpr`.
-
-`.addChecked`/`.addCheckedNat`/`.subChecked` lower onto the same integer
-add/sub primitives `Wei` uses — at the raw-`UInt256` level these are
-identical; only the *decoding* of the raw value into a decimal differs, and
-IR doesn't need to know about that.
-
-`.mulHalfUpChecked a b` lowers to `(a * b + WAD / 2) / WAD` using the new
-`Compile.IR.Expr.mul`/`.div` primitives (which lower straight onto EVM's
-native `MUL`/`DIV` opcodes, see `Bytecode/Codegen.lean`/`Yul.lean`).
-`.divDownChecked a b` lowers to `(a * WAD) / b`.
-
-**Accepted overflow limitation (mirrors `Wei`'s existing precedent):** just
-like `Wei.lowerExpr`'s `.addChecked`/`.subChecked` cases lower straight onto
-raw `IR.Expr.add`/`.sub` with no IR-level overflow guard (only the
-specialised `lowerAddCheckedNatStorage`/`lowerLetBind` path emits an
-`ifRevert` check), this lowering does not synthesize a 512-bit-safe
-overflow check for `a.raw * b.raw` either. EVM's `MUL` computes the product
-mod 2^256, so if the *true* (unbounded) product of two `Wad`s' raw
-`UInt256`s exceeds 2^256, the lowered bytecode silently wraps instead of
-reverting with `Overflow` the way `Wad.mulHalfUpChecked`'s `Except`-based
-pure evaluator (`Eval.lean`, used by `Wad.eval`/off-chain simulation) does.
-Closing this gap fully requires a 512-bit "full-precision" multiply
-technique (e.g. the standard `MULMOD`-based `mulDiv` idiom used by
-OpenZeppelin/Solady) synthesized at the `IR.Stmt` level (extra `letBind`s +
-`ifRevert`s), which is a separate, larger follow-up — tracked here rather
-than silently shipped: any `Wad` contract whose multiplicands can realistically
-reach the ~2^128 range (i.e. large enough that `raw_a * raw_b` can exceed
-2^256) needs that follow-up before its bytecode can be trusted for
-overflow-safety; today's lowering is exact for the common case where the
-product itself fits in 256 bits (true for any realistic token/interest-rate
-Wad values, e.g. both operands well under 10^39). -/
 partial def lowerExpr (fieldSlot mapFieldSlot : Ident → Option Nat) (e : Expr) : Except String Compile.IR.Expr :=
   match e with
   | .lit n => .ok (Compile.IR.Expr.lit n)
@@ -75,5 +43,44 @@ partial def lowerExpr (fieldSlot mapFieldSlot : Ident → Option Nat) (e : Expr)
     let b' ← lowerExpr fieldSlot mapFieldSlot b
     let scaledNumer := Compile.IR.Expr.mul a' (Compile.IR.Expr.lit WAD)
     .ok (Compile.IR.Expr.div scaledNumer b')
+
+/-- Lower `σ.field +=? n` (literal increment) with an on-chain overflow guard. -/
+def lowerAddCheckedNatStorage (slot : Nat) (n : Nat) (overflowSelector : Nat) : Stmt :=
+  let old := "lsc_add_old"
+  let new := "lsc_add_new"
+  .seq
+    (.letBind old (.sload slot))
+    (.seq
+      (.letBind new (.add (.local old) (.lit n)))
+      (.seq
+        (.ifRevertSelector (.lt (.local new) (.local old)) overflowSelector)
+        (.sstore slot (.local new))))
+
+/-- Lower `σ.field +=? rhs` with an on-chain overflow guard. -/
+def lowerAddCheckedStorage (slot : Nat) (rhs : Expr) (fieldSlot mapFieldSlot : Ident → Option Nat)
+    (overflowSelector : Nat) : Except String Stmt := do
+  let rhsIr ← lowerExpr fieldSlot mapFieldSlot rhs
+  let old := "lsc_add_old"
+  let new := "lsc_add_new"
+  .ok <|
+    .seq
+      (.letBind old (.sload slot))
+      (.seq
+        (.letBind new (.add (.local old) rhsIr))
+        (.seq
+          (.ifRevertSelector (.lt (.local new) (.local old)) overflowSelector)
+          (.sstore slot (.local new))))
+
+/-- Lower `σ.field -=? rhs` with an on-chain underflow guard. -/
+def lowerSubCheckedStorage (slot : Nat) (rhs : Expr) (fieldSlot mapFieldSlot : Ident → Option Nat)
+    (underflowSelector : Nat) : Except String Stmt := do
+  let rhsIr ← lowerExpr fieldSlot mapFieldSlot rhs
+  let old := "lsc_sub_old"
+  .ok <|
+    .seq
+      (.letBind old (.sload slot))
+      (.seq
+        (.ifRevertSelector (.lt (.local old) rhsIr) underflowSelector)
+        (.sstore slot (.sub (.local old) rhsIr)))
 
 end Lsc.Wad

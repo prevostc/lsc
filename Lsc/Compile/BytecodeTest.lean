@@ -25,7 +25,7 @@ def counterDef : ContractDef where
     [("number", .wei, some ⟨.wei, Wei.Expr.lit 0⟩),
      ("paused", .bool, some ⟨.bool, CoreExpr.lit Ty.bool (.bool false)⟩),
      ("owner", .address, some ⟨.address, CoreExpr.lit Ty.address (.addr 0)⟩)]
-  errors := ["Paused", "NotOwner", "Overflow"]
+  errors := [("Paused", []), ("NotOwner", []), ("Overflow", [])]
   events := [("Incremented", [("n", .wei)]), ("Paused", []), ("Unpaused", [])]
   functions :=
     [{ name := "increment", kind := .external, params := [], retTy := .unit, body := incrementAst },

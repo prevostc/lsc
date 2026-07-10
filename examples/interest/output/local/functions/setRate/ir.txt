@@ -4,9 +4,10 @@ Lsc.Compile.IR.Stmt.seq
     (Lsc.Compile.IR.Stmt.seq
       (Lsc.Compile.IR.Stmt.seq
         (Lsc.Compile.IR.Stmt.skip)
-        (Lsc.Compile.IR.Stmt.ifRevert
+        (Lsc.Compile.IR.Stmt.ifRevertSelector
           (Lsc.Compile.IR.Expr.isZero
-            (Lsc.Compile.IR.Expr.eq (Lsc.Compile.IR.Expr.local "caller") (Lsc.Compile.IR.Expr.sload 2)))))
+            (Lsc.Compile.IR.Expr.eq (Lsc.Compile.IR.Expr.local "caller") (Lsc.Compile.IR.Expr.sload 2)))
+          818771057))
       (Lsc.Compile.IR.Stmt.sstore 1 (Lsc.Compile.IR.Expr.local "newRate")))
     (Lsc.Compile.IR.Stmt.log1
       40415197547064155902306972822139598662183634569597352180159849017381491785488

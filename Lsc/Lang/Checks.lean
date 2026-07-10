@@ -124,9 +124,14 @@ def arithErrorsByFunction (c : ContractDef) : List (Ident × List ArithError) :=
     those errors come from framework-level guards (e.g. reentrancy locks) outside the
     `Stmt`/`Expr` data the contract author writes, so there's no decidable reachability
     signal to walk yet. Revisit if/when framework guards become explicit `Stmt` nodes. -/
+def errorNames (c : ContractDef) : List Ident := c.errors.map (·.1)
+
+def errorsContain (c : ContractDef) (name : Ident) : Bool :=
+  (c.errors.find? (·.1 == name)).isSome
+
 def checkArithErrorCoverage (c : ContractDef) : Option String :=
   let missing := (arithErrorsByFunction c).flatMap fun (fnName, errs) =>
-    errs.filter (fun ae => ¬ c.errors.contains (arithErrorName ae))
+    errs.filter (fun ae => ¬ errorsContain c (arithErrorName ae))
       |>.map fun ae => (fnName, ae)
   match missing with
   | [] => none
@@ -232,6 +237,40 @@ def checkViews (c : ContractDef) : Option String :=
 /-- Linearity pass stub — see `docs/extensions/linear-types/`. -/
 def checkLinear (_c : ContractDef) : Option String := none
 
+/-- Whether `s` contains a cross-contract `exec`/`read` (including `let` binds). -/
+partial def usesExternalCall : Stmt → Bool
+  | .skip => false
+  | .seq s1 s2 => usesExternalCall s1 || usesExternalCall s2
+  | .externalExec .. => true
+  | .letExecBind .. => true
+  | .externalRead .. => true
+  | .letReadBind .. => true
+  | .reentrancyGuard body => usesExternalCall body
+  | .ifThenElse _ s1 s2 => usesExternalCall s1 || usesExternalCall s2
+  | _ => false
+
+/-- Whether `s` is wrapped in `reentrancyGuard` at its outermost layer. -/
+def hasReentrancyGuard : Stmt → Bool
+  | .reentrancyGuard _ => true
+  | _ => false
+
+/-- Any `@nonreentrant` / `reentrancyGuard` function needs a `Reentrant` error for codegen. -/
+def needsReentrantError (c : ContractDef) : Bool :=
+  c.functions.any fun fn => fn.nonReentrant || hasReentrancyGuard fn.body
+
+/-- Any `exec`/`read` site needs an `ExternalCallFailed` error for codegen. -/
+def needsExternalCallFailedError (c : ContractDef) : Bool :=
+  c.functions.any fun fn => usesExternalCall fn.body
+
+def checkFrameworkErrorCoverage (c : ContractDef) : Option String :=
+  if needsReentrantError c && !errorsContain c "Reentrant" then
+    some s!"{c.name} uses `@nonreentrant` or `reentrancyGuard` but its error type has no \
+`Reentrant` constructor — add one for on-chain revert selectors"
+  else if needsExternalCallFailedError c && !errorsContain c "ExternalCallFailed" then
+    some s!"{c.name} uses `exec`/`read` but its error type has no `ExternalCallFailed` \
+constructor — add one for on-chain revert selectors"
+  else none
+
 /-- Whether `s` contains an `externalExec` node. -/
 partial def usesExternalExec : Stmt → Bool
   | .skip => false
@@ -240,11 +279,6 @@ partial def usesExternalExec : Stmt → Bool
   | .letExecBind .. => true
   | .reentrancyGuard body => usesExternalExec body
   | .ifThenElse _ s1 s2 => usesExternalExec s1 || usesExternalExec s2
-  | _ => false
-
-/-- Whether `s` is wrapped in `reentrancyGuard` at its outermost layer. -/
-def hasReentrancyGuard : Stmt → Bool
-  | .reentrancyGuard _ => true
   | _ => false
 
 /-- Any function using `externalExec` must be `@nonreentrant` with a `reentrancyGuard` body. -/
@@ -296,6 +330,7 @@ def validateAll (c : ContractDef) : Except String ContractDef :=
   else if let some err := checkNoUInt256Arithmetic c then .error err
   else if let some err := checkStorageInitialization c then .error err
   else if let some err := checkArithErrorCoverage c then .error err
+  else if let some err := checkFrameworkErrorCoverage c then .error err
   else if let some err := checkNonReentrant c then .error err
   else if let some err := checkViews c then .error err
   else .ok c

@@ -3,8 +3,9 @@ Lsc.Compile.IR.Stmt.seq
     (Lsc.Compile.IR.Stmt.seq
       (Lsc.Compile.IR.Stmt.seq
         (Lsc.Compile.IR.Stmt.skip)
-        (Lsc.Compile.IR.Stmt.ifRevert
-          (Lsc.Compile.IR.Expr.isZero (Lsc.Compile.IR.Expr.isZero (Lsc.Compile.IR.Expr.sload 1)))))
+        (Lsc.Compile.IR.Stmt.ifRevertSelector
+          (Lsc.Compile.IR.Expr.isZero (Lsc.Compile.IR.Expr.isZero (Lsc.Compile.IR.Expr.sload 1)))
+          2659711688))
       (Lsc.Compile.IR.Stmt.seq
         (Lsc.Compile.IR.Stmt.letBind "lsc_n_old" (Lsc.Compile.IR.Expr.sload 0))
         (Lsc.Compile.IR.Stmt.seq
@@ -12,8 +13,9 @@ Lsc.Compile.IR.Stmt.seq
             "n"
             (Lsc.Compile.IR.Expr.add (Lsc.Compile.IR.Expr.local "lsc_n_old") (Lsc.Compile.IR.Expr.lit 1)))
           (Lsc.Compile.IR.Stmt.seq
-            (Lsc.Compile.IR.Stmt.ifRevert
-              (Lsc.Compile.IR.Expr.lt (Lsc.Compile.IR.Expr.local "n") (Lsc.Compile.IR.Expr.local "lsc_n_old")))
+            (Lsc.Compile.IR.Stmt.ifRevertSelector
+              (Lsc.Compile.IR.Expr.lt (Lsc.Compile.IR.Expr.local "n") (Lsc.Compile.IR.Expr.local "lsc_n_old"))
+              891784466)
             (Lsc.Compile.IR.Stmt.skip)))))
     (Lsc.Compile.IR.Stmt.sstore 0 (Lsc.Compile.IR.Expr.local "n")))
   (Lsc.Compile.IR.Stmt.log1

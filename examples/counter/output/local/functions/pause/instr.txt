@@ -8,27 +8,33 @@
    7  PUSH @pause.cont1
    8  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.JUMP)
    9  @:pause.rev0
-  10  PUSH 0
+  10  PUSH 22074024029326556522905774905834009986403506773305199155738315490266617741312
   11  PUSH 0
-  12  EvmYul.Operation.System (EvmYul.Operation.SOp.REVERT)
-  13  @:pause.cont1
-  14  PUSH 1
-  15  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.SLOAD)
-  16  EvmYul.Operation.CompBit (EvmYul.Operation.CBLOp.ISZERO)
-  17  EvmYul.Operation.CompBit (EvmYul.Operation.CBLOp.ISZERO)
-  18  PUSH @pause.rev2
-  19  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.JUMPI)
-  20  PUSH @pause.cont3
-  21  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.JUMP)
-  22  @:pause.rev2
-  23  PUSH 0
-  24  PUSH 0
-  25  EvmYul.Operation.System (EvmYul.Operation.SOp.REVERT)
-  26  @:pause.cont3
-  27  PUSH 1
-  28  PUSH 1
-  29  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.SSTORE)
-  30  PUSH 0
-  31  PUSH 0
-  32  PUSH 71705685273638215938037424758762834198033328358739847630456454391896748713810
-  33  EvmYul.Operation.Log (EvmYul.Operation.LOp.LOG1)
+  12  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.MSTORE)
+  13  PUSH 0
+  14  PUSH 4
+  15  EvmYul.Operation.System (EvmYul.Operation.SOp.REVERT)
+  16  @:pause.cont1
+  17  PUSH 1
+  18  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.SLOAD)
+  19  EvmYul.Operation.CompBit (EvmYul.Operation.CBLOp.ISZERO)
+  20  EvmYul.Operation.CompBit (EvmYul.Operation.CBLOp.ISZERO)
+  21  PUSH @pause.rev2
+  22  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.JUMPI)
+  23  PUSH @pause.cont3
+  24  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.JUMP)
+  25  @:pause.rev2
+  26  PUSH 71705685258477202318553780095018448788116026491575171282202431318836388036608
+  27  PUSH 0
+  28  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.MSTORE)
+  29  PUSH 0
+  30  PUSH 4
+  31  EvmYul.Operation.System (EvmYul.Operation.SOp.REVERT)
+  32  @:pause.cont3
+  33  PUSH 1
+  34  PUSH 1
+  35  EvmYul.Operation.StackMemFlow (EvmYul.Operation.SMSFOp.SSTORE)
+  36  PUSH 0
+  37  PUSH 0
+  38  PUSH 71705685273638215938037424758762834198033328358739847630456454391896748713810
+  39  EvmYul.Operation.Log (EvmYul.Operation.LOp.LOG1)

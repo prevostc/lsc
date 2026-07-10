@@ -9,10 +9,10 @@ open Lsc Lsc.Compile Lsc.Compile.IR
 namespace Lsc.StaticCallTest
 
 def sampleStaticCall : IR.Stmt :=
-  .staticCall (.local "target") 0 [] 0
+  .staticCall (.local "target") 0 [] 0 0
 
 def sampleReadTxBody : IR.Stmt :=
-  .seq (.staticCall (.sload 1) 0 [] 0) .skip
+  .seq (.staticCall (.sload 1) 0 [] 0 0) .skip
 
 private def yulStmts (s : IR.Stmt) : List EvmYul.Yul.Ast.Stmt :=
   irStmtToYul s

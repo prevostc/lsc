@@ -27,13 +27,22 @@ end StorageLayout
 structure EventLayout where
   topic0 : Ident → Option Nat
 
+structure ErrorLayout where
+  errorSelector : Ident → Option Nat
+
 structure Config where
   storage : StorageLayout
   events : EventLayout := { topic0 := fun _ => none }
+  errors : ErrorLayout := { errorSelector := fun _ => none }
 
 open Lsc.Compile.IR (Expr Stmt)
 
 namespace Lower
+
+def resolveErrorSelector (cfg : Config) (name : Ident) : Except String Nat :=
+  match cfg.errors.errorSelector name with
+  | some sel => .ok sel
+  | none => .error s!"unknown error `{name}` (not declared in contract error type)"
 
 private def resolveSlot (cfg : Config) (field : Ident) : Except String Nat :=
   match cfg.storage.fieldSlot field with
@@ -109,18 +118,74 @@ private partial def lowerStmt (cfg : Config) (s : Lsc.Stmt) : Except String IR.S
     let ir1 ← lowerStmt cfg s1
     let ir2 ← lowerStmt cfg s2
     .ok (.seq ir1 ir2)
-  | .letBind name ⟨Ty.wei, e⟩ =>
-    Wei.lowerLetBind cfg.storage.fieldSlot name e
+  | .letBind name ⟨Ty.wei, e⟩ => do
+    let overflowSel ← resolveErrorSelector cfg "Overflow"
+    Wei.lowerLetBind cfg.storage.fieldSlot name e overflowSel
   | .letBind name ⟨t, e⟩ => do
     let ir ← lowerExpr cfg (t := t) e
     .ok (.letBind name ir)
+  | .storageSet field ⟨Ty.wad, e⟩ => do
+    let slot ← resolveSlot cfg field
+    match e with
+    | Wad.Expr.addChecked (.storageGet f) rhs =>
+      if f == field then do
+        let overflowSel ← resolveErrorSelector cfg "Overflow"
+        Wad.lowerAddCheckedStorage slot rhs cfg.storage.fieldSlot cfg.storage.mapFieldSlot overflowSel
+      else do
+        let ir ← lowerExpr cfg (t := Ty.wad) e
+        .ok (.sstore slot ir)
+    | Wad.Expr.addCheckedNat (.storageGet f) n =>
+      if f == field then do
+        let overflowSel ← resolveErrorSelector cfg "Overflow"
+        .ok (Wad.lowerAddCheckedNatStorage slot n overflowSel)
+      else do
+        let ir ← lowerExpr cfg (t := Ty.wad) e
+        .ok (.sstore slot ir)
+    | Wad.Expr.subChecked (.storageGet f) rhs =>
+      if f == field then do
+        let underflowSel ← resolveErrorSelector cfg "Underflow"
+        Wad.lowerSubCheckedStorage slot rhs cfg.storage.fieldSlot cfg.storage.mapFieldSlot underflowSel
+      else do
+        let ir ← lowerExpr cfg (t := Ty.wad) e
+        .ok (.sstore slot ir)
+    | _ => do
+      let ir ← lowerExpr cfg (t := Ty.wad) e
+      .ok (.sstore slot ir)
+  | .storageSet field ⟨Ty.wei, e⟩ => do
+    let slot ← resolveSlot cfg field
+    match e with
+    | Wei.Expr.addCheckedNat (.storageGet f) n =>
+      if f == field then do
+        let overflowSel ← resolveErrorSelector cfg "Overflow"
+        .ok (Wei.lowerAddCheckedNatStorage slot n field overflowSel (.sstore slot (.local field)))
+      else do
+        let ir ← lowerExpr cfg (t := Ty.wei) e
+        .ok (.sstore slot ir)
+    | Wei.Expr.addChecked (.storageGet f) rhs =>
+      if f == field then do
+        let overflowSel ← resolveErrorSelector cfg "Overflow"
+        Wei.lowerAddCheckedStorage slot rhs cfg.storage.fieldSlot overflowSel
+      else do
+        let ir ← lowerExpr cfg (t := Ty.wei) e
+        .ok (.sstore slot ir)
+    | Wei.Expr.subChecked (.storageGet f) rhs =>
+      if f == field then do
+        let underflowSel ← resolveErrorSelector cfg "Underflow"
+        Wei.lowerSubCheckedStorage slot rhs cfg.storage.fieldSlot underflowSel
+      else do
+        let ir ← lowerExpr cfg (t := Ty.wei) e
+        .ok (.sstore slot ir)
+    | _ => do
+      let ir ← lowerExpr cfg (t := Ty.wei) e
+      .ok (.sstore slot ir)
   | .storageSet field ⟨t, e⟩ => do
     let s ← resolveSlot cfg field
     let ir ← lowerExpr cfg (t := t) e
     .ok (.sstore s ir)
-  | .require e _ => do
+  | .require e errName => do
     let cond ← lowerExpr cfg (t := Ty.bool) e
-    .ok (.ifRevert (.isZero cond))
+    let sel ← resolveErrorSelector cfg errName
+    .ok (.ifRevertSelector (.isZero cond) sel)
   | .emit eventName args =>
     match cfg.events.topic0 eventName with
     | some topic =>
@@ -135,30 +200,37 @@ private partial def lowerStmt (cfg : Config) (s : Lsc.Stmt) : Except String IR.S
         .ok (.log0 topic)
       | _ => .error s!"unsupported emit arity for {eventName}"
     | none => .error s!"unknown event {eventName}"
-  | .revert _ => .ok .revert0
+  | .revert errName => do
+    let sel ← resolveErrorSelector cfg errName
+    .ok (.revertSelector sel)
   | .ret ⟨t, e⟩ => do
     let ir ← lowerExpr cfg (t := t) e
     .ok (.ret ir)
   | .reentrancyGuard body => do
+    let reentrantSel ← resolveErrorSelector cfg "Reentrant"
     let irBody ← lowerStmt cfg body
-    .ok (.seq (.seq (.seq .checkReentrancyLock (.setReentrancyLock true)) irBody)
+    .ok (.seq (.seq (.seq (.checkReentrancyLock reentrantSel) (.setReentrancyLock true)) irBody)
       (.setReentrancyLock false))
   | .externalExec callee selector args => do
     let addr ← lowerCalleeAddr cfg callee
     let argExprs ← lowerExternalArgs cfg args
-    .ok (.externalCall addr selector argExprs false)
+    let failSel ← resolveErrorSelector cfg "ExternalCallFailed"
+    .ok (.externalCall addr selector argExprs false failSel)
   | .letExecBind name _ callee selector args => do
     let addr ← lowerCalleeAddr cfg callee
     let argExprs ← lowerExternalArgs cfg args
-    .ok (.externalCallBind addr selector argExprs name)
+    let failSel ← resolveErrorSelector cfg "ExternalCallFailed"
+    .ok (.externalCallBind addr selector argExprs name failSel)
   | .externalRead callee selector retWords args => do
     let addr ← lowerCalleeAddr cfg callee
     let argExprs ← lowerExternalArgs cfg args
-    .ok (.staticCall addr selector argExprs retWords)
+    let failSel ← resolveErrorSelector cfg "ExternalCallFailed"
+    .ok (.staticCall addr selector argExprs retWords failSel)
   | .letReadBind name _ callee selector _ args => do
     let addr ← lowerCalleeAddr cfg callee
     let argExprs ← lowerExternalArgs cfg args
-    .ok (.staticCallBind addr selector argExprs name)
+    let failSel ← resolveErrorSelector cfg "ExternalCallFailed"
+    .ok (.staticCallBind addr selector argExprs name failSel)
   | .mapSet field key expr => do
     let base ← resolveMapSlot cfg field
     let keyIr ← lowerMapKey cfg key

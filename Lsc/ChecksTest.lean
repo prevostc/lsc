@@ -11,7 +11,7 @@ def counterDef : ContractDef where
     [("number", .wei, some ⟨.wei, Wei.Expr.lit 0⟩),
      ("paused", .bool, some ⟨.bool, CoreExpr.lit Ty.bool (.bool false)⟩),
      ("owner", .address, some ⟨.address, CoreExpr.lit Ty.address (.addr 0)⟩)]
-  errors := ["Paused", "NotOwner", "Overflow"]
+  errors := [("Paused", []), ("NotOwner", []), ("Overflow", [])]
   events := [("Incremented", [("n", .wei)]), ("Paused", []), ("Unpaused", [])]
   functions :=
     [{ name := "increment", kind := .external, params := [], retTy := .unit, body := incrementAst },
@@ -77,7 +77,7 @@ example : Checks.checkSelectorCollisions collisionDef = none := by native_decide
 def overflowOkDef : ContractDef where
   name := "OverflowOk"
   storage := [("n", .wei, none)]
-  errors := ["Overflow"]
+  errors := [("Overflow", [])]
   events := []
   functions :=
     [{ name := "bump", kind := .external, params := [], retTy := .unit,
@@ -117,7 +117,7 @@ def bareExecBody : Stmt :=
 def bareExecDef : ContractDef where
   name := "BareExec"
   storage := [("token", .address, none)]
-  errors := ["Reentrant", "ExternalCallFailed"]
+  errors := [("Reentrant", []), ("ExternalCallFailed", [])]
   events := []
   functions :=
     [{ name := "release", kind := .external, params := [], retTy := .unit, body := bareExecBody,
@@ -126,5 +126,29 @@ def bareExecDef : ContractDef where
 
 example : Checks.checkNonReentrant bareExecDef |>.isSome := by native_decide
 example : ¬ (Checks.validateAll bareExecDef).isOk := by native_decide
+
+def missingReentrantDef : ContractDef where
+  name := "MissingReentrant"
+  storage := []
+  errors := [("ExternalCallFailed", [])]
+  events := []
+  functions :=
+    [{ name := "release", kind := .external, params := [], retTy := .unit,
+       body := Stmt.reentrancyGuard .skip, nonReentrant := true }]
+  interfaces := []
+
+example : Checks.checkFrameworkErrorCoverage missingReentrantDef |>.isSome := by native_decide
+
+def missingExternalCallFailedDef : ContractDef where
+  name := "MissingECF"
+  storage := []
+  errors := [("Reentrant", [])]
+  events := []
+  functions :=
+    [{ name := "release", kind := .external, params := [], retTy := .unit, body := bareExecBody,
+       nonReentrant := true }]
+  interfaces := []
+
+example : Checks.checkFrameworkErrorCoverage missingExternalCallFailedDef |>.isSome := by native_decide
 
 end Lsc.ChecksTest

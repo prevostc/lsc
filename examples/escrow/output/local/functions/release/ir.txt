@@ -4,15 +4,18 @@ Lsc.Compile.IR.Stmt.seq
     (Lsc.Compile.IR.Stmt.letBind "amount" (Lsc.Compile.IR.Expr.calldataWord 36))
     (Lsc.Compile.IR.Stmt.seq
       (Lsc.Compile.IR.Stmt.seq
-        (Lsc.Compile.IR.Stmt.seq (Lsc.Compile.IR.Stmt.checkReentrancyLock) (Lsc.Compile.IR.Stmt.setReentrancyLock true))
+        (Lsc.Compile.IR.Stmt.seq
+          (Lsc.Compile.IR.Stmt.checkReentrancyLock 3980109478)
+          (Lsc.Compile.IR.Stmt.setReentrancyLock true))
         (Lsc.Compile.IR.Stmt.seq
           (Lsc.Compile.IR.Stmt.seq
             (Lsc.Compile.IR.Stmt.seq
               (Lsc.Compile.IR.Stmt.seq
                 (Lsc.Compile.IR.Stmt.skip)
-                (Lsc.Compile.IR.Stmt.ifRevert
+                (Lsc.Compile.IR.Stmt.ifRevertSelector
                   (Lsc.Compile.IR.Expr.isZero
-                    (Lsc.Compile.IR.Expr.eq (Lsc.Compile.IR.Expr.local "caller") (Lsc.Compile.IR.Expr.sload 0)))))
+                    (Lsc.Compile.IR.Expr.eq (Lsc.Compile.IR.Expr.local "caller") (Lsc.Compile.IR.Expr.sload 0)))
+                  818771057))
               (Lsc.Compile.IR.Stmt.seq
                 (Lsc.Compile.IR.Stmt.seq
                   (Lsc.Compile.IR.Stmt.letBind "amount" (Lsc.Compile.IR.Expr.local "amount"))
@@ -28,11 +31,26 @@ Lsc.Compile.IR.Stmt.seq
                       (Lsc.Compile.IR.Expr.local "token")
                       2835717307
                       [Lsc.Compile.IR.Expr.local "recipient", Lsc.Compile.IR.Expr.local "amount"]
-                      "ok"))
-                  (Lsc.Compile.IR.Stmt.ifRevert (Lsc.Compile.IR.Expr.isZero (Lsc.Compile.IR.Expr.local "ok"))))))
-            (Lsc.Compile.IR.Stmt.sstore
-              1
-              (Lsc.Compile.IR.Expr.add (Lsc.Compile.IR.Expr.sload 1) (Lsc.Compile.IR.Expr.local "amount"))))
+                      "ok"
+                      889987313))
+                  (Lsc.Compile.IR.Stmt.ifRevertSelector
+                    (Lsc.Compile.IR.Expr.isZero (Lsc.Compile.IR.Expr.local "ok"))
+                    889987313))))
+            (Lsc.Compile.IR.Stmt.seq
+              (Lsc.Compile.IR.Stmt.letBind "lsc_add_old" (Lsc.Compile.IR.Expr.sload 1))
+              (Lsc.Compile.IR.Stmt.seq
+                (Lsc.Compile.IR.Stmt.letBind
+                  "lsc_add_new"
+                  (Lsc.Compile.IR.Expr.add
+                    (Lsc.Compile.IR.Expr.local "lsc_add_old")
+                    (Lsc.Compile.IR.Expr.local "amount")))
+                (Lsc.Compile.IR.Stmt.seq
+                  (Lsc.Compile.IR.Stmt.ifRevertSelector
+                    (Lsc.Compile.IR.Expr.lt
+                      (Lsc.Compile.IR.Expr.local "lsc_add_new")
+                      (Lsc.Compile.IR.Expr.local "lsc_add_old"))
+                    891784466)
+                  (Lsc.Compile.IR.Stmt.sstore 1 (Lsc.Compile.IR.Expr.local "lsc_add_new"))))))
           (Lsc.Compile.IR.Stmt.log1
             113760171627843794782990335253337969203451784626518736770681975682414705952101
             (Lsc.Compile.IR.Expr.local "amount"))))

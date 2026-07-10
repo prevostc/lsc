@@ -20,6 +20,6 @@ theorem optimizeStmt_deadBind :
     optimizeStmt deadBind = .sstore 0 (.lit 1) := rfl
 
 theorem incrementLetIR_elimUnusedLocals_id :
-    elimUnusedLocals Wei.incrementLetIR = Wei.incrementLetIR := rfl
+    elimUnusedLocals (Wei.incrementLetIR 0) = Wei.incrementLetIR 0 := rfl
 
 end Lsc.Compile.IR.Opt

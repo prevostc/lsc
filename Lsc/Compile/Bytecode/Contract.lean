@@ -1,6 +1,7 @@
 import Lsc.Lang.AST
 import Lsc.Lang.Checks
 import Lsc.Compile.Lower
+import Lsc.Compile.Abi
 import Lsc.Compile.Bytecode.Codegen
 import Lsc.Compile.Bytecode.Encode
 import Lsc.Selectors
@@ -11,6 +12,7 @@ namespace Lsc.Compile
 
 open Lsc.Compile.IR
 open Lsc.Compile.Bytecode
+open Lsc.Compile.Abi
 open EvmYul Operation
 open Instr
 
@@ -20,12 +22,25 @@ def configFromContract (c : ContractDef) (topic0 : Ident → Option Nat) : Confi
     if !c.layoutScalars.isEmpty || !c.layoutMaps.isEmpty then
       { slots := c.layoutScalars, mapSlots := c.layoutMaps }
     else StorageLayout.fromList (c.storage.mapIdx fun i (n, _, _) => (n, i))
-  { storage := storage, events := { topic0 := topic0 } }
+  let errorSelector name :=
+    (c.errors.find? (·.1 == name)).map fun (n, ps) =>
+      (computeErrorSelector n ps).toNat
+  { storage := storage
+  , events := { topic0 := topic0 }
+  , errors := { errorSelector := errorSelector } }
 
 namespace Bytecode.Contract
 
-private def dispatchRevert : List Instr :=
-  [.push 0, .push 0, .op REVERT]
+private def dispatchRevert (cfg : Config) : List Instr :=
+  match cfg.errors.errorSelector "InvalidSelector" with
+  | some sel =>
+    [ .push (paddedSelector sel)
+    , .push 0
+    , .op MSTORE
+    , .push 0
+    , .push 4
+    , .op REVERT ]
+  | none => [.push 0, .push 0, .op REVERT]
 
 /-- Load ABI selector from calldata word 0 (top 4 bytes). Leaves selector on stack. -/
 private def loadSelector : List Instr := [
@@ -35,7 +50,7 @@ private def loadSelector : List Instr := [
   .op SHR
 ]
 
-private def selectorDispatch (fns : List FunctionDef) (ctx : Ctx) : List Instr × Ctx :=
+private def selectorDispatch (cfg : Config) (fns : List FunctionDef) (ctx : Ctx) : List Instr × Ctx :=
   let dispatchCtx : Ctx := { ctx with labelPrefix := "dispatch." }
   let (revLbl, ctx1) := Ctx.freshLabel dispatchCtx "revert"
   let calldataCheck : List Instr := [
@@ -58,7 +73,7 @@ private def selectorDispatch (fns : List FunctionDef) (ctx : Ctx) : List Instr �
     .pushLabel revLbl,
     .op JUMP,
     .jumpDest revLbl
-  ] ++ dispatchRevert
+  ] ++ dispatchRevert cfg
   (instrs, ctx1)
 
 private def emitFunctionBodies (cfg : Config) (fns : List FunctionDef) (ctx : Ctx) :
@@ -96,7 +111,7 @@ def contract (cfg : Config) (c : ContractDef) : Except String (List Instr) := do
   if fns.isEmpty then
     .error "contract has no external functions"
   else do
-    let (dispatch, ctx1) := selectorDispatch fns {}
+    let (dispatch, ctx1) := selectorDispatch cfg fns {}
     let (bodies, _) ← emitFunctionBodies cfg fns ctx1
     .ok (dispatch ++ bodies)
 

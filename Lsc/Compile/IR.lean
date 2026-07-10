@@ -32,30 +32,35 @@ inductive Stmt where
   | sstore : Nat → Expr → Stmt
   /-- `sstore` at a computed slot (mapping entries). -/
   | sstoreDyn : Expr → Expr → Stmt
-  | ifRevert : Expr → Stmt
+  | ifRevertSelector : Expr → Nat → Stmt
   | log0 : Nat → Stmt
   | log1 : Nat → Expr → Stmt
-  | revert0 : Stmt
+  | revertSelector : Nat → Stmt
   /-- `return e;` (`view` functions only, `Lang/AST.lean`'s `Stmt.ret`) — ABI-encodes `e`'s
       single 32-byte-word value into memory and halts with `RETURN (`Bytecode/Codegen.lean`'s
       `.ret` case). Every supported `Ty` (`uint256`/`bool`/`address`/`wei`/`wad`) is exactly one
       32-byte word wide, so no length-prefix/dynamic-ABI encoding is needed. -/
   | ret : Expr → Stmt
   /-- `Stmt.reentrancyGuard` lowering — check the transient lock; revert if already held. -/
-  | checkReentrancyLock : Stmt
+  | checkReentrancyLock (reentrantSelector : Nat) : Stmt
   /-- Set the transient reentrancy lock (`held = true` → `TSTORE 1`, `false` → `TSTORE 0`). -/
   | setReentrancyLock (held : Bool) : Stmt
   /-- A real EVM `CALL` with mandatory success check — no unchecked `CALL` exists in this IR.
       `addr`/`selector`/`args` identify the callee; calldata is ABI-packed into memory at offset 0.
-      `checkBoolReturn` optionally decodes the returned word as `bool` (ERC20 convention). -/
-  | externalCall (addr : Expr) (selector : Nat) (args : List Expr) (checkBoolReturn : Bool) : Stmt
+      `checkBoolReturn` optionally decodes the returned word as `bool` (ERC20 convention).
+      `failSelector` is the custom-error selector emitted on CALL failure or bool-check failure. -/
+  | externalCall (addr : Expr) (selector : Nat) (args : List Expr) (checkBoolReturn : Bool)
+      (failSelector : Nat) : Stmt
   /-- `CALL` that copies the first 32-byte return word into `bindName` (no bool-revert guard). -/
-  | externalCallBind (addr : Expr) (selector : Nat) (args : List Expr) (bindName : Ident) : Stmt
+  | externalCallBind (addr : Expr) (selector : Nat) (args : List Expr) (bindName : Ident)
+      (failSelector : Nat) : Stmt
   /-- A real EVM `STATICCALL` with mandatory success check — read-only; no reentrancy lock.
       `retWords` is the number of 32-byte return words to copy (0 = discard returndata). -/
-  | staticCall (addr : Expr) (selector : Nat) (args : List Expr) (retWords : Nat) : Stmt
+  | staticCall (addr : Expr) (selector : Nat) (args : List Expr) (retWords : Nat)
+      (failSelector : Nat) : Stmt
   /-- `STATICCALL` that binds the first return word into `bindName`. -/
-  | staticCallBind (addr : Expr) (selector : Nat) (args : List Expr) (bindName : Ident) : Stmt
+  | staticCallBind (addr : Expr) (selector : Nat) (args : List Expr) (bindName : Ident)
+      (failSelector : Nat) : Stmt
   deriving Repr, DecidableEq
 
 end Lsc.Compile.IR

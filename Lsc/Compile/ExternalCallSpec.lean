@@ -47,20 +47,20 @@ partial def externalCallSites : IR.Stmt → List ExternalCallSite
   | .letBind _ _ => []
   | .sstore _ _ => []
   | .sstoreDyn _ _ => []
-  | .ifRevert _ => []
+  | .ifRevertSelector _ _ => []
   | .log0 _ => []
   | .log1 _ _ => []
-  | .revert0 => []
+  | .revertSelector _ => []
   | .ret _ => []
-  | .checkReentrancyLock => []
+  | .checkReentrancyLock _ => []
   | .setReentrancyLock _ => []
-  | .externalCall addr selector args checkBoolReturn =>
+  | .externalCall addr selector args checkBoolReturn _ =>
     [ExternalCallSite.call addr selector args checkBoolReturn]
-  | .externalCallBind addr selector args bindName =>
+  | .externalCallBind addr selector args bindName _ =>
     [ExternalCallSite.callBind addr selector args bindName]
-  | .staticCall addr selector args _ =>
+  | .staticCall addr selector args _ _ =>
     [ExternalCallSite.staticCall addr selector args]
-  | .staticCallBind addr selector args bindName =>
+  | .staticCallBind addr selector args bindName _ =>
     [{ kind := .staticBind, addr, selector, args, bindName := some bindName }]
 
 namespace YulSpec
@@ -185,6 +185,14 @@ def emitsLog1 (stmts : List Ast.Stmt) : Bool :=
 /-- **Property:** generated Yul contains a revert path. -/
 def hasRevertPath (stmts : List Ast.Stmt) : Bool :=
   hasCallNamed stmts "revert"
+
+/-- **Property:** generated Yul uses Solidity-style custom-error revert data (`revert(0, 4)`). -/
+def usesCustomErrorRevert (stmts : List Ast.Stmt) : Bool :=
+  stmtsAny stmts fun s =>
+    match s with
+    | .ExprStmtCall (.Call (.inr "revert") [.Lit off, .Lit size]) =>
+        off.toNat == 0 && size.toNat == 4
+    | _ => false
 
 /-- **Property:** generated Yul calls builtin `name` (e.g. `shl`). -/
 def usesBuiltin (stmts : List Ast.Stmt) (name : String) : Bool :=

@@ -50,4 +50,22 @@ def computeEventTopic0 (name : String) (params : List (Ident × Ty)) : Nat :=
   let hash := KeccakEngine.keccak256 (eventSignature name params).toUTF8
   hash.foldl (fun acc b => acc * 256 + b.toNat) 0
 
+/-- Build the canonical ABI custom-error signature, e.g. `"NotOwner()"` or `"Overflow(uint256)"`. -/
+def errorSignature (name : String) (params : List (Ident × Ty)) : String :=
+  let types := String.intercalate "," (params.map fun (_, t) => t.abiStr)
+  s!"{name}({types})"
+
+/-- Compute the 4-byte EVM ABI custom-error selector via Keccak256
+    (`keccak256(errorSignature)[0:4]`, same rule as function selectors). -/
+def computeErrorSelector (name : String) (params : List (Ident × Ty)) : UInt32 :=
+  let sig := errorSignature name params
+  let hash := KeccakEngine.keccak256 sig.toUTF8
+  if h : hash.size >= 4 then
+    let b0 := (hash[0]'(by omega)).toUInt32
+    let b1 := (hash[1]'(by omega)).toUInt32
+    let b2 := (hash[2]'(by omega)).toUInt32
+    let b3 := (hash[3]'(by omega)).toUInt32
+    (b0 <<< 24) ||| (b1 <<< 16) ||| (b2 <<< 8) ||| b3
+  else 0
+
 end Lsc

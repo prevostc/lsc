@@ -42,6 +42,10 @@ private def mapSlotToYul (base : Nat) (key : IR.Expr) : List Ast.Stmt × Ast.Exp
      Ast.Stmt.ExprStmtCall (yulCall "mstore" [yulLit 32, yulLit base])],
     yulCall "keccak256" [yulLit 64, yulLit 0] )
 
+private def revertWithSelector (selector : Nat) : List Ast.Stmt :=
+  [ Ast.Stmt.ExprStmtCall (yulCall "mstore" [yulLit 0, yulLit (paddedSelector selector)])
+  , Ast.Stmt.ExprStmtCall (yulCall "revert" [yulLit 0, yulLit 4]) ]
+
 private def revertEmpty : Ast.Stmt :=
   Ast.Stmt.ExprStmtCall (yulCall "revert" [yulLit 0, yulLit 0])
 
@@ -59,62 +63,61 @@ private def packCalldataToYul (selector : Nat) (args : List IR.Expr) : List Ast.
 private def calldataSize (args : List IR.Expr) : Nat :=
   4 + 32 * args.length
 
-private def checkReentrancyLockToYul : List Ast.Stmt :=
+private def checkReentrancyLockToYul (reentrantSelector : Nat) : List Ast.Stmt :=
   let held := yulCall "tload" [yulLit IR.reentrancyLockSlot]
   [Ast.Stmt.Let ["lsc_lock_held"] (some held),
-   Ast.Stmt.If (yulCall "iszero" [yulCall "iszero" [.Var "lsc_lock_held"]]) [revertEmpty]]
+   Ast.Stmt.If (yulCall "iszero" [yulCall "iszero" [.Var "lsc_lock_held"]]) (revertWithSelector reentrantSelector)]
 
 private def setReentrancyLockToYul (held : Bool) : List Ast.Stmt :=
   [Ast.Stmt.ExprStmtCall (yulCall "tstore" [yulLit IR.reentrancyLockSlot, yulLit (if held then 1 else 0)])]
 
-/-- `IR.externalCall` — `CALL` with mandatory success check (optional ERC20 bool decode). -/
 private def externalCallToYul (addr : IR.Expr) (selector : Nat) (args : List IR.Expr)
-    (checkBoolReturn : Bool) : List Ast.Stmt :=
+    (checkBoolReturn : Bool) (failSelector : Nat) : List Ast.Stmt :=
   let inSize := calldataSize args
   let callExpr := yulCall "call"
     [yulCall "gas" [], irExprToYul addr, yulLit 0, yulLit 0, yulLit inSize, yulLit 0, yulLit 32]
   let successCheck : Ast.Stmt :=
-    Ast.Stmt.If (yulCall "iszero" [.Var "lsc_call_success"]) [revertEmpty]
+    Ast.Stmt.If (yulCall "iszero" [.Var "lsc_call_success"]) (revertWithSelector failSelector)
   let boolReturnCheck : List Ast.Stmt :=
     if checkBoolReturn then
       [Ast.Stmt.If (yulCall "gt" [yulCall "returndatasize" [], yulLit 0])
-        [Ast.Stmt.If (yulCall "iszero" [yulCall "mload" [yulLit 0]]) [revertEmpty]]]
+        [Ast.Stmt.If (yulCall "iszero" [yulCall "mload" [yulLit 0]]) (revertWithSelector failSelector)]]
     else []
   packCalldataToYul selector args ++
     [Ast.Stmt.Let ["lsc_call_success"] (some callExpr), successCheck] ++ boolReturnCheck
 
 /-- `IR.externalCallBind` — `CALL` + bind first return word to `bindName`. -/
 private def externalCallBindToYul (addr : IR.Expr) (selector : Nat) (args : List IR.Expr)
-    (bindName : Ident) : List Ast.Stmt :=
+    (bindName : Ident) (failSelector : Nat) : List Ast.Stmt :=
   let inSize := calldataSize args
   let callExpr := yulCall "call"
     [yulCall "gas" [], irExprToYul addr, yulLit 0, yulLit 0, yulLit inSize, yulLit 0, yulLit 32]
   let successCheck : Ast.Stmt :=
-    Ast.Stmt.If (yulCall "iszero" [.Var "lsc_call_success"]) [revertEmpty]
+    Ast.Stmt.If (yulCall "iszero" [.Var "lsc_call_success"]) (revertWithSelector failSelector)
   packCalldataToYul selector args ++
     [Ast.Stmt.Let ["lsc_call_success"] (some callExpr), successCheck,
      Ast.Stmt.Let [bindName] (some (yulCall "mload" [yulLit 0]))]
 
 /-- `IR.staticCall` — `STATICCALL` with mandatory success check; no reentrancy lock. -/
 private def staticCallToYul (addr : IR.Expr) (selector : Nat) (args : List IR.Expr)
-    (retWords : Nat) : List Ast.Stmt :=
+    (retWords : Nat) (failSelector : Nat) : List Ast.Stmt :=
   let inSize := calldataSize args
   let retSize := 32 * retWords
   let callExpr := yulCall "staticcall"
     [yulCall "gas" [], irExprToYul addr, yulLit 0, yulLit inSize, yulLit 0, yulLit retSize]
   let successCheck : Ast.Stmt :=
-    Ast.Stmt.If (yulCall "iszero" [.Var "lsc_static_success"]) [revertEmpty]
+    Ast.Stmt.If (yulCall "iszero" [.Var "lsc_static_success"]) (revertWithSelector failSelector)
   packCalldataToYul selector args ++
     [Ast.Stmt.Let ["lsc_static_success"] (some callExpr), successCheck]
 
 /-- `IR.staticCallBind` — `STATICCALL` + bind first return word. -/
 private def staticCallBindToYul (addr : IR.Expr) (selector : Nat) (args : List IR.Expr)
-    (bindName : Ident) : List Ast.Stmt :=
+    (bindName : Ident) (failSelector : Nat) : List Ast.Stmt :=
   let inSize := calldataSize args
   let callExpr := yulCall "staticcall"
     [yulCall "gas" [], irExprToYul addr, yulLit 0, yulLit inSize, yulLit 0, yulLit 32]
   let successCheck : Ast.Stmt :=
-    Ast.Stmt.If (yulCall "iszero" [.Var "lsc_static_success"]) [revertEmpty]
+    Ast.Stmt.If (yulCall "iszero" [.Var "lsc_static_success"]) (revertWithSelector failSelector)
   packCalldataToYul selector args ++
     [Ast.Stmt.Let ["lsc_static_success"] (some callExpr), successCheck,
      Ast.Stmt.Let [bindName] (some (yulCall "mload" [yulLit 0]))]
@@ -133,13 +136,13 @@ partial def irStmtToYul (s : IR.Stmt) : List Ast.Stmt :=
     setup ++ [Ast.Stmt.ExprStmtCall (yulCall "sstore" [slotExpr, irExprToYul val])]
   | .sstoreDyn slot val =>
     [Ast.Stmt.ExprStmtCall (yulCall "sstore" [irExprToYul slot, irExprToYul val])]
-  | .ifRevert cond =>
-    [Ast.Stmt.If (irExprToYul cond) [revertEmpty]]
+  | .ifRevertSelector cond selector =>
+    [Ast.Stmt.If (irExprToYul cond) (revertWithSelector selector)]
   | .log0 topic =>
     [Ast.Stmt.ExprStmtCall (yulCall "log1" [yulLit 0, yulLit 0, yulLit topic])]
   | .log1 topic data =>
     [Ast.Stmt.ExprStmtCall (yulCall "log1" [yulLit topic, irExprToYul data])]
-  | .revert0 => [revertEmpty]
+  | .revertSelector selector => revertWithSelector selector
   | .ret (.dynSload (.mapSlot base key)) =>
     let (setup, slotExpr) := mapSlotToYul base key
     setup ++
@@ -148,16 +151,16 @@ partial def irStmtToYul (s : IR.Stmt) : List Ast.Stmt :=
   | .ret e =>
     [Ast.Stmt.ExprStmtCall (yulCall "mstore" [yulLit 0, irExprToYul e]),
      Ast.Stmt.ExprStmtCall (yulCall "return" [yulLit 0, yulLit 32])]
-  | .checkReentrancyLock => checkReentrancyLockToYul
+  | .checkReentrancyLock reentrantSelector => checkReentrancyLockToYul reentrantSelector
   | .setReentrancyLock held => setReentrancyLockToYul held
-  | .externalCall addr selector args checkBoolReturn =>
-    externalCallToYul addr selector args checkBoolReturn
-  | .externalCallBind addr selector args bindName =>
-    externalCallBindToYul addr selector args bindName
-  | .staticCall addr selector args retWords =>
-    staticCallToYul addr selector args retWords
-  | .staticCallBind addr selector args bindName =>
-    staticCallBindToYul addr selector args bindName
+  | .externalCall addr selector args checkBoolReturn failSelector =>
+    externalCallToYul addr selector args checkBoolReturn failSelector
+  | .externalCallBind addr selector args bindName failSelector =>
+    externalCallBindToYul addr selector args bindName failSelector
+  | .staticCall addr selector args retWords failSelector =>
+    staticCallToYul addr selector args retWords failSelector
+  | .staticCallBind addr selector args bindName failSelector =>
+    staticCallBindToYul addr selector args bindName failSelector
 
 private def renderExpr (e : Ast.Expr) : String :=
   match e with

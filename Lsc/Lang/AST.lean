@@ -124,7 +124,7 @@ structure ContractDef where
       `derive_contract` in struct declaration order. Empty for hand-written test defs. -/
   layoutScalars : List (Ident × Nat) := []
   layoutMaps : List (Ident × Nat) := []
-  errors : List Ident
+  errors : List (Ident × List (Ident × Ty))
   events : List (Ident × List (Ident × Ty))
   functions : List FunctionDef
   interfaces : List (Ident × Ident)

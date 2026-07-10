@@ -28,17 +28,17 @@ def freeVarsStmt : Stmt → List Ident
   | .letBind name e => name :: freeVarsExpr e
   | .sstore _ e => freeVarsExpr e
   | .sstoreDyn slot val => freeVarsExpr slot ++ freeVarsExpr val
-  | .ifRevert cond => freeVarsExpr cond
+  | .ifRevertSelector cond _ => freeVarsExpr cond
   | .log0 _ => []
   | .log1 _ data => freeVarsExpr data
-  | .revert0 => []
+  | .revertSelector _ => []
   | .ret e => freeVarsExpr e
-  | .checkReentrancyLock => []
+  | .checkReentrancyLock _ => []
   | .setReentrancyLock _ => []
-  | .externalCall addr _ args _ => freeVarsExpr addr ++ freeVarsExprs args
-  | .externalCallBind addr _ args bindName => freeVarsExpr addr ++ freeVarsExprs args ++ [bindName]
-  | .staticCall addr _ args _ => freeVarsExpr addr ++ freeVarsExprs args
-  | .staticCallBind addr _ args bindName => freeVarsExpr addr ++ freeVarsExprs args ++ [bindName]
+  | .externalCall addr _ args _ _ => freeVarsExpr addr ++ freeVarsExprs args
+  | .externalCallBind addr _ args bindName _ => freeVarsExpr addr ++ freeVarsExprs args ++ [bindName]
+  | .staticCall addr _ args _ _ => freeVarsExpr addr ++ freeVarsExprs args
+  | .staticCallBind addr _ args bindName _ => freeVarsExpr addr ++ freeVarsExprs args ++ [bindName]
 
 /-- Variables whose incoming `lookupLocal` value can affect evaluation. -/
 def readVarsStmt : Stmt → List Ident
@@ -47,16 +47,16 @@ def readVarsStmt : Stmt → List Ident
   | .letBind _name e => freeVarsExpr e
   | .sstore _ e => freeVarsExpr e
   | .sstoreDyn slot val => freeVarsExpr slot ++ freeVarsExpr val
-  | .ifRevert cond => freeVarsExpr cond
+  | .ifRevertSelector cond _ => freeVarsExpr cond
   | .log0 _ => []
   | .log1 _ data => freeVarsExpr data
-  | .revert0 => []
+  | .revertSelector _ => []
   | .ret e => freeVarsExpr e
-  | .checkReentrancyLock => []
+  | .checkReentrancyLock _ => []
   | .setReentrancyLock _ => []
-  | .externalCall addr _ args _ => freeVarsExpr addr ++ freeVarsExprs args
-  | .externalCallBind addr _ args bindName => freeVarsExpr addr ++ freeVarsExprs args ++ [bindName]
-  | .staticCall addr _ args _ => freeVarsExpr addr ++ freeVarsExprs args
-  | .staticCallBind addr _ args bindName => freeVarsExpr addr ++ freeVarsExprs args ++ [bindName]
+  | .externalCall addr _ args _ _ => freeVarsExpr addr ++ freeVarsExprs args
+  | .externalCallBind addr _ args bindName _ => freeVarsExpr addr ++ freeVarsExprs args ++ [bindName]
+  | .staticCall addr _ args _ _ => freeVarsExpr addr ++ freeVarsExprs args
+  | .staticCallBind addr _ args bindName _ => freeVarsExpr addr ++ freeVarsExprs args ++ [bindName]
 
 end Lsc.Compile.IR

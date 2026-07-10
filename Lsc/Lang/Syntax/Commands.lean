@@ -394,11 +394,17 @@ def elabContractDefBody (nameStrStx : TSyntax `Lean.Parser.Term.str) (storageId 
   let (layoutScalarsEntries, layoutMapsEntries) := layoutScalarsTerm
   let layoutScalarsTerm ← `([$layoutScalarsEntries,*])
   let layoutMapsTerm ← `([$layoutMapsEntries,*])
-  -- `errors : List Ident`, derived from `errId`'s constructor names.
+  -- `errors : List (Ident × List (Ident × Ty))`, derived from `errId`'s constructors.
   let errIndVal ← liftTermElabM <| getConstInfoInduct errName
-  let errCtorStrs := errIndVal.ctors.toArray.map (·.getString!)
-  let errCtorLits : Array Term := errCtorStrs.map quote
-  let errorsTerm ← `([$errCtorLits,*])
+  let errorEntries ← errIndVal.ctors.toArray.mapM fun ctorName => liftTermElabM do
+    let cStr := ctorName.getString!
+    let cStrLit := quote cStr
+    match ← Lsc.Deriving.getCtorFieldNameKind ctorName with
+    | none => `(($cStrLit, ([] : List (Lsc.Ident × Lsc.Ty))))
+    | some (_, _) =>
+      throwError "deriving ContractDef: error constructor `{cStr}` has parameters; \
+        error constructors must be nullary"
+  let errorsTerm ← `([$errorEntries,*])
   -- `events : List (Ident × List (Ident × Ty))`, derived from `eventId`'s constructors.
   let eventIndVal ← liftTermElabM <| getConstInfoInduct eventName
   let eventEntries ← eventIndVal.ctors.toArray.mapM fun ctorName => liftTermElabM do

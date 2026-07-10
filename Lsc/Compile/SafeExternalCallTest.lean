@@ -18,18 +18,18 @@ open EvmYul.Operation
 namespace Lsc.SafeExternalCallTest
 
 def sampleCallNoBoolCheck : IR.Stmt :=
-  .externalCall (.local "target") 0 [] false
+  .externalCall (.local "target") 0 [] false 0
 
 def sampleCallWithBoolCheck : IR.Stmt :=
-  .externalCall (.local "target") 0 [] true
+  .externalCall (.local "target") 0 [] true 0
 
 def sampleCallBind : IR.Stmt :=
-  .externalCallBind (.local "token") 0x00000000 [] "ok"
+  .externalCallBind (.local "token") 0x00000000 [] "ok" 0
 
 def sampleGuardedCall : IR.Stmt :=
-  .seq .checkReentrancyLock
+  .seq (.checkReentrancyLock 0)
     (.seq (.setReentrancyLock true)
-      (.seq (.externalCall (.local "target") 0 [] false)
+      (.seq (.externalCall (.local "target") 0 [] false 0)
         (.setReentrancyLock false)))
 
 /-- Minimal Escrow-shaped repro: locals + `token = sload(2)` + IERC20 `transfer`. -/
@@ -38,16 +38,16 @@ def transferBindStmt : IR.Stmt :=
     (.seq (.letBind "amount" (.lit 100))
       (.seq (.letBind "token" (.sload 2))
         (.externalCallBind (.local "token") 0xa9059cbb
-          [.local "recipient", .local "amount"] "ok")))
+          [.local "recipient", .local "amount"] "ok" 0)))
 
 /-- Same repro wrapped in reentrancy lock (Escrow `release` shape without SafeERC20 re-binds). -/
 def guardedTransferBindStmt : IR.Stmt :=
   .seq (.letBind "recipient" (.lit 0xaaa))
     (.seq (.letBind "amount" (.lit 100))
       (.seq (.letBind "token" (.sload 2))
-        (.seq (.seq .checkReentrancyLock (.setReentrancyLock true))
+        (.seq (.seq (.checkReentrancyLock 0) (.setReentrancyLock true))
           (.seq (.externalCallBind (.local "token") 0xa9059cbb
-              [.local "recipient", .local "amount"] "ok")
+              [.local "recipient", .local "amount"] "ok" 0)
             (.setReentrancyLock false)))))
 
 private def yulStmts (s : IR.Stmt) : List EvmYul.Yul.Ast.Stmt :=

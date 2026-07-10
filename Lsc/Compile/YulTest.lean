@@ -12,6 +12,9 @@ def counterConfig : Config where
   events := { topic0 := fun
     | "Incremented" => some incrementedTopic
     | _ => none }
+  errors := { errorSelector := fun
+    | "Overflow" => some 0
+    | _ => none }
 
 namespace Lsc.YulTest
 
