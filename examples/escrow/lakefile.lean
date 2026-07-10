@@ -17,3 +17,7 @@ lean_lib EscrowProofs where
 lean_lib EscrowTheorem where
   srcDir := "test"
   roots := #[`EscrowTheorem]
+
+lean_lib EscrowCompileTest where
+  srcDir := "test"
+  roots := #[`EscrowCompileTest]

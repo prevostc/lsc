@@ -71,6 +71,62 @@ namespace Codegen
 
 private def emitOp (op : Operation .EVM) : List Instr := [.op op]
 
+private def calldataSize (args : List Expr) : Nat :=
+  4 + 32 * args.length
+
+/-- `mstore(0, shl(224, selector))` — leaves stack unchanged. -/
+private def packSelector (ctx : Ctx) (selector : Nat) : List Instr × Ctx :=
+  ( [.push 224, .push selector, .op SHL, .push 0, .op MSTORE]
+  , ctx )
+
+/-- Revert when the stack top is zero (`ISZERO` then `JUMPI`). -/
+private def emitRevertIfZero (ctx : Ctx) : List Instr × Ctx :=
+  let (revLbl, c1) := Ctx.freshLabel ctx "callfail"
+  let (contLbl, c2) := Ctx.freshLabel c1 "callok"
+  ( [ .op ISZERO
+    , .pushLabel revLbl
+    , .op JUMPI
+    , .pushLabel contLbl
+    , .op JUMP
+    , .jumpDest revLbl
+    , .push 0
+    , .push 0
+    , .op REVERT
+    , .jumpDest contLbl ]
+  , c2.popStack 1 )
+
+/-- `mload(0)` — binds the loaded word as `bindName`. -/
+private def emitMloadBind (ctx : Ctx) (bindName : Ident) : List Instr × Ctx :=
+  let c1 := { ctx with stackDepth := ctx.stackDepth + 1 }
+  ( [.push 0, .op MLOAD]
+  , c1.bindLocal bindName )
+
+/-- Legacy ERC20 bool guard: revert when `returndatasize() > 0` and `mload(0) == 0`. -/
+private def emitBoolReturnCheck (ctx : Ctx) : List Instr × Ctx :=
+  let (revLbl, c1) := Ctx.freshLabel ctx "boolfail"
+  let (skipLbl, c2) := Ctx.freshLabel c1 "boolskip"
+  let (contLbl, c3) := Ctx.freshLabel c2 "boolcont"
+  ( [ .op RETURNDATASIZE
+    , .op ISZERO
+    , .pushLabel skipLbl
+    , .op JUMPI
+    , .push 0
+    , .op MLOAD
+    , .op ISZERO
+    , .pushLabel revLbl
+    , .op JUMPI
+    , .pushLabel contLbl
+    , .op JUMP
+    , .jumpDest revLbl
+    , .push 0
+    , .push 0
+    , .op REVERT
+    , .jumpDest skipLbl
+    , .pushLabel contLbl
+    , .op JUMP
+    , .jumpDest contLbl ]
+  , c3 )
+
 private partial def codegenExpr (ctx : Ctx) (e : Expr) : Except String (List Instr × Ctx) :=
   match e with
   | .lit n => .ok ([.push n], { ctx with stackDepth := ctx.stackDepth + 1 })
@@ -83,6 +139,14 @@ private partial def codegenExpr (ctx : Ctx) (e : Expr) : Except String (List Ins
       .ok (emitOp op, { ctx with stackDepth := ctx.stackDepth + 1 })
   | .sload slot =>
     .ok ([.push slot, .op SLOAD], { ctx with stackDepth := ctx.stackDepth + 1 })
+  | .mapSlot base key => do
+    let (keyInstr, c1) ← codegenExpr ctx key
+    let hashInstr : List Instr :=
+      [.push 0, .op MSTORE, .push base, .push 32, .op MSTORE, .push 64, .push 0, .op KECCAK256]
+    .ok (keyInstr ++ hashInstr, { c1 with stackDepth := c1.stackDepth + 1 })
+  | .dynSload slotExpr => do
+    let (slotInstr, c1) ← codegenExpr ctx slotExpr
+    .ok (slotInstr ++ [.op SLOAD], c1)
   | .add a b => do
     let (i1, c1) ← codegenExpr ctx a
     let (i2, c2) ← codegenExpr c1 b
@@ -111,6 +175,80 @@ private partial def codegenExpr (ctx : Ctx) (e : Expr) : Except String (List Ins
     let (i1, c1) ← codegenExpr ctx a
     .ok (i1 ++ emitOp ISZERO, c1)
 
+/-- ABI-pack each argument at `4 + 32*i` after the selector word. -/
+private partial def packArgs (ctx : Ctx) (args : List Expr) (i : Nat) :
+    Except String (List Instr × Ctx) :=
+  match args with
+  | [] => .ok ([], ctx)
+  | arg :: rest => do
+    let (argInstr, _) ← codegenExpr ctx arg
+    let offset := 4 + 32 * i
+    -- `codegenExpr` + `push offset` + `MSTORE` is net stack-neutral; keep `ctx.stackDepth`.
+    let (restInstr, c2) ← packArgs ctx rest (i + 1)
+    .ok (argInstr ++ [.push offset, .op MSTORE] ++ restInstr, c2)
+
+private def packCalldata (ctx : Ctx) (selector : Nat) (args : List Expr) :
+    Except String (List Instr × Ctx) := do
+  let (selInstr, c1) := packSelector ctx selector
+  let (argInstr, c2) ← packArgs c1 args 0
+  .ok (selInstr ++ argInstr, c2)
+
+/-- `CALL(gas(), addr, 0, 0, inSize, 0, outSize)` — leaves success bool on stack. -/
+private def emitCall (ctx : Ctx) (addr : Expr) (inSize outSize : Nat) :
+    Except String (List Instr × Ctx) := do
+  let gasInstr := emitOp GAS
+  let c1 := { ctx with stackDepth := ctx.stackDepth + 1 }
+  let (addrInstr, c2) ← codegenExpr c1 addr
+  let callInstrs : List Instr :=
+    [.push 0, .push 0, .push inSize, .push 0, .push outSize, .op CALL]
+  .ok (gasInstr ++ addrInstr ++ callInstrs, { c2 with stackDepth := c2.stackDepth - 5 })
+
+/-- `STATICCALL(gas(), addr, 0, inSize, 0, outSize)` — leaves success bool on stack. -/
+private def emitStaticCall (ctx : Ctx) (addr : Expr) (inSize outSize : Nat) :
+    Except String (List Instr × Ctx) := do
+  let gasInstr := emitOp GAS
+  let c1 := { ctx with stackDepth := ctx.stackDepth + 1 }
+  let (addrInstr, c2) ← codegenExpr c1 addr
+  let callInstrs : List Instr :=
+    [.push 0, .push inSize, .push 0, .push outSize, .op STATICCALL]
+  .ok (gasInstr ++ addrInstr ++ callInstrs, { c2 with stackDepth := c2.stackDepth - 4 })
+
+private def codegenExternalCall (ctx : Ctx) (addr : Expr) (selector : Nat) (args : List Expr)
+    (checkBoolReturn : Bool) : Except String (List Instr × Ctx) := do
+  let inSize := calldataSize args
+  let (packInstr, c1) ← packCalldata ctx selector args
+  let (callInstr, c2) ← emitCall c1 addr inSize 32
+  let (revInstr, c3) := emitRevertIfZero c2
+  let (boolInstr, c4) := if checkBoolReturn then emitBoolReturnCheck c3 else ([], c3)
+  .ok (packInstr ++ callInstr ++ revInstr ++ boolInstr, c4)
+
+private def codegenExternalCallBind (ctx : Ctx) (addr : Expr) (selector : Nat)
+    (args : List Expr) (bindName : Ident) : Except String (List Instr × Ctx) := do
+  let inSize := calldataSize args
+  let (packInstr, c1) ← packCalldata ctx selector args
+  let (callInstr, c2) ← emitCall c1 addr inSize 32
+  let (revInstr, c3) := emitRevertIfZero c2
+  let (loadInstr, c4) := emitMloadBind c3 bindName
+  .ok (packInstr ++ callInstr ++ revInstr ++ loadInstr, c4)
+
+private def codegenStaticCall (ctx : Ctx) (addr : Expr) (selector : Nat) (args : List Expr)
+    (retWords : Nat) : Except String (List Instr × Ctx) := do
+  let inSize := calldataSize args
+  let outSize := 32 * retWords
+  let (packInstr, c1) ← packCalldata ctx selector args
+  let (callInstr, c2) ← emitStaticCall c1 addr inSize outSize
+  let (revInstr, c3) := emitRevertIfZero c2
+  .ok (packInstr ++ callInstr ++ revInstr, c3)
+
+private def codegenStaticCallBind (ctx : Ctx) (addr : Expr) (selector : Nat)
+    (args : List Expr) (bindName : Ident) : Except String (List Instr × Ctx) := do
+  let inSize := calldataSize args
+  let (packInstr, c1) ← packCalldata ctx selector args
+  let (callInstr, c2) ← emitStaticCall c1 addr inSize 32
+  let (revInstr, c3) := emitRevertIfZero c2
+  let (loadInstr, c4) := emitMloadBind c3 bindName
+  .ok (packInstr ++ callInstr ++ revInstr ++ loadInstr, c4)
+
 private partial def codegenStmt (ctx : Ctx) (s : Stmt) : Except String (List Instr × Ctx) :=
   match s with
   | .skip => .ok ([], ctx)
@@ -126,6 +264,10 @@ private partial def codegenStmt (ctx : Ctx) (s : Stmt) : Except String (List Ins
     -- c1.stackDepth = ctx.stackDepth + 1 (codegenExpr pushed e).
     -- `push slot` adds 1, `SSTORE` pops 2: net from c1 is -1, so net from ctx is 0.
     .ok (instrs ++ [.push slot, .op SSTORE], c1.popStack 1)
+  | .sstoreDyn slotExpr e => do
+    let (valInstr, c1) ← codegenExpr ctx e
+    let (slotInstr, c2) ← codegenExpr c1 slotExpr
+    .ok (valInstr ++ slotInstr ++ [.op SSTORE], c2.popStack 2)
   | .ifRevert cond => do
     let (revLbl, c1) := Ctx.freshLabel ctx "rev"
     let (contLbl, c2) := Ctx.freshLabel c1 "cont"
@@ -190,12 +332,14 @@ private partial def codegenStmt (ctx : Ctx) (s : Stmt) : Except String (List Ins
   | .setReentrancyLock held =>
     let val := if held then 1 else 0
     .ok ([.push val, .push IR.reentrancyLockSlot, .op TSTORE], ctx)
-  | .externalCall .. =>
-    .error "IR.Stmt.externalCall is not yet supported by the raw bytecode codegen backend \
-      — use the Yul backend (Lsc.Compile.Yul) instead"
-  | .staticCall .. =>
-    .error "IR.Stmt.staticCall is not yet supported by the raw bytecode codegen backend \
-      — use the Yul backend (Lsc.Compile.Yul) instead"
+  | .externalCall addr selector args checkBoolReturn =>
+    codegenExternalCall ctx addr selector args checkBoolReturn
+  | .externalCallBind addr selector args bindName =>
+    codegenExternalCallBind ctx addr selector args bindName
+  | .staticCall addr selector args retWords =>
+    codegenStaticCall ctx addr selector args retWords
+  | .staticCallBind addr selector args bindName =>
+    codegenStaticCallBind ctx addr selector args bindName
 
 def stmt (ctx : Ctx) (s : IR.Stmt) : Except String (List Instr × Ctx) :=
   codegenStmt ctx s

@@ -8,6 +8,8 @@ def foldConsts : Expr → Expr
   | .lit n => .lit n
   | .local name => .local name
   | .sload slot => .sload slot
+  | .mapSlot base key => .mapSlot base (foldConsts key)
+  | .dynSload slot => .dynSload (foldConsts slot)
   | .add a b =>
     match foldConsts a, foldConsts b with
     | .lit i, .lit j => .lit (i + j)
@@ -42,6 +44,7 @@ def foldConstsStmt : Stmt → Stmt
   | .seq s1 s2 => .seq (foldConstsStmt s1) (foldConstsStmt s2)
   | .letBind name e => .letBind name (foldConsts e)
   | .sstore slot e => .sstore slot (foldConsts e)
+  | .sstoreDyn slot val => .sstoreDyn (foldConsts slot) (foldConsts val)
   | .ifRevert cond => .ifRevert (foldConsts cond)
   | .log0 topic => .log0 topic
   | .log1 topic data => .log1 topic (foldConsts data)
@@ -51,8 +54,12 @@ def foldConstsStmt : Stmt → Stmt
   | .setReentrancyLock held => .setReentrancyLock held
   | .externalCall addr selector args checkBoolReturn =>
     .externalCall (foldConsts addr) selector (args.map foldConsts) checkBoolReturn
+  | .externalCallBind addr selector args bindName =>
+    .externalCallBind (foldConsts addr) selector (args.map foldConsts) bindName
   | .staticCall addr selector args retWords =>
     .staticCall (foldConsts addr) selector (args.map foldConsts) retWords
+  | .staticCallBind addr selector args bindName =>
+    .staticCallBind (foldConsts addr) selector (args.map foldConsts) bindName
 
 namespace FoldConsts
 
@@ -62,6 +69,12 @@ theorem foldConsts_correct (st : IRState) (e : Expr) :
   | lit n => rfl
   | «local» name => rfl
   | sload slot => rfl
+  | mapSlot _ key ih =>
+    simp only [foldConsts]
+    simp [evalExpr, ih]
+  | dynSload slot ih =>
+    simp only [foldConsts]
+    simp [evalExpr, ih]
   | add a b ih_a ih_b =>
     simp only [foldConsts]
     cases ha : foldConsts a <;> cases hb : foldConsts b
@@ -127,6 +140,8 @@ theorem foldConstsStmt_correct (st : IRState) (s : Stmt) :
     simp only [foldConstsStmt, evalStmt, foldConsts_correct st e]
   | .sstore slot e =>
     simp only [foldConstsStmt, evalStmt, foldConsts_correct st e]
+  | .sstoreDyn slot val =>
+    simp only [foldConstsStmt, evalStmt, foldConsts_correct st slot, foldConsts_correct st val]
   | .ifRevert cond =>
     simp only [foldConstsStmt, evalStmt, foldConsts_correct st cond]
   | .log0 topic => rfl
@@ -137,7 +152,9 @@ theorem foldConstsStmt_correct (st : IRState) (s : Stmt) :
   | .checkReentrancyLock => rfl
   | .setReentrancyLock _ => rfl
   | .externalCall .. => rfl
+  | .externalCallBind .. => rfl
   | .staticCall .. => rfl
+  | .staticCallBind .. => rfl
 
 end FoldConsts
 

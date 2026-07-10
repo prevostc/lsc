@@ -4,6 +4,7 @@ Project-wide TODO list. Items are removed or checked off as they land. Clusters
 that outgrow a checkbox and need real design writeups get their own file in
 this directory (e.g. [`interfaces.md`](interfaces.md)) instead of growing inline here.
 
+- [ ] rework Fixed math to use gas optimized operations/safe order operations? (mulWad)?
 - [ ] evaluate if we should add Optional<Address> to replace Address 0
 - [ ] reentrancy lock is cumbersome, define better
 - [ ] define public/private variables access

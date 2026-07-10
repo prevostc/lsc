@@ -96,6 +96,39 @@ initialize contractFnsExt :
     EnvExtension (NameMap (List (Name × Name × List (String × FieldKind)))) ←
   registerEnvExtension (pure {})
 
+/-- Library modules (`derive_library`): `(fnName, params, stmtSources)` for compile-time inlining.
+`stmtSources` are `lscStmt` pretty-prints (serializable across `.olean` import). -/
+initialize libraryFnsExt :
+    EnvExtension (NameMap (List (Name × List (String × FieldKind) × List String))) ←
+  registerEnvExtension (pure {})
+
+abbrev LibraryFnEntry := Name × List (String × FieldKind) × List String
+
+abbrev LibraryFnEntryList := List LibraryFnEntry
+
+/-- Persisted `derive_library` registry (survives `.olean` import). -/
+def libraryInlineConstName (libNs : Name) : Name := libNs ++ `_libraryInline
+
+def libraryModuleMarkerName (libNs : Name) : Name := libNs ++ `_isLibraryModule
+
+def stmtSyntaxToSource (s : Syntax) : String :=
+  let raw := match s.reprint with
+  | some fmt => Format.pretty fmt
+  | none => toString s
+  raw.trim
+
+/-- Load registered library `tx` bodies for `libNs` from the in-memory extension only. -/
+def getLibraryEntries (libNs : Name) (env : Environment) : List LibraryFnEntry :=
+  (libraryFnsExt.getState env).find? libNs |>.getD []
+
+def isLibraryModule (env : Environment) (libNs : Name) : Bool :=
+  env.contains (libraryModuleMarkerName libNs)
+
+def isRegisteredLibraryFn (env : Environment) (fnName : Name) : Bool :=
+  let libNs := fnName.getPrefix
+  isLibraryModule env libNs &&
+    List.any (getLibraryEntries libNs env) fun (entryFn, _, _) => entryFn == fnName
+
 /-- Buffered `tx` entries: `(fnName, plainNameSyntax, params, stmtsSyntax)`, where `params` is
 the declared `tx name(p1 : ty1, p2 : ty2) { .. }` parameter list (`[]` for the zero-arg shape),
 each resolved to its `FieldKind` already (parsing/resolving the type annotation happens in
@@ -318,7 +351,7 @@ def FieldKind.embedLitStx (k : FieldKind) (paramId : Term) : TermElabM Term :=
   | .address => `(Lsc.CoreExpr.lit Lsc.Ty.address (Lsc.Lit.addr $paramId))
   | .uint256 => `(Lsc.CoreExpr.lit Lsc.Ty.uint256 (Lsc.Lit.u256 $paramId))
   | .wadMap => throwError "internal error: `FieldKind.wadMap` is storage-only (not embeddable as a literal)"
-  | .interface _ => throwError "internal error: interface fields are not embeddable as `tx` parameters"
+  | .interface _ => `(Lsc.CoreExpr.lit Lsc.Ty.address (Lsc.Lit.addr ($paramId).addr))
 
 /-- Wrap a plain term as a `matchDiscr` for splicing into `match $[$discrs],* with …`. -/
 def mkDiscr (t : Term) : TermElabM (TSyntax ``Lean.Parser.Term.matchDiscr) :=

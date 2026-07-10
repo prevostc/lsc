@@ -65,4 +65,15 @@ derive_contract "Counter" CounterStorage CounterError CounterEvent
 #check Counter.bytecodeHex
 #check Counter.deployHex
 
+/-! ## Bytecode
+
+`derive_contract` emits `bytecodeHex` (runtime) and `deployHex` (deploy transaction payload).
+After `lake build Counter`, evaluate the lines below in this file to print the hex strings.
+-/
+
+example : Counter.bytecodeHex.startsWith "0x" ∧ Counter.bytecodeHex.length > 10 := by native_decide
+
+#eval IO.println s!"Counter.bytecodeHex ({Counter.bytecodeHex.length} chars)"
+#eval IO.println Counter.bytecodeHex
+
 end Counter

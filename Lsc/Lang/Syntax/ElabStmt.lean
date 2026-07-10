@@ -1,8 +1,23 @@
 import Lsc.Lang.Syntax.ElabExpr
 
-open Lean Lean.Elab Lean.Elab.Command Lean.Elab.Term Lean.Meta Lean.Parser.Term
+open Lean Lean.Elab Lean.Elab.Command Lean.Elab.Term Lean.Meta Lean.Parser Lean.Parser.Term
 
 namespace Lsc.Syntax
+
+def parseLscStmt (env : Environment) (src : String) : Except String (TSyntax `lscStmt) := do
+  let s ← Parser.runParserCategory env `lscStmt src.trim "<library>"
+  pure ⟨s⟩
+
+/-- Load library entries from the in-memory extension, falling back to the persisted `_libraryInline` def. -/
+unsafe def loadLibraryEntries (libNs : Name) : TermElabM (List Lsc.Deriving.LibraryFnEntry) := do
+  let env ← getEnv
+  let fromExt := Lsc.Deriving.getLibraryEntries libNs env
+  if !fromExt.isEmpty then
+    return fromExt
+  let constName := Lsc.Deriving.libraryInlineConstName libNs
+  unless env.contains constName do
+    return []
+  evalConstCheck (List Lsc.Deriving.LibraryFnEntry) `Lsc.Deriving.LibraryFnEntryList constName
 
 /-- Fallback callee lookup via the callee's elaborated Lean type (survives cross-module import). -/
 def lookupCalleeParamsFromEnv (calleeGlobal : Name) (isRead : Bool) :
@@ -85,6 +100,25 @@ def splitSigmaMethodCall? (n : Name) : Option (String × String) :=
       none
   | none => none
 
+/-- If `n` is `local.method` and `local` is an in-scope param / `let` local. -/
+def splitLocalMethodCall? (n : Name) (locals : List (String × Lsc.Deriving.FieldKind)) :
+    Option (CalleeRef × String) :=
+  let parts := n.toString.splitOn "."
+  if parts.length == 2 then
+    let receiver := parts[0]!
+    let method := parts[1]!
+    if locals.any (·.1 == receiver) then
+      some (.local receiver, method)
+    else
+      none
+  else
+    none
+
+def mkCalleeRefTerm (c : CalleeRef) : TermElabM Term := do
+  match c with
+  | .storageField field => `(Lsc.CalleeRef.storageField $(quote field))
+  | .local name => `(Lsc.CalleeRef.local $(quote name))
+
 def mkSigmaFieldIdent (field : String) : Lean.Ident :=
   mkIdent (Name.str (Name.str Name.anonymous "σ") field)
 
@@ -119,15 +153,21 @@ def lookupInterfaceMethod (iface method : String) : TermElabM Lsc.Interfaces.IER
   | some spec => return spec
   | none => throwError "interface `{iface}` has no method `{method}`"
 
-def elabExternalInterfaceExecStmt (storageName : Name)
+def resolveLocalInterfaceReceiver (localName : String) (locals : List (String × Lsc.Deriving.FieldKind)) :
+    TermElabM String :=
+  match locals.find? (·.1 == localName) with
+  | some (_, .interface iface) => return iface
+  | some _ => throwError "local `{localName}` is not an interface type (expected e.g. `IERC20`)"
+  | none => throwError "unknown local `{localName}` for interface call"
+
+def elabExternalInterfaceExecStmtCore (storageName : Name)
     (locals : List (String × Lsc.Deriving.FieldKind))
-    (receiver : Lean.Ident) (method : Lean.Ident) (argIdents : TSyntaxArray `ident) :
+    (callee : CalleeRef) (iface : String) (method : Lean.Ident) (argIdents : TSyntaxArray `ident) :
     TermElabM (Term × List (String × Lsc.Deriving.FieldKind)) := do
-  let (targetField, iface) ← resolveInterfaceReceiver storageName receiver
   let spec ← lookupInterfaceMethod iface method.getId.toString
   unless spec.mutating do
     throwErrorAt method "`{method.getId}` is read-only on `{iface}` — use \
-`read {receiver.getId}.{method.getId}(..);` instead"
+`read ..{method.getId}(..);` instead"
   let calleeParams := spec.params.filterMap fun (n, t) =>
     tyToFieldKind t |>.map (n, ·)
   if argIdents.size != calleeParams.length then
@@ -138,8 +178,56 @@ expected {calleeParams.length}, got {argIdents.size}"
   let argExprs ← elabExternalArgExprs storageName locals calleeParams argIdents
   let argKinds := calleeParams.map (·.2)
   let argsTerm ← mkExprAnyListTerm argExprs argKinds
-  return (← `(Lsc.Stmt.externalExec $(quote targetField) $(quote selector)
-      $(quote spec.checkBoolReturn) $argsTerm), locals)
+  let calleeTerm ← mkCalleeRefTerm callee
+  return (← `(Lsc.Stmt.externalExec $calleeTerm $(quote selector) $argsTerm), locals)
+
+def elabExternalInterfaceExecStmt (storageName : Name)
+    (locals : List (String × Lsc.Deriving.FieldKind))
+    (receiver : Lean.Ident) (method : Lean.Ident) (argIdents : TSyntaxArray `ident) :
+    TermElabM (Term × List (String × Lsc.Deriving.FieldKind)) := do
+  let (targetField, iface) ← resolveInterfaceReceiver storageName receiver
+  elabExternalInterfaceExecStmtCore storageName locals (.storageField targetField) iface method
+    argIdents
+
+def elabLetExternalInterfaceExecStmt (storageName : Name)
+    (locals : List (String × Lsc.Deriving.FieldKind))
+    (bindName : String) (callee : CalleeRef) (iface : String) (method : Lean.Ident)
+    (argIdents : TSyntaxArray `ident) :
+    TermElabM (Term × List (String × Lsc.Deriving.FieldKind)) := do
+  let spec ← lookupInterfaceMethod iface method.getId.toString
+  unless spec.mutating do
+    throwErrorAt method "`{method.getId}` is read-only on `{iface}` — use \
+`let .. = read ..{method.getId}(..);` instead"
+  match spec.retTy with
+  | none => throwErrorAt method "interface `{iface}.{method.getId}` has no return value to bind"
+  | some retTy =>
+    let calleeParams := spec.params.filterMap fun (n, t) =>
+      tyToFieldKind t |>.map (n, ·)
+    if argIdents.size != calleeParams.length then
+      throwError "argument count mismatch for `{iface}.{method.getId}`: \
+expected {calleeParams.length}, got {argIdents.size}"
+    let paramTys := spec.params.map (·.2)
+    let selector := (Lsc.computeSelectorFromParams method.getId.toString paramTys).toNat
+    let argExprs ← elabExternalArgExprs storageName locals calleeParams argIdents
+    let argKinds := calleeParams.map (·.2)
+    let argsTerm ← mkExprAnyListTerm argExprs argKinds
+    let calleeTerm ← mkCalleeRefTerm callee
+    let retKind ← match retTy with
+      | .bool => pure Lsc.Deriving.FieldKind.bool
+      | .address => pure Lsc.Deriving.FieldKind.address
+      | .uint256 => pure Lsc.Deriving.FieldKind.uint256
+      | .wad => pure Lsc.Deriving.FieldKind.wad
+      | .wei => pure Lsc.Deriving.FieldKind.wei
+      | .unit => throwError "cannot bind unit return from `{iface}.{method.getId}`"
+    let retTyTerm ← match retTy with
+      | .bool => `(Lsc.Ty.bool)
+      | .address => `(Lsc.Ty.address)
+      | .uint256 => `(Lsc.Ty.uint256)
+      | .wei => `(Lsc.Ty.wei)
+      | .wad => `(Lsc.Ty.wad)
+      | .unit => `(Lsc.Ty.unit)
+    return (← `(Lsc.Stmt.letExecBind $(quote bindName) $retTyTerm $calleeTerm
+        $(quote selector) $argsTerm), (bindName, retKind) :: locals)
 
 def elabExternalInterfaceReadStmt (storageName : Name)
     (locals : List (String × Lsc.Deriving.FieldKind))
@@ -160,8 +248,8 @@ expected {calleeParams.length}, got {argIdents.size}"
   let argExprs ← elabExternalArgExprs storageName locals calleeParams argIdents
   let argKinds := calleeParams.map (·.2)
   let argsTerm ← mkExprAnyListTerm argExprs argKinds
-  return (← `(Lsc.Stmt.externalRead $(quote targetField) $(quote selector)
-      $(quote spec.retWords) $argsTerm), locals)
+  let calleeTerm ← mkCalleeRefTerm (.storageField targetField)
+  return (← `(Lsc.Stmt.externalRead $calleeTerm $(quote selector) $(quote spec.retWords) $argsTerm), locals)
 
 def elabExternalExecStmt (storageName : Name) (locals : List (String × Lsc.Deriving.FieldKind))
     (fn : Lean.Ident) (argIdents : TSyntaxArray `ident) :
@@ -177,7 +265,8 @@ def elabExternalExecStmt (storageName : Name) (locals : List (String × Lsc.Deri
   let argExprs ← elabExternalArgExprs storageName locals calleeParams argIdents
   let argKinds := calleeParams.map (·.2)
   let argsTerm ← mkExprAnyListTerm argExprs argKinds
-  return (← `(Lsc.Stmt.externalExec $(quote targetField) $(quote selector) false $argsTerm), locals)
+  let calleeTerm ← mkCalleeRefTerm (.storageField targetField)
+  return (← `(Lsc.Stmt.externalExec $calleeTerm $(quote selector) $argsTerm), locals)
 
 def elabExternalReadStmt (storageName : Name) (locals : List (String × Lsc.Deriving.FieldKind))
     (fn : Lean.Ident) (argIdents : TSyntaxArray `ident) :
@@ -193,8 +282,68 @@ def elabExternalReadStmt (storageName : Name) (locals : List (String × Lsc.Deri
   let argExprs ← elabExternalArgExprs storageName locals calleeParams argIdents
   let argKinds := calleeParams.map (·.2)
   let argsTerm ← mkExprAnyListTerm argExprs argKinds
+  let calleeTerm ← mkCalleeRefTerm (.storageField targetField)
   let retWords : Nat := 0
-  return (← `(Lsc.Stmt.externalRead $(quote targetField) $(quote selector) $(quote retWords) $argsTerm), locals)
+  return (← `(Lsc.Stmt.externalRead $calleeTerm $(quote selector) $(quote retWords) $argsTerm), locals)
+
+private def isLetBindStx (raw : Syntax) : Bool :=
+  raw.getKind == `Lsc.Syntax.lscLetBind
+
+private def isLetExecStx (raw : Syntax) : Bool :=
+  raw.getKind == `Lsc.Syntax.lscLetExec
+
+/-- Extract `(binder, expr)` from an `lscLetBind` syntax node. -/
+private def parseLetBindStx (stx : TSyntax `lscStmt) :
+    TermElabM (TSyntax `ident × TSyntax `lscExpr) := do
+  unless isLetBindStx stx.raw do
+    throwError "internal error: expected `lscLetBind` node"
+  let args := stx.raw.getArgs
+  let binder : TSyntax `ident := ⟨args[1]!⟩
+  let some exprRaw := args.find? (fun a => !a.isMissing && !a.isAtom && a != args[1]!) |
+    throwError "internal error: `lscLetBind` missing expression"
+  return (binder, ⟨exprRaw⟩)
+
+def elabLetBindStmt (storageName : Name) (locals : List (String × Lsc.Deriving.FieldKind))
+    (stx : TSyntax `lscStmt) : TermElabM (Term × List (String × Lsc.Deriving.FieldKind)) := do
+  let (x, e) ← parseLetBindStx stx
+  let (eTerm, k) ← elabLscExpr storageName locals e
+  let tyConst ← k.tyConst
+  let nameStr := x.getId.toString
+  let stmtTerm ← `(Lsc.Stmt.letBind $(quote nameStr) ⟨$tyConst, $eTerm⟩)
+  return (stmtTerm, (nameStr, k) :: locals)
+
+/-- Extract `(binder, fn, args)` from an `lscLetExec` syntax node. -/
+private def parseLetExecStx (stx : TSyntax `lscStmt) :
+    TermElabM (TSyntax `ident × TSyntax `ident × TSyntaxArray `ident) := do
+  unless stx.raw.getKind == `Lsc.Syntax.lscLetExec do
+    throwError "internal error: expected `lscLetExec` node"
+  let args := stx.raw.getArgs
+  let binder : TSyntax `ident := ⟨args[1]!⟩
+  let fn : TSyntax `ident := ⟨args[4]!⟩
+  let argsNode := args[6]!
+  let mut argIdents : TSyntaxArray `ident := #[]
+  for a in argsNode.getArgs do
+    if a.isIdent then argIdents := argIdents.push ⟨a⟩
+  return (binder, fn, argIdents)
+
+def elabLetExecStmt (storageName : Name) (locals : List (String × Lsc.Deriving.FieldKind))
+    (stx : TSyntax `lscStmt) : TermElabM (Term × List (String × Lsc.Deriving.FieldKind)) := do
+  let (x, fn, args) ← parseLetExecStx stx
+  let bindName := x.getId.toString
+  match splitSigmaMethodCall? fn.getId with
+  | some (field, method) =>
+      let (targetField, iface) ← resolveInterfaceReceiver storageName (mkSigmaFieldIdent field)
+      elabLetExternalInterfaceExecStmt storageName locals bindName (.storageField targetField) iface
+        (mkIdent (Name.mkSimple method)) args
+  | none =>
+      match splitLocalMethodCall? fn.getId locals with
+      | some (callee, method) =>
+          let iface ← match callee with
+            | Lsc.CalleeRef.local name => resolveLocalInterfaceReceiver name locals
+            | _ => throwError "internal error: local interface callee expected"
+          elabLetExternalInterfaceExecStmt storageName locals bindName callee iface
+            (mkIdent (Name.mkSimple method)) args
+      | none => throwErrorAt fn "`let .. = exec {fn.getId}(..)` only supports interface calls today"
 
 mutual
 
@@ -298,12 +447,6 @@ partial def elabLscStmt (storageName : Name) (locals : List (String × Lsc.Deriv
           let tyConst ← sk.tyConst
           return (← `(Lsc.Stmt.storageSet $(quote field) ⟨$tyConst, $diffTerm⟩), locals)
       | none => throwErrorAt x "expected `σ.field -=? e;` on the left-hand side, got `{x.getId}`"
-  | `(lscStmt| let $x:ident = $e ;) => do
-      let (eTerm, k) ← elabLscExpr storageName locals e
-      let tyConst ← k.tyConst
-      let nameStr := x.getId.toString
-      let stmtTerm ← `(Lsc.Stmt.letBind $(quote nameStr) ⟨$tyConst, $eTerm⟩)
-      return (stmtTerm, (nameStr, k) :: locals)
   | `(lscStmt| if ( $cond ) { $thn* } else { $els* }) => do
       let (condTerm, k) ← elabLscExpr storageName locals cond
       unless k == .bool do throwError "`if`'s condition must be `Bool`-kind, got `{repr k}`"
@@ -319,19 +462,36 @@ partial def elabLscStmt (storageName : Name) (locals : List (String × Lsc.Deriv
       let (eTerm, k) ← elabLscExpr storageName locals e
       let tyConst ← k.tyConst
       return (← `(Lsc.Stmt.ret ⟨$tyConst, $eTerm⟩), locals)
-  | `(lscStmt| exec $fn:ident ( $args,* ) ;) =>
+  | `(lscStmt| exec $fn:ident ( $args,* ) ;) => do
       match splitSigmaMethodCall? fn.getId with
       | some (field, method) =>
           elabExternalInterfaceExecStmt storageName locals (mkSigmaFieldIdent field)
             (mkIdent (Name.mkSimple method)) args.getElems
-      | none => elabExternalExecStmt storageName locals fn args.getElems
+      | none =>
+          match splitLocalMethodCall? fn.getId locals with
+          | some (callee, method) =>
+              let iface ← match callee with
+                | Lsc.CalleeRef.local name => resolveLocalInterfaceReceiver name locals
+                | _ => throwError "internal error: local interface callee expected"
+              elabExternalInterfaceExecStmtCore storageName locals callee iface
+                (mkIdent (Name.mkSimple method)) args.getElems
+          | none => do
+              if let some result ← tryElabInlineLibraryExec storageName locals fn args.getElems then
+                return result
+              elabExternalExecStmt storageName locals fn args.getElems
   | `(lscStmt| read $fn:ident ( $args,* ) ;) =>
       match splitSigmaMethodCall? fn.getId with
       | some (field, method) =>
           elabExternalInterfaceReadStmt storageName locals (mkSigmaFieldIdent field)
             (mkIdent (Name.mkSimple method)) args.getElems
       | none => elabExternalReadStmt storageName locals fn args.getElems
-  | stx => throwErrorAt stx "Syntax.elabLscStmt: unsupported `lscStmt` node"
+  | stx => do
+    if isLetExecStx stx.raw then
+      elabLetExecStmt storageName locals stx
+    else if isLetBindStx stx.raw then
+      elabLetBindStmt storageName locals stx
+    else
+      throwErrorAt stx "Syntax.elabLscStmt: unsupported `lscStmt` node (kind: {stx.raw.getKind})"
 
 /-- Fold a sequence of `lscStmt` nodes into one chained `Lsc.Stmt` term via
 `Stmt.seq`/`Stmt.skip`, threading `locals` through so a `var` in an earlier statement is
@@ -345,6 +505,63 @@ partial def elabStmtList (storageName : Name) (locals : List (String × Lsc.Deri
     result ← `(Lsc.Stmt.seq $result $t)
     locs := locs'
   return (result, locs)
+
+/-- Inline a registered library `tx` at the call site (re-elaborate body in caller context). -/
+partial def elabInlineLibraryExec (storageName : Name) (locals : List (String × Lsc.Deriving.FieldKind))
+    (fnName : Name) (fn : Lean.Ident) (argIdents : TSyntaxArray `ident) :
+    TermElabM (Term × List (String × Lsc.Deriving.FieldKind)) := do
+  let libNs := fnName.getPrefix
+  let env ← getEnv
+  let entries ← if Lsc.Deriving.getLibraryEntries libNs env |>.isEmpty then
+      unsafe loadLibraryEntries libNs
+    else
+      pure (Lsc.Deriving.getLibraryEntries libNs env)
+  match entries.find? fun (entryFn, _, _) => entryFn == fnName with
+  | some (_, params, stmtSources) =>
+    if argIdents.size != params.length then
+      throwError "argument count mismatch for library `{fn.getId}`: \
+expected {params.length}, got {argIdents.size}"
+    let stmts ← stmtSources.mapM fun src =>
+      match parseLscStmt env src with
+      | .ok stx => pure stx
+      | .error e => throwError "failed to parse library inline stmt `{src}`: {e}"
+    let stmtsArr : Array (TSyntax `lscStmt) := stmts.toArray
+    let mut locs := locals
+    let mut bindPrefix : Term ← `(Lsc.Stmt.skip)
+    for (pname, k) in params do
+      let argIdx := params.findIdx (·.1 == pname)
+      let arg := argIdents[argIdx]!
+      let (eTerm, _) ← elabLscExpr storageName locs (← `(lscExpr| $arg:ident))
+      let tyConst ← k.tyConst
+      locs := (pname, k) :: locs
+      bindPrefix ← `(Lsc.Stmt.seq (Lsc.Stmt.letBind $(quote pname) ⟨$tyConst, $eTerm⟩) $bindPrefix)
+    let (bodyTerm, _) ← elabStmtList storageName locs stmtsArr
+    return (← `(Lsc.Stmt.seq $bindPrefix $bodyTerm), locals)
+  | none =>
+    let env ← getEnv
+    unless (env.find? fnName).isSome do
+      throwErrorAt fn "`{fn.getId}` is not a registered library function"
+    let mut app : Term := mkIdent fnName
+    for arg in argIdents do
+      app ← `( $app $arg:ident )
+    return (app, locals)
+
+partial def tryElabInlineLibraryExec (storageName : Name) (locals : List (String × Lsc.Deriving.FieldKind))
+    (fn : Lean.Ident) (argIdents : TSyntaxArray `ident) :
+    TermElabM (Option (Term × List (String × Lsc.Deriving.FieldKind))) := do
+  let fnName ← Lean.resolveGlobalConstNoOverload fn
+  let libNs := fnName.getPrefix
+  if libNs == Name.anonymous then
+    return none
+  unless Lsc.Deriving.isLibraryModule (← getEnv) fnName.getPrefix do
+    return none
+  let env ← getEnv
+  let hasEntry :=
+    List.any (Lsc.Deriving.getLibraryEntries fnName.getPrefix env) (·.1 == fnName) ||
+      env.contains (Lsc.Deriving.libraryInlineConstName fnName.getPrefix)
+  unless hasEntry do
+    return none
+  return some (← elabInlineLibraryExec storageName locals fnName fn argIdents)
 
 end
 

@@ -216,7 +216,7 @@ self-registration, so `derive_contract_def`'s auto-derived `functions` list stil
 unchanged. Clears the namespace's buffer once flushed, so re-running (e.g. a stray second
 `derive_contract_def` in the same namespace) is a no-op rather than re-emitting duplicate
 `def`s. -/
-def flushContractTxs : CommandElabM Unit := do
+def flushContractTxs (libraryMode : Bool := false) : CommandElabM Unit := do
   let ns ← getCurrNamespace
   let pending := (Lsc.Deriving.contractTxSyntaxExt.getState (← getEnv)).find? ns |>.getD []
   let execCallState := Lsc.Deriving.contractExecCallExt.getState (← getEnv)
@@ -234,7 +234,23 @@ def flushContractTxs : CommandElabM Unit := do
           pure t
       return wrapped
     let isExecTx := (execCallState.find? fnName).getD false
-    let needsPairMDef := isExecTx && stmtsUseModuleExec stmts
+    let needsPairMDef ← liftTermElabM do
+      if !isExecTx then return false
+      for s in stmts do
+        match s with
+        | `(lscStmt| exec $fn:ident ( $_,* ) ;) =>
+          if splitSigmaMethodCall? fn.getId |>.isNone then
+            let fnName := fn.getId
+            let env ← getEnv
+            let libNs := fnName.getPrefix
+            let isLibrary := Lsc.Deriving.isLibraryModule env libNs &&
+              (env.contains (Lsc.Deriving.libraryInlineConstName libNs) ||
+                List.any (Lsc.Deriving.getLibraryEntries libNs env) fun (entryFn, _, _) =>
+                  entryFn == fnName)
+            unless isLibrary do
+              return true
+        | _ => pure ()
+      return false
     -- PairM proof-layer `def` for cross-module `exec` txs (e.g. `exec Token.transfer(..)`).
     -- Interface-only `exec σ.field.method(..)` txs keep Stmt `*Impl` only — proofs use
     -- hand-written `IERC20Spec` lemmas (`releaseHonest`, etc.) instead.
@@ -266,7 +282,7 @@ def flushContractTxs : CommandElabM Unit := do
     -- `exec` txs reserve the plain `nameId` for the PairM proof `def` above, so their Stmt
     -- body always lives in a hidden `nameImpl` def instead (same suffix as the parameterized
     -- non-`exec` case).
-    let stmtDefFnName ← if isExecTx then
+    let stmtDefFnName ← if isExecTx && !libraryMode then
         let implId := mkIdent (Name.mkSimple (nameRaw.getId.toString ++ "Impl"))
         elabCommand (← `(command| def $implId : Lsc.Stmt := $bodyTerm))
         pure (ns ++ Name.mkSimple (nameRaw.getId.toString ++ "Impl"))
@@ -362,6 +378,22 @@ def elabContractDefBody (nameStrStx : TSyntax `Lean.Parser.Term.str) (storageId 
           | some t => pure t
       `(($fnameStr, $tyConst, ($defaultTerm : Option Lsc.ExprAny)))
   let storageTerm ← `([$storageEntries,*])
+  -- Solidity-style slot assignment over all storage fields (scalars + `wadMap` roots).
+  let layoutScalarsTerm ← liftTermElabM do
+    let mut scalars : Array Term := #[]
+    let mut maps : Array Term := #[]
+    let mut slot := 0
+    for (fname, k) in storageFields do
+      let fnameLit := quote fname.toString
+      if k == Lsc.Deriving.FieldKind.wadMap then
+        maps := maps.push (← `(($(fnameLit), $(quote slot))))
+      else
+        scalars := scalars.push (← `(($(fnameLit), $(quote slot))))
+      slot := slot + 1
+    pure (scalars, maps)
+  let (layoutScalarsEntries, layoutMapsEntries) := layoutScalarsTerm
+  let layoutScalarsTerm ← `([$layoutScalarsEntries,*])
+  let layoutMapsTerm ← `([$layoutMapsEntries,*])
   -- `errors : List Ident`, derived from `errId`'s constructor names.
   let errIndVal ← liftTermElabM <| getConstInfoInduct errName
   let errCtorStrs := errIndVal.ctors.toArray.map (·.getString!)
@@ -562,6 +594,8 @@ def elabContractDefBody (nameStrStx : TSyntax `Lean.Parser.Term.str) (storageId 
     def $contractDefId : Lsc.ContractDef where
       name := $nameStr
       storage := $storageTerm
+      layoutScalars := $layoutScalarsTerm
+      layoutMaps := $layoutMapsTerm
       errors := $errorsTerm
       events := $eventsTerm
       functions :=
@@ -614,5 +648,55 @@ sits once, *after* every `tx`/`view` block. -/
 elab "derive_contract " nameStrStx:str storageId:ident errId:ident eventId:ident
     fnsStx:("(" term ")")? topic0Stx:("(" term ")")? ctorStx:("(" term ")")? : command => do
   elabDeriveContract nameStrStx storageId errId eventId fnsStx topic0Stx ctorStx
+
+/-- Quote a `FieldKind` for embedding in a persisted `def`. -/
+def mkFieldKindTerm (k : Lsc.Deriving.FieldKind) : TermElabM Term :=
+  match k with
+  | .wei => `(Lsc.Deriving.FieldKind.wei)
+  | .wad => `(Lsc.Deriving.FieldKind.wad)
+  | .bool => `(Lsc.Deriving.FieldKind.bool)
+  | .address => `(Lsc.Deriving.FieldKind.address)
+  | .uint256 => `(Lsc.Deriving.FieldKind.uint256)
+  | .wadMap => `(Lsc.Deriving.FieldKind.wadMap)
+  | .interface iface => `(Lsc.Deriving.FieldKind.interface $(quote iface))
+
+/-- Emit persisted library inline registry + module marker (survives cross-module import). -/
+def emitLibraryPersistDefs (_ns : Name)
+    (pending : List (Name × Syntax × List (String × Lsc.Deriving.FieldKind) × Array Syntax)) :
+    CommandElabM Unit := do
+  let markerId := mkIdent `_isLibraryModule
+  elabCommand (← `(def $markerId : Bool := true))
+  if pending.isEmpty then return
+  let inlineId := mkIdent `_libraryInline
+  let mut listTerm : Term ← `([])
+  for (fnName, _, params, stmts) in pending do
+    let entry ← liftTermElabM do
+      let fnLit : Term := quote fnName
+      let paramTerms ← params.toArray.mapM fun (pname, k) => do
+        let kt ← mkFieldKindTerm k
+        let pLit : Term := quote pname
+        `(($pLit, $kt))
+      let paramsList ← `([$paramTerms,*])
+      let srcTerms ← stmts.mapM fun s => do
+        let strLit : Term := quote (Lsc.Deriving.stmtSyntaxToSource s)
+        pure strLit
+      let srcList ← `([$srcTerms,*])
+      `(($fnLit, $paramsList, $srcList))
+    listTerm ← `(List.cons $entry $listTerm)
+  let reversedList ← `(List.reverse $listTerm)
+  elabCommand (← `(def $inlineId : Lsc.Deriving.LibraryFnEntryList := $reversedList))
+
+/-- `derive_library` — flush buffered `tx` bodies as inlinable library functions (no bytecode). -/
+elab "derive_library " _nameStrStx:str storageId:ident errId:ident eventId:ident : command => do
+  let ns ← getCurrNamespace
+  let pending := (Lsc.Deriving.contractTxSyntaxExt.getState (← getEnv)).find? ns |>.getD []
+  Lsc.Deriving.elabDeriveContractDsl storageId errId eventId
+  flushContractTxs (libraryMode := true)
+  flushContractViews
+  emitLibraryPersistDefs ns pending
+  modifyEnv fun env =>
+    Lsc.Deriving.libraryFnsExt.modifyState env fun m =>
+      m.insert ns (pending.map fun (fnName, _, params, stmts) =>
+        (fnName, params, stmts.toList.map Lsc.Deriving.stmtSyntaxToSource))
 
 end Lsc.Syntax

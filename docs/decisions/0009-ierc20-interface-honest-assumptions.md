@@ -16,8 +16,10 @@ Introduce two layers:
 
 1. **Interface-typed storage + Solidity-style calls** — declare `token : IERC20` on storage; call
    `exec σ.token.transfer(recipient, amount);` (Lean lexes this as one dotted ident). Callee address
-   comes from the `"token"` slot; `transfer` enables ERC20-style `bool` return checking
-   (`checkBoolReturn` in `IR.externalCall`). Black-box `exec Token.transfer(..)` remains for
+   comes from the `"token"` slot. For spec-faithful ERC20 `transfer` (returns `bool`, no auto-revert),
+   use `let ok = exec token.transfer(..); require (ok) else revert ..` (`IR.externalCallBind`) or the
+   inlined `SafeERC20.safeTransfer(..)` library (`derive_library`). Legacy `checkBoolReturn` on
+   `IR.externalCall` remains for older paths. Black-box `exec Token.transfer(..)` remains for
    co-developed LSC callees. `ContractDef.interfaces` is populated from storage field types.
 
 2. **`HonestERC20` typeclass** (`Lsc/Lib/Interfaces/IERC20.lean`) — bundles the conservation laws

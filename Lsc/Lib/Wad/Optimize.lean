@@ -37,7 +37,7 @@ reach the ~2^128 range (i.e. large enough that `raw_a * raw_b` can exceed
 overflow-safety; today's lowering is exact for the common case where the
 product itself fits in 256 bits (true for any realistic token/interest-rate
 Wad values, e.g. both operands well under 10^39). -/
-partial def lowerExpr (fieldSlot : Ident → Option Nat) (e : Expr) : Except String Compile.IR.Expr :=
+partial def lowerExpr (fieldSlot mapFieldSlot : Ident → Option Nat) (e : Expr) : Except String Compile.IR.Expr :=
   match e with
   | .lit n => .ok (Compile.IR.Expr.lit n)
   | .var name => .ok (Compile.IR.Expr.local name)
@@ -45,32 +45,34 @@ partial def lowerExpr (fieldSlot : Ident → Option Nat) (e : Expr) : Except Str
     match fieldSlot field with
     | some s => .ok (Compile.IR.Expr.sload s)
     | none => .error s!"unknown storage field {field}"
-  | .mapGet field _key =>
-    -- No EVM/Yul lowering for mapping storage yet (see `Lang/AST.lean`'s `Stmt.mapSet`
-    -- docstring / `docs/reference/TOKEN.md`): a real slot layout for a `WadMap` field would
-    -- need keccak256-based dynamic slot addressing (`keccak256(key ++ baseSlot)`, Solidity's
-    -- own mapping layout), not yet implemented in this lowering pipeline.
-    .error s!"unsupported: mapping field {field} has no EVM storage layout yet"
+  | .mapGet field key => do
+    match mapFieldSlot field with
+    | none => .error s!"unknown mapping field {field}"
+    | some base =>
+      let keyIr ← match key with
+        | .caller => .ok (Compile.IR.Expr.local "caller")
+        | .var name => .ok (Compile.IR.Expr.local name)
+      .ok (Compile.IR.Expr.dynSload (Compile.IR.Expr.mapSlot base keyIr))
   | .addChecked a b => do
-    let a' ← lowerExpr fieldSlot a
-    let b' ← lowerExpr fieldSlot b
+    let a' ← lowerExpr fieldSlot mapFieldSlot a
+    let b' ← lowerExpr fieldSlot mapFieldSlot b
     .ok (Compile.IR.Expr.add a' b')
   | .addCheckedNat e n => do
-    let e' ← lowerExpr fieldSlot e
+    let e' ← lowerExpr fieldSlot mapFieldSlot e
     .ok (Compile.IR.Expr.add e' (Compile.IR.Expr.lit n))
   | .subChecked a b => do
-    let a' ← lowerExpr fieldSlot a
-    let b' ← lowerExpr fieldSlot b
+    let a' ← lowerExpr fieldSlot mapFieldSlot a
+    let b' ← lowerExpr fieldSlot mapFieldSlot b
     .ok (Compile.IR.Expr.sub a' b')
   | .mulHalfUpChecked a b => do
-    let a' ← lowerExpr fieldSlot a
-    let b' ← lowerExpr fieldSlot b
+    let a' ← lowerExpr fieldSlot mapFieldSlot a
+    let b' ← lowerExpr fieldSlot mapFieldSlot b
     let product := Compile.IR.Expr.mul a' b'
     let rounded := Compile.IR.Expr.add product (Compile.IR.Expr.lit (WAD / 2))
     .ok (Compile.IR.Expr.div rounded (Compile.IR.Expr.lit WAD))
   | .divDownChecked a b => do
-    let a' ← lowerExpr fieldSlot a
-    let b' ← lowerExpr fieldSlot b
+    let a' ← lowerExpr fieldSlot mapFieldSlot a
+    let b' ← lowerExpr fieldSlot mapFieldSlot b
     let scaledNumer := Compile.IR.Expr.mul a' (Compile.IR.Expr.lit WAD)
     .ok (Compile.IR.Expr.div scaledNumer b')
 

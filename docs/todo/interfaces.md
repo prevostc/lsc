@@ -9,7 +9,9 @@ and [`reference/ESCROW.md`](../reference/ESCROW.md).
 |-------|----------|
 | `token : IERC20` storage fields | `Lsc/Lib/Interfaces/IERC20.lean`, `Lsc/Lang/Derive.lean` |
 | `exec σ.token.transfer(..)` / `read σ.token.balanceOf(..)` | `Lsc/Lang/Syntax.lean` |
-| `checkBoolReturn` for IERC20 `transfer` | `Lsc/Lang/Syntax.lean` → `IR.externalCall` |
+| `let ok = exec token.transfer(..); require (ok) ...` (spec-faithful bool check) | `Lsc/Lang/Syntax/ElabStmt.lean` → `IR.externalCallBind` |
+| `SafeERC20.safeTransfer` library (`derive_library`, inlined at call sites) | `Lsc/Lib/Interfaces/SafeERC20.lean` |
+| Legacy `checkBoolReturn` on `IR.externalCall` (older paths) | `Lsc/Compile/IR.lean` |
 | `ContractDef.interfaces` from storage field types | `Lsc/Deriving.contractInterfacesExt` |
 | `HonestERC20` typeclass + compositional lemmas | `Lsc/Lib/Interfaces/IERC20.lean` |
 | Reference instance | `examples/escrow/test/TokenHonest.lean` |
@@ -38,7 +40,14 @@ structure EscrowStorage where
   token : IERC20 := default
   ...
 
-exec σ.token.transfer(recipient, amount);   -- mutating; bool return check
+-- Spec-faithful IERC20: returns Bool; caller checks explicitly
+let ok = exec token.transfer(recipient, amount);
+require (ok) else revert ExternalCallFailed();
+
+-- Or use the inlined SafeERC20 library (OpenZeppelin-style wrapper)
+exec SafeERC20.safeTransfer(σ.token, recipient, amount);
+
+exec σ.token.transfer(recipient, amount);   -- same callee, local param form inside libraries
 read σ.token.balanceOf(owner);              -- read-only STATICCALL
 exec Token.transfer(recipient, amount);     -- black-box LSC module call (reference tests)
 ```

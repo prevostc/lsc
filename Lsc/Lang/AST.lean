@@ -57,6 +57,12 @@ def Expr : Ty → Type :=
 
 abbrev ExprAny := Sigma Expr
 
+/-- Callee address for `externalExec` / `letExecBind` / `letReadBind`. -/
+inductive CalleeRef where
+  | storageField (field : Ident)
+  | local (name : Ident)
+  deriving Repr, DecidableEq
+
 inductive Stmt
   | skip
   | seq : Stmt → Stmt → Stmt
@@ -78,14 +84,16 @@ inductive Stmt
       `LocalEnv`, short-circuiting any following `.seq` sibling exactly like a real early
       `return`. -/
   | ret : (t : Ty) × Expr t → Stmt
-  /-- `exec Target.fn(args);` — mutating cross-contract call. `targetField` holds the callee
-      contract address (`Token` module → `token` storage field); `selector` is the 4-byte ABI
-      selector; `args` are the already-elaborated argument expressions. -/
-  | externalExec (targetField : Ident) (selector : Nat) (checkBoolReturn : Bool)
+  /-- `exec Target.fn(args);` — mutating cross-contract call; discards return data. -/
+  | externalExec (callee : CalleeRef) (selector : Nat) (args : List ExprAny) : Stmt
+  /-- `let ok = exec Target.fn(args);` — mutating CALL; binds one 32-byte return word. -/
+  | letExecBind (name : Ident) (retTy : Ty) (callee : CalleeRef) (selector : Nat)
       (args : List ExprAny) : Stmt
-  /-- `read Target.fn(args);` — read-only cross-contract call (`STATICCALL`). Same addressing
-      convention as `externalExec`; no reentrancy guard required. -/
-  | externalRead (targetField : Ident) (selector : Nat) (retWords : Nat)
+  /-- `read Target.fn(args);` — read-only cross-contract call (`STATICCALL`); discards return. -/
+  | externalRead (callee : CalleeRef) (selector : Nat) (retWords : Nat)
+      (args : List ExprAny) : Stmt
+  /-- `let x = read Target.fn(args);` — `STATICCALL`; binds one return word. -/
+  | letReadBind (name : Ident) (retTy : Ty) (callee : CalleeRef) (selector : Nat) (retWords : Nat)
       (args : List ExprAny) : Stmt
   /-- `@nonreentrant` desugaring — wraps a `tx` body; lowers to transient-storage lock
       prologue/epilogue (`TLOAD`/`TSTORE`). Visible to `Checks` and proofs. -/
@@ -112,6 +120,10 @@ structure FunctionDef where
 structure ContractDef where
   name : Ident
   storage : List (Ident × Ty × Option ExprAny)
+  /-- Scalar field slots and `wadMap` base slots (Solidity layout), auto-populated by
+      `derive_contract` in struct declaration order. Empty for hand-written test defs. -/
+  layoutScalars : List (Ident × Nat) := []
+  layoutMaps : List (Ident × Nat) := []
   errors : List Ident
   events : List (Ident × List (Ident × Ty))
   functions : List FunctionDef

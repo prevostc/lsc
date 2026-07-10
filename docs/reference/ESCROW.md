@@ -19,16 +19,16 @@ structure EscrowStorage where
   token : IERC20
   deriving Repr, ContractStorage
 
-constructor (token_ : IERC20) {
+constructor (token_ : IERC20, owner_ : Address) {
   σ.token = token_;
+  σ.owner = owner_;
 }
 
 @nonreentrant
 tx release(recipient : Address, amount : EscrowAmount) {
   require (msg.sender == σ.owner) else revert NotOwner();
-  exec σ.token.transfer(recipient, amount);
-  let r = σ.released +? amount;
-  σ.released = r;
+  exec SafeERC20.safeTransfer(σ.token, recipient, amount);
+  σ.released = σ.released +? amount;
   emit Released(amount);
 }
 
@@ -38,11 +38,11 @@ derive_contract "Escrow" EscrowStorage EscrowError EscrowEvent
 Deploy calldata is a single ABI-encoded `address` at word 0 (no selector) — the token contract
 the escrow will call via `release`. `owner` is set automatically to `msg.sender` (the deployer).
 
-`exec σ.token.transfer(..);` is Solidity-style interface syntax: the callee address is loaded from
-the `token : IERC20` storage field (`"token"` slot at codegen), and `transfer` enables ERC20-style
-`bool` return checking at the `CALL` site. The interface is recorded in `ContractDef.interfaces`
-from the storage field type. Unannotated `exec Token.transfer(..)` (module call) stays black box
-for co-developed LSC callees.
+`exec SafeERC20.safeTransfer(σ.token, ..)` is inlined at compile time: one real IERC20 `transfer`
+`CALL` on the `token` storage address, `let ok = mload(0)` binding, and `require (ok)` revert on
+`false` — no separate SafeERC20 contract address in bytecode. The library body re-elaborates in
+the caller's error enum (`ExternalCallFailed`). Unannotated `exec Token.transfer(..)` (module call)
+stays black box for co-developed LSC callees.
 
 ## Trust boundary (what is proved vs assumed)
 

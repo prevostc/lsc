@@ -56,6 +56,8 @@ def evalExpr (st : IRState) (e : Expr) : Nat :=
   | .lit n => n
   | .local name => st.lookupLocal name
   | .sload slot => st.lookupSlot slot
+  | .mapSlot _ _ => 0
+  | .dynSload slot => st.lookupSlot (evalExpr st slot)
   | .add a b => evalExpr st a + evalExpr st b
   | .sub a b => evalExpr st a - evalExpr st b
   | .mul a b => evalExpr st a * evalExpr st b
@@ -99,6 +101,7 @@ def evalStmt (st : IRState) (s : Stmt) : IRState :=
   | .seq s1 s2 => evalStmt (evalStmt st s1) s2
   | .letBind name e => st.setLocal name (evalExpr st e)
   | .sstore slot e => st.setSlot slot (evalExpr st e)
+  | .sstoreDyn slot e => st.setSlot (evalExpr st slot) (evalExpr st e)
   | .ifRevert cond =>
     if evalExpr st cond = 1 then { st with reverted := true } else st
   | .log0 topic => { st with logs := st.logs ++ [(topic, 0)] }
@@ -115,7 +118,9 @@ def evalStmt (st : IRState) (s : Stmt) : IRState :=
   | .checkReentrancyLock => st
   | .setReentrancyLock _ => st
   | .externalCall .. => st
+  | .externalCallBind .. => st
   | .staticCall .. => st
+  | .staticCallBind .. => st
 
 @[simp] theorem evalStmt_skip (st : IRState) : evalStmt st .skip = st := rfl
 
@@ -127,6 +132,9 @@ def evalStmt (st : IRState) (s : Stmt) : IRState :=
 
 @[simp] theorem evalStmt_sstore (st : IRState) (slot : Nat) (e : Expr) :
     evalStmt st (.sstore slot e) = st.setSlot slot (evalExpr st e) := rfl
+
+@[simp] theorem evalStmt_sstoreDyn (st : IRState) (slot val : Expr) :
+    evalStmt st (.sstoreDyn slot val) = st.setSlot (evalExpr st slot) (evalExpr st val) := rfl
 
 @[simp] theorem evalStmt_ifRevert (st : IRState) (cond : Expr) :
     evalStmt st (.ifRevert cond) =

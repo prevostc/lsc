@@ -69,8 +69,10 @@ partial def visitStmt : Stmt → VisitResult
   | .emit _ args => args.foldl (init := {}) fun acc e => acc.merge (visitExpr e.2)
   | .revert _ => {}
   | .ret e => visitExprAny e
-  | .externalExec _ _ _ args => args.foldl (init := {}) fun acc e => acc.merge (visitExpr e.2)
+  | .externalExec _ _ args => args.foldl (init := {}) fun acc e => acc.merge (visitExpr e.2)
+  | .letExecBind _ _ _ _ args => args.foldl (init := {}) fun acc e => acc.merge (visitExpr e.2)
   | .externalRead _ _ _ args => args.foldl (init := {}) fun acc e => acc.merge (visitExpr e.2)
+  | .letReadBind _ _ _ _ _ args => args.foldl (init := {}) fun acc e => acc.merge (visitExpr e.2)
   | .reentrancyGuard body => visitStmt body
 
 def arithErrorsOfContract (c : ContractDef) : List ArithError :=
@@ -235,6 +237,7 @@ partial def usesExternalExec : Stmt → Bool
   | .skip => false
   | .seq s1 s2 => usesExternalExec s1 || usesExternalExec s2
   | .externalExec .. => true
+  | .letExecBind .. => true
   | .reentrancyGuard body => usesExternalExec body
   | .ifThenElse _ s1 s2 => usesExternalExec s1 || usesExternalExec s2
   | _ => false

@@ -27,18 +27,19 @@ def interfaceName : String := "IERC20"
 /-- Metadata for one interface method — used by `exec σ.field.method(..)` elaboration. -/
 structure MethodSpec where
   params : List (String × Ty)
-  checkBoolReturn : Bool := false
+  retTy : Option Ty := none
   retWords : Nat := 0
   mutating : Bool := true
 
 def methodSpecs : List (String × MethodSpec) := [
   ("transfer", {
     params := [("to", .address), ("amount", .wad)]
-    checkBoolReturn := true
+    retTy := some .bool
     mutating := true
   }),
   ("balanceOf", {
     params := [("account", .address)]
+    retTy := some .wad
     retWords := 1
     mutating := false
   }),

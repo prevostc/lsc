@@ -4,8 +4,9 @@ import Lsc.Lib.Interfaces.IERC20
 /-!
 Proof machinery backing `EscrowTheorem.lean` (`docs/reference/ESCROW.md`).
 
-Escrow calls an external token via `exec σ.token.transfer(..);` — proofs characterize
-`releaseHonest` under `[HonestERC20 T]`, not any concrete in-repo token. -/
+Escrow calls an external token via inlined `exec SafeERC20.safeTransfer(σ.token, ..)` (spec-faithful
+`IERC20.transfer` + explicit `require (ok)`) — proofs characterize `releaseHonest` under
+`[HonestERC20 T]`, not any concrete in-repo token. -/
 
 open Lsc Escrow Lsc.Interfaces
 

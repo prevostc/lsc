@@ -7,6 +7,10 @@ inductive Expr where
   | lit : Nat → Expr
   | local : Ident → Expr
   | sload : Nat → Expr
+  /-- `keccak256(abi.encode(key, baseSlot))` — Solidity mapping slot. -/
+  | mapSlot : Nat → Expr → Expr
+  /-- `sload` at a computed slot (mapping entries). -/
+  | dynSload : Expr → Expr
   | add : Expr → Expr → Expr
   | sub : Expr → Expr → Expr
   | mul : Expr → Expr → Expr
@@ -24,6 +28,8 @@ inductive Stmt where
   | seq : Stmt → Stmt → Stmt
   | letBind : Ident → Expr → Stmt
   | sstore : Nat → Expr → Stmt
+  /-- `sstore` at a computed slot (mapping entries). -/
+  | sstoreDyn : Expr → Expr → Stmt
   | ifRevert : Expr → Stmt
   | log0 : Nat → Stmt
   | log1 : Nat → Expr → Stmt
@@ -41,9 +47,13 @@ inductive Stmt where
       `addr`/`selector`/`args` identify the callee; calldata is ABI-packed into memory at offset 0.
       `checkBoolReturn` optionally decodes the returned word as `bool` (ERC20 convention). -/
   | externalCall (addr : Expr) (selector : Nat) (args : List Expr) (checkBoolReturn : Bool) : Stmt
+  /-- `CALL` that copies the first 32-byte return word into `bindName` (no bool-revert guard). -/
+  | externalCallBind (addr : Expr) (selector : Nat) (args : List Expr) (bindName : Ident) : Stmt
   /-- A real EVM `STATICCALL` with mandatory success check — read-only; no reentrancy lock.
       `retWords` is the number of 32-byte return words to copy (0 = discard returndata). -/
   | staticCall (addr : Expr) (selector : Nat) (args : List Expr) (retWords : Nat) : Stmt
+  /-- `STATICCALL` that binds the first return word into `bindName`. -/
+  | staticCallBind (addr : Expr) (selector : Nat) (args : List Expr) (bindName : Ident) : Stmt
   deriving Repr
 
 end Lsc.Compile.IR

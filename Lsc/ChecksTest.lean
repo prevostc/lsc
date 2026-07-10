@@ -112,7 +112,7 @@ example : ¬ (Checks.validateAll overflowMissingDef).isOk := by native_decide
 
 -- `exec` without `@nonreentrant` / `reentrancyGuard` is rejected by `checkNonReentrant`.
 def bareExecBody : Stmt :=
-  Stmt.externalExec "token" 0 false []
+  Stmt.externalExec (.storageField "token") 0 []
 
 def bareExecDef : ContractDef where
   name := "BareExec"

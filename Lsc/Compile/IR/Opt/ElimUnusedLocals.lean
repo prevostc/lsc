@@ -44,6 +44,11 @@ theorem elimUnusedLocals_correct (st : IRState) (s : Stmt) :
                       .seq (.sstore slot e) (elimUnusedLocals s2) from rfl,
                  evalStmt_seq]
       exact ih2 _
+    | sstoreDyn slot val =>
+      simp only [show elimUnusedLocals (.seq (.sstoreDyn slot val) s2) =
+                      .seq (.sstoreDyn slot val) (elimUnusedLocals s2) from rfl,
+                 evalStmt_seq]
+      exact ih2 _
     | ifRevert cond =>
       simp only [show elimUnusedLocals (.seq (.ifRevert cond) s2) =
                       .seq (.ifRevert cond) (elimUnusedLocals s2) from rfl,
@@ -74,9 +79,19 @@ theorem elimUnusedLocals_correct (st : IRState) (s : Stmt) :
                       .seq (.externalCall addr selector args checkBoolReturn) (elimUnusedLocals s2) from rfl,
                  evalStmt_seq]
       exact ih2 _
+    | externalCallBind addr selector args bindName =>
+      simp only [show elimUnusedLocals (.seq (.externalCallBind addr selector args bindName) s2) =
+                      .seq (.externalCallBind addr selector args bindName) (elimUnusedLocals s2) from rfl,
+                 evalStmt_seq]
+      exact ih2 _
     | staticCall addr selector args retWords =>
       simp only [show elimUnusedLocals (.seq (.staticCall addr selector args retWords) s2) =
                       .seq (.staticCall addr selector args retWords) (elimUnusedLocals s2) from rfl,
+                 evalStmt_seq]
+      exact ih2 _
+    | staticCallBind addr selector args bindName =>
+      simp only [show elimUnusedLocals (.seq (.staticCallBind addr selector args bindName) s2) =
+                      .seq (.staticCallBind addr selector args bindName) (elimUnusedLocals s2) from rfl,
                  evalStmt_seq]
       exact ih2 _
     | checkReentrancyLock =>
@@ -90,6 +105,7 @@ theorem elimUnusedLocals_correct (st : IRState) (s : Stmt) :
   | skip => exact observablyEqual_refl _
   | letBind name e => exact observablyEqual_refl _
   | sstore slot e => exact observablyEqual_refl _
+  | sstoreDyn _ _ => exact observablyEqual_refl _
   | ifRevert cond => exact observablyEqual_refl _
   | log0 topic => exact observablyEqual_refl _
   | log1 topic data => exact observablyEqual_refl _
@@ -98,7 +114,9 @@ theorem elimUnusedLocals_correct (st : IRState) (s : Stmt) :
   | checkReentrancyLock => exact observablyEqual_refl _
   | setReentrancyLock held => exact observablyEqual_refl _
   | externalCall addr selector args checkBoolReturn => exact observablyEqual_refl _
+  | externalCallBind addr selector args bindName => exact observablyEqual_refl _
   | staticCall addr selector args retWords => exact observablyEqual_refl _
+  | staticCallBind addr selector args bindName => exact observablyEqual_refl _
 
 end ElimUnusedLocals
 

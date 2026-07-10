@@ -6,8 +6,9 @@ namespace Lsc.Syntax
 
 /-! ## Real cross-contract calls (`exec`/`read`): Stmt nodes + optional PairM proofs -/
 
-/-- Whether `s` is (syntactically) one `exec Target.fn(..);` node. -/
+/-- Whether `s` is (syntactically) one `exec Target.fn(..);` or `let _ = exec ..` node. -/
 def isExecStmt (s : TSyntax `lscStmt) : Bool :=
+  s.raw.getKind == `Lsc.Syntax.lscLetExec ||
   match s with
   | `(lscStmt| exec $_:ident ( $_,* ) ;) => true
   | _ => false

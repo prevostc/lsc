@@ -62,4 +62,15 @@ derive_contract "Interest" InterestStorage InterestError InterestEvent
 #check Interest.bytecodeHex
 #check Interest.deployHex
 
+/-! ## Bytecode
+
+`derive_contract` emits `bytecodeHex` (runtime) and `deployHex` (deploy transaction payload).
+After `lake build Interest`, evaluate the lines below in this file to print the hex strings.
+-/
+
+example : Interest.bytecodeHex.startsWith "0x" ∧ Interest.bytecodeHex.length > 10 := by native_decide
+
+#eval IO.println s!"Interest.bytecodeHex ({Interest.bytecodeHex.length} chars)"
+#eval IO.println Interest.bytecodeHex
+
 end Interest

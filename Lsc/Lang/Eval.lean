@@ -185,7 +185,9 @@ def evalWith
       ContractM.setLocked false
       pure r
   | .externalExec .. => pure (env, none)
+  | .letExecBind .. => pure (env, none)
   | .externalRead .. => pure (env, none)
+  | .letReadBind .. => pure (env, none)
 
 attribute [reducible] evalWith
 

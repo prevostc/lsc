@@ -9,6 +9,7 @@ calldata. `Stmt.reentrancyGuard` lowers to transient-storage lock IR. -/
 
 structure StorageLayout where
   slots : List (Ident × Nat)
+  mapSlots : List (Ident × Nat) := []
   deriving Repr
 
 namespace StorageLayout
@@ -16,7 +17,10 @@ namespace StorageLayout
 def fieldSlot (layout : StorageLayout) (field : Ident) : Option Nat :=
   (layout.slots.find? (·.1 == field)).map (·.2)
 
-def fromList (slots : List (Ident × Nat)) : StorageLayout := ⟨slots⟩
+def mapFieldSlot (layout : StorageLayout) (field : Ident) : Option Nat :=
+  (layout.mapSlots.find? (·.1 == field)).map (·.2)
+
+def fromList (slots : List (Ident × Nat)) : StorageLayout := ⟨slots, []⟩
 
 end StorageLayout
 
@@ -35,6 +39,16 @@ private def resolveSlot (cfg : Config) (field : Ident) : Except String Nat :=
   match cfg.storage.fieldSlot field with
   | some s => .ok s
   | none => .error s!"unknown storage field {field}"
+
+private def resolveMapSlot (cfg : Config) (field : Ident) : Except String Nat :=
+  match cfg.storage.mapFieldSlot field with
+  | some s => .ok s
+  | none => .error s!"unknown mapping field {field}"
+
+private def lowerMapKey (_cfg : Config) (key : Wad.MapKey) : Except String IR.Expr :=
+  match key with
+  | .caller => .ok (.local "caller")
+  | .var name => .ok (.local name)
 
 private partial def lowerCoreExpr (cfg : Config) {t : Ty} (e : CoreExpr t) : Except String IR.Expr :=
   match e with
@@ -63,7 +77,7 @@ private partial def lowerCoreExpr (cfg : Config) {t : Ty} (e : CoreExpr t) : Exc
 private partial def lowerExpr (cfg : Config) {t : Ty} (e : Expr t) : Except String IR.Expr :=
   match t, e with
   | .wei, e => Wei.lowerExpr cfg.storage.fieldSlot e
-  | .wad, e => Wad.lowerExpr cfg.storage.fieldSlot e
+  | .wad, e => Wad.lowerExpr cfg.storage.fieldSlot cfg.storage.mapFieldSlot e
   | .uint256, e => lowerCoreExpr cfg e
   | .bool, e => lowerCoreExpr cfg e
   | .address, e => lowerCoreExpr cfg e
@@ -80,10 +94,13 @@ private def calldataSize (args : List IR.Expr) : Nat :=
 private def lowerExternalArgs (cfg : Config) (args : List ExprAny) : Except String (List IR.Expr) :=
   args.mapM (lowerExprAny cfg)
 
-/-- Address of the callee: `sload` of the `targetField` storage slot. -/
-private def lowerCalleeAddr (cfg : Config) (targetField : Ident) : Except String IR.Expr := do
-  let slot ← resolveSlot cfg targetField
-  .ok (.sload slot)
+/-- Address of the callee: `sload` of a storage field, or a bound local/param. -/
+private def lowerCalleeAddr (cfg : Config) (callee : CalleeRef) : Except String IR.Expr :=
+  match callee with
+  | .storageField targetField => do
+    let slot ← resolveSlot cfg targetField
+    .ok (.sload slot)
+  | .local name => .ok (.local name)
 
 private partial def lowerStmt (cfg : Config) (s : Lsc.Stmt) : Except String IR.Stmt :=
   match s with
@@ -112,7 +129,7 @@ private partial def lowerStmt (cfg : Config) (s : Lsc.Stmt) : Except String IR.S
         let data ← Wei.lowerExpr cfg.storage.fieldSlot dataExpr
         .ok (.log1 topic data)
       | [⟨Ty.wad, dataExpr⟩] => do
-        let data ← Wad.lowerExpr cfg.storage.fieldSlot dataExpr
+        let data ← Wad.lowerExpr cfg.storage.fieldSlot cfg.storage.mapFieldSlot dataExpr
         .ok (.log1 topic data)
       | [] =>
         .ok (.log0 topic)
@@ -126,14 +143,27 @@ private partial def lowerStmt (cfg : Config) (s : Lsc.Stmt) : Except String IR.S
     let irBody ← lowerStmt cfg body
     .ok (.seq (.seq (.seq .checkReentrancyLock (.setReentrancyLock true)) irBody)
       (.setReentrancyLock false))
-  | .externalExec targetField selector checkBoolReturn args => do
-    let addr ← lowerCalleeAddr cfg targetField
+  | .externalExec callee selector args => do
+    let addr ← lowerCalleeAddr cfg callee
     let argExprs ← lowerExternalArgs cfg args
-    .ok (.externalCall addr selector argExprs checkBoolReturn)
-  | .externalRead targetField selector retWords args => do
-    let addr ← lowerCalleeAddr cfg targetField
+    .ok (.externalCall addr selector argExprs false)
+  | .letExecBind name _ callee selector args => do
+    let addr ← lowerCalleeAddr cfg callee
+    let argExprs ← lowerExternalArgs cfg args
+    .ok (.externalCallBind addr selector argExprs name)
+  | .externalRead callee selector retWords args => do
+    let addr ← lowerCalleeAddr cfg callee
     let argExprs ← lowerExternalArgs cfg args
     .ok (.staticCall addr selector argExprs retWords)
+  | .letReadBind name _ callee selector retWords args => do
+    let addr ← lowerCalleeAddr cfg callee
+    let argExprs ← lowerExternalArgs cfg args
+    .ok (.staticCallBind addr selector argExprs name)
+  | .mapSet field key expr => do
+    let base ← resolveMapSlot cfg field
+    let keyIr ← lowerMapKey cfg key
+    let valIr ← Wad.lowerExpr cfg.storage.fieldSlot cfg.storage.mapFieldSlot expr
+    .ok (.sstoreDyn (.mapSlot base keyIr) valIr)
   | _ => .error "unsupported statement in lowering"
 
 def stmt (cfg : Config) (s : Lsc.Stmt) : Except String IR.Stmt :=

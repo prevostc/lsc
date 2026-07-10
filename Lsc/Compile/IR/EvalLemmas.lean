@@ -41,6 +41,10 @@ private theorem not_mem_append_right {xs ys : List Ident} {name : Ident}
   intro hmem
   exact h (List.mem_append_right xs hmem)
 
+private theorem lookupSlot_setLocal (st : IRState) (name : Ident) (v : Nat) (slot : Nat) :
+    (st.setLocal name v).lookupSlot slot = st.lookupSlot slot := by
+  simp [IRState.lookupSlot, IRState.setLocal]
+
 theorem evalExpr_setLocal_unused (st : IRState) (name : Ident) (v : Nat) (e : Expr)
     (h : name ∉ freeVarsExpr e) :
     evalExpr (st.setLocal name v) e = evalExpr st e := by
@@ -50,6 +54,10 @@ theorem evalExpr_setLocal_unused (st : IRState) (name : Ident) (v : Nat) (e : Ex
     have hne : name ≠ other := not_mem_singleton_ne (by simpa [freeVarsExpr] using h)
     simp [evalExpr, IRState.lookupLocal_setLocal_ne st name other v hne]
   | .sload slot => rfl
+  | .mapSlot _ _ => rfl
+  | .dynSload slot =>
+    simp only [freeVarsExpr] at h
+    simp [evalExpr, evalExpr_setLocal_unused st name v slot h, lookupSlot_setLocal]
   | .add a b =>
     simp only [freeVarsExpr, List.mem_append] at h
     simp [evalExpr, evalExpr_setLocal_unused st name v a (not_mem_or_left h),
@@ -93,6 +101,11 @@ theorem evalExpr_obs_agree (st1 st2 : IRState) (e : Expr) (hobs : observablyEqua
   | .lit n => rfl
   | .local name => exact hlookup name (by simp [freeVarsExpr])
   | .sload slot => exact lookupSlot_eq st1 st2 slot hobs.1
+  | .mapSlot _ _ => rfl
+  | .dynSload slot =>
+    simp only [freeVarsExpr] at hlookup ⊢
+    have ih := evalExpr_obs_agree st1 st2 slot hobs (λ id hmem => hlookup id hmem)
+    simp [evalExpr, ih, lookupSlot_eq st1 st2 (evalExpr st2 slot) hobs.1]
   | .add a b =>
     simp only [freeVarsExpr, List.mem_append] at hlookup ⊢
     simp [evalExpr, evalExpr_obs_agree st1 st2 a hobs (λ id hmem => hlookup id (Or.inl hmem)),
@@ -139,6 +152,9 @@ theorem lookupLocal_evalStmt_unused (st : IRState) (s : Stmt) (id : Ident)
   | .sstore slot e =>
     simp only [freeVarsStmt] at h
     simp [evalStmt, lookupLocal_setSlot st slot (evalExpr st e) id]
+  | .sstoreDyn slot e =>
+    simp only [freeVarsStmt, List.mem_append] at h
+    simp [evalStmt, lookupLocal_setSlot st (evalExpr st slot) (evalExpr st e) id]
   | .ifRevert cond =>
     simp only [freeVarsStmt] at h
     by_cases hc : evalExpr st cond = 1 <;> simp [evalStmt, hc, IRState.lookupLocal]
@@ -151,11 +167,13 @@ theorem lookupLocal_evalStmt_unused (st : IRState) (s : Stmt) (id : Ident)
   | .revert0 => simp [evalStmt, IRState.lookupLocal]
   | .ret _ => rfl
   | .externalCall .. => rfl
+  | .externalCallBind .. => rfl
   | .checkReentrancyLock => simp [evalStmt_checkReentrancyLock, IRState.lookupLocal]
   | .setReentrancyLock _ =>
     simp only [freeVarsStmt] at h
     simp [evalStmt_setReentrancyLock, IRState.lookupLocal]
   | .staticCall .. => rfl
+  | .staticCallBind .. => rfl
 
 mutual
   theorem lookupLocal_after_eval_agree (st1 st2 : IRState) (s : Stmt) (hobs : observablyEqual st1 st2)
@@ -208,6 +226,10 @@ mutual
       intro id hmem
       simpa [evalStmt, lookupLocal_setSlot, freeVarsStmt] using
         hlookup id (by simpa [freeVarsStmt] using hmem)
+    | .sstoreDyn slot val =>
+      intro id hmem
+      simpa [evalStmt, lookupLocal_setSlot, freeVarsStmt, List.mem_append] using
+        hlookup id (by simpa [freeVarsStmt, List.mem_append] using hmem)
     | .ifRevert cond =>
       intro id hmem
       have heval := evalExpr_obs_agree st1 st2 cond hobs
@@ -239,6 +261,9 @@ mutual
     | .externalCall .. =>
       intro id hmem
       exact hlookup id hmem
+    | .externalCallBind .. =>
+      intro id hmem
+      exact hlookup id hmem
     | .checkReentrancyLock =>
       intro id hmem
       simp [freeVarsStmt] at hmem
@@ -246,6 +271,9 @@ mutual
       intro id hmem
       simp [freeVarsStmt] at hmem
     | .staticCall .. =>
+      intro id hmem
+      exact hlookup id hmem
+    | .staticCallBind .. =>
       intro id hmem
       exact hlookup id hmem
 
@@ -277,6 +305,17 @@ mutual
         exact hlookup id (by simpa [freeVarsStmt] using hmem)
       have heval := evalExpr_obs_agree st1 st2 e hobs hfree
       simp only [evalStmt_sstore, observablyEqual, heval, IRState.setSlot]
+      exact ⟨by simp [hobs.1], hobs.2.1, hobs.2.2⟩
+    | .sstoreDyn slot val =>
+      have hfreeSlot : ∀ id ∈ freeVarsExpr slot, st1.lookupLocal id = st2.lookupLocal id := by
+        intro id hmem
+        exact hlookup id (by simpa [freeVarsStmt, List.mem_append] using Or.inl hmem)
+      have hfreeVal : ∀ id ∈ freeVarsExpr val, st1.lookupLocal id = st2.lookupLocal id := by
+        intro id hmem
+        exact hlookup id (by simpa [freeVarsStmt, List.mem_append] using Or.inr hmem)
+      have hevalSlot := evalExpr_obs_agree st1 st2 slot hobs hfreeSlot
+      have hevalVal := evalExpr_obs_agree st1 st2 val hobs hfreeVal
+      simp only [evalStmt_sstoreDyn, observablyEqual, hevalSlot, hevalVal, IRState.setSlot]
       exact ⟨by simp [hobs.1], hobs.2.1, hobs.2.2⟩
     | .ifRevert cond =>
       have hfree : ∀ id ∈ freeVarsExpr cond, st1.lookupLocal id = st2.lookupLocal id := by
@@ -310,9 +349,11 @@ mutual
       exact ⟨hobs.1, hobs.2.1, (by simp [evalStmt_revert0, observablyEqual])⟩
     | .ret _ => exact hobs
     | .externalCall .. => exact hobs
+    | .externalCallBind .. => exact hobs
     | .checkReentrancyLock => exact hobs
     | .setReentrancyLock _ => exact hobs
     | .staticCall .. => exact hobs
+    | .staticCallBind .. => exact hobs
 end
 
 mutual
@@ -358,6 +399,9 @@ mutual
     | .sstore slot e =>
       simp only [freeVarsStmt, readVarsStmt] at hfv hnot
       exact absurd hfv hnot
+    | .sstoreDyn _ _ =>
+      simp only [freeVarsStmt, readVarsStmt] at hfv hnot
+      exact absurd hfv hnot
     | .ifRevert cond =>
       simp only [freeVarsStmt, readVarsStmt] at hfv hnot
       exact absurd hfv hnot
@@ -374,6 +418,9 @@ mutual
     | .externalCall .. =>
       simp only [freeVarsStmt, readVarsStmt] at hfv hnot
       exact absurd hfv hnot
+    | .externalCallBind .. =>
+      simp only [freeVarsStmt, readVarsStmt] at hfv hnot
+      exact absurd hfv hnot
     | .checkReentrancyLock =>
       simp only [freeVarsStmt, readVarsStmt] at hfv hnot
       exact absurd hfv hnot
@@ -381,6 +428,9 @@ mutual
       simp only [freeVarsStmt, readVarsStmt] at hfv hnot
       exact absurd hfv hnot
     | .staticCall .. =>
+      simp only [freeVarsStmt, readVarsStmt] at hfv hnot
+      exact absurd hfv hnot
+    | .staticCallBind .. =>
       simp only [freeVarsStmt, readVarsStmt] at hfv hnot
       exact absurd hfv hnot
 
@@ -453,6 +503,10 @@ mutual
       intro id hmem
       simpa [evalStmt, lookupLocal_setSlot, readVarsStmt] using
         hlookup id (by simpa [readVarsStmt] using hmem)
+    | .sstoreDyn slot val =>
+      intro id hmem
+      simpa [evalStmt, lookupLocal_setSlot, readVarsStmt, List.mem_append] using
+        hlookup id (by simpa [readVarsStmt, List.mem_append] using hmem)
     | .ifRevert cond =>
       intro id hmem
       have heval := evalExpr_obs_agree st1 st2 cond hobs
@@ -484,6 +538,9 @@ mutual
     | .externalCall .. =>
       intro id hmem
       exact hlookup id hmem
+    | .externalCallBind .. =>
+      intro id hmem
+      exact hlookup id hmem
     | .checkReentrancyLock =>
       intro id hmem
       simp [readVarsStmt, freeVarsStmt] at hmem
@@ -491,6 +548,9 @@ mutual
       intro id hmem
       simp [readVarsStmt, freeVarsStmt] at hmem
     | .staticCall .. =>
+      intro id hmem
+      exact hlookup id hmem
+    | .staticCallBind .. =>
       intro id hmem
       exact hlookup id hmem
 
@@ -522,6 +582,17 @@ mutual
         exact hlookup id (by simpa [readVarsStmt] using hmem)
       have heval := evalExpr_obs_agree st1 st2 e hobs hfree
       simp only [evalStmt_sstore, observablyEqual, heval, IRState.setSlot]
+      exact ⟨by simp [hobs.1], hobs.2.1, hobs.2.2⟩
+    | .sstoreDyn slot val =>
+      have hfreeSlot : ∀ id ∈ freeVarsExpr slot, st1.lookupLocal id = st2.lookupLocal id := by
+        intro id hmem
+        exact hlookup id (by simpa [readVarsStmt, List.mem_append] using Or.inl hmem)
+      have hfreeVal : ∀ id ∈ freeVarsExpr val, st1.lookupLocal id = st2.lookupLocal id := by
+        intro id hmem
+        exact hlookup id (by simpa [readVarsStmt, List.mem_append] using Or.inr hmem)
+      have hevalSlot := evalExpr_obs_agree st1 st2 slot hobs hfreeSlot
+      have hevalVal := evalExpr_obs_agree st1 st2 val hobs hfreeVal
+      simp only [evalStmt_sstoreDyn, observablyEqual, hevalSlot, hevalVal, IRState.setSlot]
       exact ⟨by simp [hobs.1], hobs.2.1, hobs.2.2⟩
     | .ifRevert cond =>
       have hfree : ∀ id ∈ freeVarsExpr cond, st1.lookupLocal id = st2.lookupLocal id := by
@@ -555,9 +626,11 @@ mutual
       exact ⟨hobs.1, hobs.2.1, (by simp [evalStmt_revert0, observablyEqual])⟩
     | .ret _ => exact hobs
     | .externalCall .. => exact hobs
+    | .externalCallBind .. => exact hobs
     | .checkReentrancyLock => exact hobs
     | .setReentrancyLock _ => exact hobs
     | .staticCall .. => exact hobs
+    | .staticCallBind .. => exact hobs
 end
 
 theorem evalStmt_setLocal_unused_obs (st : IRState) (name : Ident) (v : Nat) (s : Stmt)
@@ -603,6 +676,14 @@ theorem evalStmt_setLocal_unused_obs (st : IRState) (name : Ident) (v : Nat) (s 
     simp only [freeVarsStmt] at h
     simp only [evalStmt_sstore, observablyEqual, evalExpr_setLocal_unused st name v e h, IRState.setSlot]
     trivial
+  | sstoreDyn slot val =>
+    simp only [freeVarsStmt, List.mem_append] at h
+    have hs := not_mem_or_left h
+    have hv := not_mem_or_right h
+    simp only [evalStmt_sstoreDyn, observablyEqual,
+      evalExpr_setLocal_unused st name v slot hs,
+      evalExpr_setLocal_unused st name v val hv, IRState.setSlot]
+    trivial
   | ifRevert cond =>
     simp only [freeVarsStmt] at h
     by_cases hc : evalExpr st cond = 1
@@ -626,6 +707,8 @@ theorem evalStmt_setLocal_unused_obs (st : IRState) (name : Ident) (v : Nat) (s 
     exact observablyEqual_setLocal st name v
   | externalCall addr selector args checkBoolReturn =>
     simpa only [evalStmt] using observablyEqual_setLocal st name v
+  | externalCallBind _ _ _ _ =>
+    simpa only [evalStmt] using observablyEqual_setLocal st name v
   | checkReentrancyLock =>
     simp only [freeVarsStmt] at h
     simp [evalStmt_checkReentrancyLock, observablyEqual, IRState.setLocal]
@@ -633,6 +716,8 @@ theorem evalStmt_setLocal_unused_obs (st : IRState) (name : Ident) (v : Nat) (s 
     simp only [freeVarsStmt] at h
     simp [evalStmt_setReentrancyLock, observablyEqual, IRState.setLocal]
   | staticCall addr selector args retWords =>
+    simpa only [evalStmt] using observablyEqual_setLocal st name v
+  | staticCallBind _ _ _ _ =>
     simpa only [evalStmt] using observablyEqual_setLocal st name v
 
 theorem evalStmt_unused_bind_ignored (st : IRState) (name : Ident) (e : Expr) (rest : Stmt)

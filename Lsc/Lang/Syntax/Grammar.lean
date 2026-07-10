@@ -150,6 +150,9 @@ binding reads naturally either way and this isn't competing with `Eq`/`doReassig
 `TxM.lean`'s old `do`-notation attempts were). -/
 syntax (name := lscLetBind) "let " ident " = " lscExpr ";" : lscStmt
 
+/-- `let ok = exec Target.fn(args);` — bind one return word from a mutating interface call. -/
+syntax (name := lscLetExec) "let " ident " = " "exec " ident " ( " ident,* " ) " ";" : lscStmt
+
 /-- `if (cond) { ... } else { ... }`. -/
 syntax (name := lscIfElse) "if" "(" lscExpr ")" "{" lscStmt* "}" "else" "{" lscStmt* "}" : lscStmt
 

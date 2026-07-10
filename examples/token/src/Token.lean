@@ -55,4 +55,15 @@ tx mint(recipient : Address, amount : Amount) {
 
 derive_contract "Token" TokenStorage TokenError TokenEvent
 
+/-! ## Bytecode
+
+`derive_contract` emits `bytecodeHex` / `deployHex` for the runtime and deploy payloads.
+After `lake build Token`, `#eval` the block below.
+-/
+
+example : Token.bytecodeHex.startsWith "0x" ∧ Token.bytecodeHex.length > 10 := by native_decide
+
+#eval IO.println s!"Token.bytecodeHex ({Token.bytecodeHex.length} chars)"
+#eval IO.println Token.bytecodeHex
+
 end Token

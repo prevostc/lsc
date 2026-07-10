@@ -16,8 +16,11 @@ open Instr
 
 /-- Build compile `Config` from a contract schema (sequential storage slots). -/
 def configFromContract (c : ContractDef) (topic0 : Ident → Option Nat) : Config :=
-  { storage := StorageLayout.fromList (c.storage.mapIdx fun i (n, _, _) => (n, i))
-  , events := { topic0 := topic0 } }
+  let storage :=
+    if !c.layoutScalars.isEmpty || !c.layoutMaps.isEmpty then
+      { slots := c.layoutScalars, mapSlots := c.layoutMaps }
+    else StorageLayout.fromList (c.storage.mapIdx fun i (n, _, _) => (n, i))
+  { storage := storage, events := { topic0 := topic0 } }
 
 namespace Bytecode.Contract
 

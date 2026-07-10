@@ -23,6 +23,8 @@ private def irExprToYul (e : IR.Expr) : Ast.Expr :=
   | .local "caller" => .Call (.inl (Operation.CALLER (τ := .Yul))) []
   | .local name => .Var name
   | .sload slot => yulCall "sload" [yulLit slot]
+  | .mapSlot _ _ => yulLit 0
+  | .dynSload slot => yulCall "sload" [irExprToYul slot]
   | .add a b => yulCall "add" [irExprToYul a, irExprToYul b]
   | .sub a b => yulCall "sub" [irExprToYul a, irExprToYul b]
   | .mul a b => yulCall "mul" [irExprToYul a, irExprToYul b]
@@ -30,6 +32,12 @@ private def irExprToYul (e : IR.Expr) : Ast.Expr :=
   | .lt a b => yulCall "lt" [irExprToYul a, irExprToYul b]
   | .eq a b => yulCall "eq" [irExprToYul a, irExprToYul b]
   | .isZero a => yulCall "iszero" [irExprToYul a]
+
+private def mapSlotToYul (base : Nat) (key : IR.Expr) : List Ast.Stmt × Ast.Expr :=
+  let keyExpr := irExprToYul key
+  ( [Ast.Stmt.ExprStmtCall (yulCall "mstore" [yulLit 0, keyExpr]),
+     Ast.Stmt.ExprStmtCall (yulCall "mstore" [yulLit 32, yulLit base])],
+    yulCall "keccak256" [yulLit 64, yulLit 0] )
 
 private def revertEmpty : Ast.Stmt :=
   Ast.Stmt.ExprStmtCall (yulCall "revert" [yulLit 0, yulLit 0])
@@ -72,6 +80,18 @@ private def externalCallToYul (addr : IR.Expr) (selector : Nat) (args : List IR.
   packCalldataToYul selector args ++
     [Ast.Stmt.Let ["lsc_call_success"] (some callExpr), successCheck] ++ boolReturnCheck
 
+/-- `IR.externalCallBind` — `CALL` + bind first return word to `bindName`. -/
+private def externalCallBindToYul (addr : IR.Expr) (selector : Nat) (args : List IR.Expr)
+    (bindName : Ident) : List Ast.Stmt :=
+  let inSize := calldataSize args
+  let callExpr := yulCall "call"
+    [yulCall "gas" [], irExprToYul addr, yulLit 0, yulLit 0, yulLit inSize, yulLit 0, yulLit 32]
+  let successCheck : Ast.Stmt :=
+    Ast.Stmt.If (yulCall "iszero" [.Var "lsc_call_success"]) [revertEmpty]
+  packCalldataToYul selector args ++
+    [Ast.Stmt.Let ["lsc_call_success"] (some callExpr), successCheck,
+     Ast.Stmt.Let [bindName] (some (yulCall "mload" [yulLit 0]))]
+
 /-- `IR.staticCall` — `STATICCALL` with mandatory success check; no reentrancy lock. -/
 private def staticCallToYul (addr : IR.Expr) (selector : Nat) (args : List IR.Expr)
     (retWords : Nat) : List Ast.Stmt :=
@@ -84,12 +104,32 @@ private def staticCallToYul (addr : IR.Expr) (selector : Nat) (args : List IR.Ex
   packCalldataToYul selector args ++
     [Ast.Stmt.Let ["lsc_static_success"] (some callExpr), successCheck]
 
+/-- `IR.staticCallBind` — `STATICCALL` + bind first return word. -/
+private def staticCallBindToYul (addr : IR.Expr) (selector : Nat) (args : List IR.Expr)
+    (bindName : Ident) : List Ast.Stmt :=
+  let inSize := calldataSize args
+  let callExpr := yulCall "staticcall"
+    [yulCall "gas" [], irExprToYul addr, yulLit 0, yulLit inSize, yulLit 0, yulLit 32]
+  let successCheck : Ast.Stmt :=
+    Ast.Stmt.If (yulCall "iszero" [.Var "lsc_static_success"]) [revertEmpty]
+  packCalldataToYul selector args ++
+    [Ast.Stmt.Let ["lsc_static_success"] (some callExpr), successCheck,
+     Ast.Stmt.Let [bindName] (some (yulCall "mload" [yulLit 0]))]
+
 private partial def irStmtToYul (s : IR.Stmt) : List Ast.Stmt :=
   match s with
   | .skip => []
   | .seq s1 s2 => irStmtToYul s1 ++ irStmtToYul s2
+  | .letBind name (.dynSload (.mapSlot base key)) =>
+    let (setup, slotExpr) := mapSlotToYul base key
+    setup ++ [Ast.Stmt.Let [name] (some (yulCall "sload" [slotExpr]))]
   | .letBind name e => [Ast.Stmt.Let [name] (some (irExprToYul e))]
   | .sstore slot e => [Ast.Stmt.ExprStmtCall (yulCall "sstore" [yulLit slot, irExprToYul e])]
+  | .sstoreDyn (.mapSlot base key) val =>
+    let (setup, slotExpr) := mapSlotToYul base key
+    setup ++ [Ast.Stmt.ExprStmtCall (yulCall "sstore" [slotExpr, irExprToYul val])]
+  | .sstoreDyn slot val =>
+    [Ast.Stmt.ExprStmtCall (yulCall "sstore" [irExprToYul slot, irExprToYul val])]
   | .ifRevert cond =>
     [Ast.Stmt.If (irExprToYul cond) [revertEmpty]]
   | .log0 topic =>
@@ -97,6 +137,11 @@ private partial def irStmtToYul (s : IR.Stmt) : List Ast.Stmt :=
   | .log1 topic data =>
     [Ast.Stmt.ExprStmtCall (yulCall "log1" [yulLit topic, irExprToYul data])]
   | .revert0 => [revertEmpty]
+  | .ret (.dynSload (.mapSlot base key)) =>
+    let (setup, slotExpr) := mapSlotToYul base key
+    setup ++
+      [Ast.Stmt.ExprStmtCall (yulCall "mstore" [yulLit 0, yulCall "sload" [slotExpr]]),
+       Ast.Stmt.ExprStmtCall (yulCall "return" [yulLit 0, yulLit 32])]
   | .ret e =>
     [Ast.Stmt.ExprStmtCall (yulCall "mstore" [yulLit 0, irExprToYul e]),
      Ast.Stmt.ExprStmtCall (yulCall "return" [yulLit 0, yulLit 32])]
@@ -104,8 +149,12 @@ private partial def irStmtToYul (s : IR.Stmt) : List Ast.Stmt :=
   | .setReentrancyLock held => setReentrancyLockToYul held
   | .externalCall addr selector args checkBoolReturn =>
     externalCallToYul addr selector args checkBoolReturn
+  | .externalCallBind addr selector args bindName =>
+    externalCallBindToYul addr selector args bindName
   | .staticCall addr selector args retWords =>
     staticCallToYul addr selector args retWords
+  | .staticCallBind addr selector args bindName =>
+    staticCallBindToYul addr selector args bindName
 
 private def renderExpr (e : Ast.Expr) : String :=
   match e with
