@@ -5,7 +5,7 @@ open Lean Lean.Elab Lean.Elab.Command Lean.Elab.Term Lean.Meta Lean.Parser Lean.
 namespace Lsc.Syntax
 
 def parseLscStmt (env : Environment) (src : String) : Except String (TSyntax `lscStmt) := do
-  let s ← Parser.runParserCategory env `lscStmt src.trim "<library>"
+  let s ← Parser.runParserCategory env `lscStmt src.trimAscii.toString "<library>"
   pure ⟨s⟩
 
 /-- Load library entries from the in-memory extension, falling back to the persisted `_libraryInline` def. -/

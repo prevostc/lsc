@@ -75,7 +75,7 @@ def FieldKind.interfaceName? (k : FieldKind) : Option String :=
 /-- Callee module prefix → caller storage field holding its address (`Token` → `"token"`). -/
 def moduleTargetField (moduleName : Name) : String :=
   let s := moduleName.componentsRev.head!.toString
-  if s.isEmpty then s else s.set 0 s.front.toLower
+  if s.isEmpty then s else s.front.toLower.toString ++ s.drop 1
 
 /-- Each registered function's `(abiName, stmtDefName, params)`:
 * `abiName` is the fully-qualified name `tx` itself was declared under (e.g. `Smoke.deposit`) —
@@ -115,7 +115,7 @@ def stmtSyntaxToSource (s : Syntax) : String :=
   let raw := match s.reprint with
   | some fmt => Format.pretty fmt
   | none => toString s
-  raw.trim
+  raw.trimAscii.toString
 
 /-- Load registered library `tx` bodies for `libNs` from the in-memory extension only. -/
 def getLibraryEntries (libNs : Name) (env : Environment) : List LibraryFnEntry :=
