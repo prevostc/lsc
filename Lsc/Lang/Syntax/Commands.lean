@@ -363,7 +363,7 @@ def elabContractDefBody (nameStrStx : TSyntax `Lean.Parser.Term.str) (storageId 
   let storageFields ← liftTermElabM <| Lsc.Deriving.getStructureFieldKinds storageName
   -- `mapping` fields have no `Ty` at all (storage-only) — excluded from `ContractDef.storage`.
   let scalarStorageFields := storageFields.filter fun (_, k) =>
-    match k with | .mapping _ => false | _ => true
+    match k with | .mapping _ | .mapping2 _ => false | _ => true
   let storageEntries ← scalarStorageFields.mapM fun (fname, k) => do
     liftTermElabM do
       let tyConst ← k.tyConst
@@ -384,7 +384,7 @@ def elabContractDefBody (nameStrStx : TSyntax `Lean.Parser.Term.str) (storageId 
     let mut slot := 0
     for (fname, k) in storageFields do
       let fnameLit := quote fname.toString
-      if match k with | .mapping _ => true | _ => false then
+      if match k with | .mapping _ | .mapping2 _ => true | _ => false then
         maps := maps.push (← `(($(fnameLit), $(quote slot))))
       else
         scalars := scalars.push (← `(($(fnameLit), $(quote slot))))
@@ -665,6 +665,9 @@ def mkFieldKindTerm (k : Lsc.Deriving.FieldKind) : TermElabM Term :=
   | .mapping vk => do
       let vkTerm ← mkFieldKindTerm vk
       `(Lsc.Deriving.FieldKind.mapping $vkTerm)
+  | .mapping2 vk => do
+      let vkTerm ← mkFieldKindTerm vk
+      `(Lsc.Deriving.FieldKind.mapping2 $vkTerm)
   | .interface iface => `(Lsc.Deriving.FieldKind.interface $(quote iface))
 
 /-- Emit persisted library inline registry + module marker (survives cross-module import). -/

@@ -55,6 +55,7 @@ theorem evalExpr_setLocal_unused (st : IRState) (name : Ident) (v : Nat) (e : Ex
     simp [evalExpr, IRState.lookupLocal_setLocal_ne st name other v hne]
   | .sload slot => rfl
   | .mapSlot _ _ => rfl
+  | .mapSlot2 _ _ _ => rfl
   | .dynSload slot =>
     simp only [freeVarsExpr] at h
     simp [evalExpr, evalExpr_setLocal_unused st name v slot h, lookupSlot_setLocal]
@@ -103,6 +104,7 @@ theorem evalExpr_obs_agree (st1 st2 : IRState) (e : Expr) (hobs : observablyEqua
   | .local name => exact hlookup name (by simp [freeVarsExpr])
   | .sload slot => exact lookupSlot_eq st1 st2 slot hobs.1
   | .mapSlot _ _ => rfl
+  | .mapSlot2 _ _ _ => rfl
   | .dynSload slot =>
     simp only [freeVarsExpr] at hlookup ⊢
     have ih := evalExpr_obs_agree st1 st2 slot hobs (λ id hmem => hlookup id hmem)

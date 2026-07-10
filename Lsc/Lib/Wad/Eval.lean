@@ -152,6 +152,16 @@ theorem mulHalfUpChecked_eq_error_of (a b : Wad)
 
 variable {S E Err : Type} [ContractErrors Err] [dsl : ContractDSL S E Err]
 
+/-- Resolve a `MapKey` (`msg.sender` or a bare local `Address` identifier) against `env` —
+factored out of `mapGet`'s own inline `match` so `mapGet2` can reuse it for both of its keys. -/
+def resolveMapKey (key : MapKey) (env : LocalEnv) : ContractM S E Err Address :=
+  match key with
+  | .caller => ContractM.caller
+  | .var name =>
+    match env.lookup name with
+    | some ⟨Ty.address, .addr a⟩ => pure a
+    | _ => ContractM.revert .Unauthorized
+
 /-- `ContractM`-based evaluator for `Wad.Expr`, mirroring `Wei.eval` exactly. -/
 def eval
     (e : Expr) (env : LocalEnv) : ContractM S E Err Wad :=
@@ -167,14 +177,16 @@ def eval
     | some (.wad w) => pure w
     | _ => ContractM.revert .Unauthorized
   | .mapGet field key => do
-    let addr ← match key with
-      | .caller => ContractM.caller
-      | .var name =>
-        match env.lookup name with
-        | some ⟨Ty.address, .addr a⟩ => pure a
-        | _ => ContractM.revert .Unauthorized
+    let addr ← resolveMapKey key env
     let st ← ContractM.get
     match dsl.getMapField field addr st.storage with
+    | some w => pure w
+    | none => ContractM.revert .Unauthorized
+  | .mapGet2 field key1 key2 => do
+    let addr1 ← resolveMapKey key1 env
+    let addr2 ← resolveMapKey key2 env
+    let st ← ContractM.get
+    match dsl.getMapField2 field addr1 addr2 st.storage with
     | some w => pure w
     | none => ContractM.revert .Unauthorized
   | .addChecked a b => do

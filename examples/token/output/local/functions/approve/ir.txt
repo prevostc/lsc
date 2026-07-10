@@ -1,0 +1,13 @@
+Lsc.Compile.IR.Stmt.seq
+  (Lsc.Compile.IR.Stmt.letBind "spender" (Lsc.Compile.IR.Expr.calldataWord 4))
+  (Lsc.Compile.IR.Stmt.seq
+    (Lsc.Compile.IR.Stmt.letBind "amount" (Lsc.Compile.IR.Expr.calldataWord 36))
+    (Lsc.Compile.IR.Stmt.seq
+      (Lsc.Compile.IR.Stmt.seq
+        (Lsc.Compile.IR.Stmt.skip)
+        (Lsc.Compile.IR.Stmt.sstoreDyn
+          (Lsc.Compile.IR.Expr.mapSlot2 3 (Lsc.Compile.IR.Expr.local "caller") (Lsc.Compile.IR.Expr.local "spender"))
+          (Lsc.Compile.IR.Expr.local "amount")))
+      (Lsc.Compile.IR.Stmt.log1
+        68073243475457436064652586866388997639525426329129431039426117110984427799850
+        (Lsc.Compile.IR.Expr.local "amount"))))

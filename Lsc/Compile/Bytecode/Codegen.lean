@@ -165,6 +165,18 @@ private partial def codegenExpr (ctx : Ctx) (e : Expr) : Except String (List Ins
     let hashInstr : List Instr :=
       [.push 0, .op MSTORE, .push base, .push 32, .op MSTORE, .push 64, .push 0, .op KECCAK256]
     .ok (keyInstr ++ hashInstr, { c1 with stackDepth := c1.stackDepth + 1 })
+  | .mapSlot2 base key1 key2 => do
+    -- Nested-mapping slot: `keccak256(key2 ++ keccak256(key1 ++ base))`, i.e. `mapSlot`'s own
+    -- single-key hash chained twice (see `IR.Expr.mapSlot2`'s docstring).
+    let (key1Instr, c1) ← codegenExpr ctx key1
+    let innerHashInstr : List Instr :=
+      [.push 0, .op MSTORE, .push base, .push 32, .op MSTORE, .push 64, .push 0, .op KECCAK256]
+    let c1' := { c1 with stackDepth := c1.stackDepth + 1 }
+    let (key2Instr, c2) ← codegenExpr c1' key2
+    let outerHashInstr : List Instr :=
+      [.push 0, .op MSTORE, .push 32, .op MSTORE, .push 64, .push 0, .op KECCAK256]
+    .ok (key1Instr ++ innerHashInstr ++ key2Instr ++ outerHashInstr,
+      { c2 with stackDepth := c2.stackDepth + 1 })
   | .dynSload slotExpr => do
     let (slotInstr, c1) ← codegenExpr ctx slotExpr
     .ok (slotInstr ++ [.op SLOAD], c1)

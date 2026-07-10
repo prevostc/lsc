@@ -9,6 +9,7 @@ def foldConsts : Expr → Expr
   | .local name => .local name
   | .sload slot => .sload slot
   | .mapSlot base key => .mapSlot base (foldConsts key)
+  | .mapSlot2 base key1 key2 => .mapSlot2 base (foldConsts key1) (foldConsts key2)
   | .dynSload slot => .dynSload (foldConsts slot)
   | .calldataWord offset => .calldataWord offset
   | .add a b =>
@@ -71,6 +72,9 @@ theorem foldConsts_correct (st : IRState) (e : Expr) :
   | «local» name => rfl
   | sload slot => rfl
   | mapSlot _ key ih =>
+    simp only [foldConsts]
+    simp [evalExpr]
+  | mapSlot2 _ key1 key2 ih1 ih2 =>
     simp only [foldConsts]
     simp [evalExpr]
   | dynSload slot ih =>

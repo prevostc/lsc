@@ -25,6 +25,9 @@ def storageFieldKind (storageName : Name) (field : String) : TermElabM Lsc.Deriv
 def isMappingField (k : Lsc.Deriving.FieldKind) : Bool :=
   match k with | .mapping _ => true | _ => false
 
+def isMapping2Field (k : Lsc.Deriving.FieldKind) : Bool :=
+  match k with | .mapping2 _ => true | _ => false
+
 /-- Elaborate a `σ.field[key]`/`σ.field[key] = e;` node's `key` sub-`lscExpr` into a
 `Lsc.MapKey`-valued `Term` — only `msg.sender` or a bare local identifier are supported
 (see `lscExprMapGet`'s docstring). -/
@@ -98,6 +101,16 @@ partial def elabLscExpr (storageName : Name) (locals : List (String × Lsc.Deriv
   | `(lscExpr| $n:num) => do
       let litTerm ← `(Lsc.Lit.u256 $(quote n.getNat))
       return (← `(Lsc.CoreExpr.lit Lsc.Ty.uint256 $litTerm), .uint256)
+  | `(lscExpr| $x:ident [ $key1 ] [ $key2 ]) => do
+      match Lsc.sigmaFieldName? x.getId with
+      | some field => do
+          let k ← storageFieldKind storageName field
+          unless isMapping2Field k do
+            throwErrorAt x "`{field}` is not a nested mapping field, cannot index it with `[..][..]`"
+          let key1Term ← elabMapKey key1
+          let key2Term ← elabMapKey key2
+          return (← `(Lsc.Wad.Expr.mapGet2 $(quote field) $key1Term $key2Term), .wad)
+      | none => throwErrorAt x "expected `σ.field[key1][key2]`, got `{x.getId}[..][..]`"
   | `(lscExpr| $x:ident [ $key ]) => do
       match Lsc.sigmaFieldName? x.getId with
       | some field => do
@@ -142,6 +155,8 @@ partial def elabLscExpr (storageName : Name) (locals : List (String × Lsc.Deriv
                   let t ← `(Lsc.CoreExpr.var Lsc.Ty.uint256 $nameLit)
                   pure (t, k)
                 | .mapping _ => throwErrorAt x "`{nameStr}` is a mapping field, not a local value"
+                | .mapping2 _ =>
+                    throwErrorAt x "`{nameStr}` is a nested mapping field, not a local value"
                 | .interface _ => do
                   let t ← `(Lsc.CoreExpr.var Lsc.Ty.address $nameLit)
                   pure (t, Lsc.Deriving.FieldKind.address)

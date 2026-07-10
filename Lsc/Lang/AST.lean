@@ -76,6 +76,10 @@ inductive Stmt
       `FieldKind`, see `Lang/Derive.lean`) since a mapping write needs both a key (`MapKey`) and
       a value expression whose kind matches the map's value type. -/
   | mapSet : Ident → MapKey → Wad.Expr → Stmt
+  /-- `σ.field[key1][key2] = e;` — write one entry of a nested (`Mapping (Address × Address) V`)
+      storage field (e.g. `σ.allowances[owner][spender] = amount;`). Mirrors `mapSet` one level
+      deeper — see `Wad.Expr.mapGet2`'s docstring. -/
+  | mapSet2 : Ident → MapKey → MapKey → Wad.Expr → Stmt
   | require : Expr Ty.bool → Ident → Stmt
   | ifThenElse : Expr Ty.bool → Stmt → Stmt → Stmt
   | emit : Ident → List ExprAny → Stmt

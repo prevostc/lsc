@@ -43,6 +43,22 @@ def methodSpecs : List (String × MethodSpec) := [
     retWords := 1
     mutating := false
   }),
+  ("approve", {
+    params := [("spender", .address), ("amount", .wad)]
+    retTy := some .bool
+    mutating := true
+  }),
+  ("transferFrom", {
+    params := [("from", .address), ("to", .address), ("amount", .wad)]
+    retTy := some .bool
+    mutating := true
+  }),
+  ("allowance", {
+    params := [("owner", .address), ("spender", .address)]
+    retTy := some .wad
+    retWords := 1
+    mutating := false
+  }),
 ]
 
 def lookupMethod (method : String) : Option MethodSpec :=
@@ -53,12 +69,20 @@ def isInterfaceType (e : Lean.Expr) : Bool :=
 
 end IERC20
 
-/-- Minimal abstract ERC20 transfer surface for proof-layer composition. -/
+/-- Minimal abstract ERC20 transfer surface for proof-layer composition. Includes the
+allowance triple (`getAllowance`/`approveTyped`/`transferFromTyped`) alongside `transferTyped`/
+`getBalance`, since a caller (e.g. a future `CPAMM`) that *pulls* tokens via `transferFrom` needs
+the same abstract hook into an unknown callee's allowance bookkeeping that it already has for
+balances — mirrors `Token.lean`'s concrete `allowances : Mapping (Address × Address) Amount`
+shape one level up, at the interface-spec layer. -/
 class IERC20Spec (T : Type) where
   ET : Type
   ErrT : Type
   transferTyped : Address → Wad → ContractM T ET ErrT Unit
   getBalance : T → Address → Wad
+  approveTyped : Address → Wad → ContractM T ET ErrT Unit
+  transferFromTyped : Address → Address → Wad → ContractM T ET ErrT Unit
+  getAllowance : T → Address → Address → Wad
 
 /-- Standard/honest ERC20: successful `transfer` moves `amount` from `msg.sender` to `recipient`
 and leaves every other balance unchanged (self-transfer cancels). Narrower than literal ERC20:
@@ -80,6 +104,38 @@ class HonestERC20 (T : Type) extends IERC20Spec T where
               Wad.mkNat ((getBalance ts.storage recipient).n + amount.n)
             else
               getBalance ts.storage a
+  /-- `approve spender amount` (called by `msg.sender = owner`) sets exactly that allowance,
+  leaving every other `(owner, spender)` pair and every balance unchanged. Standard finite-approval
+  ERC20 semantics (overwrites, does not add to, any prior allowance). -/
+  approve_sets_allowance :
+    ∀ (spender : Address) (amount : Wad) (ts : ContractState T),
+      ∃ ts' log, runS (approveTyped spender amount) ts = .ok ((), ts', log) ∧
+        getAllowance ts'.storage ts.context.caller spender = amount ∧
+        (∀ a1 a2 : Address, (a1, a2) ≠ (ts.context.caller, spender) →
+          getAllowance ts'.storage a1 a2 = getAllowance ts.storage a1 a2) ∧
+        (∀ a : Address, getBalance ts'.storage a = getBalance ts.storage a)
+  /-- `transferFrom sender recipient amount` (called by any `msg.sender` with sufficient
+  `getAllowance ts sender msg.sender`) moves `amount` from `sender` to `recipient` exactly like
+  `transfer_conserves`, and additionally decrements that one `(sender, msg.sender)` allowance by
+  `amount`, leaving every other allowance untouched. `sender ≠ recipient` mirrors
+  `transfer_conserves`'s implicit self-transfer-cancels case (kept as an explicit hypothesis here
+  rather than folded into the conclusion, matching `Token`'s own `runTransferFromOk` shape). -/
+  transferFrom_conserves :
+    ∀ (sender recipient : Address) (amount : Wad) (ts : ContractState T),
+      amount.n ≤ (getAllowance ts.storage sender ts.context.caller).n →
+      amount.n ≤ (getBalance ts.storage sender).n →
+      (getBalance ts.storage recipient).n + amount.n < 2 ^ 256 →
+      sender ≠ recipient →
+      ∃ ts' log, runS (transferFromTyped sender recipient amount) ts = .ok ((), ts', log) ∧
+        getAllowance ts'.storage sender ts.context.caller =
+          Wad.mkNat ((getAllowance ts.storage sender ts.context.caller).n - amount.n) ∧
+        getBalance ts'.storage sender = Wad.mkNat ((getBalance ts.storage sender).n - amount.n) ∧
+        getBalance ts'.storage recipient =
+          Wad.mkNat ((getBalance ts.storage recipient).n + amount.n) ∧
+        (∀ a1 a2 : Address, (a1, a2) ≠ (sender, ts.context.caller) →
+          getAllowance ts'.storage a1 a2 = getAllowance ts.storage a1 a2) ∧
+        (∀ a : Address, a ≠ sender → a ≠ recipient →
+          getBalance ts'.storage a = getBalance ts.storage a)
 
 namespace HonestERC20Lemmas
 

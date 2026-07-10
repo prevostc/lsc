@@ -73,6 +73,11 @@ supported. `σ.field` itself lexes as one dotted `ident` token (see this file's 
 docstring), so this production is `ident "[" (ident | "msg.sender") "]"`. -/
 syntax:max (name := lscExprMapGet) ident "[" lscExpr "]" : lscExpr
 
+/-- `σ.field[key1][key2]` — read one entry of a nested (`Mapping (Address × Address) V`)
+storage field (e.g. `σ.allowances[owner][spender]`), where each `key` is `msg.sender` or a bare
+local identifier — same two supported forms as `lscExprMapGet`'s single key, applied twice. -/
+syntax:max (name := lscExprMapGet2) ident "[" lscExpr "]" "[" lscExpr "]" : lscExpr
+
 syntax:max (name := lscExprParen) "(" lscExpr ")" : lscExpr
 
 /-- Boolean negation, binds tighter than `==`/`+?`/`-?`. -/
@@ -135,6 +140,18 @@ syntax (name := lscMapAssignAdd) ident "[" lscExpr "]" " +=? " lscExpr ";" : lsc
 /-- `σ.field[key] -=? e;` — checked-sub-and-write sugar for
 `σ.field[key] = σ.field[key] -? e;`, the subtraction counterpart of `lscMapAssignAdd`. -/
 syntax (name := lscMapAssignSub) ident "[" lscExpr "]" " -=? " lscExpr ";" : lscStmt
+
+/-- `σ.field[key1][key2] = e;` — write one entry of a nested (`Mapping (Address × Address) V`)
+storage field (e.g. `σ.allowances[owner][spender] = amount;`). -/
+syntax (name := lscMapAssign2) ident "[" lscExpr "]" "[" lscExpr "]" " = " lscExpr ";" : lscStmt
+
+/-- `σ.field[key1][key2] +=? e;` — checked-add-and-write sugar, the nested-mapping counterpart of
+`lscMapAssignAdd`. -/
+syntax (name := lscMapAssignAdd2) ident "[" lscExpr "]" "[" lscExpr "]" " +=? " lscExpr ";" : lscStmt
+
+/-- `σ.field[key1][key2] -=? e;` — checked-sub-and-write sugar, the nested-mapping counterpart of
+`lscMapAssignSub`. -/
+syntax (name := lscMapAssignSub2) ident "[" lscExpr "]" "[" lscExpr "]" " -=? " lscExpr ";" : lscStmt
 
 /-- `σ.field +=? e;` — checked-add-and-write sugar for `σ.field = σ.field +? e;`, for a plain
 (non-mapping) `Wei`- or `Wad`-kind storage field (e.g. `σ.totalSupply +=? amount;`). -/

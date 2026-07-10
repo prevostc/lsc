@@ -1,0 +1,9 @@
+Lsc.Compile.IR.Stmt.seq
+  (Lsc.Compile.IR.Stmt.letBind "owner" (Lsc.Compile.IR.Expr.calldataWord 4))
+  (Lsc.Compile.IR.Stmt.seq
+    (Lsc.Compile.IR.Stmt.letBind "spender" (Lsc.Compile.IR.Expr.calldataWord 36))
+    (Lsc.Compile.IR.Stmt.seq
+      (Lsc.Compile.IR.Stmt.skip)
+      (Lsc.Compile.IR.Stmt.ret
+        (Lsc.Compile.IR.Expr.dynSload
+          (Lsc.Compile.IR.Expr.mapSlot2 3 (Lsc.Compile.IR.Expr.local "owner") (Lsc.Compile.IR.Expr.local "spender"))))))

@@ -445,5 +445,13 @@ class ContractDSL (S : Type) (E : outParam Type) (Err : outParam Type) [Contract
   /-- Write one entry (keyed by `Address`) of a `Lsc.Mapping` storage field, by field name —
       a no-op (`s` returned unchanged) iff `field` doesn't name a mapping field. -/
   setMapField : Ident → Address → Wad.Wad → S → S
+  /-- Read one entry (keyed by an `Address` pair) of a nested `Mapping (Address × Address) V`
+      storage field, by field name — e.g. ERC20-style `allowances[owner][spender]`. `none` iff
+      `field` doesn't name such a field. Missing keys read as zero via `Mapping.get`. -/
+  getMapField2 : Ident → Address → Address → S → Option Wad.Wad
+  /-- Write one entry (keyed by an `Address` pair) of a nested `Mapping (Address × Address) V`
+      storage field, by field name — a no-op (`s` returned unchanged) iff `field` doesn't name
+      such a field. -/
+  setMapField2 : Ident → Address → Address → Wad.Wad → S → S
 
 end Lsc

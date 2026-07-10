@@ -21,6 +21,17 @@ partial def lowerExpr (fieldSlot mapFieldSlot : Ident → Option Nat) (e : Expr)
         | .caller => .ok (Compile.IR.Expr.local "caller")
         | .var name => .ok (Compile.IR.Expr.local name)
       .ok (Compile.IR.Expr.dynSload (Compile.IR.Expr.mapSlot base keyIr))
+  | .mapGet2 field key1 key2 => do
+    match mapFieldSlot field with
+    | none => .error s!"unknown mapping field {field}"
+    | some base =>
+      let key1Ir ← match key1 with
+        | .caller => .ok (Compile.IR.Expr.local "caller")
+        | .var name => .ok (Compile.IR.Expr.local name)
+      let key2Ir ← match key2 with
+        | .caller => .ok (Compile.IR.Expr.local "caller")
+        | .var name => .ok (Compile.IR.Expr.local name)
+      .ok (Compile.IR.Expr.dynSload (Compile.IR.Expr.mapSlot2 base key1Ir key2Ir))
   | .addChecked a b => do
     let a' ← lowerExpr fieldSlot mapFieldSlot a
     let b' ← lowerExpr fieldSlot mapFieldSlot b

@@ -54,6 +54,14 @@ inductive FieldKind
       `getMapField`/`setMapField` codegen using `Mapping.get`/`Mapping.set`. `valKind` is the
       map's value type (always `.wad`-shaped today). -/
   | mapping (valKind : FieldKind)
+  /-- A `Lsc.Mapping (Address × Address) V` storage field (e.g. ERC20-style per-owner-per-spender
+      allowances, `allowances : Mapping (Address × Address) Amount`) — the nested-mapping
+      counterpart of `.mapping`, one level deeper. `Mapping`'s `K` type parameter only ever needs
+      `[DecidableEq K]` (`Lsc/Core/Mapping.lean`), which `Address × Address` already satisfies
+      for free, so this reuses the *same* single-level `Mapping`/`Finmap` machinery keyed by a
+      pair instead of a bespoke nested `Mapping Address (Mapping Address V)` — see
+      `docs/reference/TOKEN.md`'s allowances section. Storage-only, like `.mapping`. -/
+  | mapping2 (valKind : FieldKind)
   /-- Interface-typed storage field (e.g. `token : IERC20`) — codegen uses one `Address` word;
       the interface name (`"IERC20"`, …) is recorded in `ContractDef.interfaces`. -/
   | interface (iface : String)
@@ -66,6 +74,7 @@ def FieldKind.toTy : FieldKind → Ty
   | .address => .address
   | .uint256 => .uint256
   | .mapping _ => .uint256
+  | .mapping2 _ => .uint256
   | .interface _ => .address
 
 def FieldKind.interfaceName? (k : FieldKind) : Option String :=
@@ -318,6 +327,16 @@ def fieldKindOfExprM (e : Lean.Expr) : TermElabM (Option FieldKind) := do
           if let some vk := fieldKindOfExpr valTy then return some (.mapping vk)
           else if (← resolveFixedAlias valTy) then return some (.mapping .wad)
           else return none
+        else if keyTy.isAppOfArity ``Prod 2 then
+          -- `Mapping (Address × Address) V` — the nested-allowances shape (`.mapping2`, see
+          -- that `FieldKind` case's docstring); `Prod`'s two type args must both be `Address`.
+          let prodArgs := keyTy.getAppArgs
+          if prodArgs.size == 2 && prodArgs[0]!.isConstOf ``Lsc.Address &&
+              prodArgs[1]!.isConstOf ``Lsc.Address then
+            if let some vk := fieldKindOfExpr valTy then return some (.mapping2 vk)
+            else if (← resolveFixedAlias valTy) then return some (.mapping2 .wad)
+            else return none
+          else return none
         else return none
       else return none
     else if (← resolveFixedAlias e) then return some .wad else return none
@@ -329,6 +348,7 @@ def FieldKind.tyConst : FieldKind → TermElabM Term
   | .address => `(Lsc.Ty.address)
   | .uint256 => `(Lsc.Ty.uint256)
   | .mapping _ => throwError "internal error: `FieldKind.mapping` has no `Ty` (storage-only kind)"
+  | .mapping2 _ => throwError "internal error: `FieldKind.mapping2` has no `Ty` (storage-only kind)"
   | .interface _ => `(Lsc.Ty.address)
 
 def FieldKind.leanTypeStx : FieldKind → TermElabM Term
@@ -338,6 +358,7 @@ def FieldKind.leanTypeStx : FieldKind → TermElabM Term
   | .address => `(Lsc.Address)
   | .uint256 => `(Lsc.UInt256)
   | .mapping _ => throwError "internal error: `FieldKind.mapping` is storage-only (not a `tx` parameter kind)"
+  | .mapping2 _ => throwError "internal error: `FieldKind.mapping2` is storage-only (not a `tx` parameter kind)"
   | .interface iface =>
     match iface with
     | "IERC20" => `(Lsc.Interfaces.IERC20)
@@ -363,6 +384,7 @@ def FieldKind.embedLitStx (k : FieldKind) (paramId : Term) : TermElabM Term :=
   | .address => `(Lsc.CoreExpr.lit Lsc.Ty.address (Lsc.Lit.addr $paramId))
   | .uint256 => `(Lsc.CoreExpr.lit Lsc.Ty.uint256 (Lsc.Lit.u256 $paramId))
   | .mapping _ => throwError "internal error: `FieldKind.mapping` is storage-only (not embeddable as a literal)"
+  | .mapping2 _ => throwError "internal error: `FieldKind.mapping2` is storage-only (not embeddable as a literal)"
   | .interface _ => `(Lsc.CoreExpr.lit Lsc.Ty.address (Lsc.Lit.addr ($paramId).addr))
 
 /-- Wrap a plain term as a `matchDiscr` for splicing into `match $[$discrs],* with …`. -/
@@ -376,6 +398,7 @@ def FieldKind.valCtor : FieldKind → TermElabM Term
   | .address => `(Lsc.Val.addr)
   | .uint256 => `(Lsc.Val.u256)
   | .mapping _ => throwError "internal error: `FieldKind.mapping` has no `Val` case (storage-only kind)"
+  | .mapping2 _ => throwError "internal error: `FieldKind.mapping2` has no `Val` case (storage-only kind)"
   | .interface _ => `(Lsc.Val.addr)
 
 /-- Bridge a `.wad`-kind value between its field's *own* possibly-tagged type (e.g.
@@ -393,6 +416,7 @@ def FieldKind.bridgeGeneric (k : FieldKind) (e : Term) : TermElabM Term :=
   match k with
   | .wad => `(Lsc.Wad.Fixed.retag $e)
   | .interface _ => `(Lsc.Interfaces.IERC20.mk $e)
+  | .mapping vk | .mapping2 vk => vk.bridgeGeneric e
   | _ => pure e
 
 /-- The *expression* (not value) Lean type carrying a field of this kind while a
@@ -409,6 +433,9 @@ def FieldKind.exprTypeStx : FieldKind → TermElabM Term
   | .mapping _ =>
     throwError "internal error: `FieldKind.mapping` has no plain `σ.field` expression form \
       (index it with `σ.field[key]` instead)"
+  | .mapping2 _ =>
+    throwError "internal error: `FieldKind.mapping2` has no plain `σ.field` expression form \
+      (index it with `σ.field[key1][key2]` instead)"
   | .interface _ => `(Lsc.CoreExpr Lsc.Ty.address)
 
 /-- The default (i.e. only, since these are never written by contract authors — they're
@@ -426,6 +453,9 @@ def FieldKind.storageGetStx (k : FieldKind) (fieldStr : String) : TermElabM Term
   | .mapping _ =>
     throwError "internal error: `FieldKind.mapping` has no plain `σ.field` expression form \
       (index it with `σ.field[key]` instead)"
+  | .mapping2 _ =>
+    throwError "internal error: `FieldKind.mapping2` has no plain `σ.field` expression form \
+      (index it with `σ.field[key1][key2]` instead)"
   | .interface _ => `(Lsc.CoreExpr.storageGet Lsc.Ty.address $fieldLit)
 
 /-! ## `deriving ContractStorage`
@@ -522,6 +552,7 @@ def embedStorageDefaultExpr (k : FieldKind) (defaultExpr : Lean.Expr) : TermElab
         (Lsc.CoreExpr.lit Lsc.Ty.address (Lsc.Lit.addr (BitVec.ofNat 256 $(quote n)))))))
     else return none
   | .mapping _ => return none
+  | .mapping2 _ => return none
 
 /-- Return `some defaultExpr` for a field with a Lean structure default, else `none`. -/
 def getStructureFieldDefaultExpr? (structName : Name) (fname : Name) : TermElabM (Option Lean.Expr) := do
@@ -542,7 +573,7 @@ def mkGetFieldCmd (structName : Name) (fields : Array (Name × FieldKind)) : Ter
   let sId := mkIdent `s
   -- `mapping` fields have no `Ty`/`Val` case at all (storage-only) — never matched here,
   -- only through the dedicated `getMapField` below.
-  let fields := fields.filter fun (_, k) => match k with | .mapping _ => false | _ => true
+  let fields := fields.filter fun (_, k) => match k with | .mapping _ | .mapping2 _ => false | _ => true
   let arms ← fields.mapM fun (fname, k) => do
     let fId := mkIdent fname
     let fieldStr := quote fname.toString
@@ -573,7 +604,7 @@ def mkSetFieldCmd (structName : Name) (fields : Array (Name × FieldKind)) : Ter
   let fieldId := mkIdent `field
   let vId := mkIdent `v
   let sId := mkIdent `s
-  let fields := fields.filter fun (_, k) => match k with | .mapping _ => false | _ => true
+  let fields := fields.filter fun (_, k) => match k with | .mapping _ | .mapping2 _ => false | _ => true
   let arms ← fields.mapM fun (fname, k) => do
     let fId := mkIdent fname
     let fieldStr := quote fname.toString
@@ -660,6 +691,66 @@ def mkSetMapFieldCmd (structName : Name) (fields : Array (Name × FieldKind)) : 
       match $[$discrs],* with
       $alts:matchAlt*)
 
+/-- `def S.getMapField2 (field : String) (a1 a2 : Lsc.Address) (s : S) : Option Lsc.Wad.Wad`, the
+nested-mapping (`Mapping (Address × Address) V`, `.mapping2`) counterpart of `mkGetMapFieldCmd` —
+one match arm per `mapping2`-kinded field of `structName`, always generated (even as just the
+default `| _ => none` arm). Reads via `Lsc.Mapping.get s.field (a1, a2)`, since `Mapping`'s `K`
+is already generic over any `[DecidableEq K]` (see `FieldKind.mapping2`'s docstring) — no new
+core `Mapping` machinery is needed, only this pair-keyed codegen. -/
+def mkGetMapField2Cmd (structName : Name) (fields : Array (Name × FieldKind)) : TermElabM Command := do
+  let structId := mkIdent structName
+  let getMapField2Name := mkIdent (structName ++ `getMapField2)
+  let fieldId := mkIdent `field
+  let a1Id := mkIdent `a1
+  let a2Id := mkIdent `a2
+  let sId := mkIdent `s
+  let mapFields := fields.filterMap fun (fname, k) =>
+    match k with | .mapping2 vk => some (fname, vk) | _ => none
+  let arms ← mapFields.mapM fun (fname, vk) => do
+    let fId := mkIdent fname
+    let fieldStr := quote fname.toString
+    let rawGet ← `(Lsc.Mapping.get $sId.$fId ($a1Id, $a2Id))
+    let bridged ← vk.bridgeGeneric rawGet
+    `(matchAltExpr| | $fieldStr => some $bridged)
+  let wc ← `(_)
+  let defaultArm ← `(matchAltExpr| | $wc => none)
+  let alts := arms.push defaultArm
+  let discrs ← #[(fieldId : Term)].mapM mkDiscr
+  `(command|
+    def $getMapField2Name ($fieldId : String) ($a1Id : Lsc.Address) ($a2Id : Lsc.Address)
+        ($sId : $structId) : Option Lsc.Wad.Wad :=
+      match $[$discrs],* with
+      $alts:matchAlt*)
+
+/-- Write-side counterpart of `mkGetMapField2Cmd`, mirroring `mkSetMapFieldCmd` one level deeper —
+uses `Lsc.Mapping.set` on the field's pair-keyed `Finmap`-backed storage. -/
+def mkSetMapField2Cmd (structName : Name) (fields : Array (Name × FieldKind)) : TermElabM Command := do
+  let structId := mkIdent structName
+  let setMapField2Name := mkIdent (structName ++ `setMapField2)
+  let fieldId := mkIdent `field
+  let a1Id := mkIdent `a1
+  let a2Id := mkIdent `a2
+  let vId := mkIdent `v
+  let sId := mkIdent `s
+  let mapFields := fields.filterMap fun (fname, k) =>
+    match k with | .mapping2 vk => some (fname, vk) | _ => none
+  let arms ← mapFields.mapM fun (fname, vk) => do
+    let fId := mkIdent fname
+    let fieldStr := quote fname.toString
+    let storedVal ← vk.bridgeGeneric vId
+    let updated ← `(Lsc.Mapping.set $sId.$fId ($a1Id, $a2Id) $storedVal)
+    let body ← `({ $sId with $fId:ident := $updated })
+    `(matchAltExpr| | $fieldStr => $body)
+  let wc ← `(_)
+  let defaultArm ← `(matchAltExpr| | $wc => $sId)
+  let alts := arms.push defaultArm
+  let discrs ← #[(fieldId : Term)].mapM mkDiscr
+  `(command|
+    def $setMapField2Name ($fieldId : String) ($a1Id : Lsc.Address) ($a2Id : Lsc.Address)
+        ($vId : Lsc.Wad.Wad) ($sId : $structId) : $structId :=
+      match $[$discrs],* with
+      $alts:matchAlt*)
+
 /-- One `def $ns.σ.$field : <exprTy> := <storageGet>` per storage field, where `$ns` is the
 namespace the storage `structure` was declared in (`structName`'s namespace — i.e. the same
 namespace a contract's function bodies are written in). This makes `σ` a plain Lean
@@ -674,7 +765,7 @@ def mkSigmaFieldCmds (structName : Name) (fields : Array (Name × FieldKind)) :
   let ns := structName.getPrefix
   -- A `mapping` field has no plain `σ.field` form at all — only `σ.field[key]`
   -- (`Lang/Syntax.lean`'s dedicated grammar), so it's excluded here.
-  let fields := fields.filter fun (_, k) => match k with | .mapping _ => false | _ => true
+  let fields := fields.filter fun (_, k) => match k with | .mapping _ | .mapping2 _ => false | _ => true
   fields.mapM fun (fname, k) => do
     let sigmaFieldName := mkIdent (ns ++ `σ ++ fname)
     let tyStx ← k.exprTypeStx
@@ -718,6 +809,8 @@ def mkContractStorageHandler : DerivingHandler := fun declNames => do
   let setCmd ← liftTermElabM <| mkSetFieldCmd structName fieldKinds
   let getMapCmd ← liftTermElabM <| mkGetMapFieldCmd structName fieldKinds
   let setMapCmd ← liftTermElabM <| mkSetMapFieldCmd structName fieldKinds
+  let getMap2Cmd ← liftTermElabM <| mkGetMapField2Cmd structName fieldKinds
+  let setMap2Cmd ← liftTermElabM <| mkSetMapField2Cmd structName fieldKinds
   let sigmaCmds ← liftTermElabM <| mkSigmaFieldCmds structName fieldKinds
   let inhabitedCmd? ← liftTermElabM <| mkInhabitedCmd structName fieldKinds
   atRootNamespace do
@@ -725,6 +818,8 @@ def mkContractStorageHandler : DerivingHandler := fun declNames => do
     elabCommand setCmd
     elabCommand getMapCmd
     elabCommand setMapCmd
+    elabCommand getMap2Cmd
+    elabCommand setMap2Cmd
     for c in sigmaCmds do elabCommand c
     if let some inhabitedCmd := inhabitedCmd? then
       elabCommand inhabitedCmd
@@ -1064,6 +1159,42 @@ def mkDslSetMapFieldLemma (lemmaName storageName errName eventName : Name) : Ter
         @Lsc.ContractDSL.setMapField $sId $eId $errIdT _ _ $fId $aId $vId $sVarId =
           $setMapFieldRef $fId $aId $vId $sVarId := rfl)
 
+/-- `getMapField2`/`setMapField2`'s own `ContractDSL`-projection bridging lemma — the nested
+(`.mapping2`) counterpart of `mkDslGetMapFieldLemma`/`mkDslSetMapFieldLemma` one level deeper. -/
+def mkDslGetMapField2Lemma (lemmaName storageName errName eventName : Name) : TermElabM Command := do
+  let sId := mkIdent storageName
+  let eId := mkIdent eventName
+  let errIdT := mkIdent errName
+  let getMapField2Ref := mkIdent (storageName ++ `getMapField2)
+  let fId := mkIdent `f
+  let a1Id := mkIdent `a1
+  let a2Id := mkIdent `a2
+  let sVarId := mkIdent `s
+  let lemIdent := mkIdent lemmaName
+  `(command|
+    @[simp] theorem $lemIdent:ident
+        ($fId : Lsc.Ident) ($a1Id : Lsc.Address) ($a2Id : Lsc.Address) ($sVarId : $sId) :
+        @Lsc.ContractDSL.getMapField2 $sId $eId $errIdT _ _ $fId $a1Id $a2Id $sVarId =
+          $getMapField2Ref $fId $a1Id $a2Id $sVarId := rfl)
+
+def mkDslSetMapField2Lemma (lemmaName storageName errName eventName : Name) : TermElabM Command := do
+  let sId := mkIdent storageName
+  let eId := mkIdent eventName
+  let errIdT := mkIdent errName
+  let setMapField2Ref := mkIdent (storageName ++ `setMapField2)
+  let fId := mkIdent `f
+  let a1Id := mkIdent `a1
+  let a2Id := mkIdent `a2
+  let vId := mkIdent `v
+  let sVarId := mkIdent `s
+  let lemIdent := mkIdent lemmaName
+  `(command|
+    @[simp] theorem $lemIdent:ident
+        ($fId : Lsc.Ident) ($a1Id : Lsc.Address) ($a2Id : Lsc.Address) ($vId : Lsc.Wad.Wad)
+        ($sVarId : $sId) :
+        @Lsc.ContractDSL.setMapField2 $sId $eId $errIdT _ _ $fId $a1Id $a2Id $vId $sVarId =
+          $setMapField2Ref $fId $a1Id $a2Id $vId $sVarId := rfl)
+
 def mkDslResolveErrLemma (lemmaName storageName errName eventName : Name) : TermElabM Command := do
   let sId := mkIdent storageName
   let eId := mkIdent eventName
@@ -1123,6 +1254,8 @@ def elabDeriveContractDsl (storageId errId eventId : Lean.Ident) : CommandElabM 
   let setFieldRef := mkIdent (storageName ++ `setField)
   let getMapFieldRef := mkIdent (storageName ++ `getMapField)
   let setMapFieldRef := mkIdent (storageName ++ `setMapField)
+  let getMapField2Ref := mkIdent (storageName ++ `getMapField2)
+  let setMapField2Ref := mkIdent (storageName ++ `setMapField2)
   let resolveErrRef := mkIdent (errName ++ `resolveError)
   let buildEventRef := mkIdent (eventName ++ `buildEvent)
   -- Record this contract's `(errName, eventName)` under the current namespace, so the
@@ -1137,6 +1270,8 @@ def elabDeriveContractDsl (storageId errId eventId : Lean.Ident) : CommandElabM 
       setField   := $setFieldRef
       getMapField := $getMapFieldRef
       setMapField := $setMapFieldRef
+      getMapField2 := $getMapField2Ref
+      setMapField2 := $setMapField2Ref
       resolveErr := $resolveErrRef
       buildEvent := $buildEventRef))
   -- Mark the three generated defs `@[simp]` (their own `match` equations
@@ -1153,6 +1288,10 @@ def elabDeriveContractDsl (storageId errId eventId : Lean.Ident) : CommandElabM 
     mkDslGetMapFieldLemma (Name.mkSimple (baseStr ++ "Dsl_getMapField")) storageName errName eventName
   let setMapFieldLemma ← liftTermElabM <|
     mkDslSetMapFieldLemma (Name.mkSimple (baseStr ++ "Dsl_setMapField")) storageName errName eventName
+  let getMapField2Lemma ← liftTermElabM <|
+    mkDslGetMapField2Lemma (Name.mkSimple (baseStr ++ "Dsl_getMapField2")) storageName errName eventName
+  let setMapField2Lemma ← liftTermElabM <|
+    mkDslSetMapField2Lemma (Name.mkSimple (baseStr ++ "Dsl_setMapField2")) storageName errName eventName
   let resolveErrLemma ← liftTermElabM <|
     mkDslResolveErrLemma (Name.mkSimple (baseStr ++ "Dsl_resolveErr")) storageName errName eventName
   let buildEventLemma ← liftTermElabM <|
@@ -1162,6 +1301,8 @@ def elabDeriveContractDsl (storageId errId eventId : Lean.Ident) : CommandElabM 
     elabCommand setFieldLemma
     elabCommand getMapFieldLemma
     elabCommand setMapFieldLemma
+    elabCommand getMapField2Lemma
+    elabCommand setMapField2Lemma
     elabCommand resolveErrLemma
     elabCommand buildEventLemma
   -- Emit one `@[simp]` arith-mapping lemma per `ArithError` constructor name

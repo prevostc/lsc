@@ -9,6 +9,10 @@ inductive Expr where
   | sload : Nat → Expr
   /-- `keccak256(abi.encode(key, baseSlot))` — Solidity mapping slot. -/
   | mapSlot : Nat → Expr → Expr
+  /-- `keccak256(abi.encode(key2, keccak256(abi.encode(key1, baseSlot))))` — Solidity's real
+      nested-mapping slot formula (e.g. `allowances[owner][spender]`), applying `mapSlot`'s own
+      single-key hash twice: the inner hash's result becomes the outer hash's `baseSlot`. -/
+  | mapSlot2 : Nat → Expr → Expr → Expr
   /-- `sload` at a computed slot (mapping entries). -/
   | dynSload : Expr → Expr
   /-- Read the 32-byte ABI word at byte offset `offset` in `msg.data`. -/

@@ -157,6 +157,10 @@ inductive Expr where
   | var : Ident → Expr
   | storageGet : Ident → Expr
   | mapGet : Ident → MapKey → Expr
+  /-- `σ.field[key1][key2]` — read one entry of a nested (`Mapping (Address × Address) V`)
+      storage field, e.g. `allowances[owner][spender]`. See `Lsc.Core.Mapping`'s docstring on
+      why `Address × Address` just works as a `Mapping` key with zero core changes. -/
+  | mapGet2 : Ident → MapKey → MapKey → Expr
   | addChecked : Expr → Expr → Expr
   | addCheckedNat : Expr → Nat → Expr
   | subChecked : Expr → Expr → Expr
@@ -177,5 +181,6 @@ def arithErrors : Expr → List ArithError
   | .var _ => []
   | .storageGet _ => []
   | .mapGet _ _ => []
+  | .mapGet2 _ _ _ => []
 
 end Lsc.Wad

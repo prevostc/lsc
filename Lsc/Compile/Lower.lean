@@ -236,6 +236,12 @@ private partial def lowerStmt (cfg : Config) (s : Lsc.Stmt) : Except String IR.S
     let keyIr ← lowerMapKey cfg key
     let valIr ← Wad.lowerExpr cfg.storage.fieldSlot cfg.storage.mapFieldSlot expr
     .ok (.sstoreDyn (.mapSlot base keyIr) valIr)
+  | .mapSet2 field key1 key2 expr => do
+    let base ← resolveMapSlot cfg field
+    let key1Ir ← lowerMapKey cfg key1
+    let key2Ir ← lowerMapKey cfg key2
+    let valIr ← Wad.lowerExpr cfg.storage.fieldSlot cfg.storage.mapFieldSlot expr
+    .ok (.sstoreDyn (.mapSlot2 base key1Ir key2Ir) valIr)
   | _ => .error "unsupported statement in lowering"
 
 def stmt (cfg : Config) (s : Lsc.Stmt) : Except String IR.Stmt :=

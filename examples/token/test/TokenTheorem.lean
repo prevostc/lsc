@@ -106,6 +106,99 @@ theorem mint_reverts_on_overflow (recipient : Address) (amount : Wad)
     runS (mint recipient amount : TokenM Unit) s = .error TokenError.Overflow :=
   runMintErrOverflow recipient amount s howner h
 
+/-! ## `approve` -/
+
+theorem approve_preserves_other_allowances (spender : Address) (amount : Wad)
+    (s : ContractState TokenStorage) (a1 a2 : Address)
+    (hne : (a1, a2) ≠ (s.context.caller, spender)) :
+    ∃ s', runS (approve spender amount : TokenM Unit) s =
+        .ok ((), s', [TokenEvent.Approval (Wad.Fixed.retag amount)]) ∧
+      allowanceAt s'.storage a1 a2 = allowanceAt s.storage a1 a2 := by
+  obtain ⟨s', h, _, hallow, _⟩ := runApproveOk spender amount s
+  exact ⟨s', h, hallow a1 a2 hne⟩
+
+theorem approve_preserves_balances (spender : Address) (amount : Wad)
+    (s : ContractState TokenStorage) (a : Address) :
+    ∃ s', runS (approve spender amount : TokenM Unit) s =
+        .ok ((), s', [TokenEvent.Approval (Wad.Fixed.retag amount)]) ∧
+      balanceAt s'.storage a = balanceAt s.storage a := by
+  obtain ⟨s', h, _, _, hbal⟩ := runApproveOk spender amount s
+  exact ⟨s', h, hbal a⟩
+
+/-! ## `transferFrom` -/
+
+theorem transferFrom_reverts_on_insufficient_allowance (sender recipient : Address) (amount : Wad)
+    (s : ContractState TokenStorage)
+    (h : (allowanceAt s.storage sender s.context.caller).n < amount.n) :
+    runS (transferFrom sender recipient amount : TokenM Unit) s = .error TokenError.Underflow :=
+  transferFrom_requires_sufficient_allowance sender recipient amount s h
+
+theorem transferFrom_decrements_allowance (sender recipient : Address) (amount : Wad)
+    (s : ContractState TokenStorage)
+    (hallow : amount.n ≤ (allowanceAt s.storage sender s.context.caller).n)
+    (hsub : amount.n ≤ (balanceAt s.storage sender).n)
+    (hadd : (balanceAt s.storage recipient).n + amount.n < 2 ^ 256)
+    (hne : sender ≠ recipient) :
+    ∃ s', runS (transferFrom sender recipient amount : TokenM Unit) s =
+        .ok ((), s', [TokenEvent.Transfer (Wad.Fixed.retag amount)]) ∧
+      allowanceAt s'.storage sender s.context.caller =
+        Wad.mkNat ((allowanceAt s.storage sender s.context.caller).n - amount.n) := by
+  obtain ⟨s', h, hallow', _, _, _, _⟩ :=
+    runTransferFromOk sender recipient amount s hallow hsub hadd hne
+  exact ⟨s', h, hallow'⟩
+
+theorem transferFrom_debits_sender (sender recipient : Address) (amount : Wad)
+    (s : ContractState TokenStorage)
+    (hallow : amount.n ≤ (allowanceAt s.storage sender s.context.caller).n)
+    (hsub : amount.n ≤ (balanceAt s.storage sender).n)
+    (hadd : (balanceAt s.storage recipient).n + amount.n < 2 ^ 256)
+    (hne : sender ≠ recipient) :
+    ∃ s', runS (transferFrom sender recipient amount : TokenM Unit) s =
+        .ok ((), s', [TokenEvent.Transfer (Wad.Fixed.retag amount)]) ∧
+      balanceAt s'.storage sender = Wad.mkNat ((balanceAt s.storage sender).n - amount.n) := by
+  obtain ⟨s', h, _, hbal, _, _, _⟩ :=
+    runTransferFromOk sender recipient amount s hallow hsub hadd hne
+  exact ⟨s', h, hbal⟩
+
+theorem transferFrom_credits_recipient (sender recipient : Address) (amount : Wad)
+    (s : ContractState TokenStorage)
+    (hallow : amount.n ≤ (allowanceAt s.storage sender s.context.caller).n)
+    (hsub : amount.n ≤ (balanceAt s.storage sender).n)
+    (hadd : (balanceAt s.storage recipient).n + amount.n < 2 ^ 256)
+    (hne : sender ≠ recipient) :
+    ∃ s', runS (transferFrom sender recipient amount : TokenM Unit) s =
+        .ok ((), s', [TokenEvent.Transfer (Wad.Fixed.retag amount)]) ∧
+      balanceAt s'.storage recipient = Wad.mkNat ((balanceAt s.storage recipient).n + amount.n) := by
+  obtain ⟨s', h, _, _, hbal, _, _⟩ :=
+    runTransferFromOk sender recipient amount s hallow hsub hadd hne
+  exact ⟨s', h, hbal⟩
+
+theorem transferFrom_preserves_other_balances (sender recipient : Address) (amount : Wad)
+    (s : ContractState TokenStorage) (a : Address) (ha1 : a ≠ sender) (ha2 : a ≠ recipient)
+    (hallow : amount.n ≤ (allowanceAt s.storage sender s.context.caller).n)
+    (hsub : amount.n ≤ (balanceAt s.storage sender).n)
+    (hadd : (balanceAt s.storage recipient).n + amount.n < 2 ^ 256)
+    (hne : sender ≠ recipient) :
+    ∃ s', runS (transferFrom sender recipient amount : TokenM Unit) s =
+        .ok ((), s', [TokenEvent.Transfer (Wad.Fixed.retag amount)]) ∧
+      balanceAt s'.storage a = balanceAt s.storage a := by
+  obtain ⟨s', h, _, _, _, _, hother⟩ :=
+    runTransferFromOk sender recipient amount s hallow hsub hadd hne
+  exact ⟨s', h, hother a ha1 ha2⟩
+
+theorem transferFrom_preserves_other_allowances (sender recipient : Address) (amount : Wad)
+    (s : ContractState TokenStorage) (a1 a2 : Address) (hne12 : (a1, a2) ≠ (sender, s.context.caller))
+    (hallow : amount.n ≤ (allowanceAt s.storage sender s.context.caller).n)
+    (hsub : amount.n ≤ (balanceAt s.storage sender).n)
+    (hadd : (balanceAt s.storage recipient).n + amount.n < 2 ^ 256)
+    (hne : sender ≠ recipient) :
+    ∃ s', runS (transferFrom sender recipient amount : TokenM Unit) s =
+        .ok ((), s', [TokenEvent.Transfer (Wad.Fixed.retag amount)]) ∧
+      allowanceAt s'.storage a1 a2 = allowanceAt s.storage a1 a2 := by
+  obtain ⟨s', h, _, _, _, hother, _⟩ :=
+    runTransferFromOk sender recipient amount s hallow hsub hadd hne
+  exact ⟨s', h, hother a1 a2 hne12⟩
+
 /-! ## Cross-contract interface witness
 
 Escrow's Tier-B theorems assume `[HonestERC20 T]` for an abstract callee `T`. That is an

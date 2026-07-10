@@ -64,6 +64,7 @@ partial def visitStmt : Stmt → VisitResult
   | .letBind _ e => visitExpr e.2
   | .storageSet _ e => visitExpr e.2
   | .mapSet _ _ e => visitWadExpr e
+  | .mapSet2 _ _ _ e => visitWadExpr e
   | .require e _ => visitExpr e
   | .ifThenElse e s1 s2 => visitExpr e |>.merge (visitStmt s1) |>.merge (visitStmt s2)
   | .emit _ args => args.foldl (init := {}) fun acc e => acc.merge (visitExpr e.2)
@@ -195,6 +196,7 @@ pure, `STATICCALL`-style read (see `Core/ContractM.lean`'s `PairM.read` docstrin
 partial def hasViewMutation : Stmt → Bool
   | .storageSet _ _ => true
   | .mapSet _ _ _ => true
+  | .mapSet2 _ _ _ _ => true
   | .emit _ _ => true
   | .seq s1 s2 => hasViewMutation s1 || hasViewMutation s2
   | .ifThenElse _ s1 s2 => hasViewMutation s1 || hasViewMutation s2

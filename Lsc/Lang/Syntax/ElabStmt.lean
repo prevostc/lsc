@@ -395,6 +395,46 @@ partial def elabLscStmt (storageName : Name) (locals : List (String × Lsc.Deriv
           let tyConst ← k.tyConst
           return (← `(Lsc.Stmt.storageSet $(quote field) ⟨$tyConst, $eTerm⟩), locals)
       | none => throwErrorAt x "expected `σ.field = e;` on the left-hand side, got `{x.getId}`"
+  | `(lscStmt| $x:ident [ $key1 ] [ $key2 ] = $e ;) => do
+      match Lsc.sigmaFieldName? x.getId with
+      | some field => do
+          let k ← storageFieldKind storageName field
+          unless Lsc.Syntax.isMapping2Field k do
+            throwErrorAt x "`{field}` is not a nested mapping field, cannot index it with `[..][..]`"
+          let key1Term ← elabMapKey key1
+          let key2Term ← elabMapKey key2
+          let (eTerm, ek) ← elabLscExpr storageName locals e
+          unless ek == .wad do
+            throwErrorAt x "nested mapping field `{field}` expects a `Wad`-kind value, got `{repr ek}`"
+          return (← `(Lsc.Stmt.mapSet2 $(quote field) $key1Term $key2Term $eTerm), locals)
+      | none =>
+          throwErrorAt x "expected `σ.field[key1][key2] = e;` on the left-hand side, got `{x.getId}`"
+  | `(lscStmt| $x:ident [ $key1 ] [ $key2 ] +=? $e ;) => do
+      match Lsc.sigmaFieldName? x.getId with
+      | some field => do
+          let k ← storageFieldKind storageName field
+          unless Lsc.Syntax.isMapping2Field k do
+            throwErrorAt x "`{field}` is not a nested mapping field, cannot index it with `[..][..]`"
+          let key1Term ← elabMapKey key1
+          let key2Term ← elabMapKey key2
+          let curTerm ← `(Lsc.Wad.Expr.mapGet2 $(quote field) $key1Term $key2Term)
+          let (sumTerm, _) ← elabCheckedAddWith storageName locals curTerm .wad e
+          return (← `(Lsc.Stmt.mapSet2 $(quote field) $key1Term $key2Term $sumTerm), locals)
+      | none =>
+          throwErrorAt x "expected `σ.field[key1][key2] +=? e;` on the left-hand side, got `{x.getId}`"
+  | `(lscStmt| $x:ident [ $key1 ] [ $key2 ] -=? $e ;) => do
+      match Lsc.sigmaFieldName? x.getId with
+      | some field => do
+          let k ← storageFieldKind storageName field
+          unless Lsc.Syntax.isMapping2Field k do
+            throwErrorAt x "`{field}` is not a nested mapping field, cannot index it with `[..][..]`"
+          let key1Term ← elabMapKey key1
+          let key2Term ← elabMapKey key2
+          let curTerm ← `(Lsc.Wad.Expr.mapGet2 $(quote field) $key1Term $key2Term)
+          let (diffTerm, _) ← elabCheckedSubWith storageName locals curTerm .wad e
+          return (← `(Lsc.Stmt.mapSet2 $(quote field) $key1Term $key2Term $diffTerm), locals)
+      | none =>
+          throwErrorAt x "expected `σ.field[key1][key2] -=? e;` on the left-hand side, got `{x.getId}`"
   | `(lscStmt| $x:ident [ $key ] = $e ;) => do
       match Lsc.sigmaFieldName? x.getId with
       | some field => do

@@ -27,6 +27,7 @@ private def irExprToYul (e : IR.Expr) : Ast.Expr :=
   | .sload slot => yulCall "sload" [yulLit slot]
   | .calldataWord offset => yulCall "calldataload" [yulLit offset]
   | .mapSlot _ _ => yulLit 0
+  | .mapSlot2 _ _ _ => yulLit 0
   | .dynSload slot => yulCall "sload" [irExprToYul slot]
   | .add a b => yulCall "add" [irExprToYul a, irExprToYul b]
   | .sub a b => yulCall "sub" [irExprToYul a, irExprToYul b]
@@ -40,6 +41,18 @@ private def mapSlotToYul (base : Nat) (key : IR.Expr) : List Ast.Stmt × Ast.Exp
   let keyExpr := irExprToYul key
   ( [Ast.Stmt.ExprStmtCall (yulCall "mstore" [yulLit 0, keyExpr]),
      Ast.Stmt.ExprStmtCall (yulCall "mstore" [yulLit 32, yulLit base])],
+    yulCall "keccak256" [yulLit 64, yulLit 0] )
+
+/-- Nested-mapping slot (`allowances[owner][spender]`-style) — chains `mapSlotToYul`'s own
+single-key hash twice: `keccak256(key2 ++ keccak256(key1 ++ baseSlot))`, matching Solidity's real
+nested-mapping slot formula and `IR.Expr.mapSlot2`'s docstring. -/
+private def mapSlot2ToYul (base : Nat) (key1 key2 : IR.Expr) : List Ast.Stmt × Ast.Expr :=
+  let (innerSetup, innerSlotExpr) := mapSlotToYul base key1
+  let key2Expr := irExprToYul key2
+  ( innerSetup ++
+      [Ast.Stmt.Let ["lsc_mapslot2_inner"] (some innerSlotExpr),
+       Ast.Stmt.ExprStmtCall (yulCall "mstore" [yulLit 0, key2Expr]),
+       Ast.Stmt.ExprStmtCall (yulCall "mstore" [yulLit 32, .Var "lsc_mapslot2_inner"])],
     yulCall "keccak256" [yulLit 64, yulLit 0] )
 
 private def revertWithSelector (selector : Nat) : List Ast.Stmt :=
@@ -129,10 +142,16 @@ partial def irStmtToYul (s : IR.Stmt) : List Ast.Stmt :=
   | .letBind name (.dynSload (.mapSlot base key)) =>
     let (setup, slotExpr) := mapSlotToYul base key
     setup ++ [Ast.Stmt.Let [name] (some (yulCall "sload" [slotExpr]))]
+  | .letBind name (.dynSload (.mapSlot2 base key1 key2)) =>
+    let (setup, slotExpr) := mapSlot2ToYul base key1 key2
+    setup ++ [Ast.Stmt.Let [name] (some (yulCall "sload" [slotExpr]))]
   | .letBind name e => [Ast.Stmt.Let [name] (some (irExprToYul e))]
   | .sstore slot e => [Ast.Stmt.ExprStmtCall (yulCall "sstore" [yulLit slot, irExprToYul e])]
   | .sstoreDyn (.mapSlot base key) val =>
     let (setup, slotExpr) := mapSlotToYul base key
+    setup ++ [Ast.Stmt.ExprStmtCall (yulCall "sstore" [slotExpr, irExprToYul val])]
+  | .sstoreDyn (.mapSlot2 base key1 key2) val =>
+    let (setup, slotExpr) := mapSlot2ToYul base key1 key2
     setup ++ [Ast.Stmt.ExprStmtCall (yulCall "sstore" [slotExpr, irExprToYul val])]
   | .sstoreDyn slot val =>
     [Ast.Stmt.ExprStmtCall (yulCall "sstore" [irExprToYul slot, irExprToYul val])]
@@ -145,6 +164,11 @@ partial def irStmtToYul (s : IR.Stmt) : List Ast.Stmt :=
   | .revertSelector selector => revertWithSelector selector
   | .ret (.dynSload (.mapSlot base key)) =>
     let (setup, slotExpr) := mapSlotToYul base key
+    setup ++
+      [Ast.Stmt.ExprStmtCall (yulCall "mstore" [yulLit 0, yulCall "sload" [slotExpr]]),
+       Ast.Stmt.ExprStmtCall (yulCall "return" [yulLit 0, yulLit 32])]
+  | .ret (.dynSload (.mapSlot2 base key1 key2)) =>
+    let (setup, slotExpr) := mapSlot2ToYul base key1 key2
     setup ++
       [Ast.Stmt.ExprStmtCall (yulCall "mstore" [yulLit 0, yulCall "sload" [slotExpr]]),
        Ast.Stmt.ExprStmtCall (yulCall "return" [yulLit 0, yulLit 32])]

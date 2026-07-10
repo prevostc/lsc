@@ -58,6 +58,7 @@ def evalExpr (st : IRState) (e : Expr) : Nat :=
   | .local name => st.lookupLocal name
   | .sload slot => st.lookupSlot slot
   | .mapSlot _ _ => 0
+  | .mapSlot2 _ _ _ => 0
   | .dynSload slot => st.lookupSlot (evalExpr st slot)
   | .calldataWord offset => st.calldata offset
   | .add a b => evalExpr st a + evalExpr st b

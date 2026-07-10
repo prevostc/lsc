@@ -145,6 +145,12 @@ def evalWith
     let w ← Wad.eval expr env
     ContractM.modifyStorage (dsl.setMapField field addr w)
     pure (env, none)
+  | .mapSet2 field key1 key2 expr => do
+    let addr1 ← Wad.resolveMapKey key1 env
+    let addr2 ← Wad.resolveMapKey key2 env
+    let w ← Wad.eval expr env
+    ContractM.modifyStorage (dsl.setMapField2 field addr1 addr2 w)
+    pure (env, none)
   | .require condExpr errName => do
     let v ← Expr.eval condExpr env
     if Val.boolOf v then
@@ -221,6 +227,15 @@ attribute [reducible] evalWith
             | _ => ContractM.revert .Unauthorized
         let w ← Wad.eval expr env
         ContractM.modifyStorage (dsl.setMapField field addr w)
+        pure (env, none)) := rfl
+
+@[simp] theorem evalWith_mapSet2 (field : Ident) (key1 key2 : MapKey) (expr : Wad.Expr) (env : LocalEnv) :
+    evalWith (S := S) (E := E) (Err := Err) (.mapSet2 field key1 key2 expr) env =
+      (do
+        let addr1 ← Wad.resolveMapKey key1 env
+        let addr2 ← Wad.resolveMapKey key2 env
+        let w ← Wad.eval expr env
+        ContractM.modifyStorage (dsl.setMapField2 field addr1 addr2 w)
         pure (env, none)) := rfl
 
 @[simp] theorem evalWith_require (condExpr : Expr .bool) (errName : Ident) (env : LocalEnv) :

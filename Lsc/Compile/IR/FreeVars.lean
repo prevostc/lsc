@@ -9,6 +9,7 @@ def freeVarsExpr : Expr → List Ident
   | .local name => [name]
   | .sload _ => []
   | .mapSlot _ key => freeVarsExpr key
+  | .mapSlot2 _ key1 key2 => freeVarsExpr key1 ++ freeVarsExpr key2
   | .dynSload slot => freeVarsExpr slot
   | .calldataWord _ => []
   | .add a b => freeVarsExpr a ++ freeVarsExpr b
