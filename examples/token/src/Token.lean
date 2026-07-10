@@ -22,9 +22,9 @@ namespace Token
 declare_token_amount Amount
 
 structure TokenStorage where
-  owner : Address := 0
+  owner : Address
   totalSupply : Amount := ⟨0⟩
-  balances : Wad.WadMap := fun _ => ⟨0⟩
+  balances : Mapping Address Amount := Mapping.empty
   deriving ContractStorage
 
 inductive TokenError where
@@ -37,6 +37,10 @@ inductive TokenEvent where
   | Transfer (amount : Amount)
   | Mint (amount : Amount)
   deriving Repr, DecidableEq, ContractEvent
+
+constructor (owner_ : Address) {
+  σ.owner = owner_;
+}
 
 view balanceOf(who : Address) : Amount => σ.balances[who];
 

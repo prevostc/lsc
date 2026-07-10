@@ -4,8 +4,8 @@ Full design context: [DESIGN.md](../DESIGN.md). Canonical minimal pattern: [COUN
 See also [ESCROW.md](ESCROW.md) — `Escrow.release` calls into `Token` as a genuine, black-box other
 contract, via `exec`/`read`, knowing nothing about `Token`'s internals.
 
-`Token` holds a genuine address-keyed balance mapping (`Lsc.Wad.WadMap`,
-[Lib/Wad/Syntax.lean](../../Lsc/Lib/Wad/Syntax.lean)) and exposes the real ERC20 surface for any
+`Token` holds a genuine address-keyed balance mapping (`Lsc.Mapping Address Token.Amount`,
+[Lsc/Core/Mapping.lean](../../Lsc/Core/Mapping.lean)) and exposes the real ERC20 surface for any
 number of holders.
 
 ## Contract
@@ -16,7 +16,7 @@ declare_token_amount Amount
 structure TokenStorage where
   owner : Address := 0
   totalSupply : Amount := ⟨0⟩
-  balances : Wad.WadMap := fun _ => Wad.mkNat 0
+  balances : Mapping Address Amount := Mapping.empty
   deriving ContractStorage
 
 inductive TokenError where
@@ -73,8 +73,8 @@ itself, reverting with `Underflow`.
 
 ## Scope limitations (deliberate)
 
-* **No `approve`/`transferFrom`.** The allowance half of ERC20 needs a double-keyed mapping
-  (`address → address → Wad`); `Lsc.Wad.WadMap` only supports a single `Address` key. Tracked in
+* **No `approve`/`transferFrom`.** The allowance half of ERC20 needs a nested mapping
+  (`Mapping Address (Mapping Address Amount)`); not yet wired in the DSL. Tracked in
   [`docs/todo/backlog.md`](../todo/backlog.md).
 * **Single-field events.** DSL event payloads support 0-or-1 arguments today, so `Transfer`/`Mint`
   carry only `amount`, not the real ERC20 `(from, to, amount)`. Tracked in

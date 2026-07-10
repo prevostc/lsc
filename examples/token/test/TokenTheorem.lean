@@ -9,7 +9,7 @@ open Lsc Token Lsc.Interfaces
 /-- **Property:** `balanceOf` returns the stored balance for any address. -/
 theorem balanceOf_returns_stored_balance (who : Address) (s : ContractState TokenStorage) :
     Except.map (fun x => Val.wadOf x.1) (runS (Token.balanceOf who) s) =
-      .ok (s.storage.balances who) :=
+      .ok (balanceAt s.storage who) :=
   runBalanceOfOk who s
 
 theorem balanceOf_zero_by_default (who : Address) (owner : Address) (totalSupply : Amount) :
@@ -20,54 +20,54 @@ theorem balanceOf_zero_by_default (who : Address) (owner : Address) (totalSupply
 
 theorem transfer_debits_sender (recipient : Address) (amount : Wad) (s : ContractState TokenStorage)
     (hne : s.context.caller ≠ recipient)
-    (hsub : amount.n ≤ (s.storage.balances s.context.caller).n)
-    (hadd : (s.storage.balances recipient).n + amount.n < 2 ^ 256) :
+    (hsub : amount.n ≤ (balanceAt s.storage s.context.caller).n)
+    (hadd : (balanceAt s.storage recipient).n + amount.n < 2 ^ 256) :
     ∃ s', runS (transfer recipient amount : TokenM Unit) s =
         .ok ((), s', [TokenEvent.Transfer (Wad.Fixed.retag amount)]) ∧
-      s'.storage.balances s.context.caller =
-        Wad.mkNat ((s.storage.balances s.context.caller).n - amount.n) := by
+      balanceAt s'.storage s.context.caller =
+        Wad.mkNat ((balanceAt s.storage s.context.caller).n - amount.n) := by
   obtain ⟨s', h, hbal⟩ := runTransferOk recipient amount s hsub hadd
   exact ⟨s', h, by simpa [hne] using hbal s.context.caller⟩
 
 theorem transfer_credits_recipient (recipient : Address) (amount : Wad)
     (s : ContractState TokenStorage) (hne : s.context.caller ≠ recipient)
-    (hsub : amount.n ≤ (s.storage.balances s.context.caller).n)
-    (hadd : (s.storage.balances recipient).n + amount.n < 2 ^ 256) :
+    (hsub : amount.n ≤ (balanceAt s.storage s.context.caller).n)
+    (hadd : (balanceAt s.storage recipient).n + amount.n < 2 ^ 256) :
     ∃ s', runS (transfer recipient amount : TokenM Unit) s =
         .ok ((), s', [TokenEvent.Transfer (Wad.Fixed.retag amount)]) ∧
-      s'.storage.balances recipient = Wad.mkNat ((s.storage.balances recipient).n + amount.n) := by
+      balanceAt s'.storage recipient = Wad.mkNat ((balanceAt s.storage recipient).n + amount.n) := by
   obtain ⟨s', h, hbal⟩ := runTransferOk recipient amount s hsub hadd
   exact ⟨s', h, by simpa [hne, Ne.symm hne] using hbal recipient⟩
 
 theorem transfer_preserves_other_balances (recipient : Address) (amount : Wad)
     (s : ContractState TokenStorage) (a : Address) (ha1 : a ≠ s.context.caller)
     (ha2 : a ≠ recipient)
-    (hsub : amount.n ≤ (s.storage.balances s.context.caller).n)
-    (hadd : (s.storage.balances recipient).n + amount.n < 2 ^ 256) :
+    (hsub : amount.n ≤ (balanceAt s.storage s.context.caller).n)
+    (hadd : (balanceAt s.storage recipient).n + amount.n < 2 ^ 256) :
     ∃ s', runS (transfer recipient amount : TokenM Unit) s =
         .ok ((), s', [TokenEvent.Transfer (Wad.Fixed.retag amount)]) ∧
-      s'.storage.balances a = s.storage.balances a := by
+      balanceAt s'.storage a = balanceAt s.storage a := by
   obtain ⟨s', h, hbal⟩ := runTransferOk recipient amount s hsub hadd
   exact ⟨s', h, by simpa [ha1, ha2] using hbal a⟩
 
 theorem transfer_self_transfer_is_noop (amount : Wad) (s : ContractState TokenStorage)
-    (hsub : amount.n ≤ (s.storage.balances s.context.caller).n)
-    (hadd : (s.storage.balances s.context.caller).n + amount.n < 2 ^ 256) :
+    (hsub : amount.n ≤ (balanceAt s.storage s.context.caller).n)
+    (hadd : (balanceAt s.storage s.context.caller).n + amount.n < 2 ^ 256) :
     ∃ s', runS (transfer s.context.caller amount : TokenM Unit) s =
         .ok ((), s', [TokenEvent.Transfer (Wad.Fixed.retag amount)]) ∧
-      s'.storage.balances s.context.caller = s.storage.balances s.context.caller := by
+      balanceAt s'.storage s.context.caller = balanceAt s.storage s.context.caller := by
   obtain ⟨s', h, hbal⟩ := runTransferOk s.context.caller amount s hsub hadd
   exact ⟨s', h, by simpa using hbal s.context.caller⟩
 
 theorem transfer_reverts_on_insufficient_balance (recipient : Address) (amount : Wad)
-    (s : ContractState TokenStorage) (h : (s.storage.balances s.context.caller).n < amount.n) :
+    (s : ContractState TokenStorage) (h : (balanceAt s.storage s.context.caller).n < amount.n) :
     runS (transfer recipient amount : TokenM Unit) s = .error TokenError.Underflow :=
   runTransferErr recipient amount s h
 
 theorem mint_increases_total_supply (recipient : Address) (amount : Wad)
     (s : ContractState TokenStorage) (howner : s.context.caller == s.storage.owner)
     (hsupply : s.storage.totalSupply.n + amount.n < 2 ^ 256)
-    (hadd : (s.storage.balances recipient).n + amount.n < 2 ^ 256) :
+    (hadd : (balanceAt s.storage recipient).n + amount.n < 2 ^ 256) :
     ∃ s', runS (mint recipient amount : TokenM Unit) s =
         .ok ((), s', [TokenEvent.Mint (Wad.Fixed.retag amount)]) ∧
       s'.storage.totalSupply.n = s.storage.totalSupply.n + amount.n := by
@@ -77,21 +77,21 @@ theorem mint_increases_total_supply (recipient : Address) (amount : Wad)
 theorem mint_increases_recipient_balance (recipient : Address) (amount : Wad)
     (s : ContractState TokenStorage) (howner : s.context.caller == s.storage.owner)
     (hsupply : s.storage.totalSupply.n + amount.n < 2 ^ 256)
-    (hadd : (s.storage.balances recipient).n + amount.n < 2 ^ 256) :
+    (hadd : (balanceAt s.storage recipient).n + amount.n < 2 ^ 256) :
     ∃ s', runS (mint recipient amount : TokenM Unit) s =
         .ok ((), s', [TokenEvent.Mint (Wad.Fixed.retag amount)]) ∧
-      s'.storage.balances recipient = Wad.mkNat ((s.storage.balances recipient).n + amount.n) := by
+      balanceAt s'.storage recipient = Wad.mkNat ((balanceAt s.storage recipient).n + amount.n) := by
   obtain ⟨s', h, _, hbal, _⟩ := runMintOk recipient amount s howner hsupply hadd
   exact ⟨s', h, hbal⟩
 
 theorem mint_preserves_other_balances (recipient : Address) (amount : Wad)
     (s : ContractState TokenStorage) (howner : s.context.caller == s.storage.owner)
     (hsupply : s.storage.totalSupply.n + amount.n < 2 ^ 256)
-    (hadd : (s.storage.balances recipient).n + amount.n < 2 ^ 256)
+    (hadd : (balanceAt s.storage recipient).n + amount.n < 2 ^ 256)
     (a : Address) (ha : a ≠ recipient) :
     ∃ s', runS (mint recipient amount : TokenM Unit) s =
         .ok ((), s', [TokenEvent.Mint (Wad.Fixed.retag amount)]) ∧
-      s'.storage.balances a = s.storage.balances a := by
+      balanceAt s'.storage a = balanceAt s.storage a := by
   obtain ⟨s', h, _, _, hother⟩ := runMintOk recipient amount s howner hsupply hadd
   exact ⟨s', h, hother a ha⟩
 

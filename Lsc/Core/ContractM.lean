@@ -438,13 +438,12 @@ class ContractDSL (S : Type) (E : outParam Type) (Err : outParam Type) [Contract
   setField  : (t : Ty) → Ident → Val t → S → S
   resolveErr : Ident → Option Err
   buildEvent : Ident → List (Sigma Val) → Option E
-  /-- Read one entry (keyed by `Address`) of a `Lsc.Wad.WadMap`-kinded storage field, by field
-      name — `none` iff `field` doesn't name a `WadMap` field at all (an out-of-range key is not
-      representable here: `WadMap` is a total function, see its docstring, so every key always
-      has *some* `Wad` value once `field` itself is valid). -/
+  /-- Read one entry (keyed by `Address`) of a `Lsc.Mapping` storage field, by field name —
+      `none` iff `field` doesn't name a mapping field. Missing keys read as zero via
+      `Mapping.get`. -/
   getMapField : Ident → Address → S → Option Wad.Wad
-  /-- Write one entry (keyed by `Address`) of a `Lsc.Wad.WadMap`-kinded storage field, by field
-      name — a no-op (`s` returned unchanged) iff `field` doesn't name a `WadMap` field. -/
+  /-- Write one entry (keyed by `Address`) of a `Lsc.Mapping` storage field, by field name —
+      a no-op (`s` returned unchanged) iff `field` doesn't name a mapping field. -/
   setMapField : Ident → Address → Wad.Wad → S → S
 
 end Lsc

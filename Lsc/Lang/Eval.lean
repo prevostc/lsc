@@ -210,6 +210,19 @@ attribute [reducible] evalWith
       (Expr.eval expr env >>= fun v =>
         ContractM.modifyStorage (dsl.setField t field v) >>= fun _ => pure (env, none)) := rfl
 
+@[simp] theorem evalWith_mapSet (field : Ident) (key : MapKey) (expr : Wad.Expr) (env : LocalEnv) :
+    evalWith (S := S) (E := E) (Err := Err) (.mapSet field key expr) env =
+      (do
+        let addr ← match key with
+          | .caller => ContractM.caller
+          | .var name =>
+            match env.lookup name with
+            | some ⟨Ty.address, .addr a⟩ => pure a
+            | _ => ContractM.revert .Unauthorized
+        let w ← Wad.eval expr env
+        ContractM.modifyStorage (dsl.setMapField field addr w)
+        pure (env, none)) := rfl
+
 @[simp] theorem evalWith_require (condExpr : Expr .bool) (errName : Ident) (env : LocalEnv) :
     evalWith (S := S) (E := E) (Err := Err) (.require condExpr errName) env =
       (Expr.eval condExpr env >>= fun v =>

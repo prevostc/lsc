@@ -47,12 +47,13 @@ initialize contractStorageExt : EnvExtension (NameMap Name) ←
 originally declared further below, alongside `fieldKindOfExpr`/`tyConst`/etc. -/
 inductive FieldKind
   | wei | wad | bool | address | uint256
-  /-- An address-keyed `Lsc.Wad.WadMap` storage field (e.g. ERC20-style per-holder balances,
+  /-- A `Lsc.Mapping Address V` storage field (e.g. ERC20-style per-holder balances,
       `docs/reference/TOKEN.md`) — storage-only: unlike the other five kinds, there is no `Ty`
       case for it at all (it can't be a `tx` parameter, `let`-local, or event payload), so it is
-      excluded from every scalar-`Val`-based helper below (`tyConst`/`leanTypeStx`/`valCtor`/...)
-      and instead handled by its own dedicated `getMapField`/`setMapField` codegen. -/
-  | wadMap
+      excluded from every scalar-`Val`-based helper below and instead handled by dedicated
+      `getMapField`/`setMapField` codegen using `Mapping.get`/`Mapping.set`. `valKind` is the
+      map's value type (always `.wad`-shaped today). -/
+  | mapping (valKind : FieldKind)
   /-- Interface-typed storage field (e.g. `token : IERC20`) — codegen uses one `Address` word;
       the interface name (`"IERC20"`, …) is recorded in `ContractDef.interfaces`. -/
   | interface (iface : String)
@@ -64,7 +65,7 @@ def FieldKind.toTy : FieldKind → Ty
   | .bool => .bool
   | .address => .address
   | .uint256 => .uint256
-  | .wadMap => .uint256
+  | .mapping _ => .uint256
   | .interface _ => .address
 
 def FieldKind.interfaceName? (k : FieldKind) : Option String :=
@@ -262,7 +263,6 @@ def fieldKindOfExpr (e : Lean.Expr) : Option FieldKind :=
   else if e.isConstOf ``Bool then some .bool
   else if e.isConstOf ``Lsc.Address then some .address
   else if e.isConstOf ``Lsc.UInt256 then some .uint256
-  else if e.isConstOf ``Lsc.Wad.WadMap then some .wadMap
   else if e.constName?.map (·.toString) == some "Lsc.Interfaces.IERC20" then some (.interface "IERC20")
   else if e.getAppFn.isConstOf ``Lsc.Wad.Fixed then
     -- `Fixed` now takes two explicit args (`decimals`, `tag` — see that structure's docstring);
@@ -308,7 +308,19 @@ already succeeds (the common case for the original five keyword-named types). -/
 def fieldKindOfExprM (e : Lean.Expr) : TermElabM (Option FieldKind) := do
   match fieldKindOfExpr e with
   | some k => return some k
-  | none => return if (← resolveFixedAlias e) then some .wad else none
+  | none =>
+    if e.isAppOf ``Lsc.Mapping then
+      let args := e.getAppArgs
+      if args.size >= 2 then
+        let keyTy := args[0]!
+        let valTy := args[1]!
+        if keyTy.isConstOf ``Lsc.Address then
+          if let some vk := fieldKindOfExpr valTy then return some (.mapping vk)
+          else if (← resolveFixedAlias valTy) then return some (.mapping .wad)
+          else return none
+        else return none
+      else return none
+    else if (← resolveFixedAlias e) then return some .wad else return none
 
 def FieldKind.tyConst : FieldKind → TermElabM Term
   | .wei => `(Lsc.Ty.wei)
@@ -316,7 +328,7 @@ def FieldKind.tyConst : FieldKind → TermElabM Term
   | .bool => `(Lsc.Ty.bool)
   | .address => `(Lsc.Ty.address)
   | .uint256 => `(Lsc.Ty.uint256)
-  | .wadMap => throwError "internal error: `FieldKind.wadMap` has no `Ty` (storage-only kind)"
+  | .mapping _ => throwError "internal error: `FieldKind.mapping` has no `Ty` (storage-only kind)"
   | .interface _ => `(Lsc.Ty.address)
 
 def FieldKind.leanTypeStx : FieldKind → TermElabM Term
@@ -325,7 +337,7 @@ def FieldKind.leanTypeStx : FieldKind → TermElabM Term
   | .bool => `(Bool)
   | .address => `(Lsc.Address)
   | .uint256 => `(Lsc.UInt256)
-  | .wadMap => throwError "internal error: `FieldKind.wadMap` is storage-only (not a `tx` parameter kind)"
+  | .mapping _ => throwError "internal error: `FieldKind.mapping` is storage-only (not a `tx` parameter kind)"
   | .interface iface =>
     match iface with
     | "IERC20" => `(Lsc.Interfaces.IERC20)
@@ -350,7 +362,7 @@ def FieldKind.embedLitStx (k : FieldKind) (paramId : Term) : TermElabM Term :=
   | .bool => `(Lsc.CoreExpr.lit Lsc.Ty.bool (Lsc.Lit.bool $paramId))
   | .address => `(Lsc.CoreExpr.lit Lsc.Ty.address (Lsc.Lit.addr $paramId))
   | .uint256 => `(Lsc.CoreExpr.lit Lsc.Ty.uint256 (Lsc.Lit.u256 $paramId))
-  | .wadMap => throwError "internal error: `FieldKind.wadMap` is storage-only (not embeddable as a literal)"
+  | .mapping _ => throwError "internal error: `FieldKind.mapping` is storage-only (not embeddable as a literal)"
   | .interface _ => `(Lsc.CoreExpr.lit Lsc.Ty.address (Lsc.Lit.addr ($paramId).addr))
 
 /-- Wrap a plain term as a `matchDiscr` for splicing into `match $[$discrs],* with …`. -/
@@ -363,7 +375,7 @@ def FieldKind.valCtor : FieldKind → TermElabM Term
   | .bool => `(Lsc.Val.bool)
   | .address => `(Lsc.Val.addr)
   | .uint256 => `(Lsc.Val.u256)
-  | .wadMap => throwError "internal error: `FieldKind.wadMap` has no `Val` case (storage-only kind)"
+  | .mapping _ => throwError "internal error: `FieldKind.mapping` has no `Val` case (storage-only kind)"
   | .interface _ => `(Lsc.Val.addr)
 
 /-- Bridge a `.wad`-kind value between its field's *own* possibly-tagged type (e.g.
@@ -394,8 +406,8 @@ def FieldKind.exprTypeStx : FieldKind → TermElabM Term
   | .bool => `(Lsc.CoreExpr Lsc.Ty.bool)
   | .address => `(Lsc.CoreExpr Lsc.Ty.address)
   | .uint256 => `(Lsc.CoreExpr Lsc.Ty.uint256)
-  | .wadMap =>
-    throwError "internal error: `FieldKind.wadMap` has no plain `σ.field` expression form \
+  | .mapping _ =>
+    throwError "internal error: `FieldKind.mapping` has no plain `σ.field` expression form \
       (index it with `σ.field[key]` instead)"
   | .interface _ => `(Lsc.CoreExpr Lsc.Ty.address)
 
@@ -411,8 +423,8 @@ def FieldKind.storageGetStx (k : FieldKind) (fieldStr : String) : TermElabM Term
   | .bool => `(Lsc.CoreExpr.storageGet Lsc.Ty.bool $fieldLit)
   | .address => `(Lsc.CoreExpr.storageGet Lsc.Ty.address $fieldLit)
   | .uint256 => `(Lsc.CoreExpr.storageGet Lsc.Ty.uint256 $fieldLit)
-  | .wadMap =>
-    throwError "internal error: `FieldKind.wadMap` has no plain `σ.field` expression form \
+  | .mapping _ =>
+    throwError "internal error: `FieldKind.mapping` has no plain `σ.field` expression form \
       (index it with `σ.field[key]` instead)"
   | .interface _ => `(Lsc.CoreExpr.storageGet Lsc.Ty.address $fieldLit)
 
@@ -509,7 +521,7 @@ def embedStorageDefaultExpr (k : FieldKind) (defaultExpr : Lean.Expr) : TermElab
       return some (← `(some (Sigma.mk Lsc.Ty.address
         (Lsc.CoreExpr.lit Lsc.Ty.address (Lsc.Lit.addr (BitVec.ofNat 256 $(quote n)))))))
     else return none
-  | .wadMap => return none
+  | .mapping _ => return none
 
 /-- Return `some defaultExpr` for a field with a Lean structure default, else `none`. -/
 def getStructureFieldDefaultExpr? (structName : Name) (fname : Name) : TermElabM (Option Lean.Expr) := do
@@ -528,9 +540,9 @@ def mkGetFieldCmd (structName : Name) (fields : Array (Name × FieldKind)) : Ter
   let tId := mkIdent `t
   let fieldId := mkIdent `field
   let sId := mkIdent `s
-  -- `wadMap` fields have no `Ty`/`Val` case at all (storage-only, see `FieldKind.wadMap`'s
-  -- docstring) — never matched here, only through the dedicated `getMapField` below.
-  let fields := fields.filter (·.2 != .wadMap)
+  -- `mapping` fields have no `Ty`/`Val` case at all (storage-only) — never matched here,
+  -- only through the dedicated `getMapField` below.
+  let fields := fields.filter fun (_, k) => match k with | .mapping _ => false | _ => true
   let arms ← fields.mapM fun (fname, k) => do
     let fId := mkIdent fname
     let fieldStr := quote fname.toString
@@ -561,7 +573,7 @@ def mkSetFieldCmd (structName : Name) (fields : Array (Name × FieldKind)) : Ter
   let fieldId := mkIdent `field
   let vId := mkIdent `v
   let sId := mkIdent `s
-  let fields := fields.filter (·.2 != .wadMap)
+  let fields := fields.filter fun (_, k) => match k with | .mapping _ => false | _ => true
   let arms ← fields.mapM fun (fname, k) => do
     let fId := mkIdent fname
     let fieldStr := quote fname.toString
@@ -591,8 +603,8 @@ def mkSetFieldCmd (structName : Name) (fields : Array (Name × FieldKind)) : Ter
       $alts:matchAlt*)
 
 /-- `def S.getMapField (field : String) (a : Lsc.Address) (s : S) : Option Lsc.Wad.Wad`, one
-match arm per `wadMap`-kinded field of `structName` — always generated (even as just the
-default `| _ => none` arm, if `structName` declares no `wadMap` field at all), so
+match arm per `mapping`-kinded field of `structName` — always generated (even as just the
+default `| _ => none` arm, if `structName` declares no mapping field at all), so
 `derive_contract_dsl`'s generated `ContractDSL` instance can uniformly reference
 `S.getMapField` regardless of whether `S` happens to have a mapping field. -/
 def mkGetMapFieldCmd (structName : Name) (fields : Array (Name × FieldKind)) : TermElabM Command := do
@@ -601,11 +613,14 @@ def mkGetMapFieldCmd (structName : Name) (fields : Array (Name × FieldKind)) : 
   let fieldId := mkIdent `field
   let aId := mkIdent `a
   let sId := mkIdent `s
-  let mapFields := fields.filter (·.2 == .wadMap)
-  let arms ← mapFields.mapM fun (fname, _) => do
+  let mapFields := fields.filterMap fun (fname, k) =>
+    match k with | .mapping vk => some (fname, vk) | _ => none
+  let arms ← mapFields.mapM fun (fname, vk) => do
     let fId := mkIdent fname
     let fieldStr := quote fname.toString
-    `(matchAltExpr| | $fieldStr => some ($sId.$fId $aId))
+    let rawGet ← `(Lsc.Mapping.get $sId.$fId $aId)
+    let bridged ← vk.bridgeGeneric rawGet
+    `(matchAltExpr| | $fieldStr => some $bridged)
   let wc ← `(_)
   let defaultArm ← `(matchAltExpr| | $wc => none)
   let alts := arms.push defaultArm
@@ -618,8 +633,7 @@ def mkGetMapFieldCmd (structName : Name) (fields : Array (Name × FieldKind)) : 
 
 /-- `def S.setMapField (field : String) (a : Lsc.Address) (v : Lsc.Wad.Wad) (s : S) : S`, the
 write-side counterpart of `mkGetMapFieldCmd` — a no-op (`s` unchanged) if `field` doesn't name a
-`wadMap` field. The generated `fun a' => if a' == a then v else $fId a'` update matches
-`Lsc.Wad.WadMap`'s "total function" model exactly (see that type's docstring). -/
+mapping field. Uses `Lsc.Mapping.set` on the field's `Finmap`-backed storage. -/
 def mkSetMapFieldCmd (structName : Name) (fields : Array (Name × FieldKind)) : TermElabM Command := do
   let structId := mkIdent structName
   let setMapFieldName := mkIdent (structName ++ `setMapField)
@@ -627,12 +641,13 @@ def mkSetMapFieldCmd (structName : Name) (fields : Array (Name × FieldKind)) : 
   let aId := mkIdent `a
   let vId := mkIdent `v
   let sId := mkIdent `s
-  let mapFields := fields.filter (·.2 == .wadMap)
-  let arms ← mapFields.mapM fun (fname, _) => do
+  let mapFields := fields.filterMap fun (fname, k) =>
+    match k with | .mapping vk => some (fname, vk) | _ => none
+  let arms ← mapFields.mapM fun (fname, vk) => do
     let fId := mkIdent fname
     let fieldStr := quote fname.toString
-    let aPrimeId := mkIdent `a'
-    let updated ← `(fun ($aPrimeId : Lsc.Address) => if $aPrimeId == $aId then $vId else $sId.$fId $aPrimeId)
+    let storedVal ← vk.bridgeGeneric vId
+    let updated ← `(Lsc.Mapping.set $sId.$fId $aId $storedVal)
     let body ← `({ $sId with $fId:ident := $updated })
     `(matchAltExpr| | $fieldStr => $body)
   let wc ← `(_)
@@ -657,9 +672,9 @@ generates plain `def`s of the same shape their combinators already build, nothin
 def mkSigmaFieldCmds (structName : Name) (fields : Array (Name × FieldKind)) :
     TermElabM (Array Command) := do
   let ns := structName.getPrefix
-  -- A `wadMap` field has no plain `σ.field` form at all — only `σ.field[key]`
+  -- A `mapping` field has no plain `σ.field` form at all — only `σ.field[key]`
   -- (`Lang/Syntax.lean`'s dedicated grammar), so it's excluded here.
-  let fields := fields.filter (·.2 != .wadMap)
+  let fields := fields.filter fun (_, k) => match k with | .mapping _ => false | _ => true
   fields.mapM fun (fname, k) => do
     let sigmaFieldName := mkIdent (ns ++ `σ ++ fname)
     let tyStx ← k.exprTypeStx
@@ -1018,7 +1033,7 @@ has no way to unfold `@ContractDSL.getMapField/setMapField S E Err _ _ ...` (a s
 projection applied to the `@[reducible] instance` `derive_contract_dsl` builds below) back down
 to the concrete, `match`-based `$storageId.getMapField`/`setMapField` those instance fields are
 literally assigned to — needed for any symbolic (non-`native_decide`) proof about a `tx` that
-reads/writes a `Lsc.Wad.WadMap` storage field (e.g. `examples/escrow`'s `Token.transfer`). -/
+reads/writes a `Lsc.Mapping` storage field (e.g. `examples/token`'s `Token.transfer`). -/
 def mkDslGetMapFieldLemma (lemmaName storageName errName eventName : Name) : TermElabM Command := do
   let sId := mkIdent storageName
   let eId := mkIdent eventName

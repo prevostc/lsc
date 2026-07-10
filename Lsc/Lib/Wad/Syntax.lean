@@ -1,4 +1,5 @@
 import Lsc.Core.UInt256
+import Lsc.Core.MapKey
 import Lsc.Types
 import Lean
 
@@ -20,7 +21,7 @@ untagged use of `Wad`/`Fixed d` (internal math, `Interest`'s accounting, storage
 mappings, ...) keeps meaning exactly what it always did: "some `d`-decimals fixed-point
 quantity, not tied to any one token." Uninhabited (zero constructors) since no value of this
 type is ever actually constructed — it only ever appears as a phantom type-level marker, never
-as real data (see `Fixed`'s own docstring). -/
+as real data (see `Fixed`'s docstring). -/
 inductive Untagged where
 
 /-- A decimals-*and*-token-indexed fixed-point number: `Fixed d tag` represents a value scaled by
@@ -63,7 +64,7 @@ instance {d : Nat} {tag : Type} : DecidableEq (Fixed d tag) := fun a b =>
 
 /-- `w.raw.toNat` under a shorter name — proofs about `Fixed`/`Wad` values constantly need to
 state arithmetic side-conditions and derived-storage equations in terms of this plain `Nat`
-(overflow/underflow bounds, `WadMap` update laws, ...), and the repeated `.raw.toNat` projection
+(overflow/underflow bounds, `Mapping` update laws, ...), and the repeated `.raw.toNat` projection
 chain hurts readability at that volume. `@[reducible]` (like `Wad`/`mkNat` above) so it stays
 fully transparent to `omega`/`simp`/`rfl`/`apply` — this only ever abbreviates the exact same
 `Nat`, never a new opaque projection. -/
@@ -135,41 +136,12 @@ one with the exact same `18` decimals). The generated `Tag` is never meant to be
 directly by name anywhere else — only `Foo.Amount` (the `abbrev` this expands to) is part of a
 token's public surface. -/
 elab "declare_token_amount " id:ident : command => do
-  -- Both quoted commands below splice this *same* `tagId` value (rather than each writing a
-  -- bare `Tag` identifier literal) so macro hygiene treats every occurrence as referring to one
-  -- and the same declaration — two independent `Tag` literals in two separate quotations would
-  -- otherwise get hygienically distinguished, leaving the second one unresolved and silently
-  -- auto-bound as a fresh implicit type variable instead of the just-declared inductive.
   let tagId := Lean.mkIdent (Lean.Name.mkSimple "Tag")
   Lean.Elab.Command.elabCommand (← `(
-    /-- Fresh, uninhabited nominal marker for this token's own `Amount` — see
-    `declare_token_amount`'s docstring. Never constructed; purely a phantom type-level tag. -/
     inductive $tagId))
   Lean.Elab.Command.elabCommand (← `(abbrev $id := Lsc.Wad.Fixed 18 $tagId))
-
-/-- A storage-only, address-keyed `Wad` mapping field — the minimal capability needed to
-model real ERC20-style per-holder balances (`docs/reference/TOKEN.md`), without a general
-N-key/N-value-type mapping system. Modeled as a plain total function `Address → Wad`
-(`Wad.mkNat 0` for any address never explicitly written) rather than a partial `HashMap`,
-matching real EVM storage semantics exactly: every storage slot reads as zero until written,
-there is no notion of an "absent" vs. "zero" entry. A storage `structure` field declared with
-this type (`balances : Lsc.Wad.WadMap := fun _ => Lsc.Wad.mkNat 0`) is recognized by
-`deriving ContractStorage` (`Lang/Derive.lean`) as `FieldKind.wadMap`, generating
-`S.getMapField`/`S.setMapField` for it — see that file's module docstring. -/
-def WadMap := Address → Wad
-
-/-- The address a `σ.field[key]` mapping read/write is keyed by — deliberately a small,
-self-contained sum type (rather than reusing `Lsc.CoreExpr Ty.address`) since `Wad.Expr` sits
-*below* `Lang/AST.lean`'s `CoreExpr`/`Ty` machinery in the import graph (`Lang/AST.lean` itself
-imports this file, to build the `Ty`-indexed `Expr` union) — referencing `CoreExpr` here would
-be circular. This restricts a mapping key to exactly the two forms real contracts need
-(`msg.sender`, or a bare local name — a `tx` parameter or `let`-bound `Address` value), mirroring
-the existing "bare identifiers only" restriction on `exec`/`read` call arguments
-(`Lang/Syntax.lean`). -/
-inductive MapKey where
-  | caller
-  | var : Ident → MapKey
-  deriving Repr
+  Lean.Elab.Command.elabCommand (← `(
+    instance : Inhabited $id where default := ⟨0⟩))
 
 /--
 Wad-domain expression fragment (`Expr .wad`), mirroring `Wei.Expr`'s shape
@@ -178,8 +150,8 @@ exactly — `Ty.wad`/`Val.wad` are registered in the core `Ty`/`Val`/
 alongside `Ty.wei`/`Val.wei`, so `Wad.Expr` has the same `.var`/`.storageGet`
 cases `Wei.Expr` does, letting a `Wad`-typed field be declared in a
 contract's `storage:` block and read/written from a `tx { }` body exactly
-like a `Wei` field. `.mapGet` additionally supports reading one entry of an
-address-keyed `WadMap` field (see that type's docstring). -/
+like a `Wei` field. `.mapGet` additionally supports reading one entry of a
+`Lsc.Mapping` storage field (see `Lsc/Core/Mapping.lean`). -/
 inductive Expr where
   | lit : Nat → Expr
   | var : Ident → Expr

@@ -66,9 +66,9 @@ syntax:max (name := lscExprFalse) &"false" : lscExpr
 
 syntax:max (name := lscExprMsgSender) "msg.sender" : lscExpr
 
-/-- `σ.field[key]` — read one entry of an address-keyed `Lsc.Wad.WadMap` storage field (e.g.
+/-- `σ.field[key]` — read one entry of a `Lsc.Mapping` storage field (e.g.
 `σ.balances[to]`), where `key` is `msg.sender` or a bare local identifier (a `tx` parameter or
-`let`-bound `Address` value) — see `Lsc.Wad.MapKey`'s docstring for why only these two forms are
+`let`-bound `Address` value) — see `Lsc.MapKey`'s docstring for why only these two forms are
 supported. `σ.field` itself lexes as one dotted `ident` token (see this file's module
 docstring), so this production is `ident "[" (ident | "msg.sender") "]"`. -/
 syntax:max (name := lscExprMapGet) ident "[" lscExpr "]" : lscExpr
@@ -121,7 +121,7 @@ module docstring on why `σ.field` needs no dedicated production); a non-`σ.fie
 side is a clear elaboration-time error, not a silent misparse. -/
 syntax (name := lscAssign) ident " = " lscExpr ";" : lscStmt
 
-/-- `σ.field[key] = e;` — write one entry of an address-keyed `Lsc.Wad.WadMap` storage field
+/-- `σ.field[key] = e;` — write one entry of a `Lsc.Mapping` storage field
 (e.g. `σ.balances[to] = newBalance;`) — see `lscExprMapGet`'s docstring for `key`'s two
 supported forms. -/
 syntax (name := lscMapAssign) ident "[" lscExpr "]" " = " lscExpr ";" : lscStmt

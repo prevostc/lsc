@@ -54,7 +54,7 @@ private def resolveMapSlot (cfg : Config) (field : Ident) : Except String Nat :=
   | some s => .ok s
   | none => .error s!"unknown mapping field {field}"
 
-private def lowerMapKey (_cfg : Config) (key : Wad.MapKey) : Except String IR.Expr :=
+private def lowerMapKey (_cfg : Config) (key : Lsc.MapKey) : Except String IR.Expr :=
   match key with
   | .caller => .ok (.local "caller")
   | .var name => .ok (.local name)

@@ -50,14 +50,16 @@ def divDownChecked (a b : Wad) : Except ArithError Wad :=
 abbrev Wad.canAddNat (w : Wad) (n : Nat) : Prop := w.raw.toNat + n < 2 ^ 256
 
 @[simp]
-theorem addCheckedNat_ok (a : Wad) (n : Nat) (h : a.canAddNat n) :
+theorem addCheckedNat_ok (a : Wad) (n : Nat) (h : Wad.canAddNat a n) :
     addCheckedNat a n = .ok ⟨BitVec.ofNat 256 (a.raw.toNat + n)⟩ := by
-  simp [addCheckedNat, UInt256.addCheckedNat, h, Except.map]
+  unfold Wad.canAddNat at h
+  simp [addCheckedNat, UInt256.addCheckedNat_ok a.raw n h, Except.map]
 
 @[simp]
-theorem addCheckedNat_error (a : Wad) (n : Nat) (h : ¬ a.canAddNat n) :
+theorem addCheckedNat_error (a : Wad) (n : Nat) (h : ¬ Wad.canAddNat a n) :
     addCheckedNat a n = .error .Overflow := by
-  simp [addCheckedNat, UInt256.addCheckedNat, h, Except.map]
+  unfold Wad.canAddNat at h
+  simp [addCheckedNat, UInt256.addCheckedNat_error a.raw n h, Except.map]
 
 /-- `a.raw.toNat + b.raw.toNat < 2 ^ 256` — the two-`Wad` analogue of `canAddNat`, needed for
 `addChecked`'s ok/error characterization lemmas below (two real `Wad` operands, not a bare

@@ -399,7 +399,7 @@ partial def elabLscStmt (storageName : Name) (locals : List (String × Lsc.Deriv
       match Lsc.sigmaFieldName? x.getId with
       | some field => do
           let k ← storageFieldKind storageName field
-          unless k == .wadMap do
+          unless Lsc.Syntax.isMappingField k do
             throwErrorAt x "`{field}` is not a mapping field, cannot index it with `[..]`"
           let keyTerm ← elabMapKey key
           let (eTerm, ek) ← elabLscExpr storageName locals e
@@ -411,7 +411,7 @@ partial def elabLscStmt (storageName : Name) (locals : List (String × Lsc.Deriv
       match Lsc.sigmaFieldName? x.getId with
       | some field => do
           let k ← storageFieldKind storageName field
-          unless k == .wadMap do
+          unless Lsc.Syntax.isMappingField k do
             throwErrorAt x "`{field}` is not a mapping field, cannot index it with `[..]`"
           let keyTerm ← elabMapKey key
           let curTerm ← `(Lsc.Wad.Expr.mapGet $(quote field) $keyTerm)
@@ -422,7 +422,7 @@ partial def elabLscStmt (storageName : Name) (locals : List (String × Lsc.Deriv
       match Lsc.sigmaFieldName? x.getId with
       | some field => do
           let k ← storageFieldKind storageName field
-          unless k == .wadMap do
+          unless Lsc.Syntax.isMappingField k do
             throwErrorAt x "`{field}` is not a mapping field, cannot index it with `[..]`"
           let keyTerm ← elabMapKey key
           let curTerm ← `(Lsc.Wad.Expr.mapGet $(quote field) $keyTerm)

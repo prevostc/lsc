@@ -258,21 +258,27 @@ import Lsc.Core.Types
 namespace Lsc
 
 /-- Opaque mapping type. Backed by Finmap but iteration is not exposed.
-    This prevents gas-griefing bugs and simplifies proofs. -/
-structure Mapping (K V : Type) [DecidableEq K] where
-  inner : Finmap (fun _ : K => V)
+    This prevents gas-griefing bugs and simplifies proofs. Contract authors see only
+    `get`/`set`/`empty`; the Finmap stays framework-internal (see `docs/DESIGN.md` §9). -/
+opaque Mapping (K V : Type) [DecidableEq K] : Type
 
 namespace Mapping
 
 variable {K V : Type} [DecidableEq K] [Inhabited V]
 
-def empty : Mapping K V := ⟨Finmap.empty⟩
+private def toFinmap : Mapping K V → Finmap (fun _ : K => V)
+private def fromFinmap : Finmap (fun _ : K => V) → Mapping K V
+
+axiom to_from (m : Finmap (fun _ : K => V)) : toFinmap (fromFinmap m) = m
+axiom from_to (m : Mapping K V) : fromFinmap (toFinmap m) = m
+
+def empty : Mapping K V := fromFinmap ∅
 
 def get (m : Mapping K V) (k : K) : V :=
-  (m.inner.lookup k).getD default
+  (toFinmap m |>.lookup k).getD default
 
 def set (m : Mapping K V) (k : K) (v : V) : Mapping K V :=
-  ⟨m.inner.insert k v⟩
+  fromFinmap (toFinmap m |>.insert k v)
 
 -- Separation: setting one key does not affect another
 @[simp]

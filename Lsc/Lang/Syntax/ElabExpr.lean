@@ -22,16 +22,19 @@ def storageFieldKind (storageName : Name) (field : String) : TermElabM Lsc.Deriv
   | some (_, k) => return k
   | none => throwError "Syntax: unknown storage field `{field}` on `{storageName}`"
 
+def isMappingField (k : Lsc.Deriving.FieldKind) : Bool :=
+  match k with | .mapping _ => true | _ => false
+
 /-- Elaborate a `σ.field[key]`/`σ.field[key] = e;` node's `key` sub-`lscExpr` into a
-`Lsc.Wad.MapKey`-valued `Term` — only `msg.sender` or a bare local identifier are supported
+`Lsc.MapKey`-valued `Term` — only `msg.sender` or a bare local identifier are supported
 (see `lscExprMapGet`'s docstring). -/
 def elabMapKey (key : TSyntax `lscExpr) : TermElabM Term :=
   match key with
-  | `(lscExpr| msg.sender) => `(Lsc.Wad.MapKey.caller)
+  | `(lscExpr| msg.sender) => `(Lsc.MapKey.caller)
   | `(lscExpr| $x:ident) =>
     match Lsc.sigmaFieldName? x.getId with
     | some _ => throwErrorAt x "a mapping key cannot itself be a `σ.field` read"
-    | none => `(Lsc.Wad.MapKey.var $(quote x.getId.toString))
+    | none => `(Lsc.MapKey.var $(quote x.getId.toString))
   | stx => throwErrorAt stx "unsupported mapping key `{stx}` — expected `msg.sender` or a \
 bare local identifier"
 
@@ -99,7 +102,7 @@ partial def elabLscExpr (storageName : Name) (locals : List (String × Lsc.Deriv
       match Lsc.sigmaFieldName? x.getId with
       | some field => do
           let k ← storageFieldKind storageName field
-          unless k == .wadMap do
+          unless isMappingField k do
             throwErrorAt x "`{field}` is not a mapping field, cannot index it with `[..]`"
           let keyTerm ← elabMapKey key
           return (← `(Lsc.Wad.Expr.mapGet $(quote field) $keyTerm), .wad)
@@ -138,7 +141,7 @@ partial def elabLscExpr (storageName : Name) (locals : List (String × Lsc.Deriv
                 | .uint256 => do
                   let t ← `(Lsc.CoreExpr.var Lsc.Ty.uint256 $nameLit)
                   pure (t, k)
-                | .wadMap => throwErrorAt x "`{nameStr}` is a mapping field, not a local value"
+                | .mapping _ => throwErrorAt x "`{nameStr}` is a mapping field, not a local value"
                 | .interface _ => do
                   let t ← `(Lsc.CoreExpr.var Lsc.Ty.address $nameLit)
                   pure (t, Lsc.Deriving.FieldKind.address)

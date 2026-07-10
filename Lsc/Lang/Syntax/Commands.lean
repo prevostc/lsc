@@ -361,10 +361,9 @@ def elabContractDefBody (nameStrStx : TSyntax `Lean.Parser.Term.str) (storageId 
   let eventName ← Lean.Elab.Command.liftCoreM <| Lean.Elab.realizeGlobalConstNoOverloadWithInfo eventId
   -- `storage : List (Ident × Ty × Option ExprAny)`, derived from `storageId`'s fields.
   let storageFields ← liftTermElabM <| Lsc.Deriving.getStructureFieldKinds storageName
-  -- `wadMap` fields have no `Ty` at all (storage-only, see `FieldKind.wadMap`'s docstring) —
-  -- `ContractDef.storage` has no representation for a mapping field, so they're excluded here,
-  -- same as `mkGetFieldCmd`/`mkSigmaFieldCmds` (`Lang/Derive.lean`) already exclude them.
-  let scalarStorageFields := storageFields.filter (·.2 != Lsc.Deriving.FieldKind.wadMap)
+  -- `mapping` fields have no `Ty` at all (storage-only) — excluded from `ContractDef.storage`.
+  let scalarStorageFields := storageFields.filter fun (_, k) =>
+    match k with | .mapping _ => false | _ => true
   let storageEntries ← scalarStorageFields.mapM fun (fname, k) => do
     liftTermElabM do
       let tyConst ← k.tyConst
@@ -378,14 +377,14 @@ def elabContractDefBody (nameStrStx : TSyntax `Lean.Parser.Term.str) (storageId 
           | some t => pure t
       `(($fnameStr, $tyConst, ($defaultTerm : Option Lsc.ExprAny)))
   let storageTerm ← `([$storageEntries,*])
-  -- Solidity-style slot assignment over all storage fields (scalars + `wadMap` roots).
+  -- Solidity-style slot assignment over all storage fields (scalars + mapping roots).
   let layoutScalarsTerm ← liftTermElabM do
     let mut scalars : Array Term := #[]
     let mut maps : Array Term := #[]
     let mut slot := 0
     for (fname, k) in storageFields do
       let fnameLit := quote fname.toString
-      if k == Lsc.Deriving.FieldKind.wadMap then
+      if match k with | .mapping _ => true | _ => false then
         maps := maps.push (← `(($(fnameLit), $(quote slot))))
       else
         scalars := scalars.push (← `(($(fnameLit), $(quote slot))))
@@ -663,7 +662,9 @@ def mkFieldKindTerm (k : Lsc.Deriving.FieldKind) : TermElabM Term :=
   | .bool => `(Lsc.Deriving.FieldKind.bool)
   | .address => `(Lsc.Deriving.FieldKind.address)
   | .uint256 => `(Lsc.Deriving.FieldKind.uint256)
-  | .wadMap => `(Lsc.Deriving.FieldKind.wadMap)
+  | .mapping vk => do
+      let vkTerm ← mkFieldKindTerm vk
+      `(Lsc.Deriving.FieldKind.mapping $vkTerm)
   | .interface iface => `(Lsc.Deriving.FieldKind.interface $(quote iface))
 
 /-- Emit persisted library inline registry + module marker (survives cross-module import). -/

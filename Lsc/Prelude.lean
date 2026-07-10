@@ -1,4 +1,5 @@
 import Lsc.Types
+import Lsc.Core.Mapping
 import Lsc.Arithmetic
 import Lsc.Lib.Wei
 import Lsc.Lib.Wad

@@ -11,7 +11,7 @@ namespace Interest
 structure InterestStorage where
   principal : Wad := ⟨0⟩
   rate : Wad := ⟨0⟩
-  owner : Address := 0
+  owner : Address
   deriving Repr, ContractStorage
 
 inductive InterestError where
@@ -24,6 +24,10 @@ inductive InterestEvent where
   | InterestAccrued (newPrincipal : Wad)
   | RateChanged (newRate : Wad)
   deriving Repr, DecidableEq, ContractEvent
+
+constructor (owner_ : Address) {
+  σ.owner = owner_;
+}
 
 tx deposit(amount : Wad) {
   let p = σ.principal +? amount;

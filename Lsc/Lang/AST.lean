@@ -1,5 +1,7 @@
 import Lsc.Types
 import Lsc.Arithmetic
+import Lsc.Core.MapKey
+import Lsc.Core.Mapping
 import Lsc.Lib.Wei.Syntax
 import Lsc.Lib.Wad.Syntax
 
@@ -68,12 +70,12 @@ inductive Stmt
   | seq : Stmt → Stmt → Stmt
   | letBind : Ident → (t : Ty) × Expr t → Stmt
   | storageSet : Ident → (t : Ty) × Expr t → Stmt
-  /-- `σ.field[key] = e;` — write one entry of an address-keyed `Lsc.Wad.WadMap` storage field
-      (see that type's docstring, `Lib/Wad/Syntax.lean`). Kept as its own `Stmt` node (rather
-      than folded into `storageSet`, which is `Ty`-indexed and `WadMap` is not a `Ty` at all —
-      it is a storage-only `FieldKind`, see `Lang/Derive.lean`) since a mapping write needs both
-      a key (`Wad.MapKey`) and a `Wad`-kinded value, not just a bare `Ty`-tagged value. -/
-  | mapSet : Ident → Wad.MapKey → Wad.Expr → Stmt
+  /-- `σ.field[key] = e;` — write one entry of a `Lsc.Mapping` storage field (see
+      `Lsc/Core/Mapping.lean`). Kept as its own `Stmt` node (rather than folded into `storageSet`,
+      which is `Ty`-indexed and `Mapping` is not a `Ty` at all — it is a storage-only
+      `FieldKind`, see `Lang/Derive.lean`) since a mapping write needs both a key (`MapKey`) and
+      a value expression whose kind matches the map's value type. -/
+  | mapSet : Ident → MapKey → Wad.Expr → Stmt
   | require : Expr Ty.bool → Ident → Stmt
   | ifThenElse : Expr Ty.bool → Stmt → Stmt → Stmt
   | emit : Ident → List ExprAny → Stmt
@@ -120,7 +122,7 @@ structure FunctionDef where
 structure ContractDef where
   name : Ident
   storage : List (Ident × Ty × Option ExprAny)
-  /-- Scalar field slots and `wadMap` base slots (Solidity layout), auto-populated by
+  /-- Scalar field slots and `Mapping` base slots (Solidity layout), auto-populated by
       `derive_contract` in struct declaration order. Empty for hand-written test defs. -/
   layoutScalars : List (Ident × Nat) := []
   layoutMaps : List (Ident × Nat) := []
