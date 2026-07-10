@@ -69,6 +69,7 @@ private theorem runUnpauseOk
   simp [runS, unpause, TxM.toContractM, TxM.run, howner, hp, List.mapM, List.mapM.loop,
     List.reverseAux]
 
+/-- **Property:** Increment increases `number` by one when the contract is not paused. -/
 theorem increment_increases_number_when_not_paused
     (s s' : ContractState CounterStorage)
     (log : List CounterEvent)
@@ -82,6 +83,7 @@ theorem increment_increases_number_when_not_paused
   simp only [BitVec.toNat_ofNat]
   omega
 
+/-- **Property:** Increment reverts with `Paused` when the contract is paused. -/
 theorem increment_errors_when_paused
     (s : ContractState CounterStorage)
     (hp : s.storage.paused) :

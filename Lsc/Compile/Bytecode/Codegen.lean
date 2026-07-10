@@ -139,6 +139,8 @@ private partial def codegenExpr (ctx : Ctx) (e : Expr) : Except String (List Ins
       .ok (emitOp op, { ctx with stackDepth := ctx.stackDepth + 1 })
   | .sload slot =>
     .ok ([.push slot, .op SLOAD], { ctx with stackDepth := ctx.stackDepth + 1 })
+  | .calldataWord offset =>
+    .ok ([.push offset, .op CALLDATALOAD], { ctx with stackDepth := ctx.stackDepth + 1 })
   | .mapSlot base key => do
     let (keyInstr, c1) ← codegenExpr ctx key
     let hashInstr : List Instr :=

@@ -1,3 +1,4 @@
+import Lsc.Lang.AST
 import Lsc.Compile.Lower
 import Lsc.Compile.IR
 import Lsc.TestFixtures.SyntaxSmoke
@@ -91,5 +92,15 @@ def incrementEventConfig : Config :=
 
 theorem increment_body_lowers_ok :
     Lower.stmt incrementEventConfig incrementBody |>.isOk := by native_decide
+
+def twoParamFn : FunctionDef where
+  name := "f"
+  kind := .external
+  params := [("x", .uint256), ("y", .address)]
+  retTy := .unit
+  body := .skip
+
+/-- **Property:** `Lower.function` lowers a parameterized function without error. -/
+example : (Lower.function counterConfig twoParamFn).isOk := by native_decide
 
 end Lsc.Compile.Correctness

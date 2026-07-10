@@ -11,6 +11,8 @@ inductive Expr where
   | mapSlot : Nat → Expr → Expr
   /-- `sload` at a computed slot (mapping entries). -/
   | dynSload : Expr → Expr
+  /-- Read the 32-byte ABI word at byte offset `offset` in `msg.data`. -/
+  | calldataWord : Nat → Expr
   | add : Expr → Expr → Expr
   | sub : Expr → Expr → Expr
   | mul : Expr → Expr → Expr
@@ -18,7 +20,7 @@ inductive Expr where
   | lt : Expr → Expr → Expr
   | eq : Expr → Expr → Expr
   | isZero : Expr → Expr
-  deriving Repr
+  deriving Repr, DecidableEq
 
 /-- Compiler-reserved EIP-1153 transient-storage key for the reentrancy lock. -/
 def reentrancyLockSlot : Nat := 0
@@ -54,6 +56,6 @@ inductive Stmt where
   | staticCall (addr : Expr) (selector : Nat) (args : List Expr) (retWords : Nat) : Stmt
   /-- `STATICCALL` that binds the first return word into `bindName`. -/
   | staticCallBind (addr : Expr) (selector : Nat) (args : List Expr) (bindName : Ident) : Stmt
-  deriving Repr
+  deriving Repr, DecidableEq
 
 end Lsc.Compile.IR

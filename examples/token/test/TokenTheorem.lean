@@ -6,6 +6,7 @@ Required `Token` theorems (`docs/reference/TOKEN.md`). -/
 
 open Lsc Token Lsc.Interfaces
 
+/-- **Property:** `balanceOf` returns the stored balance for any address. -/
 theorem balanceOf_returns_stored_balance (who : Address) (s : ContractState TokenStorage) :
     Except.map (fun x => Val.wadOf x.1) (runS (Token.balanceOf who) s) =
       .ok (s.storage.balances who) :=

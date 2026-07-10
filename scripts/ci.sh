@@ -21,6 +21,8 @@ build_no_warnings() {
 echo "==> library tests"
 build_no_warnings "$ROOT" "Lsc.Compile.YulTest"
 build_no_warnings "$ROOT" "Lsc.Compile.BytecodeTest"
+build_no_warnings "$ROOT" "Lsc.Compile.SafeExternalCallTest"
+build_no_warnings "$ROOT" "Lsc.Compile.StaticCallTest"
 
 # SKIPPED: BytecodeExecSmoke is known to fail in this environment, independent of
 # any DSL-redesign changes. The vendored `evmyul` Lake dependency's elliptic-curve
@@ -47,5 +49,9 @@ build_no_warnings "$ROOT" "Lsc.Lang.DeriveTest"
 echo "==> counter example"
 build_no_warnings "$ROOT/examples/counter" "Counter"
 build_no_warnings "$ROOT/examples/counter" "CounterTheorem"
+
+echo "==> escrow example"
+build_no_warnings "$ROOT/examples/escrow" "Escrow"
+build_no_warnings "$ROOT/examples/escrow" "EscrowCompileTest"
 
 echo "All build gates passed (zero warnings; BytecodeExecSmoke skipped, see warning above)."

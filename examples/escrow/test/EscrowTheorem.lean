@@ -14,6 +14,7 @@ variable {T : Type} [HonestERC20 T]
 variable (recipient escrowAddr : Address) (amount : EscrowAmount)
 variable (es : ContractState EscrowStorage) (ts : ContractState T)
 
+/-- **Property:** Only the owner may call `release`. -/
 theorem release_rejects_non_owner
     (h : ¬ es.context.caller == es.storage.owner) :
     ContractM.PairM.run (releaseHonest T recipient (Wad.Fixed.retag amount)) es ts =

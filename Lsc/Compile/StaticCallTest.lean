@@ -1,8 +1,8 @@
 import Lsc.Compile.Yul
+import Lsc.Compile.ExternalCallSpec
 
 /-!
-Codegen-level tests for `IR.Stmt.staticCall` — `STATICCALL` with mandatory success check and
-no transient-storage lock (`tload`/`tstore`). -/
+High-level properties for `IR.staticCall` lowering — read-only cross-contract calls. -/
 
 open Lsc Lsc.Compile Lsc.Compile.IR
 
@@ -14,25 +14,24 @@ def sampleStaticCall : IR.Stmt :=
 def sampleReadTxBody : IR.Stmt :=
   .seq (.staticCall (.sload 1) 0 [] 0) .skip
 
-def yulStaticCall : String := irStmtToYulString sampleStaticCall
-def yulReadTxBody : String := irStmtToYulString sampleReadTxBody
+private def yulStmts (s : IR.Stmt) : List EvmYul.Yul.Ast.Stmt :=
+  irStmtToYul s
 
-theorem static_call_emits_opcode :
-    yulStaticCall.contains "staticcall(gas()" = true := by native_decide
+/-- **Property:** A `staticCall` issues a real EVM `staticcall` opcode in generated Yul. -/
+theorem staticCall_emits_opcode :
+    YulSpec.emitsStaticCall (yulStmts sampleStaticCall) = true := by native_decide
 
-theorem static_call_checks_success :
-    yulStaticCall.contains "iszero(lsc_static_success)" = true := by native_decide
+/-- **Property:** A `staticCall` reverts when the underlying EVM staticcall returns failure. -/
+theorem staticCall_reverts_on_failure :
+    YulSpec.revertsOnStaticCallFailure (yulStmts sampleStaticCall) = true := by native_decide
 
-theorem static_call_has_no_transient_lock :
-    yulStaticCall.contains "tload(" = false ∧ yulStaticCall.contains "tstore(" = false := by
-  native_decide
+/-- **Property:** A read-only `staticCall` does not touch the transient reentrancy lock. -/
+theorem staticCall_has_no_transient_lock :
+    YulSpec.usesTransientLock (yulStmts sampleStaticCall) = false := by native_decide
 
-theorem read_tx_body_has_staticcall_no_lock :
-    yulReadTxBody.contains "staticcall(gas()" = true ∧
-      yulReadTxBody.contains "tload(" = false ∧ yulReadTxBody.contains "tstore(" = false := by
-  native_decide
-
-#eval IO.println yulStaticCall
-#eval IO.println yulReadTxBody
+/-- **Property:** A tx body using only `staticCall` for reads does not acquire a reentrancy lock. -/
+theorem read_tx_body_has_staticcall_without_lock :
+    YulSpec.emitsStaticCall (yulStmts sampleReadTxBody) = true ∧
+      YulSpec.usesTransientLock (yulStmts sampleReadTxBody) = false := by native_decide
 
 end Lsc.StaticCallTest

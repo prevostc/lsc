@@ -10,6 +10,7 @@ def foldConsts : Expr → Expr
   | .sload slot => .sload slot
   | .mapSlot base key => .mapSlot base (foldConsts key)
   | .dynSload slot => .dynSload (foldConsts slot)
+  | .calldataWord offset => .calldataWord offset
   | .add a b =>
     match foldConsts a, foldConsts b with
     | .lit i, .lit j => .lit (i + j)
@@ -71,10 +72,11 @@ theorem foldConsts_correct (st : IRState) (e : Expr) :
   | sload slot => rfl
   | mapSlot _ key ih =>
     simp only [foldConsts]
-    simp [evalExpr, ih]
+    simp [evalExpr]
   | dynSload slot ih =>
     simp only [foldConsts]
     simp [evalExpr, ih]
+  | calldataWord offset => rfl
   | add a b ih_a ih_b =>
     simp only [foldConsts]
     cases ha : foldConsts a <;> cases hb : foldConsts b

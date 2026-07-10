@@ -13,6 +13,7 @@ open Lsc Interest
 
 /-! ## `deposit` -/
 
+/-- **Property:** Deposit increases principal by the deposited amount. -/
 theorem deposit_increases_principal
     (s s' : ContractState InterestStorage) (amount : Wad) (log : List InterestEvent)
     (hno : canAdd s.storage.principal amount)

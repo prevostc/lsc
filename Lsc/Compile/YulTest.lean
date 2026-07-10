@@ -1,6 +1,6 @@
 import Lsc.Compile.Yul
+import Lsc.Compile.ExternalCallSpec
 import Lsc.TestFixtures.SyntaxSmoke
-import EvmYul.Yul.Ast
 
 open Lsc Lsc.Compile Lsc.TestFixtures
 open EvmYul Yul
@@ -15,36 +15,33 @@ def counterConfig : Config where
 
 namespace Lsc.YulTest
 
-private def stmtToYul! (cfg : Config) (s : Stmt) : String :=
-  match Compile.stmtToYul cfg s with
-  | .ok yul => yul
-  | .error e => panic! e
-
-private def stmtToYulAst! (cfg : Config) (s : Stmt) : Ast.FunctionDefinition :=
-  match Compile.stmtToYulAst cfg s with
-  | .ok fn => fn
-  | .error e => panic! e
-
 /-- Lower increment body only (Yul slice test). -/
 def incrementBodyAst : Stmt :=
   Stmt.seq incrementLet (Stmt.seq incrementSet incrementEmit)
 
-def incrementYul : String :=
-  stmtToYul! counterConfig incrementBodyAst
+private def incrementYulStmts : List Ast.Stmt :=
+  match Compile.stmtToYulAst counterConfig incrementBodyAst with
+  | .ok fn => fn.body
+  | .error e => panic! e
 
-def incrementFn : Ast.FunctionDefinition :=
-  stmtToYulAst! counterConfig incrementBodyAst
+/-- **Property:** Increment body reads the `number` storage field (slot 0). -/
+theorem increment_body_reads_number :
+    YulSpec.readsStorageSlot incrementYulStmts 0 = true := by native_decide
 
-theorem increment_yul_contains_sload : incrementYul.contains "sload(0x" = true := by native_decide
+/-- **Property:** Increment body writes the `number` storage field (slot 0). -/
+theorem increment_body_writes_number :
+    YulSpec.writesStorageSlot incrementYulStmts 0 = true := by native_decide
 
-theorem increment_yul_contains_sstore : incrementYul.contains "sstore(0x" = true := by native_decide
+/-- **Property:** Increment body emits an event log. -/
+theorem increment_body_emits_event :
+    YulSpec.emitsLog1 incrementYulStmts = true := by native_decide
 
-theorem increment_yul_contains_log1 : incrementYul.contains "log1(" = true := by native_decide
+/-- **Property:** Increment body contains a revert path (failed require). -/
+theorem increment_body_has_revert_path :
+    YulSpec.hasRevertPath incrementYulStmts = true := by native_decide
 
-theorem increment_yul_contains_revert : incrementYul.contains "revert(0x" = true := by native_decide
-
-theorem increment_fn_body_nonempty : incrementFn.body.length > 0 := by native_decide
-
-#eval IO.println incrementYul
+/-- **Property:** Increment body lowers to non-empty Yul. -/
+theorem increment_body_nonempty :
+    incrementYulStmts.length > 0 := by native_decide
 
 end Lsc.YulTest

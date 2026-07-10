@@ -58,13 +58,11 @@ derive_contract "Escrow" EscrowStorage EscrowError EscrowEvent
 /-! ## Bytecode
 
 `derive_contract` emits `bytecodeHex` (runtime) and `deployHex` (constructor + runtime).
-`release` lowers to one inlined IERC20 `transfer` `CALL` (selector `0xa9059cbb`) plus a bool
-check — no separate SafeERC20 contract call. After `lake build Escrow`, `#eval` the lines below.
+Compile-time guarantees for `release` live in `test/EscrowCompileTest.lean` (IR/Yul properties).
+After `lake build Escrow`, `#eval` the lines below to inspect emitted hex.
 -/
 
 example : Escrow.bytecodeHex.startsWith "0x" ∧ Escrow.bytecodeHex.length > 10 := by native_decide
-
-example : Escrow.bytecodeHex.contains "a9059cbb" := by native_decide
 
 #eval IO.println s!"Escrow.bytecodeHex ({Escrow.bytecodeHex.length} chars)"
 #eval IO.println Escrow.bytecodeHex

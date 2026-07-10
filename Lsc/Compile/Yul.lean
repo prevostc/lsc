@@ -23,6 +23,7 @@ private def irExprToYul (e : IR.Expr) : Ast.Expr :=
   | .local "caller" => .Call (.inl (Operation.CALLER (τ := .Yul))) []
   | .local name => .Var name
   | .sload slot => yulCall "sload" [yulLit slot]
+  | .calldataWord offset => yulCall "calldataload" [yulLit offset]
   | .mapSlot _ _ => yulLit 0
   | .dynSload slot => yulCall "sload" [irExprToYul slot]
   | .add a b => yulCall "add" [irExprToYul a, irExprToYul b]
@@ -116,7 +117,7 @@ private def staticCallBindToYul (addr : IR.Expr) (selector : Nat) (args : List I
     [Ast.Stmt.Let ["lsc_static_success"] (some callExpr), successCheck,
      Ast.Stmt.Let [bindName] (some (yulCall "mload" [yulLit 0]))]
 
-private partial def irStmtToYul (s : IR.Stmt) : List Ast.Stmt :=
+partial def irStmtToYul (s : IR.Stmt) : List Ast.Stmt :=
   match s with
   | .skip => []
   | .seq s1 s2 => irStmtToYul s1 ++ irStmtToYul s2

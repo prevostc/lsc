@@ -61,33 +61,12 @@ private def selectorDispatch (fns : List FunctionDef) (ctx : Ctx) : List Instr �
   ] ++ dispatchRevert
   (instrs, ctx1)
 
-/-- Decode each of `fn`'s ABI parameters from calldata (one 32-byte-aligned word per parameter,
-starting right after the 4-byte selector — `uint256`/`bool`/`address`/`wei`/`wad` are all a
-single word wide, see `Ty.abiStr`) onto the stack, `bindLocal`-ing each one under its declared
-parameter name exactly as `codegenStmt`'s `.letBind` case already does for `let`-locals — so the
-function body's `Expr.var paramName` references (lowered to `IR.Expr.local paramName` by
-`Lower.lean`, unchanged) resolve via the ordinary `Ctx.lookupDepth`/`DUP` mechanism with zero
-further special-casing. -/
-private partial def emitParamLoadsGo :
-    List (Ident × Ty) → Nat → Nat → List Instr × Ctx → List Instr × Ctx
-  | [], _, _, acc => acc
-  | (name, _ty) :: rest, i, baseOffset, (instrs, c) =>
-    let offset := baseOffset + 32 * i
-    let c1 := { c with stackDepth := c.stackDepth + 1 }
-    let c2 := c1.bindLocal name
-    emitParamLoadsGo rest (i + 1) baseOffset (instrs ++ [.push offset, .op CALLDATALOAD], c2)
-
-private def emitParamLoads (ctx : Ctx) (params : List (Ident × Ty)) (baseOffset : Nat := 4) :
-    List Instr × Ctx :=
-  emitParamLoadsGo params 0 baseOffset ([], ctx)
-
 private def emitFunctionBodies (cfg : Config) (fns : List FunctionDef) (ctx : Ctx) :
     Except String (List Instr × Ctx) :=
   fns.foldlM (init := ([], ctx)) fun (acc, ctx) fn => do
-    let ir ← Lower.stmt cfg fn.body
+    let ir ← Lower.function cfg fn
     let fnCtx := Ctx.forFunction ctx fn.name
-    let (paramInstrs, fnCtx') := emitParamLoads fnCtx fn.params
-    let (body, ctx') ← Codegen.stmt fnCtx' (IR.Opt.optimizeStmt ir)
+    let (body, ctx') ← Codegen.stmt fnCtx (IR.Opt.optimizeStmt ir)
     let ctxOut := Ctx.afterFunction ctx'
     -- A `.view` function's body always ends in a `return e;` (`Checks.checkViewReturns`,
     -- enforced by `Checks.validateAll` before this ever runs), which `Codegen.lean`'s `.ret`
@@ -96,7 +75,15 @@ private def emitFunctionBodies (cfg : Config) (fns : List FunctionDef) (ctx : Ct
     -- pointless). An `.external`/`tx` body, by contrast, never contains `.ret` at all (see
     -- `Lang/AST.lean`'s `Stmt.ret` docstring) and always needs the explicit `STOP` to halt.
     let haltInstrs : List Instr := if fn.kind == .view then [] else [.op STOP]
-    .ok (acc ++ [.jumpDest fn.name] ++ paramInstrs ++ body ++ haltInstrs, ctxOut)
+    .ok (acc ++ [.jumpDest fn.name] ++ body ++ haltInstrs, ctxOut)
+
+/-- Lower and codegen a single function body (including ABI parameter `letBind`s). -/
+def functionInstrs (cfg : Config) (fn : FunctionDef) (baseOffset : Nat := 4) :
+    Except String (List Instr) := do
+  let ir ← Lower.function cfg fn baseOffset
+  let fnCtx := Ctx.forFunction {} fn.name
+  let (body, _) ← Codegen.stmt fnCtx (IR.Opt.optimizeStmt ir)
+  .ok body
 
 /-- Functions reachable via the shared ABI selector-dispatch jump table: both `.external`
 (state-mutating) and `.view` (read-only) — see `Checks.checkSelectorCollisions`'s docstring for
@@ -117,10 +104,7 @@ def contract (cfg : Config) (c : ContractDef) : Except String (List Instr) := do
     Deploy calldata params are loaded from word offset 0 (no selector). The `CALLER` opcode
     is the deployer address during construction. -/
 def constructorInstrs (cfg : Config) (fn : FunctionDef) : Except String (List Instr) := do
-  let ir ← Lower.stmt cfg fn.body
-  let (paramInstrs, ctx') := emitParamLoads {} fn.params 0
-  let (body, _) ← Codegen.stmt ctx' (IR.Opt.optimizeStmt ir)
-  .ok (paramInstrs ++ body)
+  functionInstrs cfg fn 0
 
 /-- Number of bytes occupied by a `Instr.push n` (PUSH0 = 1 byte, PUSHk = 1+k bytes). -/
 private def pushByteSize (n : Nat) : Nat :=

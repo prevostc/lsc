@@ -155,7 +155,7 @@ private partial def lowerStmt (cfg : Config) (s : Lsc.Stmt) : Except String IR.S
     let addr ← lowerCalleeAddr cfg callee
     let argExprs ← lowerExternalArgs cfg args
     .ok (.staticCall addr selector argExprs retWords)
-  | .letReadBind name _ callee selector retWords args => do
+  | .letReadBind name _ callee selector _ args => do
     let addr ← lowerCalleeAddr cfg callee
     let argExprs ← lowerExternalArgs cfg args
     .ok (.staticCallBind addr selector argExprs name)
@@ -168,6 +168,24 @@ private partial def lowerStmt (cfg : Config) (s : Lsc.Stmt) : Except String IR.S
 
 def stmt (cfg : Config) (s : Lsc.Stmt) : Except String IR.Stmt :=
   lowerStmt cfg s
+
+/-- Prepend ABI calldata `letBind`s for each function parameter (declaration order). -/
+private partial def paramPrologueFrom (params : List (Ident × Ty)) (i : Nat) (baseOffset : Nat)
+    (body : IR.Stmt) : IR.Stmt :=
+  match params.drop i with
+  | [] => body
+  | (name, _) :: _ =>
+    .seq (.letBind name (.calldataWord (baseOffset + 32 * i)))
+      (paramPrologueFrom params (i + 1) baseOffset body)
+
+private def paramPrologue (params : List (Ident × Ty)) (baseOffset : Nat) (body : IR.Stmt) : IR.Stmt :=
+  paramPrologueFrom params 0 baseOffset body
+
+/-- Lower a `FunctionDef` body with ABI parameter bindings in IR.
+    `baseOffset` is 4 for external functions (after selector) and 0 for constructors. -/
+def function (cfg : Config) (fn : FunctionDef) (baseOffset : Nat := 4) : Except String IR.Stmt := do
+  let body ← stmt cfg fn.body
+  .ok (paramPrologue fn.params baseOffset body)
 
 end Lower
 end Lsc.Compile

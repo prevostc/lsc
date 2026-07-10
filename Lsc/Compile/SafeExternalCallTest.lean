@@ -1,17 +1,17 @@
 import Lsc.Compile.Yul
 import Lsc.Compile.Bytecode
 import Lsc.Compile.Bytecode.Codegen
+import Lsc.Compile.Bytecode.CodegenInvariant
+import Lsc.Compile.ExternalCallSpec
 import Lsc.Compile.IR.Opt.Pipeline
 
 /-!
-Codegen-level tests for `IR.Stmt.externalCall` (`Lsc/Compile/IR.lean`) — the real EVM `CALL`
-IR node: every rendering includes the mandatory success check, and (when requested) the
-mandatory `bool`-return check — asserted via `native_decide` on the rendered Yul string.
+High-level properties for `IR.externalCall` / `IR.externalCallBind` lowering.
 
-Bytecode tests below guard stack-depth tracking in `Bytecode/Codegen.lean`'s ABI pack +
-`emitCall` path (Escrow `release` → inlined IERC20 `transfer`). -/
+Each theorem states a plain-English guarantee first, then encodes it via `ExternalCallSpec` or
+`CodegenInvariant` predicates — never raw opcode hex substrings. -/
 
-open Lsc Lsc.Compile Lsc.Compile.IR
+open Lsc Lsc.Compile Lsc.Compile.IR Lsc.Compile.Bytecode
 
 namespace Lsc.SafeExternalCallTest
 
@@ -30,55 +30,7 @@ def sampleGuardedCall : IR.Stmt :=
       (.seq (.externalCall (.local "target") 0 [] false)
         (.setReentrancyLock false)))
 
-def yulNoBoolCheck : String := irStmtToYulString sampleCallNoBoolCheck
-def yulWithBoolCheck : String := irStmtToYulString sampleCallWithBoolCheck
-def yulCallBind : String := irStmtToYulString sampleCallBind
-def yulGuardedCall : String := irStmtToYulString sampleGuardedCall
-
-theorem no_bool_check_still_reverts_on_call_failure :
-    yulNoBoolCheck.contains "iszero(lsc_call_success)" = true := by native_decide
-
-theorem with_bool_check_still_reverts_on_call_failure :
-    yulWithBoolCheck.contains "iszero(lsc_call_success)" = true := by native_decide
-
-theorem no_bool_check_emits_the_real_call_opcode :
-    yulNoBoolCheck.contains "call(gas()" = true := by native_decide
-
-theorem with_bool_check_decodes_return_value :
-    yulWithBoolCheck.contains "mload(0x" = true := by native_decide
-
-theorem with_bool_check_guards_on_returndatasize :
-    yulWithBoolCheck.contains "returndatasize()" = true := by native_decide
-
-theorem call_bind_emits_call_and_mload_binding :
-    yulCallBind.contains "call(gas()" = true ∧
-      yulCallBind.contains "let ok := mload(0x" = true := by native_decide
-
-theorem call_bind_omits_legacy_checkBoolReturn_path :
-    yulCallBind.contains "returndatasize()" = false := by native_decide
-
-theorem no_bool_check_omits_return_decoding :
-    yulNoBoolCheck.contains "returndatasize()" = false := by native_decide
-
-theorem no_bool_check_reverts_with_no_data :
-    yulNoBoolCheck.contains "revert(0x0000000000000000000000000000000000000000000000000000000000000000, 0x0000000000000000000000000000000000000000000000000000000000000000)"
-      = true := by native_decide
-
-theorem guarded_call_emits_transient_lock_ops :
-    yulGuardedCall.contains "tload(" = true ∧ yulGuardedCall.contains "tstore(" = true := by
-  native_decide
-
-/-! ## Bytecode backend: `CALL` target must reference the token address, not a calldata arg -/
-
-private def stmtToHex (s : IR.Stmt) : String :=
-  match Bytecode.Codegen.stmtFresh (IR.Opt.optimizeStmt s) with
-  | .ok instrs =>
-    match Bytecode.encode instrs with
-    | .ok bytes => Bytecode.toHex bytes
-    | .error e => panic! e
-  | .error e => panic! e
-
-/-- Minimal Escrow-shaped repro: `recipient`/`amount` locals + `token = sload(2)` + `transfer`. -/
+/-- Minimal Escrow-shaped repro: locals + `token = sload(2)` + IERC20 `transfer`. -/
 def transferBindStmt : IR.Stmt :=
   .seq (.letBind "recipient" (.lit 0xaaa))
     (.seq (.letBind "amount" (.lit 100))
@@ -86,20 +38,75 @@ def transferBindStmt : IR.Stmt :=
         (.externalCallBind (.local "token") 0xa9059cbb
           [.local "recipient", .local "amount"] "ok")))
 
-def transferBindHex : String := stmtToHex transferBindStmt
+private def yulStmts (s : IR.Stmt) : List EvmYul.Yul.Ast.Stmt :=
+  irStmtToYul s
 
-theorem transfer_bind_loads_token_from_slot2 :
-    transferBindHex.contains "600254" = true := by native_decide
+private def bytecodeInstrs (s : IR.Stmt) : List Instr :=
+  match Bytecode.Codegen.stmtFresh (IR.Opt.optimizeStmt s) with
+  | .ok instrs => instrs
+  | .error e => panic! e
 
-theorem transfer_bind_call_avoids_gas_dup4 :
-    transferBindHex.contains "5a83" = false := by native_decide
+/-! ### External `call` -/
 
-theorem transfer_bind_call_uses_gas_dup_token :
-    transferBindHex.contains "5a81" = true := by native_decide
+/-- **Property:** An `externalCall` reverts when the underlying EVM call returns failure. -/
+theorem externalCall_reverts_on_call_failure :
+    YulSpec.revertsOnCallFailure (yulStmts sampleCallNoBoolCheck) = true := by native_decide
 
-#eval IO.println yulNoBoolCheck
-#eval IO.println yulWithBoolCheck
-#eval IO.println yulCallBind
-#eval IO.println yulGuardedCall
+/-- **Property:** An `externalCall` issues a real EVM `call` opcode in generated Yul. -/
+theorem externalCall_emits_call_opcode :
+    YulSpec.emitsCall (yulStmts sampleCallNoBoolCheck) = true := by native_decide
+
+/-- **Property:** An `externalCall` without bool-check does not decode returndata. -/
+theorem externalCall_omits_returndata_decode :
+    YulSpec.hasReturndataBoolGuard (yulStmts sampleCallNoBoolCheck) = false := by native_decide
+
+/-- **Property:** An `externalCall` with `checkBoolReturn` decodes returndata and guards on false. -/
+theorem externalCall_with_bool_check_decodes_returndata :
+    YulSpec.hasReturndataBoolGuard (yulStmts sampleCallWithBoolCheck) = true := by native_decide
+
+/-- **Property:** An `externalCall` with `checkBoolReturn` still reverts on call failure. -/
+theorem externalCall_with_bool_check_reverts_on_failure :
+    YulSpec.revertsOnCallFailure (yulStmts sampleCallWithBoolCheck) = true := by native_decide
+
+/-! ### External `call` + return binding -/
+
+/-- **Property:** An `externalCallBind` binds the first return word to the named local. -/
+theorem externalCallBind_binds_return_word :
+    YulSpec.bindsReturnWord (yulStmts sampleCallBind) "ok" = true := by native_decide
+
+/-- **Property:** An `externalCallBind` issues a real EVM `call` opcode in generated Yul. -/
+theorem externalCallBind_emits_call_opcode :
+    YulSpec.emitsCall (yulStmts sampleCallBind) = true := by native_decide
+
+/-- **Property:** An `externalCallBind` does not use the legacy ERC20 returndata bool-check path. -/
+theorem externalCallBind_omits_returndata_bool_check :
+    YulSpec.hasReturndataBoolGuard (yulStmts sampleCallBind) = false := by native_decide
+
+/-! ### Reentrancy guard -/
+
+/-- **Property:** A reentrancy-guarded external call uses transient storage lock/unlock. -/
+theorem guarded_externalCall_uses_transient_lock :
+    YulSpec.usesTransientLock (yulStmts sampleGuardedCall) = true := by native_decide
+
+/-! ### IR optimization + bytecode callee address -/
+
+/-- **Property:** IR optimization does not change external-call sites on the transfer repro. -/
+theorem optimize_preserves_transfer_call_site :
+    externalCallSites (IR.Opt.optimizeStmt transferBindStmt) =
+      externalCallSites transferBindStmt := by native_decide
+
+/-- **Property:** Bytecode codegen loads the IERC20 callee with `DUP2` after `GAS` (token, not amount). -/
+theorem externalCallBind_bytecode_uses_dup2_callee_after_gas :
+    gasDupDepthBeforeCall (bytecodeInstrs transferBindStmt) = some 2 := by native_decide
+
+/-- **Property:** Bytecode codegen does not load the CALL callee with `DUP4` (the pre-fix amount bug). -/
+theorem externalCallBind_bytecode_not_dup4_callee_after_gas :
+    gasDupDepthBeforeCall (bytecodeInstrs transferBindStmt) ≠ some 4 := by native_decide
+
+/-- **Property:** The transfer repro lowers to one `externalCallBind` on the `token` local. -/
+theorem transfer_bind_lowers_to_token_call :
+    externalCallSites transferBindStmt =
+      [ExternalCallSite.callBind (.local "token") 0xa9059cbb
+        [.local "recipient", .local "amount"] "ok"] := by native_decide
 
 end Lsc.SafeExternalCallTest

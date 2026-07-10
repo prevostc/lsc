@@ -11,6 +11,7 @@ structure IRState where
   logs : List (Nat × Nat) := []
   reverted : Bool := false
   transientLock : Nat := 0
+  calldata : Nat → Nat := fun _ => 0
 
 namespace IRState
 
@@ -46,10 +47,10 @@ end IRState
 
 /-- Observable state equality (storage, logs, revert). Locals may differ. -/
 def observablyEqual (a b : IRState) : Prop :=
-  a.slots = b.slots ∧ a.logs = b.logs ∧ a.reverted = b.reverted
+  a.slots = b.slots ∧ a.logs = b.logs ∧ a.reverted = b.reverted ∧ a.calldata = b.calldata
 
 @[simp] theorem observablyEqual_refl (st : IRState) : observablyEqual st st :=
-  ⟨rfl, rfl, rfl⟩
+  ⟨rfl, rfl, rfl, rfl⟩
 
 def evalExpr (st : IRState) (e : Expr) : Nat :=
   match e with
@@ -58,6 +59,7 @@ def evalExpr (st : IRState) (e : Expr) : Nat :=
   | .sload slot => st.lookupSlot slot
   | .mapSlot _ _ => 0
   | .dynSload slot => st.lookupSlot (evalExpr st slot)
+  | .calldataWord offset => st.calldata offset
   | .add a b => evalExpr st a + evalExpr st b
   | .sub a b => evalExpr st a - evalExpr st b
   | .mul a b => evalExpr st a * evalExpr st b
@@ -73,6 +75,9 @@ def evalExpr (st : IRState) (e : Expr) : Nat :=
 
 @[simp] theorem evalExpr_sload (st : IRState) (slot : Nat) :
     evalExpr st (.sload slot) = st.lookupSlot slot := rfl
+
+@[simp] theorem evalExpr_calldataWord (st : IRState) (offset : Nat) :
+    evalExpr st (.calldataWord offset) = st.calldata offset := rfl
 
 @[simp] theorem evalExpr_add (st : IRState) (a b : Expr) :
     evalExpr st (.add a b) = evalExpr st a + evalExpr st b := rfl
