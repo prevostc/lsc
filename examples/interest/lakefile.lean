@@ -17,3 +17,7 @@ lean_lib InterestProofs where
 lean_lib InterestTheorems where
   srcDir := "test"
   roots := #[`InterestTheorems]
+
+lean_exe review where
+  root := `ReviewMain
+  supportInterpreter := true

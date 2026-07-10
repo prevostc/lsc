@@ -1,0 +1,13 @@
+Lsc.Compile.IR.Stmt.seq
+  (Lsc.Compile.IR.Stmt.letBind "amount" (Lsc.Compile.IR.Expr.calldataWord 4))
+  (Lsc.Compile.IR.Stmt.seq
+    (Lsc.Compile.IR.Stmt.seq
+      (Lsc.Compile.IR.Stmt.seq
+        (Lsc.Compile.IR.Stmt.skip)
+        (Lsc.Compile.IR.Stmt.letBind
+          "p"
+          (Lsc.Compile.IR.Expr.add (Lsc.Compile.IR.Expr.sload 0) (Lsc.Compile.IR.Expr.local "amount"))))
+      (Lsc.Compile.IR.Stmt.sstore 0 (Lsc.Compile.IR.Expr.local "p")))
+    (Lsc.Compile.IR.Stmt.log1
+      19240432341613715882850085880317582134825077822804541045661927967340182186986
+      (Lsc.Compile.IR.Expr.local "amount")))

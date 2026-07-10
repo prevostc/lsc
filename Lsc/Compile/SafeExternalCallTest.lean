@@ -38,6 +38,16 @@ def transferBindStmt : IR.Stmt :=
         (.externalCallBind (.local "token") 0xa9059cbb
           [.local "recipient", .local "amount"] "ok")))
 
+/-- Same repro wrapped in reentrancy lock (Escrow `release` shape without SafeERC20 re-binds). -/
+def guardedTransferBindStmt : IR.Stmt :=
+  .seq (.letBind "recipient" (.lit 0xaaa))
+    (.seq (.letBind "amount" (.lit 100))
+      (.seq (.letBind "token" (.sload 2))
+        (.seq (.seq .checkReentrancyLock (.setReentrancyLock true))
+          (.seq (.externalCallBind (.local "token") 0xa9059cbb
+              [.local "recipient", .local "amount"] "ok")
+            (.setReentrancyLock false)))))
+
 private def yulStmts (s : IR.Stmt) : List EvmYul.Yul.Ast.Stmt :=
   irStmtToYul s
 
@@ -95,9 +105,23 @@ theorem optimize_preserves_transfer_call_site :
     externalCallSites (IR.Opt.optimizeStmt transferBindStmt) =
       externalCallSites transferBindStmt := by native_decide
 
-/-- **Property:** Bytecode codegen loads the IERC20 callee with `DUP2` after `GAS` (token, not amount). -/
-theorem externalCallBind_bytecode_uses_dup2_callee_after_gas :
-    gasDupDepthBeforeCall (bytecodeInstrs transferBindStmt) = some 2 := by native_decide
+/-- **Property:** Bytecode codegen reloads token from storage slot 2 after `GAS` before `CALL`. -/
+theorem externalCallBind_bytecode_reloads_token_sload_after_gas :
+    gasSloadSlotBeforeCall (bytecodeInstrs transferBindStmt) 2 = true := by native_decide
+
+/-- **Property:** The transfer repro `CALL` targets the `token` local (resolves to `sload 2`). -/
+theorem externalCallBind_bytecode_call_targets_token :
+    codegenCallUsesAddrInStmt (IR.Opt.optimizeStmt transferBindStmt)
+      (bytecodeInstrs transferBindStmt) (.local "token") = true := by native_decide
+
+/-- **Property:** Guarded transfer repro `CALL` targets token after reentrancy lock (Escrow bug shape). -/
+theorem guarded_transfer_bind_call_targets_token :
+    codegenCallUsesAddrInStmt (IR.Opt.optimizeStmt guardedTransferBindStmt)
+      (bytecodeInstrs guardedTransferBindStmt) (.local "token") = true := by native_decide
+
+/-- **Property:** Guarded transfer repro reloads token from slot 2 after `GAS`. -/
+theorem guarded_transfer_bind_reloads_token_sload_after_gas :
+    gasSloadSlotBeforeCall (bytecodeInstrs guardedTransferBindStmt) 2 = true := by native_decide
 
 /-- **Property:** Bytecode codegen does not load the CALL callee with `DUP4` (the pre-fix amount bug). -/
 theorem externalCallBind_bytecode_not_dup4_callee_after_gas :

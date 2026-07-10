@@ -17,3 +17,7 @@ lean_lib TokenProofs where
 lean_lib TokenTheorem where
   srcDir := "test"
   roots := #[`TokenTheorem]
+
+lean_exe review where
+  root := `ReviewMain
+  supportInterpreter := true

@@ -8,8 +8,14 @@ open Lsc.Compile.IR
 open EvmYul Operation
 open Instr
 
+/-- Stack slot + optional `letBind` source for reload-at-use (avoids stale `DUP` after control flow). -/
+structure LocalBinding where
+  absPos : Nat
+  src : Option Expr := none
+  deriving Repr
+
 structure Ctx where
-  locals : List (Ident × Nat) := []
+  locals : List (Ident × LocalBinding) := []
   stackDepth : Nat := 0
   labelCounter : Nat := 0
   labelPrefix : String := ""
@@ -29,17 +35,20 @@ def forFunction (ctx : Ctx) (fnName : Ident) : Ctx :=
 def afterFunction (ctx : Ctx) : Ctx :=
   { locals := [], stackDepth := 0, labelCounter := ctx.labelCounter, labelPrefix := "" }
 
+def lookupBinding (ctx : Ctx) (name : Ident) : Option LocalBinding :=
+  (ctx.locals.find? (·.1 == name)).map (·.2)
+
 -- Record the absolute 1-based stack position (from bottom) at time of binding.
 -- codegenExpr has already incremented stackDepth before this is called, so
 -- ctx.stackDepth IS the position of the new top-of-stack value.
-def bindLocal (ctx : Ctx) (name : Ident) : Ctx :=
-  { ctx with locals := (name, ctx.stackDepth) :: ctx.locals }
+def bindLocal (ctx : Ctx) (name : Ident) (src : Option Expr := none) : Ctx :=
+  { ctx with locals := (name, { absPos := ctx.stackDepth, src }) :: ctx.locals }
 
 -- Compute the DUP argument from the stored absolute position.
 -- DUP n accesses the item n slots from the top (1 = top).
 def lookupDepth (ctx : Ctx) (name : Ident) : Except String Nat :=
-  match ctx.locals.find? (·.1 == name) with
-  | some (_, absPos) => .ok (ctx.stackDepth - absPos + 1)
+  match ctx.lookupBinding name with
+  | some b => .ok (ctx.stackDepth - b.absPos + 1)
   | none => .error s!"unknown local {name}"
 
 def dupOp (depth : Nat) : Except String (Operation .EVM) :=
@@ -133,10 +142,19 @@ private partial def codegenExpr (ctx : Ctx) (e : Expr) : Except String (List Ins
   | .local name =>
     if name == "caller" then
       .ok (emitOp CALLER, { ctx with stackDepth := ctx.stackDepth + 1 })
-    else do
-      let d ← ctx.lookupDepth name
-      let op ← Ctx.dupOp d
-      .ok (emitOp op, { ctx with stackDepth := ctx.stackDepth + 1 })
+    else
+      match ctx.lookupBinding name with
+      | none => .error s!"unknown local {name}"
+      | some { src := some (.sload slot), .. } =>
+        .ok ([.push slot, .op SLOAD], { ctx with stackDepth := ctx.stackDepth + 1 })
+      | some { src := some (.calldataWord offset), .. } =>
+        .ok ([.push offset, .op CALLDATALOAD], { ctx with stackDepth := ctx.stackDepth + 1 })
+      | some { src := some (.lit n), .. } =>
+        .ok ([.push n], { ctx with stackDepth := ctx.stackDepth + 1 })
+      | some _ => do
+        let d ← ctx.lookupDepth name
+        let op ← Ctx.dupOp d
+        .ok (emitOp op, { ctx with stackDepth := ctx.stackDepth + 1 })
   | .sload slot =>
     .ok ([.push slot, .op SLOAD], { ctx with stackDepth := ctx.stackDepth + 1 })
   | .calldataWord offset =>
@@ -260,7 +278,7 @@ private partial def codegenStmt (ctx : Ctx) (s : Stmt) : Except String (List Ins
     .ok (i1 ++ i2, c2)
   | .letBind name e => do
     let (instrs, c1) ← codegenExpr ctx e
-    .ok (instrs, c1.bindLocal name)
+    .ok (instrs, c1.bindLocal name (some e))
   | .sstore slot e => do
     let (instrs, c1) ← codegenExpr ctx e
     -- c1.stackDepth = ctx.stackDepth + 1 (codegenExpr pushed e).
@@ -330,7 +348,7 @@ private partial def codegenStmt (ctx : Ctx) (s : Stmt) : Except String (List Ins
       .op REVERT,
       .jumpDest contLbl
     ]
-    .ok (lockInstrs, c2.popStack 1)
+    .ok (lockInstrs, c2)
   | .setReentrancyLock held =>
     let val := if held then 1 else 0
     .ok ([.push val, .push IR.reentrancyLockSlot, .op TSTORE], ctx)

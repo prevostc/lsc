@@ -1,0 +1,7 @@
+[{"type":"function","name":"deposit","inputs":[{"name":"amount","type":"uint256"}],"stateMutability":"nonpayable"},
+{"type":"function","name":"accrueInterest","inputs":[],"stateMutability":"nonpayable"},
+{"type":"function","name":"setRate","inputs":[{"name":"newRate","type":"uint256"}],"stateMutability":"nonpayable"},
+{"type":"event","name":"Deposited","inputs":[{"name":"amount","type":"uint256","indexed":false}],"anonymous":false},
+{"type":"event","name":"InterestAccrued","inputs":[{"name":"newPrincipal","type":"uint256","indexed":false}],"anonymous":false},
+{"type":"event","name":"RateChanged","inputs":[{"name":"newRate","type":"uint256","indexed":false}],"anonymous":false}
+]

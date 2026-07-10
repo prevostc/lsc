@@ -1,12 +1,14 @@
 import Lsc.Compile.Bytecode
 import Lsc.Compile.Bytecode.Contract
 import Lsc.Compile.Bytecode.CodegenInvariant
+import Lsc.Compile.Bytecode.Render
+import Lsc.Tools.AbiJson
 import Lsc.Compile.Lower
 import Lsc.Compile.IR.Opt.Pipeline
 import Lsc.TestFixtures.SyntaxSmoke
 import Lsc.Selectors
 
-open Lsc Lsc.Compile Lsc.Compile.Bytecode Lsc.TestFixtures
+open Lsc Lsc.Compile Lsc.Compile.Bytecode Lsc.TestFixtures Lsc.Tools
 
 def incrementedTopic : Nat := 0x20d8a6f5a693f9d1d627a598e8820f7a55ee74c183aa8f1a30e8d4e8dd9a8d84
 
@@ -113,5 +115,26 @@ def ctorParamLoadInstrs : List Instr :=
 /-- **Property:** Constructor loads the deploy parameter from calldata word offset 0. -/
 theorem ctor_deploy_loads_calldata_word_zero :
     loadsCalldataWord ctorParamLoadInstrs 0 = true := by native_decide
+
+def incrementRenderLen : Nat :=
+  (renderInstrs incrementInstrs).length
+
+def incrementRenderHasJumpDest : Bool :=
+  ((renderInstrs incrementInstrs).splitOn "@:").length > 1
+
+def counterAbiHasIncrement : Bool :=
+  ((contractAbiJson counterDef).splitOn "\"name\":\"increment\"").length > 1
+
+/-- **Property:** `renderInstrs` produces non-empty output for increment bytecode. -/
+theorem renderInstrs_increment_nonempty :
+    incrementRenderLen > 0 := by native_decide
+
+/-- **Property:** `renderInstrs` includes jump destination markers. -/
+theorem renderInstrs_includes_jumpdest :
+    incrementRenderHasJumpDest = true := by native_decide
+
+/-- **Property:** ABI JSON includes increment function. -/
+theorem abi_json_includes_increment :
+    counterAbiHasIncrement = true := by native_decide
 
 end Lsc.BytecodeTest

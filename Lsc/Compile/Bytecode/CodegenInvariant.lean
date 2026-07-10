@@ -76,6 +76,25 @@ def gasDupDepthBeforeCall (instrs : List Instr) : Option Nat :=
     | _ :: tail => go seenGas tail
   go false instrs
 
+/-- **Property:** after `GAS`, before `CALL`, bytecode reloads storage slot `slot` via `PUSH slot; SLOAD`. -/
+def gasSloadSlotBeforeCall (instrs : List Instr) (slot : Nat) : Bool :=
+  let rec go (seenGas : Bool) (rest : List Instr) : Bool :=
+    match rest with
+    | [] => false
+    | .op o :: tail =>
+      if o == CALL then false
+      else if o == GAS then go true tail
+      else go seenGas tail
+    | .push n :: .op o :: tail =>
+      if seenGas && o == SLOAD && n == slot then true
+      else go seenGas (.op o :: tail)
+    | _ :: tail => go seenGas tail
+  go false instrs
+
+/-- **Property:** after `GAS`, the CALL callee is loaded via `DUPn` or a fresh `SLOAD` of `slot`. -/
+def gasLoadsCalleeBeforeCall (instrs : List Instr) (slot : Nat) : Bool :=
+  gasDupDepthBeforeCall instrs != none || gasSloadSlotBeforeCall instrs slot
+
 private def dupStack (n : Nat) (stack : List StackSource) : Option (List StackSource) :=
   if n ≤ stack.length then
     let src := stack[stack.length - n]!

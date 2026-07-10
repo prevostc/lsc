@@ -44,7 +44,11 @@ Deferred work for the LSC v2 compiler.
 - [ ] ABI encode/decode for revert data and return values
 - [ ] EvmYul execution with real 256-bit LOG topics (keccak topic0 currently trips gas accounting in EvmYul)
 - [ ] Gas-aware codegen / stack peephole optimization
-- [ ] Memory-spilled locals (`MSTORE`/`MLOAD` scratch slots) to simplify stack codegen for decompilers
+- [ ] Memory-spilled locals (`MSTORE`/`MLOAD` scratch slots) to simplify stack codegen and improve
+      third-party decompiler output (heimdall Yul still scrambles LSC `CALL` preludes on Escrow;
+      human review uses `scripts/review-bytecode.sh` → `functions/*/instr.txt` + `heimdall/contract/disasm.txt` instead)
+- [ ] Decompiler-friendly CALL lowering (optional): solc-shaped stack at `CALL` (`gas`, `addr` adjacent)
+      for heimdall; only if it does not regress gas or [`CodegenInvariant`](../../Lsc/Compile/Bytecode/CodegenInvariant.lean) checks
 
 ### Proof obligations
 

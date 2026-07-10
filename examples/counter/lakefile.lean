@@ -13,3 +13,7 @@ lean_lib Counter where
 lean_lib CounterTheorem where
   srcDir := "test"
   roots := #[`CounterTheorem]
+
+lean_exe review where
+  root := `ReviewMain
+  supportInterpreter := true

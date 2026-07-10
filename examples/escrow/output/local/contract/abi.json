@@ -1,0 +1,3 @@
+[{"type":"function","name":"release","inputs":[{"name":"recipient","type":"address"},{"name":"amount","type":"uint256"}],"stateMutability":"nonpayable"},
+{"type":"event","name":"Released","inputs":[{"name":"amount","type":"uint256","indexed":false}],"anonymous":false}
+]

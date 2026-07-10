@@ -21,3 +21,7 @@ lean_lib EscrowTheorem where
 lean_lib EscrowCompileTest where
   srcDir := "test"
   roots := #[`EscrowCompileTest]
+
+lean_exe review where
+  root := `ReviewMain
+  supportInterpreter := true

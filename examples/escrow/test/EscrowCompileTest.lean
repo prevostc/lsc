@@ -53,7 +53,14 @@ theorem release_yul_emits_call :
 theorem release_yul_uses_transient_lock :
     YulSpec.usesTransientLock releaseYulStmts = true := by native_decide
 
-/-- **Property:** `release` bytecode loads the CALL callee with `DUP2` after `GAS` (token, not amount). -/
-example : gasDupDepthBeforeCall releaseInstrs = some 2 := by native_decide
+/-- **Property:** `release` bytecode `CALL` targets the escrow token (`σ.token` → slot 2). -/
+theorem release_call_targets_token :
+    codegenCallUsesAddrInStmt releaseIr releaseInstrs (.local "token") = true := by native_decide
+
+/-- **Property:** `release` bytecode reloads token from storage slot 2 after `GAS` before `CALL`. -/
+example : gasSloadSlotBeforeCall releaseInstrs 2 = true := by native_decide
+
+/-- **Property:** `release` bytecode loads the CALL callee after `GAS` (via `SLOAD` or `DUP`). -/
+example : gasLoadsCalleeBeforeCall releaseInstrs 2 = true := by native_decide
 
 end EscrowCompileTest
