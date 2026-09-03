@@ -174,9 +174,14 @@ theorem emitOne_jumpDest (labels : List (String × Nat)) (lbl : String) :
 
 /-- Small immediates used by the dispatcher and `get` body. -/
 theorem emitPush_zero : emitPush 0 = [0x5f] := rfl
+theorem emitPush_one : emitPush 1 = [0x60, 1] := rfl
 theorem emitPush_four : emitPush 4 = [0x60, 4] := rfl
 theorem emitPush_e0 : emitPush 0xE0 = [0x60, 0xE0] := rfl
 theorem emitPush_thirtyTwo : emitPush 32 = [0x60, 0x20] := rfl
+theorem emitPush_0x11 : emitPush 0x11 = [0x60, 0x11] := rfl
+theorem emitPush_thirtysix : emitPush 36 = [0x60, 36] := rfl
+theorem emitPush_0x80 : emitPush 0x80 = [0x60, 0x80] := rfl
+theorem emitPush_0xA0 : emitPush 0xA0 = [0x60, 0xA0] := rfl
 
 def encode (instrs : List Asm) : Except String (List UInt8) := do
   checkDuplicateLabels instrs

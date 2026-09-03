@@ -399,4 +399,153 @@ theorem isJumpDest_of_decode {code : List UInt8} {dest nextPc : Nat}
     isJumpDest code dest = true := by
   simp [isJumpDest, h]
 
+theorem step_dup1 (env : Env) (s : State) (x : Word) (rest : List Word) {nextPc : Nat}
+    (hdec : decodeAt env.code s.pc = some ({ op := .DUP ⟨0, by decide⟩ }, nextPc))
+    (hst : s.stack = x :: rest)
+    (hlen : (x :: rest).length < 1024) :
+    step env s = StepResult.next { s with stack := x :: x :: rest, pc := nextPc } := by
+  unfold step
+  rw [hdec]
+  have hpush : ¬ 1023 ≤ rest.length := by
+    simp at hlen; omega
+  simp [hst, stackDup, stackPush, hpush]
+
+theorem step_dup2 (env : Env) (s : State) (x y : Word) (rest : List Word) {nextPc : Nat}
+    (hdec : decodeAt env.code s.pc = some ({ op := .DUP ⟨1, by decide⟩ }, nextPc))
+    (hst : s.stack = x :: y :: rest)
+    (hlen : (x :: y :: rest).length < 1024) :
+    step env s = StepResult.next { s with stack := y :: x :: y :: rest, pc := nextPc } := by
+  unfold step
+  rw [hdec]
+  have hpush : ¬ 1022 ≤ rest.length := by
+    simp at hlen; omega
+  simp [hst, stackDup, stackPush, hpush]
+
+theorem step_swap1 (env : Env) (s : State) (a b : Word) (rest : List Word) {nextPc : Nat}
+    (hdec : decodeAt env.code s.pc = some ({ op := .SWAP ⟨0, by decide⟩ }, nextPc))
+    (hst : s.stack = a :: b :: rest) :
+    step env s = StepResult.next { s with stack := b :: a :: rest, pc := nextPc } := by
+  unfold step
+  rw [hdec]
+  simp [hst, stackSwap]
+
+theorem step_swap2 (env : Env) (s : State) (a b c : Word) (rest : List Word) {nextPc : Nat}
+    (hdec : decodeAt env.code s.pc = some ({ op := .SWAP ⟨1, by decide⟩ }, nextPc))
+    (hst : s.stack = a :: b :: c :: rest) :
+    step env s = StepResult.next { s with stack := c :: b :: a :: rest, pc := nextPc } := by
+  unfold step
+  rw [hdec]
+  simp [hst, stackSwap]
+
+theorem step_gt (env : Env) (s : State) (a b : Word) (rest : List Word) {nextPc : Nat}
+    (hdec : decodeAt env.code s.pc = some ({ op := .GT }, nextPc))
+    (hst : s.stack = a :: b :: rest)
+    (hlen : rest.length < 1024) :
+    step env s = StepResult.next { s with stack := gtW a b :: rest, pc := nextPc } := by
+  unfold step
+  rw [hdec]
+  simp [hst, pop2, withPush, stackPush, Nat.not_le.mpr hlen]
+
+theorem step_iszero (env : Env) (s : State) (a : Word) (rest : List Word) {nextPc : Nat}
+    (hdec : decodeAt env.code s.pc = some ({ op := .ISZERO }, nextPc))
+    (hst : s.stack = a :: rest)
+    (hlen : rest.length < 1024) :
+    step env s = StepResult.next { s with stack := iszeroW a :: rest, pc := nextPc } := by
+  unfold step
+  rw [hdec]
+  simp [hst, stackPop, withPush, stackPush, Nat.not_le.mpr hlen]
+
+theorem step_sstore (env : Env) (s : State) (key v : Word) (rest : List Word) {nextPc : Nat}
+    (hdec : decodeAt env.code s.pc = some ({ op := .SSTORE }, nextPc))
+    (hst : s.stack = key :: v :: rest) :
+    step env s = StepResult.next
+      { s with storage := fun k => if k = key then v else s.storage k, stack := rest, pc := nextPc } := by
+  unfold step
+  rw [hdec]
+  simp [hst, pop2]
+
+theorem step_mload (env : Env) (s : State) (off : Word) (rest : List Word) {nextPc : Nat}
+    (hdec : decodeAt env.code s.pc = some ({ op := .MLOAD }, nextPc))
+    (hst : s.stack = off :: rest)
+    (hlen : rest.length < 1024) :
+    step env s = StepResult.next
+      { s with stack := memLoad s.mem off :: rest, pc := nextPc } := by
+  unfold step
+  rw [hdec]
+  simp [hst, stackPop, withPush, stackPush, Nat.not_le.mpr hlen]
+
+theorem step_log1 (env : Env) (s : State) (off size topic : Word) (rest : List Word) {nextPc : Nat}
+    (hdec : decodeAt env.code s.pc = some ({ op := .LOG ⟨1, by decide⟩ }, nextPc))
+    (hst : s.stack = off :: size :: topic :: rest) :
+    step env s = StepResult.next
+      { s with
+        logs := s.logs ++
+          [{ topics := [topic]
+             data := (List.range size).map fun i => memGet s.mem (off + i) }]
+        stack := rest
+        pc := nextPc } := by
+  unfold step
+  rw [hdec]
+  simp [hst, popN]
+  split_ifs with hif
+  · omega
+  · simp
+
+theorem decodeAt_add_head (rest : List UInt8) :
+    decodeAt (0x01 :: rest) 0 = some ({ op := .ADD }, 1) :=
+  decodeAt_op_head .ADD rest rfl
+
+theorem decodeAt_gt_head (rest : List UInt8) :
+    decodeAt (0x11 :: rest) 0 = some ({ op := .GT }, 1) :=
+  decodeAt_op_head .GT rest rfl
+
+theorem decodeAt_sstore_head (rest : List UInt8) :
+    decodeAt (0x55 :: rest) 0 = some ({ op := .SSTORE }, 1) :=
+  decodeAt_op_head .SSTORE rest rfl
+
+theorem decodeAt_mload_head (rest : List UInt8) :
+    decodeAt (0x51 :: rest) 0 = some ({ op := .MLOAD }, 1) :=
+  decodeAt_op_head .MLOAD rest rfl
+
+theorem decodeAt_dup1_head (rest : List UInt8) :
+    decodeAt (0x80 :: rest) 0 = some ({ op := .DUP ⟨0, by decide⟩ }, 1) :=
+  decodeAt_op_head (.DUP ⟨0, by decide⟩) rest rfl
+
+theorem decodeAt_dup2_head (rest : List UInt8) :
+    decodeAt (0x81 :: rest) 0 = some ({ op := .DUP ⟨1, by decide⟩ }, 1) :=
+  decodeAt_op_head (.DUP ⟨1, by decide⟩) rest rfl
+
+theorem decodeAt_swap1_head (rest : List UInt8) :
+    decodeAt (0x90 :: rest) 0 = some ({ op := .SWAP ⟨0, by decide⟩ }, 1) :=
+  decodeAt_op_head (.SWAP ⟨0, by decide⟩) rest rfl
+
+theorem decodeAt_swap2_head (rest : List UInt8) :
+    decodeAt (0x91 :: rest) 0 = some ({ op := .SWAP ⟨1, by decide⟩ }, 1) :=
+  decodeAt_op_head (.SWAP ⟨1, by decide⟩) rest rfl
+
+theorem decodeAt_log1_head (rest : List UInt8) :
+    decodeAt (0xa1 :: rest) 0 = some ({ op := .LOG ⟨1, by decide⟩ }, 1) :=
+  decodeAt_op_head (.LOG ⟨1, by decide⟩) rest rfl
+
+theorem decodeAt_jump_head (rest : List UInt8) :
+    decodeAt (Opcode.toByte .JUMP :: rest) 0 = some ({ op := .JUMP }, 1) :=
+  decodeAt_op_head .JUMP rest rfl
+
+theorem decodeAt_jumpi_head (rest : List UInt8) :
+    decodeAt (Opcode.toByte .JUMPI :: rest) 0 = some ({ op := .JUMPI }, 1) :=
+  decodeAt_op_head .JUMPI rest rfl
+
+theorem decodeAt_jumpdest_head (rest : List UInt8) :
+    decodeAt (Opcode.toByte .JUMPDEST :: rest) 0 = some ({ op := .JUMPDEST }, 1) :=
+  decodeAt_op_head .JUMPDEST rest rfl
+
+/-- Unsigned add overflow test used by `checkedAdd`: `GT n (n+1)` is 0 when `n+1` fits. -/
+theorem gtW_add_no_overflow {n : Nat} (h : n + 1 < wordBound) :
+    gtW n (addW n 1) = 0 := by
+  simp [gtW, addW, wrap, Nat.mod_eq_of_lt h]
+
+theorem addW_succ_of_lt {n : Nat} (h : n + 1 < wordBound) :
+    addW n 1 = n + 1 := by
+  simp [addW, wrap, Nat.mod_eq_of_lt h]
+
 end Lsc3.EVM

@@ -1,6 +1,7 @@
 import Lsc3.Examples.Counter
 import Lsc3.Compile.GetBody
 import Lsc3.Compile.GetContract
+import Lsc3.Compile.IncBody
 import Lsc3.Compile.Codegen
 
 /-!
@@ -47,5 +48,29 @@ theorem getOnly_compile :
     compileContract GetContract.getOnly =
       .ok (GetContract.code (FnDef.selector GetContract.getFn)) :=
   GetContract.compile_getOnly
+
+/-- `increment` is load, checked `+ 1`, store, emit. -/
+theorem increment_run (ctx : Lsc3.Ctx) (w : World Storage Event)
+    (h : w.self.count + 1 < wordBound) :
+    Tx.run increment ctx w =
+      .ok ((), { self := { w.self with count := w.self.count + 1 },
+                 log := w.log ++ [.Incremented 1] }) := by
+  simp [increment, h]
+
+theorem increment_core_eq :
+    increment.core =
+      Core.letOp (.load 0)
+        (Core.letOp (.addChecked (.var 0) (.lit 1))
+          (Core.seq (.store 0 (.var 0))
+            (Core.stmtTail (.emit 0 [.lit 1])))) :=
+  rfl
+
+/-- Codegen of `increment.core` encodes to `IncBody.code`. -/
+theorem increment_codegen :
+    match Codegen.genCore {} contract increment.core with
+    | .ok (instrs, _) => encode instrs = .ok IncBody.code
+    | .error _ => False := by
+  rw [increment_core_eq, IncBody.increment_genCore]
+  exact IncBody.encode_inc
 
 end Counter
