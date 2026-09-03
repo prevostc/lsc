@@ -169,6 +169,11 @@ theorem decodeAt_return_head (rest : List UInt8) :
   unfold decodeAt Opcode.ofByte Opcode.immBytes readImm
   simp [wrap]
 
+theorem decodeAt_revert_head (rest : List UInt8) :
+    decodeAt (0xfd :: rest) 0 = some ({ op := .REVERT }, 1) := by
+  unfold decodeAt Opcode.ofByte Opcode.immBytes readImm
+  simp [wrap]
+
 theorem decodeAt_push1_head (imm : UInt8) (rest : List UInt8) :
     decodeAt (0x60 :: imm :: rest) 0 =
       some ({ op := .PUSH ⟨1, by decide⟩, imm := wrap imm.toNat }, 2) := by
@@ -320,6 +325,14 @@ theorem step_return (env : Env) (s : State) (off size : Word) (rest : List Word)
   unfold step
   rw [hdec]
   simp [hst, pop2, haltRet]
+
+theorem step_revert (env : Env) (s : State) (off size : Word) (rest : List Word) {nextPc : Nat}
+    (hdec : decodeAt env.code s.pc = some ({ op := .REVERT }, nextPc))
+    (hst : s.stack = off :: size :: rest) :
+    step env s = StepResult.halt (.revert ((List.range size).map fun i => memGet s.mem (off + i))) s := by
+  unfold step
+  rw [hdec]
+  simp [hst, pop2, haltRevert]
 
 theorem step_eq (env : Env) (s : State) (a b : Word) (rest : List Word) {nextPc : Nat}
     (hdec : decodeAt env.code s.pc = some ({ op := .EQ }, nextPc))
@@ -547,5 +560,18 @@ theorem gtW_add_no_overflow {n : Nat} (h : n + 1 < wordBound) :
 theorem addW_succ_of_lt {n : Nat} (h : n + 1 < wordBound) :
     addW n 1 = n + 1 := by
   simp [addW, wrap, Nat.mod_eq_of_lt h]
+
+theorem addW_succ_overflow {n : Nat} (h : n + 1 = wordBound) :
+    addW n 1 = 0 := by
+  simp [addW, wrap, h]
+
+theorem gtW_add_overflow {n : Nat} (h : n + 1 = wordBound) :
+    gtW n (addW n 1) = 1 := by
+  have hn0 : 0 < n := by
+    have : n = wordBound - 1 := Nat.eq_sub_of_add_eq h
+    subst this
+    decide
+  rw [addW_succ_overflow h]
+  simp [gtW, hn0]
 
 end Lsc3.EVM

@@ -715,6 +715,122 @@ theorem bdec22 :
     rw [show 22 = 10 + 12 from rfl, drop_add, body_drop10]; rfl
   exact decodeAt_of_drop h (decodeAt_jump_head _)
 
+theorem body_drop23 :
+    bodyBytes.drop 23 =
+      Opcode.toByte .JUMPDEST :: (IncBody.panicBytes ++ Opcode.toByte .JUMPDEST :: tailBytes) := by
+  rw [show 23 = 10 + 13 from rfl, drop_add, body_drop10]
+  rw [show 13 = 5 + 8 from rfl, drop_add]
+  rw [List.drop_left' (by decide : ([0x81, 0x01, 0x80, 0x91, 0x11] : List UInt8).length = 5)]
+  rw [show 8 = 3 + 5 from rfl, drop_add]
+  rw [List.drop_left' (emitPush2_length bodyRevPc)]
+  rw [List.drop_succ_cons]
+  rw [show 4 = 3 + 1 from rfl, drop_add]
+  rw [List.drop_left' (emitPush2_length bodyOkPc)]
+  rw [List.drop_succ_cons]
+  rfl
+
+theorem bdec23 :
+    decodeAt bodyBytes 23 = some ({ op := .JUMPDEST }, 24) := by
+  exact decodeAt_of_drop body_drop23 (decodeAt_jumpdest_head _)
+
+theorem body_drop24 :
+    bodyBytes.drop 24 = IncBody.panicBytes ++ Opcode.toByte .JUMPDEST :: tailBytes := by
+  rw [show 24 = 23 + 1 from rfl, drop_add, body_drop23]
+  rfl
+
+theorem body_drop24_push32 :
+    bodyBytes.drop 24 =
+      emitPush32 (selectorOf "Panic" [{ name := "code", ty := .uint256 }] * 2 ^ 224) ++
+        ([0x5f, 0x52, 0x60, 0x11, 0x60, 4, 0x52, 0x60, 36, 0x5f, 0xfd] ++
+          Opcode.toByte .JUMPDEST :: tailBytes) := by
+  simp only [body_drop24, IncBody.panicBytes, List.append_assoc]
+
+theorem bdec24 :
+    decodeAt bodyBytes 24 =
+      some ({ op := .PUSH ⟨32, by decide⟩,
+              imm := wrap (selectorOf "Panic" [{ name := "code", ty := .uint256 }] * 2 ^ 224) }, 57) := by
+  have h := decodeAt_of_drop body_drop24_push32
+    (decodeAt_push32 (selectorOf "Panic" [{ name := "code", ty := .uint256 }] * 2 ^ 224) _)
+  simpa using h
+
+theorem body_drop57 :
+    bodyBytes.drop 57 = [0x5f, 0x52, 0x60, 0x11, 0x60, 4, 0x52, 0x60, 36, 0x5f, 0xfd] ++
+      Opcode.toByte .JUMPDEST :: tailBytes := by
+  rw [show 57 = 24 + 33 from rfl, drop_add, body_drop24_push32]
+  rw [List.drop_left' (emitPush32_length (selectorOf "Panic" [{ name := "code", ty := .uint256 }] * 2 ^ 224))]
+
+theorem bdec57 :
+    decodeAt bodyBytes 57 = some ({ op := .PUSH ⟨0, by decide⟩, imm := 0 }, 58) := by
+  have h : bodyBytes.drop 57 = 0x5f :: bodyBytes.drop 58 := by
+    rw [body_drop57]; rfl
+  exact decodeAt_of_drop h (decodeAt_push0_head _)
+
+theorem bdec58 :
+    decodeAt bodyBytes 58 = some ({ op := .MSTORE }, 59) := by
+  have h : bodyBytes.drop 58 = Opcode.toByte .MSTORE :: bodyBytes.drop 59 := by
+    rw [show 58 = 24 + 34 from rfl, drop_add, body_drop24_push32]
+    rw [show 34 = 33 + 1 from rfl, drop_add]
+    rw [List.drop_left' (emitPush32_length (selectorOf "Panic" [{ name := "code", ty := .uint256 }] * 2 ^ 224))]
+    rfl
+  exact decodeAt_of_drop h (decodeAt_mstore_head _)
+
+theorem bdec59 :
+    decodeAt bodyBytes 59 = some ({ op := .PUSH ⟨1, by decide⟩, imm := 0x11 }, 61) := by
+  have hdrop : bodyBytes.drop 59 = 0x60 :: 0x11 :: bodyBytes.drop 61 := by
+    rw [show 59 = 24 + 35 from rfl, drop_add, body_drop24_push32]
+    rw [show 35 = 33 + 2 from rfl, drop_add]
+    rw [List.drop_left' (emitPush32_length (selectorOf "Panic" [{ name := "code", ty := .uint256 }] * 2 ^ 224))]
+    rfl
+  have h := decodeAt_of_drop hdrop (decodeAt_push1_head (0x11 : UInt8) (bodyBytes.drop 61))
+  simpa [wrap] using h
+
+theorem bdec61 :
+    decodeAt bodyBytes 61 = some ({ op := .PUSH ⟨1, by decide⟩, imm := 4 }, 63) := by
+  have hdrop : bodyBytes.drop 61 = 0x60 :: 4 :: bodyBytes.drop 63 := by
+    rw [show 61 = 24 + 37 from rfl, drop_add, body_drop24_push32]
+    rw [show 37 = 33 + 4 from rfl, drop_add]
+    rw [List.drop_left' (emitPush32_length (selectorOf "Panic" [{ name := "code", ty := .uint256 }] * 2 ^ 224))]
+    rfl
+  have h := decodeAt_of_drop hdrop (decodeAt_push1_head (4 : UInt8) (bodyBytes.drop 63))
+  simpa [wrap] using h
+
+theorem bdec63 :
+    decodeAt bodyBytes 63 = some ({ op := .MSTORE }, 64) := by
+  have h : bodyBytes.drop 63 = Opcode.toByte .MSTORE :: bodyBytes.drop 64 := by
+    rw [show 63 = 24 + 39 from rfl, drop_add, body_drop24_push32]
+    rw [show 39 = 33 + 6 from rfl, drop_add]
+    rw [List.drop_left' (emitPush32_length (selectorOf "Panic" [{ name := "code", ty := .uint256 }] * 2 ^ 224))]
+    rfl
+  exact decodeAt_of_drop h (decodeAt_mstore_head _)
+
+theorem bdec64 :
+    decodeAt bodyBytes 64 = some ({ op := .PUSH ⟨1, by decide⟩, imm := 36 }, 66) := by
+  have hdrop : bodyBytes.drop 64 = 0x60 :: 36 :: bodyBytes.drop 66 := by
+    rw [show 64 = 24 + 40 from rfl, drop_add, body_drop24_push32]
+    rw [show 40 = 33 + 7 from rfl, drop_add]
+    rw [List.drop_left' (emitPush32_length (selectorOf "Panic" [{ name := "code", ty := .uint256 }] * 2 ^ 224))]
+    rfl
+  have h := decodeAt_of_drop hdrop (decodeAt_push1_head (36 : UInt8) (bodyBytes.drop 66))
+  simpa [wrap] using h
+
+theorem bdec66 :
+    decodeAt bodyBytes 66 = some ({ op := .PUSH ⟨0, by decide⟩, imm := 0 }, 67) := by
+  have h : bodyBytes.drop 66 = 0x5f :: bodyBytes.drop 67 := by
+    rw [show 66 = 24 + 42 from rfl, drop_add, body_drop24_push32]
+    rw [show 42 = 33 + 9 from rfl, drop_add]
+    rw [List.drop_left' (emitPush32_length (selectorOf "Panic" [{ name := "code", ty := .uint256 }] * 2 ^ 224))]
+    rfl
+  exact decodeAt_of_drop h (decodeAt_push0_head _)
+
+theorem bdec67 :
+    decodeAt bodyBytes 67 = some ({ op := .REVERT }, 68) := by
+  have h : bodyBytes.drop 67 = 0xfd :: bodyBytes.drop 68 := by
+    rw [show 67 = 24 + 43 from rfl, drop_add, body_drop24_push32]
+    rw [show 43 = 33 + 10 from rfl, drop_add]
+    rw [List.drop_left' (emitPush32_length (selectorOf "Panic" [{ name := "code", ty := .uint256 }] * 2 ^ 224))]
+    rfl
+  exact decodeAt_of_drop h (decodeAt_revert_head _)
+
 theorem body_drop68 :
     bodyBytes.drop 68 = Opcode.toByte .JUMPDEST :: tailBytes := by
   rw [show 68 = 10 + 58 from rfl, drop_add, body_drop10]
@@ -859,6 +975,10 @@ theorem decode_body (sel : Nat) {pc next0 : Nat} {instr : Instr}
 theorem isJumpDest_ok (sel : Nat) : isJumpDest (code sel) bodyOkPc = true := by
   have h := isJumpDest_of_decode (decode_body sel bdec68)
   simpa [bodyOkPc] using h
+
+theorem isJumpDest_rev (sel : Nat) : isJumpDest (code sel) bodyRevPc = true := by
+  have h := isJumpDest_of_decode (decode_body sel bdec23)
+  simpa [bodyRevPc] using h
 
 theorem decode_at (sel : Nat) {pc next0 : Nat} {instr : Instr}
     (hd : decodeAt bodyBytes pc = some (instr, next0)) :
