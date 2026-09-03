@@ -171,6 +171,15 @@ theorem step_add (env : Env) (s : State) (a b : Word) (rest : List Word) {nextPc
   rw [hdec]
   simp [hst, pop2, withPush, stackPush, Nat.not_le.mpr hlen]
 
+theorem step_sub (env : Env) (s : State) (a b : Word) (rest : List Word) {nextPc : Nat}
+    (hdec : decodeAt env.code s.pc = some ({ op := .SUB }, nextPc))
+    (hst : s.stack = a :: b :: rest)
+    (hlen : rest.length < 1024) :
+    step env s = StepResult.next { s with stack := subW a b :: rest, pc := nextPc } := by
+  unfold step
+  rw [hdec]
+  simp [hst, pop2, withPush, stackPush, Nat.not_le.mpr hlen]
+
 theorem step_push (env : Env) (s : State) (imm : Word) {k : Fin 33} {nextPc : Nat}
     (hdec : decodeAt env.code s.pc = some ({ op := .PUSH k, imm := imm }, nextPc))
     (hlen : s.stack.length < 1024) :
@@ -558,6 +567,10 @@ theorem decodeAt_add_head (rest : List UInt8) :
     decodeAt (0x01 :: rest) 0 = some ({ op := .ADD }, 1) :=
   decodeAt_op_head .ADD rest rfl
 
+theorem decodeAt_sub_head (rest : List UInt8) :
+    decodeAt (Opcode.toByte .SUB :: rest) 0 = some ({ op := .SUB }, 1) :=
+  decodeAt_op_head .SUB rest rfl
+
 theorem decodeAt_gt_head (rest : List UInt8) :
     decodeAt (0x11 :: rest) 0 = some ({ op := .GT }, 1) :=
   decodeAt_op_head .GT rest rfl
@@ -631,5 +644,16 @@ theorem gtW_add_overflow {n : Nat} (h : n + 1 = wordBound) :
     decide
   rw [addW_succ_overflow h]
   simp [gtW, hn0]
+
+/-- `checkedSub` overflow test: `GT 1 n` is 0 when `n ≥ 1`. -/
+theorem gtW_one_of_pos {n : Nat} (h : 0 < n) : gtW 1 n = 0 := by
+  simp [gtW]; omega
+
+theorem subW_pred {n : Nat} (hpos : 0 < n) (hn : n < wordBound) :
+    subW n 1 = n - 1 := by
+  have hsum : n + wordBound - 1 = n - 1 + wordBound := by omega
+  unfold subW wrap
+  rw [hsum, Nat.add_mod, Nat.mod_self, Nat.add_zero, Nat.mod_mod, Nat.mod_eq_of_lt]
+  omega
 
 end Lsc3.EVM

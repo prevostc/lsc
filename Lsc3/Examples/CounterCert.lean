@@ -3,6 +3,7 @@ import Lsc3.Compile.GetBody
 import Lsc3.Compile.GetContract
 import Lsc3.Compile.IncBody
 import Lsc3.Compile.IncByBody
+import Lsc3.Compile.DecBody
 import Lsc3.Compile.IncContract
 import Lsc3.Compile.GetInc
 import Lsc3.Compile.Codegen
@@ -26,6 +27,9 @@ The two-function compiler `GetInc.getInc` encodes to `GetInc.code`. Apply
 
 Isolated `incrementBy` encodes to `IncByBody.code`. Apply `IncByBody.incBy_hit` /
 `IncByBody.incBy_zero`; do not instantiate them here.
+
+Isolated `decrement` encodes to `DecBody.code`. Apply `DecBody.dec_hit` /
+`DecBody.dec_zero`; do not instantiate them here.
 -/
 
 open Lsc3 Lsc3.Compile Counter
@@ -166,5 +170,13 @@ theorem decrement_core_eq :
           (Core.letOp (.subChecked (.var 0) (.lit 1))
             (Core.stmtTail (.store 0 (.var 0))))) :=
   rfl
+
+/-- Codegen of isolated `decrement` encodes to `DecBody.code`. -/
+theorem decrement_codegen :
+    match Codegen.genFunction contract DecBody.decFn {} with
+    | .ok (instrs, _) => encode instrs = .ok DecBody.code
+    | .error _ => False := by
+  rw [DecBody.decrement_genFunction]
+  exact DecBody.encode_dec
 
 end Counter
