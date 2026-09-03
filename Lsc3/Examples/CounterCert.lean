@@ -98,4 +98,57 @@ theorem getInc_compile :
       .ok (GetInc.code (FnDef.selector GetContract.getFn) (FnDef.selector IncContract.incFn)) :=
   GetInc.compile_getInc
 
+/-- `incrementBy n` requires `n ≠ 0`, then checked-adds `n` onto `count`. -/
+theorem incrementBy_run (n : Nat) (ctx : Lsc3.Ctx) (w : World Storage Event)
+    (hnz : n ≠ 0) (h : w.self.count + n < wordBound) :
+    Tx.run (incrementBy n) ctx w =
+      .ok ((), { self := { w.self with count := w.self.count + n },
+                 log := w.log ++ [.Incremented n] }) := by
+  simp [incrementBy, hnz, h]
+
+/-- `incrementBy 0` reverts with `Error.Zero`. -/
+theorem incrementBy_zero (ctx : Lsc3.Ctx) (w : World Storage Event) :
+    Tx.run (incrementBy 0) ctx w = .error (.user .Zero) := by
+  simp [incrementBy]
+
+theorem incrementBy_core_eq :
+    incrementBy.core =
+      Core.seq (.require (.ne (.var 0) (.lit 0)) 0 [])
+        (Core.letOp (.load 0)
+          (Core.letOp (.addChecked (.var 0) (.var 1))
+            (Core.seq (.store 0 (.var 0))
+              (Core.stmtTail (.emit 0 [.var 2]))))) :=
+  rfl
+
+/-- `Core.denote` of the reified `incrementBy` term is the user function. -/
+theorem incrementBy_denote (n : Nat) :
+    Core.denote schema incrementBy.core [n] = incrementBy n :=
+  incrementBy.core_denote n
+
+/-- Saturating decrement: `count = 0` stays `0`. -/
+theorem decrement_zero (ctx : Lsc3.Ctx) (w : World Storage Event)
+    (h : w.self.count = 0) :
+    Tx.run decrement ctx w =
+      .ok ((), { w with self := { w.self with count := 0 } }) := by
+  simp [decrement, h]
+
+/-- Saturating decrement: `count ≠ 0` stores `count - 1`. -/
+theorem decrement_run (ctx : Lsc3.Ctx) (w : World Storage Event)
+    (h : 0 < w.self.count) :
+    Tx.run decrement ctx w =
+      .ok ((), { w with self := { w.self with count := w.self.count - 1 } }) := by
+  have hne : ¬ w.self.count = 0 := Nat.pos_iff_ne_zero.mp h
+  have hle : 1 ≤ w.self.count := h
+  simp [decrement, hne, hle]
+
+theorem decrement_core_eq :
+    decrement.core =
+      Core.letOp (.load 0)
+        (Core.ite (.eq (.var 0) (.lit 0))
+          (Core.letOp (.pure (.lit 0))
+            (Core.stmtTail (.store 0 (.var 0))))
+          (Core.letOp (.subChecked (.var 0) (.lit 1))
+            (Core.stmtTail (.store 0 (.var 0))))) :=
+  rfl
+
 end Counter
