@@ -334,11 +334,25 @@ def step (env : Env) (s : State) : StepResult :=
 
 /-! ## `run` -/
 
-def run (fuel : Nat) (env : Env) (s : State) : RunResult :=
-  if fuel = 0 then none
-  else
+def run : Nat → Env → State → RunResult
+  | 0, _, _ => none
+  | fuel + 1, env, s =>
     match step env s with
     | StepResult.halt h s' => some (h, s')
-    | StepResult.next s' => run (fuel - 1) env s'
+    | StepResult.next s' => run fuel env s'
+
+@[simp] theorem run_zero (env : Env) (s : State) : run 0 env s = none := rfl
+
+@[simp] theorem wrap_eq_of_lt {n : Nat} (h : n < wordBound) : wrap n = n :=
+  Nat.mod_eq_of_lt h
+
+@[simp] theorem addW_comm (a b : Word) : addW a b = addW b a := by
+  simp [addW, wrap, Nat.add_comm]
+
+@[simp] theorem addW_zero (a : Word) : addW a 0 = wrap a := by
+  simp [addW]
+
+@[simp] theorem mulW_zero (a : Word) : mulW a 0 = 0 := by
+  simp [mulW, wrap]
 
 end Lsc3.EVM

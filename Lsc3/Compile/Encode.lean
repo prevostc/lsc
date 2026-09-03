@@ -89,10 +89,63 @@ def encode (instrs : List Asm) : Except String (List UInt8) := do
 
 def paddedSelector (sel : Nat) : Nat := sel * (2 ^ 224)
 
+/-- Byte size of `emitPush n` (PUSH0 is 1 byte). -/
+def pushByteSize (n : Nat) : Nat := 1 + pushWidth n
+
+/-- `CODECOPY`/`RETURN` preamble. The runtime offset is always a `PUSH32` so the preamble
+size does not depend on the offset (no PUSH-width fixpoint). -/
+def deployPreamble (rSize rOffset : Nat) : List UInt8 :=
+  emitPush rSize ++ emitPush32 rOffset ++ emitPush 0 ++ [Opcode.toByte .CODECOPY] ++
+    emitPush rSize ++ emitPush 0 ++ [Opcode.toByte .RETURN]
+
+/-- Preamble byte size; independent of `rOffset` because that immediate is always 32 bytes. -/
+def deployPreambleSize (rSize : Nat) : Nat :=
+  pushByteSize rSize + 33 + pushByteSize 0 + 1 +
+    pushByteSize rSize + pushByteSize 0 + 1
+
+def deployRuntimeOffset (rSize : Nat) : Nat := deployPreambleSize rSize
+
+/-- Standard creation bytecode: preamble ++ runtime (no constructor body). Running it
+`RETURN`s the runtime, which is what `CREATE` installs. -/
+def deployCode (runtime : List UInt8) : List UInt8 :=
+  let rSize := runtime.length
+  let rOffset := deployRuntimeOffset rSize
+  deployPreamble rSize rOffset ++ runtime
+
 def toHex (bytes : List UInt8) : String :=
   let hex b :=
     let s := (BitVec.ofNat 8 b.toNat).toHex
     if s.length = 1 then "0" ++ s else s
   "0x" ++ String.join (bytes.map hex)
+
+/-! ## Layout lemmas (kernel-checked; used by deploy certificates) -/
+
+@[simp] theorem natToBytesLE_length (n w : Nat) : (natToBytesLE n w).length = w := by
+  induction w generalizing n with
+  | zero => simp [natToBytesLE]
+  | succ w ih => simp [natToBytesLE, ih]
+
+@[simp] theorem emitPush_length (n : Nat) : (emitPush n).length = pushByteSize n := by
+  simp [emitPush, pushByteSize, natToBytesBE]
+  omega
+
+@[simp] theorem emitPush32_length (n : Nat) : (emitPush32 n).length = 33 := by
+  simp [emitPush32, natToBytesBE]
+
+theorem drop_append_length {α : Type*} (as bs : List α) :
+    (as ++ bs).drop as.length = bs := by
+  induction as with
+  | nil => simp
+  | cons _ as ih => simp [ih]
+
+@[simp] theorem deployPreamble_length (rSize rOffset : Nat) :
+    (deployPreamble rSize rOffset).length = deployPreambleSize rSize := by
+  simp [deployPreamble, deployPreambleSize, pushByteSize]
+  omega
+
+/-- The runtime is exactly the suffix of creation bytecode after the preamble. -/
+theorem deployCode_suffix (runtime : List UInt8) :
+    (deployCode runtime).drop (deployRuntimeOffset runtime.length) = runtime := by
+  simp [deployCode, deployRuntimeOffset]
 
 end Lsc3.Compile

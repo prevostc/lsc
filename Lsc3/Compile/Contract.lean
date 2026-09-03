@@ -49,4 +49,8 @@ def compileContract (c : ContractDef) : Except String (List UInt8) := do
   let instrs ← contractInstrs c
   encode instrs
 
+def compileDeploy (c : ContractDef) : Except String (List UInt8) := do
+  let runtime ← compileContract c
+  pure (deployCode runtime)
+
 end Lsc3.Compile

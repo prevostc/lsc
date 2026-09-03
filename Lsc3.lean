@@ -6,6 +6,8 @@ import Lsc3.Contract
 import Lsc3.EVM.State
 import Lsc3.EVM.Step
 import Lsc3.Compile.Contract
+import Lsc3.Compile.Exec
+import Lsc3.Compile.Cert
 import Lsc3.Examples.Counter
 import Lsc3.Examples.Token
 import Lsc3.Examples.TokenProofs
@@ -13,6 +15,7 @@ import Lsc3.Examples.Vault
 import Lsc3.Examples.VaultProofs
 import Lsc3.Examples.CounterEndToEnd
 import Lsc3.Examples.TokenEndToEnd
+import Lsc3.Examples.VaultEndToEnd
 
 /-!
 # LSC v3

@@ -636,6 +636,9 @@ def assembleContract (ns : Name) (fns : Array Name) : TermElabM Unit := do
   let bytecodeVal := mkApp (Lean.mkConst ``Lsc3.Compile.compileContract) (Lean.mkConst (ns ++ `contract))
   addAndCompile <| .defnDecl (mkDefinitionValEx (ns ++ `bytecode) [] bytecodeTy bytecodeVal
     .abbrev .safe [ns ++ `bytecode])
+  let deployVal := mkApp (Lean.mkConst ``Lsc3.Compile.compileDeploy) (Lean.mkConst (ns ++ `contract))
+  addAndCompile <| .defnDecl (mkDefinitionValEx (ns ++ `deploy) [] bytecodeTy deployVal
+    .abbrev .safe [ns ++ `deploy])
   trace[Lsc3.reify] "assembled {ns}.contract ({fns.size} functions)"
 
 /-- `lsc_schema C` derives `C.schema` from `C.Storage`, `C.Event`, `C.Error`. -/
@@ -661,9 +664,9 @@ syntax (name := lscReify) "lsc_reify " ident+ : command
       liftTermElabM <| withRef fn <| reifyFunction n
   | _ => throwUnsupportedSyntax
 
-/-- `lsc_contract C f₁ … fₙ` reifies each `C.fᵢ` if needed, then defines `C.contract` and
-`C.bytecode`. Unit-returning functions are `tx`; a function named `constructor` is the
-constructor; the rest are `view`. -/
+/-- `lsc_contract C f₁ … fₙ` reifies each `C.fᵢ` if needed, then defines `C.contract`,
+`C.bytecode` (runtime) and `C.deploy` (creation bytecode). Unit-returning functions are
+`tx`; a function named `constructor` is the constructor; the rest are `view`. -/
 syntax (name := lscContract) "lsc_contract " ident ident+ : command
 
 @[command_elab lscContract] def elabLscContract : CommandElab

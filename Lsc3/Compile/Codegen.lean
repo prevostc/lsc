@@ -48,8 +48,60 @@ namespace Codegen
 
 /-- `SWAP1` — swap stack top with the second item. -/
 def swap1 : Asm := .op (Opcode.SWAP ⟨0, by decide⟩)
+def swap2 : Asm := .op (Opcode.SWAP ⟨1, by decide⟩)
+def dup1 : Asm := .op (Opcode.DUP ⟨0, by decide⟩)
+def dup2 : Asm := .op (Opcode.DUP ⟨1, by decide⟩)
+def dup3 : Asm := .op (Opcode.DUP ⟨2, by decide⟩)
+def dup4 : Asm := .op (Opcode.DUP ⟨3, by decide⟩)
 
 def emitOp (op : Opcode) : List Asm := [Asm.op op]
+
+/-- Solidity `Panic(uint256)` — 0x11 overflow/underflow, 0x12 division by zero. -/
+def emitPanic (code : Nat) : List Asm :=
+  [Asm.push (selectorOf "Panic" [{ name := "code", ty := .uint256 }] * (2 ^ 224)),
+   Asm.push 0, Asm.op .MSTORE,
+   Asm.push code, Asm.push 4, Asm.op .MSTORE,
+   Asm.push 36, Asm.push 0, Asm.op .REVERT]
+
+/-- Skip-over a panic block: `jumpi rev; jump ok; JUMPDEST rev; panic; JUMPDEST ok`. -/
+def skipPanic (ctx : Ctx) (tag : String) (code : Nat) : List Asm × Ctx :=
+  let (revLbl, c1) := Ctx.freshLabel ctx (tag ++ "R")
+  let (okLbl, c2) := Ctx.freshLabel c1 (tag ++ "O")
+  ([Asm.jumpi revLbl, Asm.jump okLbl, Asm.jumpDest revLbl] ++ emitPanic code ++
+    [Asm.jumpDest okLbl], c2)
+
+/-- Stack `[b, a]`. Leaves `[a+b]` or panics on unsigned overflow. -/
+def checkedAdd (ctx : Ctx) : List Asm × Ctx :=
+  let (body, c1) := skipPanic ctx "add" 0x11
+  ([dup2, Asm.op .ADD, dup1, swap2, Asm.op .GT] ++ body, c1)
+
+/-- Stack `[b, a]`. Leaves `[a-b]` or panics if `b > a`. -/
+def checkedSub (ctx : Ctx) : List Asm × Ctx :=
+  let (body, c1) := skipPanic ctx "sub" 0x11
+  ([dup2, dup2, Asm.op .GT] ++ body ++ [swap1, Asm.op .SUB], c1)
+
+/-- Stack `[c, x]`. Leaves `[x/c]` or panics if `c = 0`. -/
+def checkedDiv (ctx : Ctx) : List Asm × Ctx :=
+  let (body, c1) := skipPanic ctx "div" 0x12
+  ([dup1, Asm.op .ISZERO] ++ body ++ [swap1, Asm.op .DIV], c1)
+
+/-- Stack `[b, a]`. Leaves `[a*b]` or panics on unsigned overflow. -/
+def checkedMul (ctx : Ctx) : List Asm × Ctx :=
+  let (zLbl, c1) := Ctx.freshLabel ctx "mulZ"
+  let (ovLbl, c2) := Ctx.freshLabel c1 "mulO"
+  let (okLbl, c3) := Ctx.freshLabel c2 "mulK"
+  ([dup2, dup2, Asm.op .MUL, dup3, Asm.op .ISZERO, Asm.jumpi zLbl,
+    dup1, dup4, swap1, Asm.op .DIV, dup3, Asm.op .EQ, Asm.op .ISZERO, Asm.jumpi ovLbl,
+    swap2, Asm.op .POP, Asm.op .POP, Asm.jump okLbl,
+    Asm.jumpDest zLbl, swap2, Asm.op .POP, Asm.op .POP, Asm.jump okLbl,
+    Asm.jumpDest ovLbl] ++ emitPanic 0x11 ++ [Asm.jumpDest okLbl], c3)
+
+/-- Stack `[c, prod]`. Leaves `⌈prod/c⌉` or panics if `c = 0`. -/
+def checkedDivUp (ctx : Ctx) : List Asm × Ctx :=
+  let (body, c1) := skipPanic ctx "divU" 0x12
+  ([dup1, Asm.op .ISZERO] ++ body ++
+    [dup1, dup3, Asm.op .DIV, swap1, dup3, swap1, Asm.op .MOD,
+     Asm.op .ISZERO, Asm.op .ISZERO, Asm.op .ADD, swap1, Asm.op .POP], c1)
 
 def mstoreTop (offset : Nat) : List Asm :=
   [Asm.push offset, Asm.op .MSTORE]
@@ -135,10 +187,9 @@ def genOp (ctx : Ctx) : Op → Except String (List Asm × Ctx)
     .ok (mapSlotHash f ki ++ [Asm.op .SLOAD], c1)
   | .loadMap2 f k₁ k₂ => do
     let (k1i, c1) ← genAtom ctx k₁
-    let inner := mapSlotHash f k1i
-    let c1' := { c1 with depth := c1.depth + 1 }  -- stack neutral
-    let (k2i, c2) ← genAtom c1' k₂
-    let outer := [Asm.push 0, Asm.op .MSTORE, Asm.push 32, Asm.op .MSTORE, Asm.push 64, Asm.push 0, Asm.op .KECCAK256]
+    let inner := mapSlotHash f k1i ++ [Asm.push 0, Asm.op .MSTORE]
+    let (k2i, c2) ← genAtom c1 k₂
+    let outer := [Asm.push 32, Asm.op .MSTORE, Asm.push 64, Asm.push 0, Asm.op .KECCAK256]
     .ok (inner ++ k2i ++ outer ++ [Asm.op .SLOAD], c2)
   | .sender => .ok (emitOp .CALLER, ctx)
   | .value => .ok (emitOp .CALLVALUE, ctx)
@@ -148,30 +199,37 @@ def genOp (ctx : Ctx) : Op → Except String (List Asm × Ctx)
   | .addChecked a b => do
     let (i1, c1) ← genAtom ctx a
     let (i2, c2) ← genAtom c1 b
-    .ok (i1 ++ i2 ++ emitOp .ADD, c2)
+    let (chk, c3) := checkedAdd c2
+    .ok (i1 ++ i2 ++ chk, c3)
   | .subChecked a b => do
     let (i1, c1) ← genAtom ctx a
     let (i2, c2) ← genAtom c1 b
-    .ok (i1 ++ i2 ++ [swap1, Asm.op .SUB], c2)
+    let (chk, c3) := checkedSub c2
+    .ok (i1 ++ i2 ++ chk, c3)
   | .mulChecked a b => do
     let (i1, c1) ← genAtom ctx a
     let (i2, c2) ← genAtom c1 b
-    .ok (i1 ++ i2 ++ emitOp .MUL, c2)
+    let (chk, c3) := checkedMul c2
+    .ok (i1 ++ i2 ++ chk, c3)
   | .divChecked a b => do
     let (i1, c1) ← genAtom ctx a
     let (i2, c2) ← genAtom c1 b
-    .ok (i1 ++ i2 ++ [swap1, Asm.op .DIV], c2)
+    let (chk, c3) := checkedDiv c2
+    .ok (i1 ++ i2 ++ chk, c3)
   | .mulDivDown a b c => do
     let (i1, c1) ← genAtom ctx a
     let (i2, c2) ← genAtom c1 b
-    let (i3, c3) ← genAtom c2 c
-    -- (a*b)/c with floor — mulmod path omitted; use MUL DIV for in-range values
-    .ok (i1 ++ i2 ++ emitOp .MUL ++ i3 ++ [swap1, Asm.op .DIV], c3)
+    let (mul, c3) := checkedMul c2
+    let (i3, c4) ← genAtom c3 c
+    let (div, c5) := checkedDiv c4
+    .ok (i1 ++ i2 ++ mul ++ i3 ++ div, c5)
   | .mulDivUp a b c => do
     let (i1, c1) ← genAtom ctx a
     let (i2, c2) ← genAtom c1 b
-    let (i3, c3) ← genAtom c2 c
-    .ok (i1 ++ i2 ++ emitOp .MUL ++ i3 ++ [swap1, Asm.op .DIV], c3)
+    let (mul, c3) := checkedMul c2
+    let (i3, c4) ← genAtom c3 c
+    let (div, c5) := checkedDivUp c4
+    .ok (i1 ++ i2 ++ mul ++ i3 ++ div, c5)
   | .pure a => genAtom ctx a
 
 def emitRevert (sel : Nat) : List Asm :=
@@ -188,9 +246,9 @@ def genStmt (ctx : Ctx) (c : ContractDef) : Stmt → Except String (List Asm × 
     .ok (hash ++ vi ++ [swap1, Asm.op .SSTORE], c2)
   | .storeMap2 f k₁ k₂ v => do
     let (k1i, c1) ← genAtom ctx k₁
-    let inner := mapSlotHash f k1i
+    let inner := mapSlotHash f k1i ++ [Asm.push 0, Asm.op .MSTORE]
     let (k2i, c2) ← genAtom c1 k₂
-    let slot := [Asm.push 0, Asm.op .MSTORE, Asm.push 32, Asm.op .MSTORE, Asm.push 64, Asm.push 0, Asm.op .KECCAK256]
+    let slot := [Asm.push 32, Asm.op .MSTORE, Asm.push 64, Asm.push 0, Asm.op .KECCAK256]
     let (vi, c3) ← genAtom c2 v
     .ok (inner ++ k2i ++ slot ++ vi ++ [swap1, Asm.op .SSTORE], c3)
   | .require cond err _ => do
@@ -201,22 +259,13 @@ def genStmt (ctx : Ctx) (c : ContractDef) : Stmt → Except String (List Asm × 
     .ok (ci ++ [Asm.op .ISZERO, Asm.jumpi revLbl, Asm.jump okLbl, Asm.jumpDest revLbl] ++ emitRevert sel ++
       [Asm.jumpDest okLbl], c3)
   | .emit ev args => do
-    let (argIs, cAcc) ← args.foldlM (init := ([], ctx)) fun (acc, cAcc) arg => do
-      let (i, c') ← genAtom cAcc arg
-      pure (acc ++ i, c')
+    let topic0 := if h : ev < c.events.length then EventDef.topic0 c.events[ev] else 0
+    let (stores, cAcc, _) ← args.foldlM (init := ([], ctx, (0 : Nat))) fun (acc, cAcc, i) arg => do
+      let (ai, c') ← genAtom cAcc arg
+      pure (acc ++ ai ++ [Asm.push (32 * i), Asm.op .MSTORE], c', i + 1)
     let n := args.length
-    if n > 5 then
-      .error "codegen: LOG supports at most 5 topics"
-    else
-      let logOp : Opcode :=
-        match n with
-        | 0 => .LOG ⟨0, by decide⟩
-        | 1 => .LOG ⟨1, by decide⟩
-        | 2 => .LOG ⟨2, by decide⟩
-        | 3 => .LOG ⟨3, by decide⟩
-        | 4 => .LOG ⟨4, by decide⟩
-        | _ => .LOG ⟨0, by decide⟩  -- unreachable: guarded by `n > 5` check above
-      .ok (argIs ++ [Asm.push 0, Asm.push 0, Asm.op logOp], cAcc)
+    .ok (stores ++ [Asm.push topic0, Asm.push (32 * n), Asm.push 0,
+      Asm.op (.LOG ⟨1, by decide⟩)], cAcc)
   | .revert err _ =>
     let sel := if h : err < c.errors.length then ErrorDef.selector c.errors[err] else 0
     .ok (emitRevert sel, ctx)
