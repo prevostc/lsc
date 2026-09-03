@@ -646,6 +646,25 @@ theorem gtW_add_overflow {n : Nat} (h : n + 1 = wordBound) :
   rw [addW_succ_overflow h]
   simp [gtW, hn0]
 
+/-- `checkedAdd` overflow test for a two-word add: `GT a (a+b)` is 1 when the sum wraps. -/
+theorem gtW_add_of_ge {a b : Nat} (ha : a < wordBound) (hb : b < wordBound)
+    (h : wordBound ≤ a + b) : gtW a (addW a b) = 1 := by
+  have hrest : a + b - wordBound < wordBound := by
+    have : a + b < wordBound + wordBound := Nat.add_lt_add ha hb
+    omega
+  have hmod : (a + b) % wordBound = a + b - wordBound := by
+    calc
+      (a + b) % wordBound
+          = (wordBound + (a + b - wordBound)) % wordBound := by rw [Nat.add_sub_of_le h]
+      _ = (wordBound % wordBound + (a + b - wordBound) % wordBound) % wordBound :=
+        Nat.add_mod _ _ _
+      _ = (a + b - wordBound) % wordBound := by simp [Nat.mod_self]
+      _ = a + b - wordBound := Nat.mod_eq_of_lt hrest
+  have hlt : a + b - wordBound < a := by
+    have : a + b < a + wordBound := Nat.add_lt_add_left hb a
+    omega
+  simp [gtW, addW, wrap, hmod, hlt]
+
 /-- `checkedSub` overflow test: `GT 1 n` is 0 when `n ≥ 1`. -/
 theorem gtW_one_of_pos {n : Nat} (h : 0 < n) : gtW 1 n = 0 := by
   simp [gtW]; omega

@@ -430,6 +430,13 @@ theorem decode_pc85 :
   have h : code.drop 85 = Opcode.toByte .JUMP :: code.drop 86 := code_drop85
   exact decodeAt_of_drop h (decodeAt_jump_head _)
 
+theorem decode_pc86 :
+    decodeAt code 86 = some ({ op := .JUMPDEST }, 87) :=
+  decodeAt_of_drop code_drop86 (decodeAt_jumpdest_head _)
+
+theorem isJumpDest_addR : isJumpDest code addRPc = true := by
+  simpa [addRPc] using isJumpDest_of_decode decode_pc86
+
 theorem decode_pc131 :
     decodeAt code 131 = some ({ op := .JUMPDEST }, 132) := by
   exact decodeAt_of_drop code_drop131 (decodeAt_jumpdest_head _)

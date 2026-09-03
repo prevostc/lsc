@@ -26,7 +26,7 @@ The two-function compiler `GetInc.getInc` encodes to `GetInc.code`. Apply
 `GetInc.getInc_get_hit` / `GetInc.getInc_inc_hit`; do not instantiate them here.
 
 Isolated `incrementBy` encodes to `IncByBody.code`. Apply `IncByBody.incBy_hit` /
-`IncByBody.incBy_zero`; do not instantiate them here.
+`IncByBody.incBy_zero` / `IncByBody.incBy_overflow`; do not instantiate them here.
 
 Isolated `decrement` encodes to `DecBody.code`. Apply `DecBody.dec_hit` /
 `DecBody.dec_zero`; do not instantiate them here.

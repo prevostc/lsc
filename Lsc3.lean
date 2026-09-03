@@ -18,6 +18,7 @@ import Lsc3.Compile.GetMiss
 import Lsc3.Compile.IncBody
 import Lsc3.Compile.IncByBody
 import Lsc3.Compile.IncByHit
+import Lsc3.Compile.IncByOverflow
 import Lsc3.Compile.DecBody
 import Lsc3.Compile.DecHit
 import Lsc3.Compile.IncOverflow
