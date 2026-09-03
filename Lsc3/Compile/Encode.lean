@@ -44,7 +44,7 @@ def instrByteSize (_labels : List (String × Nat)) : Asm → Nat
   | .push n => 1 + pushWidth n
   | .pushLabel _ => 33
   | .jump _ => 34
-  | .jumpi _ => 35
+  | .jumpi _ => 34
   | .jumpDest _ => 1
 
 def layoutLabelsFrom (pc : Nat) (instrs : List Asm) (acc : List (String × Nat)) :
@@ -73,7 +73,7 @@ def emitOne (labels : List (String × Nat)) : Asm → Except String (List UInt8)
     pure (emitPush32 pc ++ [Opcode.toByte .JUMP])
   | .jumpi lbl => do
     let pc ← lookupLabel labels lbl
-    pure (emitPush32 pc ++ [Opcode.toByte (.SWAP ⟨0, by decide⟩), Opcode.toByte .JUMPI])
+    pure (emitPush32 pc ++ [Opcode.toByte .JUMPI])
   | .jumpDest _ => pure [Opcode.toByte .JUMPDEST]
 
 def emitInstrs (labels : List (String × Nat)) (instrs : List Asm) :

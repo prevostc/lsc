@@ -29,7 +29,7 @@ def selectorDispatch (c : ContractDef) (ctx : Ctx) : Except String (List Asm × 
   if fns.isEmpty then
     throw "contract has no functions"
   let (revLbl, ctx1) := Ctx.freshLabel ctx "dispR"
-  let calldataCheck : List Asm := [Asm.push 4, Asm.op .CALLDATASIZE, Asm.op .GT, Asm.jumpi revLbl]
+  let calldataCheck : List Asm := [Asm.push 4, Asm.op .CALLDATASIZE, Asm.op .LT, Asm.jumpi revLbl]
   let branches := selectorBranches fns
   let tail : List Asm := [Asm.jump revLbl, Asm.jumpDest revLbl] ++ dispatchRevert (selectorOf "InvalidSelector" [])
   pure (calldataCheck ++ branches ++ tail, ctx1)

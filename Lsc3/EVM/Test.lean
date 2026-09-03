@@ -39,4 +39,27 @@ def addCode : List UInt8 :=
   | some (Halt.stop, s') => IO.println s!"add: stop, stack = {s'.stack}"
   | some (h, _) => IO.println s!"add: halt {repr h}"
 
-end Lsc3.EVM.Test
+/-- `PUSH1 5 PUSH1 3 SWAP1 SUB STOP` — Yellow Paper SUB is top − second, so 5 − 3. -/
+def subCode : List UInt8 :=
+  [0x60, 0x05, 0x60, 0x03, 0x90, 0x03, 0x00]
+
+#eval do
+  let env := emptyEnv subCode
+  match run 1000 env emptyState with
+  | some (Halt.stop, s') => IO.println s!"sub: stop, stack = {s'.stack}"
+  | none => IO.println "sub: fuel exhausted"
+  | some (h, _) => IO.println s!"sub: halt {repr h}"
+
+/-- `PUSH1 42 PUSH1 0 MSTORE PUSH1 32 PUSH1 0 RETURN` — return word 42. -/
+def returnCode : List UInt8 :=
+  [0x60, 0x2a, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3]
+
+#eval do
+  let env := emptyEnv returnCode
+  match run 1000 env emptyState with
+  | some (Halt.ret data, _) =>
+    let word : Nat := (List.range (min 32 data.length)).foldl (fun acc i =>
+      acc * 256 + UInt8.toNat data[i]!) 0
+    IO.println s!"return: word = {word}"
+  | none => IO.println "return: fuel exhausted"
+  | some (h, _) => IO.println s!"return: halt {repr h}"

@@ -42,3 +42,4 @@ end Counter
 
 lsc_schema Counter
 lsc_reify Counter.increment Counter.incrementBy Counter.decrement Counter.get
+lsc_contract Counter increment incrementBy decrement get

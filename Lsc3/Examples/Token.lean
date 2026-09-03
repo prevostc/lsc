@@ -97,3 +97,4 @@ end Token
 lsc_schema Token
 lsc_reify Token.init Token.transfer Token.approve Token.transferFrom Token.mint Token.burn
 lsc_reify Token.balanceOf Token.allowance Token.totalSupply
+lsc_contract Token init transfer approve transferFrom mint burn balanceOf allowance totalSupply

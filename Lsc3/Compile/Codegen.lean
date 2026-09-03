@@ -52,7 +52,7 @@ def swap1 : Asm := .op (Opcode.SWAP ⟨0, by decide⟩)
 def emitOp (op : Opcode) : List Asm := [Asm.op op]
 
 def mstoreTop (offset : Nat) : List Asm :=
-  [Asm.push offset, swap1, Asm.op .MSTORE]
+  [Asm.push offset, Asm.op .MSTORE]
 
 def mloadPush (offset : Nat) : List Asm :=
   [Asm.push offset, Asm.op .MLOAD]
@@ -112,6 +112,22 @@ def mapSlotHash (base : Nat) (keyInstr : List Asm) : List Asm :=
   keyInstr ++ [Asm.push 0, Asm.op .MSTORE, Asm.push base, Asm.push 32, Asm.op .MSTORE,
     Asm.push 64, Asm.push 0, Asm.op .KECCAK256]
 
+def genPrim (ctx : Ctx) : Prim → List Atom → Except String (List Asm × Ctx)
+  | .id, [a] => genAtom ctx a
+  | .addWrap, [a, b] => do
+    let (i1, c1) ← genAtom ctx a
+    let (i2, c2) ← genAtom c1 b
+    .ok (i1 ++ i2 ++ emitOp .ADD, c2)
+  | .subWrap, [a, b] => do
+    let (i1, c1) ← genAtom ctx a
+    let (i2, c2) ← genAtom c1 b
+    .ok (i1 ++ i2 ++ [swap1, Asm.op .SUB], c2)
+  | .mulWrap, [a, b] => do
+    let (i1, c1) ← genAtom ctx a
+    let (i2, c2) ← genAtom c1 b
+    .ok (i1 ++ i2 ++ emitOp .MUL, c2)
+  | _, _ => .error "codegen: unexpected Prim arity"
+
 def genOp (ctx : Ctx) : Op → Except String (List Asm × Ctx)
   | .load f => .ok ([Asm.push f, Asm.op .SLOAD], ctx)
   | .loadMap f k => do
@@ -164,7 +180,7 @@ def emitRevert (sel : Nat) : List Asm :=
 def genStmt (ctx : Ctx) (c : ContractDef) : Stmt → Except String (List Asm × Ctx)
   | .store f v => do
     let (vi, c1) ← genAtom ctx v
-    .ok (vi ++ [Asm.push f, swap1, Asm.op .SSTORE], c1)
+    .ok (vi ++ [Asm.push f, Asm.op .SSTORE], c1)
   | .storeMap f k v => do
     let (ki, c1) ← genAtom ctx k
     let hash := mapSlotHash f ki
@@ -248,13 +264,10 @@ def genCore (ctx : Ctx) (c : ContractDef) : {t : RetTy} → Core t → Except St
     let (ki, c2) ← genCore c1 c k
     .ok (si ++ ki, c2)
   | _, .letPure p args k => do
-    let (ai, cAcc) ← args.foldlM (init := ([], ctx)) fun (acc, cAcc) arg => do
-      let (i, c') ← genAtom cAcc arg
-      pure (acc ++ i, c')
-    let result := Prim.eval p (args.map fun a => match a with | .lit n => n | .var _ => 0)
-    let slot := cAcc.depth
-    let (ki, c2) ← genCore (Ctx.bind cAcc) c k
-    .ok (ai ++ [Asm.push result] ++ storeLocal cAcc slot ++ ki, c2)
+    let (pi, c1) ← genPrim ctx p args
+    let slot := c1.depth
+    let (ki, c2) ← genCore (Ctx.bind c1) c k
+    .ok (pi ++ storeLocal c1 slot ++ ki, c2)
   | _, .ite cond a b => do
     let (ci, c1) ← genCond ctx cond
     let (elseLbl, c2) := Ctx.freshLabel c1 "else"
@@ -267,7 +280,7 @@ def genCore (ctx : Ctx) (c : ContractDef) : {t : RetTy} → Core t → Except St
 /-- Load `nParams` ABI words from calldata into memory locals. -/
 def loadParams (nParams : Nat) : List Asm :=
   (List.range nParams).flatMap fun i =>
-    [Asm.push (4 + 32 * i), Asm.op .CALLDATALOAD, Asm.push (localBase + 32 * i), swap1, Asm.op .MSTORE]
+    [Asm.push (4 + 32 * i), Asm.op .CALLDATALOAD, Asm.push (localBase + 32 * i), Asm.op .MSTORE]
 
 def genFunction (c : ContractDef) (fn : FnDef) (ctx : Ctx) : Except String (List Asm × Ctx) := do
   let n := fn.params.length

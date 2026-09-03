@@ -12,12 +12,12 @@ import Lsc3.Examples.TokenProofs
 import Lsc3.Examples.Vault
 import Lsc3.Examples.VaultProofs
 import Lsc3.Examples.CounterEndToEnd
+import Lsc3.Examples.TokenEndToEnd
 
 /-!
 # LSC v3
 
 Shallow Lean surface (`Lsc3.Tx`), certified reification to a tiny ANF core (`Lsc3.Core`,
-`Lsc3.Reify`), and examples with their theorems. See the plan for the phases that follow
-(codegen with per-contract certificates against EvmYulLean, effects and invariants,
-protocol proof interfaces).
+`Lsc3.Reify`), Core→EVM codegen (`Lsc3.Compile`) with per-contract assembly (`lsc_contract`),
+and an executable subset machine (`Lsc3.EVM`) that runs the emitted bytecode.
 -/

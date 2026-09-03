@@ -81,19 +81,22 @@ def stackPop (s : List Word) : Option (Word × List Word) :=
   | [] => none
   | x :: xs => some (x, xs)
 
+/-- Pop two words in Yellow Paper order: `(top, second, rest)`. -/
 def pop2 (s : List Word) : Option (Word × Word × List Word) :=
   match s with
-  | b :: a :: rest => some (a, b, rest)
+  | a :: b :: rest => some (a, b, rest)
   | _ => none
 
+/-- Pop three words: `(top, second, third, rest)`. -/
 def pop3 (s : List Word) : Option (Word × Word × Word × List Word) :=
   match s with
-  | c :: b :: a :: rest => some (a, b, c, rest)
+  | a :: b :: c :: rest => some (a, b, c, rest)
   | _ => none
 
+/-- Pop `n` words, top-first (index 0 is the former top). -/
 def popN (s : List Word) (n : Nat) : Option (List Word × List Word) :=
   if n > s.length then none
-  else some ((s.take n).reverse, s.drop n)
+  else some (s.take n, s.drop n)
 
 def stackPush (s : List Word) (v : Word) : Option (List Word) :=
   if s.length ≥ 1024 then none else some (v :: s)
@@ -240,11 +243,11 @@ def step (env : Env) (s : State) : StepResult :=
     | .SHL =>
       match pop2 s.stack with
       | none => exceptional .stackUnderflow s
-      | some (value, shift, st) => withPush s nextPc st (shlW shift value)
+      | some (shift, value, st) => withPush s nextPc st (shlW shift value)
     | .SHR =>
       match pop2 s.stack with
       | none => exceptional .stackUnderflow s
-      | some (value, shift, st) => withPush s nextPc st (shrW shift value)
+      | some (shift, value, st) => withPush s nextPc st (shrW shift value)
     | .MLOAD =>
       match stackPop s.stack with
       | none => exceptional .stackUnderflow s
@@ -323,9 +326,9 @@ def step (env : Env) (s : State) : StepResult :=
       match popN s.stack (2 + n) with
       | none => exceptional .stackUnderflow s
       | some (args, st) =>
-        let topics := args.take n
-        let off := args[n]!
-        let size := args[n + 1]!
+        let off := args[0]!
+        let size := args[1]!
+        let topics := args.drop 2
         let data := List.range size |>.map fun i => memGet s.mem (off + i)
         StepResult.next { s with logs := s.logs ++ [{ topics, data }], stack := st, pc := nextPc }
 

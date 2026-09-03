@@ -126,6 +126,7 @@ end Vault
 lsc_schema Vault
 lsc_reify Vault.deposit Vault.withdraw Vault.previewDeposit Vault.previewRedeem
 lsc_reify Vault.pause Vault.unpause Vault.paused?
+lsc_contract Vault deposit withdraw previewDeposit previewRedeem pause unpause paused?
 
 /--
 error: reify: rounding `r` must be a literal `.down` or `.up`

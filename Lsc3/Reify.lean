@@ -1,4 +1,6 @@
 import Lsc3.Core
+import Lsc3.Contract
+import Lsc3.Compile.Contract
 
 /-!
 # LSC v3 — reification
@@ -554,6 +556,88 @@ def reifyFunction (fn : Name) : TermElabM Unit := do
     addDecl <| .thmDecl { name := fn ++ `core_denote, levelParams := [], type := stmt, value := proof }
     trace[Lsc3.reify] "reified {fn} : Core {repr t}\n{repr core}"
 
+/-! ## Contract assembly (`lsc_contract`) -/
+
+def abiTyOf (ty : Expr) : MetaM AbiTy := do
+  let ty ← whnfR ty
+  match ty.getAppFn.constName? with
+  | some ``Nat => pure .uint256
+  | some ``Lsc3.Address => pure .address
+  | some ``Lsc3.Flag => pure .bool
+  | some ``Lsc3.Amount | some ``Lsc3.Price | some ``Lsc3.Fixed => pure .uint256
+  | _ => throwError "lsc_contract: unsupported ABI type `{ty}` (Nat, Address, Flag, Amount)"
+
+def ctorParams (ctor : Name) : MetaM (List Param) := do
+  let info ← getConstInfoCtor ctor
+  forallTelescope info.type fun xs _ => do
+    let xs := xs.extract info.numParams xs.size
+    xs.toList.mapM fun x => do
+      let n := (← x.fvarId!.getUserName).getString!
+      let abi ← abiTyOf (← inferType x)
+      pure { name := n, ty := abi }
+
+def fnKindOf (fn : Name) (t : RetTy) : FnKind :=
+  if fn.getString! == "constructor" then .constructor
+  else if t == RetTy.unit then .tx
+  else .view
+
+def fnMeta (fn : Name) : MetaM (List Param × RetTy × FnKind) := do
+  let info ← getConstInfoDefn fn
+  forallTelescope info.type fun xs body => do
+    let txTy ← whnfToTx body
+    let t ← retTyOf (txTy.getArg! 3)
+    let params ← xs.toList.mapM fun x => do
+      let n := (← x.fvarId!.getUserName).getString!
+      let abi ← abiTyOf (← inferType x)
+      pure { name := n, ty := abi }
+    pure (params, t, fnKindOf fn t)
+
+def mkFnDefExpr (name : String) (decl : Name) (kind : FnKind) (params : List Param)
+    (ret : RetTy) (coreName : Name) : Expr :=
+  mkAppN (Lean.mkConst ``FnDef.mk) #[
+    toExpr name, toExpr decl, toExpr kind, toExpr params, toExpr ret, Lean.mkConst coreName]
+
+def fieldKindToAbi : FieldKind → Lsc3.FieldKind
+  | .scalar => .scalar
+  | .map1 => .map1
+  | .map2 => .map2
+
+/-- Assemble `C.contract` and `C.bytecode` from reified entrypoints. -/
+def assembleContract (ns : Name) (fns : Array Name) : TermElabM Unit := do
+  for fn in fns do
+    unless (← getEnv).contains (fn ++ `core) do
+      reifyFunction fn
+  let ci ← contractInfo ns
+  let fields : List FieldDef := ci.fields.toList.map fun f =>
+    { name := f.name.getString!, kind := fieldKindToAbi f.kind, ty := .uint256 }
+  let events : List EventDef ← ci.evCtors.toList.mapM fun ctor => do
+    let params ← ctorParams ctor
+    pure { name := ctor.getString!, params }
+  let errors : List ErrorDef ← ci.errCtors.toList.mapM fun ctor => do
+    let params ← ctorParams ctor
+    pure { name := ctor.getString!, params }
+  let mut fnDefs : Array Expr := #[]
+  let mut ctorE : Expr := mkApp (Lean.mkConst ``Option.none [Level.zero]) (Lean.mkConst ``FnDef)
+  for fn in fns do
+    let (params, ret, kind) ← fnMeta fn
+    let e := mkFnDefExpr fn.getString! fn kind params ret (fn ++ `core)
+    if kind == .constructor then
+      ctorE := mkApp2 (Lean.mkConst ``Option.some [Level.zero]) (Lean.mkConst ``FnDef) e
+    else
+      fnDefs := fnDefs.push e
+  let fnList ← mkListLit (Lean.mkConst ``FnDef) fnDefs.toList
+  let contractTy := Lean.mkConst ``ContractDef
+  let contractVal := mkAppN (Lean.mkConst ``ContractDef.mk) #[
+    toExpr ns.getString!, toExpr fields, fnList, ctorE, toExpr events, toExpr errors]
+  addAndCompile <| .defnDecl (mkDefinitionValEx (ns ++ `contract) [] contractTy contractVal
+    .abbrev .safe [ns ++ `contract])
+  let bytecodeTy := mkApp2 (Lean.mkConst ``Except [Level.zero, Level.zero]) (Lean.mkConst ``String)
+    (mkApp (Lean.mkConst ``List [Level.zero]) (Lean.mkConst ``UInt8))
+  let bytecodeVal := mkApp (Lean.mkConst ``Lsc3.Compile.compileContract) (Lean.mkConst (ns ++ `contract))
+  addAndCompile <| .defnDecl (mkDefinitionValEx (ns ++ `bytecode) [] bytecodeTy bytecodeVal
+    .abbrev .safe [ns ++ `bytecode])
+  trace[Lsc3.reify] "assembled {ns}.contract ({fns.size} functions)"
+
 /-- `lsc_schema C` derives `C.schema` from `C.Storage`, `C.Event`, `C.Error`. -/
 syntax (name := lscSchema) "lsc_schema " ident : command
 
@@ -575,6 +659,22 @@ syntax (name := lscReify) "lsc_reify " ident+ : command
     for fn in fns do
       let n ← liftCoreM <| realizeGlobalConstNoOverloadWithInfo fn
       liftTermElabM <| withRef fn <| reifyFunction n
+  | _ => throwUnsupportedSyntax
+
+/-- `lsc_contract C f₁ … fₙ` reifies each `C.fᵢ` if needed, then defines `C.contract` and
+`C.bytecode`. Unit-returning functions are `tx`; a function named `constructor` is the
+constructor; the rest are `view`. -/
+syntax (name := lscContract) "lsc_contract " ident ident+ : command
+
+@[command_elab lscContract] def elabLscContract : CommandElab
+  | `(lsc_contract $ns:ident $fns:ident*) => do
+    let nsName ← liftCoreM <| realizeGlobalConstNoOverloadWithInfo (mkIdent (ns.getId ++ `Storage))
+    let nsName := nsName.getPrefix
+    let mut resolved : Array Name := #[]
+    for fn in fns do
+      let n ← liftCoreM <| realizeGlobalConstNoOverloadWithInfo (mkIdent (nsName ++ fn.getId))
+      resolved := resolved.push n
+    liftTermElabM <| assembleContract nsName resolved
   | _ => throwUnsupportedSyntax
 
 end Lsc3.Reify
