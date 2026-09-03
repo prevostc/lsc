@@ -48,10 +48,12 @@ structure Ctx where
   deriving Repr
 
 /-- The world a contract executes in: its own storage `S` and the events emitted so far.
-`ext`/`oracle` (external contracts) are added in Phase D without changing the monad. -/
+`ext` is the Phase D call oracle: `ext to sel args = none` means the CALL failed;
+`some ret` is success with return words. `{ w with self := … }` preserves `ext`. -/
 structure World (S E : Type) where
   self : S
   log : List E := []
+  ext : Address → Nat → List Nat → Option (List Nat) := fun _ _ _ => none
 
 /-- Reasons an arithmetic primitive reverts (Solidity `Panic` codes 0x11/0x12). -/
 inductive ArithError
@@ -130,6 +132,38 @@ def value : Tx S E ε Nat := fun ctx w => .ok (ctx.value, w)
 def timestamp : Tx S E ε Nat := fun ctx w => .ok (ctx.timestamp, w)
 def blockNumber : Tx S E ε Nat := fun ctx w => .ok (ctx.blockNumber, w)
 def selfAddress : Tx S E ε Address := fun ctx w => .ok (ctx.self, w)
+
+/-! ### External calls (ERC-20)
+
+Selectors are well-known hex constants so `Core.denote` / `rfl` never reduce Keccak.
+A later theorem may relate them to `selectorOf`; do not put `selectorOf` in Core. -/
+
+/-- `transferFrom(address,address,uint256)` -/
+def selTransferFrom : Nat := 0x23b872dd
+/-- `transfer(address,uint256)` -/
+def selTransfer : Nat := 0xa9059cbb
+/-- `balanceOf(address)` -/
+def selBalanceOf : Nat := 0x70a08231
+
+/-- Oracle CALL. Failed call (`none`) returns `0`; success returns `1`. -/
+def extCall (to sel : Nat) (args : List Nat) : Tx S E ε Nat :=
+  fun _ w =>
+    match w.ext to sel args with
+    | none => .ok (0, w)
+    | some _ => .ok (1, w)
+
+def erc20TransferFrom (tok src to amt : Nat) : Tx S E ε Nat :=
+  extCall tok selTransferFrom [src, to, amt]
+
+def erc20Transfer (tok to amt : Nat) : Tx S E ε Nat :=
+  extCall tok selTransfer [to, amt]
+
+def erc20BalanceOf (tok owner : Nat) : Tx S E ε Nat :=
+  fun _ w =>
+    match w.ext tok selBalanceOf [owner] with
+    | none => .ok (0, w)
+    | some [] => .ok (0, w)
+    | some (b :: _) => .ok (b, w)
 
 /-! ### Checked arithmetic (reverts like Solidity ≥ 0.8) -/
 
@@ -216,6 +250,58 @@ section RunLemmas
 
 @[simp] theorem run_selfAddress (ctx : Ctx) (w : World S E) :
     run (selfAddress (S := S) (E := E) (ε := ε)) ctx w = .ok (ctx.self, w) := rfl
+
+/-- Not `@[simp]`: smart unfolding would fire inside `match w'` after a store, and
+`w'.ext` no longer matches a hypothesis about `w.ext`. Apply after the world is concrete. -/
+theorem run_extCall (to sel : Nat) (args : List Nat) (ctx : Ctx) (w : World S E) :
+    run (extCall (S := S) (E := E) (ε := ε) to sel args) ctx w =
+      match w.ext to sel args with
+      | none => .ok (0, w)
+      | some _ => .ok (1, w) := rfl
+
+theorem extCall_apply (to sel : Nat) (args : List Nat) (ctx : Ctx) (w : World S E) :
+    extCall (S := S) (E := E) (ε := ε) to sel args ctx w =
+      match w.ext to sel args with
+      | none => .ok (0, w)
+      | some _ => .ok (1, w) := rfl
+
+theorem run_erc20TransferFrom (tok src to amt : Nat) (ctx : Ctx) (w : World S E) :
+    run (erc20TransferFrom (S := S) (E := E) (ε := ε) tok src to amt) ctx w =
+      match w.ext tok selTransferFrom [src, to, amt] with
+      | none => .ok (0, w)
+      | some _ => .ok (1, w) := rfl
+
+theorem erc20TransferFrom_apply (tok src to amt : Nat) (ctx : Ctx) (w : World S E) :
+    erc20TransferFrom (S := S) (E := E) (ε := ε) tok src to amt ctx w =
+      match w.ext tok selTransferFrom [src, to, amt] with
+      | none => .ok (0, w)
+      | some _ => .ok (1, w) := rfl
+
+theorem run_erc20Transfer (tok to amt : Nat) (ctx : Ctx) (w : World S E) :
+    run (erc20Transfer (S := S) (E := E) (ε := ε) tok to amt) ctx w =
+      match w.ext tok selTransfer [to, amt] with
+      | none => .ok (0, w)
+      | some _ => .ok (1, w) := rfl
+
+theorem erc20Transfer_apply (tok to amt : Nat) (ctx : Ctx) (w : World S E) :
+    erc20Transfer (S := S) (E := E) (ε := ε) tok to amt ctx w =
+      match w.ext tok selTransfer [to, amt] with
+      | none => .ok (0, w)
+      | some _ => .ok (1, w) := rfl
+
+theorem run_erc20BalanceOf (tok owner : Nat) (ctx : Ctx) (w : World S E) :
+    run (erc20BalanceOf (S := S) (E := E) (ε := ε) tok owner) ctx w =
+      match w.ext tok selBalanceOf [owner] with
+      | none => .ok (0, w)
+      | some [] => .ok (0, w)
+      | some (b :: _) => .ok (b, w) := rfl
+
+theorem erc20BalanceOf_apply (tok owner : Nat) (ctx : Ctx) (w : World S E) :
+    erc20BalanceOf (S := S) (E := E) (ε := ε) tok owner ctx w =
+      match w.ext tok selBalanceOf [owner] with
+      | none => .ok (0, w)
+      | some [] => .ok (0, w)
+      | some (b :: _) => .ok (b, w) := rfl
 
 @[simp] theorem run_addChecked (a b : Nat) (ctx : Ctx) (w : World S E) :
     run (addChecked (S := S) (E := E) (ε := ε) a b) ctx w =

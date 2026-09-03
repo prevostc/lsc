@@ -70,8 +70,7 @@ theorem getOnly_compile :
 theorem increment_run (ctx : Lsc3.Ctx) (w : World Storage Event)
     (h : w.self.count + 1 < wordBound) :
     Tx.run increment ctx w =
-      .ok ((), { self := { w.self with count := w.self.count + 1 },
-                 log := w.log ++ [.Incremented 1] }) := by
+      .ok ((), { w with self := { w.self with count := w.self.count + 1 }, log := w.log ++ [.Incremented 1] }) := by
   simp [increment, h]
 
 theorem increment_core_eq :
@@ -110,8 +109,7 @@ theorem getInc_compile :
 theorem incrementBy_run (n : Nat) (ctx : Lsc3.Ctx) (w : World Storage Event)
     (hnz : n ≠ 0) (h : w.self.count + n < wordBound) :
     Tx.run (incrementBy n) ctx w =
-      .ok ((), { self := { w.self with count := w.self.count + n },
-                 log := w.log ++ [.Incremented n] }) := by
+      .ok ((), { w with self := { w.self with count := w.self.count + n }, log := w.log ++ [.Incremented n] }) := by
   simp [incrementBy, hnz, h]
 
 /-- `incrementBy 0` reverts with `Error.Zero`. -/

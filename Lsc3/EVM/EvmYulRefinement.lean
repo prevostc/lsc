@@ -78,6 +78,7 @@ theorem parseInstr_swap1 : EVM.parseInstr 0x90 = some .SWAP1 := rfl
 theorem parseInstr_log1 : EVM.parseInstr 0xa1 = some .LOG1 := rfl
 theorem parseInstr_return : EVM.parseInstr 0xf3 = some .RETURN := rfl
 theorem parseInstr_revert : EVM.parseInstr 0xfd = some .REVERT := rfl
+theorem parseInstr_call : EVM.parseInstr 0xf1 = some .CALL := rfl
 
 theorem ofByte_stop : Opcode.ofByte 0x00 = some .STOP := rfl
 theorem ofByte_add : Opcode.ofByte 0x01 = some .ADD := rfl

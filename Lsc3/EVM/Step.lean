@@ -331,6 +331,27 @@ def step (env : Env) (s : State) : StepResult :=
         let topics := args.drop 2
         let data := List.range size |>.map fun i => memGet s.mem (off + i)
         StepResult.next { s with logs := s.logs ++ [{ topics, data }], stack := st, pc := nextPc }
+    | .CALL =>
+      match popN s.stack 7 with
+      | none => exceptional .stackUnderflow s
+      | some (args, st) =>
+        let addr := args[1]!
+        let argsOff := args[3]!
+        let argsSize := args[4]!
+        let retOff := args[5]!
+        let retSize := args[6]!
+        let sel := memLoad s.mem argsOff / (2 ^ 224)
+        let nArgs := if argsSize < 4 then 0 else (argsSize - 4) / 32
+        let callArgs := (List.range nArgs).map fun i =>
+          memLoad s.mem (argsOff + 4 + 32 * i)
+        match env.ext addr sel callArgs with
+        | none => withPush s nextPc st 0
+        | some ret =>
+          let mem' :=
+            match ret.head? with
+            | some v => if 32 ≤ retSize then memStore s.mem retOff v else s.mem
+            | none => s.mem
+          withPush { s with mem := mem' } nextPc st 1
 
 /-! ## `run` -/
 

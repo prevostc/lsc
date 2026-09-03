@@ -103,6 +103,9 @@ inductive Op
   | divChecked (a b : Atom)
   | mulDivDown (a b c : Atom)
   | mulDivUp (a b c : Atom)
+  | erc20TransferFrom (tok src to amt : Atom)
+  | erc20Transfer (tok to amt : Atom)
+  | erc20BalanceOf (tok owner : Atom)
   | pure (a : Atom)
   deriving DecidableEq, Repr, Lean.ToExpr
 
@@ -202,6 +205,10 @@ def Op.denote (Γ : ContractSchema S E ε) (env : List Nat) : Op → Tx S E ε N
   | .divChecked a b => Tx.divChecked (a.eval env) (b.eval env)
   | .mulDivDown a b c => Tx.mulDivDown (a.eval env) (b.eval env) (c.eval env)
   | .mulDivUp a b c => Tx.mulDivUp (a.eval env) (b.eval env) (c.eval env)
+  | .erc20TransferFrom tok src to amt =>
+    Tx.erc20TransferFrom (tok.eval env) (src.eval env) (to.eval env) (amt.eval env)
+  | .erc20Transfer tok to amt => Tx.erc20Transfer (tok.eval env) (to.eval env) (amt.eval env)
+  | .erc20BalanceOf tok owner => Tx.erc20BalanceOf (tok.eval env) (owner.eval env)
   | .pure a => Pure.pure (a.eval env)
 
 def Stmt.denote (Γ : ContractSchema S E ε) (env : List Nat) : Stmt → Tx S E ε Unit
@@ -265,6 +272,10 @@ def Op.rename (ρ : Nat → Atom) : Op → Op
   | .divChecked a b => .divChecked (a.rename ρ) (b.rename ρ)
   | .mulDivDown a b c => .mulDivDown (a.rename ρ) (b.rename ρ) (c.rename ρ)
   | .mulDivUp a b c => .mulDivUp (a.rename ρ) (b.rename ρ) (c.rename ρ)
+  | .erc20TransferFrom tok src to amt =>
+    .erc20TransferFrom (tok.rename ρ) (src.rename ρ) (to.rename ρ) (amt.rename ρ)
+  | .erc20Transfer tok to amt => .erc20Transfer (tok.rename ρ) (to.rename ρ) (amt.rename ρ)
+  | .erc20BalanceOf tok owner => .erc20BalanceOf (tok.rename ρ) (owner.rename ρ)
   | .pure a => .pure (a.rename ρ)
 
 def Stmt.rename (ρ : Nat → Atom) : Stmt → Stmt

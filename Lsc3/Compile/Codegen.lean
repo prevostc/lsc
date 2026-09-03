@@ -53,6 +53,7 @@ def dup1 : Asm := .op (Opcode.DUP ⟨0, by decide⟩)
 def dup2 : Asm := .op (Opcode.DUP ⟨1, by decide⟩)
 def dup3 : Asm := .op (Opcode.DUP ⟨2, by decide⟩)
 def dup4 : Asm := .op (Opcode.DUP ⟨3, by decide⟩)
+def dup6 : Asm := .op (Opcode.DUP ⟨5, by decide⟩)
 
 def emitOp (op : Opcode) : List Asm := [Asm.op op]
 
@@ -105,6 +106,22 @@ def checkedDivUp (ctx : Ctx) : List Asm × Ctx :=
 
 def mstoreTop (offset : Nat) : List Asm :=
   [Asm.push offset, Asm.op .MSTORE]
+
+/-- Store `n` ABI words from the stack into memory at `4 + 32*i` (top is the last arg). -/
+def mstoreArgs : Nat → List Asm
+  | 0 => []
+  | n + 1 => [Asm.push (4 + 32 * n), Asm.op .MSTORE] ++ mstoreArgs n
+
+/-- ABI-pack `nArgs` words under a 4-byte selector and `CALL`.
+If `retOff = 0`, the CALL success bit (0/1) is left on the stack.
+If `retOff ≠ 0`, the first return word is loaded from that offset (zeroed first). -/
+def packAndCall (sel : Nat) (nArgs : Nat) (retOff : Nat) : List Asm :=
+  mstoreArgs nArgs ++
+  [Asm.push32 (sel * 2 ^ 224), Asm.push 0, Asm.op .MSTORE] ++
+  (if retOff ≠ 0 then [Asm.push 0, Asm.push retOff, Asm.op .MSTORE] else []) ++
+  [Asm.push 32, Asm.push retOff, Asm.push (4 + 32 * nArgs), Asm.push 0, Asm.push 0,
+    dup6, Asm.push 0, Asm.op .CALL, swap1, Asm.op .POP] ++
+  (if retOff ≠ 0 then [Asm.op .POP, Asm.push retOff, Asm.op .MLOAD] else [])
 
 def mloadPush (offset : Nat) : List Asm :=
   [Asm.push offset, Asm.op .MLOAD]
@@ -230,6 +247,21 @@ def genOp (ctx : Ctx) : Op → Except String (List Asm × Ctx)
     let (i3, c4) ← genAtom c3 c
     let (div, c5) := checkedDivUp c4
     .ok (i1 ++ i2 ++ mul ++ i3 ++ div, c5)
+  | .erc20TransferFrom tok src to amt => do
+    let (i1, c1) ← genAtom ctx tok
+    let (i2, c2) ← genAtom c1 src
+    let (i3, c3) ← genAtom c2 to
+    let (i4, c4) ← genAtom c3 amt
+    .ok (i1 ++ i2 ++ i3 ++ i4 ++ packAndCall Lsc3.Tx.selTransferFrom 3 0, c4)
+  | .erc20Transfer tok to amt => do
+    let (i1, c1) ← genAtom ctx tok
+    let (i2, c2) ← genAtom c1 to
+    let (i3, c3) ← genAtom c2 amt
+    .ok (i1 ++ i2 ++ i3 ++ packAndCall Lsc3.Tx.selTransfer 2 0, c3)
+  | .erc20BalanceOf tok owner => do
+    let (i1, c1) ← genAtom ctx tok
+    let (i2, c2) ← genAtom c1 owner
+    .ok (i1 ++ i2 ++ packAndCall Lsc3.Tx.selBalanceOf 1 0x40, c2)
   | .pure a => genAtom ctx a
 
 def emitRevert (sel : Nat) : List Asm :=

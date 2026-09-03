@@ -54,8 +54,7 @@ theorem transfer_ok (to : Address) (amount : Nat)
     (hsub : amount ≤ w.self.balances ctx.sender)
     (hadd : debit w.self.balances ctx.sender amount to + amount < wordBound) :
     Tx.run (transfer to amount) ctx w =
-      .ok ((), { self := transferPost w.self ctx.sender to amount
-                 log := w.log ++ [.Transfer ctx.sender to amount] }) := by
+      .ok ((), { w with self := transferPost w.self ctx.sender to amount, log := w.log ++ [.Transfer ctx.sender to amount] }) := by
   simp only [debit] at hadd
   simp [transfer, transferPost, debit, credit, hsub, hadd]
 
@@ -131,7 +130,7 @@ theorem mint_ok (to : Address) (amount : Nat) (howner : ctx.sender = w.self.owne
     (hsupply : w.self.totalSupply + amount < wordBound)
     (hadd : w.self.balances to + amount < wordBound) :
     Tx.run (mint to amount) ctx w =
-      .ok ((), { self := mintPost w.self to amount, log := w.log ++ [.Transfer 0 to amount] }) := by
+      .ok ((), { w with self := mintPost w.self to amount, log := w.log ++ [.Transfer 0 to amount] }) := by
   simp [mint, mintPost, credit, howner, hsupply, hadd]
 
 theorem mint_increases_total_supply (to : Address) (amount : Nat) (howner : ctx.sender = w.self.owner)
@@ -174,8 +173,7 @@ def approvePost (σ : Storage) (owner spender : Address) (amount : Nat) : Storag
 
 theorem approve_ok (spender : Address) (amount : Nat) :
     Tx.run (approve spender amount) ctx w =
-      .ok ((), { self := approvePost w.self ctx.sender spender amount
-                 log := w.log ++ [.Approval ctx.sender spender amount] }) := by
+      .ok ((), { w with self := approvePost w.self ctx.sender spender amount, log := w.log ++ [.Approval ctx.sender spender amount] }) := by
   simp [approve, approvePost]
 
 theorem approve_sets_allowance (spender : Address) (amount : Nat) :
@@ -212,8 +210,7 @@ theorem transferFrom_ok (src to : Address) (amount : Nat)
     (hsub : amount ≤ w.self.balances src)
     (hadd : debit w.self.balances src amount to + amount < wordBound) :
     Tx.run (transferFrom src to amount) ctx w =
-      .ok ((), { self := transferFromPost w.self src ctx.sender to amount
-                 log := w.log ++ [.Transfer src to amount] }) := by
+      .ok ((), { w with self := transferFromPost w.self src ctx.sender to amount, log := w.log ++ [.Transfer src to amount] }) := by
   simp only [debit] at hadd
   simp [transferFrom, transferFromPost, debit, credit, hallow, hsub, hadd]
 
@@ -289,8 +286,7 @@ def burnPost (σ : Storage) (src : Address) (amount : Nat) : Storage :=
 theorem burn_ok (amount : Nat)
     (hsub : amount ≤ w.self.balances ctx.sender) (hsupply : amount ≤ w.self.totalSupply) :
     Tx.run (burn amount) ctx w =
-      .ok ((), { self := burnPost w.self ctx.sender amount
-                 log := w.log ++ [.Transfer ctx.sender 0 amount] }) := by
+      .ok ((), { w with self := burnPost w.self ctx.sender amount, log := w.log ++ [.Transfer ctx.sender 0 amount] }) := by
   simp [burn, burnPost, debit, hsub, hsupply]
 
 theorem burn_decreases_supply (amount : Nat)

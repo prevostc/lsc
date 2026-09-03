@@ -119,6 +119,7 @@ theorem ofByte_toByte (op : Opcode) : Opcode.ofByte op.toByte = some op := by
   | TIMESTAMP => rfl | NUMBER => rfl
   | POP => rfl | MLOAD => rfl | MSTORE => rfl | SLOAD => rfl | SSTORE => rfl
   | JUMP => rfl | JUMPI => rfl | JUMPDEST => rfl | TLOAD => rfl | TSTORE => rfl
+  | CALL => rfl
   | RETURN => rfl | REVERT => rfl | INVALID => rfl
 
 theorem decodeAt_op_head (op : Opcode) (rest : List UInt8)

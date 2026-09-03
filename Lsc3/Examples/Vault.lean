@@ -4,30 +4,39 @@ import Lsc3.Reify
 /-!
 # Vault — single-asset ERC4626-style vault
 
-`ASSET` and `SHARE` are phantom markers: mixing them, or mixing WAD with USDC, is a type
-error. Share issuance and redemption always round **down** (`shareDown`), so leftover wei
-stays in the vault.
+`ASSET` and `SHARE` are phantom markers: mixing them, or mixing scales, is a type error.
+The underlying token is an `IERC20 ASSET assetScale` stored in `Storage.asset` — scale is a
+type index (the injection), not a `decimals()` call. Share issuance and redemption always
+round **down** (`shareDown`), so leftover wei stays in the vault.
 -/
 
 open Lsc3 Lsc3.Syntax
 
 namespace Vault
 
-/-- Phantom marker for the underlying asset (WAD-scaled). -/
+/-- Phantom marker for the underlying asset. -/
 structure ASSET where
-/-- Phantom marker for vault shares (WAD-scaled). -/
+/-- Phantom marker for vault shares. -/
 structure SHARE where
 
+/-- Asset scale knob: change this (e.g. to `USDC_SCALE`) to inject a 6-decimal ERC-20. -/
+def assetScale : Nat := WAD
+/-- Share scale; ERC-4626 convention is 18 decimals. -/
+def shareScale : Nat := WAD
+
 structure Storage where
-  totalAssets : Amount ASSET WAD
-  totalShares : Amount SHARE WAD
-  shares : Mapping Address (Amount SHARE WAD)
+  totalAssets : Amount ASSET assetScale
+  totalShares : Amount SHARE shareScale
+  shares : Mapping Address (Amount SHARE shareScale)
   paused : Flag
   owner : Address
+  asset : Address
 
 inductive Event
-  | Deposit (who : Address) (assets : Amount ASSET WAD) (sharesOut : Amount SHARE WAD)
-  | Withdraw (who : Address) (assets : Amount ASSET WAD) (sharesIn : Amount SHARE WAD)
+  | Deposit (who : Address) (assets : Amount ASSET assetScale)
+      (sharesOut : Amount SHARE shareScale)
+  | Withdraw (who : Address) (assets : Amount ASSET assetScale)
+      (sharesIn : Amount SHARE shareScale)
   | Paused
   | Unpaused
   deriving DecidableEq, Repr
@@ -37,35 +46,42 @@ inductive Error
   | InsufficientShares
   | NotOwner
   | Zero
+  | TransferFailed
   deriving DecidableEq, Repr
 
 abbrev M := Tx Storage Event Error
 
-/-- Deposit `assets`; mint shares 1:1 if empty, otherwise `⌊assets * supply / assets⌋`. -/
-def deposit (assets : Amount ASSET WAD) : M (Amount SHARE WAD) := do
+/-- Deposit `assets`; mint shares 1:1 if empty, otherwise `⌊assets * supply / assets⌋`.
+Pulls the asset via `IERC20.transferFrom` before updating accounting. -/
+def deposit (assets : Amount ASSET assetScale) : M (Amount SHARE shareScale) := do
   let p ← read paused
   Tx.require (p = Flag.off) .Paused
-  Tx.require ((0 : Amount ASSET WAD) < assets) .Zero
+  Tx.require ((0 : Amount ASSET assetScale) < assets) .Zero
+  let tok ← read asset
+  let who ← Tx.sender
+  let self ← Tx.selfAddress
+  let ok ← IERC20.transferFrom (tok : IERC20 ASSET assetScale) who self assets
+  Tx.require (ok = Flag.on) .TransferFailed
   let ta ← read totalAssets
   let ts ← read totalShares
   let minted ←
-    if ts = (0 : Amount SHARE WAD) then
+    if ts = (0 : Amount SHARE shareScale) then
       pure assets
     else
       assets.shareDown ts ta
   write totalAssets (← assets +ₐ ta)
   write totalShares (← minted +ₐ ts)
-  let who ← Tx.sender
   let bal ← read shares[who]
   write shares[who] (← minted +ₐ bal)
   Tx.emit (.Deposit who assets minted)
   pure minted
 
-/-- Burn `sharesIn` and return `⌊sharesIn * totalAssets / totalShares⌋` assets. -/
-def withdraw (sharesIn : Amount SHARE WAD) : M (Amount ASSET WAD) := do
+/-- Burn `sharesIn` and return `⌊sharesIn * totalAssets / totalShares⌋` assets.
+Pushes the asset via `IERC20.transfer` after updating accounting. -/
+def withdraw (sharesIn : Amount SHARE shareScale) : M (Amount ASSET assetScale) := do
   let p ← read paused
   Tx.require (p = Flag.off) .Paused
-  Tx.require ((0 : Amount SHARE WAD) < sharesIn) .Zero
+  Tx.require ((0 : Amount SHARE shareScale) < sharesIn) .Zero
   let who ← Tx.sender
   let bal ← read shares[who]
   Tx.require (sharesIn ≤ bal) .InsufficientShares
@@ -75,20 +91,23 @@ def withdraw (sharesIn : Amount SHARE WAD) : M (Amount ASSET WAD) := do
   write shares[who] (← bal -ₐ sharesIn)
   write totalShares (← ts -ₐ sharesIn)
   write totalAssets (← ta -ₐ assetsOut)
+  let tok ← read asset
+  let ok ← IERC20.transfer (tok : IERC20 ASSET assetScale) who assetsOut
+  Tx.require (ok = Flag.on) .TransferFailed
   Tx.emit (.Withdraw who assetsOut sharesIn)
   pure assetsOut
 
-/-- View: shares `deposit` would mint (no state change, no pause check). -/
-def previewDeposit (assets : Amount ASSET WAD) : M (Amount SHARE WAD) := do
+/-- View: shares `deposit` would mint (no state change, no pause check, no token pull). -/
+def previewDeposit (assets : Amount ASSET assetScale) : M (Amount SHARE shareScale) := do
   let ta ← read totalAssets
   let ts ← read totalShares
-  if ts = (0 : Amount SHARE WAD) then
+  if ts = (0 : Amount SHARE shareScale) then
     pure assets
   else
     assets.shareDown ts ta
 
 /-- View: assets `withdraw` would return. -/
-def previewRedeem (sharesIn : Amount SHARE WAD) : M (Amount ASSET WAD) := do
+def previewRedeem (sharesIn : Amount SHARE shareScale) : M (Amount ASSET assetScale) := do
   let ta ← read totalAssets
   let ts ← read totalShares
   sharesIn.shareDown ta ts
@@ -113,7 +132,7 @@ def unpause : M Unit := do
 def paused? : M Flag := read paused
 
 /-- Out-of-fragment: `Rounding` is a parameter, not a literal. Used by `#guard_msgs` below. -/
-def badRescale (r : Rounding) (a : Amount ASSET WAD) : M (Amount ASSET USDC_SCALE) :=
+def badRescale (r : Rounding) (a : Amount ASSET assetScale) : M (Amount ASSET USDC_SCALE) :=
   Amount.rescale USDC_SCALE r a
 
 /-- Out-of-fragment: pure `Nat` addition is not an atom. -/

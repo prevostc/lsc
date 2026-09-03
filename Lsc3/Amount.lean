@@ -207,6 +207,30 @@ def on : Flag := (1 : Nat)
 def off : Flag := (0 : Nat)
 end Flag
 
+/-! ## `IERC20` — an address tagged with token marker and scale
+
+The scale `s` is a type index (the injection), not a runtime `decimals()` call.
+Methods are transparent aliases of the `Tx.erc20*` primitives so reification stays `rfl`. -/
+
+def IERC20 (_τ : Type) (_s : Nat) : Type := Address
+
+namespace IERC20
+
+variable {τ : Type} {s : Nat} {S E ε : Type}
+
+def transferFrom (tok : IERC20 τ s) (src to : Address) (amount : Amount τ s) :
+    Tx S E ε Flag :=
+  Tx.erc20TransferFrom tok src to amount
+
+def transfer (tok : IERC20 τ s) (to : Address) (amount : Amount τ s) :
+    Tx S E ε Flag :=
+  Tx.erc20Transfer tok to amount
+
+def balanceOf (tok : IERC20 τ s) (owner : Address) : Tx S E ε (Amount τ s) :=
+  Tx.erc20BalanceOf tok owner
+
+end IERC20
+
 /-! ### Unit-preserving surface sugar
 
 `a +? b` is `Tx.addChecked` on `Nat`. Because `Amount τ s` is definitionally `Nat`, that

@@ -23,9 +23,10 @@ def packCall (sel : Nat) (args : List Nat := []) : List UInt8 :=
 def decodeWord (data : List UInt8) : Nat :=
   (List.range (min 32 data.length)).foldl (fun acc i => acc * 256 + UInt8.toNat data[i]!) 0
 
-def mkEnv (code calldata : List UInt8) (caller : Nat := 0) : Env :=
+def mkEnv (code calldata : List UInt8) (caller : Nat := 0)
+    (ext : Word → Nat → List Nat → Option (List Nat) := fun _ _ _ => none) : Env :=
   { code := code, calldata := calldata, address := 1, caller := caller, callvalue := 0,
-    timestamp := 0, number := 0 }
+    timestamp := 0, number := 0, ext := ext }
 
 inductive Outcome
   | stop (storage : Storage)
@@ -35,8 +36,9 @@ inductive Outcome
   | timeout
 
 def exec (code calldata : List UInt8) (storage : Storage) (caller : Nat := 0)
-    (fuel : Nat := 100000) : Outcome :=
-  match run fuel (mkEnv code calldata caller) { storage := storage } with
+    (fuel : Nat := 100000)
+    (ext : Word → Nat → List Nat → Option (List Nat) := fun _ _ _ => none) : Outcome :=
+  match run fuel (mkEnv code calldata caller ext) { storage := storage } with
   | none => .timeout
   | some (Halt.stop, s) => .stop s.storage
   | some (Halt.ret data, s) => .ret (decodeWord data) s.storage
@@ -47,8 +49,10 @@ def slot0 (n : Nat) : Storage := fun k => if k = 0 then n else 0
 
 /-- Run and return the raw halt + state (logs, memory, storage). -/
 def execState (code calldata : List UInt8) (storage : Storage) (caller : Nat := 0)
-    (fuel : Nat := 100000) : Option (Halt × State) :=
-  run fuel (mkEnv code calldata caller) { storage := storage }
+    (fuel : Nat := 100000)
+    (ext : Word → Nat → List Nat → Option (List Nat) := fun _ _ _ => none) :
+    Option (Halt × State) :=
+  run fuel (mkEnv code calldata caller ext) { storage := storage }
 
 /-- Execute creation bytecode; `some runtime` iff the preamble `RETURN`s the payload. -/
 def deploy (code : List UInt8) (fuel : Nat := 100000) : Option (List UInt8) :=

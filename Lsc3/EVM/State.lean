@@ -11,7 +11,7 @@ is kept tiny, executable and first-order:
 * memory is byte-addressed (`Nat → UInt8`), storage and transient storage are `Nat → Nat`;
 * there is no gas: termination is by fuel in `run`, and gas bounds are a separate, later
   theorem against EvmYul's accounting;
-* no calls, no `CREATE`, no precompiles in Phase B (calls arrive as oracle steps in Phase D).
+* no nested EVM: `CALL` is an oracle step (`Env.ext`) in Phase D;
 
 The machine is kept honest two ways (Phase B): per-opcode refinement theorems against
 EvmYulLean's `EVM.step` under a state projection (`Lsc3/EVM/EvmYulRefinement.lean`), and
@@ -39,7 +39,8 @@ inductive Opcode
   | KECCAK256
   | ADDRESS | CALLER | CALLVALUE | CALLDATALOAD | CALLDATASIZE | CALLDATACOPY | CODESIZE | CODECOPY
   | TIMESTAMP | NUMBER
-  | POP | MLOAD | MSTORE | SLOAD | SSTORE | JUMP | JUMPI | JUMPDEST | TLOAD | TSTORE
+  | POP | MLOAD | MSTORE | SLOAD | SSTORE   | JUMP | JUMPI | JUMPDEST | TLOAD | TSTORE
+  | CALL
   | PUSH (k : Fin 33)
   | DUP (k : Fin 16)
   | SWAP (k : Fin 16)
@@ -61,6 +62,7 @@ def toByte : Opcode → UInt8
   | TIMESTAMP => 0x42 | NUMBER => 0x43
   | POP => 0x50 | MLOAD => 0x51 | MSTORE => 0x52 | SLOAD => 0x54 | SSTORE => 0x55
   | JUMP => 0x56 | JUMPI => 0x57 | JUMPDEST => 0x5b | TLOAD => 0x5c | TSTORE => 0x5d
+  | CALL => 0xf1
   | PUSH k => UInt8.ofNat (0x5f + k.val)
   | DUP k => UInt8.ofNat (0x80 + k.val)
   | SWAP k => UInt8.ofNat (0x90 + k.val)
@@ -90,6 +92,7 @@ def ofByte (b : UInt8) : Option Opcode :=
   | 0x50 => some POP | 0x51 => some MLOAD | 0x52 => some MSTORE | 0x54 => some SLOAD
   | 0x55 => some SSTORE | 0x56 => some JUMP | 0x57 => some JUMPI | 0x5b => some JUMPDEST
   | 0x5c => some TLOAD | 0x5d => some TSTORE
+  | 0xf1 => some CALL
   | 0xf3 => some RETURN | 0xfd => some REVERT | 0xfe => some INVALID
   | _ => none
 
@@ -112,7 +115,8 @@ structure Log where
   data : List UInt8
   deriving DecidableEq, Repr
 
-/-- The immutable part of an execution: the code being run and the call's environment. -/
+/-- The immutable part of an execution: the code being run and the call's environment.
+`ext` is the Phase D call oracle (same shape as `World.ext`). -/
 structure Env where
   code : List UInt8
   calldata : List UInt8
@@ -121,7 +125,7 @@ structure Env where
   callvalue : Word
   timestamp : Word
   number : Word
-  deriving Repr
+  ext : Word → Nat → List Nat → Option (List Nat) := fun _ _ _ => none
 
 /-- The mutable machine state. -/
 structure State where

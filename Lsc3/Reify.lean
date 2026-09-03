@@ -308,7 +308,8 @@ def isAmountOp : Name → Bool
   | ``Lsc3.Amount.divDown | ``Lsc3.Amount.divUp
   | ``Lsc3.Amount.ratioDown | ``Lsc3.Amount.ratioUp
   | ``Lsc3.Amount.shareDown | ``Lsc3.Amount.shareUp
-  | ``Lsc3.Amount.rescale | ``Lsc3.Amount.convert => true
+  | ``Lsc3.Amount.rescale | ``Lsc3.Amount.convert
+  | ``Lsc3.IERC20.transferFrom | ``Lsc3.IERC20.transfer | ``Lsc3.IERC20.balanceOf => true
   | _ => false
 
 /-- `Rounding` must be a literal constructor so the reifier can pick `mulDivDown` vs `mulDivUp`. -/
@@ -325,7 +326,9 @@ partial def unfoldToTx (x : Expr) (fuel : Nat := 8) : MetaM Expr := do
   let n := x.getAppFn.constName?
   if n == some ``Lsc3.Tx.addChecked || n == some ``Lsc3.Tx.subChecked
       || n == some ``Lsc3.Tx.mulChecked || n == some ``Lsc3.Tx.divChecked
-      || n == some ``Lsc3.Tx.mulDivDown || n == some ``Lsc3.Tx.mulDivUp then
+      || n == some ``Lsc3.Tx.mulDivDown || n == some ``Lsc3.Tx.mulDivUp
+      || n == some ``Lsc3.Tx.erc20TransferFrom || n == some ``Lsc3.Tx.erc20Transfer
+      || n == some ``Lsc3.Tx.erc20BalanceOf then
     return x
   if fuel = 0 then return x
   if n.any isAmountOp then
@@ -380,6 +383,13 @@ def opOf (ci : ContractInfo) (env : Env t) (x : Expr) : MetaM (Option Op) := do
     return some (.mulDivDown (← atom args[3]!) (← atom args[4]!) (← atom args[5]!))
   | some ``Lsc3.Tx.mulDivUp, 6 =>
     return some (.mulDivUp (← atom args[3]!) (← atom args[4]!) (← atom args[5]!))
+  | some ``Lsc3.Tx.erc20TransferFrom, 7 =>
+    return some (.erc20TransferFrom (← atom args[3]!) (← atom args[4]!)
+      (← atom args[5]!) (← atom args[6]!))
+  | some ``Lsc3.Tx.erc20Transfer, 6 =>
+    return some (.erc20Transfer (← atom args[3]!) (← atom args[4]!) (← atom args[5]!))
+  | some ``Lsc3.Tx.erc20BalanceOf, 5 =>
+    return some (.erc20BalanceOf (← atom args[3]!) (← atom args[4]!))
   | some ``Pure.pure, 4 => return some (.pure (← atom args[3]!))
   | _, _ => return none
 
