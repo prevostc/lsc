@@ -3,6 +3,7 @@ import Lsc3.Compile.GetBody
 import Lsc3.Compile.GetContract
 import Lsc3.Compile.IncBody
 import Lsc3.Compile.IncContract
+import Lsc3.Compile.GetInc
 import Lsc3.Compile.Codegen
 
 /-!
@@ -18,6 +19,9 @@ specializing it here.
 `increment` is load / checked `+ 1` / store / emit. The one-function compiler
 contract encodes to `IncContract.code`; `IncContract.incOnly_hit sel n h` is the
 matching-selector machine certificate (STOP with slot 0 equal to `n + 1`).
+
+The two-function compiler `GetInc.getInc` encodes to `GetInc.code`. Apply
+`GetInc.getInc_get_hit` / `GetInc.getInc_inc_hit`; do not instantiate them here.
 -/
 
 open Lsc3 Lsc3.Compile Counter
@@ -87,5 +91,11 @@ theorem incrementOnly_compile :
     compileContract IncContract.incOnly =
       .ok (IncContract.code (FnDef.selector IncContract.incFn)) :=
   IncContract.compile_incOnly
+
+/-- The compiler's two-function `get` + `increment` contract encodes to `GetInc.code`. -/
+theorem getInc_compile :
+    compileContract GetInc.getInc =
+      .ok (GetInc.code (FnDef.selector GetContract.getFn) (FnDef.selector IncContract.incFn)) :=
+  GetInc.compile_getInc
 
 end Counter

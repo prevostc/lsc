@@ -17,6 +17,9 @@ import Lsc3.Compile.GetContract
 import Lsc3.Compile.GetMiss
 import Lsc3.Compile.IncBody
 import Lsc3.Compile.IncOverflow
+import Lsc3.Compile.GetInc
+import Lsc3.Compile.GetIncHit
+import Lsc3.Compile.GetIncIncHit
 import Lsc3.Compile.Cert
 import Lsc3.Examples.Counter
 import Lsc3.Examples.CounterCert
