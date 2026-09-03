@@ -624,6 +624,12 @@ theorem decode_pc118 :
     rfl
   exact decodeAt_of_drop h (decodeAt_stop_head _)
 
+theorem decode_suffix (pre : List UInt8) {pc next0 : Nat} {instr : Instr}
+    (hd : decodeAt code pc = some (instr, next0)) :
+    decodeAt (pre ++ code) (pre.length + pc) = some (instr, pre.length + next0) := by
+  rw [decodeAt_append, hd]
+  simp [Nat.add_comm]
+
 theorem isJumpDest_ok : isJumpDest code okPc = true := by
   simpa [okPc] using isJumpDest_of_decode decode_pc68
 

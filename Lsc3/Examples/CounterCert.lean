@@ -2,6 +2,7 @@ import Lsc3.Examples.Counter
 import Lsc3.Compile.GetBody
 import Lsc3.Compile.GetContract
 import Lsc3.Compile.IncBody
+import Lsc3.Compile.IncContract
 import Lsc3.Compile.Codegen
 
 /-!
@@ -13,6 +14,10 @@ encodes to `GetContract.code`, and `GetContract.getOnly_hit sel n` is the machin
 certificate (any `sel`, including `selectorOf "get" []`). Instantiating that proof
 at a concrete Keccak selector exceeds `maxRecDepth`; apply it rather than
 specializing it here.
+
+`increment` is load / checked `+ 1` / store / emit. The one-function compiler
+contract encodes to `IncContract.code`; `IncContract.incOnly_hit sel n h` is the
+matching-selector machine certificate (STOP with slot 0 equal to `n + 1`).
 -/
 
 open Lsc3 Lsc3.Compile Counter
@@ -72,5 +77,15 @@ theorem increment_codegen :
     | .error _ => False := by
   rw [increment_core_eq, IncBody.increment_genCore]
   exact IncBody.encode_inc
+
+/-- The increment-only compiler contract uses the same Core term. -/
+theorem increment_core_incOnly : increment.core = IncContract.incFn.core := by
+  rw [increment_core_eq, IncContract.incFn_core]
+
+/-- The compiler's one-function `increment` contract encodes to `IncContract.code`. -/
+theorem incrementOnly_compile :
+    compileContract IncContract.incOnly =
+      .ok (IncContract.code (FnDef.selector IncContract.incFn)) :=
+  IncContract.compile_incOnly
 
 end Counter
