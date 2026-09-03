@@ -14,6 +14,7 @@ import Lsc3.Compile.Dispatch
 import Lsc3.Compile.DispatchGet
 import Lsc3.Compile.CalldataCheck
 import Lsc3.Compile.GetContract
+import Lsc3.Compile.GetMiss
 import Lsc3.Compile.IncBody
 import Lsc3.Compile.IncOverflow
 import Lsc3.Compile.Cert
