@@ -18,7 +18,7 @@ lean_lib Lsc where
 
 /-- LSC v3 (shallow Lean surface + certified reification), built alongside v2 during the rewrite. -/
 lean_lib Lsc3 where
-  globs := #[Glob.submodules `Lsc3]
+  globs := #[Glob.andSubmodules `Lsc3]
 
 lean_exe «BytecodeExecSmoke» where
   root := `Lsc.Compile.BytecodeExecTestMain

@@ -1,6 +1,9 @@
 import Lsc3.Tx
+import Lsc3.Amount
 import Lsc3.Core
 import Lsc3.Reify
+import Lsc3.Contract
+import Lsc3.EVM.State
 import Lsc3.Examples.Counter
 import Lsc3.Examples.Token
 import Lsc3.Examples.TokenProofs
