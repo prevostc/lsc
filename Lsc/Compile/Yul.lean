@@ -36,6 +36,9 @@ private def irExprToYul (e : IR.Expr) : Ast.Expr :=
   | .lt a b => yulCall "lt" [irExprToYul a, irExprToYul b]
   | .eq a b => yulCall "eq" [irExprToYul a, irExprToYul b]
   | .isZero a => yulCall "iszero" [irExprToYul a]
+  | .gt a b => yulCall "gt" [irExprToYul a, irExprToYul b]
+  | .shr amount val => yulCall "shr" [irExprToYul amount, irExprToYul val]
+  | .xor a b => yulCall "xor" [irExprToYul a, irExprToYul b]
 
 private def mapSlotToYul (base : Nat) (key : IR.Expr) : List Ast.Stmt × Ast.Expr :=
   let keyExpr := irExprToYul key

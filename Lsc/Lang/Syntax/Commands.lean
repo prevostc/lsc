@@ -208,6 +208,54 @@ def flushContractViews : CommandElabM Unit := do
         m.insert ns ((m.find? ns |>.getD []) ++ [(fnName, implFnName, params, retKind)])
   modifyEnv fun env => Lsc.Deriving.contractViewSyntaxExt.modifyState env (·.insert ns [])
 
+/-- Elaborate buffered `library_view` declarations (Lean `Fixed.Expr` return bodies). -/
+def flushLibraryViews : CommandElabM Unit := do
+  let ns ← getCurrNamespace
+  let pending := (Lsc.Deriving.contractLibraryViewSyntaxExt.getState (← getEnv)).find? ns |>.getD []
+  for (fnName, nameRaw, params, retKind, exprRaw) in pending do
+    let nameId : Lean.Ident := ⟨nameRaw⟩
+    let implId := mkIdent (Name.mkSimple (nameRaw.getId.toString ++ "Impl"))
+    let bodyTerm ← liftTermElabM do
+      let retTyConst ← retKind.tyConst
+      let exprStx : TSyntax `term := ⟨exprRaw⟩
+      `(Lsc.Stmt.ret ⟨$retTyConst, $exprStx⟩)
+    elabCommand (← `(command| def $implId : Lsc.Stmt := $bodyTerm))
+    let retTypeTerm ← liftTermElabM do
+      let storageName ← Lsc.Deriving.currContractStorageName
+      let (errName, eventName) ← Lsc.Deriving.currContractTypes
+      let storageId := mkIdent storageName
+      let errId := mkIdent errName
+      let eventId := mkIdent eventName
+      let retTyConst ← retKind.tyConst
+      `(Lsc.ContractM $storageId $eventId $errId (Lsc.Val $retTyConst))
+    if params.isEmpty then
+      let bodyTerm2 ← liftTermElabM do
+        let retTyConst ← retKind.tyConst
+        `(Lsc.Stmt.evalView $retTyConst $implId)
+      elabCommand (← `(command| def $nameId : $retTypeTerm := $bodyTerm2))
+    else
+      let sigTerm ← liftTermElabM do
+        let paramTys ← params.mapM (·.2.leanTypeStx)
+        paramTys.foldrM (init := retTypeTerm) fun ty acc => `($ty → $acc)
+      let fullBody ← liftTermElabM do
+        let wrappedBody ← params.foldrM (init := (← `($implId))) fun (pname, k) acc => do
+          let pid : Term := ⟨mkIdent (Name.mkSimple pname)⟩
+          let tyConst ← k.tyConst
+          let litStx ← k.embedLitStx pid
+          `(Lsc.Stmt.seq (Lsc.Stmt.letBind $(quote pname) ⟨$tyConst, $litStx⟩) $acc)
+        let retTyConst ← retKind.tyConst
+        let evalTerm ← `(Lsc.Stmt.evalView $retTyConst $wrappedBody)
+        params.foldrM (init := evalTerm) fun (pname, _) acc => do
+          let pid := mkIdent (Name.mkSimple pname)
+          `(fun $pid:ident => $acc)
+      elabCommand (← `(command| def $nameId : $sigTerm := $fullBody))
+    let implFnName := ns ++ Name.mkSimple (nameRaw.getId.toString ++ "Impl")
+    modifyEnv fun env =>
+      Lsc.Deriving.contractViewFnsExt.modifyState env fun m =>
+        m.insert ns ((m.find? ns |>.getD []) ++ [(fnName, implFnName, params, retKind)])
+  modifyEnv fun env =>
+    Lsc.Deriving.contractLibraryViewSyntaxExt.modifyState env (·.insert ns [])
+
 /-- Elaborate and emit every `tx name { .. }` body buffered so far under the current namespace
 (`Lsc.Deriving.contractTxSyntaxExt`) into a real `def name : Lsc.Stmt := ...`, exactly as
 `tx` itself used to do inline — see `tx`'s docstring above for why this is now deferred rather
@@ -642,6 +690,7 @@ def elabDeriveContract (nameStrStx : TSyntax `Lean.Parser.Term.str)
   Lsc.Deriving.elabDeriveContractDsl storageId errId eventId
   flushContractTxs
   flushContractViews
+  flushLibraryViews
   flushContractCtor
   let (fns?, topic0?, ctor?) := unwrapContractDefTrailingGroups fnsStx topic0Stx ctorStx
   elabContractDefBody nameStrStx storageId errId eventId fns? topic0? ctor?
@@ -705,6 +754,7 @@ elab "derive_library " _nameStrStx:str storageId:ident errId:ident eventId:ident
   Lsc.Deriving.elabDeriveContractDsl storageId errId eventId
   flushContractTxs (libraryMode := true)
   flushContractViews
+  flushLibraryViews
   emitLibraryPersistDefs ns pending
   modifyEnv fun env =>
     Lsc.Deriving.libraryFnsExt.modifyState env fun m =>

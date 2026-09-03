@@ -22,7 +22,7 @@ def stubEventTopic0 : Ident → Option Nat
 def counterDef : ContractDef where
   name := "Counter"
   storage :=
-    [("number", .wei, some ⟨.wei, Wei.Expr.lit 0⟩),
+    [("number", .wei, some ⟨.wei, Fixed.Expr.lit 0⟩),
      ("paused", .bool, some ⟨.bool, CoreExpr.lit Ty.bool (.bool false)⟩),
      ("owner", .address, some ⟨.address, CoreExpr.lit Ty.address (.addr 0)⟩)]
   errors := [("Paused", []), ("NotOwner", []), ("Overflow", [])]
@@ -37,6 +37,61 @@ def counterConfig : Config :=
   configFromContract counterDef stubEventTopic0
 
 namespace Lsc.BytecodeTest
+
+private def isSubDivInSourceOrder : Except String (List Instr) → Bool
+  | .ok [ .push 7, .push 3, .op .SWAP1, .op .SUB, .push 2, .op .SWAP1, .op .DIV,
+          .push 0, .op .MSTORE, .push 32, .push 0, .op .RETURN ] => true
+  | _ => false
+
+private def isShrGtInSourceOrder : Except String (List Instr) → Bool
+  | .ok [ .push 1, .push 8, .op .SWAP1, .op .SHR, .push 3, .op .SWAP1, .op .GT,
+          .push 0, .op .MSTORE, .push 32, .push 0, .op .RETURN ] => true
+  | _ => false
+
+/-- **Regression:** non-commutative EVM operations receive IR operands in source order. -/
+example :
+    isSubDivInSourceOrder
+      (Bytecode.Codegen.stmtFresh
+        (.ret (.div (.sub (.lit 7) (.lit 3)) (.lit 2)))) = true := by
+  native_decide
+
+/-- **Regression:** comparisons and shifts also preserve their source operand order. -/
+example :
+    isShrGtInSourceOrder
+      (Bytecode.Codegen.stmtFresh
+        (.ret (.gt (.shr (.lit 1) (.lit 8)) (.lit 3)))) = true := by
+  native_decide
+
+def deepParameterCtx : Bytecode.Ctx :=
+  { locals := [("parameter", { absPos := 1, src := some (.calldataWord 4) })]
+    stackDepth := 17 }
+
+private def deepParameterReloadsFromCalldata : Bool :=
+  match Bytecode.Codegen.expr deepParameterCtx (.local "parameter") with
+  | .ok ([.push 4, .op .CALLDATALOAD], out) => out.stackDepth == 18
+  | _ => false
+
+/-- **Regression:** a parameter below `DUP16` is rebuilt from its calldata source, at the
+current stack depth, instead of making production code generation fail. -/
+theorem deep_parameter_reloads_from_calldata :
+    deepParameterReloadsFromCalldata = true := by native_decide
+
+def deepArithmeticCtx : Bytecode.Ctx :=
+  { locals :=
+      [ ("derived", { absPos := 2, src := some (.add (.local "parameter") (.lit 1)) })
+      , ("parameter", { absPos := 1, src := some (.calldataWord 4) }) ]
+    stackDepth := 18 }
+
+private def deepArithmeticReloadsRecursively : Bool :=
+  match Bytecode.Codegen.expr deepArithmeticCtx (.local "derived") with
+  | .ok ([.push 4, .op .CALLDATALOAD, .push 1, .op .ADD], out) =>
+      out.stackDepth == 19
+  | _ => false
+
+/-- **Regression:** a deep arithmetic let is rebuilt from its expression, recursively reloading
+an even deeper parameter source, rather than being restricted to direct calldata bindings. -/
+theorem deep_arithmetic_reloads_recursively :
+    deepArithmeticReloadsRecursively = true := by native_decide
 
 /-- Lower increment body only (bytecode slice test). -/
 def incrementBodyAst : Stmt :=

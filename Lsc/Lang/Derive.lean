@@ -205,6 +205,14 @@ initialize contractViewSyntaxExt :
     EnvExtension (NameMap (List (Name × Syntax × List (String × FieldKind) × FieldKind × Array Syntax))) ←
   registerEnvExtension (pure {})
 
+/-- Buffered `library_view` entries: `(fnName, plainNameSyntax, params, retKind, returnExprSyntax)`
+where `returnExprSyntax` is a Lean `Fixed.Expr` term (not `lscExpr`) — flushed by
+`flushLibraryViews` alongside ordinary `view`s at `derive_contract` time. Provided by
+`Lsc.Lib.Math.Inline`'s `library_view` command. -/
+initialize contractLibraryViewSyntaxExt :
+    EnvExtension (NameMap (List (Name × Syntax × List (String × FieldKind) × FieldKind × Syntax))) ←
+  registerEnvExtension (pure {})
+
 /-- Registered `view` functions: `(abiName, stmtDefName, params, retKind)` — the `view`
 counterpart of `contractFnsExt`. Unlike `contractFnsExt`, `stmtDefName` *always* points at a
 separate hidden `name.Impl` def holding the raw, `Expr.var`-parameterized body (even for a
@@ -273,15 +281,13 @@ def fieldKindOfExpr (e : Lean.Expr) : Option FieldKind :=
   else if e.isConstOf ``Lsc.Address then some .address
   else if e.isConstOf ``Lsc.UInt256 then some .uint256
   else if e.constName?.map (·.toString) == some "Lsc.Interfaces.IERC20" then some (.interface "IERC20")
-  else if e.getAppFn.isConstOf ``Lsc.Wad.Fixed then
-    -- `Fixed` now takes two explicit args (`decimals`, `tag` — see that structure's docstring);
-    -- `tag` is intentionally ignored here: it's purely a Lean-level nominal marker distinguishing
-    -- *which token* an amount belongs to, invisible to `FieldKind`/`Ty`/`Val`/codegen, which stay
-    -- homogeneous across every token (the tag is threaded through separately, at the
-    -- `tx`/`view` Lean-signature level only — see `Lang/Syntax.lean`'s `flushContractTxs`/
-    -- `flushContractViews`).
+  else if e.getAppFn.isConstOf ``Lsc.Fixed.Fixed || e.getAppFn.isConstOf ``Lsc.Wad.Fixed then
     match e.getAppArgs with
-    | #[dExpr, _tagExpr] => if natLitOfExpr? dExpr == some 18 then some .wad else none
+    | #[dExpr, _tagExpr] =>
+      match natLitOfExpr? dExpr with
+      | some 0 => some .wei
+      | some 18 => some .wad
+      | _ => none
     | _ => none
   else none
 
@@ -378,8 +384,8 @@ already a 256-bit `BitVec`; `CoreExpr.lit`'s `Lit` constructors instead store th
 type directly (`UInt256`/`Bool`/`Address`), needing no such round-trip. -/
 def FieldKind.embedLitStx (k : FieldKind) (paramId : Term) : TermElabM Term :=
   match k with
-  | .wei => `(Lsc.Wei.Expr.lit ($paramId).raw.toNat)
-  | .wad => `(Lsc.Wad.Expr.lit ($paramId).raw.toNat)
+  | .wei => `(Lsc.Fixed.Expr.lit ($paramId).raw.toNat)
+  | .wad => `(Lsc.Fixed.Expr.lit ($paramId).raw.toNat)
   | .bool => `(Lsc.CoreExpr.lit Lsc.Ty.bool (Lsc.Lit.bool $paramId))
   | .address => `(Lsc.CoreExpr.lit Lsc.Ty.address (Lsc.Lit.addr $paramId))
   | .uint256 => `(Lsc.CoreExpr.lit Lsc.Ty.uint256 (Lsc.Lit.u256 $paramId))
@@ -445,8 +451,8 @@ today (`TxM.lean`'s `weiField`/`boolField`/`addrField`/`u256Field`). -/
 def FieldKind.storageGetStx (k : FieldKind) (fieldStr : String) : TermElabM Term := do
   let fieldLit := quote fieldStr
   match k with
-  | .wei => `(Lsc.Wei.Expr.storageGet $fieldLit)
-  | .wad => `(Lsc.Wad.Expr.storageGet $fieldLit)
+  | .wei => `(Lsc.Fixed.Expr.storageGet $fieldLit)
+  | .wad => `(Lsc.Fixed.Expr.storageGet $fieldLit)
   | .bool => `(Lsc.CoreExpr.storageGet Lsc.Ty.bool $fieldLit)
   | .address => `(Lsc.CoreExpr.storageGet Lsc.Ty.address $fieldLit)
   | .uint256 => `(Lsc.CoreExpr.storageGet Lsc.Ty.uint256 $fieldLit)
@@ -540,11 +546,11 @@ def embedStorageDefaultExpr (k : FieldKind) (defaultExpr : Lean.Expr) : TermElab
     else return none
   | .wei =>
     if let some n ← findDefaultNatLit? e then
-      return some (← `(some (Sigma.mk Lsc.Ty.wei (Lsc.Wei.Expr.lit $(quote n)))))
+      return some (← `(some (Sigma.mk Lsc.Ty.wei (Lsc.Fixed.Expr.lit $(quote n)))))
     else return none
   | .wad =>
     if let some n ← findDefaultNatLit? e then
-      return some (← `(some (Sigma.mk Lsc.Ty.wad (Lsc.Wad.Expr.lit $(quote n)))))
+      return some (← `(some (Sigma.mk Lsc.Ty.wad (Lsc.Fixed.Expr.lit $(quote n)))))
     else return none
   | .interface _ =>
     if let some n ← findDefaultNatLit? e then

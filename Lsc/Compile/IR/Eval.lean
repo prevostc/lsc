@@ -68,6 +68,9 @@ def evalExpr (st : IRState) (e : Expr) : Nat :=
   | .lt a b => if evalExpr st a < evalExpr st b then 1 else 0
   | .eq a b => if evalExpr st a == evalExpr st b then 1 else 0
   | .isZero a => if evalExpr st a == 0 then 1 else 0
+  | .gt a b => if evalExpr st a > evalExpr st b then 1 else 0
+  | .shr amount val => evalExpr st val / 2 ^ (evalExpr st amount)
+  | .xor a b => (evalExpr st a ^^^ evalExpr st b)
 
 @[simp] theorem evalExpr_lit (st : IRState) (n : Nat) : evalExpr st (.lit n) = n := rfl
 

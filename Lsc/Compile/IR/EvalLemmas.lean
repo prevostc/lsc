@@ -87,6 +87,18 @@ theorem evalExpr_setLocal_unused (st : IRState) (name : Ident) (v : Nat) (e : Ex
   | .isZero a =>
     simp only [freeVarsExpr] at h
     simp [evalExpr, evalExpr_setLocal_unused st name v a h]
+  | .gt a b =>
+    simp only [freeVarsExpr, List.mem_append] at h
+    simp [evalExpr, evalExpr_setLocal_unused st name v a (not_mem_or_left h),
+      evalExpr_setLocal_unused st name v b (not_mem_or_right h)]
+  | .shr amount val =>
+    simp only [freeVarsExpr, List.mem_append] at h
+    simp [evalExpr, evalExpr_setLocal_unused st name v amount (not_mem_or_left h),
+      evalExpr_setLocal_unused st name v val (not_mem_or_right h)]
+  | .xor a b =>
+    simp only [freeVarsExpr, List.mem_append] at h
+    simp [evalExpr, evalExpr_setLocal_unused st name v a (not_mem_or_left h),
+      evalExpr_setLocal_unused st name v b (not_mem_or_right h)]
 
 private theorem lookupLocal_setSlot (st : IRState) (slot : Nat) (v : Nat) (name : Ident) :
     (st.setSlot slot v).lookupLocal name = st.lookupLocal name := by
@@ -170,6 +182,18 @@ theorem evalExpr_obs_agree (st1 st2 : IRState) (e : Expr) (hobs : observablyEqua
   | .isZero a =>
     simp only [freeVarsExpr] at hlookup ⊢
     simp [evalExpr, evalExpr_obs_agree st1 st2 a hobs hlookup]
+  | .gt a b =>
+    simp only [freeVarsExpr, List.mem_append] at hlookup ⊢
+    simp [evalExpr, evalExpr_obs_agree st1 st2 a hobs (λ id hmem => hlookup id (Or.inl hmem)),
+      evalExpr_obs_agree st1 st2 b hobs (λ id hmem => hlookup id (Or.inr hmem))]
+  | .shr amount val =>
+    simp only [freeVarsExpr, List.mem_append] at hlookup ⊢
+    simp [evalExpr, evalExpr_obs_agree st1 st2 amount hobs (λ id hmem => hlookup id (Or.inl hmem)),
+      evalExpr_obs_agree st1 st2 val hobs (λ id hmem => hlookup id (Or.inr hmem))]
+  | .xor a b =>
+    simp only [freeVarsExpr, List.mem_append] at hlookup ⊢
+    simp [evalExpr, evalExpr_obs_agree st1 st2 a hobs (λ id hmem => hlookup id (Or.inl hmem)),
+      evalExpr_obs_agree st1 st2 b hobs (λ id hmem => hlookup id (Or.inr hmem))]
 
 theorem evalExprs_obs_agree (st1 st2 : IRState) (exprs : List Expr) (hobs : observablyEqual st1 st2)
     (hlookup : ∀ id ∈ freeVarsExprs exprs, st1.lookupLocal id = st2.lookupLocal id) :

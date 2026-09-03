@@ -1,5 +1,7 @@
 import Lsc.Compile.IR.Eval
 
+set_option maxHeartbeats 400000
+
 namespace Lsc.Compile.IR.Opt
 
 open Lsc.Compile.IR
@@ -40,6 +42,18 @@ def foldConsts : Expr → Expr
     match foldConsts a with
     | .lit i => if i == 0 then .lit 1 else .lit 0
     | a' => .isZero a'
+  | .gt a b =>
+    match foldConsts a, foldConsts b with
+    | .lit i, .lit j => if i > j then .lit 1 else .lit 0
+    | a', b' => .gt a' b'
+  | .shr amount val =>
+    match foldConsts amount, foldConsts val with
+    | .lit k, .lit v => .lit (v / 2 ^ k)
+    | amount', val' => .shr amount' val'
+  | .xor a b =>
+    match foldConsts a, foldConsts b with
+    | .lit i, .lit j => .lit (i ^^^ j)
+    | a', b' => .xor a' b'
 
 def foldConstsStmt : Stmt → Stmt
   | .skip => .skip
@@ -132,6 +146,28 @@ theorem foldConsts_correct (st : IRState) (e : Expr) :
       simp only [evalExpr]
       rw [← ih]
       split <;> rfl
+  | gt a b ih_a ih_b =>
+    simp only [foldConsts]
+    cases ha : foldConsts a <;> cases hb : foldConsts b
+    all_goals
+      simp only [ha, hb, evalExpr] at ih_a ih_b
+      simp only [evalExpr]
+      rw [← ih_a, ← ih_b]
+      split <;> rfl
+  | shr amount val ih_a ih_b =>
+    simp only [foldConsts]
+    cases ha : foldConsts amount <;> cases hb : foldConsts val
+    all_goals
+      simp only [ha, hb, evalExpr] at ih_a ih_b
+      simp only [evalExpr]
+      rw [← ih_a, ← ih_b]
+  | xor a b ih_a ih_b =>
+    simp only [foldConsts]
+    cases ha : foldConsts a <;> cases hb : foldConsts b
+    all_goals
+      simp only [ha, hb, evalExpr] at ih_a ih_b
+      simp only [evalExpr]
+      rw [← ih_a, ← ih_b]
 
 theorem foldConstsStmt_correct (st : IRState) (s : Stmt) :
     evalStmt st (foldConstsStmt s) = evalStmt st s := by

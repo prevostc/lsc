@@ -96,7 +96,7 @@ partial def elabLscExpr (storageName : Name) (locals : List (String × Lsc.Deriv
       let (bt, bk) ← elabLscExpr storageName locals b
       unless bk == .wad do
         throwError "`⸢*⸣?`'s right-hand side must be `Wad`-kind, got `{repr bk}`"
-      return (← `(Lsc.Wad.Expr.mulHalfUpChecked $at_ $bt), .wad)
+      return (← `(Lsc.Wad.exprMulHalfUpChecked $at_ $bt), .wad)
   | `(lscExpr| $a ⌊/⌋? $b) => do
       let (at_, ak) ← elabLscExpr storageName locals a
       unless ak == .wad do
@@ -104,7 +104,7 @@ partial def elabLscExpr (storageName : Name) (locals : List (String × Lsc.Deriv
       let (bt, bk) ← elabLscExpr storageName locals b
       unless bk == .wad do
         throwError "`⌊/⌋?`'s right-hand side must be `Wad`-kind, got `{repr bk}`"
-      return (← `(Lsc.Wad.Expr.divDownChecked $at_ $bt), .wad)
+      return (← `(Lsc.Wad.exprDivDownChecked $at_ $bt), .wad)
   | `(lscExpr| $a == $b) => do
       let (at_, ak) ← elabLscExpr storageName locals a
       let (bt, bk) ← elabLscExpr storageName locals b
@@ -148,7 +148,7 @@ partial def elabLscExpr (storageName : Name) (locals : List (String × Lsc.Deriv
             throwErrorAt x "`{field}` is not a nested mapping field, cannot index it with `[..][..]`"
           let key1Term ← elabMapKey key1
           let key2Term ← elabMapKey key2
-          return (← `(Lsc.Wad.Expr.mapGet2 $(quote field) $key1Term $key2Term), .wad)
+          return (← `(Lsc.Fixed.Expr.mapGet2 $(quote field) $key1Term $key2Term), .wad)
       | none => throwErrorAt x "expected `σ.field[key1][key2]`, got `{x.getId}[..][..]`"
   | `(lscExpr| $x:ident [ $key ]) => do
       match Lsc.sigmaFieldName? x.getId with
@@ -157,7 +157,7 @@ partial def elabLscExpr (storageName : Name) (locals : List (String × Lsc.Deriv
           unless isMappingField k do
             throwErrorAt x "`{field}` is not a mapping field, cannot index it with `[..]`"
           let keyTerm ← elabMapKey key
-          return (← `(Lsc.Wad.Expr.mapGet $(quote field) $keyTerm), .wad)
+          return (← `(Lsc.Fixed.Expr.mapGet $(quote field) $keyTerm), .wad)
       | none => throwErrorAt x "expected `σ.field[key]`, got `{x.getId}[..]`"
   | `(lscExpr| $x:ident) => do
       let name := x.getId
@@ -179,10 +179,10 @@ partial def elabLscExpr (storageName : Name) (locals : List (String × Lsc.Deriv
               let nameLit := quote nameStr
               let (t, k') ← match k with
                 | .wei => do
-                  let t ← `(Lsc.Wei.Expr.var $nameLit)
+                  let t ← `(Lsc.Fixed.Expr.var $nameLit)
                   pure (t, k)
                 | .wad => do
-                  let t ← `(Lsc.Wad.Expr.var $nameLit)
+                  let t ← `(Lsc.Fixed.Expr.var $nameLit)
                   pure (t, k)
                 | .bool => do
                   let t ← `(Lsc.CoreExpr.var Lsc.Ty.bool $nameLit)
@@ -213,20 +213,20 @@ partial def elabCheckedAddWith (storageName : Name) (locals : List (String × Ls
   match ak with
   | .wei =>
     match lscExprAsNatLit? b with
-    | some n => return (← `(Lsc.Wei.Expr.addCheckedNat $at_ $(quote n)), .wei)
+    | some n => return (← `(Lsc.Fixed.Expr.addCheckedNat $at_ $(quote n)), .wei)
     | none =>
         let (bt, bk) ← elabLscExpr storageName locals b
         unless bk == .wei do
           throwError "`+?`'s right-hand side must be `Wei`-kind or a numeral, got `{repr bk}`"
-        return (← `(Lsc.Wei.Expr.addChecked $at_ $bt), .wei)
+        return (← `(Lsc.Fixed.Expr.addChecked $at_ $bt), .wei)
   | .wad =>
     match lscExprAsNatLit? b with
-    | some n => return (← `(Lsc.Wad.Expr.addCheckedNat $at_ $(quote n)), .wad)
+    | some n => return (← `(Lsc.Fixed.Expr.addCheckedNat $at_ $(quote n)), .wad)
     | none =>
         let (bt, bk) ← elabLscExpr storageName locals b
         unless bk == .wad do
           throwError "`+?`'s right-hand side must be `Wad`-kind or a numeral, got `{repr bk}`"
-        return (← `(Lsc.Wad.Expr.addChecked $at_ $bt), .wad)
+        return (← `(Lsc.Fixed.Expr.addChecked $at_ $bt), .wad)
   | _ => throwError "`+?`'s left-hand side must be `Wei`- or `Wad`-kind, got `{repr ak}`"
 
 /-- Checked subtraction — the `-?`/`-=?` counterpart of `elabCheckedAddWith`. -/
@@ -236,22 +236,22 @@ partial def elabCheckedSubWith (storageName : Name) (locals : List (String × Ls
   match ak with
   | .wei =>
     let bt ← match lscExprAsNatLit? b with
-      | some n => `(Lsc.Wei.Expr.lit $(quote n))
+      | some n => `(Lsc.Fixed.Expr.lit $(quote n))
       | none => do
           let (bt, bk) ← elabLscExpr storageName locals b
           unless bk == .wei do
             throwError "`-?`'s right-hand side must be `Wei`-kind or a numeral, got `{repr bk}`"
           pure bt
-    return (← `(Lsc.Wei.Expr.subChecked $at_ $bt), .wei)
+    return (← `(Lsc.Fixed.Expr.subChecked $at_ $bt), .wei)
   | .wad =>
     let bt ← match lscExprAsNatLit? b with
-      | some n => `(Lsc.Wad.Expr.lit $(quote n))
+      | some n => `(Lsc.Fixed.Expr.lit $(quote n))
       | none => do
           let (bt, bk) ← elabLscExpr storageName locals b
           unless bk == .wad do
             throwError "`-?`'s right-hand side must be `Wad`-kind or a numeral, got `{repr bk}`"
           pure bt
-    return (← `(Lsc.Wad.Expr.subChecked $at_ $bt), .wad)
+    return (← `(Lsc.Fixed.Expr.subChecked $at_ $bt), .wad)
   | _ => throwError "`-?`'s left-hand side must be `Wei`- or `Wad`-kind, got `{repr ak}`"
 
 end

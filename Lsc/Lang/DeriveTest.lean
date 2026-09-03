@@ -93,7 +93,7 @@ def increment : TM Unit := Stmt.eval incrementTx
 --
 -- `number` correctly ends up `1` and the emitted event carries `1` too (not
 -- `2`): `n` is bound once via `Stmt.letBind` (`Syntax.lean`'s `var`) and
--- reused via `Wei.Expr.var "n"`, which `Stmt.evalWith`'s `.letBind` case
+-- reused via `Fixed.Expr.var "n"`, which `Stmt.evalWith`'s `.letBind` case
 -- computes exactly once and resolves through `LocalEnv` thereafter —
 -- unaffected by the later storage write.
 #eval runS increment

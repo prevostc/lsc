@@ -27,7 +27,7 @@ open Lsc
 /-- `increment`: require not paused, `number +?= 1`, emit. -/
 def incrementTxM : TxM Unit := do
   requireE (CoreExpr.not (boolField "paused")) "Paused"
-  let n := Wei.Expr.addCheckedNat (weiField "number") 1
+  let n := Fixed.Expr.addCheckedNat (weiField "number") 1
   setWei "number" n
   emitEvent "Incremented" [⟨Ty.wei, n⟩]
 
@@ -85,8 +85,8 @@ partial def _root_.Lsc.Stmt.summary : Stmt → String
 
 example : incrementAst =
     (Stmt.require (CoreExpr.not (CoreExpr.storageGet Ty.bool "paused")) "Paused").seq
-      ((Stmt.storageSet "number" ⟨Ty.wei, (Wei.Expr.storageGet "number").addCheckedNat 1⟩).seq
-        (Stmt.emit "Incremented" [⟨Ty.wei, (Wei.Expr.storageGet "number").addCheckedNat 1⟩])) := rfl
+      ((Stmt.storageSet "number" ⟨Ty.wei, (Fixed.Expr.storageGet "number").addCheckedNat 1⟩).seq
+        (Stmt.emit "Incremented" [⟨Ty.wei, (Fixed.Expr.storageGet "number").addCheckedNat 1⟩])) := rfl
 
 example : pauseAst =
     (Stmt.require (CoreExpr.eqAuto (CoreExpr.txField TxField.caller)

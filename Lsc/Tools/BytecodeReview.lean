@@ -49,9 +49,9 @@ private def reviewFunction (outDir : System.FilePath) (cfg : Config) (fn : Funct
   match Lower.function cfg fn with
   | .error e => IO.eprintln s!"warning: failed to lower {fn.name}: {e}"
   | .ok ir =>
-    let optIr := IR.Opt.optimizeStmt ir
-    writeText (fnDir / "ir.txt") (irRender optIr)
-    writeText (fnDir / "yul.txt") (irStmtToYulString optIr)
+    let codegenIr := Bytecode.Contract.codegenInput fn ir
+    writeText (fnDir / "ir.txt") (irRender codegenIr)
+    writeText (fnDir / "yul.txt") (irStmtToYulString codegenIr)
     match Bytecode.Contract.functionInstrs cfg fn with
     | .error e => IO.eprintln s!"warning: failed to codegen {fn.name}: {e}"
     | .ok instrs =>
@@ -72,10 +72,10 @@ def runReview (outDir : String) (input : ReviewInput) : IO Unit := do
   writeText (out / "README.txt") <|
     "LSC bytecode review artifacts\n\n" ++
     "contract/\n" ++
-    "  bytecode.hex   full runtime bytecode (post IR.Opt.optimizeStmt → codegen → encode)\n" ++
+    "  bytecode.hex   full runtime bytecode (direct lowered view IR; optimized tx IR)\n" ++
     "  abi.json       ABI for heimdall -a (keccak selectors)\n\n" ++
     "functions/{name}/\n" ++
-    "  ir.txt         optimised IR for one external/view function\n" ++
+    "  ir.txt         exact IR consumed by codegen (direct view; optimized tx)\n" ++
     "  yul.txt        LSC Yul lowering\n" ++
     "  instr.txt      LSC codegen Instr dump (authoritative for external CALL shapes)\n" ++
     "  bytecode.hex   function body only (no dispatcher)\n\n" ++

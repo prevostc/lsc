@@ -62,7 +62,7 @@ theorem bool_not_to_false {b : Bool} (h : ¬ b) : b = false := by
   · exact absurd rfl h
 
 /-- `Wad.mkNat` round-trips a `Wad`'s own raw value back to itself — bridges the literal `tx`
-parameters are re-embedded as (`Wad.Expr.lit amount.raw.toNat`, per
+parameters are re-embedded as (`Fixed.Expr.lit amount.raw.toNat`, per
 `Lsc.Deriving.FieldKind.embedLitStx`) back to the parameter value itself, so `run*Ok` lemmas
 below can state their arithmetic side conditions directly in terms of `amount`/`newRate`. -/
 theorem Wad.mkNat_roundtrip (w : Wad) : Wad.mkNat w.raw.toNat = w := by

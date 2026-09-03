@@ -1,43 +1,29 @@
 import Lsc.Lib.Wei.Syntax
+import Lsc.Lib.Fixed.Arith
 import Lsc.Core.ContractM
 import Lsc.Lang.AST
 
 namespace Lsc.Wei
 
-def addChecked (a b : Wei) : Except ArithError Wei :=
-  (UInt256.addChecked a.raw b.raw).map Wei.mk
+def addChecked (a b : Wei) : Except ArithError Wei := Fixed.addChecked a b
+def subChecked (a b : Wei) : Except ArithError Wei := Fixed.subChecked a b
+def addCheckedNat (a : Wei) (n : Nat) : Except ArithError Wei := Fixed.addCheckedNat a n
 
-def subChecked (a b : Wei) : Except ArithError Wei :=
-  (UInt256.subChecked a.raw b.raw).map Wei.mk
-
-def mulChecked (a b : Wei) : Except ArithError Wei :=
-  (UInt256.mulChecked a.raw b.raw).map Wei.mk
-
-def divFloor (a b : Wei) : Except ArithError Wei :=
-  (UInt256.divChecked a.raw b.raw).map Wei.mk
-
-def addCheckedNat (a : Wei) (n : Nat) : Except ArithError Wei :=
-  (UInt256.addCheckedNat a.raw n).map Wei.mk
-
-/-- `w.canAddNat n` holds iff adding `n` to `w` will not overflow 256 bits. -/
 abbrev Wei.canAddNat (w : Wei) (n : Nat) : Prop := w.raw.toNat + n < 2 ^ 256
 
-@[simp]
-theorem addCheckedNat_ok (a : Wei) (n : Nat) (h : Wei.canAddNat a n) :
+@[simp] theorem addCheckedNat_ok (a : Wei) (n : Nat) (h : Wei.canAddNat a n) :
     addCheckedNat a n = .ok ⟨BitVec.ofNat 256 (a.raw.toNat + n)⟩ := by
   unfold Wei.canAddNat at h
-  simp [addCheckedNat, UInt256.addCheckedNat_ok a.raw n h, Except.map]
+  simp [addCheckedNat, Fixed.addCheckedNat, Fixed.mkNat, UInt256.addCheckedNat_ok a.raw n h, Except.map]
 
-@[simp]
-theorem addCheckedNat_error (a : Wei) (n : Nat) (h : ¬ Wei.canAddNat a n) :
+@[simp] theorem addCheckedNat_error (a : Wei) (n : Nat) (h : ¬ Wei.canAddNat a n) :
     addCheckedNat a n = .error .Overflow := by
   unfold Wei.canAddNat at h
-  simp [addCheckedNat, UInt256.addCheckedNat_error a.raw n h, Except.map]
+  simp [addCheckedNat, Fixed.addCheckedNat, UInt256.addCheckedNat_error a.raw n h, Except.map]
 
 variable {S E Err : Type} [ContractErrors Err] [dsl : ContractDSL S E Err]
 
-def eval
-    (e : Expr) (env : LocalEnv) : ContractM S E Err Wei :=
+def eval (e : Expr) (env : LocalEnv) : ContractM S E Err Wei :=
   match e with
   | .lit n => pure (Wei.mkNat n)
   | .var name =>
@@ -66,6 +52,17 @@ def eval
     match Wei.subChecked va vb with
     | .error ae => ContractM.revertArith ae
     | .ok r => pure r
+  | .sqrtDownChecked scale a => do
+    let va ← eval a env
+    match Fixed.sqrtDown scale va with
+    | .error ae => ContractM.revertArith ae
+    | .ok r => pure r
+  | .min a b => do
+    let va ← eval a env
+    let vb ← eval b env
+    pure (Fixed.min va vb)
+  | .mulHalfUpChecked _ _ _ | .divDownChecked _ _ _ | .mapGet _ _ | .mapGet2 _ _ _ =>
+    ContractM.revert .Unauthorized
 
 attribute [simp] eval
 

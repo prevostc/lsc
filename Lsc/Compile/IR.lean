@@ -24,6 +24,9 @@ inductive Expr where
   | lt : Expr → Expr → Expr
   | eq : Expr → Expr → Expr
   | isZero : Expr → Expr
+  | gt : Expr → Expr → Expr
+  | shr : Expr → Expr → Expr
+  | xor : Expr → Expr → Expr
   deriving Repr, DecidableEq
 
 /-- Compiler-reserved EIP-1153 transient-storage key for the reentrancy lock. -/

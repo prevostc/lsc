@@ -86,7 +86,7 @@ inductive Stmt
   | mapSet : Ident → MapKey → Wad.Expr → Stmt
   /-- `σ.field[key1][key2] = e;` — write one entry of a nested (`Mapping (Address × Address) V`)
       storage field (e.g. `σ.allowances[owner][spender] = amount;`). Mirrors `mapSet` one level
-      deeper — see `Wad.Expr.mapGet2`'s docstring. -/
+      deeper — see `Fixed.Expr.mapGet2`'s docstring. -/
   | mapSet2 : Ident → MapKey → MapKey → Wad.Expr → Stmt
   | require : Expr Ty.bool → Ident → Stmt
   | ifThenElse : Expr Ty.bool → Stmt → Stmt → Stmt

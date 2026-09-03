@@ -19,6 +19,9 @@ def freeVarsExpr : Expr → List Ident
   | .lt a b => freeVarsExpr a ++ freeVarsExpr b
   | .eq a b => freeVarsExpr a ++ freeVarsExpr b
   | .isZero a => freeVarsExpr a
+  | .gt a b => freeVarsExpr a ++ freeVarsExpr b
+  | .shr amount val => freeVarsExpr amount ++ freeVarsExpr val
+  | .xor a b => freeVarsExpr a ++ freeVarsExpr b
 
 def freeVarsExprs : List Expr → List Ident :=
   List.foldl (init := []) fun acc e => acc ++ freeVarsExpr e

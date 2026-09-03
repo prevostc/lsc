@@ -80,7 +80,7 @@ end Ctx
 
 namespace Codegen
 
-private def emitOp (op : Operation .EVM) : List Instr := [.op op]
+def emitOp (op : Operation .EVM) : List Instr := [.op op]
 
 private def calldataSize (args : List Expr) : Nat :=
   4 + 32 * args.length
@@ -137,7 +137,12 @@ private def emitBoolReturnCheck (ctx : Ctx) (failSelector : Nat) : List Instr ×
     , .jumpDest contLbl ]
   , c3 )
 
-private partial def codegenExpr (ctx : Ctx) (e : Expr) : Except String (List Instr × Ctx) :=
+/-- Recursive expression compiler with a reload budget. Ordinary recursive calls are structural;
+the budget decreases only when a local deeper than `DUP16` is rebuilt from its recorded source.
+The initial budget is the number of bindings, so an acyclic chain of binding sources cannot run
+out. Exhaustion therefore reports an invalid self-referential/cyclic reload source. -/
+def codegenExprFuel (reloadFuel : Nat) (ctx : Ctx) (e : Expr) :
+    Except String (List Instr × Ctx) :=
   match e with
   | .lit n => .ok ([.push n], { ctx with stackDepth := ctx.stackDepth + 1 })
   | .local name =>
@@ -146,16 +151,101 @@ private partial def codegenExpr (ctx : Ctx) (e : Expr) : Except String (List Ins
     else
       match ctx.lookupBinding name with
       | none => .error s!"unknown local {name}"
-      | some { src := some (.sload slot), .. } =>
-        .ok ([.push slot, .op SLOAD], { ctx with stackDepth := ctx.stackDepth + 1 })
-      | some { src := some (.calldataWord offset), .. } =>
-        .ok ([.push offset, .op CALLDATALOAD], { ctx with stackDepth := ctx.stackDepth + 1 })
-      | some { src := some (.lit n), .. } =>
-        .ok ([.push n], { ctx with stackDepth := ctx.stackDepth + 1 })
-      | some _ => do
-        let d ← ctx.lookupDepth name
-        let op ← Ctx.dupOp d
-        .ok (emitOp op, { ctx with stackDepth := ctx.stackDepth + 1 })
+      | some binding =>
+          let depth := ctx.stackDepth - binding.absPos + 1
+          match Ctx.dupOp depth with
+          | .ok dup => .ok (emitOp dup, { ctx with stackDepth := ctx.stackDepth + 1 })
+          | .error depthError =>
+              match binding.src with
+              | none => .error depthError
+              | some source =>
+                  match reloadFuel with
+                  | 0 => .error s!"cyclic reload source for local {name}"
+                  | fuel + 1 => codegenExprFuel fuel ctx source
+  | .sload slot =>
+    .ok ([.push slot, .op SLOAD], { ctx with stackDepth := ctx.stackDepth + 1 })
+  | .calldataWord offset =>
+    .ok ([.push offset, .op CALLDATALOAD], { ctx with stackDepth := ctx.stackDepth + 1 })
+  | .mapSlot base key => do
+    let (keyInstr, c1) ← codegenExprFuel reloadFuel ctx key
+    let hashInstr : List Instr :=
+      [.push 0, .op MSTORE, .push base, .push 32, .op MSTORE, .push 64, .push 0, .op KECCAK256]
+    .ok (keyInstr ++ hashInstr, { c1 with stackDepth := c1.stackDepth + 1 })
+  | .mapSlot2 base key1 key2 => do
+    -- Nested-mapping slot: `keccak256(key2 ++ keccak256(key1 ++ base))`, i.e. `mapSlot`'s own
+    -- single-key hash chained twice (see `IR.Expr.mapSlot2`'s docstring).
+    let (key1Instr, c1) ← codegenExprFuel reloadFuel ctx key1
+    let innerHashInstr : List Instr :=
+      [.push 0, .op MSTORE, .push base, .push 32, .op MSTORE, .push 64, .push 0, .op KECCAK256]
+    let c1' := { c1 with stackDepth := c1.stackDepth + 1 }
+    let (key2Instr, c2) ← codegenExprFuel reloadFuel c1' key2
+    let outerHashInstr : List Instr :=
+      [.push 0, .op MSTORE, .push 32, .op MSTORE, .push 64, .push 0, .op KECCAK256]
+    .ok (key1Instr ++ innerHashInstr ++ key2Instr ++ outerHashInstr,
+      { c2 with stackDepth := c2.stackDepth + 1 })
+  | .dynSload slotExpr => do
+    let (slotInstr, c1) ← codegenExprFuel reloadFuel ctx slotExpr
+    .ok (slotInstr ++ [.op SLOAD], c1)
+  | .add a b => do
+    let (i1, c1) ← codegenExprFuel reloadFuel ctx a
+    let (i2, c2) ← codegenExprFuel reloadFuel c1 b
+    .ok (i1 ++ i2 ++ emitOp ADD, { c2 with stackDepth := c2.stackDepth - 1 })
+  | .sub a b => do
+    let (i1, c1) ← codegenExprFuel reloadFuel ctx a
+    let (i2, c2) ← codegenExprFuel reloadFuel c1 b
+    .ok (i1 ++ i2 ++ [.op SWAP1, .op SUB], { c2 with stackDepth := c2.stackDepth - 1 })
+  | .mul a b => do
+    let (i1, c1) ← codegenExprFuel reloadFuel ctx a
+    let (i2, c2) ← codegenExprFuel reloadFuel c1 b
+    .ok (i1 ++ i2 ++ emitOp MUL, { c2 with stackDepth := c2.stackDepth - 1 })
+  | .div a b => do
+    let (i1, c1) ← codegenExprFuel reloadFuel ctx a
+    let (i2, c2) ← codegenExprFuel reloadFuel c1 b
+    .ok (i1 ++ i2 ++ [.op SWAP1, .op DIV], { c2 with stackDepth := c2.stackDepth - 1 })
+  | .lt a b => do
+    let (i1, c1) ← codegenExprFuel reloadFuel ctx a
+    let (i2, c2) ← codegenExprFuel reloadFuel c1 b
+    .ok (i1 ++ i2 ++ [.op SWAP1, .op LT], { c2 with stackDepth := c2.stackDepth - 1 })
+  | .eq a b => do
+    let (i1, c1) ← codegenExprFuel reloadFuel ctx a
+    let (i2, c2) ← codegenExprFuel reloadFuel c1 b
+    .ok (i1 ++ i2 ++ emitOp EQ, { c2 with stackDepth := c2.stackDepth - 1 })
+  | .isZero a => do
+    let (i1, c1) ← codegenExprFuel reloadFuel ctx a
+    .ok (i1 ++ emitOp ISZERO, c1)
+  | .gt a b => do
+    let (i1, c1) ← codegenExprFuel reloadFuel ctx a
+    let (i2, c2) ← codegenExprFuel reloadFuel c1 b
+    .ok (i1 ++ i2 ++ [.op SWAP1, .op GT], { c2 with stackDepth := c2.stackDepth - 1 })
+  | .shr amount val => do
+    let (i1, c1) ← codegenExprFuel reloadFuel ctx amount
+    let (i2, c2) ← codegenExprFuel reloadFuel c1 val
+    .ok (i1 ++ i2 ++ [.op SWAP1, .op SHR], { c2 with stackDepth := c2.stackDepth - 1 })
+  | .xor a b => do
+    let (i1, c1) ← codegenExprFuel reloadFuel ctx a
+    let (i2, c2) ← codegenExprFuel reloadFuel c1 b
+    .ok (i1 ++ i2 ++ emitOp XOR, { c2 with stackDepth := c2.stackDepth - 1 })
+termination_by (reloadFuel, sizeOf e)
+
+/-- Recursive expression compiler. Public for kernel-checked codegen proofs; use `expr` as the
+stable API entry point. -/
+def codegenExpr (ctx : Ctx) (e : Expr) : Except String (List Instr × Ctx) :=
+  match e with
+  | .lit n => .ok ([.push n], { ctx with stackDepth := ctx.stackDepth + 1 })
+  | .local name =>
+    if name == "caller" then
+      .ok (emitOp CALLER, { ctx with stackDepth := ctx.stackDepth + 1 })
+    else
+      match ctx.lookupBinding name with
+      | none => .error s!"unknown local {name}"
+      | some binding =>
+          let depth := ctx.stackDepth - binding.absPos + 1
+          match Ctx.dupOp depth with
+          | .ok dup => .ok (emitOp dup, { ctx with stackDepth := ctx.stackDepth + 1 })
+          | .error depthError =>
+              match binding.src with
+              | none => .error depthError
+              | some source => codegenExprFuel ctx.locals.length ctx source
   | .sload slot =>
     .ok ([.push slot, .op SLOAD], { ctx with stackDepth := ctx.stackDepth + 1 })
   | .calldataWord offset =>
@@ -166,8 +256,6 @@ private partial def codegenExpr (ctx : Ctx) (e : Expr) : Except String (List Ins
       [.push 0, .op MSTORE, .push base, .push 32, .op MSTORE, .push 64, .push 0, .op KECCAK256]
     .ok (keyInstr ++ hashInstr, { c1 with stackDepth := c1.stackDepth + 1 })
   | .mapSlot2 base key1 key2 => do
-    -- Nested-mapping slot: `keccak256(key2 ++ keccak256(key1 ++ base))`, i.e. `mapSlot`'s own
-    -- single-key hash chained twice (see `IR.Expr.mapSlot2`'s docstring).
     let (key1Instr, c1) ← codegenExpr ctx key1
     let innerHashInstr : List Instr :=
       [.push 0, .op MSTORE, .push base, .push 32, .op MSTORE, .push 64, .push 0, .op KECCAK256]
@@ -187,7 +275,7 @@ private partial def codegenExpr (ctx : Ctx) (e : Expr) : Except String (List Ins
   | .sub a b => do
     let (i1, c1) ← codegenExpr ctx a
     let (i2, c2) ← codegenExpr c1 b
-    .ok (i1 ++ i2 ++ emitOp SUB, { c2 with stackDepth := c2.stackDepth - 1 })
+    .ok (i1 ++ i2 ++ [.op SWAP1, .op SUB], { c2 with stackDepth := c2.stackDepth - 1 })
   | .mul a b => do
     let (i1, c1) ← codegenExpr ctx a
     let (i2, c2) ← codegenExpr c1 b
@@ -195,11 +283,11 @@ private partial def codegenExpr (ctx : Ctx) (e : Expr) : Except String (List Ins
   | .div a b => do
     let (i1, c1) ← codegenExpr ctx a
     let (i2, c2) ← codegenExpr c1 b
-    .ok (i1 ++ i2 ++ emitOp DIV, { c2 with stackDepth := c2.stackDepth - 1 })
+    .ok (i1 ++ i2 ++ [.op SWAP1, .op DIV], { c2 with stackDepth := c2.stackDepth - 1 })
   | .lt a b => do
     let (i1, c1) ← codegenExpr ctx a
     let (i2, c2) ← codegenExpr c1 b
-    .ok (i1 ++ i2 ++ emitOp LT, { c2 with stackDepth := c2.stackDepth - 1 })
+    .ok (i1 ++ i2 ++ [.op SWAP1, .op LT], { c2 with stackDepth := c2.stackDepth - 1 })
   | .eq a b => do
     let (i1, c1) ← codegenExpr ctx a
     let (i2, c2) ← codegenExpr c1 b
@@ -207,9 +295,25 @@ private partial def codegenExpr (ctx : Ctx) (e : Expr) : Except String (List Ins
   | .isZero a => do
     let (i1, c1) ← codegenExpr ctx a
     .ok (i1 ++ emitOp ISZERO, c1)
+  | .gt a b => do
+    let (i1, c1) ← codegenExpr ctx a
+    let (i2, c2) ← codegenExpr c1 b
+    .ok (i1 ++ i2 ++ [.op SWAP1, .op GT], { c2 with stackDepth := c2.stackDepth - 1 })
+  | .shr amount val => do
+    let (i1, c1) ← codegenExpr ctx amount
+    let (i2, c2) ← codegenExpr c1 val
+    .ok (i1 ++ i2 ++ [.op SWAP1, .op SHR], { c2 with stackDepth := c2.stackDepth - 1 })
+  | .xor a b => do
+    let (i1, c1) ← codegenExpr ctx a
+    let (i2, c2) ← codegenExpr c1 b
+    .ok (i1 ++ i2 ++ emitOp XOR, { c2 with stackDepth := c2.stackDepth - 1 })
+
+/-- Proof-oriented public entry point for expression code generation. -/
+def expr (ctx : Ctx) (e : Expr) : Except String (List Instr × Ctx) :=
+  codegenExpr ctx e
 
 /-- ABI-pack each argument at `4 + 32*i` after the selector word. -/
-private partial def packArgs (ctx : Ctx) (args : List Expr) (i : Nat) :
+private def packArgs (ctx : Ctx) (args : List Expr) (i : Nat) :
     Except String (List Instr × Ctx) :=
   match args with
   | [] => .ok ([], ctx)
@@ -288,7 +392,8 @@ private def codegenStaticCallBind (ctx : Ctx) (addr : Expr) (selector : Nat)
   let (loadInstr, c4) := emitMloadBind c3 bindName
   .ok (packInstr ++ callInstr ++ revInstr ++ loadInstr, c4)
 
-private partial def codegenStmt (ctx : Ctx) (s : Stmt) : Except String (List Instr × Ctx) :=
+/-- Recursive statement compiler, exposed for compositional correctness proofs. -/
+def codegenStmt (ctx : Ctx) (s : Stmt) : Except String (List Instr × Ctx) :=
   match s with
   | .skip => .ok ([], ctx)
   | .seq s1 s2 => do

@@ -1,5 +1,6 @@
 import Lsc.Lang.Checks
 import Lsc.TestFixtures.SyntaxSmoke
+import Lsc.Lib.Fixed.Syntax
 
 open Lsc Lsc.TestFixtures
 
@@ -8,7 +9,7 @@ namespace Lsc.ChecksTest
 def counterDef : ContractDef where
   name := "Counter"
   storage :=
-    [("number", .wei, some ⟨.wei, Wei.Expr.lit 0⟩),
+    [("number", .wei, some ⟨.wei, Fixed.Expr.lit 0⟩),
      ("paused", .bool, some ⟨.bool, CoreExpr.lit Ty.bool (.bool false)⟩),
      ("owner", .address, some ⟨.address, CoreExpr.lit Ty.address (.addr 0)⟩)]
   errors := [("Paused", []), ("NotOwner", []), ("Overflow", [])]

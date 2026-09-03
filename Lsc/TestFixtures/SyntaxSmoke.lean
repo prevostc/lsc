@@ -1,4 +1,5 @@
 import Lsc.Lang.AST
+import Lsc.Lib.Fixed.Syntax
 
 /-!
   Minimal Stmt shapes for macro, lowering, and validation smoke tests.
@@ -12,10 +13,10 @@ def incrementLet : Stmt :=
   Stmt.letBind "n" ⟨Ty.wei, Wei.addCheckedNatStorage "number" 1⟩
 
 def incrementSet : Stmt :=
-  Stmt.storageSet "number" ⟨Ty.wei, Wei.Expr.var "n"⟩
+  Stmt.storageSet "number" ⟨Ty.wei, Fixed.Expr.var "n"⟩
 
 def incrementEmit : Stmt :=
-  Stmt.emit "Incremented" [⟨Ty.wei, Wei.Expr.var "n"⟩]
+  Stmt.emit "Incremented" [⟨Ty.wei, Fixed.Expr.var "n"⟩]
 
 def incrementRequire : Stmt :=
   Stmt.require (CoreExpr.not (CoreExpr.storageGet Ty.bool "paused")) "Paused"

@@ -27,7 +27,7 @@ multiply/divide:
 
 These operator names/notation are picked to match `docs/extensions/MATH.md`'s
 `Wad.mulHalfUp`/`Wad.divDown` naming (with a `Checked` suffix on the `Expr`
-constructors, mirroring `Wei.Expr.addChecked`/`.subChecked`).
+constructors, mirroring `Fixed.Expr.addChecked`/`.subChecked`).
 
 ## First-class wiring (on par with `Wei`)
 

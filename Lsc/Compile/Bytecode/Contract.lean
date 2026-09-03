@@ -31,26 +31,48 @@ def configFromContract (c : ContractDef) (topic0 : Ident → Option Nat) : Confi
 
 namespace Bytecode.Contract
 
-private def dispatchRevert (cfg : Config) : List Instr :=
+/- `.view` codegen intentionally consumes the exact lowered IR.  Besides keeping review output
+faithful to lowering, this lets view-correctness proofs use the lowering/building invariants
+directly, without transporting syntactic reload plans through the optimizer.  Transactional
+functions retain the optimizer pipeline. -/
+def codegenInput (fn : FunctionDef) (ir : IR.Stmt) : IR.Stmt :=
+  if fn.kind == .view then ir else IR.Opt.optimizeStmt ir
+
+def dispatchRevert (cfg : Config) : List Instr :=
   match cfg.errors.errorSelector "InvalidSelector" with
   | some sel =>
     [ .push (paddedSelector sel)
     , .push 0
     , .op MSTORE
-    , .push 0
     , .push 4
+    , .push 0
     , .op REVERT ]
   | none => [.push 0, .push 0, .op REVERT]
 
 /-- Load ABI selector from calldata word 0 (top 4 bytes). Leaves selector on stack. -/
-private def loadSelector : List Instr := [
+def loadSelector : List Instr := [
   .push 0,
   .op CALLDATALOAD,
   .push 0xE0,
   .op SHR
 ]
 
-private def selectorDispatch (cfg : Config) (fns : List FunctionDef) (ctx : Ctx) : List Instr × Ctx :=
+def selectorRevertLabel (ctx : Ctx) : String :=
+  (Ctx.freshLabel { ctx with labelPrefix := "dispatch." } "revert").1
+
+/-- Generate independent selector tests. Each test reloads the selector, so both a failed test and
+a successful jump leave the operand stack empty. -/
+def selectorBranches : List FunctionDef → List Instr
+  | [] => []
+  | fn :: rest =>
+      loadSelector ++ [
+        .push (computeSelector fn |>.toNat),
+        .op EQ,
+        .pushLabel fn.name,
+        .op JUMPI
+      ] ++ selectorBranches rest
+
+def selectorDispatch (cfg : Config) (fns : List FunctionDef) (ctx : Ctx) : List Instr × Ctx :=
   let dispatchCtx : Ctx := { ctx with labelPrefix := "dispatch." }
   let (revLbl, ctx1) := Ctx.freshLabel dispatchCtx "revert"
   let calldataCheck : List Instr := [
@@ -60,28 +82,19 @@ private def selectorDispatch (cfg : Config) (fns : List FunctionDef) (ctx : Ctx)
     .pushLabel revLbl,
     .op JUMPI
   ]
-  let branches := fns.foldl (init := ([] : List Instr)) fun acc fn =>
-    acc ++ [
-      .op DUP1,
-      .push (computeSelector fn |>.toNat),
-      .op EQ,
-      .pushLabel fn.name,
-      .op JUMPI
-    ]
-  let instrs := calldataCheck ++ loadSelector ++ branches ++ [
-    .op POP,
+  let instrs := calldataCheck ++ selectorBranches fns ++ [
     .pushLabel revLbl,
     .op JUMP,
     .jumpDest revLbl
   ] ++ dispatchRevert cfg
   (instrs, ctx1)
 
-private def emitFunctionBodies (cfg : Config) (fns : List FunctionDef) (ctx : Ctx) :
-    Except String (List Instr × Ctx) :=
-  fns.foldlM (init := ([], ctx)) fun (acc, ctx) fn => do
+def emitFunctionBody (cfg : Config) (accCtx : List Instr × Ctx) (fn : FunctionDef) :
+    Except String (List Instr × Ctx) := do
+    let (acc, ctx) := accCtx
     let ir ← Lower.function cfg fn
     let fnCtx := Ctx.forFunction ctx fn.name
-    let (body, ctx') ← Codegen.stmt fnCtx (IR.Opt.optimizeStmt ir)
+    let (body, ctx') ← Codegen.stmt fnCtx (codegenInput fn ir)
     let ctxOut := Ctx.afterFunction ctx'
     -- A `.view` function's body always ends in a `return e;` (`Checks.checkViewReturns`,
     -- enforced by `Checks.validateAll` before this ever runs), which `Codegen.lean`'s `.ret`
@@ -92,18 +105,22 @@ private def emitFunctionBodies (cfg : Config) (fns : List FunctionDef) (ctx : Ct
     let haltInstrs : List Instr := if fn.kind == .view then [] else [.op STOP]
     .ok (acc ++ [.jumpDest fn.name] ++ body ++ haltInstrs, ctxOut)
 
+def emitFunctionBodies (cfg : Config) (fns : List FunctionDef) (ctx : Ctx) :
+    Except String (List Instr × Ctx) :=
+  fns.foldlM (init := ([], ctx)) (emitFunctionBody cfg)
+
 /-- Lower and codegen a single function body (including ABI parameter `letBind`s). -/
 def functionInstrs (cfg : Config) (fn : FunctionDef) (baseOffset : Nat := 4) :
     Except String (List Instr) := do
   let ir ← Lower.function cfg fn baseOffset
   let fnCtx := Ctx.forFunction {} fn.name
-  let (body, _) ← Codegen.stmt fnCtx (IR.Opt.optimizeStmt ir)
+  let (body, _) ← Codegen.stmt fnCtx (codegenInput fn ir)
   .ok body
 
 /-- Functions reachable via the shared ABI selector-dispatch jump table: both `.external`
 (state-mutating) and `.view` (read-only) — see `Checks.checkSelectorCollisions`'s docstring for
 why both kinds share one selector namespace. -/
-private def dispatchedFunctions (c : ContractDef) : List FunctionDef :=
+def dispatchedFunctions (c : ContractDef) : List FunctionDef :=
   c.functions.filter fun fn => fn.kind == .external || fn.kind == .view
 
 def contract (cfg : Config) (c : ContractDef) : Except String (List Instr) := do

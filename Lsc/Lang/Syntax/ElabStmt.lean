@@ -425,7 +425,7 @@ partial def elabLscStmt (storageName : Name) (locals : List (String × Lsc.Deriv
             throwErrorAt x "`{field}` is not a nested mapping field, cannot index it with `[..][..]`"
           let key1Term ← elabMapKey key1
           let key2Term ← elabMapKey key2
-          let curTerm ← `(Lsc.Wad.Expr.mapGet2 $(quote field) $key1Term $key2Term)
+          let curTerm ← `(Lsc.Fixed.Expr.mapGet2 $(quote field) $key1Term $key2Term)
           let (sumTerm, _) ← elabCheckedAddWith storageName locals curTerm .wad e
           return (← `(Lsc.Stmt.mapSet2 $(quote field) $key1Term $key2Term $sumTerm), locals)
       | none =>
@@ -438,7 +438,7 @@ partial def elabLscStmt (storageName : Name) (locals : List (String × Lsc.Deriv
             throwErrorAt x "`{field}` is not a nested mapping field, cannot index it with `[..][..]`"
           let key1Term ← elabMapKey key1
           let key2Term ← elabMapKey key2
-          let curTerm ← `(Lsc.Wad.Expr.mapGet2 $(quote field) $key1Term $key2Term)
+          let curTerm ← `(Lsc.Fixed.Expr.mapGet2 $(quote field) $key1Term $key2Term)
           let (diffTerm, _) ← elabCheckedSubWith storageName locals curTerm .wad e
           return (← `(Lsc.Stmt.mapSet2 $(quote field) $key1Term $key2Term $diffTerm), locals)
       | none =>
@@ -462,7 +462,7 @@ partial def elabLscStmt (storageName : Name) (locals : List (String × Lsc.Deriv
           unless Lsc.Syntax.isMappingField k do
             throwErrorAt x "`{field}` is not a mapping field, cannot index it with `[..]`"
           let keyTerm ← elabMapKey key
-          let curTerm ← `(Lsc.Wad.Expr.mapGet $(quote field) $keyTerm)
+          let curTerm ← `(Lsc.Fixed.Expr.mapGet $(quote field) $keyTerm)
           let (sumTerm, _) ← elabCheckedAddWith storageName locals curTerm .wad e
           return (← `(Lsc.Stmt.mapSet $(quote field) $keyTerm $sumTerm), locals)
       | none => throwErrorAt x "expected `σ.field[key] +=? e;` on the left-hand side, got `{x.getId}`"
@@ -473,7 +473,7 @@ partial def elabLscStmt (storageName : Name) (locals : List (String × Lsc.Deriv
           unless Lsc.Syntax.isMappingField k do
             throwErrorAt x "`{field}` is not a mapping field, cannot index it with `[..]`"
           let keyTerm ← elabMapKey key
-          let curTerm ← `(Lsc.Wad.Expr.mapGet $(quote field) $keyTerm)
+          let curTerm ← `(Lsc.Fixed.Expr.mapGet $(quote field) $keyTerm)
           let (diffTerm, _) ← elabCheckedSubWith storageName locals curTerm .wad e
           return (← `(Lsc.Stmt.mapSet $(quote field) $keyTerm $diffTerm), locals)
       | none => throwErrorAt x "expected `σ.field[key] -=? e;` on the left-hand side, got `{x.getId}`"

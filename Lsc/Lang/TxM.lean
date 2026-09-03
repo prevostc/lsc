@@ -2,6 +2,7 @@ import Lsc.Lang.AST
 import Lsc.Lang.Eval
 import Lsc.Lib.Wei.Syntax
 import Lsc.Lib.Wad.Syntax
+import Lsc.Lib.Fixed.Syntax
 import Mathlib.Control.Monad.Writer
 import Lean
 
@@ -24,7 +25,7 @@ hand-written ASTs in `examples/counter/src/Counter.lean` are today.
 ## Storage-field notation (`σ.field`) — approach and limitations
 
 The plan suggests a typed, fully-generic `σ.field` notation that picks the
-right constructor (`Wei.Expr.storageGet` vs. `CoreExpr.storageGet t`)
+right constructor (`Fixed.Expr.storageGet` vs. `CoreExpr.storageGet t`)
 based on the *declared type* of `field` in some contract's storage
 structure. Doing this in full generality requires either:
 
@@ -49,7 +50,7 @@ with full inference.
 
 A `TxM` `do`-block is *building* a `Stmt` AST, not executing one. A plain
 Lean `let n := wei σ.number +? 1` only binds `n` to an *AST term*
-(`Wei.Expr.addCheckedNat (Wei.Expr.storageGet "number") 1`) at
+(`Fixed.Expr.addCheckedNat (Fixed.Expr.storageGet "number") 1`) at
 *elaboration* time — it does **not** emit any `Stmt` and does **not**
 evaluate anything. If that same term is referenced again later in the
 same function body, evaluation re-runs the whole term — including any
@@ -73,12 +74,12 @@ write to a field it transitively reads, use `letWei`/`letBool`/
 These emit a real `Stmt.letBind name ⟨ty, e⟩` (which `Stmt.evalWith`
 evaluates exactly once, at that point in the statement sequence, and
 binds into `LocalEnv`) and hand back not `e` itself but a `var`
-reference (`Wei.Expr.var name` / `CoreExpr.var ty name`) resolved
+reference (`Fixed.Expr.var name` / `CoreExpr.var ty name`) resolved
 through `LocalEnv` at eval time. Reusing that reference after subsequent
 storage writes is then safe, since it always resolves to the
 once-computed, bind-time value — exactly the pattern
 `examples/counter/src/Counter.lean`'s hand-written `incrementAst` uses
-(`Stmt.letBind "n" ...` then `Wei.Expr.var "n"` in both the storage-set
+(`Stmt.letBind "n" ...` then `Fixed.Expr.var "n"` in both the storage-set
 and the `emit`).
 
 `TxM`'s `do`-notation supports `let n ← letWei ...` cleanly because the
@@ -212,16 +213,16 @@ One variant per `Ty` tag, matching the `weiField`/`boolField`/`addrField`/
 a `TxM` `do`-block. -/
 
 /-- `let n ← letWei name e` emits `Stmt.letBind name ⟨Ty.wei, e⟩` (evaluated
-once, at this point in the sequence) and returns `Wei.Expr.var name`, a
+once, at this point in the sequence) and returns `Fixed.Expr.var name`, a
 reference safe to reuse even after later writes to fields `e` reads. -/
 @[simp] def letWei (name : Ident) (e : Wei.Expr) : TxM Wei.Expr := do
   tellStmt (Stmt.letBind name ⟨Ty.wei, e⟩)
-  pure (Wei.Expr.var name)
+  pure (Fixed.Expr.var name)
 
 /-- `let w ← letWad name e`, the `Wad`-typed analogue of `letWei`. -/
 @[simp] def letWad (name : Ident) (e : Wad.Expr) : TxM Wad.Expr := do
   tellStmt (Stmt.letBind name ⟨Ty.wad, e⟩)
-  pure (Wad.Expr.var name)
+  pure (Fixed.Expr.var name)
 
 /-- `let b ← letBool name e`, the `Bool`-typed analogue of `letWei`. -/
 @[simp] def letBool (name : Ident) (e : CoreExpr .bool) : TxM (CoreExpr .bool) := do
@@ -316,7 +317,7 @@ function stays; the `+?`/`-?`/`===`/`!`/`msg.sender` *notations* that used to
 live here (for building `Wei.Expr`/`CoreExpr` terms directly in `do`-blocks)
 were removed, since `Syntax.lean`'s `lscExpr` grammar has its own,
 independent `+?`/`-?`/`==`/`!`/`msg.sender` productions that elaborate
-straight to `Wei.Expr.addChecked`/`CoreExpr.not`/`CoreExpr.txField`/etc.
+straight to `Fixed.Expr.addChecked`/`CoreExpr.not`/`CoreExpr.txField`/etc.
 without going through any of these `term`-level notations. -/
 @[simp] def CoreExpr.eqAuto {t : Ty} (a b : CoreExpr t) : CoreExpr Ty.bool := CoreExpr.eq t a b
 

@@ -13,6 +13,7 @@ def renderInstr (i : Instr) : String :=
   match i with
   | .op o => renderOp o
   | .push n => s!"PUSH {n}"
+  | .push32 n => s!"PUSH32 {n}"
   | .pushLabel lbl => s!"PUSH @{lbl}"
   | .jump lbl => s!"JUMP @{lbl}"
   | .jumpi lbl => s!"JUMPI @{lbl}"

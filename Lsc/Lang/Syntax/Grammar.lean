@@ -50,7 +50,7 @@ separate grammar productions (see module docstring). -/
 syntax:max (name := lscExprIdent) ident : lscExpr
 
 /-- Numeric literal. Defaults to `Ty.uint256`-kind unless consumed directly by `+?`/`-?`'s
-bare-`Nat` `Wei.Expr.addCheckedNat`/`.lit` handling (see `lscExprAsNatLit?`). -/
+bare-`Nat` `Fixed.Expr.addCheckedNat`/`.lit` handling (see `lscExprAsNatLit?`). -/
 syntax:max (name := lscExprNum) num : lscExpr
 
 /-- Boolean literal. Using plain `"true"`/`"false"` as fresh `syntax` atoms (even via

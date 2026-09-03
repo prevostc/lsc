@@ -1,17 +1,19 @@
 import Lsc.Lib.Wad.Syntax
+import Lsc.Lib.Fixed.Arith
+import Lsc.Lib.Fixed.ScaleMode
 import Lsc.Core.ContractM
 import Lsc.Lang.AST
 
 namespace Lsc.Wad
 
 def addChecked (a b : Wad) : Except ArithError Wad :=
-  (UInt256.addChecked a.raw b.raw).map Fixed.mk
+  (UInt256.addChecked a.raw b.raw).map mk
 
 def subChecked (a b : Wad) : Except ArithError Wad :=
-  (UInt256.subChecked a.raw b.raw).map Fixed.mk
+  (UInt256.subChecked a.raw b.raw).map mk
 
 def addCheckedNat (a : Wad) (n : Nat) : Except ArithError Wad :=
-  (UInt256.addCheckedNat a.raw n).map Fixed.mk
+  (UInt256.addCheckedNat a.raw n).map mk
 
 /-- Multiply two `Wad`s with half-up rounding, checked for overflow.
 
@@ -46,6 +48,11 @@ def divDownChecked (a b : Wad) : Except ArithError Wad :=
     else
       .ok (mkNat resultNat)
 
+def sqrtDownChecked (a : Wad) : Except ArithError Wad :=
+  Fixed.sqrtDown (.static 18) a
+
+def min (a b : Wad) : Wad := Fixed.min a b
+
 /-- `w.canAddNat n` holds iff adding `n` to `w` will not overflow 256 bits. -/
 abbrev Wad.canAddNat (w : Wad) (n : Nat) : Prop := w.raw.toNat + n < 2 ^ 256
 
@@ -53,13 +60,13 @@ abbrev Wad.canAddNat (w : Wad) (n : Nat) : Prop := w.raw.toNat + n < 2 ^ 256
 theorem addCheckedNat_ok (a : Wad) (n : Nat) (h : Wad.canAddNat a n) :
     addCheckedNat a n = .ok ⟨BitVec.ofNat 256 (a.raw.toNat + n)⟩ := by
   unfold Wad.canAddNat at h
-  simp [addCheckedNat, UInt256.addCheckedNat_ok a.raw n h, Except.map]
+  simp [addCheckedNat, mk, UInt256.addCheckedNat_ok a.raw n h, Except.map, mkNat]
 
 @[simp]
 theorem addCheckedNat_error (a : Wad) (n : Nat) (h : ¬ Wad.canAddNat a n) :
     addCheckedNat a n = .error .Overflow := by
   unfold Wad.canAddNat at h
-  simp [addCheckedNat, UInt256.addCheckedNat_error a.raw n h, Except.map]
+  simp [addCheckedNat, mk, UInt256.addCheckedNat_error a.raw n h, Except.map]
 
 /-- `a.raw.toNat + b.raw.toNat < 2 ^ 256` — the two-`Wad` analogue of `canAddNat`, needed for
 `addChecked`'s ok/error characterization lemmas below (two real `Wad` operands, not a bare
@@ -84,7 +91,7 @@ theorem addChecked_eq_ok_of (a b : Wad) (n : Nat)
     rw [BitVec.lt_def, htoNat]; omega
   simp only [addChecked, UInt256.addChecked, heq]
   rw [if_neg (heq ▸ hnolt)]
-  simp [Except.map, mkNat]
+  simp [Except.map, mk, mkNat]
 
 /-- `Wad.addChecked` in the overflow case — the error-case counterpart of
 `addChecked_eq_ok_of` above. -/
@@ -121,7 +128,7 @@ theorem subChecked_eq_ok_of (a b : Wad) (n : Nat) (hn : a.raw.toNat = b.raw.toNa
     rw [htoNat, BitVec.toNat_ofNat, Nat.mod_eq_of_lt hbound]
   simp only [subChecked, UInt256.subChecked, heq]
   rw [if_neg hnolt]
-  simp [Except.map, mkNat]
+  simp [Except.map, mk, mkNat]
 
 /-- `Wad.subChecked` in the underflow case — the error-case counterpart of
 `subChecked_eq_ok_of` above. -/
@@ -206,18 +213,27 @@ def eval
     match Wad.subChecked va vb with
     | .error ae => ContractM.revertArith ae
     | .ok r => pure r
-  | .mulHalfUpChecked a b => do
+  | .mulHalfUpChecked _ a b => do
     let va ← eval a env
     let vb ← eval b env
     match Wad.mulHalfUpChecked va vb with
     | .error ae => ContractM.revertArith ae
     | .ok r => pure r
-  | .divDownChecked a b => do
+  | .divDownChecked _ a b => do
     let va ← eval a env
     let vb ← eval b env
     match Wad.divDownChecked va vb with
     | .error ae => ContractM.revertArith ae
     | .ok r => pure r
+  | .sqrtDownChecked _ a => do
+    let va ← eval a env
+    match Wad.sqrtDownChecked va with
+    | .error ae => ContractM.revertArith ae
+    | .ok r => pure r
+  | .min a b => do
+    let va ← eval a env
+    let vb ← eval b env
+    pure (Wad.min va vb)
 
 attribute [simp] eval
 

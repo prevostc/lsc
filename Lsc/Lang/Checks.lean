@@ -123,7 +123,7 @@ def arithErrorsByFunction (c : ContractDef) : List (Ident × List ArithError) :=
 
     `FrameworkError` (`Reentrant`/`Unauthorized`/`InvalidSelector`) is intentionally NOT
     checked for reachability here: unlike checked-arithmetic ops, there is no AST node
-    that "raises" a `FrameworkError` the way `Wei.Expr.addChecked` raises `Overflow` —
+    that "raises" a `FrameworkError` the way `Fixed.Expr.addChecked` raises `Overflow` —
     those errors come from framework-level guards (e.g. reentrancy locks) outside the
     `Stmt`/`Expr` data the contract author writes, so there's no decidable reachability
     signal to walk yet. Revisit if/when framework guards become explicit `Stmt` nodes. -/
@@ -185,7 +185,7 @@ def checkSelectorCollisions (c : ContractDef) : Option String :=
   -- calldata-selector check), so collisions must be checked across both kinds together.
   let dispatched := c.functions.filter fun fn => fn.kind == .external || fn.kind == .view
   let selectors := dispatched.map computeSelector
-  if selectors.length ≠ selectors.eraseDups.length then
+  if ¬ selectors.Nodup then
     some "Selector collision detected between external/view functions"
   else
     none
@@ -338,6 +338,20 @@ def validateAll (c : ContractDef) : Except String ContractDef :=
   else if let some err := checkNonReentrant c then .error err
   else if let some err := checkViews c then .error err
   else .ok c
+
+theorem validateAll_selector_nodup (c : ContractDef)
+    (hvalid : validateAll c = .ok c) :
+    ((c.functions.filter fun fn => fn.kind == .external || fn.kind == .view).map
+      computeSelector).Nodup := by
+  simp only [validateAll] at hvalid
+  split at hvalid <;> try contradiction
+  split at hvalid <;> try contradiction
+  split at hvalid
+  · simp at hvalid
+  · rename_i _ _ _ _ _ hnone
+    by_contra hdup
+    apply hnone "Selector collision detected between external/view functions"
+    simp [checkSelectorCollisions, hdup]
 
 end Checks
 end Lsc

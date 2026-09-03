@@ -1,6 +1,7 @@
 import Lsc.Lang.AST
 import Lsc.Lib.Wei.Optimize
 import Lsc.Lib.Wad.Optimize
+import Lsc.Lib.Fixed.Syntax
 
 namespace Lsc.Compile
 
@@ -101,7 +102,7 @@ private partial def lowerCoreExpr (cfg : Config) {t : Ty} (e : CoreExpr t) : Exc
     .ok (.isZero (.lt b' a'))
   | _ => .error "unsupported expression in lowering"
 
-private partial def lowerExpr (cfg : Config) {t : Ty} (e : Expr t) : Except String IR.Expr :=
+private def lowerExpr (cfg : Config) {t : Ty} (e : Expr t) : Except String IR.Expr :=
   match t, e with
   | .wei, e => Wei.lowerExpr cfg.storage.fieldSlot e
   | .wad, e => Wad.lowerExpr cfg.storage.fieldSlot cfg.storage.mapFieldSlot e
@@ -129,7 +130,7 @@ private def lowerCalleeAddr (cfg : Config) (callee : CalleeRef) : Except String 
     .ok (.sload slot)
   | .local name => .ok (.local name)
 
-private partial def lowerStmt (cfg : Config) (s : Lsc.Stmt) : Except String IR.Stmt :=
+private def lowerStmt (cfg : Config) (s : Lsc.Stmt) : Except String IR.Stmt :=
   match s with
   | .skip => .ok .skip
   | .seq s1 s2 => do
@@ -145,21 +146,21 @@ private partial def lowerStmt (cfg : Config) (s : Lsc.Stmt) : Except String IR.S
   | .storageSet field ⟨Ty.wad, e⟩ => do
     let slot ← resolveSlot cfg field
     match e with
-    | Wad.Expr.addChecked (.storageGet f) rhs =>
+    | Fixed.Expr.addChecked (.storageGet f) rhs =>
       if f == field then do
         let overflowSel ← resolveErrorSelector cfg "Overflow"
         Wad.lowerAddCheckedStorage slot rhs cfg.storage.fieldSlot cfg.storage.mapFieldSlot overflowSel
       else do
         let ir ← lowerExpr cfg (t := Ty.wad) e
         .ok (.sstore slot ir)
-    | Wad.Expr.addCheckedNat (.storageGet f) n =>
+    | Fixed.Expr.addCheckedNat (.storageGet f) n =>
       if f == field then do
         let overflowSel ← resolveErrorSelector cfg "Overflow"
         .ok (Wad.lowerAddCheckedNatStorage slot n overflowSel)
       else do
         let ir ← lowerExpr cfg (t := Ty.wad) e
         .ok (.sstore slot ir)
-    | Wad.Expr.subChecked (.storageGet f) rhs =>
+    | Fixed.Expr.subChecked (.storageGet f) rhs =>
       if f == field then do
         let underflowSel ← resolveErrorSelector cfg "Underflow"
         Wad.lowerSubCheckedStorage slot rhs cfg.storage.fieldSlot cfg.storage.mapFieldSlot underflowSel
@@ -172,21 +173,21 @@ private partial def lowerStmt (cfg : Config) (s : Lsc.Stmt) : Except String IR.S
   | .storageSet field ⟨Ty.wei, e⟩ => do
     let slot ← resolveSlot cfg field
     match e with
-    | Wei.Expr.addCheckedNat (.storageGet f) n =>
+    | Fixed.Expr.addCheckedNat (.storageGet f) n =>
       if f == field then do
         let overflowSel ← resolveErrorSelector cfg "Overflow"
         .ok (Wei.lowerAddCheckedNatStorage slot n field overflowSel (.sstore slot (.local field)))
       else do
         let ir ← lowerExpr cfg (t := Ty.wei) e
         .ok (.sstore slot ir)
-    | Wei.Expr.addChecked (.storageGet f) rhs =>
+    | Fixed.Expr.addChecked (.storageGet f) rhs =>
       if f == field then do
         let overflowSel ← resolveErrorSelector cfg "Overflow"
         Wei.lowerAddCheckedStorage slot rhs cfg.storage.fieldSlot overflowSel
       else do
         let ir ← lowerExpr cfg (t := Ty.wei) e
         .ok (.sstore slot ir)
-    | Wei.Expr.subChecked (.storageGet f) rhs =>
+    | Fixed.Expr.subChecked (.storageGet f) rhs =>
       if f == field then do
         let underflowSel ← resolveErrorSelector cfg "Underflow"
         Wei.lowerSubCheckedStorage slot rhs cfg.storage.fieldSlot underflowSel
@@ -213,6 +214,10 @@ private partial def lowerStmt (cfg : Config) (s : Lsc.Stmt) : Except String IR.S
   | .revert errName => do
     let sel ← resolveErrorSelector cfg errName
     .ok (.revertSelector sel)
+  | .ret ⟨Ty.wad, e⟩ =>
+    Fixed.lowerRetStmt cfg.storage.fieldSlot cfg.storage.mapFieldSlot e
+  | .ret ⟨Ty.wei, e⟩ =>
+    Fixed.lowerRetStmt cfg.storage.fieldSlot (fun _ => none) e
   | .ret ⟨t, e⟩ => do
     let ir ← lowerExpr cfg (t := t) e
     .ok (.ret ir)
@@ -257,17 +262,35 @@ private partial def lowerStmt (cfg : Config) (s : Lsc.Stmt) : Except String IR.S
 def stmt (cfg : Config) (s : Lsc.Stmt) : Except String IR.Stmt :=
   lowerStmt cfg s
 
-/-- Prepend ABI calldata `letBind`s for each function parameter (declaration order). -/
-private partial def paramPrologueFrom (params : List (Ident × Ty)) (i : Nat) (baseOffset : Nat)
-    (body : IR.Stmt) : IR.Stmt :=
-  match params.drop i with
-  | [] => body
-  | (name, _) :: _ =>
-    .seq (.letBind name (.calldataWord (baseOffset + 32 * i)))
-      (paramPrologueFrom params (i + 1) baseOffset body)
+/-- Transparent equation used by library-view proofs without exposing the private recursive
+lowering worker. -/
+@[simp] theorem stmt_ret_wad (cfg : Config) (e : Fixed.Expr) :
+    stmt cfg (.ret ⟨.wad, e⟩) =
+      Fixed.lowerRetStmt cfg.storage.fieldSlot cfg.storage.mapFieldSlot e := by
+  simp [stmt, lowerStmt]
 
-private def paramPrologue (params : List (Ident × Ty)) (baseOffset : Nat) (body : IR.Stmt) : IR.Stmt :=
+/-- Total worker for ABI calldata bindings, carrying the original word index. -/
+def paramPrologueLoop : List (Ident × Ty) → Nat → Nat → IR.Stmt → IR.Stmt
+  | [], _, _, body => body
+  | (name, _) :: rest, i, baseOffset, body =>
+    .seq (.letBind name (.calldataWord (baseOffset + 32 * i)))
+      (paramPrologueLoop rest (i + 1) baseOffset body)
+
+/-- Prepend ABI calldata `letBind`s for each function parameter (declaration order). -/
+def paramPrologueFrom (params : List (Ident × Ty)) (i : Nat) (baseOffset : Nat)
+    (body : IR.Stmt) : IR.Stmt :=
+  paramPrologueLoop (params.drop i) i baseOffset body
+
+def paramPrologue (params : List (Ident × Ty)) (baseOffset : Nat) (body : IR.Stmt) : IR.Stmt :=
   paramPrologueFrom params 0 baseOffset body
+
+/-- Transparent two-parameter ABI prologue equation. -/
+@[simp] theorem paramPrologue_two (a b : Ident) (ta tb : Ty) (baseOffset : Nat)
+    (body : IR.Stmt) :
+    paramPrologue [(a, ta), (b, tb)] baseOffset body =
+      .seq (.letBind a (.calldataWord baseOffset))
+        (.seq (.letBind b (.calldataWord (baseOffset + 32))) body) := by
+  simp [paramPrologue, paramPrologueFrom, paramPrologueLoop]
 
 /-- Lower a `FunctionDef` body with ABI parameter bindings in IR.
     `baseOffset` is 4 for external functions (after selector) and 0 for constructors. -/
