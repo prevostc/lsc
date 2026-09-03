@@ -2,6 +2,7 @@ import Lsc3.Examples.Counter
 import Lsc3.Compile.GetBody
 import Lsc3.Compile.GetContract
 import Lsc3.Compile.IncBody
+import Lsc3.Compile.IncByBody
 import Lsc3.Compile.IncContract
 import Lsc3.Compile.GetInc
 import Lsc3.Compile.Codegen
@@ -119,6 +120,10 @@ theorem incrementBy_core_eq :
             (Core.seq (.store 0 (.var 0))
               (Core.stmtTail (.emit 0 [.var 2]))))) :=
   rfl
+
+/-- The isolated `incrementBy` codegen function uses the same Core term. -/
+theorem incrementBy_core_incBy : incrementBy.core = IncByBody.incByFn.core := by
+  rw [incrementBy_core_eq, IncByBody.incByFn_core]
 
 /-- `Core.denote` of the reified `incrementBy` term is the user function. -/
 theorem incrementBy_denote (n : Nat) :
