@@ -15,7 +15,7 @@ def loadSelector : List Asm :=
   [Asm.push 0, Asm.op .CALLDATALOAD, Asm.push 0xE0, Asm.op .SHR]
 
 def selectorBranch (fn : FnDef) : List Asm :=
-  loadSelector ++ [Asm.push (FnDef.selector fn), Asm.op .EQ, Asm.jumpi fn.name]
+  loadSelector ++ [Asm.push4 (FnDef.selector fn), Asm.op .EQ, Asm.jumpi fn.name]
 
 def selectorBranches : List FnDef → List Asm
   | [] => []

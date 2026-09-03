@@ -12,6 +12,10 @@ open Lsc3.EVM
 inductive Asm where
   | op (op : Opcode)
   | push (n : Word)
+  /-- Dispatcher selectors: always `PUSH4`, so jump layout does not depend on the value. -/
+  | push4 (n : Word)
+  /-- 32-byte immediates (`PUSH32`): revert selectors, event topics. -/
+  | push32 (n : Word)
   | pushLabel (lbl : String)
   | jump (lbl : String)
   | jumpi (lbl : String)

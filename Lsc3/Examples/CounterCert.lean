@@ -1,0 +1,51 @@
+import Lsc3.Examples.Counter
+import Lsc3.Compile.GetBody
+import Lsc3.Compile.GetContract
+import Lsc3.Compile.Codegen
+
+/-!
+# Counter.get — Lean, Core, codegen, and compiler bytecode
+
+`get` is `read count`. Reification yields `opTail (.load 0)`; codegen of that term
+encodes to `GetBody.code`. The one-function compiler contract with the same Core
+encodes to `GetContract.code`, and `GetContract.getOnly_hit sel n` is the machine
+certificate (any `sel`, including `selectorOf "get" []`). Instantiating that proof
+at a concrete Keccak selector exceeds `maxRecDepth`; apply it rather than
+specializing it here.
+-/
+
+open Lsc3 Lsc3.Compile Counter
+
+namespace Counter
+
+/-- `get` is `read count`. -/
+theorem get_run (ctx : Lsc3.Ctx) (w : World Storage Event) :
+    Tx.run get ctx w = .ok (w.self.count, w) := by
+  simp [get]
+
+/-- Reification of `get` is a tail load of slot 0. -/
+theorem get_core_eq : get.core = Core.opTail (.load 0) := rfl
+
+/-- The get-only compiler contract uses the same Core term. -/
+theorem get_core_getOnly : get.core = GetContract.getFn.core := by
+  rw [get_core_eq, GetContract.getFn_core]
+
+/-- `Core.denote` of the reified term is the user function. -/
+theorem get_denote : Core.denote schema get.core [] = get :=
+  get.core_denote
+
+/-- Codegen of `get.core` is the `GetBody` instruction list. -/
+theorem get_codegen (ctx : Lsc3.Compile.Ctx) :
+    match Codegen.genCore ctx contract get.core with
+    | .ok (instrs, _) => encode instrs = .ok GetBody.code
+    | .error _ => False := by
+  rw [get_core_eq]
+  exact GetBody.encode_genCore_load0 ctx contract
+
+/-- The compiler's one-function `get` contract encodes to `GetContract.code`. -/
+theorem getOnly_compile :
+    compileContract GetContract.getOnly =
+      .ok (GetContract.code (FnDef.selector GetContract.getFn)) :=
+  GetContract.compile_getOnly
+
+end Counter

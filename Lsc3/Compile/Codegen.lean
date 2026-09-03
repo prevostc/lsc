@@ -58,7 +58,7 @@ def emitOp (op : Opcode) : List Asm := [Asm.op op]
 
 /-- Solidity `Panic(uint256)` — 0x11 overflow/underflow, 0x12 division by zero. -/
 def emitPanic (code : Nat) : List Asm :=
-  [Asm.push (selectorOf "Panic" [{ name := "code", ty := .uint256 }] * (2 ^ 224)),
+  [Asm.push32 (selectorOf "Panic" [{ name := "code", ty := .uint256 }] * (2 ^ 224)),
    Asm.push 0, Asm.op .MSTORE,
    Asm.push code, Asm.push 4, Asm.op .MSTORE,
    Asm.push 36, Asm.push 0, Asm.op .REVERT]
@@ -233,7 +233,7 @@ def genOp (ctx : Ctx) : Op → Except String (List Asm × Ctx)
   | .pure a => genAtom ctx a
 
 def emitRevert (sel : Nat) : List Asm :=
-  [Asm.push (sel * (2 ^ 224)), Asm.push 0, Asm.op .MSTORE, Asm.push 4, Asm.push 0, Asm.op .REVERT]
+  [Asm.push32 (sel * (2 ^ 224)), Asm.push 0, Asm.op .MSTORE, Asm.push 4, Asm.push 0, Asm.op .REVERT]
 
 def genStmt (ctx : Ctx) (c : ContractDef) : Stmt → Except String (List Asm × Ctx)
   | .store f v => do
@@ -264,7 +264,7 @@ def genStmt (ctx : Ctx) (c : ContractDef) : Stmt → Except String (List Asm × 
       let (ai, c') ← genAtom cAcc arg
       pure (acc ++ ai ++ [Asm.push (32 * i), Asm.op .MSTORE], c', i + 1)
     let n := args.length
-    .ok (stores ++ [Asm.push topic0, Asm.push (32 * n), Asm.push 0,
+    .ok (stores ++ [Asm.push32 topic0, Asm.push (32 * n), Asm.push 0,
       Asm.op (.LOG ⟨1, by decide⟩)], cAcc)
   | .revert err _ =>
     let sel := if h : err < c.errors.length then ErrorDef.selector c.errors[err] else 0

@@ -9,8 +9,14 @@ import Lsc3.EVM.Lemmas
 import Lsc3.EVM.EvmYulRefinement
 import Lsc3.Compile.Contract
 import Lsc3.Compile.Exec
+import Lsc3.Compile.GetBody
+import Lsc3.Compile.Dispatch
+import Lsc3.Compile.DispatchGet
+import Lsc3.Compile.CalldataCheck
+import Lsc3.Compile.GetContract
 import Lsc3.Compile.Cert
 import Lsc3.Examples.Counter
+import Lsc3.Examples.CounterCert
 import Lsc3.Examples.Token
 import Lsc3.Examples.TokenProofs
 import Lsc3.Examples.Vault
