@@ -5,6 +5,8 @@ import Lsc3.Reify
 import Lsc3.Contract
 import Lsc3.EVM.State
 import Lsc3.EVM.Step
+import Lsc3.EVM.Lemmas
+import Lsc3.EVM.EvmYulRefinement
 import Lsc3.Compile.Contract
 import Lsc3.Compile.Exec
 import Lsc3.Compile.Cert

@@ -46,6 +46,9 @@ build_no_warnings "$ROOT" "Lsc.ChecksTest"
 build_no_warnings "$ROOT" "Lsc.Lang.TxMTest"
 build_no_warnings "$ROOT" "Lsc.Lang.DeriveTest"
 
+echo "==> Lsc3"
+build_no_warnings "$ROOT" "Lsc3"
+
 echo "==> counter example"
 build_no_warnings "$ROOT/examples/counter" "Counter"
 build_no_warnings "$ROOT/examples/counter" "CounterTheorem"

@@ -79,4 +79,20 @@ theorem length_flatMap_packWord (args : List Nat) :
 
 @[simp] theorem decodeWord_packWord_42 : decodeWord (packWord 42) = 42 := rfl
 
+/-- Word-valued `Tx.run` vs machine `Outcome`. Revert/panic both map to a failing outcome. -/
+def agreesWord {S E ε} (o : Outcome) (r : Except (Err ε) (Nat × World S E)) : Prop :=
+  match o, r with
+  | .ret w _, .ok (v, _) => w = v
+  | .revert, .error _ => True
+  | .fail _, .error (.arith _) => True
+  | _, _ => False
+
+/-- Unit-valued `Tx.run` vs machine `Outcome`. -/
+def agreesUnit {S E ε} (o : Outcome) (r : Except (Err ε) (Unit × World S E)) : Prop :=
+  match o, r with
+  | .stop _, .ok _ => True
+  | .revert, .error _ => True
+  | .fail _, .error (.arith _) => True
+  | _, _ => False
+
 end Lsc3.Compile.Exec
