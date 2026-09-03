@@ -182,6 +182,7 @@ theorem emitPush_0x11 : emitPush 0x11 = [0x60, 0x11] := rfl
 theorem emitPush_thirtysix : emitPush 36 = [0x60, 36] := rfl
 theorem emitPush_0x80 : emitPush 0x80 = [0x60, 0x80] := rfl
 theorem emitPush_0xA0 : emitPush 0xA0 = [0x60, 0xA0] := rfl
+theorem emitPush_0xC0 : emitPush 0xC0 = [0x60, 0xC0] := rfl
 
 def encode (instrs : List Asm) : Except String (List UInt8) := do
   checkDuplicateLabels instrs

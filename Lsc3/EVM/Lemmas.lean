@@ -65,8 +65,31 @@ theorem memGet_memStore (m : Mem) (off v i : Nat) (hi : i < 32) :
   exact memGet_foldl_memSet m off
     (fun j => UInt8.ofNat ((wrap v / 256 ^ (31 - j)) % 256)) 32 i hi
 
+theorem memGet_foldl_memSet_ne (m : Mem) (off : Nat) (byte : Nat → UInt8) (k j : Nat)
+    (hj : ∀ i, i < k → j ≠ off + i) :
+    memGet ((List.range k).foldl (fun mem i => memSet mem (off + i) (byte i)) m) j =
+      memGet m j := by
+  induction k generalizing m with
+  | zero => simp
+  | succ k ih =>
+    rw [List.range_succ, List.foldl_append]
+    simp only [List.foldl_cons, List.foldl_nil]
+    have hne : j ≠ off + k := hj k (Nat.lt_succ_self k)
+    rw [memGet_memSet_ne _ _ _ _ hne]
+    exact ih m (fun i hi => hj i (Nat.lt_succ_of_lt hi))
+
+theorem memGet_memStore_ne (m : Mem) (off v j : Nat)
+    (h : ∀ i, i < 32 → j ≠ off + i) :
+    memGet (memStore m off v) j = memGet m j := by
+  simp only [memStore]
+  exact memGet_foldl_memSet_ne m off
+    (fun i => UInt8.ofNat ((wrap v / 256 ^ (31 - i)) % 256)) 32 j h
+
 @[simp] theorem wrap_lt (n : Nat) : wrap n < wordBound :=
   Nat.mod_lt n (by decide)
+
+@[simp] theorem wrap_wrap (n : Nat) : wrap (wrap n) = wrap n :=
+  Nat.mod_eq_of_lt (wrap_lt n)
 
 @[simp] theorem eqW_self (a : Word) : eqW a a = 1 := by simp [eqW]
 
@@ -105,6 +128,18 @@ theorem decodeAt_op_head (op : Opcode) (rest : List UInt8)
   have hpc : 0 < (op.toByte :: rest).length := by simp
   rw [dif_pos hpc, List.getElem_cons_zero, ofByte_toByte]
   simp [himm, readImm, wrap]
+
+theorem decodeAt_eq_head (rest : List UInt8) :
+    decodeAt (Opcode.toByte .EQ :: rest) 0 = some ({ op := .EQ }, 1) :=
+  decodeAt_op_head .EQ rest rfl
+
+theorem decodeAt_iszero_head (rest : List UInt8) :
+    decodeAt (Opcode.toByte .ISZERO :: rest) 0 = some ({ op := .ISZERO }, 1) :=
+  decodeAt_op_head .ISZERO rest rfl
+
+theorem decodeAt_calldataload_head (rest : List UInt8) :
+    decodeAt (Opcode.toByte .CALLDATALOAD :: rest) 0 = some ({ op := .CALLDATALOAD }, 1) :=
+  decodeAt_op_head .CALLDATALOAD rest rfl
 
 /-! ## `step` from a decode hypothesis -/
 
@@ -190,6 +225,21 @@ private theorem foldl_range_eq {α} (n : Nat) (f g : α → Nat → α)
     simp only [List.foldl_cons, List.foldl_nil]
     rw [ih (fun acc i hi => h acc i (Nat.lt_succ_of_lt hi))]
     rw [h _ n (Nat.lt_succ_self n)]
+
+theorem memLoad_memStore_ne (m : Mem) (off v off' : Nat)
+    (h : off' + 32 ≤ off ∨ off + 32 ≤ off') :
+    memLoad (memStore m off v) off' = memLoad m off' := by
+  simp only [memLoad]
+  apply congrArg wrap
+  refine foldl_range_eq 32 _ _ ?_ 0
+  intro acc i hi
+  have hne : memGet (memStore m off v) (off' + i) = memGet m (off' + i) := by
+    apply memGet_memStore_ne
+    intro k hk
+    cases h with
+    | inl hle => omega
+    | inr hle => omega
+  rw [hne]
 
 /-- Immediate bytes at `pc` are the prefix of `code.drop pc`. -/
 theorem readImm_drop (code : List UInt8) (pc immLen : Nat) :
@@ -560,6 +610,14 @@ theorem gtW_add_no_overflow {n : Nat} (h : n + 1 < wordBound) :
 theorem addW_succ_of_lt {n : Nat} (h : n + 1 < wordBound) :
     addW n 1 = n + 1 := by
   simp [addW, wrap, Nat.mod_eq_of_lt h]
+
+theorem addW_of_lt {a b : Nat} (h : a + b < wordBound) : addW a b = a + b := by
+  simp [addW, wrap, Nat.mod_eq_of_lt h]
+
+theorem gtW_add_of_lt {a b : Nat} (h : a + b < wordBound) : gtW a (addW a b) = 0 := by
+  rw [addW_of_lt h]
+  simp [gtW]
+  try exact Nat.not_lt.mpr (Nat.le_add_right a b)
 
 theorem addW_succ_overflow {n : Nat} (h : n + 1 = wordBound) :
     addW n 1 = 0 := by

@@ -326,6 +326,42 @@ theorem shrW_calldataLoad_packCall (sel : Nat) (args : List Nat) :
   rw [Nat.add_comm, ← pow256_28, Nat.add_mul_div_right _ _ (by decide : 0 < 256 ^ 28)]
   rw [Nat.div_eq_of_lt hlow, Nat.zero_add]
 
+theorem packCall_arg_getElem (sel arg : Nat) (i : Nat) (hi : i < 32) :
+    (packCall sel [arg])[4 + i]'(by simp [packCall_length]; omega) =
+      (packWord arg)[i]'(by simp [packWord_length]; exact hi) := by
+  simp only [packCall, List.flatMap_cons, List.flatMap_nil, List.append_nil]
+  have hle : ((List.range 4).map fun j =>
+      UInt8.ofNat ((sel / (256 ^ (3 - j))) % 256)).length ≤ 4 + i := by
+    simp
+  rw [List.getElem_append_right hle]
+  simp
+
+/-- ABI word at calldata offset 4 of `packCall sel [arg]`. -/
+theorem calldataLoad_packCall_arg (sel arg : Nat) :
+    calldataLoad (packCall sel [arg]) 4 = wrap arg := by
+  set data := packCall sel [arg]
+  have hlen : ∀ i, i < 32 → 4 + i < data.length := by
+    intro i hi
+    simp [data, packCall_length]; omega
+  have hfold :
+      (List.range 32).foldl (fun acc i =>
+        acc * 256 + (if 4 + i < data.length then (data[4 + i]!).toNat else 0)) 0 =
+      (List.range 32).foldl (fun acc i => acc * 256 + (packWord arg)[i]!.toNat) 0 := by
+    refine foldl_range_eq 32 _ _ ?_ 0
+    intro acc i hi
+    have hi' := hlen i hi
+    simp only [hi', ↓reduceIte]
+    rw [getElem!_pos data (4 + i) hi', packCall_arg_getElem sel arg i hi]
+    rw [getElem!_pos (packWord arg) i (by simp [packWord_length]; exact hi)]
+  have hdecode :
+      (List.range 32).foldl (fun acc i => acc * 256 + (packWord arg)[i]!.toNat) 0 =
+        arg % wordBound := by
+    have hlen32 : (packWord arg).length = 32 := packWord_length arg
+    simpa [decodeWord, hlen32, Nat.min_self] using decodeWord_packWord arg
+  simp only [calldataLoad]
+  rw [hfold, hdecode]
+  simp [wrap]
+
 /-- Word-valued `Tx.run` vs machine `Outcome`. Revert/panic both map to a failing outcome. -/
 def agreesWord {S E ε} (o : Outcome) (r : Except (Err ε) (Nat × World S E)) : Prop :=
   match o, r with

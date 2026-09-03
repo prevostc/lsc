@@ -23,6 +23,9 @@ matching-selector machine certificate (STOP with slot 0 equal to `n + 1`).
 
 The two-function compiler `GetInc.getInc` encodes to `GetInc.code`. Apply
 `GetInc.getInc_get_hit` / `GetInc.getInc_inc_hit`; do not instantiate them here.
+
+Isolated `incrementBy` encodes to `IncByBody.code`. Apply `IncByBody.incBy_hit` /
+`IncByBody.incBy_zero`; do not instantiate them here.
 -/
 
 open Lsc3 Lsc3.Compile Counter
@@ -124,6 +127,14 @@ theorem incrementBy_core_eq :
 /-- The isolated `incrementBy` codegen function uses the same Core term. -/
 theorem incrementBy_core_incBy : incrementBy.core = IncByBody.incByFn.core := by
   rw [incrementBy_core_eq, IncByBody.incByFn_core]
+
+/-- Codegen of isolated `incrementBy` encodes to `IncByBody.code`. -/
+theorem incrementBy_codegen :
+    match Codegen.genFunction contract IncByBody.incByFn {} with
+    | .ok (instrs, _) => encode instrs = .ok IncByBody.code
+    | .error _ => False := by
+  rw [IncByBody.incrementBy_genFunction]
+  exact IncByBody.encode_incBy
 
 /-- `Core.denote` of the reified `incrementBy` term is the user function. -/
 theorem incrementBy_denote (n : Nat) :
