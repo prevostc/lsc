@@ -167,9 +167,20 @@ def natLit? (e : Expr) : Option Nat :=
       | _ => none
     else none
 
+/-- Evaluate a closed `Nat` (literals, `WAD`/`RAY`/`Flag.on`, `10 ^ 18`, …) to a number.
+Used so scale constants become `Atom.lit` and the certificate still closes by `rfl`. -/
+def closedNat? (e : Expr) : MetaM (Option Nat) := do
+  let e := e.consumeMData
+  if let some n := natLit? e then return some n
+  try
+    let e ← reduce (skipTypes := true) e
+    return natLit? e.consumeMData
+  catch _ =>
+    return none
+
 def atomOf (env : Env t) (e : Expr) : MetaM Atom := do
   let e := e.consumeMData
-  if let some n := natLit? e then return .lit n
+  if let some n ← closedNat? e then return .lit n
   if let .fvar id := e then
     match env.vars.idxOf? id with
     | some i => return .var i
@@ -221,18 +232,40 @@ def ctorIndex (ctors : Array Name) (e : Expr) : MetaM (Nat × Array Expr) := do
     | none => throwError "reify: `{e}` is not a constructor of the contract's event/error type"
   | _ => throwError "reify: `{e}` must be an event/error constructor application"
 
+/-- Word-like types that may be compared: `Nat`, `Address`, `Amount`, `Flag`, `Price`. -/
+def isWordLike (ty : Expr) : Bool :=
+  let n := ty.getAppFn.constName?
+  n == some ``Nat || n == some ``Lsc3.Address || n == some ``Lsc3.Amount
+    || n == some ``Lsc3.Flag || n == some ``Lsc3.Price || n == some ``Lsc3.Fixed
+
 partial def condOf (env : Env t) (e : Expr) : MetaM Cond := do
   let e := e.consumeMData
   let f := e.getAppFn
   let args := e.getAppArgs
   let atom := atomOf env
+  let checkWord (ty : Expr) : MetaM Unit := do
+    let ty ← whnfR ty
+    unless isWordLike ty || ty.isConstOf ``Nat do
+      throwError "reify: comparison on `{ty}` is not supported (use Nat, Address, Amount, Flag)"
   match f.constName?, args.size with
-  | some ``LT.lt, 4 => return .lt (← atom args[2]!) (← atom args[3]!)
-  | some ``LE.le, 4 => return .le (← atom args[2]!) (← atom args[3]!)
-  | some ``GT.gt, 4 => return .lt (← atom args[3]!) (← atom args[2]!)
-  | some ``GE.ge, 4 => return .le (← atom args[3]!) (← atom args[2]!)
-  | some ``Eq, 3 => return .eq (← atom args[1]!) (← atom args[2]!)
-  | some ``Ne, 3 => return .ne (← atom args[1]!) (← atom args[2]!)
+  | some ``LT.lt, 4 =>
+    checkWord args[0]!
+    return .lt (← atom args[2]!) (← atom args[3]!)
+  | some ``LE.le, 4 =>
+    checkWord args[0]!
+    return .le (← atom args[2]!) (← atom args[3]!)
+  | some ``GT.gt, 4 =>
+    checkWord args[0]!
+    return .lt (← atom args[3]!) (← atom args[2]!)
+  | some ``GE.ge, 4 =>
+    checkWord args[0]!
+    return .le (← atom args[3]!) (← atom args[2]!)
+  | some ``Eq, 3 =>
+    checkWord args[0]!
+    return .eq (← atom args[1]!) (← atom args[2]!)
+  | some ``Ne, 3 =>
+    checkWord args[0]!
+    return .ne (← atom args[1]!) (← atom args[2]!)
   | some ``And, 2 => return .and (← condOf env args[0]!) (← condOf env args[1]!)
   | some ``Or, 2 => return .or (← condOf env args[0]!) (← condOf env args[1]!)
   | some ``Not, 1 => return .not (← condOf env args[0]!)
@@ -244,24 +277,79 @@ def retExprOf (env : Env t) : (s : RetTy) → Expr → MetaM (RetExpr s)
   | .unit, _ => pure .unit
   | .word, e => return .word (← atomOf env e)
   | .addr, e => return .addr (← atomOf env e)
+  | .flag, e => return .flag (← atomOf env e)
   | .pair s₁ s₂, e => do
     let e := e.consumeMData
     if e.isAppOfArity ``Prod.mk 4 then
       return .pair (← retExprOf env s₁ (e.getArg! 2)) (← retExprOf env s₂ (e.getArg! 3))
     throwError "reify: expected a pair in `pure`, found `{e}`"
 
+/-- Do not `whnf` through `Amount`/`Address`/`Flag` (`def` newtypes). `whnfR` still unfolds
+the `Fixed` abbrev to `Amount Unit s`. -/
 partial def retTyOf (ρ : Expr) : MetaM RetTy := do
   let ρ ← whnfR ρ
   match ρ.getAppFn.constName?, ρ.getAppNumArgs with
   | some ``Unit, 0 | some ``PUnit, 0 => pure .unit
   | some ``Nat, 0 => pure .word
   | some ``Lsc3.Address, 0 => pure .addr
+  | some ``Lsc3.Flag, 0 => pure .flag
+  | some ``Lsc3.Amount, 2 => pure .word
+  | some ``Lsc3.Price, 3 => pure .word
   | some ``Prod, 2 => return .pair (← retTyOf (ρ.getArg! 0)) (← retTyOf (ρ.getArg! 1))
-  | _, _ => throwError "reify: unsupported return type `{ρ}` (Unit, Nat, Address, or pairs)"
+  | _, _ => throwError "reify: unsupported return type `{ρ}` \
+      (Unit, Nat, Address, Flag, Amount, Price, or pairs)"
+
+/-- Head constants that unfold to a `Tx` primitive (`Amount.add` → `Tx.addChecked`, …). -/
+def isAmountOp : Name → Bool
+  | ``Lsc3.Amount.add | ``Lsc3.Amount.sub
+  | ``Lsc3.Amount.mulDown | ``Lsc3.Amount.mulUp
+  | ``Lsc3.Amount.divDown | ``Lsc3.Amount.divUp
+  | ``Lsc3.Amount.ratioDown | ``Lsc3.Amount.ratioUp
+  | ``Lsc3.Amount.shareDown | ``Lsc3.Amount.shareUp
+  | ``Lsc3.Amount.rescale | ``Lsc3.Amount.convert => true
+  | _ => false
+
+/-- `Rounding` must be a literal constructor so the reifier can pick `mulDivDown` vs `mulDivUp`. -/
+def roundingOf (e : Expr) : MetaM Rounding := do
+  let e := e.consumeMData
+  match e.getAppFn.constName? with
+  | some ``Lsc3.Rounding.down => return .down
+  | some ``Lsc3.Rounding.up => return .up
+  | _ => throwError "reify: rounding `{e}` must be a literal `.down` or `.up`"
+
+/-- Unfold `Amount.*` (and reduce a `Rounding` match) until the head is a `Tx` primitive. -/
+partial def unfoldToTx (x : Expr) (fuel : Nat := 8) : MetaM Expr := do
+  let x := x.consumeMData
+  let n := x.getAppFn.constName?
+  if n == some ``Lsc3.Tx.addChecked || n == some ``Lsc3.Tx.subChecked
+      || n == some ``Lsc3.Tx.mulChecked || n == some ``Lsc3.Tx.divChecked
+      || n == some ``Lsc3.Tx.mulDivDown || n == some ``Lsc3.Tx.mulDivUp then
+    return x
+  if fuel = 0 then return x
+  if n.any isAmountOp then
+    if n == some ``Lsc3.Amount.rescale || n == some ``Lsc3.Amount.convert then
+      -- Fail early with a clear message if Rounding is not a constructor.
+      let args := x.getAppArgs
+      if args.size > 0 then
+        let _ ← roundingOf args[args.size - 2]!
+    match ← unfoldDefinition? x with
+    | some x' => return (← unfoldToTx x' (fuel - 1))
+    | none =>
+      let x' ← whnfR x
+      if x' == x then return x
+      else return (← unfoldToTx x' (fuel - 1))
+  let x' ← whnfR x
+  if x' != x then return (← unfoldToTx x' (fuel - 1))
+  match ← unfoldDefinition? x with
+  | some x' => unfoldToTx x' (fuel - 1)
+  | none => return x
 
 /-- Word-valued primitives. -/
 def opOf (ci : ContractInfo) (env : Env t) (x : Expr) : MetaM (Option Op) := do
   let x := x.consumeMData
+  let x ←
+    if x.getAppFn.constName?.any isAmountOp then unfoldToTx x
+    else pure x
   let args := x.getAppArgs
   let atom := atomOf env
   match x.getAppFn.constName?, args.size with
@@ -286,6 +374,10 @@ def opOf (ci : ContractInfo) (env : Env t) (x : Expr) : MetaM (Option Op) := do
   | some ``Lsc3.Tx.subChecked, 5 => return some (.subChecked (← atom args[3]!) (← atom args[4]!))
   | some ``Lsc3.Tx.mulChecked, 5 => return some (.mulChecked (← atom args[3]!) (← atom args[4]!))
   | some ``Lsc3.Tx.divChecked, 5 => return some (.divChecked (← atom args[3]!) (← atom args[4]!))
+  | some ``Lsc3.Tx.mulDivDown, 6 =>
+    return some (.mulDivDown (← atom args[3]!) (← atom args[4]!) (← atom args[5]!))
+  | some ``Lsc3.Tx.mulDivUp, 6 =>
+    return some (.mulDivUp (← atom args[3]!) (← atom args[4]!) (← atom args[5]!))
   | some ``Pure.pure, 4 => return some (.pure (← atom args[3]!))
   | _, _ => return none
 
@@ -409,6 +501,7 @@ partial def reify (ci : ContractInfo) (t : RetTy) (env : Env t) (e : Expr) : Met
           match t with
           | .word => return .opTail op
           | .addr => return .opTailAddr op
+          | .flag => return .opTailFlag op
           | _ => throwError "reify: `{e}` returns a word but the function does not"
         else if let some s ← stmtOf ci env e then
           match t with

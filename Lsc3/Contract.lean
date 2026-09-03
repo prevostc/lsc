@@ -120,6 +120,7 @@ def RetTy.abi : RetTy → List AbiTy
   | .unit => []
   | .word => [.uint256]
   | .addr => [.address]
+  | .flag => [.bool]
   | .pair a b => a.abi ++ b.abi
 
 end Lsc3

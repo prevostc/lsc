@@ -7,6 +7,8 @@ import Lsc3.EVM.State
 import Lsc3.Examples.Counter
 import Lsc3.Examples.Token
 import Lsc3.Examples.TokenProofs
+import Lsc3.Examples.Vault
+import Lsc3.Examples.VaultProofs
 
 /-!
 # LSC v3

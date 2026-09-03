@@ -233,6 +233,20 @@ section RunLemmas
     run (divChecked (S := S) (E := E) (ε := ε) a b) ctx w =
       if b ≠ 0 then .ok (a / b, w) else .error (.arith .divByZero) := rfl
 
+/-- `do emit e; pure v` elaborates to `map`. -/
+@[simp] theorem run_map {β : Type} (f : α → β) (x : Tx S E ε α) (ctx : Ctx) (w : World S E) :
+    run (f <$> x) ctx w =
+      match run x ctx w with
+      | .ok (a, w') => .ok (f a, w')
+      | .error e => .error e := by
+  cases h : x ctx w with
+  | error e =>
+    change ((fun (p : α × World S E) => (f p.1, p.2)) <$> x ctx w) = _
+    simp [run, h, Functor.map, Except.map]
+  | ok p =>
+    change ((fun (p : α × World S E) => (f p.1, p.2)) <$> x ctx w) = _
+    simp [run, h, Functor.map, Except.map]
+
 /-- `if` inside a program: push `run` into the branches. -/
 @[simp] theorem run_ite (c : Prop) [Decidable c] (x y : Tx S E ε α) (ctx : Ctx) (w : World S E) :
     run (if c then x else y) ctx w = if c then run x ctx w else run y ctx w := by

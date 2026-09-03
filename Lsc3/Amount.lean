@@ -164,6 +164,32 @@ def convert {τ₁ τ₂ : Type} (p : Price τ₁ τ₂ s) (r : Rounding) (a : A
   | .down => Tx.mulDivDown a p s
   | .up => Tx.mulDivUp a p s
 
+/-! ### Run lemmas (Amount ops are `def` aliases of `Tx` prims; these keep `simp` on-surface) -/
+
+@[simp] theorem run_add (a b : Amount τ s) (ctx : Ctx) (w : World S E) :
+    Tx.run (add (S := S) (E := E) (ε := ε) a b) ctx w =
+      if Nat.add a b < wordBound then .ok (Nat.add a b, w)
+      else .error (.arith .overflow) := rfl
+
+@[simp] theorem run_sub (a b : Amount τ s) (ctx : Ctx) (w : World S E) :
+    Tx.run (sub (S := S) (E := E) (ε := ε) a b) ctx w =
+      if b ≤ a then .ok (Nat.sub a b, w) else .error (.arith .underflow) := rfl
+
+@[simp] theorem run_shareDown (a : Amount τ s) (b c : Amount τ' s') (ctx : Ctx)
+    (w : World S E) :
+    Tx.run (shareDown (S := S) (E := E) (ε := ε) a b c) ctx w =
+      if c = (0 : Nat) then .error (.arith .divByZero)
+      else if Nat.mul a b < wordBound then .ok (Nat.div (Nat.mul a b) c, w)
+      else .error (.arith .overflow) := rfl
+
+@[simp] theorem run_shareUp (a : Amount τ s) (b c : Amount τ' s') (ctx : Ctx)
+    (w : World S E) :
+    Tx.run (shareUp (S := S) (E := E) (ε := ε) a b c) ctx w =
+      if c = (0 : Nat) then .error (.arith .divByZero)
+      else if Nat.mul a b < wordBound then
+        .ok (Nat.div (Nat.mul a b) c + (if Nat.mod (Nat.mul a b) c = 0 then 0 else 1), w)
+      else .error (.arith .overflow) := rfl
+
 end Amount
 
 /-! ## `Flag` -/
@@ -180,5 +206,20 @@ def on : Flag := (1 : Nat)
 /-- The cleared flag (the storage default). -/
 def off : Flag := (0 : Nat)
 end Flag
+
+/-! ### Unit-preserving surface sugar
+
+`a +? b` is `Tx.addChecked` on `Nat`. Because `Amount τ s` is definitionally `Nat`, that
+notation typechecks on amounts but **returns `Nat`**, dropping the token/scale. Prefer
+`Amount.add` / `Amount.sub`, or the scoped `+ₐ` / `-ₐ` below, whose result stays
+`Amount τ s`. There is no `*ₐ` / `/ₐ`: rounding must be named (`mulDown`/`mulUp`).
+
+This is typeclass-free so the reifier matches `Lsc3.Amount.add` (definitionally
+`Tx.addChecked`) and the certificate stays `rfl`.
+-/
+namespace Syntax
+scoped infixl:65 " +ₐ " => Lsc3.Amount.add
+scoped infixl:65 " -ₐ " => Lsc3.Amount.sub
+end Syntax
 
 end Lsc3

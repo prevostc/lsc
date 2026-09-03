@@ -1,4 +1,4 @@
-import Lsc3.Tx
+import Lsc3.Amount
 
 /-!
 # LSC v3 — the Core AST and its denotation
@@ -101,6 +101,8 @@ inductive Op
   | subChecked (a b : Atom)
   | mulChecked (a b : Atom)
   | divChecked (a b : Atom)
+  | mulDivDown (a b c : Atom)
+  | mulDivUp (a b c : Atom)
   | pure (a : Atom)
   deriving DecidableEq, Repr, Lean.ToExpr
 
@@ -119,6 +121,7 @@ inductive RetTy
   | unit
   | word
   | addr
+  | flag
   | pair (a b : RetTy)
   deriving DecidableEq, Repr, Lean.ToExpr
 
@@ -126,6 +129,7 @@ def RetTy.denote : RetTy → Type
   | .unit => Unit
   | .word => Nat
   | .addr => Address
+  | .flag => Flag
   | .pair a b => a.denote × b.denote
 
 /-- Return expressions, typed by `RetTy`. -/
@@ -133,12 +137,14 @@ inductive RetExpr : RetTy → Type
   | unit : RetExpr .unit
   | word (a : Atom) : RetExpr .word
   | addr (a : Atom) : RetExpr .addr
+  | flag (a : Atom) : RetExpr .flag
   | pair {s t : RetTy} (x : RetExpr s) (y : RetExpr t) : RetExpr (.pair s t)
 
 def RetExpr.eval (env : List Nat) : {t : RetTy} → RetExpr t → t.denote
   | _, .unit => ()
   | _, .word a => a.eval env
   | _, .addr a => (a.eval env : Nat)
+  | _, .flag a => (a.eval env : Nat)
   | _, .pair x y => (x.eval env, y.eval env)
 
 /-- The Core language. Indexed by the function's return type. -/
@@ -146,6 +152,7 @@ inductive Core : RetTy → Type
   | ret {t : RetTy} (r : RetExpr t) : Core t
   | opTail (op : Op) : Core .word
   | opTailAddr (op : Op) : Core .addr
+  | opTailFlag (op : Op) : Core .flag
   | stmtTail (s : Stmt) : Core .unit
   | revertTail {t : RetTy} (err : Nat) (args : List Atom) : Core t
   | letOp {t : RetTy} (op : Op) (k : Core t) : Core t
@@ -193,6 +200,8 @@ def Op.denote (Γ : ContractSchema S E ε) (env : List Nat) : Op → Tx S E ε N
   | .subChecked a b => Tx.subChecked (a.eval env) (b.eval env)
   | .mulChecked a b => Tx.mulChecked (a.eval env) (b.eval env)
   | .divChecked a b => Tx.divChecked (a.eval env) (b.eval env)
+  | .mulDivDown a b c => Tx.mulDivDown (a.eval env) (b.eval env) (c.eval env)
+  | .mulDivUp a b c => Tx.mulDivUp (a.eval env) (b.eval env) (c.eval env)
   | .pure a => Pure.pure (a.eval env)
 
 def Stmt.denote (Γ : ContractSchema S E ε) (env : List Nat) : Stmt → Tx S E ε Unit
@@ -208,6 +217,7 @@ def Core.denote (Γ : ContractSchema S E ε) : {t : RetTy} → Core t → List N
   | _, .ret r, env => pure (r.eval env)
   | _, .opTail op, env => Op.denote Γ env op
   | _, .opTailAddr op, env => (Op.denote Γ env op : Tx S E ε Nat)
+  | _, .opTailFlag op, env => (Op.denote Γ env op : Tx S E ε Nat)
   | _, .stmtTail s, env => Stmt.denote Γ env s
   | _, .revertTail err args, env => Tx.revert (Γ.err.build err (args.map (·.eval env)))
   | _, .letOp op k, env => Op.denote Γ env op >>= fun v => Core.denote Γ k (v :: env)
@@ -253,6 +263,8 @@ def Op.rename (ρ : Nat → Atom) : Op → Op
   | .subChecked a b => .subChecked (a.rename ρ) (b.rename ρ)
   | .mulChecked a b => .mulChecked (a.rename ρ) (b.rename ρ)
   | .divChecked a b => .divChecked (a.rename ρ) (b.rename ρ)
+  | .mulDivDown a b c => .mulDivDown (a.rename ρ) (b.rename ρ) (c.rename ρ)
+  | .mulDivUp a b c => .mulDivUp (a.rename ρ) (b.rename ρ) (c.rename ρ)
   | .pure a => .pure (a.rename ρ)
 
 def Stmt.rename (ρ : Nat → Atom) : Stmt → Stmt
@@ -267,12 +279,14 @@ def RetExpr.rename (ρ : Nat → Atom) : {t : RetTy} → RetExpr t → RetExpr t
   | _, .unit => .unit
   | _, .word a => .word (a.rename ρ)
   | _, .addr a => .addr (a.rename ρ)
+  | _, .flag a => .flag (a.rename ρ)
   | _, .pair x y => .pair (x.rename ρ) (y.rename ρ)
 
 def Core.rename (ρ : Nat → Atom) : {t : RetTy} → Core t → Core t
   | _, .ret r => .ret (r.rename ρ)
   | _, .opTail op => .opTail (op.rename ρ)
   | _, .opTailAddr op => .opTailAddr (op.rename ρ)
+  | _, .opTailFlag op => .opTailFlag (op.rename ρ)
   | _, .stmtTail s => .stmtTail (s.rename ρ)
   | _, .revertTail err args => .revertTail err (args.map (·.rename ρ))
   | _, .letOp op k => .letOp (op.rename ρ) (k.rename (liftRename ρ))
@@ -287,6 +301,7 @@ def RetExpr.toExpr : {t : RetTy} → RetExpr t → Expr
   | _, .unit => mkConst ``RetExpr.unit
   | _, .word a => mkApp (mkConst ``RetExpr.word) (Lean.toExpr a)
   | _, .addr a => mkApp (mkConst ``RetExpr.addr) (Lean.toExpr a)
+  | _, .flag a => mkApp (mkConst ``RetExpr.flag) (Lean.toExpr a)
   | .pair s t, .pair x y =>
     mkApp4 (mkConst ``RetExpr.pair) (Lean.toExpr s) (Lean.toExpr t) x.toExpr y.toExpr
 
@@ -295,6 +310,7 @@ def Core.toExpr : {t : RetTy} → Core t → Expr
   | t, .ret r => mkApp2 (mkConst ``Core.ret) (Lean.toExpr t) r.toExpr
   | _, .opTail op => mkApp (mkConst ``Core.opTail) (Lean.toExpr op)
   | _, .opTailAddr op => mkApp (mkConst ``Core.opTailAddr) (Lean.toExpr op)
+  | _, .opTailFlag op => mkApp (mkConst ``Core.opTailFlag) (Lean.toExpr op)
   | _, .stmtTail s => mkApp (mkConst ``Core.stmtTail) (Lean.toExpr s)
   | t, .revertTail err args =>
     mkApp3 (mkConst ``Core.revertTail) (Lean.toExpr t) (Lean.toExpr err) (Lean.toExpr args)
@@ -312,6 +328,7 @@ instance : Repr (RetExpr t) where
       | _, .unit => "()"
       | _, .word a => repr a
       | _, .addr a => repr a
+      | _, .flag a => repr a
       | _, .pair x y => "(" ++ go x ++ ", " ++ go y ++ ")"
     go r
 
@@ -321,6 +338,7 @@ instance : Repr (Core t) where
       | _, .ret r => "ret " ++ repr r
       | _, .opTail op => "tail " ++ repr op
       | _, .opTailAddr op => "tail " ++ repr op
+      | _, .opTailFlag op => "tail " ++ repr op
       | _, .stmtTail s => "tail " ++ repr s
       | _, .revertTail e a => "revert " ++ repr e ++ " " ++ repr a
       | _, .letOp op k => "let ← " ++ repr op ++ ";" ++ Std.Format.line ++ go k
