@@ -94,4 +94,44 @@ theorem decodeAt_push2 (n : Nat) (rest : List UInt8) :
   rw [hbyte, ofByte_toByte]
   simp [Opcode.immBytes, readImm_push2]
 
+/-- Immediate of `PUSH32 n` is `wrap n`. Does not reduce `n` (Keccak topics stay symbolic). -/
+theorem readImm_push32 (n : Nat) (rest : List UInt8) :
+    readImm (emitPush32 n ++ rest) 0 32 = wrap n := by
+  have hlen : ∀ i, i < 32 → 1 + i < (emitPush32 n ++ rest).length := by
+    intro i hi
+    simp [emitPush32, natToBytesBE_length]; omega
+  have hfold :
+      (List.range 32).foldl (fun acc i =>
+        if 1 + i < (emitPush32 n ++ rest).length then
+          acc * 256 + ((emitPush32 n ++ rest)[1 + i]!).toNat
+        else acc) 0 =
+        (List.range 32).foldl (fun acc i => acc * 256 + n / 256 ^ (31 - i) % 256) 0 := by
+    refine foldl_range_eq 32 _ _ ?_ 0
+    intro acc i hi
+    have hi' := hlen i hi
+    simp only [hi', ↓reduceIte]
+    rw [Nat.add_comm 1 i]
+    have hi2 : i + 1 < (emitPush32 n ++ rest).length := by
+      simpa [Nat.add_comm] using hi'
+    rw [getElem!_pos (emitPush32 n ++ rest) (i + 1) hi2]
+    simp only [emitPush32, List.cons_append]
+    rw [List.getElem_cons_succ]
+    have hlt : i < (natToBytesBE n 32).length := by simp [natToBytesBE_length]; exact hi
+    rw [List.getElem_append_left hlt, natToBytesBE_getElem n 32 i hi, toNat_ofNat_mod256]
+  simp only [readImm, Nat.zero_add]
+  rw [hfold, packWord_high n 32 (by decide), Nat.sub_self, Nat.pow_zero, Nat.div_one,
+    pow256_32]
+  simp [wrap]
+
+theorem decodeAt_push32 (n : Nat) (rest : List UInt8) :
+    decodeAt (emitPush32 n ++ rest) 0 =
+      some ({ op := .PUSH ⟨32, by decide⟩, imm := wrap n }, 33) := by
+  unfold decodeAt
+  have hpc : 0 < (emitPush32 n ++ rest).length := by simp [emitPush32, natToBytesBE_length]
+  rw [dif_pos hpc]
+  have hbyte : (emitPush32 n ++ rest)[0] = Opcode.toByte (.PUSH ⟨32, by decide⟩) := by
+    simp [emitPush32]
+  rw [hbyte, ofByte_toByte]
+  simp [Opcode.immBytes, readImm_push32]
+
 end Lsc3.Compile.Jump
