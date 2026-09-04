@@ -24,15 +24,19 @@ def selectorBranches : List FnDef → List Asm
 def dispatchRevert (sel : Nat) : List Asm :=
   emitRevert sel
 
-def selectorDispatch (c : ContractDef) (ctx : Ctx) : Except String (List Asm × Ctx) := do
+def selectorDispatch (c : ContractDef) (ctx : Ctx) : Except String (List Asm × Ctx) :=
   let fns := c.functions
-  if fns.isEmpty then
-    throw "contract has no functions"
-  let (revLbl, ctx1) := Ctx.freshLabel ctx "dispR"
-  let calldataCheck : List Asm := [Asm.push 4, Asm.op .CALLDATASIZE, Asm.op .LT, Asm.jumpi revLbl]
-  let branches := selectorBranches fns
-  let tail : List Asm := [Asm.jump revLbl, Asm.jumpDest revLbl] ++ dispatchRevert (selectorOf "InvalidSelector" [])
-  pure (calldataCheck ++ branches ++ tail, ctx1)
+  match fns with
+  | [] => .error "contract has no functions"
+  | _ =>
+    let (revLbl, ctx1) := Ctx.freshLabel ctx "dispR"
+    let calldataCheck : List Asm :=
+      [Asm.push 4, Asm.op .CALLDATASIZE, Asm.op .LT, Asm.jumpi revLbl]
+    let branches := selectorBranches fns
+    let tail : List Asm :=
+      [Asm.jump revLbl, Asm.jumpDest revLbl] ++
+        dispatchRevert (selectorOf "InvalidSelector" [])
+    .ok (calldataCheck ++ branches ++ tail, ctx1)
 
 def emitFunction (c : ContractDef) (acc : List Asm × Ctx) (fn : FnDef) :
     Except String (List Asm × Ctx) := do
@@ -52,5 +56,65 @@ def compileContract (c : ContractDef) : Except String (List UInt8) := do
 def compileDeploy (c : ContractDef) : Except String (List UInt8) := do
   let runtime ← compileContract c
   pure (deployCode runtime)
+
+/-! ## Dispatcher byte sizes
+
+Selector immediates are always `PUSH4` and the invalid-selector revert is always `PUSH32`,
+so these sizes do not depend on Keccak. The first function `JUMPDEST` is at
+`dispatchByteSize n`. -/
+
+def calldataCheckByteSize : Nat := 8
+def selectorBranchByteSize : Nat := 15
+def dispatchTailByteSize : Nat := 44
+def dispatchByteSize (nFns : Nat) : Nat :=
+  calldataCheckByteSize + selectorBranchByteSize * nFns + dispatchTailByteSize
+
+theorem dispatchByteSize_one : dispatchByteSize 1 = 67 := rfl
+theorem dispatchByteSize_two : dispatchByteSize 2 = 82 := rfl
+theorem dispatchByteSize_four : dispatchByteSize 4 = 112 := rfl
+
+theorem asmListSize_loadSelector : asmListSize loadSelector = 5 := rfl
+
+theorem asmListSize_selectorBranch (fn : FnDef) :
+    asmListSize (selectorBranch fn) = selectorBranchByteSize := rfl
+
+theorem asmListSize_selectorBranches (fns : List FnDef) :
+    asmListSize (selectorBranches fns) = selectorBranchByteSize * fns.length := by
+  induction fns with
+  | nil =>
+    rfl
+  | cons fn rest ih =>
+    rw [selectorBranches, asmListSize_append, asmListSize_selectorBranch, ih, List.length_cons]
+    simp [selectorBranchByteSize]
+    omega
+
+theorem asmListSize_calldataCheck (revLbl : String) :
+    asmListSize [Asm.push 4, Asm.op .CALLDATASIZE, Asm.op .LT, Asm.jumpi revLbl] =
+      calldataCheckByteSize :=
+  rfl
+
+theorem asmListSize_dispatchRevert (sel : Nat) :
+    asmListSize (dispatchRevert sel) = 39 := rfl
+
+theorem asmListSize_emitRevert (sel : Nat) :
+    asmListSize (emitRevert sel) = 39 :=
+  asmListSize_dispatchRevert sel
+
+theorem asmListSize_dispatchTail (revLbl : String) (sel : Nat) :
+    asmListSize ([Asm.jump revLbl, Asm.jumpDest revLbl] ++ dispatchRevert sel) =
+      dispatchTailByteSize :=
+  rfl
+
+theorem selectorDispatch_size {c : ContractDef} {ctx : Ctx} (hne : c.functions ≠ []) :
+    match selectorDispatch c ctx with
+    | .ok (instrs, _) => asmListSize instrs = dispatchByteSize c.functions.length
+    | .error _ => False := by
+  unfold selectorDispatch
+  match hfn : c.functions with
+  | [] => exact (hne hfn).elim
+  | _fn :: _rest =>
+    simp [Ctx.freshLabel, asmListSize_append, asmListSize_selectorBranches,
+      asmListSize_dispatchRevert, dispatchByteSize, calldataCheckByteSize, dispatchTailByteSize]
+    omega
 
 end Lsc3.Compile

@@ -14,7 +14,8 @@ import Lsc3.Compile.Jump
 
 Dispatcher: calldata check, get branch, increment branch, fallthrough revert.
 `get` body is position-independent (`GetBody`). `increment` is `IncContract.bodyInstrs`
-shifted to PC 92 (checked-add destinations 115 and 160).
+shifted to PC `incPc + 1`; checked-add destinations are that base plus the isolated
+body's local PCs (`bodyRevPc_eq`, `lookup_addR_relocate`).
 -/
 
 namespace Lsc3.Compile.GetInc
@@ -40,6 +41,11 @@ def incPc : Nat := 91
 def bodyRevPc : Nat := 115
 def bodyOkPc : Nat := 160
 
+theorem getPc_eq_dispatch : getPc = dispatchByteSize 2 := rfl
+theorem incPc_eq_after_get : incPc = getPc + 1 + 8 := rfl
+theorem bodyRevPc_eq : bodyRevPc = incPc + 1 + IncBody.revPc := rfl
+theorem bodyOkPc_eq : bodyOkPc = incPc + 1 + IncBody.okPc := rfl
+
 abbrev checkInstrs : List Asm := GetContract.checkInstrs
 abbrev fallInstrs : List Asm := GetContract.fallInstrs
 
@@ -54,6 +60,13 @@ def expectedInstrs (getSel incSel : Nat) : List Asm :=
     [Asm.jumpDest revLbl] ++ emitRevert invalidSel ++
     [Asm.jumpDest "get"] ++ GetContract.bodyInstrs ++
     [Asm.jumpDest "increment"] ++ bodyInstrs
+
+/-- Prefix of `expectedInstrs` before the increment body (ends at the `increment` JUMPDEST). -/
+def expectedPre (getSel incSel : Nat) : List Asm :=
+  checkInstrs ++ branchGet getSel ++ branchInc incSel ++ fallInstrs ++
+    [Asm.jumpDest revLbl] ++ emitRevert invalidSel ++
+    [Asm.jumpDest "get"] ++ GetContract.bodyInstrs ++
+    [Asm.jumpDest "increment"]
 
 set_option maxRecDepth 20000 in
 theorem labels_expected (getSel incSel : Nat) :
@@ -81,6 +94,46 @@ theorem lookup_addR (getSel incSel : Nat) :
 theorem lookup_addO (getSel incSel : Nat) :
     lookupLabel (layoutLabels (expectedInstrs getSel incSel)) addO = .ok bodyOkPc := by
   simp [labels_expected, lookupLabel, addR, addO, revLbl]
+
+theorem expected_pre_append (gSel iSel : Nat) :
+    expectedInstrs gSel iSel = expectedPre gSel iSel ++ bodyInstrs := by
+  simp [expectedInstrs, expectedPre]
+
+theorem checkInstrs_size : asmListSize checkInstrs = 8 := rfl
+theorem branchGet_size (sel : Nat) : asmListSize (branchGet sel) = 15 := rfl
+theorem branchInc_size (sel : Nat) : asmListSize (branchInc sel) = 15 := rfl
+theorem fallInstrs_size : asmListSize fallInstrs = 4 := rfl
+theorem jumpDest_size (lbl : String) : asmListSize [Asm.jumpDest lbl] = 1 := rfl
+
+theorem expectedPre_size (gSel iSel : Nat) :
+    asmListSize (expectedPre gSel iSel) = incPc + 1 := by
+  simp only [expectedPre, asmListSize_append, checkInstrs_size, branchGet_size,
+    branchInc_size, fallInstrs_size, jumpDest_size, GetContract.bodyInstrs_size,
+    asmListSize_emitRevert]
+  simp [incPc]
+
+theorem addR_local :
+    lookupLabel (layoutLabels bodyInstrs) addR = .ok IncBody.revPc :=
+  rfl
+
+theorem addO_local :
+    lookupLabel (layoutLabels bodyInstrs) addO = .ok IncBody.okPc :=
+  rfl
+
+/-- Relocate the increment body's overflow JUMPDEST: local PC + placement. -/
+theorem lookup_addR_at (base : Nat) :
+    lookupLabel (layoutLabelsFrom base bodyInstrs []) addR = .ok (base + IncBody.revPc) := by
+  rw [layoutLabelsFrom_offset, lookupLabel_shift, addR_local]
+  simp [Nat.add_comm]
+
+/-- Same destination as `lookup_addR`, derived from layout rather than a magic numeral. -/
+theorem lookup_addR_relocate (gSel iSel : Nat) :
+    lookupLabel (layoutLabels (expectedInstrs gSel iSel)) addR =
+      .ok (incPc + 1 + IncBody.revPc) := by
+  rw [expected_pre_append, layoutLabels, layoutLabelsFrom_append, Nat.zero_add,
+    expectedPre_size, layoutLabelsFrom_acc]
+  apply lookupLabel_append_ok
+  exact lookup_addR_at (incPc + 1)
 
 theorem dup_expected (getSel incSel : Nat) :
     checkDuplicateLabels (expectedInstrs getSel incSel) = .ok () :=

@@ -134,6 +134,20 @@ theorem emitInstrs_append (labels : List (String × Nat)) (as bs : List Asm) :
       cases emitInstrs labels bs
     all_goals simp [bind, Except.bind, pure, Except.pure, List.append_assoc]
 
+theorem emit_cons_ok {labels : List (String × Nat)} {i : Asm} {rest : List Asm}
+    {b bs : List UInt8}
+    (h1 : emitOne labels i = .ok b) (h2 : emitInstrs labels rest = .ok bs) :
+    emitInstrs labels (i :: rest) = .ok (b ++ bs) := by
+  rw [emitInstrs_cons, h1, h2]
+  rfl
+
+theorem emit_bind_ok {labels : List (String × Nat)} {as bs : List Asm}
+    {a b : List UInt8}
+    (h1 : emitInstrs labels as = .ok a) (h2 : emitInstrs labels bs = .ok b) :
+    emitInstrs labels (as ++ bs) = .ok (a ++ b) := by
+  rw [emitInstrs_append, h1, h2]
+  rfl
+
 theorem emitOne_jumpi (labels : List (String × Nat)) (lbl : String) {pc : Nat}
     (h : lookupLabel labels lbl = .ok pc) (hlt : pc < jumpImmBound) :
     emitOne labels (.jumpi lbl) = .ok (emitPush2 pc ++ [Opcode.toByte .JUMPI]) := by
@@ -289,6 +303,229 @@ theorem encode_jumpi_here :
 
 theorem encode_push4_stop (n : Nat) :
     encode [.push4 n, .op .STOP] = .ok (emitPush4 n ++ [Opcode.toByte .STOP]) :=
+  rfl
+
+/-! ## Instruction sizes and relocatable layout
+
+Jumps are fixed-width `PUSH2`, so a body's byte size does not depend on where it is
+placed. `layoutLabelsFrom (pc + base)` is `layoutLabelsFrom pc` with every PC shifted
+by `base`. A suffix that never looks up labels encodes independently of the prefix
+label map — that is how `get` (and any `opTail (.load _)` view) composes with an
+arbitrary dispatcher. -/
+
+def asmByteSize (i : Asm) : Nat := instrByteSize [] i
+
+def asmListSize : List Asm → Nat
+  | [] => 0
+  | i :: rest => asmByteSize i + asmListSize rest
+
+@[simp] theorem asmListSize_nil : asmListSize [] = 0 := rfl
+
+@[simp] theorem asmListSize_cons (i : Asm) (rest : List Asm) :
+    asmListSize (i :: rest) = asmByteSize i + asmListSize rest :=
+  rfl
+
+theorem asmListSize_append (as bs : List Asm) :
+    asmListSize (as ++ bs) = asmListSize as + asmListSize bs := by
+  induction as with
+  | nil => simp
+  | cons i as ih => simp [ih, Nat.add_assoc]
+
+@[simp] theorem asmByteSize_op (op : Opcode) : asmByteSize (.op op) = 1 := rfl
+@[simp] theorem asmByteSize_push4 (n : Nat) : asmByteSize (.push4 n) = 5 := rfl
+@[simp] theorem asmByteSize_push32 (n : Nat) : asmByteSize (.push32 n) = 33 := rfl
+@[simp] theorem asmByteSize_pushLabel (lbl : String) : asmByteSize (.pushLabel lbl) = 3 := rfl
+@[simp] theorem asmByteSize_jump (lbl : String) : asmByteSize (.jump lbl) = 4 := rfl
+@[simp] theorem asmByteSize_jumpi (lbl : String) : asmByteSize (.jumpi lbl) = 4 := rfl
+@[simp] theorem asmByteSize_jumpDest (lbl : String) : asmByteSize (.jumpDest lbl) = 1 := rfl
+@[simp] theorem asmByteSize_push_zero : asmByteSize (.push 0) = 1 := rfl
+@[simp] theorem asmByteSize_push_four : asmByteSize (.push 4) = 2 := rfl
+@[simp] theorem asmByteSize_push_e0 : asmByteSize (.push 0xE0) = 2 := rfl
+@[simp] theorem asmByteSize_push_thirtyTwo : asmByteSize (.push 32) = 2 := rfl
+
+theorem layoutLabelsFrom_cons (pc : Nat) (i : Asm) (rest : List Asm)
+    (acc : List (String × Nat)) :
+    layoutLabelsFrom pc (i :: rest) acc =
+      layoutLabelsFrom (pc + instrByteSize [] i) rest
+        (match i with
+         | .jumpDest lbl => (lbl, pc) :: acc
+         | _ => acc) := by
+  cases i <;> rfl
+
+def shiftLabels (base : Nat) (labels : List (String × Nat)) : List (String × Nat) :=
+  labels.map fun p => (p.1, p.2 + base)
+
+@[simp] theorem shiftLabels_nil (base : Nat) : shiftLabels base [] = [] := rfl
+
+@[simp] theorem shiftLabels_cons (base : Nat) (l : String) (p : Nat)
+    (rest : List (String × Nat)) :
+    shiftLabels base ((l, p) :: rest) = (l, p + base) :: shiftLabels base rest :=
+  rfl
+
+theorem shiftLabels_append (base : Nat) (as bs : List (String × Nat)) :
+    shiftLabels base (as ++ bs) = shiftLabels base as ++ shiftLabels base bs := by
+  simp [shiftLabels]
+
+private theorem acc_shift (base pc : Nat) (i : Asm) (acc : List (String × Nat)) :
+    (match i with
+     | .jumpDest lbl => (lbl, pc + base) :: shiftLabels base acc
+     | _ => shiftLabels base acc) =
+      shiftLabels base (match i with
+        | .jumpDest lbl => (lbl, pc) :: acc
+        | _ => acc) := by
+  cases i <;> rfl
+
+theorem layoutLabelsFrom_shift (base pc : Nat) (instrs : List Asm)
+    (acc : List (String × Nat)) :
+    layoutLabelsFrom (pc + base) instrs (shiftLabels base acc) =
+      shiftLabels base (layoutLabelsFrom pc instrs acc) := by
+  induction instrs generalizing pc acc with
+  | nil =>
+    simp [layoutLabelsFrom]
+  | cons i rest ih =>
+    rw [layoutLabelsFrom_cons, layoutLabelsFrom_cons, acc_shift,
+      Nat.add_right_comm pc base (instrByteSize [] i), ih]
+
+/-- Laying a body out at `base` is the body's local layout with every PC shifted. -/
+theorem layoutLabelsFrom_offset (base : Nat) (instrs : List Asm) :
+    layoutLabelsFrom base instrs [] = shiftLabels base (layoutLabels instrs) := by
+  simpa [layoutLabels] using layoutLabelsFrom_shift base 0 instrs []
+
+theorem layoutLabelsFrom_append (pc : Nat) (as bs : List Asm)
+    (acc : List (String × Nat)) :
+    layoutLabelsFrom pc (as ++ bs) acc =
+      layoutLabelsFrom (pc + asmListSize as) bs (layoutLabelsFrom pc as acc) := by
+  induction as generalizing pc acc with
+  | nil =>
+    simp [layoutLabelsFrom, asmListSize]
+  | cons i as ih =>
+    rw [List.cons_append, layoutLabelsFrom_cons, layoutLabelsFrom_cons, ih]
+    simp [asmByteSize, Nat.add_assoc]
+
+/-- Labels collected from `instrs` are prepended to `acc`. -/
+theorem layoutLabelsFrom_acc (pc : Nat) (instrs : List Asm) (acc : List (String × Nat)) :
+    layoutLabelsFrom pc instrs acc = layoutLabelsFrom pc instrs [] ++ acc := by
+  induction instrs generalizing pc acc with
+  | nil =>
+    simp [layoutLabelsFrom]
+  | cons i rest ih =>
+    cases i with
+    | jumpDest lbl =>
+      change layoutLabelsFrom (pc + 1) rest ((lbl, pc) :: acc) =
+        layoutLabelsFrom (pc + 1) rest [(lbl, pc)] ++ acc
+      rw [ih, ih (acc := [(lbl, pc)])]
+      simp
+    | op op =>
+      change layoutLabelsFrom (pc + instrByteSize [] (.op op)) rest acc =
+        layoutLabelsFrom (pc + instrByteSize [] (.op op)) rest [] ++ acc
+      exact ih _ _
+    | push n =>
+      change layoutLabelsFrom (pc + instrByteSize [] (.push n)) rest acc =
+        layoutLabelsFrom (pc + instrByteSize [] (.push n)) rest [] ++ acc
+      exact ih _ _
+    | push4 n =>
+      change layoutLabelsFrom (pc + instrByteSize [] (.push4 n)) rest acc =
+        layoutLabelsFrom (pc + instrByteSize [] (.push4 n)) rest [] ++ acc
+      exact ih _ _
+    | push32 n =>
+      change layoutLabelsFrom (pc + instrByteSize [] (.push32 n)) rest acc =
+        layoutLabelsFrom (pc + instrByteSize [] (.push32 n)) rest [] ++ acc
+      exact ih _ _
+    | pushLabel lbl =>
+      change layoutLabelsFrom (pc + instrByteSize [] (.pushLabel lbl)) rest acc =
+        layoutLabelsFrom (pc + instrByteSize [] (.pushLabel lbl)) rest [] ++ acc
+      exact ih _ _
+    | jump lbl =>
+      change layoutLabelsFrom (pc + instrByteSize [] (.jump lbl)) rest acc =
+        layoutLabelsFrom (pc + instrByteSize [] (.jump lbl)) rest [] ++ acc
+      exact ih _ _
+    | jumpi lbl =>
+      change layoutLabelsFrom (pc + instrByteSize [] (.jumpi lbl)) rest acc =
+        layoutLabelsFrom (pc + instrByteSize [] (.jumpi lbl)) rest [] ++ acc
+      exact ih _ _
+
+theorem find?_shiftLabels (base : Nat) (labels : List (String × Nat)) (lbl : String) :
+    (shiftLabels base labels).find? (fun p => p.1 == lbl) =
+      (labels.find? (fun p => p.1 == lbl)).map (fun p => (p.1, p.2 + base)) := by
+  induction labels with
+  | nil =>
+    rfl
+  | cons hd tl ih =>
+    match hd with
+    | (l, p) =>
+      rw [shiftLabels_cons, List.find?_cons, List.find?_cons]
+      cases hl : (l == lbl) <;> simp [ih]
+
+theorem lookupLabel_shift (base : Nat) (labels : List (String × Nat)) (lbl : String) :
+    lookupLabel (shiftLabels base labels) lbl =
+      match lookupLabel labels lbl with
+      | .ok pc => .ok (pc + base)
+      | .error e => .error e := by
+  simp only [lookupLabel]
+  rw [find?_shiftLabels]
+  cases labels.find? (fun p => p.1 == lbl) <;> rfl
+
+theorem lookupLabel_append_ok {L1 L2 : List (String × Nat)} {lbl : String} {pc : Nat}
+    (h : lookupLabel L1 lbl = .ok pc) :
+    lookupLabel (L1 ++ L2) lbl = .ok pc := by
+  simp only [lookupLabel, List.find?_append] at h ⊢
+  cases hL : L1.find? (fun p => p.1 == lbl) with
+  | none =>
+    simp [hL] at h
+  | some _ =>
+    simp [hL, Option.or] at h ⊢
+    exact h
+
+theorem emitOne_jumpi_shift (L : List (String × Nat)) (lbl : String) (base pc : Nat)
+    (h : lookupLabel L lbl = .ok pc) (hlt : pc + base < jumpImmBound) :
+    emitOne (shiftLabels base L) (.jumpi lbl) =
+      .ok (emitPush2 (pc + base) ++ [Opcode.toByte .JUMPI]) := by
+  apply emitOne_jumpi
+  · rw [lookupLabel_shift, h]
+  · exact hlt
+
+theorem emitOne_jump_shift (L : List (String × Nat)) (lbl : String) (base pc : Nat)
+    (h : lookupLabel L lbl = .ok pc) (hlt : pc + base < jumpImmBound) :
+    emitOne (shiftLabels base L) (.jump lbl) =
+      .ok (emitPush2 (pc + base) ++ [Opcode.toByte .JUMP]) := by
+  apply emitOne_jump
+  · rw [lookupLabel_shift, h]
+  · exact hlt
+
+theorem emitOne_of_not_usesLabel (L : List (String × Nat)) (i : Asm)
+    (h : i.usesLabel = false) :
+    emitOne L i = emitOne [] i := by
+  cases i with
+  | jump _ => nomatch h
+  | jumpi _ => nomatch h
+  | pushLabel _ => nomatch h
+  | op _ => rfl
+  | push _ => rfl
+  | push4 _ => rfl
+  | push32 _ => rfl
+  | jumpDest _ => rfl
+
+theorem emitInstrs_of_not_usesLabel (L : List (String × Nat)) (body : List Asm)
+    (h : ∀ i ∈ body, i.usesLabel = false) :
+    emitInstrs L body = emitInstrs [] body := by
+  induction body with
+  | nil =>
+    rfl
+  | cons i rest ih =>
+    have hi : i.usesLabel = false := h i (List.Mem.head rest)
+    have hr : ∀ j ∈ rest, j.usesLabel = false := fun j hj =>
+      h j (List.Mem.tail (b := i) hj)
+    rw [emitInstrs_cons, emitInstrs_cons, emitOne_of_not_usesLabel L i hi, ih hr]
+
+/-- A self-jump laid out at PC 10 encodes `PUSH2 14 JUMPI JUMPDEST`. -/
+theorem encode_jumpi_offset :
+    emitInstrs (layoutLabelsFrom 10 [.jumpi "t", .jumpDest "t"] [])
+      [.jumpi "t", .jumpDest "t"] =
+      .ok (emitPush2 14 ++ [Opcode.toByte .JUMPI, Opcode.toByte .JUMPDEST]) :=
+  rfl
+
+theorem layout_shift_jumpi :
+    layoutLabelsFrom 10 [.jumpi "t", .jumpDest "t"] [] = [("t", 14)] :=
   rfl
 
 end Lsc3.Compile

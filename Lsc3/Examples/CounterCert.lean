@@ -24,12 +24,18 @@ matching-selector machine certificate (STOP with slot 0 equal to `n + 1`).
 
 The two-function compiler `GetInc.getInc` encodes to `GetInc.code`. Apply
 `GetInc.getInc_get_hit` / `GetInc.getInc_inc_hit`; do not instantiate them here.
+Checked-add jump targets are `incPc + 1` plus the isolated body's local PCs
+(`GetInc.bodyRevPc_eq`), not a second hand-placed numeral.
 
 Isolated `incrementBy` encodes to `IncByBody.code`. Apply `IncByBody.incBy_hit` /
 `IncByBody.incBy_zero` / `IncByBody.incBy_overflow`; do not instantiate them here.
 
 Isolated `decrement` encodes to `DecBody.code`. Apply `DecBody.dec_hit` /
 `DecBody.dec_zero`; do not instantiate them here.
+
+`lsc_contract Counter … get` is the generic compiler: the last function is the
+same `opTail (.load 0)` body as `GetContract`, and the dispatcher is
+`dispatchByteSize 4` bytes.
 -/
 
 open Lsc3 Lsc3.Compile Counter
@@ -176,5 +182,56 @@ theorem decrement_codegen :
     | .error _ => False := by
   rw [DecBody.decrement_genFunction]
   exact DecBody.encode_dec
+
+/-- Dispatch order is the `lsc_contract` argument order. -/
+theorem contract_fn_names :
+    contract.functions.map (fun f => f.name) =
+      ["increment", "incrementBy", "decrement", "get"] :=
+  rfl
+
+theorem contract_nFns : contract.functions.length = 4 := rfl
+
+theorem contract_get_core :
+    (contract.functions.get ⟨3, by decide⟩).core = Core.opTail (.load 0) :=
+  rfl
+
+theorem contract_get_params :
+    (contract.functions.get ⟨3, by decide⟩).params = [] :=
+  rfl
+
+theorem contract_get_name :
+    (contract.functions.get ⟨3, by decide⟩).name = "get" :=
+  rfl
+
+/-- The production Counter `get` is the generic load-0 body, not a hand-written clone. -/
+theorem genFunction_contract_get (ctx : Lsc3.Compile.Ctx) :
+    Codegen.genFunction contract (contract.functions.get ⟨3, by decide⟩) ctx =
+      .ok (GetContract.bodyInstrs,
+        Ctx.afterFunction (Ctx.forFunction ctx "get" 0)) := by
+  unfold Codegen.genFunction
+  rw [contract_get_params, contract_get_core, contract_get_name]
+  simp [List.length_nil, bind, Except.bind, GetContract.bodyInstrs]
+  have hcore :
+      Codegen.genCore (ctx.forFunction "get" 0) contract (Core.opTail (.load 0)) =
+        .ok (GetContract.bodyInstrs, ctx.forFunction "get" 0) :=
+    GetBody.genCore_opTail_load0 _ _
+  let k : Except String (List Asm × Lsc3.Compile.Ctx) → Except String (List Asm × Lsc3.Compile.Ctx) :=
+    fun x =>
+      match x with
+      | Except.error err => Except.error err
+      | Except.ok v => Except.ok (v.1, v.2.afterFunction)
+  exact (congrArg k hcore).trans rfl
+
+/-- Four selector branches; first function `JUMPDEST` sits at `dispatchByteSize 4`. -/
+theorem counter_dispatch_size (ctx : Lsc3.Compile.Ctx) :
+    match selectorDispatch contract ctx with
+    | .ok (instrs, _) => asmListSize instrs = dispatchByteSize 4
+    | .error _ => False := by
+  have hne : contract.functions ≠ [] := by
+    intro h
+    have := congrArg List.length h
+    simp [contract_nFns] at this
+  have h := selectorDispatch_size (c := contract) (ctx := ctx) hne
+  simpa [contract_nFns] using h
 
 end Counter

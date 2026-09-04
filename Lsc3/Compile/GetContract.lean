@@ -41,6 +41,8 @@ def invalidSel : Nat := selectorOf "InvalidSelector" []
 def revPc : Nat := 27
 def getPc : Nat := 67
 
+theorem getPc_eq_dispatch : getPc = dispatchByteSize 1 := rfl
+
 def checkInstrs : List Asm :=
   [Asm.push 4, Asm.op .CALLDATASIZE, Asm.op .LT, Asm.jumpi revLbl]
 
@@ -51,6 +53,12 @@ def fallInstrs : List Asm := [Asm.jump revLbl]
 
 def bodyInstrs : List Asm :=
   [Asm.push 0, Asm.op .SLOAD, Asm.push 0, Asm.op .MSTORE, Asm.push 32, Asm.push 0, Asm.op .RETURN]
+
+theorem bodyInstrs_size : asmListSize bodyInstrs = 8 := rfl
+
+theorem bodyInstrs_all_no_label :
+    bodyInstrs.all (fun i => !i.usesLabel) = true :=
+  rfl
 
 def expectedInstrs (sel : Nat) : List Asm :=
   checkInstrs ++ branchInstrs sel ++ fallInstrs ++
@@ -65,6 +73,13 @@ theorem getFn_core : getFn.core = Core.opTail (.load 0) := rfl
 theorem getOnly_instrs :
     contractInstrs getOnly = .ok (expectedInstrs (FnDef.selector getFn)) :=
   rfl
+
+/-- Any contract's copy of this `get` function compiles to the same body. -/
+theorem genFunction_getFn (c : ContractDef) (ctx : Ctx) :
+    genFunction c getFn ctx =
+      .ok (bodyInstrs, Ctx.afterFunction (Ctx.forFunction ctx getFn.name 0)) := by
+  simp [genFunction, getFn, GetBody.genCore_opTail_load0, GetBody.loadParams_zero, bodyInstrs,
+    bind, Except.bind]
 
 theorem labels_expected (sel : Nat) :
     layoutLabels (expectedInstrs sel) = [("get", getPc), (revLbl, revPc)] :=

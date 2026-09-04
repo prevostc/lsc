@@ -22,4 +22,10 @@ inductive Asm where
   | jumpDest (lbl : String)
   deriving Repr
 
+/-- True when encoding looks up a label (jumps / `PUSH2` of a label). `jumpDest` defines
+a label and does not look one up. -/
+def Asm.usesLabel : Asm → Bool
+  | .jump _ | .jumpi _ | .pushLabel _ => true
+  | _ => false
+
 end Lsc3.Compile
