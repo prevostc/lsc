@@ -11,6 +11,9 @@ import Lsc.Examples.Counter
 import Lsc.Examples.Token
 import Lsc.Examples.TokenProofs
 import Lsc.Examples.TokenSecurity
+import Lsc.Examples.Vault
+import Lsc.Examples.VaultProofs
+import Lsc.Examples.VaultSecurity
 import Lsc.Compiler.Yul
 import Lsc.Compiler.YulExec
 import Lsc.Compiler.Bytecode

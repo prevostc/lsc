@@ -48,4 +48,39 @@ theorem inv_run {C : Spec S X E ε} {Inv : World S X E → Prop} {rely : X → X
       have ⟨hr, htl⟩ := hR
       exact ih (hE w x' hw hr) hW htl
 
+/-- Like `PreservesInvFn`, but only for well-formed calls at `self` (`ctx.self = self`,
+`ctx.sender ≠ self`). Needed when `Inv` mentions `holdings self`. -/
+def PreservesInvFnAt (C : Spec S X E ε) (Inv : World S X E → Prop) (self : Address)
+    (fn : C.Fn) : Prop :=
+  ∀ (args : C.Args fn) (ctx : Ctx) (w : World S X E),
+    ctx.self = self → ctx.sender ≠ self → Inv w →
+    Inv (worldAfter (C.exec fn args) ctx w)
+
+/-- `Inv` is preserved by well-formed calls at `self`. -/
+def PreservesInvAt (C : Spec S X E ε) (Inv : World S X E → Prop) (self : Address) : Prop :=
+  ∀ (c : Call C) (w : World S X E),
+    c.target = self → c.sender ≠ self → Inv w → Inv (step (.call c) w)
+
+theorem PreservesInvAt.of_fns {C : Spec S X E ε} {Inv : World S X E → Prop} {self : Address}
+    (h : ∀ fn, PreservesInvFnAt C Inv self fn) : PreservesInvAt C Inv self := by
+  intro c w ht hs hc
+  simpa [step, Call.toCtx] using h c.fn c.args c.toCtx w ht hs hc
+
+theorem inv_run_at {C : Spec S X E ε} {Inv : World S X E → Prop} {rely : X → X → Prop}
+    {self : Address}
+    (hC : PreservesInvAt C Inv self) (hE : PreservesInvEnv C Inv rely)
+    {w : World S X E} (hw : Inv w) (tr : List (Step C))
+    (hW : Wf self tr) (hR : RelyAlong rely tr w) :
+    Inv (run tr w) := by
+  induction tr generalizing w with
+  | nil => simpa using hw
+  | cons s tr ih =>
+    match s with
+    | .call c =>
+      have ⟨ht, hs, htl⟩ := hW
+      exact ih (hC c w ht hs hw) htl hR
+    | .env x' =>
+      have ⟨hr, htl⟩ := hR
+      exact ih (hE w x' hw hr) hW htl
+
 end Lsc.Security

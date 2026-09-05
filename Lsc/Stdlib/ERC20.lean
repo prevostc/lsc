@@ -85,6 +85,8 @@ def IERC20 : Interface where
 /-- Field type of a bound token: definitionally `Address` so Core certificates stay `rfl`. -/
 abbrev IERC20.Ref : Type := Address
 
+@[simp] theorem IERC20.model_eq : IERC20.model = model := rfl
+
 end Lsc.Stdlib
 
 namespace Lsc.Binding
@@ -173,5 +175,25 @@ theorem move_decimals (g : Ghost) (src dst : Address) (amt : Nat) :
 theorem move_self (g : Ghost) (src : Address) (amt : Nat) :
     move g src src amt = g := by
   simp [move]
+
+theorem model_transfer {src dst amt g} (h : amt ≤ g.balances src) :
+    model .transfer src [dst, amt] g = some (1, move g src dst amt) := by
+  simp [model, h]
+
+theorem model_transferFrom {callee src dst amt g} (h : amt ≤ g.balances src) :
+    model .transferFrom callee [src, dst, amt] g = some (1, move g src dst amt) := by
+  simp [model, h]
+
+theorem model_decimals (callee : Address) (g : Ghost) :
+    model .decimals callee [] g = some (g.decimals, g) :=
+  rfl
+
+theorem model_transfer_none {src dst amt g} (h : ¬ amt ≤ g.balances src) :
+    model .transfer src [dst, amt] g = none := by
+  simp [model, h]
+
+theorem model_transferFrom_none {callee src dst amt g} (h : ¬ amt ≤ g.balances src) :
+    model .transferFrom callee [src, dst, amt] g = none := by
+  simp [model, h]
 
 end Lsc.Stdlib

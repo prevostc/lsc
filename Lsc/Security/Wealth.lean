@@ -124,4 +124,55 @@ theorem solvent_run {Inv : World S X E → Prop} {claim : Claim S}
     Solvent claim holdings self (run tr w) :=
   hS self _ (inv_run hP hE hw tr hW hR)
 
+/-- `Inv self ⇒ Solvent` along well-formed traces, when `Inv` is only preserved at `self`. -/
+theorem solvent_run_at {Inv : World S X E → Prop} {claim : Claim S}
+    {holdings : Holdings S X E} {rely : X → X → Prop} {self : Address}
+    (hP : PreservesInvAt C Inv self) (hE : PreservesInvEnv C Inv rely)
+    (hS : ∀ w, Inv w → Solvent claim holdings self w)
+    {w : World S X E} (hw : Inv w) (tr : List (Step C))
+    (hW : Wf self tr) (hR : RelyAlong rely tr w) :
+    Solvent claim holdings self (run tr w) :=
+  hS _ (inv_run_at hP hE hw tr hW hR)
+
+/-- `Σ ⌊f a * num / den⌋ ≤ num` when `Σ f = den` and `den > 0`. -/
+theorem sum_mul_div_le {α : Type} [DecidableEq α] (H : Finset α) (f : α → Nat) (num den : Nat)
+    (hsum : H.sum f = den) (hpos : 0 < den) :
+    H.sum (fun a => f a * num / den) ≤ num := by
+  have hmul_right : ∀ (s : Finset α) (g : α → Nat) (n : Nat),
+      s.sum g * n = s.sum (fun a => g a * n) := by
+    intro s g n
+    classical
+    induction s using Finset.induction_on with
+    | empty => simp
+    | insert a s ha ih =>
+      rw [Finset.sum_insert ha, Finset.sum_insert ha, Nat.add_mul, ih]
+  have hmul_left : ∀ (s : Finset α) (g : α → Nat) (n : Nat),
+      n * s.sum g = s.sum (fun a => n * g a) := by
+    intro s g n
+    classical
+    induction s using Finset.induction_on with
+    | empty => simp
+    | insert a s ha ih =>
+      rw [Finset.sum_insert ha, Finset.sum_insert ha, Nat.mul_add, ih]
+  have hle : ∀ (s : Finset α) (g h : α → Nat), (∀ a ∈ s, g a ≤ h a) → s.sum g ≤ s.sum h := by
+    intro s g h hh
+    classical
+    induction s using Finset.induction_on with
+    | empty => simp
+    | insert a s ha ih =>
+      rw [Finset.sum_insert ha, Finset.sum_insert ha]
+      exact Nat.add_le_add (hh a (Finset.mem_insert_self _ _))
+        (ih fun x hx => hh x (Finset.mem_insert_of_mem hx))
+  have hbound :
+      H.sum (fun a => f a * num / den) * den ≤ H.sum (fun a => f a * num) := by
+    rw [hmul_right]
+    exact hle _ _ _ fun _ _ => Nat.div_mul_le_self _ _
+  have hrhs : H.sum (fun a => f a * num) = num * den := by
+    have h1 : H.sum (fun a => f a * num) = H.sum (fun a => num * f a) :=
+      Finset.sum_congr rfl fun _ _ => Nat.mul_comm _ _
+    rw [h1, ← hmul_left, hsum]
+  have : H.sum (fun a => f a * num / den) * den ≤ num * den := by
+    rw [← hrhs]; exact hbound
+  exact Nat.le_of_mul_le_mul_right this hpos
+
 end Lsc.Security

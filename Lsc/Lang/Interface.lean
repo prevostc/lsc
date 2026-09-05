@@ -44,12 +44,14 @@ namespace Tx
 
 variable {I : Interface} {S X E ε : Type}
 
-/-- CALL through a binding. Faults and model-`none` revert the caller (`callFailed`). -/
+/-- CALL through a binding. Faults and model-`none` revert the caller (`callFailed`).
+The model sees `ctx.self` (our address, the token's `msg.sender`); the callee is
+implicit in the binding's ghost. The compiler `sload`s `b.addr` for the EVM CALL. -/
 def call (b : Binding I S X) (m : I.Method) (args : List Nat) : Tx S X E ε Nat :=
-  fun _ w =>
+  fun ctx w =>
     if w.faults w.ncalls then .error .callFailed
     else
-      match I.model m (b.addr w.self) args (b.get w.ext) with
+      match I.model m ctx.self args (b.get w.ext) with
       | none => .error .callFailed
       | some (ret, g') =>
           .ok (ret, { w with ext := b.set w.ext g', ncalls := w.ncalls + 1 })
@@ -66,7 +68,19 @@ def callUnit (b : Binding I S X) (m : I.Method) (args : List Nat) : Tx S X E ε 
     Tx.run (Tx.call (E := E) (ε := ε) b m args) ctx w =
       if w.faults w.ncalls then .error .callFailed
       else
-        match I.model m (b.addr w.self) args (b.get w.ext) with
+        match I.model m ctx.self args (b.get w.ext) with
+        | none => .error .callFailed
+        | some (ret, g') =>
+            .ok (ret, { w with ext := b.set w.ext g', ncalls := w.ncalls + 1 }) :=
+  rfl
+
+/-- `simp` after a `do` block leaves `ReaderT.run` (`.run`), which does not match `Tx.run_call`. -/
+@[simp] theorem call_run (b : Binding I S X) (m : I.Method) (args : List Nat)
+    (ctx : Ctx) (w : World S X E) :
+    (Tx.call (E := E) (ε := ε) b m args).run ctx w =
+      if w.faults w.ncalls then .error .callFailed
+      else
+        match I.model m ctx.self args (b.get w.ext) with
         | none => .error .callFailed
         | some (ret, g') =>
             .ok (ret, { w with ext := b.set w.ext g', ncalls := w.ncalls + 1 }) :=

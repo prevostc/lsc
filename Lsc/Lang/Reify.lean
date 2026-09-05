@@ -146,14 +146,20 @@ def contractInfo (ns : Name) : MetaM ContractInfo := do
 
 /-! ## Schema generation -/
 
-/-- `fun (args : List Nat) => C (args.getD 0 0) … (args.getD (n-1) 0)` for constructor `C`. -/
+/-- `fun (args : List Nat) => C (ofNat (args.getD 0 0)) …` for constructor `C`.
+Amount fields are rebuilt with `ofNat`; `Address`/`Flag`/`Nat` are words. -/
 def ctorBuilder (ctor : Name) : MetaM Term := do
   let info ← getConstInfoCtor ctor
-  let args := mkIdent `args
-  let mut app : Term := mkIdent ctor
-  for i in [:info.numFields] do
-    app ← `($app (List.getD $args $(quote i) 0))
-  `(fun ($args : List Nat) => $app)
+  let argsId := mkIdent `args
+  forallTelescope info.type fun xs _ => do
+    let xs := xs.extract info.numParams xs.size
+    let mut app : Term := mkIdent ctor
+    for i in [:xs.size] do
+      let ty ← inferType xs[i]!
+      let get ← `(List.getD $argsId $(quote i) 0)
+      let arg ← if ← isAmountTy ty then `(Lsc.Amount.ofNat $get) else pure get
+      app ← `($app $arg)
+    `(fun ($argsId : List Nat) => $app)
 
 def mkSchemaCommand (ci : ContractInfo) : MetaM Syntax := do
   let σ := mkIdent `σ
@@ -787,7 +793,12 @@ def reifyFunction (fn : Name) : TermElabM Unit := do
     -- Certificate: Core.denote schema core [pₙ, …, p₁] = fn …, or
     -- `Amount.ofNat <$> Core.denote … = f` when the surface returns `Amount`.
     let schema := Lean.mkConst ci.schema
-    let envList ← mkListLit (Lean.mkConst ``Nat) params.toList.reverse
+    -- Amount parameters are words in Core; insert `toNat` at the boundary.
+    let envAtoms : List Expr ← params.toList.reverse.mapM fun p => do
+      let ty ← inferType p
+      if ← isAmountTy ty then mkAppM ``Lsc.Amount.toNat #[p]
+      else pure p
+    let envList ← mkListLit (Lean.mkConst ``Nat) envAtoms
     let coreDen := mkAppN (Lean.mkConst ``Core.denote)
       #[S, X, E, ε, schema, toExpr t, Lean.mkConst coreName, envList]
     let lhs ←

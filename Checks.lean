@@ -23,5 +23,8 @@ axioms. `#guard_msgs` turns a widened footprint into a build error (see
 /-- info: 'Token.token_solvent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms Token.token_solvent
 
+/-- info: 'Vault.vault_solvent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms Vault.vault_solvent
+
 /-- info: 'Lsc.Security.no_unauthorized_extraction' depends on axioms: [propext] -/
 #guard_msgs in #print axioms Lsc.Security.no_unauthorized_extraction
