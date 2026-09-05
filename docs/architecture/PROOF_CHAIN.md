@@ -32,6 +32,10 @@ bytecode    ──(4) EndToEnd glue──────  bytecode-level anti-explo
    the dispatcher (`runtimeBlock`: selector → `toYulFn`, calldata decoding) has no theorem yet.
 3. **Yul → bytecode.** powdr `YulEvmCompiler.compileObject_correct`, axioms exactly
    `propext`, `Classical.choice`, `Quot.sound`. Status: **proved** (external, pinned).
+   Known gap for the deploy object: `compileObject_correct` starts from `L.initState` (empty
+   calldata), while constructor arguments are currently read with `calldataload`. The emitter
+   must switch to the Solidity convention (arguments appended to the creation code and read with
+   `codecopy`) before the constructor link can be proved. Runtime calls are unaffected.
 4. **Glue.** Generic theorem: a `Security` result about `Tx.run` traces implies the same statement
    about EVM call sequences on the compiled bytecode, storage read through `R`, under the
    hypotheses listed in `TRUSTED_COMPUTING_BASE.md`. Status: **incomplete** (S1).

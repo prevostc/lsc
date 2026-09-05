@@ -82,3 +82,28 @@ Used to validate Token, never as the model of a foreign token.
 Core gains exactly `Op.call b m args` and `Stmt.call b m args`. `ContractSchema.ext` supplies
 `call : Nat → Nat → List Nat → Tx`. Lowering: `YUL_TARGET.md`. `letCall` / fault-oracle shape:
 `PROOF_CHAIN.md`. TCB: `TRUSTED_COMPUTING_BASE.md`.
+
+## Resolved implementation decisions
+
+- `Amount τ s` is a `structure` (a `def` newtype unifies with `Nat` and across units once unfolded,
+  so it gives no unit safety). Core still denotes into `Nat`; the reifier inserts `toNat`/`ofNat`
+  at the boundary and the certificate for an `Amount`-valued function is
+  `Amount.ofNat <$> Core.denote … = f`, still closed by `rfl`.
+- `Inv : World S X E → Prop`; protocols instantiate it at their own address (`Vault.Inv self`).
+  Trace well-formedness `Wf self tr`: every call has `target = self` and `sender ≠ self`.
+- `World.faults` defaults to `fun _ => false`; theorems quantify over all oracles.
+- ERC20 may-model: `transferFrom` ignores allowances (pull succeeds iff `src`'s balance covers
+  and the call is not faulted); `move` uses unbounded `Nat` addition — `Conforms` maps on-chain
+  balances to values `< 2^256`, so no wrap is modelled.
+- Bindings are explicit constants for now: `def assetB : Binding IERC20 Storage Ext := ⟨…⟩`.
+  A `bind` command is sugar to add later.
+- `extCallGas := 1_000_000` (a literal; the EVM caps it at 63/64 of available gas).
+- `IERC20.Ref := Address` (`abbrev`); typing is carried by the `Binding`, not by the field type.
+- `#lsc_obligations` also lists `C.inv_rely` when `Ext ≠ Unit` (`rely := fun _ _ => True` for
+  `Unit`), and requires `C.holdings`.
+- Traces are `List (Step C)` with `Step := call | env`; `NoAuthAlong` skips `env` steps.
+- Constructor arguments (`calldataload` in creation code vs powdr's empty `initState`) are a
+  pre-existing gap of the deploy link, tracked in `PROOF_CHAIN.md`, not part of this refactor.
+  Constructor-time `call` (for `decimals`) is covered by `compileObject_correct` under
+  `evmWithExternal`.
+- `@[simp] run_call` may be dropped if it loops in protocol proofs; then use it by `rw`.
