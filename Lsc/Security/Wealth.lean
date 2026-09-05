@@ -31,23 +31,27 @@ abbrev Claim (S : Type) := Address → S → Nat
 /-- Permission to decrease `claim a`. Evaluated in the **pre-state**. -/
 abbrev AuthPred (C : Spec S X E ε) := Address → Call C → S → Prop
 
-/-- A decrease of `claim a` on a call is only possible when `Auth a` holds in the pre-state. -/
-def NoUnauthorizedDecrease (C : Spec S X E ε) (claim : Claim S) (Auth : AuthPred C) : Prop :=
+/-- A decrease of `claim a` on a call from a world satisfying `Inv` is only possible
+when `Auth a` holds in the pre-state. Relative to `Inv`: a pro-rata `claim` is only
+monotone under the protocol invariant. -/
+def NoUnauthorizedDecrease (C : Spec S X E ε) (Inv : World S X E → Prop)
+    (claim : Claim S) (Auth : AuthPred C) : Prop :=
   ∀ (c : Call C) (w : World S X E) (a : Address),
-    claim a (step (.call c) w).self < claim a w.self → Auth a c w.self
+    Inv w → claim a (step (.call c) w).self < claim a w.self → Auth a c w.self
 
 /-- Per-entrypoint form of `NoUnauthorizedDecrease` (unpacked args, no `Call` in the hyp). -/
-def NoUnauthorizedDecreaseFn (C : Spec S X E ε) (claim : Claim S) (Auth : AuthPred C)
-    (fn : C.Fn) : Prop :=
+def NoUnauthorizedDecreaseFn (C : Spec S X E ε) (Inv : World S X E → Prop)
+    (claim : Claim S) (Auth : AuthPred C) (fn : C.Fn) : Prop :=
   ∀ (args : C.Args fn) (ctx : Ctx) (w : World S X E) (a : Address),
+    Inv w →
     claim a (worldAfter (C.exec fn args) ctx w).self < claim a w.self →
     Auth a (Call.ofCtx ctx fn args) w.self
 
-theorem NoUnauthorizedDecrease.of_fns {claim : Claim S} {Auth : AuthPred C}
-    (h : ∀ fn, NoUnauthorizedDecreaseFn C claim Auth fn) :
-    NoUnauthorizedDecrease C claim Auth := by
-  intro c w a hlt
-  simpa [step, Call.ofCtx_toCtx] using h c.fn c.args c.toCtx w a hlt
+theorem NoUnauthorizedDecrease.of_fns {Inv : World S X E → Prop} {claim : Claim S}
+    {Auth : AuthPred C} (h : ∀ fn, NoUnauthorizedDecreaseFn C Inv claim Auth fn) :
+    NoUnauthorizedDecrease C Inv claim Auth := by
+  intro c w a hInv hlt
+  simpa [step, Call.ofCtx_toCtx] using h c.fn c.args c.toCtx w a hInv hlt
 
 /--
 `Auth` is state-dependent (allowance), so the hyp must follow the prefix state.
@@ -58,11 +62,14 @@ def NoAuthAlong (Auth : AuthPred C) (a : Address) : List (Step C) → World S X 
   | .call c :: tr, w => ¬ Auth a c w.self ∧ NoAuthAlong Auth a tr (step (.call c) w)
   | .env x' :: tr, w => NoAuthAlong Auth a tr { w with ext := x' }
 
-/-- Victim-side: if `a` never authorised a call along `tr`, `claim a` is non-decreasing. -/
-theorem no_unauthorized_extraction {claim : Claim S} {Auth : AuthPred C}
-    (hN : NoUnauthorizedDecrease C claim Auth)
+/-- Victim-side: if `Inv` holds initially and is preserved, and `a` never authorised a
+call along `tr`, then `claim a` is non-decreasing. `Inv` is threaded like `inv_run`. -/
+theorem no_unauthorized_extraction {Inv : World S X E → Prop} {claim : Claim S}
+    {Auth : AuthPred C} {rely : X → X → Prop}
+    (hN : NoUnauthorizedDecrease C Inv claim Auth)
+    (hP : PreservesInv C Inv) (hE : PreservesInvEnv C Inv rely)
     (self : Address) (tr : List (Step C)) (w : World S X E) (a : Address)
-    (_hW : Wf self tr)
+    (hw : Inv w) (_hW : Wf self tr) (hR : RelyAlong rely tr w)
     (hA : NoAuthAlong Auth a tr w) :
     claim a w.self ≤ claim a (run tr w).self := by
   induction tr generalizing w with
@@ -71,38 +78,71 @@ theorem no_unauthorized_extraction {claim : Claim S} {Auth : AuthPred C}
     match s with
     | .call c =>
       obtain ⟨hna, htl⟩ := hA
+      have hw' : Inv (step (.call c) w) := hP c w hw
       have hle : claim a w.self ≤ claim a (step (.call c) w).self :=
-        Nat.le_of_not_lt fun hlt => hna (hN c w a hlt)
-      exact Nat.le_trans hle (ih (step (.call c) w) (by exact _hW.2.2) htl)
+        Nat.le_of_not_lt fun hlt => hna (hN c w a hw hlt)
+      exact Nat.le_trans hle (ih (step (.call c) w) hw' _hW.2.2 hR htl)
     | .env x' =>
-      simpa [step] using ih { w with ext := x' } _hW hA
+      obtain ⟨hr, htl⟩ := hR
+      have hw' : Inv { w with ext := x' } := hE w x' hw hr
+      simpa [step] using ih { w with ext := x' } hw' _hW htl hA
+
+/-- Like `no_unauthorized_extraction`, when `Inv` is only preserved at `self`. -/
+theorem no_unauthorized_extraction_at {Inv : World S X E → Prop} {claim : Claim S}
+    {Auth : AuthPred C} {rely : X → X → Prop} {self : Address}
+    (hN : NoUnauthorizedDecrease C Inv claim Auth)
+    (hP : PreservesInvAt C Inv self) (hE : PreservesInvEnv C Inv rely)
+    (tr : List (Step C)) (w : World S X E) (a : Address)
+    (hw : Inv w) (hW : Wf self tr) (hR : RelyAlong rely tr w)
+    (hA : NoAuthAlong Auth a tr w) :
+    claim a w.self ≤ claim a (run tr w).self := by
+  induction tr generalizing w with
+  | nil => simp [run]
+  | cons s tr ih =>
+    match s with
+    | .call c =>
+      obtain ⟨hna, htl⟩ := hA
+      have ⟨ht, hs, hWtl⟩ := hW
+      have hw' : Inv (step (.call c) w) := hP c w ht hs hw
+      have hle : claim a w.self ≤ claim a (step (.call c) w).self :=
+        Nat.le_of_not_lt fun hlt => hna (hN c w a hw hlt)
+      exact Nat.le_trans hle (ih (step (.call c) w) hw' hWtl hR htl)
+    | .env x' =>
+      obtain ⟨hr, htl⟩ := hR
+      have hw' : Inv { w with ext := x' } := hE w x' hw hr
+      simpa [step] using ih { w with ext := x' } hw' hW htl hA
 
 /-! ### Conservation (local) and solvency -/
 
 /-- Actual inflow of claim-units on this call (0 on revert). -/
 abbrev Inflow (C : Spec S X E ε) := Call C → World S X E → Nat
 
-/-- ∃ a touched set `T` closed for `claim`, and `T` conserves up to `inflow`. -/
-def Conservation (C : Spec S X E ε) (claim : Claim S) (inflow : Inflow C) : Prop :=
+/-- ∃ a touched set `T` closed for `claim`, and `T` conserves up to `inflow`.
+Stated from worlds satisfying `Inv` (a pro-rata `claim` is only conservative under `Inv`). -/
+def Conservation (C : Spec S X E ε) (Inv : World S X E → Prop) (claim : Claim S)
+    (inflow : Inflow C) : Prop :=
   ∀ (c : Call C) (w : World S X E),
+    Inv w →
     ∃ T : Finset Address,
       (∀ a, a ∉ T → claim a (step (.call c) w).self = claim a w.self) ∧
       T.sum (fun a => claim a (step (.call c) w).self) ≤
         T.sum (fun a => claim a w.self) + inflow c w
 
 /-- Per-entrypoint form of `Conservation` (unpacked args). -/
-def ConservesFn (C : Spec S X E ε) (claim : Claim S) (inflow : Inflow C) (fn : C.Fn) : Prop :=
+def ConservesFn (C : Spec S X E ε) (Inv : World S X E → Prop) (claim : Claim S)
+    (inflow : Inflow C) (fn : C.Fn) : Prop :=
   ∀ (args : C.Args fn) (ctx : Ctx) (w : World S X E),
+    Inv w →
     ∃ T : Finset Address,
       (∀ a, a ∉ T →
         claim a (worldAfter (C.exec fn args) ctx w).self = claim a w.self) ∧
       T.sum (fun a => claim a (worldAfter (C.exec fn args) ctx w).self) ≤
         T.sum (fun a => claim a w.self) + inflow (Call.ofCtx ctx fn args) w
 
-theorem Conservation.of_fns {claim : Claim S} {inflow : Inflow C}
-    (h : ∀ fn, ConservesFn C claim inflow fn) : Conservation C claim inflow := by
-  intro c w
-  simpa [step, Call.ofCtx_toCtx] using h c.fn c.args c.toCtx w
+theorem Conservation.of_fns {Inv : World S X E → Prop} {claim : Claim S} {inflow : Inflow C}
+    (h : ∀ fn, ConservesFn C Inv claim inflow fn) : Conservation C Inv claim inflow := by
+  intro c w hInv
+  simpa [step, Call.ofCtx_toCtx] using h c.fn c.args c.toCtx w hInv
 
 /-- Assets the contract actually controls, read from storage or the external-token ghost. -/
 abbrev Holdings (S X E : Type) := Address → World S X E → Nat

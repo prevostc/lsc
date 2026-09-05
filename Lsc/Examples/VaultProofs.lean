@@ -409,4 +409,59 @@ theorem withdraw_assets_le_proportional (sharesIn : Amount SHARE shareScale)
   simp [redeemedAssets]
   exact Nat.div_mul_le_self _ _
 
+/-! ### Exchange-rate monotonicity (floor mint / redeem) -/
+
+/-- `⌊x / c⌋ ≤ ⌊y / d⌋` when `x * d ≤ y * c`. -/
+private theorem div_le_div_of_mul_le {x y c d : Nat}
+    (hc : 0 < c) (hd : 0 < d) (h : x * d ≤ y * c) : x / c ≤ y / d := by
+  rw [Nat.le_div_iff_mul_le hd]
+  have hx : x / c * c ≤ x := Nat.div_mul_le_self x c
+  have h1 : x / c * c * d ≤ y * c := Nat.le_trans (Nat.mul_le_mul_right d hx) h
+  rw [Nat.mul_assoc, Nat.mul_comm c d, ← Nat.mul_assoc] at h1
+  exact Nat.le_of_mul_le_mul_right h1 hc
+
+/-- Redeeming `s` shares for `a = ⌊s · TA / TS⌋` assets does not decrease the exchange
+rate: `a * TS ≤ s * TA` gives `TA / TS ≤ (TA − a) / (TS − s)` as floors of `sa` shares. -/
+theorem withdraw_rate_nondecreasing (TA TS sa s : Nat)
+    (hTS : 0 < TS) (hs : s < TS) :
+    sa * TA / TS ≤ sa * (TA - TA * s / TS) / (TS - s) := by
+  set a := TA * s / TS
+  have hTS' : 0 < TS - s := Nat.sub_pos_of_lt hs
+  have hrate : TA * (TS - s) ≤ (TA - a) * TS := by
+    have h1 : TA * (TS - s) = TA * TS - TA * s := Nat.mul_sub TA TS s
+    have h2 : (TA - a) * TS = TA * TS - a * TS := Nat.sub_mul TA a TS
+    have h3 : a * TS ≤ TA * s := Nat.div_mul_le_self (TA * s) TS
+    rw [h1, h2]
+    exact Nat.sub_le_sub_left h3 _
+  have hprod : sa * TA * (TS - s) ≤ sa * (TA - a) * TS := by
+    calc
+      sa * TA * (TS - s) = sa * (TA * (TS - s)) := Nat.mul_assoc _ _ _
+      _ ≤ sa * ((TA - a) * TS) := Nat.mul_le_mul_left sa hrate
+      _ = sa * (TA - a) * TS := (Nat.mul_assoc _ _ _).symm
+  exact div_le_div_of_mul_le hTS hTS' hprod
+
+/-- Minting `m = ⌊assets · TS / TA⌋` shares against `assets` does not decrease the
+exchange rate: `m * TA ≤ assets * TS` gives `TA / TS ≤ (TA + assets) / (TS + m)`. -/
+theorem deposit_rate_nondecreasing (TA TS sa assets : Nat)
+    (hTS : 0 < TS) :
+    sa * TA / TS ≤ sa * (TA + assets) / (TS + TS * assets / TA) := by
+  set m := TS * assets / TA
+  have hTS' : 0 < TS + m := Nat.lt_of_lt_of_le hTS (Nat.le_add_right _ _)
+  have hrate : TA * (TS + m) ≤ (TA + assets) * TS := by
+    have h1 : TA * (TS + m) = TA * TS + TA * m := Nat.mul_add TA TS m
+    have h2 : (TA + assets) * TS = TA * TS + assets * TS := Nat.add_mul TA assets TS
+    have h3 : TA * m ≤ assets * TS := by
+      calc
+        TA * m = m * TA := Nat.mul_comm _ _
+        _ ≤ TS * assets := Nat.div_mul_le_self (TS * assets) TA
+        _ = assets * TS := Nat.mul_comm _ _
+    rw [h1, h2]
+    exact Nat.add_le_add_left h3 _
+  have hprod : sa * TA * (TS + m) ≤ sa * (TA + assets) * TS := by
+    calc
+      sa * TA * (TS + m) = sa * (TA * (TS + m)) := Nat.mul_assoc _ _ _
+      _ ≤ sa * ((TA + assets) * TS) := Nat.mul_le_mul_left sa hrate
+      _ = sa * (TA + assets) * TS := (Nat.mul_assoc _ _ _).symm
+  exact div_le_div_of_mul_le hTS hTS' hprod
+
 end Vault

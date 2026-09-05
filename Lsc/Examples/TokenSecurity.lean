@@ -211,8 +211,8 @@ private theorem inv_of_burnPost (σ : Storage) (src : Address) (n : Nat)
 
 /-! ### (a) No unauthorized decrease -/
 
-theorem transfer_auth : NoUnauthorizedDecreaseFn spec claim Auth .transfer := by
-  intro ⟨dst, amount⟩ ctx w a hdec
+theorem transfer_auth : NoUnauthorizedDecreaseFn spec Inv claim Auth .transfer := by
+  intro ⟨dst, amount⟩ ctx w a _hInv hdec
   rw [Auth_transfer]
   by_cases hs : ctx.sender = a
   · exact hs
@@ -231,8 +231,8 @@ theorem transfer_auth : NoUnauthorizedDecreaseFn spec claim Auth .transfer := by
     · have hrun := transfer_reverts_on_insufficient_balance ctx w dst amount (Nat.not_le.mp hsub)
       simp [worldAfter, hrun] at hdec
 
-theorem transferFrom_auth : NoUnauthorizedDecreaseFn spec claim Auth .transferFrom := by
-  intro ⟨src, dst, amount⟩ ctx w a hdec
+theorem transferFrom_auth : NoUnauthorizedDecreaseFn spec Inv claim Auth .transferFrom := by
+  intro ⟨src, dst, amount⟩ ctx w a _hInv hdec
   rw [Auth_transferFrom]
   by_cases ha : src = a
   · by_cases hallow : amount ≤ w.self.allowances src ctx.sender
@@ -261,8 +261,8 @@ theorem transferFrom_auth : NoUnauthorizedDecreaseFn spec claim Auth .transferFr
         (Nat.not_le.mp hallow)
       simp [worldAfter, hrun] at hdec
 
-theorem burn_auth : NoUnauthorizedDecreaseFn spec claim Auth .burn := by
-  intro amount ctx w a hdec
+theorem burn_auth : NoUnauthorizedDecreaseFn spec Inv claim Auth .burn := by
+  intro amount ctx w a _hInv hdec
   rw [Auth_burn]
   by_cases hs : ctx.sender = a
   · exact hs
@@ -277,8 +277,8 @@ theorem burn_auth : NoUnauthorizedDecreaseFn spec claim Auth .burn := by
     · have hrun := burn_reverts_on_insufficient_balance ctx w amount (Nat.not_le.mp hsub)
       simp [worldAfter, hrun] at hdec
 
-theorem mint_auth : NoUnauthorizedDecreaseFn spec claim Auth .mint := by
-  intro ⟨dst, amount⟩ ctx w a hdec
+theorem mint_auth : NoUnauthorizedDecreaseFn spec Inv claim Auth .mint := by
+  intro ⟨dst, amount⟩ ctx w a _hInv hdec
   by_cases howner : ctx.sender = w.self.owner
   · by_cases hsupply : w.self.totalSupply + amount < wordBound
     · by_cases hadd : w.self.balances dst + amount < wordBound
@@ -298,31 +298,31 @@ theorem mint_auth : NoUnauthorizedDecreaseFn spec claim Auth .mint := by
   · have hrun := mint_reverts_for_non_owner ctx w dst amount howner
     simp [worldAfter, hrun] at hdec
 
-theorem approve_auth : NoUnauthorizedDecreaseFn spec claim Auth .approve := by
-  intro ⟨spender, amount⟩ ctx w a hdec
+theorem approve_auth : NoUnauthorizedDecreaseFn spec Inv claim Auth .approve := by
+  intro ⟨spender, amount⟩ ctx w a _hInv hdec
   have ⟨w', hrun, hb⟩ := approve_preserves_balances ctx w spender amount
   simp [worldAfter, hrun] at hdec
   simp [claim, hb] at hdec
 
-theorem balanceOf_auth : NoUnauthorizedDecreaseFn spec claim Auth .balanceOf := by
-  intro who ctx w a hdec
+theorem balanceOf_auth : NoUnauthorizedDecreaseFn spec Inv claim Auth .balanceOf := by
+  intro who ctx w a _hInv hdec
   unfold worldAfter at hdec
   rw [balanceOf_returns_stored_balance ctx w who] at hdec
   exact (Nat.lt_irrefl _ hdec).elim
 
-theorem allowance_auth : NoUnauthorizedDecreaseFn spec claim Auth .allowance := by
-  intro ⟨owner, spender⟩ ctx w a hdec
+theorem allowance_auth : NoUnauthorizedDecreaseFn spec Inv claim Auth .allowance := by
+  intro ⟨owner, spender⟩ ctx w a _hInv hdec
   unfold worldAfter at hdec
   rw [allowance_returns_stored ctx w owner spender] at hdec
   exact (Nat.lt_irrefl _ hdec).elim
 
-theorem totalSupply_auth : NoUnauthorizedDecreaseFn spec claim Auth .totalSupply := by
-  intro u ctx w a hdec
+theorem totalSupply_auth : NoUnauthorizedDecreaseFn spec Inv claim Auth .totalSupply := by
+  intro u ctx w a _hInv hdec
   unfold worldAfter at hdec
   rw [totalSupply_returns_stored ctx w] at hdec
   exact (Nat.lt_irrefl _ hdec).elim
 
-theorem token_no_unauth : NoUnauthorizedDecrease spec claim Auth :=
+theorem token_no_unauth : NoUnauthorizedDecrease spec Inv claim Auth :=
   NoUnauthorizedDecrease.of_fns fun fn =>
     match fn with
     | .transfer => transfer_auth
@@ -334,16 +334,10 @@ theorem token_no_unauth : NoUnauthorizedDecrease spec claim Auth :=
     | .allowance => allowance_auth
     | .totalSupply => totalSupply_auth
 
-theorem token_no_unauthorized_extraction
-    (self : Address) (tr : List (Step spec)) (w : World Storage Unit Event) (a : Address)
-    (hW : Wf self tr) (hA : NoAuthAlong Auth a tr w) :
-    claim a w.self ≤ claim a (run tr w).self :=
-  no_unauthorized_extraction token_no_unauth self tr w a hW hA
-
 /-! ### (b) Conservation -/
 
-theorem transfer_conservesFn : ConservesFn spec claim inflow .transfer := by
-  intro ⟨dst, amount⟩ ctx w
+theorem transfer_conservesFn : ConservesFn spec Inv claim inflow .transfer := by
+  intro ⟨dst, amount⟩ ctx w _hInv
   refine ⟨({ctx.sender, dst} : Finset Address), ?frame, ?sum⟩
   · intro a ha
     have hst : a ≠ ctx.sender ∧ a ≠ dst := by
@@ -379,8 +373,8 @@ theorem transfer_conservesFn : ConservesFn spec claim inflow .transfer := by
     · have hrun := transfer_reverts_on_insufficient_balance ctx w dst amount (Nat.not_le.mp hsub)
       simp [worldAfter, hrun]
 
-theorem transferFrom_conservesFn : ConservesFn spec claim inflow .transferFrom := by
-  intro ⟨src, dst, amount⟩ ctx w
+theorem transferFrom_conservesFn : ConservesFn spec Inv claim inflow .transferFrom := by
+  intro ⟨src, dst, amount⟩ ctx w _hInv
   refine ⟨({src, dst} : Finset Address), ?frame, ?sum⟩
   · intro a ha
     have hst : a ≠ src ∧ a ≠ dst := by
@@ -431,8 +425,8 @@ theorem transferFrom_conservesFn : ConservesFn spec claim inflow .transferFrom :
         (Nat.not_le.mp hallow)
       simp [worldAfter, hrun]
 
-theorem mint_conservesFn : ConservesFn spec claim inflow .mint := by
-  intro ⟨dst, amount⟩ ctx w
+theorem mint_conservesFn : ConservesFn spec Inv claim inflow .mint := by
+  intro ⟨dst, amount⟩ ctx w _hInv
   refine ⟨({dst} : Finset Address), ?frame, ?sum⟩
   · intro a ha
     have hat : a ≠ dst := by simpa [Finset.mem_singleton] using ha
@@ -463,8 +457,8 @@ theorem mint_conservesFn : ConservesFn spec claim inflow .mint := by
     · have hrun := mint_reverts_for_non_owner ctx w dst amount howner
       simp [worldAfter, hrun]
 
-theorem burn_conservesFn : ConservesFn spec claim inflow .burn := by
-  intro amount ctx w
+theorem burn_conservesFn : ConservesFn spec Inv claim inflow .burn := by
+  intro amount ctx w _hInv
   refine ⟨({ctx.sender} : Finset Address), ?frame, ?sum⟩
   · intro a ha
     have hs : a ≠ ctx.sender := by simpa [Finset.mem_singleton] using ha
@@ -489,8 +483,8 @@ theorem burn_conservesFn : ConservesFn spec claim inflow .burn := by
     · have hrun := burn_reverts_on_insufficient_balance ctx w amount (Nat.not_le.mp hsub)
       simp [worldAfter, hrun]
 
-theorem approve_conservesFn : ConservesFn spec claim inflow .approve := by
-  intro ⟨spender, amount⟩ ctx w
+theorem approve_conservesFn : ConservesFn spec Inv claim inflow .approve := by
+  intro ⟨spender, amount⟩ ctx w _hInv
   refine ⟨∅, ?_, ?_⟩
   · intro a _
     have ⟨w', hrun, hb⟩ := approve_preserves_balances ctx w spender amount
@@ -498,8 +492,8 @@ theorem approve_conservesFn : ConservesFn spec claim inflow .approve := by
   · have ⟨_, hrun, _⟩ := approve_preserves_balances ctx w spender amount
     simp [worldAfter, hrun]
 
-theorem balanceOf_conservesFn : ConservesFn spec claim inflow .balanceOf := by
-  intro who ctx w
+theorem balanceOf_conservesFn : ConservesFn spec Inv claim inflow .balanceOf := by
+  intro who ctx w _hInv
   refine ⟨∅, ?_, ?_⟩
   · intro a _
     unfold worldAfter
@@ -508,8 +502,8 @@ theorem balanceOf_conservesFn : ConservesFn spec claim inflow .balanceOf := by
     rw [balanceOf_returns_stored_balance ctx w who]
     simp [claim, inflow, Call.ofCtx]
 
-theorem allowance_conservesFn : ConservesFn spec claim inflow .allowance := by
-  intro ⟨owner, spender⟩ ctx w
+theorem allowance_conservesFn : ConservesFn spec Inv claim inflow .allowance := by
+  intro ⟨owner, spender⟩ ctx w _hInv
   refine ⟨∅, ?_, ?_⟩
   · intro a _
     unfold worldAfter
@@ -518,8 +512,8 @@ theorem allowance_conservesFn : ConservesFn spec claim inflow .allowance := by
     rw [allowance_returns_stored ctx w owner spender]
     simp [claim, inflow, Call.ofCtx]
 
-theorem totalSupply_conservesFn : ConservesFn spec claim inflow .totalSupply := by
-  intro u ctx w
+theorem totalSupply_conservesFn : ConservesFn spec Inv claim inflow .totalSupply := by
+  intro u ctx w _hInv
   refine ⟨∅, ?_, ?_⟩
   · intro a _
     unfold worldAfter
@@ -528,7 +522,7 @@ theorem totalSupply_conservesFn : ConservesFn spec claim inflow .totalSupply := 
     rw [totalSupply_returns_stored ctx w]
     simp [claim, inflow, Call.ofCtx]
 
-theorem token_conservation : Conservation spec claim inflow :=
+theorem token_conservation : Conservation spec Inv claim inflow :=
   Conservation.of_fns fun fn =>
     match fn with
     | .transfer => transfer_conservesFn
@@ -651,6 +645,14 @@ theorem token_preserves_inv : PreservesInv spec Inv :=
 theorem token_inv_rely : PreservesInvEnv spec Inv (fun _ _ => True) := by
   intro w x' hw _
   exact hw
+
+theorem token_no_unauthorized_extraction
+    (self : Address) (tr : List (Step spec)) (w : World Storage Unit Event) (a : Address)
+    (hw : Inv w) (hW : Wf self tr) (hR : RelyAlong (fun _ _ => True) tr w)
+    (hA : NoAuthAlong Auth a tr w) :
+    claim a w.self ≤ claim a (run tr w).self :=
+  no_unauthorized_extraction token_no_unauth token_preserves_inv token_inv_rely
+    self tr w a hw hW hR hA
 
 /-- Deployment from empty balances establishes `Inv`. -/
 theorem «constructor_inv» (owner : Address) (supply : Nat) (ctx : Ctx)
