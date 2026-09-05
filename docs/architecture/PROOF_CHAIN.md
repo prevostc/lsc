@@ -26,11 +26,16 @@ bytecode    ──(4) EndToEnd glue──────  bytecode-level anti-explo
    `CtxWF`), `R` including `WorldWF` and `logsRel` via `List.Forall₂` with `Γ.ev.build` /
    `abiBytes` witnesses. Args are `decodeArgs f st0.env.calldata` (no `calldataRel`). The
    `letCall` case (S2) still quantifies existentially over the fault oracle. Status:
-   **M1 proved** for `Counter.increment` (`Lsc.Compiler.counter_increment_correct`, axioms
-   `propext` / `Classical.choice` / `Quot.sound`) via general `core_sim` on the `M1Frag`
-   fragment (`load`, `addChecked`, `store`, one-word `emit`, `ret` unit, `letOp`/`seq`/`stmtTail`).
-   General `toYulFn_correct` / dispatcher remain `sorry`. Emitter: temp-free nested Yul, gated by
-   `coreWF` / `Nodup`. Tested for Counter and Token by `Lsc/Compiler/YulTests.lean`.
+   **M2a proved** for every Counter runtime entrypoint (`Lsc.Compiler.counter_correct`, and the
+   named `counter_increment_correct` / `counter_incrementBy_correct` /
+   `counter_decrement_correct` / `counter_get_correct`; axioms `propext` / `Classical.choice` /
+   `Quot.sound`) via `core_sim` on `M1Frag` (`load`, `addChecked`, `subChecked`, `Op.pure`,
+   `store`, one-word `emit`, 0-arg `require` with `eq`/`ne`, `letOp`/`seq`/`stmtTail`/`letPure`
+   id / `ite` / `opTail` word `ret`). Params `n ≤ 1` with `calldataload`. General
+   `toYulFn_correct` / dispatcher remain `sorry`. `ctxRel` does not bound `calldata.length`, so
+   the general `runtimeBlock_correct` is not proved (Yul `calldatasize` wraps at `2^256`).
+   Emitter: temp-free nested Yul, gated by `coreWF` / `Nodup`. Tested for Counter and Token by
+   `Lsc/Compiler/YulTests.lean`.
 3. **Yul → bytecode.** powdr `YulEvmCompiler.compileObject_correct`, axioms exactly
    `propext`, `Classical.choice`, `Quot.sound`. Status: **proved** (external, pinned).
    Known gap for the deploy object: `compileObject_correct` starts from `L.initState` (empty

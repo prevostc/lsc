@@ -19,6 +19,25 @@ theorem ofNat_inj_of_lt {a b : Nat} (ha : a < wordBound) (hb : b < wordBound)
     (h : BitVec.ofNat 256 a = BitVec.ofNat 256 b) : a = b := by
   simpa [toNat_ofNat_of_lt ha, toNat_ofNat_of_lt hb] using congrArg BitVec.toNat h
 
+theorem ofNat_eq_iff {a b : Nat} (ha : a < wordBound) (hb : b < wordBound) :
+    BitVec.ofNat 256 a = BitVec.ofNat 256 b ↔ a = b :=
+  ⟨ofNat_inj_of_lt ha hb, fun h => h ▸ rfl⟩
+
+theorem ofNat_sub_of_le {a b : Nat} (hba : b ≤ a) (ha : a < wordBound) :
+    BitVec.ofNat 256 a - BitVec.ofNat 256 b = BitVec.ofNat 256 (a - b) := by
+  have hb : b < wordBound := Nat.lt_of_le_of_lt hba ha
+  have hab : a - b < wordBound := Nat.lt_of_le_of_lt (Nat.sub_le a b) ha
+  apply BitVec.eq_of_toNat_eq
+  have ha' := toNat_ofNat_of_lt ha
+  have hb' := toNat_ofNat_of_lt hb
+  rw [BitVec.toNat_sub, ha', hb', toNat_ofNat_of_lt hab]
+  change (2 ^ 256 - b + a) % 2 ^ 256 = a - b
+  have hword : (2 : Nat) ^ 256 = wordBound := rfl
+  rw [hword]
+  have : wordBound - b + a = (a - b) + wordBound := by omega
+  rw [this, Nat.add_mod_right]
+  exact Nat.mod_eq_of_lt hab
+
 theorem ofNat_add (a b : Nat) :
     BitVec.ofNat 256 a + BitVec.ofNat 256 b = BitVec.ofNat 256 (a + b) := by
   apply BitVec.eq_of_toNat_eq

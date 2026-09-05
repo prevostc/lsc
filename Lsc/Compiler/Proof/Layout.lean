@@ -226,6 +226,13 @@ theorem ctxRel_appendLog {ctx st} (h : ctxRel ctx st) (topics : List U256) (p n 
 theorem memOnly_touch (st : EvmState) (p n : Nat) : MemOnly st (touchMemory st p n) := by
   simp [MemOnly, touchMemory]
 
+theorem R_touch_halted {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
+    {κ} {w : World S X E} {st : EvmState}
+    (h : R c Γ κ w st) (p n : Nat) (h' : Option (HaltKind × List UInt8)) :
+    R c Γ κ w { touchMemory st p n with halted := h' } :=
+  R_halted_update (R_memOnly h (memOnly_touch st p n)) h'
+
+
 theorem R_sstore {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx} {w : World S X E} {st : EvmState} {f v : Nat}
     (hR : R c Γ κ w st) (_hctx : ctxRel ctx st)

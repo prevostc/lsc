@@ -143,6 +143,25 @@ def haltError {S X E ε : Type} (c : ContractDef) (Γ : ContractSchema S X E ε)
   | .user e, bytes => ∃ i args, e = Γ.err.build i args ∧ bytes = customErrorBytes c i args
   | .callFailed, bytes => bytes = []
 
+/-- Reducible alias of the `toYulFn_correct` conclusion, so per-function restatements
+are defeq to the general theorem (`RetTy.unit.denote` unfolds with `f.ret`). -/
+@[reducible] def ToYulFnCorrect {S X E ε : Type} (c : ContractDef)
+    (Γ : ContractSchema S X E ε) (κ : List UInt8 → U256) (f : FnDef)
+    (yul : YBlock) (ctx : Ctx) (w : World S X E) (st0 : EvmState) : Prop :=
+  let args := decodeArgs f st0.env.calldata
+  match Tx.run (Core.denote Γ f.core args.reverse) ctx w with
+  | .ok (v, w') =>
+      ∃ stObs,
+        RunCommitted yul st0 [] stObs .halt ∧
+        haltSuccess f.ret v stObs.halted ∧
+        R c Γ κ w' stObs
+  | .error e =>
+      ∃ stObs bytes,
+        RunCommitted yul st0 [] stObs .halt ∧
+        stObs.halted = some (.revert, bytes) ∧
+        haltError c Γ e bytes ∧
+        R c Γ κ w stObs
+
 /-- If `Tx.run (Core.denote … f) = .ok (v, w')`, a `RunCommitted` of `toYulFn c f` from a
 related state halts with `.ret` (or `stop` for unit) and ABI bytes of `v`, and the
 final observed state is related to `w'`. If it reverts with `e`, the run halts with
@@ -153,19 +172,7 @@ theorem toYulFn_correct {S X E ε : Type} (c : ContractDef) (Γ : ContractSchema
     (yul : YBlock) (hyul : toYulFn c f = some yul)
     (ctx : Ctx) (w : World S X E) (st0 : EvmState)
     (hctx : ctxRel ctx st0) (hR : R c Γ κ w st0) :
-    let args := decodeArgs f st0.env.calldata
-    match Tx.run (Core.denote Γ f.core args.reverse) ctx w with
-    | .ok (v, w') =>
-        ∃ stObs,
-          RunCommitted yul st0 [] stObs .halt ∧
-          haltSuccess f.ret v stObs.halted ∧
-          R c Γ κ w' stObs
-    | .error e =>
-        ∃ stObs bytes,
-          RunCommitted yul st0 [] stObs .halt ∧
-          stObs.halted = some (.revert, bytes) ∧
-          haltError c Γ e bytes ∧
-          R c Γ κ w stObs := by
+    ToYulFnCorrect c Γ κ f yul ctx w st0 := by
   -- TODO(S1): proof
   sorry
 

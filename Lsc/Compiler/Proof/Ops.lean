@@ -1,4 +1,5 @@
 import Lsc.Compiler.Proof.Layout
+import Lsc.Compiler.Proof.Emit
 import YulSemantics.BigStep
 
 set_option linter.unusedSimpArgs false
@@ -15,19 +16,23 @@ open YulSemantics.EVM
 def M1Op : Lsc.Op → Prop
   | .load _ => True
   | .addChecked _ _ => True
+  | .subChecked _ _ => True
+  | .pure _ => True
+  | _ => False
+
+def M1Cond : Lsc.Cond → Prop
+  | .eq _ _ | .ne _ _ => True
   | _ => False
 
 def M1Stmt : Lsc.Stmt → Prop
   | .store _ _ => True
   | .emit _ args => args.length = 1
+  | .require c _ args => M1Cond c ∧ args.length = 0
   | _ => False
 
 theorem memOnly_mstore (st : EvmState) (p v : U256) :
     MemOnly st { touchMemory st p.toNat 32 with memory := storeWord st.memory p.toNat v } := by
   simp [MemOnly, touchMemory]
-
-theorem hoist_panic (code : Nat) : hoist evm (emitPanic {} code).stmts = [] := by
-  simp [emitPanic, emitDo, Emit.push, Emit.stmts, hoist]
 
 theorem emitLet_stmts (e : Emit) (n : YIdent) (x : YExpr) :
     (emitLet e n x).stmts = e.stmts ++ [.letDecl [n] (some x)] :=
@@ -49,6 +54,13 @@ theorem emitLetOp_load (c : ContractDef) (e : Emit) (d f : Nat) :
 theorem emitLetOp_addChecked (c : ContractDef) (e : Emit) (d : Nat) (a b : Atom) :
     emitLetOp c e d (.addChecked a b) =
       some (emitAddChecked e (identV d) (atomE d a) (atomE d b)) := rfl
+
+theorem emitLetOp_subChecked (c : ContractDef) (e : Emit) (d : Nat) (a b : Atom) :
+    emitLetOp c e d (.subChecked a b) =
+      some (emitSubChecked e (identV d) (atomE d a) (atomE d b)) := rfl
+
+theorem emitLetOp_pure (c : ContractDef) (e : Emit) (d : Nat) (a : Atom) :
+    emitLetOp c e d (.pure a) = some (emitLet e (identV d) (atomE d a)) := rfl
 
 theorem emitAddChecked_stmts (e : Emit) (name : YIdent) (a b : YExpr) :
     (emitAddChecked e name a b).stmts =
@@ -78,37 +90,37 @@ theorem emitStmt_emit_one (c : ContractDef) (e : Emit) (d ev : Nat) (a : Atom)
           .exprStmt (bop Op.log1 [lit abiPtr, lit 32, lit ed.topic0])] := by
   simp [emitStmt, h, emitLog1_one]
 
-private theorem toNat_abiPtr : (BitVec.ofNat 256 abiPtr).toNat = abiPtr :=
+theorem toNat_abiPtr : (BitVec.ofNat 256 abiPtr).toNat = abiPtr :=
   toNat_ofNat_of_lt (lt_256_wordBound (by decide))
 
-private theorem toNat_abiAfterSel : (BitVec.ofNat 256 abiAfterSel).toNat = abiAfterSel :=
+theorem toNat_abiAfterSel : (BitVec.ofNat 256 abiAfterSel).toNat = abiAfterSel :=
   toNat_ofNat_of_lt (lt_256_wordBound (by decide))
 
-private theorem toNat_36 : (BitVec.ofNat 256 36).toNat = 36 :=
+theorem toNat_36 : (BitVec.ofNat 256 36).toNat = 36 :=
   toNat_ofNat_of_lt (lt_256_wordBound (by decide))
 
-private theorem toNat_32 : (BitVec.ofNat 256 32).toNat = 32 :=
+theorem toNat_32 : (BitVec.ofNat 256 32).toNat = 32 :=
   toNat_ofNat_of_lt (lt_256_wordBound (by decide))
 
-private theorem toNat_224 : (BitVec.ofNat 256 224).toNat = 224 :=
+theorem toNat_224 : (BitVec.ofNat 256 224).toNat = 224 :=
   toNat_ofNat_of_lt (lt_256_wordBound (by decide))
 
-private theorem step_add (st : EvmState) (a b : U256) :
+theorem step_add (st : EvmState) (a b : U256) :
     stepOp Op.add [a, b] st = some (.ok [a + b] st) := rfl
 
-private theorem step_lt (st : EvmState) (a b : U256) :
+theorem step_lt (st : EvmState) (a b : U256) :
     stepOp Op.lt [a, b] st = some (.ok [b2w (a.ult b)] st) := rfl
 
-private theorem step_shl (st : EvmState) (shift val : U256) :
+theorem step_shl (st : EvmState) (shift val : U256) :
     stepOp Op.shl [shift, val] st = some (.ok [val <<< shift.toNat] st) := rfl
 
-private theorem step_sload (st : EvmState) (k : U256) :
+theorem step_sload (st : EvmState) (k : U256) :
     stepOp Op.sload [k] st = some (.ok [st.storage k] st) := rfl
 
-private theorem evm_litValue_number (n : Nat) :
+theorem evm_litValue_number (n : Nat) :
     evm.litValue (.number n) = BitVec.ofNat 256 n := rfl
 
-private theorem step_sstore (st : EvmState) (k v : U256) (h : st.env.static = false) :
+theorem step_sstore (st : EvmState) (k v : U256) (h : st.env.static = false) :
     stepOp Op.sstore [k, v] st = some (.ok []
       { st with
         storage := upd st.storage k v
@@ -117,21 +129,21 @@ private theorem step_sstore (st : EvmState) (k v : U256) (h : st.env.static = fa
   simp only [stepOp, guardStatic, h]
   rw [if_neg Bool.false_ne_true]
 
-private theorem step_log1 (st : EvmState) (p n t : U256) (h : st.env.static = false) :
+theorem step_log1 (st : EvmState) (p n t : U256) (h : st.env.static = false) :
     stepOp Op.log1 [p, n, t] st = some (.ok [] (appendLog st [t] p n)) := by
   simp only [stepOp, guardStatic, h]
   rw [if_neg Bool.false_ne_true]
 
-private theorem step_mstore (st : EvmState) (p v : U256) :
+theorem step_mstore (st : EvmState) (p v : U256) :
     stepOp Op.mstore [p, v] st = some (.ok []
       { touchMemory st p.toNat 32 with memory := storeWord st.memory p.toNat v }) := rfl
 
-private theorem step_revert (st : EvmState) (p s : U256) :
+theorem step_revert (st : EvmState) (p s : U256) :
     stepOp Op.revert [p, s] st = some (.halt
       { touchMemory st p.toNat s.toNat with
         halted := some (.revert, readBytes st.memory p.toNat s.toNat) }) := rfl
 
-private theorem step_stop (st : EvmState) :
+theorem step_stop (st : EvmState) :
     stepOp Op.stop [] st = some (.halt { st with halted := some (.stop, []) }) := rfl
 
 theorem stop_sim (funs : FunEnv evm) (V : VEnv evm) (st : EvmState) :

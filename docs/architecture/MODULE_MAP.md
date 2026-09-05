@@ -50,8 +50,10 @@ proved invariants/laws.
   differential tests against `Tx.run`.
 - `Bytecode.lean` — `compileRuntime`/`compileDeploy` through powdr's verified compiler.
 - `Correctness.lean` — `R` and the `toYul_correct` statement; proofs under `Proof/`.
-- `Proof/{Words,Memory,Env,Layout,Ops,Core}.lean` — M1 simulation (`M1Frag`);
-  `counter_increment_correct` for `Counter.increment`.
+- `Proof/{Words,Memory,Env,Layout,Ops,OpsMore,Emit,Core,Counter}.lean` — `M1Frag` simulation
+  (`load`/`addChecked`/`subChecked`/`pure`, `store`/`emit`/`require`, `ite`/`opTail` word
+  return, params); `counter_correct` for every Counter runtime function. General
+  `toYulFn_correct` / `runtimeBlock_correct` remain `sorry` in `Correctness.lean`.
 - `EndToEnd.lean` — generic glue from a `Security` theorem to a bytecode-level theorem via
   `core_denote`, `toYul_correct`, powdr `compileObject_correct`. States `Conforms` against powdr.
 

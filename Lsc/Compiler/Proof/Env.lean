@@ -188,6 +188,117 @@ theorem Emit.stmts_push (e : Emit) (s : YStmt) :
 
 theorem emitParams_zero (e : Emit) (off : Nat) : emitParams e off 0 = e := rfl
 
+theorem emitParams_succ (e : Emit) (off n : Nat) :
+    emitParams e off (n + 1) =
+      (emitParams e off n).push
+        (.letDecl [identV n]
+          (some (bop Op.calldataload [lit (off + 32 * n)]))) := by
+  have hrange : List.range (n + 1) = List.range n ++ [n] := List.range_succ
+  dsimp only [emitParams]
+  rw [hrange, List.foldl_append, List.foldl_cons, List.foldl_nil]
+
+theorem step_calldataload (st : EvmState) (p : U256) :
+    stepOp Op.calldataload [p] st = some (.ok [wordFrom st.env.calldata p.toNat] st) := rfl
+
+theorem wordFrom_toNat_lt (cd : List UInt8) (p : Nat) :
+    (wordFrom cd p).toNat < wordBound := by
+  simpa [wordBound] using (wordFrom cd p).isLt
+
+theorem decodeArgs_wf (f : FnDef) (cd : List UInt8) : EnvWF (decodeArgs f cd).reverse := by
+  intro v hv
+  have hv' : v ∈ decodeArgs f cd := List.mem_reverse.mp hv
+  unfold decodeArgs at hv'
+  obtain ⟨i, _, rfl⟩ := List.mem_map.mp hv'
+  exact wordFrom_toNat_lt _ _
+
+theorem decodeArgs_length (f : FnDef) (cd : List UInt8) :
+    (decodeArgs f cd).length = f.params.length := by
+  simp [decodeArgs]
+
+theorem decodeArgs_reverse_length (f : FnDef) (cd : List UInt8) :
+    (decodeArgs f cd).reverse.length = f.params.length := by
+  simp [decodeArgs]
+
+theorem decodeArgs_runtime {f : FnDef} {cd : List UInt8} (hk : f.kind ≠ .constructor) :
+    decodeArgs f cd =
+      (List.range f.params.length).map fun i =>
+        (wordFrom cd (4 + 32 * i)).toNat := by
+  simp [decodeArgs, hk]
+
+theorem params_sim (funs : FunEnv evm) (st : EvmState) (off n : Nat)
+    (hbound : off + 32 * n < wordBound) :
+    ExecStmts evm funs [] st (emitParams {} off n).stmts
+      (toVEnv ((List.range n).map (fun i =>
+        (wordFrom st.env.calldata (off + 32 * i)).toNat)).reverse) st .normal := by
+  induction n with
+  | zero =>
+    simp [emitParams_zero, Emit.stmts_nil, toVEnv_nil]
+    exact Step.seqNil
+  | succ n ih =>
+    have hbound' : off + 32 * n < wordBound := by
+      have : 32 * n ≤ 32 * (n + 1) := Nat.mul_le_mul_left 32 (Nat.le_succ n)
+      omega
+    have ih' := ih hbound'
+    have hrange : List.range (n + 1) = List.range n ++ [n] := List.range_succ
+    have hmap :
+        (List.range (n + 1)).map (fun i => (wordFrom st.env.calldata (off + 32 * i)).toNat) =
+          (List.range n).map (fun i => (wordFrom st.env.calldata (off + 32 * i)).toNat) ++
+            [(wordFrom st.env.calldata (off + 32 * n)).toNat] := by
+      rw [hrange, List.map_append, List.map_cons, List.map_nil]
+    rw [emitParams_succ, Emit.stmts_push, hmap, List.reverse_append, List.reverse_cons,
+      List.reverse_nil, List.nil_append, List.singleton_append, toVEnv_cons]
+    simp only [List.length_reverse, List.length_map, List.length_range]
+    have hlit : (BitVec.ofNat 256 (off + 32 * n)).toNat = off + 32 * n :=
+      toNat_ofNat_of_lt hbound'
+    have hload :
+        EvalExpr evm funs
+          (toVEnv ((List.range n).map (fun i =>
+            (wordFrom st.env.calldata (off + 32 * i)).toNat)).reverse) st
+          (bop Op.calldataload [lit (off + 32 * n)])
+          (.vals [wordFrom st.env.calldata (off + 32 * n)] st) :=
+      Step.builtinOk (Step.argsCons Step.argsNil Step.lit)
+        (by
+          simp only [litValue_number, step_calldataload, hlit])
+    have hlet :
+        ExecStmt evm funs
+          (toVEnv ((List.range n).map (fun i =>
+            (wordFrom st.env.calldata (off + 32 * i)).toNat)).reverse) st
+          (.letDecl [identV n]
+            (some (bop Op.calldataload [lit (off + 32 * n)])))
+          ((identV n, wordFrom st.env.calldata (off + 32 * n)) ::
+            toVEnv ((List.range n).map (fun i =>
+              (wordFrom st.env.calldata (off + 32 * i)).toNat)).reverse)
+          st .normal :=
+      Step.letVal hload rfl
+    have hlet' :
+        ExecStmt evm funs
+          (toVEnv ((List.range n).map (fun i =>
+            (wordFrom st.env.calldata (off + 32 * i)).toNat)).reverse) st
+          (.letDecl [identV n]
+            (some (bop Op.calldataload [lit (off + 32 * n)])))
+          ((identV n,
+              BitVec.ofNat 256 (wordFrom st.env.calldata (off + 32 * n)).toNat) ::
+            toVEnv ((List.range n).map (fun i =>
+              (wordFrom st.env.calldata (off + 32 * i)).toNat)).reverse)
+          st .normal := by
+      convert hlet using 1
+      congr 1
+      congr 1
+      apply BitVec.eq_of_toNat_eq
+      rw [toNat_ofNat_of_lt (wordFrom_toNat_lt _ _)]
+    exact execStmts_append ih' (Step.seqCons hlet' Step.seqNil)
+
+theorem hoist_append (a b : YBlock) :
+    hoist evm (a ++ b) = hoist evm a ++ hoist evm b := by
+  simp [hoist, List.filterMap_append]
+
+theorem hoist_params (off n : Nat) : hoist evm (emitParams {} off n).stmts = [] := by
+  induction n with
+  | zero => simp [emitParams_zero, Emit.stmts_nil, hoist]
+  | succ n ih =>
+    rw [emitParams_succ, Emit.stmts_push, hoist_append, ih]
+    simp [hoist]
+
 theorem halt_ne_normal : Outcome.halt ≠ .normal := by decide
 
 end Lsc.Compiler

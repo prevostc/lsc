@@ -4,7 +4,7 @@ import Lsc.Examples.TokenProofs
 import Lsc.Examples.TokenSecurity
 import Lsc.Examples.VaultSecurity
 import Lsc.Security.Wealth
-import Lsc.Compiler.Proof.Core
+import Lsc.Compiler.Proof.Counter
 
 /-!
 # Axiom footprint checks
@@ -40,3 +40,15 @@ axioms. `#guard_msgs` turns a widened footprint into a build error (see
 
 /-- info: 'Lsc.Compiler.counter_increment_correct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms Lsc.Compiler.counter_increment_correct
+
+/-- info: 'Lsc.Compiler.counter_incrementBy_correct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms Lsc.Compiler.counter_incrementBy_correct
+
+/-- info: 'Lsc.Compiler.counter_decrement_correct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms Lsc.Compiler.counter_decrement_correct
+
+/-- info: 'Lsc.Compiler.counter_get_correct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms Lsc.Compiler.counter_get_correct
+
+/-- info: 'Lsc.Compiler.counter_correct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms Lsc.Compiler.counter_correct

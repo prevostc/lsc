@@ -147,7 +147,7 @@ private theorem two_pow_32_lt_wordBound : (2 : Nat) ^ 32 < wordBound := by
   unfold wordBound
   exact Nat.pow_lt_pow_right (by decide : (1 : Nat) < 2) (by decide : (32 : Nat) < 256)
 
-private theorem byteAt_shl_selector (sel i : Nat) (hsel : sel < 2 ^ 32) (hi : i < 4) :
+theorem byteAt_shl_selector (sel i : Nat) (hsel : sel < 2 ^ 32) (hi : i < 4) :
     byteAt (BitVec.ofNat 256 sel <<< 224) (31 - i) =
       UInt8.ofNat ((sel >>> (8 * (3 - i))) % 256) := by
   have hsel' : sel < wordBound := Nat.lt_trans hsel two_pow_32_lt_wordBound
@@ -195,7 +195,26 @@ theorem panicBytes_mem (mem : Nat → UInt8) (code : Nat) (hcode : code < wordBo
         omega),
     hidx, byteAt_shl_selector panicSelector i panicSelector_lt hi']
 
+theorem selectorBytes_mem (mem : Nat → UInt8) (sel : Nat) (hsel : sel < 2 ^ 32) :
+    readBytes (storeWord mem abiPtr (BitVec.ofNat 256 sel <<< 224)) abiPtr 4 =
+      selectorBytes sel := by
+  unfold readBytes selectorBytes
+  apply List.map_congr_left
+  intro i hi
+  have hi' : i < 4 := List.mem_range.mp hi
+  have hidx : abiPtr + i - abiPtr = i := Nat.add_sub_cancel_left abiPtr i
+  rw [storeWord_in (h := by
+        simp only [abiPtr]
+        omega),
+    hidx, byteAt_shl_selector sel i hsel hi']
+
+theorem customErrorBytes_nil (c : ContractDef) {err : Nat} {ed : ErrorDef}
+    (h : c.errors[err]? = some ed) :
+    customErrorBytes c err [] = selectorBytes ed.selector := by
+  simp [customErrorBytes, h]
+
 theorem abiBytes_singleton (n : Nat) : abiBytes [n] = wordBytes n := by
   simp [abiBytes]
+
 
 end Lsc.Compiler
