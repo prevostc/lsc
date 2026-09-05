@@ -30,3 +30,28 @@ jobs:
       - name: No project axioms
         run: |
           if grep -rnE '^\s*axiom ' Lsc --include='*.lean'; then exit 1; fi
+
+  difftest:
+    name: EVM differential (anvil / Tx.run)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install elan
+        run: |
+          curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf \
+            | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.elan
+            .lake
+          key: ${{ runner.os }}-lsc-${{ hashFiles('lean-toolchain', 'lake-manifest.json') }}
+      - name: Mathlib cache
+        run: lake exe cache get || true
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+      - name: Differential harness
+        run: scripts/difftest.sh
+
