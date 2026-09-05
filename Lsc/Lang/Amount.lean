@@ -18,7 +18,8 @@ protocol's disfavour. This module makes those type errors at zero runtime cost.
   `Core` stays a language of words and the certificate stays `rfl`. (A `Bool`-typed `Core`
   would need typed environments; deferred.)
 
-Core still denotes into `Nat`; the reifier inserts `toNat`/`ofNat` at the boundary.
+The compiler denotation is still `Core.denote` into `Nat`. Amount-typed certificates use
+`Core.denoteAWord` / `Core.denoteAUnit` (`toNat` on parameters; `ofNat` at each word op).
 -/
 
 namespace Lsc

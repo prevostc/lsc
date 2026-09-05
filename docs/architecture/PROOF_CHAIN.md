@@ -12,8 +12,13 @@ Yul         ──(3) powdr compileObject_correct──  bytecode (powdr evm-sem
 bytecode    ──(4) EndToEnd glue──────  bytecode-level anti-exploit theorem
 ```
 
-1. **Surface → Core.** `f.core_denote : Core.denote schema f.core args = f args := rfl`. Emitted
-   by the untrusted reifier, checked by the kernel. Status: **proved** for every reified function.
+1. **Surface → Core.** `f.core_denote` by `rfl`, emitted by the untrusted reifier, kernel-checked.
+   Shape is `Core.denote schema f.core args = f args` for word-typed programs, or
+   `Core.denoteAWord` / `Core.denoteAUnit` when the surface is Amount-typed (`INTERFACE_MODEL.md`).
+   Status: **proved** for every reified function. The compiler obligation `toYul_correct` still
+   talks about `Core.denote` (Nat). Amount programs therefore need a future `toNat`/`ofNat`
+   agreement lemma between `denoteAWord`/`denoteAUnit` and `Core.denote` before the bytecode
+   link is as tight as for `Nat` programs.
 2. **Core → Yul.** Two theorems in `Lsc/Compiler/Correctness.lean` (`sorry`, not imported by
    `Lsc.lean` / `Checks.lean`): `toYulFn_correct` (one runtime entrypoint, `V' = []`) and
    `runtimeBlock_correct` (dispatcher). Hypotheses: `Γ.st.Lawful c.fields` (nine update equations,

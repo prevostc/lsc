@@ -87,9 +87,14 @@ Core gains exactly `Op.call b m args` and `Stmt.call b m args`. `ContractSchema.
 ## Resolved implementation decisions
 
 - `Amount τ s` is a `structure` (a `def` newtype unifies with `Nat` and across units once unfolded,
-  so it gives no unit safety). Core still denotes into `Nat`; the reifier inserts `toNat`/`ofNat`
-  at the boundary and the certificate for an `Amount`-valued function is
-  `Amount.ofNat <$> Core.denote … = f`, still closed by `rfl`.
+  so it gives no unit safety). The compiler denotation `Core.denote` stays a language of words.
+  `Amount.add`/`sub`/`share*` are explicit `if`s (so `run_*` is `rfl`); they are **not**
+  `ofNat <$> Tx.addChecked`, because `Functor.map` over `ReaderT/StateT/Except` is not
+  definitionally `bind`-congruent and does not push through `ite`. Amount-returning certificates
+  are `Core.denoteAWord Γ f.core [toNat args…] = f` (and `denoteAUnit` when the function returns
+  `Unit` but storage has `Amount` fields), closed by `rfl`. A single `(τ, s)` is taken from the
+  return type, or from the first Amount storage field for `Unit` functions — mixed-unit
+  arithmetic in one entrypoint (`shareDown` across asset/share) needs a richer interp.
 - `Inv : World S X E → Prop`; protocols instantiate it at their own address (`Vault.Inv self`).
   Trace well-formedness `Wf self tr`: every call has `target = self` and `sender ≠ self`.
 - `World.faults` defaults to `fun _ => false`; theorems quantify over all oracles.

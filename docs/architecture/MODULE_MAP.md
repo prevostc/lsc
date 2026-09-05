@@ -13,8 +13,9 @@ Every module exposes an API (definitions, theorem statements, assumptions) and k
 - `Amount.lean` — `Amount τ s` (structure), `Flag`, `Price`, rounding-explicit ops, `toNat` simp
   normal form, ℚ cast pack. External scales are opaque symbols; `rescale` / `Amount.one` take
   runtime scale words. No IERC20 shim.
-- `Core.lean` — `Core` (`Op.call`, `Stmt.call`), `Core.denote`, `Core.effects` (including
-  `calls`). `ContractSchema.ext` supplies `call : Nat → Nat → List Nat → Tx`.
+- `Core.lean` — `Core` (`Op.call`, `Stmt.call`), `Core.denote` (Nat, compiler), `Core.denoteAWord`
+  / `Core.denoteAUnit` (Amount surface certificates), `Core.effects` (including `calls`).
+  `ContractSchema.ext` supplies `call : Nat → Nat → List Nat → Tx`.
 - `CoreProof.lean` — `effects_frame` (stated; proof is a remaining structural induction).
 - `Spec.lean` — `Entry`, `Spec` (a contract as a finite family of `Tx` entrypoints with their own
   argument/return types). Language-level so that `Reify` can generate it without depending on

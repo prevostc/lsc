@@ -8,6 +8,7 @@ import Lsc.Lang.Reify
 import Lsc.Lang.Contract
 import Lsc.Tools.AbiJson
 import Lsc.Examples.Counter
+import Lsc.Examples.AmountDemo
 import Lsc.Examples.Token
 import Lsc.Examples.TokenProofs
 import Lsc.Examples.TokenSecurity

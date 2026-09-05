@@ -34,13 +34,24 @@ Core  --toYul (ours)-->  Yul AST (powdr yul-semantics)  --powdr compile_correct-
 
 ## Core: the only IR
 
-- Loop-free ANF over words with de Bruijn locals; one denotation `Core.denote : Core → List ℕ →
+- Loop-free ANF over words with de Bruijn locals; compiler denotation `Core.denote : Core → List ℕ →
   Tx …`. Storage fields, events and errors are indices into a generated schema.
   `ContractSchema.ext` supplies `call : Nat → Nat → List Nat → Tx`. Core gains exactly
-  `Op.call b m args` and `Stmt.call b m args`.
-- The reifier (`lsc_reify`, MetaM) is **untrusted**: every run emits `f.core_denote :
-  Core.denote schema f.core args = f args := rfl`, kernel-checked. A reifier bug is a build error,
-  never a miscompile. Rejections carry a positioned message naming the offending subterm.
+  `Op.call b m args` and `Stmt.call b m args`. Amount surface programs have a second interp
+  `denoteAWord` / `denoteAUnit` used only in `f.core_denote` (same AST; compiler still uses
+  `Core.denote`).
+  **Interim decision (Sept 2026):** `Amount.ofNat <$> Core.denote = f` is not definitional
+  (`Functor.map` does not push through `bind`/`ite`), so the typed interp is the certificate
+  target. Its limits: one `(τ, s)` per function, so mixed-unit programs (the Vault) stay on `Nat`
+  storage for now. The principled end state is a **type-directed interp with erasure**: Core
+  ops tagged with their unit, `denoteTyped` producing surface types, one generic theorem
+  `denoteTyped c = ofNat <$> Core.denote (erase c)` proved once by induction, compiler on the
+  erased term. Scheduled after the first end-to-end bytecode theorem; not on its critical path.
+- The reifier (`lsc_reify`, MetaM) is **untrusted**: every run emits `f.core_denote` by `rfl`,
+  kernel-checked — `Core.denote schema f.core args = f args` for word-typed programs, or
+  `Core.denoteAWord` / `Core.denoteAUnit` when the surface returns `Amount` or is `Unit` with
+  `Amount` storage. A reifier bug is a build error, never a miscompile. Rejections carry a
+  positioned message naming the offending subterm.
 - `Core.effects` (reads/writes/emits/`calls : List (binding × method)`) with a generic frame
   theorem replaces per-function `f_preserves_x` proofs. The frame includes: no `store` to
   field `f` in any entrypoint ⇒ `f` immutable (bound addresses).

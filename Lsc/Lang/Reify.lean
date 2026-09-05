@@ -10,9 +10,11 @@ user's Lean types, plus `C.schema_lawful : C.schema.st.Lawful …`, and `lsc_rei
 `C.f : … → Tx C.Storage C.Ext C.Event C.Error ρ` (or `Unit` when there is no `Ext`) into
 
 * `C.f.core : Core t` — the Core AST, and
-* `C.f.core_denote : ∀ args, Core.denote C.schema C.f.core [argsₙ, …, args₁] = C.f args₁ … argsₙ`
+* `C.f.core_denote` — `Core.denote C.schema C.f.core [args] = C.f args` for word-typed
+  programs, or `Core.denoteAWord` / `Core.denoteAUnit` when the surface returns
+  `Amount` or has `Amount` storage, both proved by `rfl`.
 
-proved by `rfl`. `lsc_contract C f₁ … fₙ` additionally defines `C.contract` and a
+`lsc_contract C f₁ … fₙ` additionally defines `C.contract` and a
 language-level `C.spec` (`C.Fn` / `C.entry` / `C.spec_exec_*`). `#lsc_obligations C`
 prints the security theorems to prove; it does not import `Lsc.Security`.
 
@@ -89,9 +91,30 @@ def fieldKindAndVal (ty : Expr) : MetaM (FieldKind × Expr) :=
     | 2 => pure (.map2, val)
     | n => throwError "storage field with {n} keys is not supported (max 2)"
 
-def isAmountTy (ty : Expr) : MetaM Bool := do
-  let ty ← whnfR ty
-  return ty.isAppOfArity ``Lsc.Amount 2
+/-- Unfold abbrevs such as `abbrev Dai := Amount …`. -/
+def whnfAmount? (ty : Expr) : MetaM (Option (Expr × Expr)) := do
+  let ty ← whnfD ty
+  if ty.isAppOfArity ``Lsc.Amount 2 then
+    return some (ty.getArg! 0, ty.getArg! 1)
+  else
+    return none
+
+def isAmountTy (ty : Expr) : MetaM Bool :=
+  return (← whnfAmount? ty).isSome
+
+/-- `some (τ, s)` when the certificate uses `Core.denoteAWord` / `Core.denoteAUnit`.
+Amount **return** always; Amount **storage** only for `Unit` returns (the first Amount
+field's `(τ, s)`). Nat/Flag/Addr returns stay on `Core.denote`, so
+`Vault.deposit : Amount → M Nat` is unchanged even if storage later becomes `Amount`. -/
+def amountAnnot (ci : ContractInfo) (ρ : Expr) : MetaM (Option (Expr × Expr)) := do
+  match ← whnfAmount? ρ with
+  | some ts => return some ts
+  | none =>
+    let ρ ← whnfR ρ
+    unless ρ.isConstOf ``Unit || ρ.isConstOf ``PUnit do return none
+    for f in ci.fields do
+      if let some ts ← whnfAmount? f.valTy then return some ts
+    return none
 
 def findBindings (ns storage ext : Name) : MetaM (Array BindingInfo) := do
   let env ← getEnv
@@ -173,11 +196,14 @@ def mkSchemaCommand (ci : ContractInfo) : MetaM Syntax := do
   let mut map1Upd : Array Term := #[]
   let mut map2 : Array Term := #[]
   let mut map2Upd : Array Term := #[]
+  let mut map1Set : Array Term := #[]
+  let mut map2Set : Array Term := #[]
   for f in ci.fields do
     let proj := mkIdent (`σ ++ f.name)
     let fld := mkIdent f.name
     let amt? ← isAmountTy f.valTy
     let k := mkIdent `k
+    let v := mkIdent `v
     match f.kind with
     | .scalar =>
       if amt? then
@@ -188,27 +214,47 @@ def mkSchemaCommand (ci : ContractInfo) : MetaM Syntax := do
         scalarUpd := scalarUpd.push (← `(fun $σ $m => { $σ with $fld:ident := $m }))
       map1 := map1.push (← `(fun _ _ => 0)); map1Upd := map1Upd.push (← `(fun $σ _ => $σ))
       map2 := map2.push (← `(fun _ _ _ => 0)); map2Upd := map2Upd.push (← `(fun $σ _ => $σ))
+      map1Set := map1Set.push (← `(fun $σ _ _ => $σ))
+      map2Set := map2Set.push (← `(fun $σ _ _ _ => $σ))
     | .map1 =>
       scalar := scalar.push (← `(fun _ => 0)); scalarUpd := scalarUpd.push (← `(fun $σ _ => $σ))
       if amt? then
         map1 := map1.push (← `(fun $σ $k => Lsc.Amount.toNat ($proj $k)))
         map1Upd := map1Upd.push
           (← `(fun $σ $m => { $σ with $fld:ident := fun $k => Lsc.Amount.ofNat ($m $k) }))
+        map1Set := map1Set.push
+          (← `(fun $σ $k $v =>
+            { $σ with $fld:ident := Function.update $proj $k (Lsc.Amount.ofNat $v) }))
       else
         map1 := map1.push (← `(fun $σ => $proj))
         map1Upd := map1Upd.push (← `(fun $σ $m => { $σ with $fld:ident := $m }))
+        map1Set := map1Set.push
+          (← `(fun $σ $k $v => { $σ with $fld:ident := Function.update $proj $k $v }))
       map2 := map2.push (← `(fun _ _ _ => 0)); map2Upd := map2Upd.push (← `(fun $σ _ => $σ))
+      map2Set := map2Set.push (← `(fun $σ _ _ _ => $σ))
     | .map2 =>
       scalar := scalar.push (← `(fun _ => 0)); scalarUpd := scalarUpd.push (← `(fun $σ _ => $σ))
       map1 := map1.push (← `(fun _ _ => 0)); map1Upd := map1Upd.push (← `(fun $σ _ => $σ))
+      map1Set := map1Set.push (← `(fun $σ _ _ => $σ))
       if amt? then
         let k₁ := mkIdent `k₁; let k₂ := mkIdent `k₂
         map2 := map2.push (← `(fun $σ $k₁ $k₂ => Lsc.Amount.toNat ($proj $k₁ $k₂)))
         map2Upd := map2Upd.push
           (← `(fun $σ $m => { $σ with $fld:ident := fun $k₁ $k₂ => Lsc.Amount.ofNat ($m $k₁ $k₂) }))
+        map2Set := map2Set.push
+          (← `(fun $σ $k₁ $k₂ $v =>
+            let m := $proj
+            { $σ with $fld:ident :=
+              Function.update m $k₁ (Function.update (m $k₁) $k₂ (Lsc.Amount.ofNat $v)) }))
       else
+        let k₁ := mkIdent `k₁; let k₂ := mkIdent `k₂
         map2 := map2.push (← `(fun $σ => $proj))
         map2Upd := map2Upd.push (← `(fun $σ $m => { $σ with $fld:ident := $m }))
+        map2Set := map2Set.push
+          (← `(fun $σ $k₁ $k₂ $v =>
+            let m := $proj
+            { $σ with $fld:ident :=
+              Function.update m $k₁ (Function.update (m $k₁) $k₂ $v) }))
   let evBuilders ← ci.evCtors.mapM ctorBuilder
   let errBuilders ← ci.errCtors.mapM ctorBuilder
   let evDefault ← ctorBuilder ci.evCtors[0]!
@@ -249,7 +295,9 @@ def mkSchemaCommand (ci : ContractInfo) : MetaM Syntax := do
         map1 := fun $i => List.getD [$map1,*] $i (fun _ _ => 0)
         map1Upd := fun $i => List.getD [$map1Upd,*] $i (fun $σ _ => $σ)
         map2 := fun $i => List.getD [$map2,*] $i (fun _ _ _ => 0)
-        map2Upd := fun $i => List.getD [$map2Upd,*] $i (fun $σ _ => $σ) }
+        map2Upd := fun $i => List.getD [$map2Upd,*] $i (fun $σ _ => $σ)
+        map1Set := fun $i => List.getD [$map1Set,*] $i (fun $σ _ _ => $σ)
+        map2Set := fun $i => List.getD [$map2Set,*] $i (fun $σ _ _ _ => $σ) }
       ev := ⟨fun $i $args => List.getD [$evBuilders,*] $i $evDefault $args⟩
       err := ⟨fun $i $args => List.getD [$errBuilders,*] $i $errDefault $args⟩
       ext := { call := $extTerm })
@@ -448,7 +496,8 @@ def retExprOf (env : Env t) : (s : RetTy) → Expr → MetaM (RetExpr s)
     throwError "reify: expected a pair in `pure`, found `{e}`"
 
 /-- Do not `whnf` through `Amount`/`Address`/`Flag` (`def` newtypes). `whnfR` still unfolds
-the `Fixed` abbrev to `Amount Unit s`. -/
+the `Fixed` abbrev to `Amount Unit s`; user `abbrev`s such as `Dai := Amount …` are
+unfolded one step on the fallback path so `Address` stays folded. -/
 partial def retTyOf (ρ : Expr) : MetaM RetTy := do
   let ρ ← whnfR ρ
   match ρ.getAppFn.constName?, ρ.getAppNumArgs with
@@ -459,8 +508,11 @@ partial def retTyOf (ρ : Expr) : MetaM RetTy := do
   | some ``Lsc.Amount, 2 => pure .word
   | some ``Lsc.Price, 3 => pure .word
   | some ``Prod, 2 => return .pair (← retTyOf (ρ.getArg! 0)) (← retTyOf (ρ.getArg! 1))
-  | _, _ => throwError "reify: unsupported return type `{ρ}` \
-      (Unit, Nat, Address, Flag, Amount, Price, or pairs)"
+  | _, _ =>
+    match ← unfoldDefinition? ρ with
+    | some ρ' => retTyOf ρ'
+    | none => throwError "reify: unsupported return type `{ρ}` \
+        (Unit, Nat, Address, Flag, Amount, Price, or pairs)"
 
 /-- Head constants that unfold to a `Tx` primitive (`Amount.add` → `addChecked`,
 `Binding.transfer` → `Tx.call`, …). Compared as names so Reify need not import
@@ -790,8 +842,9 @@ def reifyFunction (fn : Name) : TermElabM Unit := do
     let coreName := fn ++ `core
     let coreTy := mkApp (Lean.mkConst ``Core) (toExpr t)
     addAndCompile <| .defnDecl (mkDefinitionValEx coreName [] coreTy core.toExpr .abbrev .safe [coreName])
-    -- Certificate: Core.denote schema core [pₙ, …, p₁] = fn …, or
-    -- `Amount.ofNat <$> Core.denote … = f` when the surface returns `Amount`.
+    -- Certificate: `Core.denote schema core env = f`, or `Core.denoteAWord/AUnit = f`
+    -- when the surface is Amount-typed (return or storage). `Functor.map ofNat` over
+    -- `Core.denote` is not definitionally `Amount.add` (bind does not push through `ite`).
     let schema := Lean.mkConst ci.schema
     -- Amount parameters are words in Core; insert `toNat` at the boundary.
     let envAtoms : List Expr ← params.toList.reverse.mapM fun p => do
@@ -799,18 +852,24 @@ def reifyFunction (fn : Name) : TermElabM Unit := do
       if ← isAmountTy ty then mkAppM ``Lsc.Amount.toNat #[p]
       else pure p
     let envList ← mkListLit (Lean.mkConst ``Nat) envAtoms
-    let coreDen := mkAppN (Lean.mkConst ``Core.denote)
-      #[S, X, E, ε, schema, toExpr t, Lean.mkConst coreName, envList]
+    let annot ← amountAnnot ci ρ
     let lhs ←
-      if ← isAmountTy ρ then
-        let ofNat := mkAppN (Lean.mkConst ``Lsc.Amount.ofNat) #[ρ.getArg! 0, ρ.getArg! 1]
-        mkAppM ``Functor.map #[ofNat, coreDen]
-      else
-        pure coreDen
+      match t, annot with
+      | .word, some (τ, sc) =>
+        mkAppOptM ``Core.denoteAWord
+          #[some S, some X, some E, some ε, some τ, some sc, some schema,
+            some (toExpr t), some (Lean.mkConst coreName), some envList]
+      | .unit, some (τ, sc) =>
+        mkAppOptM ``Core.denoteAUnit
+          #[some S, some X, some E, some ε, some τ, some sc, some schema,
+            some (toExpr t), some (Lean.mkConst coreName), some envList]
+      | _, _ =>
+        pure <| mkAppN (Lean.mkConst ``Core.denote)
+          #[S, X, E, ε, schema, toExpr t, Lean.mkConst coreName, envList]
     let rhs := mkAppN (Lean.mkConst fn) params
     let eq ← mkEq lhs rhs
     unless ← isDefEq lhs rhs do
-      throwError "reify: certificate failed — `Core.denote` of the reified term is not \
+      throwError "reify: certificate failed — denotation of the reified term is not \
         definitionally the original function.{indentExpr eq}\nReified Core:{indentExpr core.toExpr}"
     let stmt ← mkForallFVars params eq
     let proof ← mkLambdaFVars params (← mkEqRefl lhs)
@@ -1085,9 +1144,9 @@ def obligationsText (ns : Name) (ctors : List Name) (extName : String) : String 
   let preserves := ctors.map fun fn =>
     thm fn "preserves_inv" "Lsc.Security.PreservesInvFn" s!"{C}.Inv"
   let auths := ctors.map fun fn =>
-    thm fn "auth" "Lsc.Security.NoUnauthorizedDecreaseFn" s!"{C}.claim {C}.Auth"
+    thm fn "auth" "Lsc.Security.NoUnauthorizedDecreaseFn" s!"{C}.Inv {C}.claim {C}.Auth"
   let conserves := ctors.map fun fn =>
-    thm fn "conserves" "Lsc.Security.ConservesFn" s!"{C}.claim {C}.inflow"
+    thm fn "conserves" "Lsc.Security.ConservesFn" s!"{C}.Inv {C}.claim {C}.inflow"
   let arms (suffix : String) : String :=
     "\n".intercalate (ctors.map fun fn =>
       s!"    | .{leaf fn} => {C}.{leaf fn}_{suffix}")
@@ -1101,11 +1160,13 @@ def obligationsText (ns : Name) (ctors : List Name) (extName : String) : String 
     "theorem " ++ C ++ ".no_unauthorized_extraction\n" ++
     "    (self : Lsc.Address) (tr : List (Lsc.Security.Step " ++ C ++ ".spec))\n" ++
     "    (w : " ++ world ++ ") (a : Lsc.Address)\n" ++
-    "    (hW : Lsc.Security.Wf self tr)\n" ++
+    "    (hw : " ++ C ++ ".Inv w) (hW : Lsc.Security.Wf self tr)\n" ++
+    "    (hR : Lsc.Security.RelyAlong (" ++ rely ++ ") tr w)\n" ++
     "    (hA : Lsc.Security.NoAuthAlong " ++ C ++ ".Auth a tr w) :\n" ++
     "    " ++ C ++ ".claim a w.self ≤ " ++ C ++
     ".claim a (Lsc.Security.run tr w).self :=\n" ++
-    "  Lsc.Security.no_unauthorized_extraction " ++ C ++ ".no_unauth tr w a hW hA"
+    "  Lsc.Security.no_unauthorized_extraction " ++ C ++ ".no_unauth " ++
+    C ++ ".preserves_inv " ++ C ++ ".inv_rely self tr w a hw hW hR hA"
   let body :=
     (preserves ++
       [assembler "preserves_inv" s!"Lsc.Security.PreservesInv {C}.spec {C}.Inv"
@@ -1113,11 +1174,11 @@ def obligationsText (ns : Name) (ctors : List Name) (extName : String) : String 
       [invRely] ++
       auths ++
       [assembler "no_unauth"
-        s!"Lsc.Security.NoUnauthorizedDecrease {C}.spec {C}.claim {C}.Auth"
+        s!"Lsc.Security.NoUnauthorizedDecrease {C}.spec {C}.Inv {C}.claim {C}.Auth"
         "Lsc.Security.NoUnauthorizedDecrease.of_fns" "auth"] ++
       [extraction] ++
       conserves ++
-      [assembler "conserves" s!"Lsc.Security.Conservation {C}.spec {C}.claim {C}.inflow"
+      [assembler "conserves" s!"Lsc.Security.Conservation {C}.spec {C}.Inv {C}.claim {C}.inflow"
         "Lsc.Security.Conservation.of_fns" "conserves"])
   s!"-- Proof obligations for {C}\n" ++ "\n\n".intercalate body
 

@@ -21,7 +21,9 @@ bound value; function parameters are the initial environment, last parameter fir
 Storage fields, events and errors are referenced by index through a `ContractSchema`,
 which `lsc_schema` generates from the user's Lean `structure`/`inductive`s. Every case of
 `denote` is *literally* the surface primitive applied to evaluated atoms, which is what
-makes `Core.denote (reify f) = f` hold by `rfl`.
+makes `Core.denote (reify f) = f` hold by `rfl` for word-typed programs. Amount-typed
+surface programs use `denoteAWord` / `denoteAUnit` (same Core AST; `ofNat` at each op
+rather than `Functor.map` over the whole `Tx`).
 -/
 
 namespace Lsc
@@ -173,6 +175,13 @@ structure StorageSchema (S : Type) where
   map1Upd : Nat → S → (Nat → Nat) → S
   map2 : Nat → S → Nat → Nat → Nat
   map2Upd : Nat → S → (Nat → Nat → Nat) → S
+  /-- Point-update a 1-key map. For `Amount` fields this is `Function.update` on the
+  Amount-valued map (with `ofNat`), which matches the surface `write f[k]`. The
+  whole-map `map1Upd` is kept for `Lawful`. Default is the Nat encoding. -/
+  map1Set : Nat → S → Nat → Nat → S := fun f σ k v =>
+    map1Upd f σ (Function.update (map1 f σ) k v)
+  map2Set : Nat → S → Nat → Nat → Nat → S := fun f σ k₁ k₂ v =>
+    map2Upd f σ (Function.update (map2 f σ) k₁ (Function.update (map2 f σ k₁) k₂ v))
 
 structure EvSchema (E : Type) where
   build : Nat → List Nat → E
@@ -233,6 +242,115 @@ def Core.denote (Γ : ContractSchema S X E ε) : {t : RetTy} → Core t → List
   | _, .seq s k, env => Stmt.denote Γ env s >>= fun _ => Core.denote Γ k env
   | _, .letPure p args k, env => Core.denote Γ k (Prim.eval p (args.map (·.eval env)) :: env)
   | _, .ite c a b, env => if c.denote env then Core.denote Γ a env else Core.denote Γ b env
+
+/-! ## Amount-shaped denotation
+
+`Core.denote` is a language of words. An `Amount`-typed surface program has the same
+word operations, but each load/add/store carries `ofNat`/`toNat` in a different place
+than `Functor.map` over the whole `Tx`. Those two nestings are not definitionally
+equal (kernel `rfl` does not push `bind` through `ite`).
+
+`denoteA` interprets word ops as `Amount τ s` (the same `Amount.add` / `load` the
+surface used) and uses `map1Set` so mapping writes are `Function.update` on the
+Amount-valued field. Certificates are `denoteAWord` / `denoteAUnit` `= f` by `rfl`.
+The compiler still uses `denote` (Nat); the two agree on the underlying words. -/
+
+def Op.denoteA {τ : Type} {scale : Nat} (Γ : ContractSchema S X E ε) (env : List Nat) :
+    Op → Tx S X E ε (Amount τ scale)
+  | .load f => Tx.load (fun σ => Amount.ofNat (Γ.st.scalar f σ))
+  | .loadMap f k => Tx.loadMap (fun σ key => Amount.ofNat (Γ.st.map1 f σ key)) (k.eval env)
+  | .loadMap2 f k₁ k₂ =>
+      Tx.loadMap2 (fun σ a b => Amount.ofNat (Γ.st.map2 f σ a b)) (k₁.eval env) (k₂.eval env)
+  | .addChecked a b => Amount.add (Amount.ofNat (a.eval env)) (Amount.ofNat (b.eval env))
+  | .subChecked a b => Amount.sub (Amount.ofNat (a.eval env)) (Amount.ofNat (b.eval env))
+  | .mulChecked a b =>
+      fun _ w =>
+        if a.eval env * b.eval env < wordBound then
+          .ok (Amount.ofNat (a.eval env * b.eval env), w)
+        else .error (.arith .overflow)
+  | .divChecked a b =>
+      fun _ w =>
+        if b.eval env ≠ 0 then .ok (Amount.ofNat (a.eval env / b.eval env), w)
+        else .error (.arith .divByZero)
+  | .mulDivDown a b c =>
+      -- Same `(τ, s)` as the result; mixed-unit `shareDown` (Vault assets vs shares) needs a
+      -- richer interp than a single `denoteAWord` annotation.
+      Amount.shareDown (τ' := τ) (s' := scale)
+        (Amount.ofNat (a.eval env)) (Amount.ofNat (b.eval env)) (Amount.ofNat (c.eval env))
+  | .mulDivUp a b c =>
+      Amount.shareUp (τ' := τ) (s' := scale)
+        (Amount.ofNat (a.eval env)) (Amount.ofNat (b.eval env)) (Amount.ofNat (c.eval env))
+  | .pure a => Pure.pure (Amount.ofNat (a.eval env))
+  | .sender | .value | .timestamp | .blockNumber | .selfAddress | .call .. =>
+      fun _ _ => .error .callFailed
+
+def Stmt.denoteA (Γ : ContractSchema S X E ε) (env : List Nat) : Stmt → Tx S X E ε Unit
+  | .store f v => Tx.store (Γ.st.scalarUpd f) (v.eval env)
+  | .storeMap f k v =>
+      fun _ w =>
+        .ok ((), { w with self := Γ.st.map1Set f w.self (k.eval env) (v.eval env) })
+  | .storeMap2 f k₁ k₂ v =>
+      fun _ w =>
+        .ok ((), { w with
+          self := Γ.st.map2Set f w.self (k₁.eval env) (k₂.eval env) (v.eval env) })
+  | .require c err args => Tx.require (c.denote env) (Γ.err.build err (args.map (·.eval env)))
+  | .emit ev args => Tx.emit (Γ.ev.build ev (args.map (·.eval env)))
+  | .revert err args => Tx.revert (Γ.err.build err (args.map (·.eval env)))
+  | .call b m args => Γ.ext.call b m (args.map (·.eval env)) >>= fun _ => pure ()
+
+/-- Amount-returning interp. Indexed on the full `Core` family (like `Core.denote`) so the
+equation compiler emits `brecOn`, which reduces. A definition on `Core .word` alone is
+well-founded `fix` and `@[irreducible]`. Dummy on non-`.word` constructors. -/
+def Core.denoteAWord {τ : Type} {scale : Nat} (Γ : ContractSchema S X E ε) :
+    {t : RetTy} → Core t → List Nat → Tx S X E ε (Amount τ scale)
+  | _, .ret (.word a), env => pure (Amount.ofNat (a.eval env))
+  | _, .opTail op, env => Op.denoteA (τ := τ) (scale := scale) Γ env op
+  | _, .revertTail err args, env => Tx.revert (Γ.err.build err (args.map (·.eval env)))
+  | _, .letOp op k, env =>
+      match op with
+      | .sender | .value | .timestamp | .blockNumber | .selfAddress | .call .. =>
+          Op.denote Γ env op >>= fun v =>
+            Core.denoteAWord (τ := τ) (scale := scale) Γ k (v :: env)
+      | _ =>
+          Op.denoteA (τ := τ) (scale := scale) Γ env op >>= fun a =>
+            Core.denoteAWord (τ := τ) (scale := scale) Γ k (a.toNat :: env)
+  | _, .seq st k, env =>
+      Stmt.denoteA Γ env st >>= fun _ => Core.denoteAWord (τ := τ) (scale := scale) Γ k env
+  | _, .letPure p args k, env =>
+      Core.denoteAWord (τ := τ) (scale := scale) Γ k (Prim.eval p (args.map (·.eval env)) :: env)
+  | _, .ite c a b, env =>
+      if c.denote env then Core.denoteAWord (τ := τ) (scale := scale) Γ a env
+      else Core.denoteAWord (τ := τ) (scale := scale) Γ b env
+  | _, .ret _, _ => fun _ _ => .error .callFailed
+  | _, .opTailAddr _, _ => fun _ _ => .error .callFailed
+  | _, .opTailFlag _, _ => fun _ _ => .error .callFailed
+  | _, .stmtTail _, _ => fun _ _ => .error .callFailed
+
+/-- Unit-returning interp with Amount-shaped word ops. Same family-indexing as `denoteAWord`. -/
+def Core.denoteAUnit {τ : Type} {scale : Nat} (Γ : ContractSchema S X E ε) :
+    {t : RetTy} → Core t → List Nat → Tx S X E ε Unit
+  | _, .ret .unit, _env => pure ()
+  | _, .stmtTail st, env => Stmt.denoteA Γ env st
+  | _, .revertTail err args, env => Tx.revert (Γ.err.build err (args.map (·.eval env)))
+  | _, .letOp op k, env =>
+      match op with
+      | .sender | .value | .timestamp | .blockNumber | .selfAddress | .call .. =>
+          Op.denote Γ env op >>= fun v =>
+            Core.denoteAUnit (τ := τ) (scale := scale) Γ k (v :: env)
+      | _ =>
+          Op.denoteA (τ := τ) (scale := scale) Γ env op >>= fun a =>
+            Core.denoteAUnit (τ := τ) (scale := scale) Γ k (a.toNat :: env)
+  | _, .seq st k, env =>
+      Stmt.denoteA Γ env st >>= fun _ => Core.denoteAUnit (τ := τ) (scale := scale) Γ k env
+  | _, .letPure p args k, env =>
+      Core.denoteAUnit (τ := τ) (scale := scale) Γ k (Prim.eval p (args.map (·.eval env)) :: env)
+  | _, .ite c a b, env =>
+      if c.denote env then Core.denoteAUnit (τ := τ) (scale := scale) Γ a env
+      else Core.denoteAUnit (τ := τ) (scale := scale) Γ b env
+  | _, .ret _, _ => fun _ _ => .error .callFailed
+  | _, .opTail _, _ => fun _ _ => .error .callFailed
+  | _, .opTailAddr _, _ => fun _ _ => .error .callFailed
+  | _, .opTailFlag _, _ => fun _ _ => .error .callFailed
 
 /-! ## Renaming (used by the reifier to eliminate join points) -/
 
