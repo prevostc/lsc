@@ -14,22 +14,15 @@ bytecode    ──(4) EndToEnd glue──────  bytecode-level anti-explo
 
 1. **Surface → Core.** `f.core_denote : Core.denote schema f.core args = f args := rfl`. Emitted
    by the untrusted reifier, checked by the kernel. Status: **proved** for every reified function.
-2. **Core → Yul.** `toYul_correct`: for every Core program `c`, every world `w` related to a Yul
-   state by the layout relation `R` (`storage`/`ctx` and `∀ b, b.get w.ext = α_b (view yst)`),
-   `Core.denote c` and `YulSemantics.Run (toYul c)` agree on outcome (return data, revert data,
-   storage under `R`, logs). The `letCall` case quantifies **existentially** over the fault
-   oracle: for every `resp` admitted by `ext.Call` at the compiled `call` there is a choice
-   `faults ncalls := ¬resp.success` under which both sides agree. Success uses `Conforms` (model
-   word and `α(post) = g'`, re-establishing `R`); failure reverts both sides with empty data. The
-   theorem's shape is `∀ w, ∀ outcome, ∃ w'` differing from `w` only in `faults`; security
-   theorems are `∀ w`, so the glue instantiates them at the chosen oracle. Status: **incomplete**
-   (S1 for the call-free fragment, S2 for `letCall`). Current state: `Lsc/Compiler/Yul.lean`
-   emits the call-free fragment; `Lsc/Compiler/Correctness.lean` states `toYul_correct` for one
-   `FnDef` (`sorry`, not imported by `Lsc.lean`). The statement is **tested** for Counter and
-   Token by the differential harness in `Lsc/Compiler/YulTests.lean` (powdr's Yul interpreter vs
-   `Tx.run`; compiled by powdr: Counter 480/494 bytes, Token 1650/1742). Known weaknesses of the
-   stated theorem: `R` relates logs only by length and address (event data not yet related), and
-   the dispatcher (`runtimeBlock`: selector → `toYulFn`, calldata decoding) has no theorem yet.
+2. **Core → Yul.** Two theorems in `Lsc/Compiler/Correctness.lean` (`sorry`, not imported by
+   `Lsc.lean` / `Checks.lean`): `toYulFn_correct` (one runtime entrypoint, `V' = []`) and
+   `runtimeBlock_correct` (dispatcher). Hypotheses: `Γ.st.Lawful c.fields` (nine update equations,
+   generated as `C.schema_lawful`), `KeccakSep c κ`, `ctxRel` (`static = false`, `halted = none`,
+   `CtxWF`), `R` including `WorldWF` and `logsRel` via `List.Forall₂` with `Γ.ev.build` /
+   `abiBytes` witnesses. Args are `decodeArgs f st0.env.calldata` (no `calldataRel`). The
+   `letCall` case (S2) still quantifies existentially over the fault oracle. Status:
+   **incomplete** (S1 call-free, S2 `letCall`). Emitter: temp-free nested Yul, gated by `coreWF`
+   / `Nodup`. Tested for Counter and Token by `Lsc/Compiler/YulTests.lean`.
 3. **Yul → bytecode.** powdr `YulEvmCompiler.compileObject_correct`, axioms exactly
    `propext`, `Classical.choice`, `Quot.sound`. Status: **proved** (external, pinned).
    Known gap for the deploy object: `compileObject_correct` starts from `L.initState` (empty

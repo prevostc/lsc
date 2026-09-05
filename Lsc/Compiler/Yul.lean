@@ -14,8 +14,9 @@ everything in `Core` except the external ERC20 ops (`erc20Transfer`, `erc20Trans
 
 Not emitted in this slice: `tload`/`tstore` (reentrancy lock), `gas()`, `for`, `delegatecall`,
 `selfdestruct`, `create`. `ite` is `switch` (Yul `if` has no else). Dispatcher is
-`switch shr(224, calldataload(0))`. Nested expressions are flattened to `let`s, and each
-Core step is wrapped in `{ … }` so those temps die (powdr cannot DUP/SWAP past slot 16).
+`switch shr(224, calldataload(0))`. Sub-expressions are nested Yul builtins (no flatten /
+`t_i` temps); `{ … }` only wraps `if` bodies and `switch` cases. `toYulFn` requires
+`coreWF` and `Nodup` `identV` names; `runtimeBlock` requires unique selectors.
 -/
 
 namespace Lsc.Compiler
@@ -127,7 +128,6 @@ def bop (op : YulSemantics.EVM.Op) (args : List YExpr) : YExpr :=
   YulSemantics.Expr.builtin (Op := YulSemantics.EVM.Op) op args
 
 def identV (i : Nat) : YIdent := s!"v_{i}"
-def identT (i : Nat) : YIdent := s!"t_{i}"
 
 /-- De Bruijn `i` at environment length `depth` is `v_{depth-1-i}`.
 Parameters occupy `v_0 … v_{n-1}` in ABI order (first parameter first). -/
@@ -150,65 +150,144 @@ def constructorCode (n : YIdent) : YBlock :=
     YulSemantics.Stmt.exprStmt (bop YulSemantics.EVM.Op.ret [lit 0,
       bop YulSemantics.EVM.Op.datasize [ YulSemantics.Expr.lit (YulSemantics.Literal.string n) ]]) ]
 
-/-! ## Flattening emitter -/
+/-! ## Well-formedness (decidable; `toYulFn` / `runtimeBlock` return `none` otherwise) -/
+
+def atomWF : Atom → Bool
+  | .var _ => true
+  | .lit n => decide (n < wordBound)
+
+def atomsWF (as : List Atom) : Bool := as.all atomWF
+
+def condWF : Cond → Bool
+  | .lt a b | .le a b | .eq a b | .ne a b => atomWF a && atomWF b
+  | .and c d | .or c d => condWF c && condWF d
+  | .not c => condWF c
+  | .tt | .ff => true
+
+def fieldKindOK (c : ContractDef) (idx : Nat) (k : FieldKind) : Bool :=
+  match c.fields[idx]? with
+  | some fd => decide (fd.kind = k)
+  | none => false
+
+def eventOK (c : ContractDef) (ev n : Nat) : Bool :=
+  match c.events[ev]? with
+  | some ed => decide (ed.params.length = n)
+  | none => false
+
+def errorOK (c : ContractDef) (err n : Nat) : Bool :=
+  match c.errors[err]? with
+  | some ed => decide (ed.params.length = n)
+  | none => false
+
+def opWF (c : ContractDef) : Lsc.Op → Bool
+  | .load f => fieldKindOK c f .scalar
+  | .loadMap f k => fieldKindOK c f .map1 && atomWF k
+  | .loadMap2 f k₁ k₂ => fieldKindOK c f .map2 && atomWF k₁ && atomWF k₂
+  | .sender | .value | .timestamp | .blockNumber | .selfAddress => true
+  | .addChecked a b | .subChecked a b | .mulChecked a b | .divChecked a b =>
+      atomWF a && atomWF b
+  | .mulDivDown a b d | .mulDivUp a b d => atomWF a && atomWF b && atomWF d
+  | .erc20TransferFrom a b d e => atomsWF [a, b, d, e]
+  | .erc20Transfer a b d => atomsWF [a, b, d]
+  | .erc20BalanceOf a b => atomWF a && atomWF b
+  | .pure a => atomWF a
+
+def stmtWF (c : ContractDef) : Lsc.Stmt → Bool
+  | .store f v => fieldKindOK c f .scalar && atomWF v
+  | .storeMap f k v => fieldKindOK c f .map1 && atomWF k && atomWF v
+  | .storeMap2 f k₁ k₂ v => fieldKindOK c f .map2 && atomWF k₁ && atomWF k₂ && atomWF v
+  | .require cond err args => condWF cond && errorOK c err args.length && args.all atomWF
+  | .emit ev args => eventOK c ev args.length && args.all atomWF
+  | .revert err args => errorOK c err args.length && args.all atomWF
+
+def retWF : {t : RetTy} → RetExpr t → Bool
+  | _, .unit => true
+  | _, .word a => atomWF a
+  | _, .addr a => atomWF a
+  | _, .flag a => atomWF a
+  | _, .pair x y => retWF x && retWF y
+
+def coreWF (c : ContractDef) : {t : RetTy} → Core t → Bool
+  | _, .ret r => retWF r
+  | _, .opTail op => opWF c op
+  | _, .opTailAddr op => opWF c op
+  | _, .opTailFlag op => opWF c op
+  | _, .stmtTail s => stmtWF c s
+  | _, .revertTail err args => errorOK c err args.length && args.all atomWF
+  | _, .letOp op k => opWF c op && coreWF c k
+  | _, .seq s k => stmtWF c s && coreWF c k
+  | _, .letPure _ args k => args.all atomWF && coreWF c k
+  | _, .ite cond a b => condWF cond && coreWF c a && coreWF c b
+
+/-- Extra `let`s under `f` (`opTail` desugars to one). `maxDepth f = params + extra`. -/
+def coreExtraDepth : {t : RetTy} → Core t → Nat
+  | _, .ret _ => 0
+  | _, .opTail _ => 1
+  | _, .opTailAddr _ => 1
+  | _, .opTailFlag _ => 1
+  | _, .stmtTail _ => 0
+  | _, .revertTail .. => 0
+  | _, .letOp _ k => coreExtraDepth k + 1
+  | _, .seq _ k => coreExtraDepth k
+  | _, .letPure _ _ k => coreExtraDepth k + 1
+  | _, .ite _ a b => max (coreExtraDepth a) (coreExtraDepth b)
+
+def maxDepth (f : FnDef) : Nat := f.params.length + coreExtraDepth f.core
+
+def identsNodup (n : Nat) : Bool :=
+  decide (((List.range n).map identV).Pairwise (fun a b => a ≠ b))
+
+def selectorsNodup (c : ContractDef) : Bool :=
+  decide ((c.functions.map (fun f => f.selector)).Pairwise (fun a b => a ≠ b))
+
+theorem atomWF_iff (a : Atom) :
+    atomWF a = true ↔ match a with | .var _ => True | .lit n => n < wordBound := by
+  cases a <;> simp [atomWF, decide_eq_true_eq]
+
+theorem fieldKindOK_iff (c : ContractDef) (idx : Nat) (k : FieldKind) :
+    fieldKindOK c idx k = true ↔ ∃ fd, c.fields[idx]? = some fd ∧ fd.kind = k := by
+  simp only [fieldKindOK]
+  cases c.fields[idx]? <;> simp [decide_eq_true_eq]
+
+theorem eventOK_iff (c : ContractDef) (ev n : Nat) :
+    eventOK c ev n = true ↔ ∃ ed, c.events[ev]? = some ed ∧ ed.params.length = n := by
+  simp only [eventOK]
+  cases c.events[ev]? <;> simp [decide_eq_true_eq]
+
+theorem errorOK_iff (c : ContractDef) (err n : Nat) :
+    errorOK c err n = true ↔ ∃ ed, c.errors[err]? = some ed ∧ ed.params.length = n := by
+  simp only [errorOK]
+  cases c.errors[err]? <;> simp [decide_eq_true_eq]
+
+theorem identsNodup_iff (n : Nat) :
+    identsNodup n = true ↔ ((List.range n).map identV).Pairwise (fun a b => a ≠ b) := by
+  simp [identsNodup, decide_eq_true_eq]
+
+theorem selectorsNodup_iff (c : ContractDef) :
+    selectorsNodup c = true ↔
+      (c.functions.map (fun f => f.selector)).Pairwise (fun a b => a ≠ b) := by
+  simp [selectorsNodup, decide_eq_true_eq]
+
+/-! ## Temp-free emitter (nested expressions; result variable as scratch) -/
 
 structure Emit where
-  tmp : Nat := 0
   acc : List YStmt := []
 
 def Emit.push (e : Emit) (s : YStmt) : Emit :=
   { e with acc := s :: e.acc }
 
-def Emit.fresh (e : Emit) : YIdent × Emit :=
-  (identT e.tmp, { e with tmp := e.tmp + 1 })
-
 def Emit.stmts (e : Emit) : YBlock := e.acc.reverse
 
-mutual
-  /-- Bind a (possibly nested) expression to a `let`, leaving only vars/lits as builtin args. -/
-  def flatten (e : Emit) : YExpr → YExpr × Emit
-    | .var x => (.var x, e)
-    | .lit l => (.lit l, e)
-    | .builtin op args =>
-      let (args', e) := flattenRev e args
-      let (t, e) := e.fresh
-      (.var t, e.push (.letDecl [t] (some (YulSemantics.Expr.builtin (Op := YulSemantics.EVM.Op) op args'))))
-    | .call fn args =>
-      let (args', e) := flattenRev e args
-      let (t, e) := e.fresh
-      (.var t, e.push (.letDecl [t] (some (.call fn args'))))
-
-  /-- Flatten arguments **right-to-left**, matching Yul evaluation order. -/
-  def flattenRev (e : Emit) : List YExpr → List YExpr × Emit
-    | [] => ([], e)
-    | x :: xs =>
-      let (xs', e) := flattenRev e xs
-      let (x', e) := flatten e x
-      (x' :: xs', e)
-end
-
-/-- Assign an already-declared `name`. Nested builtins are flattened into `name`. -/
-def emitAssign (e : Emit) (name : YIdent) (x : YExpr) : Emit :=
-  match x with
-  | .var _ | .lit _ => e.push (.assign [name] x)
-  | .builtin op args =>
-    let (args', e) := flattenRev e args
-    e.push (.assign [name] (YulSemantics.Expr.builtin (Op := YulSemantics.EVM.Op) op args'))
-  | .call fn args =>
-    let (args', e) := flattenRev e args
-    e.push (.assign [name] (.call fn args'))
-
-/-- Wrap `inner`'s statements in `{ … }` so its `let`s drop off the EVM stack (DUP16 limit). -/
-def nest (e : Emit) (inner : Emit) : Emit :=
-  match inner.acc with
-  | [] => e
-  | _ => e.push (YulSemantics.Stmt.block inner.stmts)
-
 def emitDo (e : Emit) (op : YulSemantics.EVM.Op) (args : List YExpr) : Emit :=
-  let (args', e) := flattenRev e args
-  e.push (.exprStmt (YulSemantics.Expr.builtin (Op := YulSemantics.EVM.Op) op args'))
+  e.push (.exprStmt (YulSemantics.Expr.builtin (Op := YulSemantics.EVM.Op) op args))
 
-/-- `if lt(calldatasize(), n) { revert(0,0) }` as a nested expression (no live temps). -/
+def emitLet (e : Emit) (name : YIdent) (x : YExpr) : Emit :=
+  e.push (.letDecl [name] (some x))
+
+def emitIf (e : Emit) (cnd : YExpr) (body : YBlock) : Emit :=
+  e.push (.cond cnd body)
+
+/-- `if lt(calldatasize(), n) { revert(0,0) }`. -/
 def emitGuardLt (e : Emit) (n : Nat) : Emit :=
   e.push (.cond (bop YulSemantics.EVM.Op.lt [bop YulSemantics.EVM.Op.calldatasize [], lit n])
     [revert00])
@@ -223,8 +302,11 @@ def emitParams (e : Emit) (offset n : Nat) : Emit :=
 def abiPtr : Nat := 0x80
 def abiAfterSel : Nat := 0x84
 
+def keccak064 : YExpr := bop YulSemantics.EVM.Op.keccak256 [lit 0, lit 64]
+
 def emitPanic (e : Emit) (code : Nat) : Emit :=
-  let e := emitDo e YulSemantics.EVM.Op.mstore [lit abiPtr, bop YulSemantics.EVM.Op.shl [lit 224, lit panicSelector]]
+  let e := emitDo e YulSemantics.EVM.Op.mstore
+    [lit abiPtr, bop YulSemantics.EVM.Op.shl [lit 224, lit panicSelector]]
   let e := emitDo e YulSemantics.EVM.Op.mstore [lit abiAfterSel, lit code]
   emitDo e YulSemantics.EVM.Op.revert [lit abiPtr, lit 36]
 
@@ -233,7 +315,8 @@ def emitCustomError (c : ContractDef) (e : Emit) (err : Nat) (args : List YExpr)
     match c.errors[err]? with
     | some ed => ed.selector
     | none => 0
-  let e := emitDo e YulSemantics.EVM.Op.mstore [lit abiPtr, bop YulSemantics.EVM.Op.shl [lit 224, lit sel]]
+  let e := emitDo e YulSemantics.EVM.Op.mstore
+    [lit abiPtr, bop YulSemantics.EVM.Op.shl [lit 224, lit sel]]
   let (e, _) := args.foldl (fun (e, i) a =>
     (emitDo e YulSemantics.EVM.Op.mstore [lit (abiAfterSel + 32 * i), a], i + 1)) (e, 0)
   emitDo e YulSemantics.EVM.Op.revert [lit abiPtr, lit (4 + 32 * args.length)]
@@ -254,143 +337,124 @@ def emitLog1 (e : Emit) (topic : Nat) (args : List YExpr) : Emit :=
     (emitDo e YulSemantics.EVM.Op.mstore [lit (abiPtr + 32 * i), a], i + 1)) (e, 0)
   emitDo e YulSemantics.EVM.Op.log1 [lit abiPtr, lit (32 * args.length), lit topic]
 
-def emitMapSlot (e : Emit) (slot : Nat) (k : YExpr) : YExpr × Emit :=
+/-- `mstore(0, k) mstore(32, slot)` so a subsequent nested `keccak256(0,64)` is the map slot. -/
+def emitMapSlotPrep (e : Emit) (slot : Nat) (k : YExpr) : Emit :=
   let e := emitDo e YulSemantics.EVM.Op.mstore [lit 0, k]
-  let e := emitDo e YulSemantics.EVM.Op.mstore [lit 32, lit slot]
-  flatten e (bop YulSemantics.EVM.Op.keccak256 [lit 0, lit 64])
+  emitDo e YulSemantics.EVM.Op.mstore [lit 32, lit slot]
 
-/-- Nested mapping slot: `keccak256(k₂ ‖ keccak256(k₁ ‖ slot))`. -/
-def emitMap2Slot (e : Emit) (slot : Nat) (k₁ k₂ : YExpr) : YExpr × Emit :=
-  let (inner, e) := emitMapSlot e slot k₁
-  let e := emitDo e YulSemantics.EVM.Op.mstore [lit 0, k₂]
-  let e := emitDo e YulSemantics.EVM.Op.mstore [lit 32, inner]
-  flatten e (bop YulSemantics.EVM.Op.keccak256 [lit 0, lit 64])
+/-- Nested mapping. `keccak256(0,64)` reads `[0,64)`, so the inner hash must be written to
+`[32]` *before* `mstore(0, k₂)` overwrites `[0]`: `mstore(32, keccak256(0,64)); mstore(0, k₂)`. -/
+def emitMap2SlotPrep (e : Emit) (slot : Nat) (k₁ k₂ : YExpr) : Emit :=
+  let e := emitMapSlotPrep e slot k₁
+  let e := emitDo e YulSemantics.EVM.Op.mstore [lit 32, keccak064]
+  emitDo e YulSemantics.EVM.Op.mstore [lit 0, k₂]
 
-def emitIf (e : Emit) (cnd : YExpr) (body : YBlock) : Emit :=
-  e.push (.cond cnd body)
-
-/-- Overflow check for wrapping `add`: `lt(sum, a)`. -/
-def emitAddChecked (e : Emit) (a b : YExpr) : YExpr × Emit :=
-  let (s, e) := flatten e (bop YulSemantics.EVM.Op.add [a, b])
-  let (cnd, e) := flatten e (bop YulSemantics.EVM.Op.lt [s, a])
-  let eP := emitPanic { e with acc := [] } 0x11
-  (s, emitIf { e with tmp := eP.tmp } cnd eP.stmts)
-
-/-- Underflow check: `lt(a, b)` then `sub`. -/
-def emitSubChecked (e : Emit) (a b : YExpr) : YExpr × Emit :=
-  let (cnd, e) := flatten e (bop YulSemantics.EVM.Op.lt [a, b])
-  let eP := emitPanic { e with acc := [] } 0x11
-  flatten (emitIf { e with tmp := eP.tmp } cnd eP.stmts) (bop YulSemantics.EVM.Op.sub [a, b])
-
-/-- `a = 0 ∨ div(mul(a,b), a) = b`. -/
+/-- Overflow: `a = 0 ∨ div(p, a) = b`. Nested; `p` is the product variable. -/
 def emitMulOverflowGuard (e : Emit) (a b p : YExpr) : Emit :=
-  let (z, e) := flatten e (bop YulSemantics.EVM.Op.iszero [a])
-  let (q, e) := flatten e (bop YulSemantics.EVM.Op.div [p, a])
-  let (eq, e) := flatten e (bop YulSemantics.EVM.Op.eq [q, b])
-  let (ok, e) := flatten e (bop YulSemantics.EVM.Op.or [z, eq])
-  let (bad, e) := flatten e (bop YulSemantics.EVM.Op.iszero [ok])
-  let eP := emitPanic { e with acc := [] } 0x11
-  emitIf { e with tmp := eP.tmp } bad eP.stmts
+  emitIf e
+    (bop YulSemantics.EVM.Op.iszero
+      [bop YulSemantics.EVM.Op.or
+        [bop YulSemantics.EVM.Op.iszero [a],
+          bop YulSemantics.EVM.Op.eq [bop YulSemantics.EVM.Op.div [p, a], b]]])
+    (emitPanic {} 0x11).stmts
 
-def emitMulChecked (e : Emit) (a b : YExpr) : YExpr × Emit :=
-  let (p, e) := flatten e (bop YulSemantics.EVM.Op.mul [a, b])
-  (p, emitMulOverflowGuard e a b p)
+/-- `let name := add(a,b)` then `if lt(name, a) { panic }`. -/
+def emitAddChecked (e : Emit) (name : YIdent) (a b : YExpr) : Emit :=
+  let e := emitLet e name (bop YulSemantics.EVM.Op.add [a, b])
+  emitIf e (bop YulSemantics.EVM.Op.lt [var name, a]) (emitPanic {} 0x11).stmts
 
-/-- `c = 0` panics `0x12`. -/
-def emitDivChecked (e : Emit) (a b : YExpr) : YExpr × Emit :=
-  let (z, e) := flatten e (bop YulSemantics.EVM.Op.iszero [b])
-  let eP := emitPanic { e with acc := [] } 0x12
-  flatten (emitIf { e with tmp := eP.tmp } z eP.stmts) (bop YulSemantics.EVM.Op.div [a, b])
+/-- `if lt(a, b) { panic }` then `let name := sub(a,b)`. -/
+def emitSubChecked (e : Emit) (name : YIdent) (a b : YExpr) : Emit :=
+  let e := emitIf e (bop YulSemantics.EVM.Op.lt [a, b]) (emitPanic {} 0x11).stmts
+  emitLet e name (bop YulSemantics.EVM.Op.sub [a, b])
 
-def emitMulDivDown (e : Emit) (a b c : YExpr) : YExpr × Emit :=
-  let (z, e) := flatten e (bop YulSemantics.EVM.Op.iszero [c])
-  let eP := emitPanic { e with acc := [] } 0x12
-  let e := emitIf { e with tmp := eP.tmp } z eP.stmts
-  let (p, e) := flatten e (bop YulSemantics.EVM.Op.mul [a, b])
-  let e := emitMulOverflowGuard e a b p
-  flatten e (bop YulSemantics.EVM.Op.div [p, c])
+def emitMulChecked (e : Emit) (name : YIdent) (a b : YExpr) : Emit :=
+  let e := emitLet e name (bop YulSemantics.EVM.Op.mul [a, b])
+  emitMulOverflowGuard e a b (var name)
 
-def emitMulDivUp (e : Emit) (a b c : YExpr) : YExpr × Emit :=
-  let (q, e) := emitMulDivDown e a b c
-  let (p, e) := flatten e (bop YulSemantics.EVM.Op.mul [a, b])
-  let (r, e) := flatten e (bop YulSemantics.EVM.Op.mod [p, c])
-  let (qn, e) :=
-    match q with
-    | .var n => (n, e)
-    | _ =>
-      let (n, e) := e.fresh
-      (n, e.push (.letDecl [n] (some q)))
-  (var qn, e.push (.cond r [.assign [qn] (bop YulSemantics.EVM.Op.add [.var qn, lit 1])]))
+/-- `if iszero(b) { panic 0x12 }` then `let name := div(a,b)`. -/
+def emitDivChecked (e : Emit) (name : YIdent) (a b : YExpr) : Emit :=
+  let e := emitIf e (bop YulSemantics.EVM.Op.iszero [b]) (emitPanic {} 0x12).stmts
+  emitLet e name (bop YulSemantics.EVM.Op.div [a, b])
 
-def emitOpVal (e : Emit) (depth : Nat) : Lsc.Op → Option (YExpr × Emit)
-  | .load f => some (flatten e (bop YulSemantics.EVM.Op.sload [lit f]))
+/-- `let name := mul(a,b)` + overflow guard + `name := div(name,c)`. -/
+def emitMulDivDown (e : Emit) (name : YIdent) (a b c : YExpr) : Emit :=
+  let e := emitIf e (bop YulSemantics.EVM.Op.iszero [c]) (emitPanic {} 0x12).stmts
+  let e := emitLet e name (bop YulSemantics.EVM.Op.mul [a, b])
+  let e := emitMulOverflowGuard e a b (var name)
+  e.push (.assign [name] (bop YulSemantics.EVM.Op.div [var name, c]))
+
+/-- Same product/guard, then `switch mod(name,c)` to round up. -/
+def emitMulDivUp (e : Emit) (name : YIdent) (a b c : YExpr) : Emit :=
+  let e := emitIf e (bop YulSemantics.EVM.Op.iszero [c]) (emitPanic {} 0x12).stmts
+  let e := emitLet e name (bop YulSemantics.EVM.Op.mul [a, b])
+  let e := emitMulOverflowGuard e a b (var name)
+  e.push (.switch (bop YulSemantics.EVM.Op.mod [var name, c])
+    [(YulSemantics.Literal.number 0,
+      [.assign [name] (bop YulSemantics.EVM.Op.div [var name, c])])]
+    (some [.assign [name]
+      (bop YulSemantics.EVM.Op.add [bop YulSemantics.EVM.Op.div [var name, c], lit 1])]))
+
+def emitLetOp (e : Emit) (depth : Nat) : Lsc.Op → Option Emit
+  | .load f => some (emitLet e (identV depth) (bop YulSemantics.EVM.Op.sload [lit f]))
   | .loadMap f k =>
-    let (slot, e) := emitMapSlot e f (atomE depth k)
-    some (flatten e (bop YulSemantics.EVM.Op.sload [slot]))
+    let e := emitMapSlotPrep e f (atomE depth k)
+    some (emitLet e (identV depth) (bop YulSemantics.EVM.Op.sload [keccak064]))
   | .loadMap2 f k₁ k₂ =>
-    let (slot, e) := emitMap2Slot e f (atomE depth k₁) (atomE depth k₂)
-    some (flatten e (bop YulSemantics.EVM.Op.sload [slot]))
-  | .sender => some (flatten e (bop YulSemantics.EVM.Op.caller []))
-  | .value => some (flatten e (bop YulSemantics.EVM.Op.callvalue []))
-  | .timestamp => some (flatten e (bop YulSemantics.EVM.Op.timestamp []))
-  | .blockNumber => some (flatten e (bop YulSemantics.EVM.Op.number []))
-  | .selfAddress => some (flatten e (bop YulSemantics.EVM.Op.address []))
-  | .addChecked a b => some (emitAddChecked e (atomE depth a) (atomE depth b))
-  | .subChecked a b => some (emitSubChecked e (atomE depth a) (atomE depth b))
-  | .mulChecked a b => some (emitMulChecked e (atomE depth a) (atomE depth b))
-  | .divChecked a b => some (emitDivChecked e (atomE depth a) (atomE depth b))
+    let e := emitMap2SlotPrep e f (atomE depth k₁) (atomE depth k₂)
+    some (emitLet e (identV depth) (bop YulSemantics.EVM.Op.sload [keccak064]))
+  | .sender => some (emitLet e (identV depth) (bop YulSemantics.EVM.Op.caller []))
+  | .value => some (emitLet e (identV depth) (bop YulSemantics.EVM.Op.callvalue []))
+  | .timestamp => some (emitLet e (identV depth) (bop YulSemantics.EVM.Op.timestamp []))
+  | .blockNumber => some (emitLet e (identV depth) (bop YulSemantics.EVM.Op.number []))
+  | .selfAddress => some (emitLet e (identV depth) (bop YulSemantics.EVM.Op.address []))
+  | .addChecked a b =>
+      some (emitAddChecked e (identV depth) (atomE depth a) (atomE depth b))
+  | .subChecked a b =>
+      some (emitSubChecked e (identV depth) (atomE depth a) (atomE depth b))
+  | .mulChecked a b =>
+      some (emitMulChecked e (identV depth) (atomE depth a) (atomE depth b))
+  | .divChecked a b =>
+      some (emitDivChecked e (identV depth) (atomE depth a) (atomE depth b))
   | .mulDivDown a b c =>
-    some (emitMulDivDown e (atomE depth a) (atomE depth b) (atomE depth c))
+      some (emitMulDivDown e (identV depth) (atomE depth a) (atomE depth b) (atomE depth c))
   | .mulDivUp a b c =>
-    some (emitMulDivUp e (atomE depth a) (atomE depth b) (atomE depth c))
-  | .pure a => some (atomE depth a, e)
+      some (emitMulDivUp e (identV depth) (atomE depth a) (atomE depth b) (atomE depth c))
+  | .pure a => some (emitLet e (identV depth) (atomE depth a))
   | .erc20TransferFrom .. | .erc20Transfer .. | .erc20BalanceOf .. => none
 
-def emitPrim (e : Emit) (depth : Nat) (p : Prim) (args : List Atom) : YExpr × Emit :=
+def emitPrim (depth : Nat) (p : Prim) (args : List Atom) : YExpr :=
   match p, args with
-  | .id, [a] => (atomE depth a, e)
-  | .addWrap, [a, b] => flatten e (bop YulSemantics.EVM.Op.add [atomE depth a, atomE depth b])
-  | .subWrap, [a, b] => flatten e (bop YulSemantics.EVM.Op.sub [atomE depth a, atomE depth b])
-  | .mulWrap, [a, b] => flatten e (bop YulSemantics.EVM.Op.mul [atomE depth a, atomE depth b])
-  | _, _ => (lit 0, e)
+  | .id, [a] => atomE depth a
+  | .addWrap, [a, b] => bop YulSemantics.EVM.Op.add [atomE depth a, atomE depth b]
+  | .subWrap, [a, b] => bop YulSemantics.EVM.Op.sub [atomE depth a, atomE depth b]
+  | .mulWrap, [a, b] => bop YulSemantics.EVM.Op.mul [atomE depth a, atomE depth b]
+  | _, _ => lit 0
 
-def emitCond (e : Emit) (depth : Nat) : Cond → YExpr × Emit
-  | .lt a b => flatten e (bop YulSemantics.EVM.Op.lt [atomE depth a, atomE depth b])
+def emitCond (depth : Nat) : Cond → YExpr
+  | .lt a b => bop YulSemantics.EVM.Op.lt [atomE depth a, atomE depth b]
   | .le a b =>
-    let (t, e) := flatten e (bop YulSemantics.EVM.Op.lt [atomE depth b, atomE depth a])
-    flatten e (bop YulSemantics.EVM.Op.iszero [t])
-  | .eq a b => flatten e (bop YulSemantics.EVM.Op.eq [atomE depth a, atomE depth b])
+    bop YulSemantics.EVM.Op.iszero [bop YulSemantics.EVM.Op.lt [atomE depth b, atomE depth a]]
+  | .eq a b => bop YulSemantics.EVM.Op.eq [atomE depth a, atomE depth b]
   | .ne a b =>
-    let (t, e) := flatten e (bop YulSemantics.EVM.Op.eq [atomE depth a, atomE depth b])
-    flatten e (bop YulSemantics.EVM.Op.iszero [t])
-  | .and c d =>
-    let (x, e) := emitCond e depth c
-    let (y, e) := emitCond e depth d
-    flatten e (bop YulSemantics.EVM.Op.and [x, y])
-  | .or c d =>
-    let (x, e) := emitCond e depth c
-    let (y, e) := emitCond e depth d
-    flatten e (bop YulSemantics.EVM.Op.or [x, y])
-  | .not c =>
-    let (x, e) := emitCond e depth c
-    flatten e (bop YulSemantics.EVM.Op.iszero [x])
-  | .tt => (lit 1, e)
-  | .ff => (lit 0, e)
+    bop YulSemantics.EVM.Op.iszero [bop YulSemantics.EVM.Op.eq [atomE depth a, atomE depth b]]
+  | .and c d => bop YulSemantics.EVM.Op.and [emitCond depth c, emitCond depth d]
+  | .or c d => bop YulSemantics.EVM.Op.or [emitCond depth c, emitCond depth d]
+  | .not c => bop YulSemantics.EVM.Op.iszero [emitCond depth c]
+  | .tt => lit 1
+  | .ff => lit 0
 
 def emitStmt (c : ContractDef) (e : Emit) (depth : Nat) : Lsc.Stmt → Emit
   | .store f v => emitDo e YulSemantics.EVM.Op.sstore [lit f, atomE depth v]
   | .storeMap f k v =>
-    let (slot, e) := emitMapSlot e f (atomE depth k)
-    emitDo e YulSemantics.EVM.Op.sstore [slot, atomE depth v]
+    let e := emitMapSlotPrep e f (atomE depth k)
+    emitDo e YulSemantics.EVM.Op.sstore [keccak064, atomE depth v]
   | .storeMap2 f k₁ k₂ v =>
-    let (slot, e) := emitMap2Slot e f (atomE depth k₁) (atomE depth k₂)
-    emitDo e YulSemantics.EVM.Op.sstore [slot, atomE depth v]
+    let e := emitMap2SlotPrep e f (atomE depth k₁) (atomE depth k₂)
+    emitDo e YulSemantics.EVM.Op.sstore [keccak064, atomE depth v]
   | .require cond err args =>
-    let (cv, e) := emitCond e depth cond
-    let (z, e) := flatten e (bop YulSemantics.EVM.Op.iszero [cv])
-    let eE := emitCustomError c { e with acc := [] } err (args.map (atomE depth))
-    let e := { e with tmp := eE.tmp }
-    e.push (.cond z eE.stmts)
+    emitIf e (bop YulSemantics.EVM.Op.iszero [emitCond depth cond])
+      (emitCustomError c {} err (args.map (atomE depth))).stmts
   | .emit ev args =>
     let topic :=
       match c.events[ev]? with
@@ -404,60 +468,47 @@ def emitRet (e : Emit) (depth : Nat) (haltUnit : Bool) : {t : RetTy} → RetExpr
   | _, .unit => emitReturnUnit e haltUnit
   | _, r => emitReturnWords e ((retAtoms r).map (atomE depth))
 
-/-- Fresh inner emitter. Temps restart at `t_0`; they live only inside the next `nest`. -/
-def innerEmit : Emit := { tmp := 0, acc := [] }
-
 def emitCore (c : ContractDef) (e : Emit) (depth : Nat) (haltUnit : Bool) :
     {t : RetTy} → Core t → Option Emit
-  | _, .ret r => some (nest e (emitRet innerEmit depth haltUnit r))
+  | _, .ret r => some (emitRet e depth haltUnit r)
   | _, .opTail op => do
-      let (x, inner) ← emitOpVal innerEmit depth op
-      some (nest e (emitReturnWords inner [x]))
+      let e ← emitLetOp e depth op
+      some (emitRet e (depth + 1) haltUnit (.word (.var 0)))
   | _, .opTailAddr op => do
-      let (x, inner) ← emitOpVal innerEmit depth op
-      some (nest e (emitReturnWords inner [x]))
+      let e ← emitLetOp e depth op
+      some (emitRet e (depth + 1) haltUnit (.addr (.var 0)))
   | _, .opTailFlag op => do
-      let (x, inner) ← emitOpVal innerEmit depth op
-      some (nest e (emitReturnWords inner [x]))
-  | _, .stmtTail s =>
-      some (nest e (emitReturnUnit (emitStmt c innerEmit depth s) haltUnit))
-  | _, .revertTail err args =>
-      some (nest e (emitCustomError c innerEmit err (args.map (atomE depth))))
+      let e ← emitLetOp e depth op
+      some (emitRet e (depth + 1) haltUnit (.flag (.var 0)))
+  | _, .stmtTail s => some (emitReturnUnit (emitStmt c e depth s) haltUnit)
+  | _, .revertTail err args => some (emitCustomError c e err (args.map (atomE depth)))
   | _, .letOp op k => do
-      -- Declare `v_d` in the outer scope, compute in a nested block (temps die).
-      let e := e.push (.letDecl [identV depth] none)
-      let (x, inner) ← emitOpVal innerEmit depth op
-      let e := e.push (.block (emitAssign inner (identV depth) x).stmts)
+      let e ← emitLetOp e depth op
       emitCore c e (depth + 1) haltUnit k
-  | _, .seq s k =>
-      emitCore c (nest e (emitStmt c innerEmit depth s)) depth haltUnit k
+  | _, .seq s k => emitCore c (emitStmt c e depth s) depth haltUnit k
   | _, .letPure p args k =>
-      let e := e.push (.letDecl [identV depth] none)
-      let (x, inner) := emitPrim innerEmit depth p args
-      let e := e.push (.block (emitAssign inner (identV depth) x).stmts)
-      emitCore c e (depth + 1) haltUnit k
+      emitCore c (emitLet e (identV depth) (emitPrim depth p args)) (depth + 1) haltUnit k
   | _, .ite cond a b => do
-      let (cv, eC) := emitCond innerEmit depth cond
-      let eA ← emitCore c innerEmit depth haltUnit a
-      let eB ← emitCore c innerEmit depth haltUnit b
-      -- `switch c case 0 { else } default { then }`
-      let eC := eC.push (.switch cv
-        [(YulSemantics.Literal.number 0, eB.stmts)] (some eA.stmts))
-      some (e.push (.block eC.stmts))
+      let eA ← emitCore c {} depth haltUnit a
+      let eB ← emitCore c {} depth haltUnit b
+      some (e.push (.switch (emitCond depth cond)
+        [(YulSemantics.Literal.number 0, eB.stmts)] (some eA.stmts)))
 
 /-- Compile one function. Parameters are ABI-decoded from calldata (`offset = 4` for
 runtime entrypoints, `0` for constructors). A constructor's `ret ()` falls through
 (no `stop()`), so `deployObject` can append `constructorCode "runtime"`. -/
 def toYulFn (c : ContractDef) (f : FnDef) : Option YBlock :=
   if !coreCallFree f.core then none
+  else if !coreWF c f.core then none
+  else if !identsNodup (maxDepth f) then none
   else
     let offset := if f.kind = .constructor then 0 else 4
     let haltUnit := f.kind ≠ .constructor
     let e := emitParams {} offset f.params.length
     (emitCore c e f.params.length haltUnit f.core).map Emit.stmts
 
-/-- `if lt(calldatasize(), 4+32n) { revert(0,0) }` in its own block so those temps are
-dead before the function body (DUP16). -/
+/-- `if lt(calldatasize(), 4+32n) { revert(0,0) }` then the function body, as two blocks
+inside the selector `switch` case. -/
 def entryCase (c : ContractDef) (f : FnDef) : Option (YulSemantics.Literal × YBlock) := do
   let body ← toYulFn c f
   let min := 4 + 32 * f.params.length
@@ -467,13 +518,15 @@ def entryCase (c : ContractDef) (f : FnDef) : Option (YulSemantics.Literal × YB
 
 /-- Dispatcher + every non-constructor function. Size-check is its own block; the
 selector is a nested expression so it does not occupy a live stack slot in the cases. -/
-def runtimeBlock (c : ContractDef) : Option YBlock := do
-  let cases ← c.functions.mapM (entryCase c)
-  let guard := (emitGuardLt {} 4).stmts
-  let sel := bop YulSemantics.EVM.Op.shr
-    [lit 224, bop YulSemantics.EVM.Op.calldataload [lit 0]]
-  some [YulSemantics.Stmt.block guard,
-    YulSemantics.Stmt.switch sel cases (some [revert00])]
+def runtimeBlock (c : ContractDef) : Option YBlock :=
+  if !selectorsNodup c then none
+  else do
+    let cases ← c.functions.mapM (entryCase c)
+    let guard := (emitGuardLt {} 4).stmts
+    let sel := bop YulSemantics.EVM.Op.shr
+      [lit 224, bop YulSemantics.EVM.Op.calldataload [lit 0]]
+    some [YulSemantics.Stmt.block guard,
+      YulSemantics.Stmt.switch sel cases (some [revert00])]
 
 /-- Deploy object: ctor body (if any) then `constructorCode "runtime"`, nested `"runtime"`. -/
 def deployObject (c : ContractDef) : Option YObject := do

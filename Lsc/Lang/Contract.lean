@@ -123,4 +123,39 @@ def RetTy.abi : RetTy → List AbiTy
   | .flag => [.bool]
   | .pair a b => a.abi ++ b.abi
 
+/-! ## Storage-schema laws
+
+`lsc_schema` fills `StorageSchema` with `List.getD` tables. These nine equations say that an
+update of field `j` writes that field and leaves every other field unchanged. Generated per
+contract as `C.schema_lawful`; `toYulFn_correct` takes `(hΓ : Γ.st.Lawful c.fields)`. -/
+
+structure StorageSchema.Lawful {S : Type} (st : StorageSchema S) (fields : List FieldDef) : Prop where
+  scalar_scalar : ∀ (i j : Nat) (σ : S) (v : Nat),
+    (fields[j]?).map (·.kind) = some FieldKind.scalar →
+      st.scalar i (st.scalarUpd j σ v) = if i = j then v else st.scalar i σ
+  scalar_map1 : ∀ (i j : Nat) (σ : S) (v : Nat),
+    (fields[j]?).map (·.kind) = some FieldKind.scalar →
+      st.map1 i (st.scalarUpd j σ v) = st.map1 i σ
+  scalar_map2 : ∀ (i j : Nat) (σ : S) (v : Nat),
+    (fields[j]?).map (·.kind) = some FieldKind.scalar →
+      st.map2 i (st.scalarUpd j σ v) = st.map2 i σ
+  map1_scalar : ∀ (i j : Nat) (σ : S) (m : Nat → Nat),
+    (fields[j]?).map (·.kind) = some FieldKind.map1 →
+      st.scalar i (st.map1Upd j σ m) = st.scalar i σ
+  map1_map1 : ∀ (i j : Nat) (σ : S) (m : Nat → Nat),
+    (fields[j]?).map (·.kind) = some FieldKind.map1 →
+      st.map1 i (st.map1Upd j σ m) = if i = j then m else st.map1 i σ
+  map1_map2 : ∀ (i j : Nat) (σ : S) (m : Nat → Nat),
+    (fields[j]?).map (·.kind) = some FieldKind.map1 →
+      st.map2 i (st.map1Upd j σ m) = st.map2 i σ
+  map2_scalar : ∀ (i j : Nat) (σ : S) (m : Nat → Nat → Nat),
+    (fields[j]?).map (·.kind) = some FieldKind.map2 →
+      st.scalar i (st.map2Upd j σ m) = st.scalar i σ
+  map2_map1 : ∀ (i j : Nat) (σ : S) (m : Nat → Nat → Nat),
+    (fields[j]?).map (·.kind) = some FieldKind.map2 →
+      st.map1 i (st.map2Upd j σ m) = st.map1 i σ
+  map2_map2 : ∀ (i j : Nat) (σ : S) (m : Nat → Nat → Nat),
+    (fields[j]?).map (·.kind) = some FieldKind.map2 →
+      st.map2 i (st.map2Upd j σ m) = if i = j then m else st.map2 i σ
+
 end Lsc

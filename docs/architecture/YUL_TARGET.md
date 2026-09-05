@@ -40,18 +40,22 @@ Decisions for `Lsc/Compiler` fixed by the study of `yul-semantics`, `evm_semanti
 ## Core → Yul mapping
 
 - de Bruijn local `i` → `let v_i`; `letOp`/`letPure` → `let`; `seq` → sequence.
-- Scalar field `f` → slot `f`; `loadMap f k` → `mstore(0,k) mstore(32,f) sload(keccak256(0,64))`;
-  `map2` nests. Ctx reads → `caller/callvalue/timestamp/number/address`.
+- Scalar field `f` → slot `f`; `loadMap f k` → `mstore(0,k) mstore(32,f) sload(keccak256(0,64))`.
+  `map2` nests, but `keccak256(0,64)` reads `[0,64)`, so the inner hash is written to `[32]`
+  *before* `mstore(0, k₂)` (`mstore(32, keccak256(0,64)); mstore(0, k₂); sload(keccak256(0,64))`).
+  Ctx reads → `caller/callvalue/timestamp/number/address`.
 - Checked arithmetic → guard + `revert` with `Panic(uint256)` selector and code `0x11`/`0x12`;
   `mulDiv*` → overflow guard on the product then `div` (512-bit later).
 - `require c err args` → `if iszero(c) { <custom error ABI at 0x80> revert(0x80, 4+32n) }`.
 - `emit` → ABI-pack at `0x80`, `log1(0x80, 32n, topic0)`.
 - `ite` → `switch c case 0 {…} default {…}` (Yul `if` has no `else`). Core's `ite` carries two
   full tail continuations, so no result variables need to be joined.
-- Each Core step is emitted inside its own nested `{ … }` so temporaries die at the end of the
-  step. powdr's `compileExpr` returns `none` when a `DUP`/`SWAP` index reaches 16; Token was
-  rejected until this nesting was added. Parameters are bound as
-  `let v_i := calldataload(4 + 32 i)` (a `Run` starts with an empty `VEnv`).
+- Nested Yul expressions (no flatten / `t_i` temps). `Cond`, map-slot `keccak256(0,64)`, and
+  pure primitives are expression trees; checked ops reuse the result variable as scratch
+  (`let v_d := add(a,b); if lt(v_d,a) { panic }`). `{ … }` only wraps `if` bodies and `switch`
+  cases. `toYulFn` returns `none` unless `coreWF` (literals `< 2^256`, field kinds, event/error
+  arity) and `identV` names on `[0, maxDepth)` are pairwise distinct; `runtimeBlock` also
+  requires unique selectors. Parameters are `let v_i := calldataload(4 + 32 i)` (empty `VEnv`).
 - `ret` → ABI-encode at `0x80`, `return(0x80, 32k)`; unit → `stop()`.
 - `Op.call` / `Stmt.call` → `sload` the bound address slot, ABI-pack at `0x80`,
   `call(<gas literal>, tok, 0, …)` (**never `gas()`**; powdr rejects it),
@@ -76,3 +80,6 @@ Decisions for `Lsc/Compiler` fixed by the study of `yul-semantics`, `evm_semanti
   `accountMap`.
 - Differential harness: `Tx.run` vs `Interp.run` on emitted Yul vs `stepF` on compiled bytes vs
   revm/anvil on the same calldata.
+- Measured bytecode (`compileRuntime` / `compileDeploy` from `YulTests.lean`): Counter 424 / 438,
+  Token 1408 / 1498. Token `stackOK2` holds (no DUP16). Nested `map2` hashes inner `keccak256(0,64)`
+  into `[32]` before `mstore(0, k₂)`, so the read does not see a clobbered `[0]`.

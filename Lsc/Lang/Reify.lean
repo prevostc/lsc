@@ -6,7 +6,7 @@ import Lsc.Lang.Spec
 # reification
 
 `lsc_schema C` derives `C.schema : ContractSchema C.Storage C.Event C.Error` from the
-user's Lean types, and `lsc_reify C.f` turns the elaborated term of a contract function
+user's Lean types, plus `C.schema_lawful : C.schema.st.Lawful …`, and `lsc_reify C.f` turns the elaborated term of a contract function
 `C.f : … → Tx C.Storage C.Event C.Error ρ` into
 
 * `C.f.core : Core t` — the Core AST, and
@@ -160,6 +160,50 @@ def mkSchemaCommand (ci : ContractInfo) : MetaM Syntax := do
         map2Upd := fun $i => List.getD [$map2Upd,*] $i (fun $σ _ => $σ) }
       ev := ⟨fun $i $args => List.getD [$evBuilders,*] $i $evDefault $args⟩
       err := ⟨fun $i $args => List.getD [$errBuilders,*] $i $errDefault $args⟩)
+
+/-- `C.schema_lawful : C.schema.st.Lawful <fields>` by `cases` / `simp` / `rfl`.
+Unhygienic `i`/`j` so nested `succ i` rebinds the name the inner `cases` looks up. -/
+def mkSchemaLawfulCommand (ci : ContractInfo) : MetaM (TSyntax `command) := do
+  let thmName := mkIdent (`_root_ ++ ci.schema.getPrefix ++ `schema_lawful)
+  let schema := mkIdent (`_root_ ++ ci.schema)
+  let n := ci.fields.size
+  let iId := mkIdent `i
+  let jId := mkIdent `j
+  let hId := mkIdent `h
+  -- `elimTarget` is `nullNode` (no `h :`) plus a term; a raw `ident` is not an elimTarget.
+  let mkTgt (id : Ident) : TSyntax ``Lean.Parser.Tactic.elimTarget :=
+    ⟨mkNode ``Lean.Parser.Tactic.elimTarget #[mkNullNode, id]⟩
+  let iTgt := mkTgt iId
+  let jTgt := mkTgt jId
+  let hTgt := mkTgt hId
+  let fieldTerms : Array Term ← ci.fields.mapM fun f => do
+    let nm : TSyntax `str := Syntax.mkStrLit f.name.getString!
+    let k ← match f.kind with
+      | .scalar => `(Lsc.FieldKind.scalar)
+      | .map1 => `(Lsc.FieldKind.map1)
+      | .map2 => `(Lsc.FieldKind.map2)
+    `({ name := $nm, kind := $k, ty := Lsc.AbiTy.uint256 })
+  let fieldsTerm ← `([$fieldTerms,*])
+  let close ← `(Lean.Parser.Tactic.tacticSeq|
+      simp [$schema:ident] <;>
+        first | contradiction | (split <;> simp [$schema:ident]) |
+          (funext; intro; simp [$schema:ident]) | rfl)
+  let mut restI := close
+  for _ in [:n] do
+    restI ← `(Lean.Parser.Tactic.tacticSeq|
+      cases $iTgt with
+      | zero => $close
+      | succ $iId => $restI)
+  let mut restJ ← `(Lean.Parser.Tactic.tacticSeq| first | contradiction | cases $hTgt)
+  for _ in [:n] do
+    restJ ← `(Lean.Parser.Tactic.tacticSeq|
+      cases $jTgt with
+      | zero => (first | contradiction | ($restI))
+      | succ $jId => $restJ)
+  let schemaSt ← `(($schema:ident).st)
+  `(command| theorem $thmName : Lsc.StorageSchema.Lawful $schemaSt $fieldsTerm := by
+      constructor
+      all_goals (intros $iId $jId σ x $hId; ($restJ)))
 
 /-! ## Reification -/
 
@@ -855,10 +899,13 @@ syntax (name := lscSchema) "lsc_schema " ident : command
   | `(lsc_schema $ns:ident) => do
     let ns ← liftCoreM <| realizeGlobalConstNoOverloadWithInfo (mkIdent (ns.getId ++ `Storage))
     let ns := ns.getPrefix
-    let cmd ← liftTermElabM do
+    let (cmd, thm) ← liftTermElabM do
       let ci ← contractInfo ns
-      mkSchemaCommand ci
+      let cmd ← mkSchemaCommand ci
+      let thm ← mkSchemaLawfulCommand ci
+      pure (cmd, thm)
     elabCommand cmd
+    elabCommand thm
   | _ => throwUnsupportedSyntax
 
 /-- `lsc_reify C.f` reifies a contract function and certifies the result. -/
