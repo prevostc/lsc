@@ -7,9 +7,10 @@ Decisions for `Lsc/Compiler` fixed by the study of `yul-semantics`, `evm_semanti
 
 - **Deploy**: `YulEvmCompiler.compileObject_correct` (`ObjectCompile.lean`) — relates the
   resolved object run from `L.initState` (empty calldata/storage) to the compiled creation code.
-  Object shape: `object C { code { datacopy(0, dataoffset("runtime"), datasize("runtime"))
-  return(0, datasize("runtime")) } object "runtime" { code { dispatcher } } }`
-  (`YulSemantics.EVM.constructorCode`, in `ObjectRun.lean`).
+  Object shape: `object C { code { <constructor body>; datacopy(0, dataoffset("runtime"),
+  datasize("runtime")) return(0, datasize("runtime")) } object "runtime" { code { dispatcher } } }`
+  (`YulSemantics.EVM.constructorCode`, in `ObjectRun.lean`). Constructor-time `call` in the
+  constructor body is subject to verification against this theorem.
 - **Runtime calls**: `compile_correct` / `compile_runContract` (`Correctness.lean`,
   `ContractCorrectness.lean`) on the *resolved runtime block* from a custom `EvmState`
   (calldata, storage, `keccakOf`, caller, …). There is no `compileObject_runContract`.
@@ -52,9 +53,14 @@ Decisions for `Lsc/Compiler` fixed by the study of `yul-semantics`, `evm_semanti
   rejected until this nesting was added. Parameters are bound as
   `let v_i := calldataload(4 + 32 i)` (a `Run` starts with an empty `VEnv`).
 - `ret` → ABI-encode at `0x80`, `return(0x80, 32k)`; unit → `stop()`.
-- External ERC20 call → `call(<literal gas word>, tok, 0, in, n, out, 32)`; **never `gas()`**
-  (powdr rejects it). Under the lock, `toYul_correct` constrains `ExternalCalls` to the
-  interface model and to leaving our storage unchanged.
+- `Op.call` / `Stmt.call` → `sload` the bound address slot, ABI-pack at `0x80`,
+  `call(<gas literal>, tok, 0, …)` (**never `gas()`**; powdr rejects it),
+  `if iszero(ok) { revert(0,0) }`. Return handling: `boolOpt` — success ⇔ call ok ∧
+  (`returndatasize() = 0` ∨ returned word `= 1`) (missing-return-value tokens OK);
+  `word` — require `returndatasize() ≥ 32`. `toYul_correct`'s `letCall` case: `PROOF_CHAIN.md`.
+- Constructor-time `call` (e.g. caching `decimals`) is subject to verification against powdr's
+  deploy theorem (`compileObject_correct` / `evmWithExternal` in init code). If that theorem
+  cannot take external calls in creation code, `decimals` is a constructor argument.
 - Dispatcher → `if lt(calldatasize(), 4) { revert(0,0) }` then
   `switch shr(224, calldataload(0))` with one `case <selector>` per entrypoint and `default { revert(0,0) }`.
 - Reentrancy lock → `tload`/`tstore` of a fixed transient slot around every `tx` entrypoint;

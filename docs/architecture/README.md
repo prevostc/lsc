@@ -4,7 +4,8 @@ These documents record **decisions discovered by architecture reviews**, not gue
 They were first produced by the September 2026 review (verdict: SIMPLIFY).
 
 - `LANGUAGE_ARCHITECTURE.md` — surface, Core (the only IR), arithmetic domains, proof UX, backend, toolchain.
-- `SECURITY_MODEL.md` — the anti-exploit formalization (`Inv`/`claim`/`Auth`), Interface model, adversary scope, language vs stdlib vs protocol boundary.
+- `SECURITY_MODEL.md` — the anti-exploit formalization (`Inv`/`claim`/`Auth`), adversary scope, language vs stdlib vs protocol boundary.
+- `INTERFACE_MODEL.md` — external-contract contract: `Interface`/`Binding`/`Tx.call`, `Conforms`/`Implements`/`Rely`, non-conforming tokens.
 - `PROOF_CHAIN.md` — the four links from a `Tx` theorem to deployed bytecode and their status.
 - `MODULE_MAP.md` — module boundaries and dependency rules.
 - `TRUSTED_COMPUTING_BASE.md` — what every end-to-end theorem trusts or assumes.

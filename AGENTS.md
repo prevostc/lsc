@@ -16,10 +16,16 @@ Read `docs/PROJECT_GOAL.md` when you need the canonical product goal. Keep that 
 
 When model selection is available:
 
-- **Cursor 4.6 xhigh**: coding, refactoring, mechanical exploration, build fixes, contained proof tasks.
-- **Fable 5.1 high/xhigh**: architecture, proof strategy, decomposition, hard design decisions, challenging results, deciding what to do next.
+- **Cursor Grok 4.6 xhigh** (default for everything): coding, refactoring, exploration, build fixes,
+  proof implementation, proof-strategy drafts, design drafts, documentation, reports.
+- **Fable 5.1**: reserved for the few most critical architecture decisions (semantics, proof
+  boundaries, trusted assumptions) and for adjudicating when Grok's results conflict or fail
+  twice. At most one Fable subagent at a time, read-only, with a tight brief and a ≤ 250-line
+  deliverable. Never for implementation, docs, or first-draft designs.
 
-Do not spend Fable on work Cursor can reliably execute.
+Fable budget is the binding constraint of this project. Before spawning Fable ask: could Grok draft
+this and Fable only review the draft? If yes, do that. The main (Fable) context must stay brief:
+delegate, decide, record; do not read implementation files or long reports itself.
 
 Do not let execution agents make major architectural decisions implicitly through code.
 

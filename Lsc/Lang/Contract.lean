@@ -5,8 +5,9 @@ import KeccakEngine.Sponge
 # Contract assembly: the `ContractDef` data model
 
 `lsc_contract C f₁ … fₙ` (in `Lsc.Lang.Reify`) reifies the listed entrypoints under namespace
-`C` and produces `C.contract : ContractDef`. Everything downstream is a Lean function of that
-value: ABI JSON, selectors, the Yul dispatcher and codegen (`Lsc.Compiler.toYul`).
+`C` and produces `C.contract : ContractDef` plus `C.Fn` / `C.entry` / `C.spec`. Everything
+downstream of `C.contract` is a Lean function of that value: ABI JSON, selectors, the Yul
+dispatcher and codegen (`Lsc.Compiler.toYul`).
 
 This file is the data model plus the ABI hashing helpers (KeccakEngine); it has no
 metaprogramming. `FnDef.core` is a dependent field, so `ToExpr`/`Repr` are hand-written by

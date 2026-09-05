@@ -15,11 +15,16 @@ bytecode    ──(4) EndToEnd glue──────  bytecode-level anti-explo
 1. **Surface → Core.** `f.core_denote : Core.denote schema f.core args = f args := rfl`. Emitted
    by the untrusted reifier, checked by the kernel. Status: **proved** for every reified function.
 2. **Core → Yul.** `toYul_correct`: for every Core program `c`, every world `w` related to a Yul
-   state by the layout relation `R`, `Core.denote c` and `YulSemantics.Run (toYul c)` agree on
-   outcome (return data, revert data, storage under `R`, logs); external calls are simulated under
-   `ExternalsRealized` and "responses follow the interface model". Status: **incomplete** (S1
-   for the call-free fragment, S2 for `letCall`). Current state: `Lsc/Compiler/Yul.lean` emits
-   the call-free fragment; `Lsc/Compiler/Correctness.lean` states `toYul_correct` for one
+   state by the layout relation `R` (`storage`/`ctx` and `∀ b, b.get w.ext = α_b (view yst)`),
+   `Core.denote c` and `YulSemantics.Run (toYul c)` agree on outcome (return data, revert data,
+   storage under `R`, logs). The `letCall` case quantifies **existentially** over the fault
+   oracle: for every `resp` admitted by `ext.Call` at the compiled `call` there is a choice
+   `faults ncalls := ¬resp.success` under which both sides agree. Success uses `Conforms` (model
+   word and `α(post) = g'`, re-establishing `R`); failure reverts both sides with empty data. The
+   theorem's shape is `∀ w, ∀ outcome, ∃ w'` differing from `w` only in `faults`; security
+   theorems are `∀ w`, so the glue instantiates them at the chosen oracle. Status: **incomplete**
+   (S1 for the call-free fragment, S2 for `letCall`). Current state: `Lsc/Compiler/Yul.lean`
+   emits the call-free fragment; `Lsc/Compiler/Correctness.lean` states `toYul_correct` for one
    `FnDef` (`sorry`, not imported by `Lsc.lean`). The statement is **tested** for Counter and
    Token by the differential harness in `Lsc/Compiler/YulTests.lean` (powdr's Yul interpreter vs
    `Tx.run`; compiled by powdr: Counter 480/494 bytes, Token 1650/1742). Known weaknesses of the
@@ -42,13 +47,13 @@ bytecode    ──(4) EndToEnd glue──────  bytecode-level anti-explo
 
 ## Hypotheses that appear in every end-to-end theorem
 
-Sufficient gas for each call; keccak oracle injective on the keys used; `Conforms I addr` for
-each declared external address; powdr `ExternalsRealized`; fork = Osaka; adversary model scope
-per `SECURITY_MODEL.md`.
+Sufficient gas for each call; keccak oracle injective on the keys used; per-binding `Conforms`
+(including non-interference) and `RelyEnv` (`INTERFACE_MODEL.md`, `TRUSTED_COMPUTING_BASE.md`);
+powdr `ExternalsRealized`; fork = Osaka; adversary model scope per `SECURITY_MODEL.md`.
 
 ## Rules
 
 - No `sorry`, `native_decide`, `bv_decide` or new `axiom` in any link; CI pins the axiom footprint
   of every end-to-end theorem.
-- `Security` depends only on `Lang`; `Compiler` depends on `Core` and powdr, never on `Security`;
-  only `EndToEnd` sees both.
+- `Security` depends only on `Lang`; `Compiler` depends on `Lang` (`Core`, `Interface`) and
+  powdr, never on `Security`; only `EndToEnd` sees both.

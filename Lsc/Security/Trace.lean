@@ -1,33 +1,14 @@
 import Mathlib.Data.Finset.Basic
-import Lsc.Lang.Tx
+import Lsc.Lang.Spec
 
 /-!
-Trace semantics of one contract: a family of entrypoints over one storage type `S`.
+Trace semantics of one contract: `Call`, `step`, and `run` over a language-level `Lsc.Spec`.
 A reverted call is a no-op on the world (EVM atomicity).
 -/
 
 namespace Lsc.Security
 
 variable {S E ε : Type}
-
-/-- One ABI entrypoint, with its own argument and return types. -/
-structure Entry (S E ε : Type) where
-  Args : Type
-  Ret : Type
-  run : Args → Tx S E ε Ret
-
-/-- A contract as a family of entrypoints. `Fn` is typically a finite inductive. -/
-structure Spec (S E ε : Type) where
-  Fn : Type
-  entry : Fn → Entry S E ε
-
-namespace Spec
-variable (C : Spec S E ε)
-abbrev Args (fn : C.Fn) : Type := (C.entry fn).Args
-abbrev Ret (fn : C.Fn) : Type := (C.entry fn).Ret
-/-- Run the body of `fn` on `args`. -/
-@[reducible] def exec (fn : C.Fn) (args : C.Args fn) : Tx S E ε (C.Ret fn) := (C.entry fn).run args
-end Spec
 
 /-- One attempted call. `target` is `Ctx.self` (the callee). -/
 structure Call (C : Spec S E ε) where

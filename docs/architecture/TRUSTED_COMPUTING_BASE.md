@@ -7,9 +7,9 @@ What an end-to-end theorem of this project relies on beyond its own proof.
 - Lean 4 kernel and the standard axioms `propext`, `Classical.choice`, `Quot.sound`. No
   `native_decide`, `bv_decide`, `sorry` or project axioms in the proof chain (they may appear in
   tests only). CI pins the axiom footprint of every end-to-end theorem.
-- **The language specification**: `Tx` semantics and `Core.denote` (`Lsc/Lang/Tx.lean`,
-  `Core.lean`). Reviewed, not proved. A theorem about `Tx.run f` means what these files say it
-  means.
+- **The language specification**: `Tx` semantics, `Tx.call`, and `Core.denote`
+  (`Lsc/Lang/Tx.lean`, `Interface.lean`, `Core.lean`). Reviewed, not proved. A theorem about
+  `Tx.run f` means what these files say it means.
 - **EVM ground truth**: powdr `evm-semantics` (relational, conformance-tested with zero failures
   against `ethereum/tests` GeneralStateTests and EEST Osaka) and powdr `yul-semantics` (adequacy
   proved by its authors). Pinned commits.
@@ -23,12 +23,20 @@ What an end-to-end theorem of this project relies on beyond its own proof.
 
 - Sufficient gas for each call (powdr's gas bound is existential).
 - `ExternalsRealized`: external call responses are realised by complete EVM executions.
-- `Conforms I addr` for each declared external address (code realises the interface model and
-  does not modify our account).
+- Per binding `b` of interface `I`: `Conforms I self σ₀.addr_b ext` — refinement of powdr
+  `ExternalCalls` through `α_b`, including non-interference with our storage/transient and no
+  cross-binding effect (`INTERFACE_MODEL.md`). Non-interference is **assumed**, justified
+  informally by the `tload`/`tstore` lock (reentrant entry hits the dispatcher and reverts; views
+  revert while locked). A bytecode-level proof from the lock is deferred.
+- `RelyEnv`: between two of our calls, `I.Rely self (α_b st) (α_b st')`.
+- Fault oracle: `toYul_correct` existentially chooses `faults ncalls := ¬resp.success` so Core
+  and Yul agree on each external outcome; security theorems remain `∀ w` and the glue instantiates
+  them at that oracle. A failing `call` reverts both sides with empty data and needs no `Conforms`
+  success clause.
 - Fork = Osaka.
-- Adversary model scope (`SECURITY_MODEL.md`): any call sequence from any addresses; excludes
-  private-key compromise, block-producer ordering/MEV, gas griefing, non-conforming tokens unless
-  modelled.
+- Adversary model scope (`SECURITY_MODEL.md`): any call sequence from any addresses, `env` steps
+  under `RelyEnv`, `sender ≠ self`; excludes private-key compromise, block-producer ordering/MEV,
+  gas griefing of our execution, and token behaviours excluded by `Conforms`/`Rely`.
 
 ## Untrusted (checked or irrelevant to soundness)
 
