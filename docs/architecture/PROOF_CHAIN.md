@@ -20,14 +20,17 @@ bytecode    ──(4) EndToEnd glue──────  bytecode-level anti-explo
    agreement lemma between `denoteAWord`/`denoteAUnit` and `Core.denote` before the bytecode
    link is as tight as for `Nat` programs.
 2. **Core → Yul.** Two theorems in `Lsc/Compiler/Correctness.lean` (`sorry`, not imported by
-   `Lsc.lean` / `Checks.lean`): `toYulFn_correct` (one runtime entrypoint, `V' = []`) and
+   `Lsc.lean`): `toYulFn_correct` (one runtime entrypoint, `V' = []`) and
    `runtimeBlock_correct` (dispatcher). Hypotheses: `Γ.st.Lawful c.fields` (nine update equations,
    generated as `C.schema_lawful`), `KeccakSep c κ`, `ctxRel` (`static = false`, `halted = none`,
    `CtxWF`), `R` including `WorldWF` and `logsRel` via `List.Forall₂` with `Γ.ev.build` /
    `abiBytes` witnesses. Args are `decodeArgs f st0.env.calldata` (no `calldataRel`). The
    `letCall` case (S2) still quantifies existentially over the fault oracle. Status:
-   **incomplete** (S1 call-free, S2 `letCall`). Emitter: temp-free nested Yul, gated by `coreWF`
-   / `Nodup`. Tested for Counter and Token by `Lsc/Compiler/YulTests.lean`.
+   **M1 proved** for `Counter.increment` (`Lsc.Compiler.counter_increment_correct`, axioms
+   `propext` / `Classical.choice` / `Quot.sound`) via general `core_sim` on the `M1Frag`
+   fragment (`load`, `addChecked`, `store`, one-word `emit`, `ret` unit, `letOp`/`seq`/`stmtTail`).
+   General `toYulFn_correct` / dispatcher remain `sorry`. Emitter: temp-free nested Yul, gated by
+   `coreWF` / `Nodup`. Tested for Counter and Token by `Lsc/Compiler/YulTests.lean`.
 3. **Yul → bytecode.** powdr `YulEvmCompiler.compileObject_correct`, axioms exactly
    `propext`, `Classical.choice`, `Quot.sound`. Status: **proved** (external, pinned).
    Known gap for the deploy object: `compileObject_correct` starts from `L.initState` (empty

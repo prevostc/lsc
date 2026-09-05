@@ -4,6 +4,7 @@ import Lsc.Examples.TokenProofs
 import Lsc.Examples.TokenSecurity
 import Lsc.Examples.VaultSecurity
 import Lsc.Security.Wealth
+import Lsc.Compiler.Proof.Core
 
 /-!
 # Axiom footprint checks
@@ -36,3 +37,6 @@ axioms. `#guard_msgs` turns a widened footprint into a build error (see
 
 /-- info: 'Vault.vault_no_unauthorized_extraction' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms Vault.vault_no_unauthorized_extraction
+
+/-- info: 'Lsc.Compiler.counter_increment_correct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms Lsc.Compiler.counter_increment_correct
