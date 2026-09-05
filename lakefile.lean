@@ -24,7 +24,21 @@ require KeccakEngine from git
   "https://github.com/prevostc/lean-keccak-unrolled" @ "main"
 
 lean_lib Lsc where
-  globs := #[Glob.andSubmodules `Lsc]
+  -- Vault.lean / VaultProofs.lean stay on disk for a follow-up rewrite; they are
+  -- not imported and must not be compiled until they match `World S X E`.
+  -- `Glob.submodules` (not `andSubmodules`) because there is no `Lsc/Lang.lean` etc.
+  globs := #[
+    Glob.submodules `Lsc.Lang,
+    Glob.submodules `Lsc.Stdlib,
+    Glob.submodules `Lsc.Security,
+    Glob.submodules `Lsc.Compiler,
+    Glob.submodules `Lsc.Tools,
+    Glob.one `Lsc.Examples.Counter,
+    Glob.one `Lsc.Examples.Token,
+    Glob.one `Lsc.Examples.TokenProofs,
+    Glob.one `Lsc.Examples.TokenSecurity,
+    Glob.one `Lsc
+  ]
 
 /-- Pinned axiom footprint of the certificates and end-to-end theorems (built by `lake build`). -/
 lean_lib Checks where

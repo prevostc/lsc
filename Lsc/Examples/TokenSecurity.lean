@@ -25,7 +25,7 @@ def Auth (a : Address) (c : Call spec) (s : Storage) : Prop :=
   | _, _ => False
 
 /-- Mint is the only inflow; it is `0` on revert. -/
-def inflow (c : Call spec) (w : World Storage Event) : Nat :=
+def inflow (c : Call spec) (w : World Storage Unit Event) : Nat :=
   match c.fn, c.args with
   | .mint, (dst, amt) =>
     match Tx.run (mint dst amt) c.toCtx w with
@@ -33,17 +33,19 @@ def inflow (c : Call spec) (w : World Storage Event) : Nat :=
     | .error _ => 0
   | _, _ => 0
 
-/-- Token holdings are the recorded `totalSupply`. -/
-def holdings (w : World Storage Event) : Nat := w.self.totalSupply
+/-- Token holdings are the recorded `totalSupply`. The address is ignored. -/
+def holdings (_self : Address) (w : World Storage Unit Event) : Nat := w.self.totalSupply
 
-/-- Finite support is a ghost: not stored. Equivalent to `Finsupp.support` without changing `Mapping`. -/
-def Inv (s : Storage) : Prop :=
+/-- Finite support of balances. Used by `inv_of_*`; `Inv` wraps it on a world. -/
+def InvStorage (s : Storage) : Prop :=
   ∃ H : Finset Address,
     (∀ a, a ∉ H → s.balances a = 0) ∧
     H.sum (fun a => s.balances a) = s.totalSupply
 
-theorem inv_solvent (w : World Storage Event) (h : Inv w.self) :
-    Solvent claim holdings w := by
+def Inv (w : World Storage Unit Event) : Prop := InvStorage w.self
+
+theorem inv_solvent (self : Address) (w : World Storage Unit Event) (h : Inv w) :
+    Solvent claim holdings self w := by
   obtain ⟨H, h0, hs⟩ := h
   exact ⟨H, h0, hs.le⟩
 
@@ -77,8 +79,8 @@ private theorem sum_debit (H : Finset Address) (bals : Address → Nat) {src : A
   omega
 
 private theorem inv_of_transferPost (σ : Storage) (src dst : Address) (n : Nat)
-    (hInv : Inv σ) (hn : n ≤ σ.balances src) :
-    Inv (transferPost σ src dst n) := by
+    (hInv : InvStorage σ) (hn : n ≤ σ.balances src) :
+    InvStorage (transferPost σ src dst n) := by
   obtain ⟨H, h0, hsum⟩ := hInv
   by_cases hsrc : src ∈ H
   · by_cases hto : dst ∈ H
@@ -146,8 +148,8 @@ private theorem inv_of_transferPost (σ : Storage) (src dst : Address) (n : Nat)
         intro a _; rw [hbals]
       simpa [transferPost] using hsum'.trans hsum
 
-private theorem inv_of_mintPost (σ : Storage) (dst : Address) (n : Nat) (hInv : Inv σ) :
-    Inv (mintPost σ dst n) := by
+private theorem inv_of_mintPost (σ : Storage) (dst : Address) (n : Nat) (hInv : InvStorage σ) :
+    InvStorage (mintPost σ dst n) := by
   obtain ⟨H, h0, hsum⟩ := hInv
   refine ⟨insert dst H, ?_, ?_⟩
   · intro a ha
@@ -185,8 +187,8 @@ private theorem inv_of_mintPost (σ : Storage) (dst : Address) (n : Nat) (hInv :
       simpa [mintPost] using hsum'.trans (by rw [hsum])
 
 private theorem inv_of_burnPost (σ : Storage) (src : Address) (n : Nat)
-    (hInv : Inv σ) (hn : n ≤ σ.balances src) :
-    Inv (burnPost σ src n) := by
+    (hInv : InvStorage σ) (hn : n ≤ σ.balances src) :
+    InvStorage (burnPost σ src n) := by
   obtain ⟨H, h0, hsum⟩ := hInv
   by_cases hs : src ∈ H
   · refine ⟨H, ?_, ?_⟩
@@ -333,10 +335,10 @@ theorem token_no_unauth : NoUnauthorizedDecrease spec claim Auth :=
     | .totalSupply => totalSupply_auth
 
 theorem token_no_unauthorized_extraction
-    (tr : List (Call spec)) (w : World Storage Event) (a : Address)
-    (hA : NoAuthAlong Auth a tr w) :
+    (self : Address) (tr : List (Step spec)) (w : World Storage Unit Event) (a : Address)
+    (hW : Wf self tr) (hA : NoAuthAlong Auth a tr w) :
     claim a w.self ≤ claim a (run tr w).self :=
-  no_unauthorized_extraction token_no_unauth tr w a hA
+  no_unauthorized_extraction token_no_unauth self tr w a hW hA
 
 /-! ### (b) Conservation -/
 
@@ -645,21 +647,27 @@ theorem token_preserves_inv : PreservesInv spec Inv :=
     | .allowance => allowance_preserves_inv
     | .totalSupply => totalSupply_preserves_inv
 
+/-- Environment steps are a no-op on `Inv` (`X := Unit`). -/
+theorem token_inv_rely : PreservesInvEnv spec Inv (fun _ _ => True) := by
+  intro w x' hw _
+  exact hw
+
 /-- Deployment from empty balances establishes `Inv`. -/
 theorem «constructor_inv» (owner : Address) (supply : Nat) (ctx : Ctx)
-    (w : World Storage Event)
+    (w : World Storage Unit Event)
     (hempty : ∀ a, w.self.balances a = 0) (_hbound : supply < wordBound) :
-    Inv (worldAfter (Token.constructor owner supply) ctx w).self := by
+    Inv (worldAfter (Token.constructor owner supply) ctx w) := by
   have hrun := ctor_ok ctx w owner supply
-  simp [worldAfter, hrun]
+  simp [worldAfter, hrun, Inv, InvStorage]
   refine ⟨{owner}, ?_, ?_⟩
   · intro a ha
     have hne : a ≠ owner := by simpa [Finset.mem_singleton] using ha
     simp [ctorPost, Function.update_of_ne hne, hempty]
   · simp [ctorPost, Finset.sum_singleton, Function.update_self]
 
-theorem token_solvent (tr : List (Call spec)) (w : World Storage Event)
-    (h : Inv w.self) : Solvent claim holdings (run tr w) :=
-  solvent_run token_preserves_inv inv_solvent h tr
+theorem token_solvent (self : Address) (tr : List (Step spec)) (w : World Storage Unit Event)
+    (hW : Wf self tr) (hR : RelyAlong (fun _ _ => True) tr w) (h : Inv w) :
+    Solvent claim holdings self (run tr w) :=
+  solvent_run token_preserves_inv token_inv_rely inv_solvent h tr hW hR
 
 end Token

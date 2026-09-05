@@ -64,7 +64,7 @@ def selectedFn (c : ContractDef) (cd : List UInt8) : Option FnDef :=
       if cd.length < 4 + 32 * f.params.length then none else some f
 
 /-- Storage values (and mapping keys) used by `R` fit in an EVM word. -/
-def WorldWF {S E ε} (c : ContractDef) (Γ : ContractSchema S E ε) (w : World S E) : Prop :=
+def WorldWF {S X E ε} (c : ContractDef) (Γ : ContractSchema S X E ε) (w : World S X E) : Prop :=
   ∀ (i : Nat) (fd : FieldDef), c.fields[i]? = some fd →
     match fd.kind with
     | .scalar => Γ.st.scalar i w.self < wordBound
@@ -106,7 +106,7 @@ structure KeccakSep (c : ContractDef) (κ : List UInt8 → U256) : Prop where
 
 /-- Storage layout: scalar field `i` is slot `i`; mappings use Solidity `keccak256(key ‖ slot)`
 (and nested keccak for `map2`). Map clauses quantify only over keys `< 2^256`. -/
-def storageRel {S E ε} (c : ContractDef) (Γ : ContractSchema S E ε)
+def storageRel {S X E ε} (c : ContractDef) (Γ : ContractSchema S X E ε)
     (keccak : List UInt8 → U256) (σ : S) (storage : U256 → U256) : Prop :=
   ∀ (i : Nat) (fd : FieldDef), c.fields[i]? = some fd →
     match fd.kind with
@@ -117,17 +117,17 @@ def storageRel {S E ε} (c : ContractDef) (Γ : ContractSchema S E ε)
         storage (mapSlot2 keccak i k₁ k₂) = BitVec.ofNat 256 (Γ.st.map2 i σ k₁ k₂)
 
 /-- Logs related in order: each Core event is some `Γ.ev.build i args` with matching ABI data. -/
-def logsRel {S E ε} (c : ContractDef) (Γ : ContractSchema S E ε)
-    (w : World S E) (st : EvmState) : Prop :=
+def logsRel {S X E ε} (c : ContractDef) (Γ : ContractSchema S X E ε)
+    (w : World S X E) (st : EvmState) : Prop :=
   List.Forall₂ (fun ev l =>
       ∃ i args, ev = Γ.ev.build i args ∧ ∃ hi : i < c.events.length,
         l = LogEntry.mk st.env.address
           [BitVec.ofNat 256 (c.events[i]).topic0] (abiBytes args))
     w.log st.logs
 
-/-- Layout relation `R : World S E → EvmState → Prop`. -/
-def R {S E ε} (c : ContractDef) (Γ : ContractSchema S E ε)
-    (keccak : List UInt8 → U256) (w : World S E) (st : EvmState) : Prop :=
+/-- Layout relation `R : World S X E → EvmState → Prop`. Ghost/`faults` are not in `R`. -/
+def R {S X E ε} (c : ContractDef) (Γ : ContractSchema S X E ε)
+    (keccak : List UInt8 → U256) (w : World S X E) (st : EvmState) : Prop :=
   storageRel c Γ keccak w.self st.storage ∧
   logsRel c Γ w st ∧
   st.env.keccakOf = keccak ∧
@@ -137,20 +137,21 @@ def haltSuccess (t : RetTy) (v : t.denote) (h : Option (HaltKind × List UInt8))
   if t = .unit then h = some (.stop, [])
   else h = some (.ret, abiBytes (retWords (t := t) v))
 
-def haltError {S E ε : Type} (c : ContractDef) (Γ : ContractSchema S E ε) :
+def haltError {S X E ε : Type} (c : ContractDef) (Γ : ContractSchema S X E ε) :
     Err ε → List UInt8 → Prop
   | .arith a, bytes => bytes = panicBytes (arithPanicCode a)
   | .user e, bytes => ∃ i args, e = Γ.err.build i args ∧ bytes = customErrorBytes c i args
+  | .callFailed, bytes => bytes = []
 
 /-- If `Tx.run (Core.denote … f) = .ok (v, w')`, a `RunCommitted` of `toYulFn c f` from a
 related state halts with `.ret` (or `stop` for unit) and ABI bytes of `v`, and the
 final observed state is related to `w'`. If it reverts with `e`, the run halts with
 `.revert` and the Panic/custom-error bytes, observed state related to the pre-world `w`. -/
-theorem toYulFn_correct {S E ε : Type} (c : ContractDef) (Γ : ContractSchema S E ε)
+theorem toYulFn_correct {S X E ε : Type} (c : ContractDef) (Γ : ContractSchema S X E ε)
     (hΓ : Γ.st.Lawful c.fields) (κ : List UInt8 → U256) (hκ : KeccakSep c κ)
     (f : FnDef) (hf : f.kind ≠ .constructor)
     (yul : YBlock) (hyul : toYulFn c f = some yul)
-    (ctx : Ctx) (w : World S E) (st0 : EvmState)
+    (ctx : Ctx) (w : World S X E) (st0 : EvmState)
     (hctx : ctxRel ctx st0) (hR : R c Γ κ w st0) :
     let args := decodeArgs f st0.env.calldata
     match Tx.run (Core.denote Γ f.core args.reverse) ctx w with
@@ -170,10 +171,10 @@ theorem toYulFn_correct {S E ε : Type} (c : ContractDef) (Γ : ContractSchema S
 
 /-- Dispatcher: a unique selected entrypoint agrees with `toYulFn_correct`; otherwise the
 run reverts with empty data and the pre-world relation. -/
-theorem runtimeBlock_correct {S E ε : Type} (c : ContractDef) (Γ : ContractSchema S E ε)
+theorem runtimeBlock_correct {S X E ε : Type} (c : ContractDef) (Γ : ContractSchema S X E ε)
     (hΓ : Γ.st.Lawful c.fields) (κ : List UInt8 → U256) (hκ : KeccakSep c κ)
     (yul : YBlock) (hyul : runtimeBlock c = some yul)
-    (ctx : Ctx) (w : World S E) (st0 : EvmState)
+    (ctx : Ctx) (w : World S X E) (st0 : EvmState)
     (hctx : ctxRel ctx st0) (hR : R c Γ κ w st0) :
     ∃ stObs, RunCommitted yul st0 [] stObs .halt ∧
       match selectedFn c st0.env.calldata with

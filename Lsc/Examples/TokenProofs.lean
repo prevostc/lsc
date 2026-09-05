@@ -14,7 +14,7 @@ open Lsc Token
 
 namespace Token
 
-variable (ctx : Ctx) (w : World Storage Event)
+variable (ctx : Ctx) (w : World Storage Unit Event)
 
 /-- `bals` after removing `amount` from `a`. -/
 def debit (bals : Mapping Address Nat) (a : Address) (amount : Nat) : Mapping Address Nat :=
@@ -55,8 +55,8 @@ def ctorPost (σ : Storage) (owner : Address) (supply : Nat) : Storage :=
 
 theorem ctor_ok (owner : Address) (supply : Nat) :
     Tx.run (Token.constructor owner supply) ctx w =
-      .ok ((), World.mk (ctorPost w.self owner supply)
-        (w.log ++ [.Transfer 0 owner supply]) w.ext) := by
+      .ok ((), World.mk (ctorPost w.self owner supply) w.ext
+        (w.log ++ [.Transfer 0 owner supply]) w.faults w.ncalls) := by
   simp [Token.constructor, ctorPost]
 
 /-! ### transfer -/
@@ -110,7 +110,7 @@ theorem transfer_self_transfer_is_noop (amount : Nat)
   · simp [transferPost, credit_other _ h, debit_other _ h]
 
 /-- Frame: `transfer` never touches `totalSupply`, whatever happens. -/
-theorem transfer_preserves_totalSupply (to : Address) (amount : Nat) (w' : World Storage Event)
+theorem transfer_preserves_totalSupply (to : Address) (amount : Nat) (w' : World Storage Unit Event)
     (h : Tx.run (transfer to amount) ctx w = .ok ((), w')) :
     w'.self.totalSupply = w.self.totalSupply := by
   by_cases hsub : amount ≤ w.self.balances ctx.sender

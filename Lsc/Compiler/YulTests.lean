@@ -45,8 +45,8 @@ def runFn (c : ContractDef) (f : FnDef) (args : List Nat)
 
 /-! ## Counter -/
 
-def ctrW (n : Nat) : World Counter.Storage Counter.Event :=
-  { self := { count := n } }
+def ctrW (n : Nat) : World Counter.Storage Unit Counter.Event :=
+  { self := { count := n }, ext := () }
 
 def ctrSlots (n : Nat) : List (U256 × U256) :=
   [(u256 0, u256 n)]
@@ -56,7 +56,7 @@ def ctrStore (n : Nat) : U256 → U256 := storageOf (ctrSlots n)
 def ctx1 : Ctx := { sender := 1, self := 7 }
 
 def checkCtrUnit (fname : String) (args : List Nat) (count : Nat)
-    (tx : Except (Err Counter.Error) (Unit × World Counter.Storage Counter.Event)) : Bool :=
+    (tx : Except (Err Counter.Error) (Unit × World Counter.Storage Unit Counter.Event)) : Bool :=
   match fnNamed Counter.contract fname with
   | none => false
   | some f =>
@@ -70,9 +70,10 @@ def checkCtrUnit (fname : String) (args : List Nat) (count : Nat)
         checkRevert y (customErrorBytes Counter.contract 0 []) pre
       | .error (.arith a) =>
         checkRevert y (panicBytes (arithPanicCode a)) pre
+      | .error .callFailed => false
 
 def checkCtrWord (fname : String) (args : List Nat) (count : Nat)
-    (tx : Except (Err Counter.Error) (Nat × World Counter.Storage Counter.Event)) : Bool :=
+    (tx : Except (Err Counter.Error) (Nat × World Counter.Storage Unit Counter.Event)) : Bool :=
   match fnNamed Counter.contract fname with
   | none => false
   | some f =>
@@ -85,6 +86,7 @@ def checkCtrWord (fname : String) (args : List Nat) (count : Nat)
         checkRevert y (customErrorBytes Counter.contract 0 []) (ctrSlots count)
       | .error (.arith a) =>
         checkRevert y (panicBytes (arithPanicCode a)) (ctrSlots count)
+      | .error .callFailed => false
 
 def counter_increment_ok : Bool :=
   checkCtrUnit "increment" [] 5 (Tx.run Counter.increment ctx1 (ctrW 5))
@@ -120,8 +122,9 @@ def counterAll : List (String × Bool) :=
 /-! ## Token (call-free entrypoints) -/
 
 def tokW (owner supply : Nat) (bals : Nat → Nat) (allows : Nat → Nat → Nat) :
-    World Token.Storage Token.Event :=
-  { self := { owner := owner, totalSupply := supply, balances := bals, allowances := allows } }
+    World Token.Storage Unit Token.Event :=
+  { self := { owner := owner, totalSupply := supply, balances := bals, allowances := allows },
+    ext := () }
 
 def tokAddrs : List Nat := [0, 1, 2, 3]
 
@@ -148,14 +151,14 @@ def σ₁ : Token.Storage := { owner := 1, totalSupply := 1000, balances := bals
 
 def σAllow : Token.Storage := { σ₁ with allowances := allow₁₂ }
 
-def w₁ : World Token.Storage Token.Event := { self := σ₁ }
-def wAllow : World Token.Storage Token.Event := { self := σAllow }
+def w₁ : World Token.Storage Unit Token.Event := { self := σ₁, ext := () }
+def wAllow : World Token.Storage Unit Token.Event := { self := σAllow, ext := () }
 
 def ctxOwner : Ctx := { sender := 1, self := 7 }
 def ctx2 : Ctx := { sender := 2, self := 7 }
 
 def checkTokUnit (fname : String) (args : List Nat) (ctx : Ctx) (σ : Token.Storage)
-    (tx : Except (Err Token.Error) (Unit × World Token.Storage Token.Event)) : Bool :=
+    (tx : Except (Err Token.Error) (Unit × World Token.Storage Unit Token.Event)) : Bool :=
   match fnNamed Token.contract fname with
   | none => false
   | some f =>
@@ -173,9 +176,10 @@ def checkTokUnit (fname : String) (args : List Nat) (ctx : Ctx) (σ : Token.Stor
         checkRevert y (customErrorBytes Token.contract 2 []) pre
       | .error (.arith a) =>
         checkRevert y (panicBytes (arithPanicCode a)) pre
+      | .error .callFailed => false
 
 def checkTokWord (fname : String) (args : List Nat) (ctx : Ctx) (σ : Token.Storage)
-    (tx : Except (Err Token.Error) (Nat × World Token.Storage Token.Event)) : Bool :=
+    (tx : Except (Err Token.Error) (Nat × World Token.Storage Unit Token.Event)) : Bool :=
   match fnNamed Token.contract fname with
   | none => false
   | some f =>
@@ -192,6 +196,7 @@ def checkTokWord (fname : String) (args : List Nat) (ctx : Ctx) (σ : Token.Stor
         checkRevert y (customErrorBytes Token.contract 2 []) (tokSlots σ)
       | .error (.arith a) =>
         checkRevert y (panicBytes (arithPanicCode a)) (tokSlots σ)
+      | .error .callFailed => false
 
 def token_transfer_ok : Bool :=
   checkTokUnit "transfer" [2, 100] ctxOwner σ₁ (Tx.run (Token.transfer 2 100) ctxOwner w₁)

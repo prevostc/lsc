@@ -5,9 +5,9 @@ import Lsc.Lang.Spec
 /-!
 # reification
 
-`lsc_schema C` derives `C.schema : ContractSchema C.Storage C.Event C.Error` from the
+`lsc_schema C` derives `C.schema : ContractSchema C.Storage C.Ext C.Event C.Error` from the
 user's Lean types, plus `C.schema_lawful : C.schema.st.Lawful …`, and `lsc_reify C.f` turns the elaborated term of a contract function
-`C.f : … → Tx C.Storage C.Event C.Error ρ` into
+`C.f : … → Tx C.Storage C.Ext C.Event C.Error ρ` (or `Unit` when there is no `Ext`) into
 
 * `C.f.core : Core t` — the Core AST, and
 * `C.f.core_denote : ∀ args, Core.denote C.schema C.f.core [argsₙ, …, args₁] = C.f args₁ … argsₙ`
@@ -45,6 +45,14 @@ structure FieldInfo where
   name : Name
   idx : Nat
   kind : FieldKind
+  /-- Value type (for mappings, the type stored at a key). -/
+  valTy : Expr
+  deriving Inhabited
+
+structure BindingInfo where
+  name : Name
+  fieldSlot : Nat
+  iface : Name
   deriving Repr, Inhabited
 
 structure ContractInfo where
@@ -55,6 +63,8 @@ structure ContractInfo where
   fields : Array FieldInfo
   evCtors : Array Name
   errCtors : Array Name
+  ext? : Option Name
+  bindings : Array BindingInfo
 
 /-- A join point in scope: `have jp := fun (y : T) => rest`. `body` is `rest` reified in
 the environment at the definition point (plus `y` if `hasArg`). -/
@@ -70,14 +80,42 @@ structure Env (t : RetTy) where
 
 /-! ## Contract information from the user's types -/
 
-/-- Arity of a field type after unfolding abbreviations such as `Mapping`. -/
-def fieldKind (ty : Expr) : MetaM FieldKind :=
-  forallTelescopeReducing ty fun xs _ => do
+/-- Arity of a field type after unfolding abbreviations such as `Mapping`, plus the value type. -/
+def fieldKindAndVal (ty : Expr) : MetaM (FieldKind × Expr) :=
+  forallTelescopeReducing ty fun xs val => do
     match xs.size with
-    | 0 => pure .scalar
-    | 1 => pure .map1
-    | 2 => pure .map2
+    | 0 => pure (.scalar, val)
+    | 1 => pure (.map1, val)
+    | 2 => pure (.map2, val)
     | n => throwError "storage field with {n} keys is not supported (max 2)"
+
+def isAmountTy (ty : Expr) : MetaM Bool := do
+  let ty ← whnfR ty
+  return ty.isAppOfArity ``Lsc.Amount 2
+
+def findBindings (ns storage ext : Name) : MetaM (Array BindingInfo) := do
+  let env ← getEnv
+  let mut out : Array BindingInfo := #[]
+  let storageFields := getStructureFields env storage
+  for f in getStructureFields env ext do
+    let stem := f.getString!
+    let cands := #[ns ++ Name.mkSimple (stem ++ "B"), ns ++ f]
+    let mut found := false
+    for cand in cands do
+      unless found do
+        unless env.contains cand do continue
+        let info ← getConstInfo cand
+        let ty ← whnfD info.type
+        unless ty.isAppOf ``Lsc.Binding do continue
+        let args := ty.getAppArgs
+        unless args.size ≥ 3 do continue
+        let some ifaceN := args[0]!.constName? | continue
+        let some fieldIdx :=
+          storageFields.toList.findIdx? (fun sf => sf.getString! == stem)
+          | throwError "reify: binding `{cand}` has no storage field `{stem}`"
+        out := out.push { name := cand, fieldSlot := fieldIdx, iface := ifaceN }
+        found := true
+  return out
 
 def contractInfo (ns : Name) : MetaM ContractInfo := do
   let storage := ns ++ `Storage
@@ -91,13 +129,20 @@ def contractInfo (ns : Name) : MetaM ContractInfo := do
   let fields ← forallTelescope ctor.type fun xs _ => do
     let xs := xs.extract ctor.numParams xs.size
     xs.mapIdxM fun i x => do
-      let kind ← fieldKind (← inferType x)
-      pure { name := fieldNames[i]!, idx := i, kind : FieldInfo }
+      let (kind, valTy) ← fieldKindAndVal (← inferType x)
+      pure { name := fieldNames[i]!, idx := i, kind, valTy : FieldInfo }
   let evInfo ← getConstInfoInduct event
   let errInfo ← getConstInfoInduct error
+  let extName := ns ++ `Ext
+  let ext? := if isStructure env extName then some extName else none
+  let bindings ←
+    match ext? with
+    | some ext => findBindings ns storage ext
+    | none => pure #[]
   pure {
     storage, event, error, schema := ns ++ `schema, fields
-    evCtors := evInfo.ctors.toArray, errCtors := errInfo.ctors.toArray }
+    evCtors := evInfo.ctors.toArray, errCtors := errInfo.ctors.toArray
+    ext?, bindings }
 
 /-! ## Schema generation -/
 
@@ -125,23 +170,39 @@ def mkSchemaCommand (ci : ContractInfo) : MetaM Syntax := do
   for f in ci.fields do
     let proj := mkIdent (`σ ++ f.name)
     let fld := mkIdent f.name
-    let upd ← `(fun $σ $m => { $σ with $fld:ident := $m })
+    let amt? ← isAmountTy f.valTy
+    let k := mkIdent `k
     match f.kind with
     | .scalar =>
-      scalar := scalar.push (← `(fun $σ => $proj))
-      scalarUpd := scalarUpd.push upd
+      if amt? then
+        scalar := scalar.push (← `(fun $σ => Lsc.Amount.toNat $proj))
+        scalarUpd := scalarUpd.push (← `(fun $σ $m => { $σ with $fld:ident := Lsc.Amount.ofNat $m }))
+      else
+        scalar := scalar.push (← `(fun $σ => $proj))
+        scalarUpd := scalarUpd.push (← `(fun $σ $m => { $σ with $fld:ident := $m }))
       map1 := map1.push (← `(fun _ _ => 0)); map1Upd := map1Upd.push (← `(fun $σ _ => $σ))
       map2 := map2.push (← `(fun _ _ _ => 0)); map2Upd := map2Upd.push (← `(fun $σ _ => $σ))
     | .map1 =>
       scalar := scalar.push (← `(fun _ => 0)); scalarUpd := scalarUpd.push (← `(fun $σ _ => $σ))
-      map1 := map1.push (← `(fun $σ => $proj))
-      map1Upd := map1Upd.push upd
+      if amt? then
+        map1 := map1.push (← `(fun $σ $k => Lsc.Amount.toNat ($proj $k)))
+        map1Upd := map1Upd.push
+          (← `(fun $σ $m => { $σ with $fld:ident := fun $k => Lsc.Amount.ofNat ($m $k) }))
+      else
+        map1 := map1.push (← `(fun $σ => $proj))
+        map1Upd := map1Upd.push (← `(fun $σ $m => { $σ with $fld:ident := $m }))
       map2 := map2.push (← `(fun _ _ _ => 0)); map2Upd := map2Upd.push (← `(fun $σ _ => $σ))
     | .map2 =>
       scalar := scalar.push (← `(fun _ => 0)); scalarUpd := scalarUpd.push (← `(fun $σ _ => $σ))
       map1 := map1.push (← `(fun _ _ => 0)); map1Upd := map1Upd.push (← `(fun $σ _ => $σ))
-      map2 := map2.push (← `(fun $σ => $proj))
-      map2Upd := map2Upd.push upd
+      if amt? then
+        let k₁ := mkIdent `k₁; let k₂ := mkIdent `k₂
+        map2 := map2.push (← `(fun $σ $k₁ $k₂ => Lsc.Amount.toNat ($proj $k₁ $k₂)))
+        map2Upd := map2Upd.push
+          (← `(fun $σ $m => { $σ with $fld:ident := fun $k₁ $k₂ => Lsc.Amount.ofNat ($m $k₁ $k₂) }))
+      else
+        map2 := map2.push (← `(fun $σ => $proj))
+        map2Upd := map2Upd.push (← `(fun $σ $m => { $σ with $fld:ident := $m }))
   let evBuilders ← ci.evCtors.mapM ctorBuilder
   let errBuilders ← ci.errCtors.mapM ctorBuilder
   let evDefault ← ctorBuilder ci.evCtors[0]!
@@ -149,8 +210,33 @@ def mkSchemaCommand (ci : ContractInfo) : MetaM Syntax := do
   let S := mkIdent ci.storage
   let E := mkIdent ci.event
   let Er := mkIdent ci.error
+  let X : Term ←
+    match ci.ext? with
+    | some ext => pure ⟨mkIdent ext⟩
+    | none => `(Unit)
+  let extTerm : Term ←
+    match ci.ext?, ci.bindings.size with
+    | none, _ | some _, 0 => `(Lsc.ExtSchema.noneCall.call)
+    | some _, n => do
+      let b := mkIdent `b
+      let mm := mkIdent `m
+      let args' := mkIdent `args
+      let mut acc ← `(fun (_ : Lsc.Ctx) (_ : Lsc.World $S $X $E) =>
+          Except.error (α := Nat × Lsc.World $S $X $E) Lsc.Err.callFailed)
+      for k in (List.range n).reverse do
+        let bi := ci.bindings[k]!
+        let bId := mkIdent bi.name
+        let iface := mkIdent bi.iface
+        let kLit := quote k
+        let body ←
+          `(if h : $mm < ($iface).n then
+              Lsc.Tx.call $bId (($iface).idx.invFun ⟨$mm, h⟩) $args'
+            else fun (_ : Lsc.Ctx) (_ : Lsc.World $S $X $E) =>
+              Except.error (α := Nat × Lsc.World $S $X $E) Lsc.Err.callFailed)
+        acc ← `(if $b = $kLit then $body else $acc)
+      `(fun $b $mm $args' => $acc)
   let name := mkIdent (`_root_ ++ ci.schema)
-  `(def $name : Lsc.ContractSchema $S $E $Er where
+  `(def $name : Lsc.ContractSchema $S $X $E $Er where
       st := {
         scalar := fun $i => List.getD [$scalar,*] $i (fun _ => 0)
         scalarUpd := fun $i => List.getD [$scalarUpd,*] $i (fun $σ _ => $σ)
@@ -159,7 +245,17 @@ def mkSchemaCommand (ci : ContractInfo) : MetaM Syntax := do
         map2 := fun $i => List.getD [$map2,*] $i (fun _ _ _ => 0)
         map2Upd := fun $i => List.getD [$map2Upd,*] $i (fun $σ _ => $σ) }
       ev := ⟨fun $i $args => List.getD [$evBuilders,*] $i $evDefault $args⟩
-      err := ⟨fun $i $args => List.getD [$errBuilders,*] $i $errDefault $args⟩)
+      err := ⟨fun $i $args => List.getD [$errBuilders,*] $i $errDefault $args⟩
+      ext := { call := $extTerm })
+
+def abiTyOf (ty : Expr) : MetaM AbiTy := do
+  let ty ← whnfR ty
+  match ty.getAppFn.constName? with
+  | some ``Nat => pure .uint256
+  | some ``Lsc.Address => pure .address
+  | some ``Lsc.Flag => pure .bool
+  | some ``Lsc.Amount | some ``Lsc.Price | some ``Lsc.Fixed => pure .uint256
+  | _ => throwError "lsc_contract: unsupported ABI type `{ty}` (Nat, Address, Flag, Amount)"
 
 /-- `C.schema_lawful : C.schema.st.Lawful <fields>` by `cases` / `simp` / `rfl`.
 Unhygienic `i`/`j` so nested `succ i` rebinds the name the inner `cases` looks up. -/
@@ -182,7 +278,12 @@ def mkSchemaLawfulCommand (ci : ContractInfo) : MetaM (TSyntax `command) := do
       | .scalar => `(Lsc.FieldKind.scalar)
       | .map1 => `(Lsc.FieldKind.map1)
       | .map2 => `(Lsc.FieldKind.map2)
-    `({ name := $nm, kind := $k, ty := Lsc.AbiTy.uint256 })
+    let abi ← abiTyOf f.valTy
+    let abiT ← match abi with
+      | .uint256 => `(Lsc.AbiTy.uint256)
+      | .address => `(Lsc.AbiTy.address)
+      | .bool => `(Lsc.AbiTy.bool)
+    `({ name := $nm, kind := $k, ty := $abiT })
   let fieldsTerm ← `([$fieldTerms,*])
   let close ← `(Lean.Parser.Tactic.tacticSeq|
       simp [$schema:ident] <;>
@@ -228,8 +329,12 @@ def closedNat? (e : Expr) : MetaM (Option Nat) := do
   catch _ =>
     return none
 
-def atomOf (env : Env t) (e : Expr) : MetaM Atom := do
+partial def atomOf (env : Env t) (e : Expr) : MetaM Atom := do
   let e := e.consumeMData
+  -- Amount boundary: Core stores the underlying word.
+  if e.isAppOf ``Lsc.Amount.toNat || e.isAppOf ``Lsc.Amount.ofNat
+      || e.isAppOf ``Lsc.Amount.mk then
+    return (← atomOf env e.appArg!)
   if let some n ← closedNat? e then return .lit n
   if let .fvar id := e then
     match env.vars.idxOf? id with
@@ -243,6 +348,8 @@ def atomOf (env : Env t) (e : Expr) : MetaM Atom := do
 def fieldOfProj (ci : ContractInfo) (proj : Expr) : MetaM FieldInfo := do
   let name? : Option Name ← lambdaTelescope proj fun _ body => do
     let body := body.consumeMData
+    let body :=
+      if body.isAppOf ``Lsc.Amount.toNat then body.appArg! else body
     match body.getAppFn with
     | .const n _ => pure (some n)
     | _ =>
@@ -349,15 +456,17 @@ partial def retTyOf (ρ : Expr) : MetaM RetTy := do
   | _, _ => throwError "reify: unsupported return type `{ρ}` \
       (Unit, Nat, Address, Flag, Amount, Price, or pairs)"
 
-/-- Head constants that unfold to a `Tx` primitive (`Amount.add` → `Tx.addChecked`, …). -/
-def isAmountOp : Name → Bool
-  | ``Lsc.Amount.add | ``Lsc.Amount.sub
-  | ``Lsc.Amount.mulDown | ``Lsc.Amount.mulUp
-  | ``Lsc.Amount.divDown | ``Lsc.Amount.divUp
-  | ``Lsc.Amount.ratioDown | ``Lsc.Amount.ratioUp
-  | ``Lsc.Amount.shareDown | ``Lsc.Amount.shareUp
-  | ``Lsc.Amount.rescale | ``Lsc.Amount.convert
-  | ``Lsc.IERC20.transferFrom | ``Lsc.IERC20.transfer | ``Lsc.IERC20.balanceOf => true
+/-- Head constants that unfold to a `Tx` primitive (`Amount.add` → `addChecked`,
+`Binding.transfer` → `Tx.call`, …). Compared as names so Reify need not import
+`Stdlib.ERC20`. -/
+def isSurfaceOp : Name → Bool
+  | .str (.str `Lsc "Amount") s =>
+      s == "add" || s == "sub" || s == "mulDown" || s == "mulUp" || s == "divDown"
+        || s == "divUp" || s == "ratioDown" || s == "ratioUp" || s == "shareDown"
+        || s == "shareUp" || s == "rescale" || s == "convert"
+  | .str (.str `Lsc "Binding") s =>
+      s == "transfer" || s == "transferFrom" || s == "balanceOf" || s == "decimals"
+        || s == "transferUnit" || s == "transferFromUnit"
   | _ => false
 
 /-- `Rounding` must be a literal constructor so the reifier can pick `mulDivDown` vs `mulDivUp`. -/
@@ -368,20 +477,19 @@ def roundingOf (e : Expr) : MetaM Rounding := do
   | some ``Lsc.Rounding.up => return .up
   | _ => throwError "reify: rounding `{e}` must be a literal `.down` or `.up`"
 
-/-- Unfold `Amount.*` (and reduce a `Rounding` match) until the head is a `Tx` primitive. -/
+/-- Unfold `Amount.*` / `Binding.*` (and reduce a `Rounding` match) until the head is a
+`Tx` primitive. -/
 partial def unfoldToTx (x : Expr) (fuel : Nat := 8) : MetaM Expr := do
   let x := x.consumeMData
   let n := x.getAppFn.constName?
   if n == some ``Lsc.Tx.addChecked || n == some ``Lsc.Tx.subChecked
       || n == some ``Lsc.Tx.mulChecked || n == some ``Lsc.Tx.divChecked
       || n == some ``Lsc.Tx.mulDivDown || n == some ``Lsc.Tx.mulDivUp
-      || n == some ``Lsc.Tx.erc20TransferFrom || n == some ``Lsc.Tx.erc20Transfer
-      || n == some ``Lsc.Tx.erc20BalanceOf then
+      || n == some ``Lsc.Tx.call || n == some ``Lsc.Tx.callUnit then
     return x
   if fuel = 0 then return x
-  if n.any isAmountOp then
+  if n.any isSurfaceOp then
     if n == some ``Lsc.Amount.rescale || n == some ``Lsc.Amount.convert then
-      -- Fail early with a clear message if Rounding is not a constructor.
       let args := x.getAppArgs
       if args.size > 0 then
         let _ ← roundingOf args[args.size - 2]!
@@ -397,81 +505,143 @@ partial def unfoldToTx (x : Expr) (fuel : Nat := 8) : MetaM Expr := do
   | some x' => unfoldToTx x' (fuel - 1)
   | none => return x
 
+partial def atomsOfList (env : Env t) (e : Expr) : MetaM (List Atom) := do
+  let e := e.consumeMData
+  if e.isAppOf ``List.nil then return []
+  if e.isAppOf ``List.cons then
+    let args := e.getAppArgs
+    let hd ← atomOf env args[args.size - 2]!
+    let tl ← atomsOfList env args[args.size - 1]!
+    return hd :: tl
+  throwError "reify: expected a list of atoms, found `{e}`"
+
+def bindingIndex (ci : ContractInfo) (b : Expr) : MetaM Nat := do
+  let b := b.consumeMData
+  match b.getAppFn.constName? with
+  | some n =>
+    match ci.bindings.findIdx? (fun bi => bi.name == n) with
+    | some i => pure i
+    | none => throwError "reify: binding `{n}` must be a constant"
+  | none => throwError "reify: binding `{b}` must be a constant"
+
+def methodIndex (m : Expr) : MetaM Nat := do
+  let m ← whnfR m.consumeMData
+  match m.getAppFn.constName? with
+  | some n =>
+    let info ← getConstInfoCtor n
+    let iinfo ← getConstInfoInduct info.induct
+    match iinfo.ctors.toArray.idxOf? n with
+    | some i => pure i
+    | none => throwError "reify: `{n}` is not a method constructor"
+  | none => throwError "reify: method `{m}` must be an interface method constructor"
+
 /-- Word-valued primitives. -/
 def opOf (ci : ContractInfo) (env : Env t) (x : Expr) : MetaM (Option Op) := do
   let x := x.consumeMData
+  let n0 := x.getAppFn.constName?
+  -- Amount.add/sub/share* are explicit `if`s, not `addChecked`; match before unfolding.
+  if n0 == some ``Lsc.Amount.add || n0 == some ``Lsc.Amount.sub
+      || n0 == some ``Lsc.Amount.shareDown || n0 == some ``Lsc.Amount.shareUp then
+    let args := x.getAppArgs
+    let atom := atomOf env
+    match n0, args.size with
+    | some ``Lsc.Amount.add, n =>
+      return some (.addChecked (← atom args[n - 2]!) (← atom args[n - 1]!))
+    | some ``Lsc.Amount.sub, n =>
+      return some (.subChecked (← atom args[n - 2]!) (← atom args[n - 1]!))
+    | some ``Lsc.Amount.shareDown, n =>
+      return some (.mulDivDown (← atom args[n - 3]!) (← atom args[n - 2]!) (← atom args[n - 1]!))
+    | some ``Lsc.Amount.shareUp, n =>
+      return some (.mulDivUp (← atom args[n - 3]!) (← atom args[n - 2]!) (← atom args[n - 1]!))
+    | _, _ => return none
   let x ←
-    if x.getAppFn.constName?.any isAmountOp then unfoldToTx x
+    if n0.any isSurfaceOp then unfoldToTx x
     else pure x
   let args := x.getAppArgs
   let atom := atomOf env
   match x.getAppFn.constName?, args.size with
-  | some ``Lsc.Tx.load, 5 =>
-    let f ← fieldOfProj ci args[4]!
+  | some ``Lsc.Tx.load, 6 =>
+    let f ← fieldOfProj ci args[5]!
     unless f.kind == .scalar do throwError "reify: `read {f.name}` needs keys"
     return some (.load f.idx)
-  | some ``Lsc.Tx.loadMap, 7 =>
-    let f ← fieldOfProj ci args[5]!
-    unless f.kind == .map1 do throwError "reify: `read {f.name}[k]` has the wrong number of keys"
-    return some (.loadMap f.idx (← atom args[6]!))
-  | some ``Lsc.Tx.loadMap2, 9 =>
+  | some ``Lsc.Tx.loadMap, 8 =>
     let f ← fieldOfProj ci args[6]!
+    unless f.kind == .map1 do throwError "reify: `read {f.name}[k]` has the wrong number of keys"
+    return some (.loadMap f.idx (← atom args[7]!))
+  | some ``Lsc.Tx.loadMap2, 10 =>
+    let f ← fieldOfProj ci args[7]!
     unless f.kind == .map2 do throwError "reify: `read {f.name}[k₁, k₂]` has the wrong number of keys"
-    return some (.loadMap2 f.idx (← atom args[7]!) (← atom args[8]!))
-  | some ``Lsc.Tx.sender, 3 => return some .sender
-  | some ``Lsc.Tx.value, 3 => return some .value
-  | some ``Lsc.Tx.timestamp, 3 => return some .timestamp
-  | some ``Lsc.Tx.blockNumber, 3 => return some .blockNumber
-  | some ``Lsc.Tx.selfAddress, 3 => return some .selfAddress
-  | some ``Lsc.Tx.addChecked, 5 => return some (.addChecked (← atom args[3]!) (← atom args[4]!))
-  | some ``Lsc.Tx.subChecked, 5 => return some (.subChecked (← atom args[3]!) (← atom args[4]!))
-  | some ``Lsc.Tx.mulChecked, 5 => return some (.mulChecked (← atom args[3]!) (← atom args[4]!))
-  | some ``Lsc.Tx.divChecked, 5 => return some (.divChecked (← atom args[3]!) (← atom args[4]!))
-  | some ``Lsc.Tx.mulDivDown, 6 =>
-    return some (.mulDivDown (← atom args[3]!) (← atom args[4]!) (← atom args[5]!))
-  | some ``Lsc.Tx.mulDivUp, 6 =>
-    return some (.mulDivUp (← atom args[3]!) (← atom args[4]!) (← atom args[5]!))
-  | some ``Lsc.Tx.erc20TransferFrom, 7 =>
-    return some (.erc20TransferFrom (← atom args[3]!) (← atom args[4]!)
-      (← atom args[5]!) (← atom args[6]!))
-  | some ``Lsc.Tx.erc20Transfer, 6 =>
-    return some (.erc20Transfer (← atom args[3]!) (← atom args[4]!) (← atom args[5]!))
-  | some ``Lsc.Tx.erc20BalanceOf, 5 =>
-    return some (.erc20BalanceOf (← atom args[3]!) (← atom args[4]!))
+    return some (.loadMap2 f.idx (← atom args[8]!) (← atom args[9]!))
+  | some ``Lsc.Tx.sender, 4 => return some .sender
+  | some ``Lsc.Tx.value, 4 => return some .value
+  | some ``Lsc.Tx.timestamp, 4 => return some .timestamp
+  | some ``Lsc.Tx.blockNumber, 4 => return some .blockNumber
+  | some ``Lsc.Tx.selfAddress, 4 => return some .selfAddress
+  | some ``Lsc.Tx.addChecked, 6 => return some (.addChecked (← atom args[4]!) (← atom args[5]!))
+  | some ``Lsc.Tx.subChecked, 6 => return some (.subChecked (← atom args[4]!) (← atom args[5]!))
+  | some ``Lsc.Tx.mulChecked, 6 => return some (.mulChecked (← atom args[4]!) (← atom args[5]!))
+  | some ``Lsc.Tx.divChecked, 6 => return some (.divChecked (← atom args[4]!) (← atom args[5]!))
+  | some ``Lsc.Tx.mulDivDown, 7 =>
+    return some (.mulDivDown (← atom args[4]!) (← atom args[5]!) (← atom args[6]!))
+  | some ``Lsc.Tx.mulDivUp, 7 =>
+    return some (.mulDivUp (← atom args[4]!) (← atom args[5]!) (← atom args[6]!))
+  | some ``Lsc.Tx.call, n =>
+    if n < 3 then return none
+    let bIdx ← bindingIndex ci args[n - 3]!
+    let mIdx ← methodIndex args[n - 2]!
+    let as ← atomsOfList env args[n - 1]!
+    return some (.call bIdx mIdx as)
+  | some ``Lsc.Amount.add, n =>
+    return some (.addChecked (← atom args[n - 2]!) (← atom args[n - 1]!))
+  | some ``Lsc.Amount.sub, n =>
+    return some (.subChecked (← atom args[n - 2]!) (← atom args[n - 1]!))
+  | some ``Lsc.Amount.shareDown, n =>
+    return some (.mulDivDown (← atom args[n - 3]!) (← atom args[n - 2]!) (← atom args[n - 1]!))
+  | some ``Lsc.Amount.shareUp, n =>
+    return some (.mulDivUp (← atom args[n - 3]!) (← atom args[n - 2]!) (← atom args[n - 1]!))
   | some ``Pure.pure, 4 => return some (.pure (← atom args[3]!))
   | _, _ => return none
 
 /-- Unit-valued primitives. -/
 def stmtOf (ci : ContractInfo) (env : Env t) (x : Expr) : MetaM (Option Stmt) := do
   let x := x.consumeMData
+  let x ←
+    if x.getAppFn.constName?.any isSurfaceOp then unfoldToTx x
+    else pure x
   let args := x.getAppArgs
   let atom := atomOf env
   match x.getAppFn.constName?, args.size with
-  | some ``Lsc.Tx.store, 6 =>
-    let f ← fieldOfUpd ci args[4]!
+  | some ``Lsc.Tx.store, 7 =>
+    let f ← fieldOfUpd ci args[5]!
     unless f.kind == .scalar do throwError "reify: `write {f.name}` needs keys"
-    return some (.store f.idx (← atom args[5]!))
-  | some ``Lsc.Tx.storeMap, 10 =>
-    let f ← fieldOfProj ci args[6]!
-    let f' ← fieldOfUpd ci args[7]!
+    return some (.store f.idx (← atom args[6]!))
+  | some ``Lsc.Tx.storeMap, 11 =>
+    let f ← fieldOfProj ci args[7]!
+    let f' ← fieldOfUpd ci args[8]!
     unless f.kind == .map1 && f.idx == f'.idx do
       throwError "reify: `write {f.name}[k]` has the wrong number of keys"
-    return some (.storeMap f.idx (← atom args[8]!) (← atom args[9]!))
-  | some ``Lsc.Tx.storeMap2, 13 =>
-    let f ← fieldOfProj ci args[8]!
-    let f' ← fieldOfUpd ci args[9]!
+    return some (.storeMap f.idx (← atom args[9]!) (← atom args[10]!))
+  | some ``Lsc.Tx.storeMap2, 14 =>
+    let f ← fieldOfProj ci args[9]!
+    let f' ← fieldOfUpd ci args[10]!
     unless f.kind == .map2 && f.idx == f'.idx do
       throwError "reify: `write {f.name}[k₁, k₂]` has the wrong number of keys"
-    return some (.storeMap2 f.idx (← atom args[10]!) (← atom args[11]!) (← atom args[12]!))
-  | some ``Lsc.Tx.require, 6 =>
-    let (i, eargs) ← ctorIndex ci.errCtors args[5]!
-    return some (.require (← condOf env args[3]!) i (← eargs.toList.mapM atom))
-  | some ``Lsc.Tx.emit, 4 =>
-    let (i, eargs) ← ctorIndex ci.evCtors args[3]!
+    return some (.storeMap2 f.idx (← atom args[11]!) (← atom args[12]!) (← atom args[13]!))
+  | some ``Lsc.Tx.require, 7 =>
+    let (i, eargs) ← ctorIndex ci.errCtors args[6]!
+    return some (.require (← condOf env args[4]!) i (← eargs.toList.mapM atom))
+  | some ``Lsc.Tx.emit, 5 =>
+    let (i, eargs) ← ctorIndex ci.evCtors args[4]!
     return some (.emit i (← eargs.toList.mapM atom))
-  | some ``Lsc.Tx.revert, 5 =>
-    let (i, eargs) ← ctorIndex ci.errCtors args[4]!
+  | some ``Lsc.Tx.revert, 6 =>
+    let (i, eargs) ← ctorIndex ci.errCtors args[5]!
     return some (.revert i (← eargs.toList.mapM atom))
+  | some ``Lsc.Tx.callUnit, n =>
+    if n < 3 then return none
+    let bIdx ← bindingIndex ci args[n - 3]!
+    let mIdx ← methodIndex args[n - 2]!
+    let as ← atomsOfList env args[n - 1]!
+    return some (.call bIdx mIdx as)
   | _, _ => return none
 
 /-- Pure word expressions bound by `let`. -/
@@ -567,8 +737,8 @@ partial def reify (ci : ContractInfo) (t : RetTy) (env : Env t) (e : Expr) : Met
         let a ← reify ci t env args[3]!
         let b ← reify ci t env args[4]!
         return .ite c a b
-      | ``Lsc.Tx.revert, 5 =>
-        let (i, eargs) ← ctorIndex ci.errCtors args[4]!
+      | ``Lsc.Tx.revert, 6 =>
+        let (i, eargs) ← ctorIndex ci.errCtors args[5]!
         return .revertTail i (← eargs.toList.mapM (atomOf env))
       | _, _ =>
         if let some op ← opOf ci env e then
@@ -588,7 +758,7 @@ partial def reify (ci : ContractInfo) (t : RetTy) (env : Env t) (e : Expr) : Met
 /-- Unfold `abbrev`s such as `C.M` until the head is `Lsc.Tx`. -/
 partial def whnfToTx (ty : Expr) : MetaM Expr := do
   let ty := ty.consumeMData
-  if ty.isAppOfArity ``Lsc.Tx 4 then return ty
+  if ty.isAppOfArity ``Lsc.Tx 5 then return ty
   match ← unfoldDefinition? ty with
   | some ty' => whnfToTx ty'
   | none => throwError "reify: `{ty}` is not a `Tx` type"
@@ -599,7 +769,10 @@ def reifyFunction (fn : Name) : TermElabM Unit := do
   forallTelescope info.type fun params body => do
     let txTy ← whnfToTx body
     let S := txTy.getArg! 0
-    let ρ := txTy.getArg! 3
+    let X := txTy.getArg! 1
+    let E := txTy.getArg! 2
+    let ε := txTy.getArg! 3
+    let ρ := txTy.getArg! 4
     let some sName := S.constName? | throwError "reify: storage type `{S}` must be a constant"
     let ns := sName.getPrefix
     let ci ← contractInfo ns
@@ -611,11 +784,18 @@ def reifyFunction (fn : Name) : TermElabM Unit := do
     let coreName := fn ++ `core
     let coreTy := mkApp (Lean.mkConst ``Core) (toExpr t)
     addAndCompile <| .defnDecl (mkDefinitionValEx coreName [] coreTy core.toExpr .abbrev .safe [coreName])
-    -- Certificate: Core.denote schema core [pₙ, …, p₁] = fn p₁ … pₙ
+    -- Certificate: Core.denote schema core [pₙ, …, p₁] = fn …, or
+    -- `Amount.ofNat <$> Core.denote … = f` when the surface returns `Amount`.
     let schema := Lean.mkConst ci.schema
     let envList ← mkListLit (Lean.mkConst ``Nat) params.toList.reverse
-    let lhs := mkAppN (Lean.mkConst ``Core.denote) #[S, txTy.getArg! 1, txTy.getArg! 2, schema, toExpr t,
-      Lean.mkConst coreName, envList]
+    let coreDen := mkAppN (Lean.mkConst ``Core.denote)
+      #[S, X, E, ε, schema, toExpr t, Lean.mkConst coreName, envList]
+    let lhs ←
+      if ← isAmountTy ρ then
+        let ofNat := mkAppN (Lean.mkConst ``Lsc.Amount.ofNat) #[ρ.getArg! 0, ρ.getArg! 1]
+        mkAppM ``Functor.map #[ofNat, coreDen]
+      else
+        pure coreDen
     let rhs := mkAppN (Lean.mkConst fn) params
     let eq ← mkEq lhs rhs
     unless ← isDefEq lhs rhs do
@@ -627,15 +807,6 @@ def reifyFunction (fn : Name) : TermElabM Unit := do
     trace[Lsc.reify] "reified {fn} : Core {repr t}\n{repr core}"
 
 /-! ## Contract assembly (`lsc_contract`) -/
-
-def abiTyOf (ty : Expr) : MetaM AbiTy := do
-  let ty ← whnfR ty
-  match ty.getAppFn.constName? with
-  | some ``Nat => pure .uint256
-  | some ``Lsc.Address => pure .address
-  | some ``Lsc.Flag => pure .bool
-  | some ``Lsc.Amount | some ``Lsc.Price | some ``Lsc.Fixed => pure .uint256
-  | _ => throwError "lsc_contract: unsupported ABI type `{ty}` (Nat, Address, Flag, Amount)"
 
 def ctorParams (ctor : Name) : MetaM (List Param) := do
   let info ← getConstInfoCtor ctor
@@ -655,7 +826,7 @@ def fnMeta (fn : Name) : MetaM (List Param × RetTy × FnKind) := do
   let info ← getConstInfoDefn fn
   forallTelescope info.type fun xs body => do
     let txTy ← whnfToTx body
-    let t ← retTyOf (txTy.getArg! 3)
+    let t ← retTyOf (txTy.getArg! 4)
     let params ← xs.toList.mapM fun x => do
       let n := (← x.fvarId!.getUserName).getString!
       let abi ← abiTyOf (← inferType x)
@@ -672,6 +843,17 @@ def fieldKindToAbi : FieldKind → Lsc.FieldKind
   | .map1 => .map1
   | .map2 => .map2
 
+/-- ABI rows for a declared interface (IERC20 in this slice). -/
+def methodsOfIface (iface : Name) : MetaM (List (String × AbiSpec)) := do
+  if iface.getString! == "IERC20" then
+    return [
+      ("transfer", { selector := 0xa9059cbb, arity := 2, ret := .boolOpt }),
+      ("transferFrom", { selector := 0x23b872dd, arity := 3, ret := .boolOpt }),
+      ("balanceOf", { selector := 0x70a08231, arity := 1, ret := .word }),
+      ("decimals", { selector := 0x313ce567, arity := 0, ret := .word })
+    ]
+  throwError "lsc_contract: unknown interface `{iface}` (only IERC20 is wired)"
+
 /-- Assemble `C.contract : ContractDef` from reified entrypoints. Compilation to Yul is a
 separate Lean function of that value (`Lsc.Compiler.toYul`). -/
 def assembleContract (ns : Name) (fns : Array Name) : TermElabM Unit := do
@@ -679,8 +861,9 @@ def assembleContract (ns : Name) (fns : Array Name) : TermElabM Unit := do
     unless (← getEnv).contains (fn ++ `core) do
       reifyFunction fn
   let ci ← contractInfo ns
-  let fields : List FieldDef := ci.fields.toList.map fun f =>
-    { name := f.name.getString!, kind := fieldKindToAbi f.kind, ty := .uint256 }
+  let fields : List FieldDef ← ci.fields.toList.mapM fun f => do
+    let abi ← abiTyOf f.valTy
+    pure { name := f.name.getString!, kind := fieldKindToAbi f.kind, ty := abi }
   let events : List EventDef ← ci.evCtors.toList.mapM fun ctor => do
     let params ← ctorParams ctor
     pure { name := ctor.getString!, params }
@@ -697,9 +880,22 @@ def assembleContract (ns : Name) (fns : Array Name) : TermElabM Unit := do
     else
       fnDefs := fnDefs.push e
   let fnList ← mkListLit (Lean.mkConst ``FnDef) fnDefs.toList
+  let bindings : List BindingDef ← ci.bindings.toList.mapM fun bi => do
+    -- Method names/ABI: evaluate `I.abi` at each constructor of `I.Method`.
+    let ifaceInfo ← getConstInfo bi.iface
+    let ifaceTy ← whnfD ifaceInfo.type
+    unless ifaceTy.isConstOf ``Lsc.Interface do
+      throwError "lsc_contract: `{bi.iface}` is not an Interface"
+    let methods ← methodsOfIface bi.iface
+    pure {
+      name := bi.name.getString!
+      fieldSlot := bi.fieldSlot
+      ifaceName := bi.iface.getString!
+      methods }
   let contractTy := Lean.mkConst ``ContractDef
   let contractVal := mkAppN (Lean.mkConst ``ContractDef.mk) #[
-    toExpr ns.getString!, toExpr fields, fnList, ctorE, toExpr events, toExpr errors]
+    toExpr ns.getString!, toExpr fields, fnList, ctorE, toExpr events, toExpr errors,
+    toExpr bindings]
   addAndCompile <| .defnDecl (mkDefinitionValEx (ns ++ `contract) [] contractTy contractVal
     .abbrev .safe [ns ++ `contract])
   trace[Lsc.reify] "assembled {ns}.contract ({fns.size} functions)"
@@ -767,8 +963,16 @@ def mkRunTerm (fn : Name) (arity : Nat) : MetaM Term := do
       args := args.push (← mkNestedProj pTerm n i)
     `(fun $p => $f $args*)
 
-/-- Parameter names/types and the `Tx S E ε ρ` indices of `fn`. -/
-def fnSurface (fn : Name) : MetaM (Expr × Expr × Expr × Array (Name × Expr) × Expr) := do
+/-- Parameter names/types and the `Tx S X E ε ρ` indices of `fn`. -/
+structure FnSurface where
+  S : Expr
+  X : Expr
+  E : Expr
+  ε : Expr
+  params : Array (Name × Expr)
+  ρ : Expr
+
+def fnSurface (fn : Name) : MetaM FnSurface := do
   let info ← getConstInfoDefn fn
   forallTelescope info.type fun xs body => do
     let txTy ← whnfToTx body
@@ -776,7 +980,9 @@ def fnSurface (fn : Name) : MetaM (Expr × Expr × Expr × Array (Name × Expr) 
       let n := ← x.fvarId!.getUserName
       let n := if n.hasMacroScopes then Name.mkSimple s!"a{i}" else n
       pure (n, ← inferType x)
-    pure (txTy.getArg! 0, txTy.getArg! 1, txTy.getArg! 2, params, txTy.getArg! 3)
+    pure {
+      S := txTy.getArg! 0, X := txTy.getArg! 1, E := txTy.getArg! 2
+      ε := txTy.getArg! 3, params, ρ := txTy.getArg! 4 }
 
 def entrypointFns (fns : Array Name) : MetaM (Array Name) :=
   fns.filterM fun fn => do
@@ -784,23 +990,23 @@ def entrypointFns (fns : Array Name) : MetaM (Array Name) :=
     return kind != .constructor
 
 def mkEntryRhs (fn : Name) : MetaM Term := do
-  let (_, _, _, params, ρ) ← fnSurface fn
-  let argTys ← params.mapM fun (_, ty) => exprToTerm ty
+  let surf ← fnSurface fn
+  let argTys ← surf.params.mapM fun (_, ty) => exprToTerm ty
   let argsTy ← mkProdType argTys
-  let retTy ← exprToTerm ρ
-  let run ← mkRunTerm fn params.size
+  let retTy ← exprToTerm surf.ρ
+  let run ← mkRunTerm fn surf.params.size
   `(⟨$argsTy, $retTy, $run⟩)
 
 def mkSpecExecCommand (ns fn : Name) : MetaM (TSyntax `command) := do
-  let (_, _, _, params, _) ← fnSurface fn
+  let surf ← fnSurface fn
   let ctor := ctorIdent fn
   let specId : Term := ⟨mkIdent (ns ++ `spec)⟩
   let f : Term := ⟨mkIdent fn⟩
-  let args : Array Term := params.map fun (n, _) => ⟨mkIdent n⟩
+  let args : Array Term := surf.params.map fun (n, _) => ⟨mkIdent n⟩
   let argStx ← mkTuple args
   let rhs ← `($f $args*)
   let binders : TSyntaxArray ``Lean.Parser.Term.bracketedBinderF ←
-    params.mapM fun (n, ty) => do
+    surf.params.mapM fun (n, ty) => do
       let id := mkIdent n
       let t ← exprToTerm ty
       `(Lean.Parser.Term.bracketedBinderF| ($id : $t))
@@ -815,14 +1021,19 @@ def mkSpecCommands (ns : Name) (fns : Array Name) : TermElabM (Array (TSyntax `c
   let ctorIds : Array Ident := entries.map ctorIdent
   let fnCmd ←
     `(command| inductive $fnName where $[| $ctorIds:ident]* deriving DecidableEq, Repr)
-  let (S₀, E₀, ε₀) ←
+  let (S₀, X₀, E₀, ε₀) ←
     if entries.isEmpty then
-      pure (Lean.mkConst (ns ++ `Storage), Lean.mkConst (ns ++ `Event),
+      let env ← getEnv
+      let X :=
+        if isStructure env (ns ++ `Ext) then Lean.mkConst (ns ++ `Ext)
+        else Lean.mkConst ``Unit
+      pure (Lean.mkConst (ns ++ `Storage), X, Lean.mkConst (ns ++ `Event),
         Lean.mkConst (ns ++ `Error))
     else
-      let (S, E, ε, _, _) ← fnSurface entries[0]!
-      pure (S, E, ε)
+      let surf ← fnSurface entries[0]!
+      pure (surf.S, surf.X, surf.E, surf.ε)
   let S ← exprToTerm S₀
+  let X ← exprToTerm X₀
   let E ← exprToTerm E₀
   let ε ← exprToTerm ε₀
   let entryName := mkIdent (ns ++ `entry)
@@ -832,14 +1043,14 @@ def mkSpecCommands (ns : Name) (fns : Array Name) : TermElabM (Array (TSyntax `c
     `(Lean.Parser.Term.matchAltExpr| | .$ctor:ident => $rhs)
   let entryCmd ←
     if entries.isEmpty then
-      `(command| @[reducible] def $entryName : $fnName → Lsc.Entry $S $E $ε :=
+      `(command| @[reducible] def $entryName : $fnName → Lsc.Entry $S $X $E $ε :=
           fun fn => nomatch fn)
     else
-      `(command| @[reducible] def $entryName : $fnName → Lsc.Entry $S $E $ε
+      `(command| @[reducible] def $entryName : $fnName → Lsc.Entry $S $X $E $ε
           $alts:matchAlt*)
   let specName := mkIdent (ns ++ `spec)
   let specCmd ←
-    `(command| @[reducible] def $specName : Lsc.Spec $S $E $ε := ⟨$fnName, $entryName⟩)
+    `(command| @[reducible] def $specName : Lsc.Spec $S $X $E $ε := ⟨$fnName, $entryName⟩)
   let mut cmds : Array (TSyntax `command) := #[fnCmd, entryCmd, specCmd]
   for fn in entries do
     cmds := cmds.push (← mkSpecExecCommand ns fn)
@@ -848,15 +1059,16 @@ def mkSpecCommands (ns : Name) (fns : Array Name) : TermElabM (Array (TSyntax `c
 def obligationsMissing (ns : Name) : MetaM (Array Name) := do
   let env ← getEnv
   let mut missing : Array Name := #[]
-  for s in #[`Inv, `claim, `Auth, `inflow] do
+  for s in #[`Inv, `claim, `Auth, `inflow, `holdings] do
     unless env.contains (ns ++ s) do
       missing := missing.push (ns ++ s)
   return missing
 
 /-- Copy-pasteable security theorems for `C`'s generated `Fn` (not imported from Security). -/
-def obligationsText (ns : Name) (ctors : List Name) : String :=
+def obligationsText (ns : Name) (ctors : List Name) (extName : String) : String :=
   let C := ns.toString
   let leaf (n : Name) : String := n.getString!
+  let world := s!"Lsc.World {C}.Storage {extName} {C}.Event"
   let thm (fn : Name) (suffix ty args : String) : String :=
     s!"theorem {C}.{leaf fn}_{suffix} : {ty} {C}.spec {args} .{leaf fn} := by sorry"
   let preserves := ctors.map fun fn =>
@@ -870,18 +1082,24 @@ def obligationsText (ns : Name) (ctors : List Name) : String :=
       s!"    | .{leaf fn} => {C}.{leaf fn}_{suffix}")
   let assembler (name ty ofFns suffix : String) : String :=
     s!"theorem {C}.{name} : {ty} :=\n  {ofFns} fun fn =>\n    match fn with\n{arms suffix}"
+  let rely :=
+    if extName == "Unit" then "fun _ _ => True" else s!"{C}.rely"
+  let invRely :=
+    s!"theorem {C}.inv_rely : Lsc.Security.PreservesInvEnv {C}.spec {C}.Inv ({rely}) := by sorry"
   let extraction :=
     "theorem " ++ C ++ ".no_unauthorized_extraction\n" ++
-    "    (tr : List (Lsc.Security.Call " ++ C ++ ".spec)) " ++
-    "(w : Lsc.World " ++ C ++ ".Storage " ++ C ++ ".Event) (a : Lsc.Address)\n" ++
+    "    (self : Lsc.Address) (tr : List (Lsc.Security.Step " ++ C ++ ".spec))\n" ++
+    "    (w : " ++ world ++ ") (a : Lsc.Address)\n" ++
+    "    (hW : Lsc.Security.Wf self tr)\n" ++
     "    (hA : Lsc.Security.NoAuthAlong " ++ C ++ ".Auth a tr w) :\n" ++
     "    " ++ C ++ ".claim a w.self ≤ " ++ C ++
     ".claim a (Lsc.Security.run tr w).self :=\n" ++
-    "  Lsc.Security.no_unauthorized_extraction " ++ C ++ ".no_unauth tr w a hA"
+    "  Lsc.Security.no_unauthorized_extraction " ++ C ++ ".no_unauth tr w a hW hA"
   let body :=
     (preserves ++
       [assembler "preserves_inv" s!"Lsc.Security.PreservesInv {C}.spec {C}.Inv"
         "Lsc.Security.PreservesInv.of_fns" "preserves_inv"] ++
+      [invRely] ++
       auths ++
       [assembler "no_unauth"
         s!"Lsc.Security.NoUnauthorizedDecrease {C}.spec {C}.claim {C}.Auth"
@@ -956,9 +1174,11 @@ syntax (name := lscObligations) "#lsc_obligations " ident : command
       let missing ← obligationsMissing nsName
       unless missing.isEmpty do
         throwError "#lsc_obligations: missing {missing.toList} \
-          (need {nsName}.Inv, {nsName}.claim, {nsName}.Auth, {nsName}.inflow)"
+          (need {nsName}.Inv, {nsName}.claim, {nsName}.Auth, {nsName}.inflow, {nsName}.holdings)"
       let info ← getConstInfoInduct (nsName ++ `Fn)
-      logInfo m!"{obligationsText nsName info.ctors}"
+      let extName :=
+        if isStructure env (nsName ++ `Ext) then (nsName ++ `Ext).toString else "Unit"
+      logInfo m!"{obligationsText nsName info.ctors extName}"
   | _ => throwUnsupportedSyntax
 
 end Lsc.Reify

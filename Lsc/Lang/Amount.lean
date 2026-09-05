@@ -7,9 +7,9 @@ Most DeFi accidents that are not reentrancy are decimal accidents: adding 6-deci
 to 18-decimal DAI, multiplying two WAD numbers without dividing by WAD, rounding in the
 protocol's disfavour. This module makes those type errors at zero runtime cost.
 
-* `Amount τ s` is a `def` newtype over `Nat` (definitionally a word, exactly like `Address`)
-  tagged with a *token marker* `τ` (any type, used only as a phantom) and a *scale* `s`
-  (the denominator: `WAD = 10^18`, `USDC = 10^6`, `Q96 = 2^96`). Same-unit arithmetic only.
+* `Amount τ s` is a `structure` over `Nat` tagged with a *token marker* `τ` (any type, used
+  only as a phantom) and a *scale* `s` (the denominator: `WAD = 10^18`, `USDC = 10^6`).
+  Same-unit arithmetic only. A `def` newtype would unify with `Nat` and across units.
 * `Fixed s := Amount Unit s` is a dimensionless fixed-point number (rates, ratios, prices).
   `Amount τ s * Fixed s → Amount τ s`; two amounts divide to a `Fixed s`.
 * Every operation that can lose precision names its rounding direction (`mulDown`/`mulUp`,
@@ -18,8 +18,7 @@ protocol's disfavour. This module makes those type errors at zero runtime cost.
   `Core` stays a language of words and the certificate stays `rfl`. (A `Bool`-typed `Core`
   would need typed environments; deferred.)
 
-Core stays untyped: the reifier maps these operations to the `mulDiv` primitives below with
-constant scales. Phase E adds the full-precision (512-bit intermediate) `mulDiv`.
+Core still denotes into `Nat`; the reifier inserts `toNat`/`ofNat` at the boundary.
 -/
 
 namespace Lsc
@@ -47,12 +46,12 @@ inductive Rounding
 
 namespace Tx
 
-variable {S E ε : Type}
+variable {S X E ε : Type}
 
 /-- `⌊a * b / c⌋`. Reverts on `c = 0` and, in this Phase-B version, when the intermediate
 product does not fit in a word (Phase E replaces the intermediate check by a full-precision
 512-bit product; the surface API does not change). -/
-def mulDivDown (a b c : Nat) : Tx S E ε Nat :=
+def mulDivDown (a b c : Nat) : Tx S X E ε Nat :=
   fun _ w =>
     if c = 0 then .error (.arith .divByZero)
     else if a * b < wordBound then .ok (a * b / c, w)
@@ -61,20 +60,20 @@ def mulDivDown (a b c : Nat) : Tx S E ε Nat :=
 /-- `⌈a * b / c⌉`, same revert conditions as `mulDivDown`. The result always fits in a word
 when the product does (`a * b / c + 1 ≤ a * b` unless `c = 1`, in which case the remainder
 is zero). -/
-def mulDivUp (a b c : Nat) : Tx S E ε Nat :=
+def mulDivUp (a b c : Nat) : Tx S X E ε Nat :=
   fun _ w =>
     if c = 0 then .error (.arith .divByZero)
     else if a * b < wordBound then .ok (a * b / c + (if a * b % c = 0 then 0 else 1), w)
     else .error (.arith .overflow)
 
-@[simp] theorem run_mulDivDown (a b c : Nat) (ctx : Ctx) (w : World S E) :
-    run (mulDivDown (S := S) (E := E) (ε := ε) a b c) ctx w =
+@[simp] theorem run_mulDivDown (a b c : Nat) (ctx : Ctx) (w : World S X E) :
+    run (mulDivDown (S := S) (X := X) (E := E) (ε := ε) a b c) ctx w =
       if c = 0 then .error (.arith .divByZero)
       else if a * b < wordBound then .ok (a * b / c, w)
       else .error (.arith .overflow) := rfl
 
-@[simp] theorem run_mulDivUp (a b c : Nat) (ctx : Ctx) (w : World S E) :
-    run (mulDivUp (S := S) (E := E) (ε := ε) a b c) ctx w =
+@[simp] theorem run_mulDivUp (a b c : Nat) (ctx : Ctx) (w : World S X E) :
+    run (mulDivUp (S := S) (X := X) (E := E) (ε := ε) a b c) ctx w =
       if c = 0 then .error (.arith .divByZero)
       else if a * b < wordBound then .ok (a * b / c + (if a * b % c = 0 then 0 else 1), w)
       else .error (.arith .overflow) := rfl
@@ -84,10 +83,11 @@ end Tx
 /-! ## `Amount` -/
 
 set_option linter.unusedVariables false in
-/-- A quantity of token `τ` at scale `s`. Definitionally `Nat`; `τ` is a phantom marker type
-(declare one per asset: `structure DAI`, `structure USDC`), `s` the denominator.
-`abbrev` so proofs can unfold at `simp`'s implicit transparency (Lean 4.33). -/
-abbrev Amount (τ : Type) (s : Nat) : Type := Nat
+/-- A quantity of token `τ` at scale `s`. A `structure` so mixed-unit arithmetic is a
+type error; `τ` is a phantom marker (declare one per asset: `structure DAI`), `s` the
+denominator. Core denotes into `Nat`; `toNat`/`ofNat` are the boundary. -/
+structure Amount (τ : Type) (s : Nat) where
+  toNat : Nat
 
 /-- Dimensionless fixed-point number at scale `s` (a rate, ratio or price). -/
 abbrev Fixed (s : Nat) : Type := Amount Unit s
@@ -100,97 +100,129 @@ namespace Amount
 
 variable {τ τ' : Type} {s s' : Nat}
 
-instance : DecidableEq (Amount τ s) := inferInstanceAs (DecidableEq Nat)
-instance : OfNat (Amount τ s) n := ⟨(n : Nat)⟩
-instance : Repr (Amount τ s) := inferInstanceAs (Repr Nat)
-instance : Inhabited (Amount τ s) := ⟨(0 : Nat)⟩
-instance : LT (Amount τ s) := inferInstanceAs (LT Nat)
-instance : LE (Amount τ s) := inferInstanceAs (LE Nat)
-instance (a b : Amount τ s) : Decidable (a < b) := Nat.decLt a b
-instance (a b : Amount τ s) : Decidable (a ≤ b) := Nat.decLe a b
-
-/-- The raw word (number of smallest units). -/
-def toNat (a : Amount τ s) : Nat := a
+instance : DecidableEq (Amount τ s) := fun a b =>
+  if h : a.toNat = b.toNat then
+    isTrue (by cases a; cases b; subst h; rfl)
+  else
+    isFalse (by intro h'; cases a; cases b; exact h (Amount.mk.inj h'))
+instance : OfNat (Amount τ s) n := ⟨⟨n⟩⟩
+instance : Repr (Amount τ s) where
+  reprPrec a := reprPrec a.toNat
+instance : Inhabited (Amount τ s) := ⟨⟨0⟩⟩
+instance : LT (Amount τ s) where
+  lt a b := a.toNat < b.toNat
+instance : LE (Amount τ s) where
+  le a b := a.toNat ≤ b.toNat
+instance (a b : Amount τ s) : Decidable (a < b) := Nat.decLt a.toNat b.toNat
+instance (a b : Amount τ s) : Decidable (a ≤ b) := Nat.decLe a.toNat b.toNat
 
 /-- Tag a raw word as an amount. Boundary use only (ABI decoding, tests). -/
-def ofNat (n : Nat) : Amount τ s := n
+def ofNat (n : Nat) : Amount τ s := ⟨n⟩
 
-@[simp] theorem toNat_eq (a : Amount τ s) : toNat a = a := rfl
-@[simp] theorem ofNat_eq (n : Nat) : ofNat (τ := τ) (s := s) n = n := rfl
+/-- The scale as a value of the same fixed-point type: `one scale = 1.0`. The scale is a
+runtime word (not the type index), so opaque external scales stay out of Core literals. -/
+def one (scale : Nat) : Amount τ s := ⟨scale⟩
 
-/-- The scale as a value of the same fixed-point type: `one = 1.0`. -/
-def one : Fixed s := s
+@[simp] theorem toNat_mk (n : Nat) : (⟨n⟩ : Amount τ s).toNat = n := rfl
+@[simp] theorem mk_toNat (a : Amount τ s) : ⟨a.toNat⟩ = a := rfl
+@[simp] theorem toNat_ofNat (n : Nat) : (ofNat n : Amount τ s).toNat = n := rfl
+@[simp] theorem ofNat_toNat (a : Amount τ s) : ofNat (τ := τ) (s := s) a.toNat = a := rfl
 
-variable {S E ε : Type}
+variable {S X E ε : Type}
 
 /-! ### Same-unit checked arithmetic -/
 
-def add (a b : Amount τ s) : Tx S E ε (Amount τ s) := Tx.addChecked a b
-def sub (a b : Amount τ s) : Tx S E ε (Amount τ s) := Tx.subChecked a b
+def add (a b : Amount τ s) : Tx S X E ε (Amount τ s) :=
+  fun _ w =>
+    if a.toNat + b.toNat < wordBound then .ok (ofNat (a.toNat + b.toNat), w)
+    else .error (.arith .overflow)
+def sub (a b : Amount τ s) : Tx S X E ε (Amount τ s) :=
+  fun _ w =>
+    if b.toNat ≤ a.toNat then .ok (ofNat (a.toNat - b.toNat), w)
+    else .error (.arith .underflow)
 
 /-! ### Scaling by a dimensionless factor (`Amount τ s * Fixed s → Amount τ s`) -/
 
-/-- `⌊a * x / s⌋`. -/
-def mulDown (a : Amount τ s) (x : Fixed s) : Tx S E ε (Amount τ s) := Tx.mulDivDown a x s
+/-- `⌊a * x / s⌋`. `s` is passed as a runtime word. -/
+def mulDown (a : Amount τ s) (x : Fixed s) : Tx S X E ε (Amount τ s) :=
+  (fun n => ofNat n) <$> Tx.mulDivDown a.toNat x.toNat s
 /-- `⌈a * x / s⌉`. -/
-def mulUp (a : Amount τ s) (x : Fixed s) : Tx S E ε (Amount τ s) := Tx.mulDivUp a x s
+def mulUp (a : Amount τ s) (x : Fixed s) : Tx S X E ε (Amount τ s) :=
+  (fun n => ofNat n) <$> Tx.mulDivUp a.toNat x.toNat s
 /-- `⌊a * s / x⌋`. -/
-def divDown (a : Amount τ s) (x : Fixed s) : Tx S E ε (Amount τ s) := Tx.mulDivDown a s x
+def divDown (a : Amount τ s) (x : Fixed s) : Tx S X E ε (Amount τ s) :=
+  (fun n => ofNat n) <$> Tx.mulDivDown a.toNat s x.toNat
 /-- `⌈a * s / x⌉`. -/
-def divUp (a : Amount τ s) (x : Fixed s) : Tx S E ε (Amount τ s) := Tx.mulDivUp a s x
+def divUp (a : Amount τ s) (x : Fixed s) : Tx S X E ε (Amount τ s) :=
+  (fun n => ofNat n) <$> Tx.mulDivUp a.toNat s x.toNat
 
 /-! ### Ratios of two same-unit amounts (dimensionless) -/
 
 /-- `⌊a * s / b⌋ : Fixed s`. -/
-def ratioDown (a b : Amount τ s) : Tx S E ε (Fixed s) := Tx.mulDivDown a s b
+def ratioDown (a b : Amount τ s) : Tx S X E ε (Fixed s) :=
+  (fun n => ofNat n) <$> Tx.mulDivDown a.toNat s b.toNat
 /-- `⌈a * s / b⌉ : Fixed s`. -/
-def ratioUp (a b : Amount τ s) : Tx S E ε (Fixed s) := Tx.mulDivUp a s b
+def ratioUp (a b : Amount τ s) : Tx S X E ε (Fixed s) :=
+  (fun n => ofNat n) <$> Tx.mulDivUp a.toNat s b.toNat
 
 /-! ### Proportional shares (`a * b / c` with `b`, `c` in the same unit; vault/share math) -/
 
 /-- `⌊a * b / c⌋`, `b` and `c` of one unit, result in `a`'s unit. -/
-def shareDown (a : Amount τ s) (b c : Amount τ' s') : Tx S E ε (Amount τ s) := Tx.mulDivDown a b c
+def shareDown (a : Amount τ s) (b c : Amount τ' s') : Tx S X E ε (Amount τ s) :=
+  fun _ w =>
+    if c.toNat = 0 then .error (.arith .divByZero)
+    else if a.toNat * b.toNat < wordBound then
+      .ok (ofNat (a.toNat * b.toNat / c.toNat), w)
+    else .error (.arith .overflow)
 /-- `⌈a * b / c⌉`. -/
-def shareUp (a : Amount τ s) (b c : Amount τ' s') : Tx S E ε (Amount τ s) := Tx.mulDivUp a b c
+def shareUp (a : Amount τ s) (b c : Amount τ' s') : Tx S X E ε (Amount τ s) :=
+  fun _ w =>
+    if c.toNat = 0 then .error (.arith .divByZero)
+    else if a.toNat * b.toNat < wordBound then
+      .ok (ofNat (a.toNat * b.toNat / c.toNat +
+        (if a.toNat * b.toNat % c.toNat = 0 then 0 else 1)), w)
+    else .error (.arith .overflow)
 
 /-! ### Changing scale and unit -/
 
-/-- Re-express an amount at scale `s'` (`a * s' / s`), rounding as requested. -/
-def rescale (s' : Nat) (r : Rounding) (a : Amount τ s) : Tx S E ε (Amount τ s') :=
+/-- Re-express an amount at another scale (`a * tgtScale / srcScale`), rounding as requested.
+Both scales are runtime words. -/
+def rescale (srcScale tgtScale : Nat) (r : Rounding) (a : Amount τ s) :
+    Tx S X E ε (Amount τ s') :=
   match r with
-  | .down => Tx.mulDivDown a s' s
-  | .up => Tx.mulDivUp a s' s
+  | .down => (fun n => ofNat n) <$> Tx.mulDivDown a.toNat tgtScale srcScale
+  | .up => (fun n => ofNat n) <$> Tx.mulDivUp a.toNat tgtScale srcScale
 
-/-- Convert `τ₁` into `τ₂` at price `p` (`a * p / s`). -/
-def convert {τ₁ τ₂ : Type} (p : Price τ₁ τ₂ s) (r : Rounding) (a : Amount τ₁ s) :
-    Tx S E ε (Amount τ₂ s) :=
+/-- Convert `τ₁` into `τ₂` at price `p` (`a * p / s`). `s` is a runtime word. -/
+def convert {τ₁ τ₂ : Type} (p : Price τ₁ τ₂ s) (scale : Nat) (r : Rounding)
+    (a : Amount τ₁ s) : Tx S X E ε (Amount τ₂ s) :=
   match r with
-  | .down => Tx.mulDivDown a p s
-  | .up => Tx.mulDivUp a p s
+  | .down => (fun n => ofNat n) <$> Tx.mulDivDown a.toNat p.toNat scale
+  | .up => (fun n => ofNat n) <$> Tx.mulDivUp a.toNat p.toNat scale
 
-/-! ### Run lemmas (Amount ops are `def` aliases of `Tx` prims; these keep `simp` on-surface) -/
+/-! ### Run lemmas (Amount ops wrap `Tx` prims with `toNat`/`ofNat`) -/
 
-@[simp] theorem run_add (a b : Amount τ s) (ctx : Ctx) (w : World S E) :
-    Tx.run (add (S := S) (E := E) (ε := ε) a b) ctx w =
+@[simp] theorem run_add (a b : Amount τ s) (ctx : Ctx) (w : World S X E) :
+    Tx.run (add (S := S) (X := X) (E := E) (ε := ε) a b) ctx w =
       if toNat a + toNat b < wordBound then .ok (ofNat (toNat a + toNat b), w)
       else .error (.arith .overflow) := rfl
 
-@[simp] theorem run_sub (a b : Amount τ s) (ctx : Ctx) (w : World S E) :
-    Tx.run (sub (S := S) (E := E) (ε := ε) a b) ctx w =
+@[simp] theorem run_sub (a b : Amount τ s) (ctx : Ctx) (w : World S X E) :
+    Tx.run (sub (S := S) (X := X) (E := E) (ε := ε) a b) ctx w =
       if toNat b ≤ toNat a then .ok (ofNat (toNat a - toNat b), w)
       else .error (.arith .underflow) := rfl
 
 @[simp] theorem run_shareDown (a : Amount τ s) (b c : Amount τ' s') (ctx : Ctx)
-    (w : World S E) :
-    Tx.run (shareDown (S := S) (E := E) (ε := ε) a b c) ctx w =
+    (w : World S X E) :
+    Tx.run (shareDown (S := S) (X := X) (E := E) (ε := ε) a b c) ctx w =
       if toNat c = 0 then .error (.arith .divByZero)
       else if toNat a * toNat b < wordBound then
         .ok (ofNat (toNat a * toNat b / toNat c), w)
       else .error (.arith .overflow) := rfl
 
 @[simp] theorem run_shareUp (a : Amount τ s) (b c : Amount τ' s') (ctx : Ctx)
-    (w : World S E) :
-    Tx.run (shareUp (S := S) (E := E) (ε := ε) a b c) ctx w =
+    (w : World S X E) :
+    Tx.run (shareUp (S := S) (X := X) (E := E) (ε := ε) a b c) ctx w =
       if toNat c = 0 then .error (.arith .divByZero)
       else if toNat a * toNat b < wordBound then
         .ok (ofNat (toNat a * toNat b / toNat c +
@@ -214,79 +246,11 @@ def on : Flag := (1 : Nat)
 def off : Flag := (0 : Nat)
 end Flag
 
-/-! ## `IERC20` — an address tagged with token marker and scale
-
-The scale `s` is a type index (the injection), not a runtime `decimals()` call.
-Methods are transparent aliases of the `Tx.erc20*` primitives so reification stays `rfl`. -/
-
-abbrev IERC20 (_τ : Type) (_s : Nat) : Type := Address
-
-namespace IERC20
-
-variable {τ : Type} {s : Nat} {S E ε : Type}
-
-def transferFrom (tok : IERC20 τ s) (src to : Address) (amount : Amount τ s) :
-    Tx S E ε Flag :=
-  Tx.erc20TransferFrom tok src to amount
-
-def transfer (tok : IERC20 τ s) (to : Address) (amount : Amount τ s) :
-    Tx S E ε Flag :=
-  Tx.erc20Transfer tok to amount
-
-def balanceOf (tok : IERC20 τ s) (owner : Address) : Tx S E ε (Amount τ s) :=
-  Tx.erc20BalanceOf tok owner
-
-/-- Surface-typed run lemma so `simp` need not unfold `Address`/`Amount` at implicit
-transparency (Lean 4.33). -/
-@[simp] theorem run_transferFrom (tok : IERC20 τ s) (src to : Address) (amount : Amount τ s)
-    (ctx : Ctx) (w : World S E) :
-    Tx.run (transferFrom (S := S) (E := E) (ε := ε) tok src to amount) ctx w =
-      match w.ext tok Tx.selTransferFrom [src, to, amount] with
-      | none => .ok (Flag.off, w)
-      | some _ => .ok (Flag.on, w) := rfl
-
-@[simp] theorem transferFrom_apply (tok : IERC20 τ s) (src to : Address) (amount : Amount τ s)
-    (ctx : Ctx) (w : World S E) :
-    transferFrom (S := S) (E := E) (ε := ε) tok src to amount ctx w =
-      match w.ext tok Tx.selTransferFrom [src, to, amount] with
-      | none => .ok (Flag.off, w)
-      | some _ => .ok (Flag.on, w) := rfl
-
-/-- Not `@[simp]`: same reason as `Tx.run_extCall` — after a store the world is `w'`
-and a hypothesis about `w.ext` no longer matches. Apply once the world is concrete. -/
-theorem run_transfer (tok : IERC20 τ s) (to : Address) (amount : Amount τ s)
-    (ctx : Ctx) (w : World S E) :
-    Tx.run (transfer (S := S) (E := E) (ε := ε) tok to amount) ctx w =
-      match w.ext tok Tx.selTransfer [to, amount] with
-      | none => .ok (Flag.off, w)
-      | some _ => .ok (Flag.on, w) := rfl
-
-theorem transfer_apply (tok : IERC20 τ s) (to : Address) (amount : Amount τ s)
-    (ctx : Ctx) (w : World S E) :
-    transfer (S := S) (E := E) (ε := ε) tok to amount ctx w =
-      match w.ext tok Tx.selTransfer [to, amount] with
-      | none => .ok (Flag.off, w)
-      | some _ => .ok (Flag.on, w) := rfl
-
-@[simp] theorem run_balanceOf (tok : IERC20 τ s) (owner : Address)
-    (ctx : Ctx) (w : World S E) :
-    Tx.run (balanceOf (S := S) (E := E) (ε := ε) tok owner) ctx w =
-      match w.ext tok Tx.selBalanceOf [owner] with
-      | none => .ok ((0 : Amount τ s), w)
-      | some [] => .ok ((0 : Amount τ s), w)
-      | some (b :: _) => .ok (b, w) := rfl
-
-end IERC20
-
 /-! ### Unit-preserving surface sugar
 
-`a +? b` is `Tx.addChecked` on `Nat`. Because `Amount τ s` is definitionally `Nat`, that
-notation typechecks on amounts but **returns `Nat`**, dropping the token/scale. Prefer
+`a +? b` is `Tx.addChecked` on `Nat` and does not typecheck on `Amount`. Prefer
 `Amount.add` / `Amount.sub`, or the scoped `+ₐ` / `-ₐ` below, whose result stays
 `Amount τ s`. There is no `*ₐ` / `/ₐ`: rounding must be named (`mulDown`/`mulUp`).
-
-This is typeclass-free so the reifier matches `Lsc.Amount.add` (definitionally
-`Tx.addChecked`) and the certificate stays `rfl`.
 -/
 namespace Syntax
 scoped infixl:65 " +ₐ " => Lsc.Amount.add

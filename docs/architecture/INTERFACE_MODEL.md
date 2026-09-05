@@ -14,7 +14,7 @@ are not our contracts; failure outside the ghost is one fault oracle, not non-co
 `Err` gains `callFailed`. External failure reverts the caller.
 
 ```
-Interface := { Ghost, Method, model, abi, idx }
+Interface := { Ghost, Method, n, model, abi, idx }
   model : Method → Address → List Nat → Ghost → Option (Nat × Ghost)
   abi   : Method → { selector, arity, ret }   -- ret ∈ {word, boolOpt, none}; compiler only
   idx   : Method ≃ Fin n
@@ -25,9 +25,10 @@ Binding I S X := { addr : S → Address, get : X → I.Ghost, set : X → I.Ghos
 `Tx.call binding method args` takes **no address**. The compiled call `sload`s the bound
 storage field; `Core.effects` frames it immutable (no `store` to that field in any entrypoint).
 The model updates the bound ghost. `Tx.callUnit` is the `Stmt` form. `run_call` is `rfl`.
-Surface: `bind` macro.
+Bindings are explicit constants (`def assetB : Binding IERC20 Storage Ext := ⟨…⟩`); a `bind`
+command is sugar to add later.
 
-Files: `Lsc/Lang/Interface.lean` (`Interface`, `Binding`, `Tx.call`, `run_call`, `bind`);
+Files: `Lsc/Lang/Interface.lean` (`Interface`, `Binding`, `Tx.call`, `run_call`);
 `Lsc/Stdlib/ERC20.lean` (ghost, model, `Rely`, `IERC20`, `IERC20.Ref`, `Binding.*` aliases).
 
 ## ERC20

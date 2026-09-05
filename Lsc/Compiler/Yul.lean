@@ -5,12 +5,12 @@ import YulSemantics.PrettyPrint
 import KeccakEngine.Sponge
 
 /-!
-# Core → Yul (call-free fragment)
+# Core → Yul
 
-`toYulFn` compiles one `FnDef` to a powdr `YulSemantics` block. The call-free fragment is
-everything in `Core` except the external ERC20 ops (`erc20Transfer`, `erc20TransferFrom`,
-`erc20BalanceOf`), which need `call` and are deferred to S2. Those constructors make
-`toYulFn` / `runtimeBlock` / `deployObject` return `none`.
+`toYulFn` compiles one `FnDef` to a powdr `YulSemantics` block. `Op.call` / `Stmt.call`
+are emitted (`sload` of the bound slot, ABI pack at `0x80`, `call` with a gas literal,
+`if iszero(ok) { revert(0,0) }`, then `boolOpt` / `word` return handling). `toYulFn` does
+**not** return `none` on calls.
 
 Not emitted in this slice: `tload`/`tstore` (reentrancy lock), `gas()`, `for`, `delegatecall`,
 `selfdestruct`, `create`. `ite` is `switch` (Yul `if` has no else). Dispatcher is
@@ -101,24 +101,8 @@ def listBytes (bs : List UInt8) : ByteArray :=
 def keccakOf (bs : List UInt8) : YulSemantics.EVM.U256 :=
   BitVec.ofNat 256 (bytesToNat (KeccakEngine.keccak256 (listBytes bs)))
 
-/-! ## Call-free fragment -/
-
-/-- External ERC20 ops (need `call`) are excluded from this slice. -/
-def opCallFree : Lsc.Op → Bool
-  | .erc20TransferFrom .. | .erc20Transfer .. | .erc20BalanceOf .. => false
-  | _ => true
-
-def coreCallFree : {t : RetTy} → Core t → Bool
-  | _, .ret _ => true
-  | _, .opTail op => opCallFree op
-  | _, .opTailAddr op => opCallFree op
-  | _, .opTailFlag op => opCallFree op
-  | _, .stmtTail _ => true
-  | _, .revertTail .. => true
-  | _, .letOp op k => opCallFree op && coreCallFree k
-  | _, .seq _ k => coreCallFree k
-  | _, .letPure _ _ k => coreCallFree k
-  | _, .ite _ a b => coreCallFree a && coreCallFree b
+/-- Gas stipend for an external CALL (literal; never `gas()`). -/
+def extCallGas : Nat := 1_000_000
 
 /-! ## AST helpers -/
 
@@ -187,9 +171,7 @@ def opWF (c : ContractDef) : Lsc.Op → Bool
   | .addChecked a b | .subChecked a b | .mulChecked a b | .divChecked a b =>
       atomWF a && atomWF b
   | .mulDivDown a b d | .mulDivUp a b d => atomWF a && atomWF b && atomWF d
-  | .erc20TransferFrom a b d e => atomsWF [a, b, d, e]
-  | .erc20Transfer a b d => atomsWF [a, b, d]
-  | .erc20BalanceOf a b => atomWF a && atomWF b
+  | .call _b _m args => args.all atomWF
   | .pure a => atomWF a
 
 def stmtWF (c : ContractDef) : Lsc.Stmt → Bool
@@ -199,6 +181,7 @@ def stmtWF (c : ContractDef) : Lsc.Stmt → Bool
   | .require cond err args => condWF cond && errorOK c err args.length && args.all atomWF
   | .emit ev args => eventOK c ev args.length && args.all atomWF
   | .revert err args => errorOK c err args.length && args.all atomWF
+  | .call _b _m args => args.all atomWF
 
 def retWF : {t : RetTy} → RetExpr t → Bool
   | _, .unit => true
@@ -395,7 +378,62 @@ def emitMulDivUp (e : Emit) (name : YIdent) (a b c : YExpr) : Emit :=
     (some [.assign [name]
       (bop YulSemantics.EVM.Op.add [bop YulSemantics.EVM.Op.div [var name, c], lit 1])]))
 
-def emitLetOp (e : Emit) (depth : Nat) : Lsc.Op → Option Emit
+/-- Look up ABI of binding `b`, method `m`. Defaults are inert (empty selector, word). -/
+def bindingMethod (c : ContractDef) (b m : Nat) : Nat × AbiRet :=
+  match c.bindings[b]? with
+  | none => (0, .word)
+  | some bd =>
+    match bd.methods[m]? with
+    | none => (0, .word)
+    | some (_, spec) => (spec.selector, spec.ret)
+
+def bindingSlot (c : ContractDef) (b : Nat) : Nat :=
+  match c.bindings[b]? with
+  | some bd => bd.fieldSlot
+  | none => 0
+
+/-- After a successful CALL: `boolOpt` (missing return OK) or `word` (`returndatasize ≥ 32`). -/
+def emitCallRetCheck (e : Emit) (ret : AbiRet) : Emit :=
+  match ret with
+  | .boolOpt =>
+    emitIf e
+      (bop YulSemantics.EVM.Op.iszero
+        [bop YulSemantics.EVM.Op.or
+          [bop YulSemantics.EVM.Op.iszero [bop YulSemantics.EVM.Op.returndatasize []],
+            bop YulSemantics.EVM.Op.eq
+              [bop YulSemantics.EVM.Op.mload [lit abiPtr], lit 1]]])
+      [revert00]
+  | .word =>
+    emitIf e (bop YulSemantics.EVM.Op.lt
+      [bop YulSemantics.EVM.Op.returndatasize [], lit 32]) [revert00]
+  | .none => e
+
+/-- `sload` bound address, ABI-pack at `0x80`, `call(extCallGas, tok, 0, …)`, revert on failure.
+When `bindResult` is set, the Core local is the returned word (`boolOpt` yields `1`). -/
+def emitExtCall (c : ContractDef) (e : Emit) (depth : Nat) (b m : Nat) (args : List Atom)
+    (bindResult : Option YIdent) : Emit :=
+  let slot := bindingSlot c b
+  let (sel, ret) := bindingMethod c b m
+  let tok : YIdent := s!"_tok_{depth}"
+  let ok : YIdent := s!"_ok_{depth}"
+  let e := emitLet e tok (bop YulSemantics.EVM.Op.sload [lit slot])
+  let e := emitDo e YulSemantics.EVM.Op.mstore
+    [lit abiPtr, bop YulSemantics.EVM.Op.shl [lit 224, lit sel]]
+  let (e, _) := args.foldl (fun (e, i) a =>
+    (emitDo e YulSemantics.EVM.Op.mstore [lit (abiAfterSel + 32 * i), atomE depth a], i + 1)) (e, 0)
+  let insize := 4 + 32 * args.length
+  let e := emitLet e ok (bop YulSemantics.EVM.Op.call
+    [lit extCallGas, var tok, lit 0, lit abiPtr, lit insize, lit abiPtr, lit 32])
+  let e := emitIf e (bop YulSemantics.EVM.Op.iszero [var ok]) [revert00]
+  let e := emitCallRetCheck e ret
+  match bindResult with
+  | none => e
+  | some name =>
+    match ret with
+    | .boolOpt | .none => emitLet e name (lit 1)
+    | .word => emitLet e name (bop YulSemantics.EVM.Op.mload [lit abiPtr])
+
+def emitLetOp (c : ContractDef) (e : Emit) (depth : Nat) : Lsc.Op → Option Emit
   | .load f => some (emitLet e (identV depth) (bop YulSemantics.EVM.Op.sload [lit f]))
   | .loadMap f k =>
     let e := emitMapSlotPrep e f (atomE depth k)
@@ -416,12 +454,12 @@ def emitLetOp (e : Emit) (depth : Nat) : Lsc.Op → Option Emit
       some (emitMulChecked e (identV depth) (atomE depth a) (atomE depth b))
   | .divChecked a b =>
       some (emitDivChecked e (identV depth) (atomE depth a) (atomE depth b))
-  | .mulDivDown a b c =>
-      some (emitMulDivDown e (identV depth) (atomE depth a) (atomE depth b) (atomE depth c))
-  | .mulDivUp a b c =>
-      some (emitMulDivUp e (identV depth) (atomE depth a) (atomE depth b) (atomE depth c))
+  | .mulDivDown a b d =>
+      some (emitMulDivDown e (identV depth) (atomE depth a) (atomE depth b) (atomE depth d))
+  | .mulDivUp a b d =>
+      some (emitMulDivUp e (identV depth) (atomE depth a) (atomE depth b) (atomE depth d))
   | .pure a => some (emitLet e (identV depth) (atomE depth a))
-  | .erc20TransferFrom .. | .erc20Transfer .. | .erc20BalanceOf .. => none
+  | .call b m args => some (emitExtCall c e depth b m args (some (identV depth)))
 
 def emitPrim (depth : Nat) (p : Prim) (args : List Atom) : YExpr :=
   match p, args with
@@ -463,6 +501,8 @@ def emitStmt (c : ContractDef) (e : Emit) (depth : Nat) : Lsc.Stmt → Emit
     emitLog1 e topic (args.map (atomE depth))
   | .revert err args =>
     emitCustomError c e err (args.map (atomE depth))
+  | .call b m args =>
+    emitExtCall c e depth b m args none
 
 def emitRet (e : Emit) (depth : Nat) (haltUnit : Bool) : {t : RetTy} → RetExpr t → Emit
   | _, .unit => emitReturnUnit e haltUnit
@@ -472,18 +512,18 @@ def emitCore (c : ContractDef) (e : Emit) (depth : Nat) (haltUnit : Bool) :
     {t : RetTy} → Core t → Option Emit
   | _, .ret r => some (emitRet e depth haltUnit r)
   | _, .opTail op => do
-      let e ← emitLetOp e depth op
+      let e ← emitLetOp c e depth op
       some (emitRet e (depth + 1) haltUnit (.word (.var 0)))
   | _, .opTailAddr op => do
-      let e ← emitLetOp e depth op
+      let e ← emitLetOp c e depth op
       some (emitRet e (depth + 1) haltUnit (.addr (.var 0)))
   | _, .opTailFlag op => do
-      let e ← emitLetOp e depth op
+      let e ← emitLetOp c e depth op
       some (emitRet e (depth + 1) haltUnit (.flag (.var 0)))
   | _, .stmtTail s => some (emitReturnUnit (emitStmt c e depth s) haltUnit)
   | _, .revertTail err args => some (emitCustomError c e err (args.map (atomE depth)))
   | _, .letOp op k => do
-      let e ← emitLetOp e depth op
+      let e ← emitLetOp c e depth op
       emitCore c e (depth + 1) haltUnit k
   | _, .seq s k => emitCore c (emitStmt c e depth s) depth haltUnit k
   | _, .letPure p args k =>
@@ -498,8 +538,7 @@ def emitCore (c : ContractDef) (e : Emit) (depth : Nat) (haltUnit : Bool) :
 runtime entrypoints, `0` for constructors). A constructor's `ret ()` falls through
 (no `stop()`), so `deployObject` can append `constructorCode "runtime"`. -/
 def toYulFn (c : ContractDef) (f : FnDef) : Option YBlock :=
-  if !coreCallFree f.core then none
-  else if !coreWF c f.core then none
+  if !coreWF c f.core then none
   else if !identsNodup (maxDepth f) then none
   else
     let offset := if f.kind = .constructor then 0 else 4

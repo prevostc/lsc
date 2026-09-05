@@ -8,26 +8,29 @@ Every module exposes an API (definitions, theorem statements, assumptions) and k
 - `Tx.lean` — `Tx S X E ε`, `World S X E` (`self`, `ext : X`, `log`, `faults`, `ncalls`), `Ctx`,
   `Err` (including `callFailed`), primitives, the `run_*` simp normal form. This file is the
   language specification.
-- `Interface.lean` — `Interface`, `Binding`, `Tx.call` / `Tx.callUnit`, `run_call`, `bind` macro.
+- `Interface.lean` — `Interface`, `Binding`, `Tx.call` / `Tx.callUnit`, `run_call`. Bindings are
+  explicit constants (no `bind` macro yet).
 - `Amount.lean` — `Amount τ s` (structure), `Flag`, `Price`, rounding-explicit ops, `toNat` simp
   normal form, ℚ cast pack. External scales are opaque symbols; `rescale` / `Amount.one` take
   runtime scale words. No IERC20 shim.
 - `Core.lean` — `Core` (`Op.call`, `Stmt.call`), `Core.denote`, `Core.effects` (including
-  `calls`), `effects_frame`. `ContractSchema.ext` supplies `call : Nat → Nat → List Nat → Tx`.
+  `calls`). `ContractSchema.ext` supplies `call : Nat → Nat → List Nat → Tx`.
+- `CoreProof.lean` — `effects_frame` (stated; proof is a remaining structural induction).
 - `Spec.lean` — `Entry`, `Spec` (a contract as a finite family of `Tx` entrypoints with their own
   argument/return types). Language-level so that `Reify` can generate it without depending on
   `Lsc/Security`.
 - `Reify.lean` — `lsc_schema`, `lsc_reify`, `lsc_contract` (MetaM, untrusted). Exports
   `f.core`, `f.core_denote`, `C.contract`, `C.Fn`/`C.entry`/`C.spec` with `spec_exec_*` simp
   lemmas, and `#lsc_obligations C` listing the theorem statements to prove.
-- `Contract.lean` — `ContractDef`, `FnDef`, ABI signatures, keccak selectors.
+- `Contract.lean` — `ContractDef` (including `bindings : List BindingDef`), `FnDef`, ABI
+  signatures, keccak selectors.
 
 ## `Lsc/Security` — the security model
 
-- `Trace.lean` — `Call`, `call`/`env` steps, `RelyAlong`, `Call.sender ≠ target`, `run`,
-  adversary sets, revert-frame lemmas.
-- `Invariant.lean` — `Inv : World S X E → Prop`, obligations (including preservation by `Rely`)
-  and trace induction.
+- `Trace.lean` — `Call`, `Step` (`call`/`env`), `Wf` (`target = self` and `sender ≠ self`),
+  `run`, adversary sets, revert-frame lemmas.
+- `Invariant.lean` — `Inv : World S X E → Prop`, `RelyAlong`, `PreservesInv`/`PreservesInvEnv`,
+  `inv_run`.
 - `Wealth.lean` — `claim`, `Auth`, `holdings`, `no_unauthorized_extraction`, `solvency`.
 
 Depends only on `Lsc/Lang`.

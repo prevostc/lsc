@@ -1,4 +1,5 @@
 import Lsc.Lang.Core
+import Lsc.Lang.Interface
 import KeccakEngine.Sponge
 
 /-!
@@ -78,6 +79,15 @@ structure ErrorDef where
   params : List Param
   deriving DecidableEq, Repr, Lean.ToExpr
 
+/-- One static binding: storage field holding the callee address, plus the interface's
+methods in declaration = method-index order. -/
+structure BindingDef where
+  name : String
+  fieldSlot : Nat
+  ifaceName : String
+  methods : List (String × AbiSpec)
+  deriving DecidableEq, Repr, Lean.ToExpr
+
 /-- Everything the compiler needs about one contract. -/
 structure ContractDef where
   name : String
@@ -87,6 +97,7 @@ structure ContractDef where
   ctor : Option FnDef
   events : List EventDef
   errors : List ErrorDef
+  bindings : List BindingDef := []
 
 /-! ## ABI hashing -/
 

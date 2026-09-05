@@ -29,7 +29,7 @@ inductive Error
   | NotOwner
   deriving DecidableEq, Repr
 
-abbrev M := Tx Storage Event Error
+abbrev M := Tx Storage Unit Event Error
 
 /-- Deployment: the deployer owns the whole initial supply. -/
 def constructor (owner : Address) (supply : Nat) : M Unit := do

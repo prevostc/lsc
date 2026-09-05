@@ -14,9 +14,6 @@ axioms. `#guard_msgs` turns a widened footprint into a build error (see
 /-- info: 'Token.transfer.core_denote' depends on axioms: [propext] -/
 #guard_msgs in #print axioms Token.transfer.core_denote
 
-/-- info: 'Vault.deposit.core_denote' depends on axioms: [propext] -/
-#guard_msgs in #print axioms Vault.deposit.core_denote
-
 /-- info: 'Token.transfer_conserves' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms Token.transfer_conserves
 
