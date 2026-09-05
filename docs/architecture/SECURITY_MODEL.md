@@ -28,6 +28,16 @@ Obligations 2 and 3 are relative to `Inv` (decided after the Vault instance: a p
 is only monotone under the share-supply invariant). `no_unauthorized_extraction` therefore
 assumes `Inv w₀`, `PreservesInv` and `PreservesInvEnv` in addition to `NoAuthAlong`.
 
+Obligation 3 is **optional when solvency follows from `Inv` directly** (`Inv ⇒ Σ claim ≤ holdings`,
+as for the Vault). Per-step conservation is false for floor-rounded pro-rata claims (rounding
+slack accumulates), which is not a leak; solvency is the statement that matters there.
+
+Known limit of `claim`: it measures what the protocol owes, not the caller's external wallet. A
+deposit that mints zero shares is a loss for the depositor that `claim`-monotonicity does not
+see. Such cases are protocol bugs to be excluded by the program (`require minted > 0`), and a
+future "no-loss for the caller" obligation may add the caller's external ghost balance to the
+measure.
+
 **Generic theorems** — proved once in `Lsc/Security`, over the trace semantics `run` (call steps
 and `env` steps; any senders, any arguments, any order; a reverted call leaves the world
 unchanged; `env` constrained by `RelyAlong`):

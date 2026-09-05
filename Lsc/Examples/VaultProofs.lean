@@ -46,6 +46,24 @@ def extAfterMove (x : Ext) (src dst : Address) (amt : Nat) : Ext :=
 private theorem toNat_zero_asset : (0 : Amount ASSET assetScale).toNat = 0 := rfl
 private theorem toNat_zero_share : (0 : Amount SHARE shareScale).toNat = 0 := rfl
 
+/-- `simp` unfolds `Tx.require (0 < a / b)` to `0 < b ∧ b ≤ a`. -/
+private theorem pos_div_iff {a b : Nat} : 0 < a / b ↔ 0 < b ∧ b ≤ a := by
+  rw [Nat.pos_iff_ne_zero, ne_eq, Nat.div_eq_zero_iff]
+  omega
+
+private theorem minted_require_iff (σ : Storage) (assets : Amount ASSET assetScale)
+    (hts : σ.totalShares ≠ 0) :
+    0 < mintedShares σ assets ↔
+      0 < σ.totalAssets ∧ σ.totalAssets ≤ σ.totalShares * assets.toNat := by
+  simp only [mintedShares, hts]
+  exact pos_div_iff
+
+private theorem redeemed_require_iff (σ : Storage) (sharesIn : Amount SHARE shareScale) :
+    0 < redeemedAssets σ sharesIn ↔
+      0 < σ.totalShares ∧ σ.totalShares ≤ σ.totalAssets * sharesIn.toNat := by
+  simp only [redeemedAssets]
+  exact pos_div_iff
+
 /-! ### Views -/
 
 theorem paused?_returns_stored :
@@ -98,6 +116,7 @@ theorem deposit_reverts_on_zero (hp : w.self.paused = Flag.off) :
 structure DepositOk (w : World Storage Ext Event) (assets : Amount ASSET assetScale) : Prop where
   paused : w.self.paused = Flag.off
   pos : 0 < assets.toNat
+  mintedPos : 0 < mintedShares w.self assets
   noFault : w.faults w.ncalls = false
   cover : assets.toNat ≤ w.ext.asset.balances ctx.sender
   prod :
@@ -107,25 +126,90 @@ structure DepositOk (w : World Storage Ext Event) (assets : Amount ASSET assetSc
   addShares : mintedShares w.self assets + w.self.totalShares < wordBound
   addBal : mintedShares w.self assets + w.self.shares ctx.sender < wordBound
 
+theorem deposit_reverts_on_divByZero (assets : Amount ASSET assetScale)
+    (hp : w.self.paused = Flag.off) (hpos : 0 < assets.toNat)
+    (hts : w.self.totalShares ≠ 0) (hta : w.self.totalAssets = 0) :
+    Tx.run (deposit assets) ctx w = .error (.arith .divByZero) := by
+  simp [deposit, hp, hpos, hts, hta]
+
+theorem deposit_reverts_on_mul_overflow (assets : Amount ASSET assetScale)
+    (hp : w.self.paused = Flag.off) (hpos : 0 < assets.toNat)
+    (hts : w.self.totalShares ≠ 0) (hta : w.self.totalAssets ≠ 0)
+    (hmul : ¬ w.self.totalShares * assets.toNat < wordBound) :
+    Tx.run (deposit assets) ctx w = .error (.arith .overflow) := by
+  simp [deposit, hp, hpos, hts, hta, hmul]
+
+theorem deposit_reverts_on_zero_shares (assets : Amount ASSET assetScale)
+    (hp : w.self.paused = Flag.off) (hpos : 0 < assets.toNat)
+    (hprod :
+      w.self.totalShares = 0 ∨
+        (w.self.totalAssets ≠ 0 ∧ w.self.totalShares * assets.toNat < wordBound))
+    (hminted : ¬ 0 < mintedShares w.self assets) :
+    Tx.run (deposit assets) ctx w = .error (.user .ZeroShares) := by
+  simp [deposit, hp, hpos]
+  by_cases hts : w.self.totalShares = 0
+  · simp [hts, mintedShares] at hminted
+    omega
+  · rcases hprod with h0 | ⟨hta, hmul⟩
+    · exact (hts h0).elim
+    · have hreq :
+          ¬ (0 < w.self.totalAssets ∧
+              w.self.totalAssets ≤ w.self.totalShares * assets.toNat) :=
+        mt (minted_require_iff w.self assets hts).mpr hminted
+      simp [hts, hta, hmul, hreq]
+
 theorem deposit_reverts_on_fault (assets : Amount ASSET assetScale)
     (hp : w.self.paused = Flag.off) (hpos : 0 < assets.toNat)
+    (hprod :
+      w.self.totalShares = 0 ∨
+        (w.self.totalAssets ≠ 0 ∧ w.self.totalShares * assets.toNat < wordBound))
+    (hminted : 0 < mintedShares w.self assets)
     (hf : w.faults w.ncalls = true) :
     Tx.run (deposit assets) ctx w = .error .callFailed := by
-  simp [deposit, hp, hpos, Binding.transferFrom]
-  unfold Tx.call
-  dsimp only [Tx.run]
-  simp [hf]
+  simp [deposit, hp, hpos]
+  by_cases hts : w.self.totalShares = 0
+  · simp [hts]
+    unfold Tx.call
+    dsimp only [Tx.run]
+    simp [hf]
+  · rcases hprod with h0 | ⟨hta, hmul⟩
+    · exact (hts h0).elim
+    · have hreq :
+          0 < w.self.totalAssets ∧
+            w.self.totalAssets ≤ w.self.totalShares * assets.toNat :=
+        (minted_require_iff w.self assets hts).mp hminted
+      simp [hts, hta, hmul, hreq]
+      unfold Tx.call
+      dsimp only [Tx.run]
+      simp [hf]
 
 theorem deposit_reverts_on_no_cover (assets : Amount ASSET assetScale)
     (hp : w.self.paused = Flag.off) (hpos : 0 < assets.toNat)
+    (hprod :
+      w.self.totalShares = 0 ∨
+        (w.self.totalAssets ≠ 0 ∧ w.self.totalShares * assets.toNat < wordBound))
+    (hminted : 0 < mintedShares w.self assets)
     (hf : w.faults w.ncalls = false)
     (hcov : ¬ assets.toNat ≤ w.ext.asset.balances ctx.sender) :
     Tx.run (deposit assets) ctx w = .error .callFailed := by
-  simp [deposit, hp, hpos, Binding.transferFrom]
-  unfold Tx.call
-  dsimp only [Tx.run]
-  simp [assetB]
-  simp [hf, model, hcov]
+  simp [deposit, hp, hpos]
+  by_cases hts : w.self.totalShares = 0
+  · simp [hts]
+    unfold Tx.call
+    dsimp only [Tx.run]
+    simp [assetB]
+    simp [hf, model, hcov]
+  · rcases hprod with h0 | ⟨hta, hmul⟩
+    · exact (hts h0).elim
+    · have hreq :
+          0 < w.self.totalAssets ∧
+            w.self.totalAssets ≤ w.self.totalShares * assets.toNat :=
+        (minted_require_iff w.self assets hts).mp hminted
+      simp [hts, hta, hmul, hreq]
+      unfold Tx.call
+      dsimp only [Tx.run]
+      simp [assetB]
+      simp [hf, model, hcov]
 
 /-- Exact post-state of a successful `deposit`. -/
 theorem deposit_ok (assets : Amount ASSET assetScale) (h : DepositOk ctx w assets) :
@@ -135,115 +219,111 @@ theorem deposit_ok (assets : Amount ASSET assetScale) (h : DepositOk ctx w asset
           (extAfterMove w.ext ctx.sender ctx.self assets.toNat)
           (w.log ++ [.Deposit ctx.sender assets (Amount.ofNat (mintedShares w.self assets))])
           w.faults (w.ncalls + 1)) := by
-  rcases h with ⟨hp, hpos, hf, hcov, hprod, haddA, haddS, haddB⟩
+  rcases h with ⟨hp, hpos, hminted, hf, hcov, hprod, haddA, haddS, haddB⟩
   have hxfer : model .transferFrom ctx.self [ctx.sender, ctx.self, assets.toNat] w.ext.asset =
       some (1, move w.ext.asset ctx.sender ctx.self assets.toNat) :=
     model_transferFrom hcov
-  simp [deposit, hp, hpos, Binding.transferFrom]
-  unfold Tx.call
-  dsimp only [Tx.run]
-  simp [assetB]
-  simp [hf, hxfer, extAfterMove, depositPost]
+  simp [deposit, hp, hpos]
   by_cases hts : w.self.totalShares = 0
   · simp [hts, mintedShares] at haddS haddB
-    simp [hts, haddA, haddS, haddB, mintedShares]
+    simp [hts]
+    unfold Tx.call
+    dsimp only [Tx.run]
+    simp [assetB]
+    simp [hf, hxfer, haddA, haddS, haddB, hts, mintedShares, extAfterMove, depositPost]
   · rcases hprod with h0 | ⟨hta, hmul⟩
     · exact (hts h0).elim
     · simp [hts, mintedShares] at haddS haddB
-      simp [hts, hta, hmul, haddA, haddS, haddB, mintedShares]
-
-theorem deposit_reverts_on_divByZero (assets : Amount ASSET assetScale)
-    (hp : w.self.paused = Flag.off) (hpos : 0 < assets.toNat)
-    (hf : w.faults w.ncalls = false)
-    (hcov : assets.toNat ≤ w.ext.asset.balances ctx.sender)
-    (hts : w.self.totalShares ≠ 0) (hta : w.self.totalAssets = 0) :
-    Tx.run (deposit assets) ctx w = .error (.arith .divByZero) := by
-  have hxfer : model .transferFrom ctx.self [ctx.sender, ctx.self, assets.toNat] w.ext.asset =
-      some (1, move w.ext.asset ctx.sender ctx.self assets.toNat) :=
-    model_transferFrom hcov
-  simp [deposit, hp, hpos, Binding.transferFrom]
-  unfold Tx.call
-  dsimp only [Tx.run]
-  simp [assetB]
-  simp [hf, hxfer, hts, hta]
-
-theorem deposit_reverts_on_mul_overflow (assets : Amount ASSET assetScale)
-    (hp : w.self.paused = Flag.off) (hpos : 0 < assets.toNat)
-    (hf : w.faults w.ncalls = false)
-    (hcov : assets.toNat ≤ w.ext.asset.balances ctx.sender)
-    (hts : w.self.totalShares ≠ 0) (hta : w.self.totalAssets ≠ 0)
-    (hmul : ¬ w.self.totalShares * assets.toNat < wordBound) :
-    Tx.run (deposit assets) ctx w = .error (.arith .overflow) := by
-  have hxfer : model .transferFrom ctx.self [ctx.sender, ctx.self, assets.toNat] w.ext.asset =
-      some (1, move w.ext.asset ctx.sender ctx.self assets.toNat) :=
-    model_transferFrom hcov
-  simp [deposit, hp, hpos, Binding.transferFrom]
-  unfold Tx.call
-  dsimp only [Tx.run]
-  simp [assetB]
-  simp [hf, hxfer, hts, hta, hmul]
+      have hreq :
+          0 < w.self.totalAssets ∧
+            w.self.totalAssets ≤ w.self.totalShares * assets.toNat :=
+        (minted_require_iff w.self assets hts).mp hminted
+      simp [hts, hta, hmul, hreq]
+      unfold Tx.call
+      dsimp only [Tx.run]
+      simp [assetB]
+      simp [hf, hxfer, haddA, haddS, haddB, hts, mintedShares, extAfterMove, depositPost]
 
 theorem deposit_reverts_on_add_assets (assets : Amount ASSET assetScale)
     (hp : w.self.paused = Flag.off) (hpos : 0 < assets.toNat)
-    (hf : w.faults w.ncalls = false)
-    (hcov : assets.toNat ≤ w.ext.asset.balances ctx.sender)
     (hprod :
       w.self.totalShares = 0 ∨
         (w.self.totalAssets ≠ 0 ∧ w.self.totalShares * assets.toNat < wordBound))
+    (hminted : 0 < mintedShares w.self assets)
+    (hf : w.faults w.ncalls = false)
+    (hcov : assets.toNat ≤ w.ext.asset.balances ctx.sender)
     (haddA : ¬ w.self.totalAssets + assets.toNat < wordBound) :
     Tx.run (deposit assets) ctx w = .error (.arith .overflow) := by
   have hxfer : model .transferFrom ctx.self [ctx.sender, ctx.self, assets.toNat] w.ext.asset =
       some (1, move w.ext.asset ctx.sender ctx.self assets.toNat) :=
     model_transferFrom hcov
-  simp [deposit, hp, hpos, Binding.transferFrom]
-  unfold Tx.call
-  dsimp only [Tx.run]
-  simp [assetB]
-  simp [hf, hxfer]
+  simp [deposit, hp, hpos]
   by_cases hts : w.self.totalShares = 0
-  · simp [hts, haddA]
+  · simp [hts]
+    unfold Tx.call
+    dsimp only [Tx.run]
+    simp [assetB]
+    simp [hf, hxfer, haddA]
   · rcases hprod with h0 | ⟨hta, hmul⟩
     · exact (hts h0).elim
-    · simp [hts, hta, hmul, haddA]
+    · have hreq :
+          0 < w.self.totalAssets ∧
+            w.self.totalAssets ≤ w.self.totalShares * assets.toNat :=
+        (minted_require_iff w.self assets hts).mp hminted
+      simp [hts, hta, hmul, hreq]
+      unfold Tx.call
+      dsimp only [Tx.run]
+      simp [assetB]
+      simp [hf, hxfer, haddA]
 
 theorem deposit_reverts_on_add_shares (assets : Amount ASSET assetScale)
     (hp : w.self.paused = Flag.off) (hpos : 0 < assets.toNat)
-    (hf : w.faults w.ncalls = false)
-    (hcov : assets.toNat ≤ w.ext.asset.balances ctx.sender)
     (hprod :
       w.self.totalShares = 0 ∨
         (w.self.totalAssets ≠ 0 ∧ w.self.totalShares * assets.toNat < wordBound))
+    (hminted : 0 < mintedShares w.self assets)
+    (hf : w.faults w.ncalls = false)
+    (hcov : assets.toNat ≤ w.ext.asset.balances ctx.sender)
     (haddA : w.self.totalAssets + assets.toNat < wordBound)
     (haddS : ¬ mintedShares w.self assets + w.self.totalShares < wordBound) :
     Tx.run (deposit assets) ctx w = .error (.arith .overflow) := by
   have hxfer : model .transferFrom ctx.self [ctx.sender, ctx.self, assets.toNat] w.ext.asset =
       some (1, move w.ext.asset ctx.sender ctx.self assets.toNat) :=
     model_transferFrom hcov
-  simp [deposit, hp, hpos, Binding.transferFrom]
-  unfold Tx.call
-  dsimp only [Tx.run]
-  simp [assetB]
-  simp [hf, hxfer]
+  simp [deposit, hp, hpos]
   by_cases hts : w.self.totalShares = 0
   · simp [hts, mintedShares] at haddS
     have hS : ¬ assets.toNat < wordBound := Nat.not_lt.mpr haddS
-    simp [hts, haddA, hS]
+    simp [hts]
+    unfold Tx.call
+    dsimp only [Tx.run]
+    simp [assetB]
+    simp [hf, hxfer, haddA, hS]
   · rcases hprod with h0 | ⟨hta, hmul⟩
     · exact (hts h0).elim
     · simp [hts, mintedShares] at haddS
+      have hreq :
+          0 < w.self.totalAssets ∧
+            w.self.totalAssets ≤ w.self.totalShares * assets.toNat :=
+        (minted_require_iff w.self assets hts).mp hminted
       have hS :
           ¬ w.self.totalShares * assets.toNat / w.self.totalAssets + w.self.totalShares
               < wordBound :=
         Nat.not_lt.mpr haddS
-      simp [hts, hta, hmul, haddA, hS]
+      simp [hts, hta, hmul, hreq]
+      unfold Tx.call
+      dsimp only [Tx.run]
+      simp [assetB]
+      simp [hf, hxfer, haddA, hS]
 
 theorem deposit_reverts_on_add_bal (assets : Amount ASSET assetScale)
     (hp : w.self.paused = Flag.off) (hpos : 0 < assets.toNat)
-    (hf : w.faults w.ncalls = false)
-    (hcov : assets.toNat ≤ w.ext.asset.balances ctx.sender)
     (hprod :
       w.self.totalShares = 0 ∨
         (w.self.totalAssets ≠ 0 ∧ w.self.totalShares * assets.toNat < wordBound))
+    (hminted : 0 < mintedShares w.self assets)
+    (hf : w.faults w.ncalls = false)
+    (hcov : assets.toNat ≤ w.ext.asset.balances ctx.sender)
     (haddA : w.self.totalAssets + assets.toNat < wordBound)
     (haddS : mintedShares w.self assets + w.self.totalShares < wordBound)
     (haddB : ¬ mintedShares w.self assets + w.self.shares ctx.sender < wordBound) :
@@ -251,23 +331,31 @@ theorem deposit_reverts_on_add_bal (assets : Amount ASSET assetScale)
   have hxfer : model .transferFrom ctx.self [ctx.sender, ctx.self, assets.toNat] w.ext.asset =
       some (1, move w.ext.asset ctx.sender ctx.self assets.toNat) :=
     model_transferFrom hcov
-  simp [deposit, hp, hpos, Binding.transferFrom]
-  unfold Tx.call
-  dsimp only [Tx.run]
-  simp [assetB]
-  simp [hf, hxfer]
+  simp [deposit, hp, hpos]
   by_cases hts : w.self.totalShares = 0
   · simp [hts, mintedShares] at haddS haddB
     have hB : ¬ assets.toNat + w.self.shares ctx.sender < wordBound := Nat.not_lt.mpr haddB
-    simp [hts, haddA, haddS, hB]
+    simp [hts]
+    unfold Tx.call
+    dsimp only [Tx.run]
+    simp [assetB]
+    simp [hf, hxfer, haddA, haddS, hB]
   · rcases hprod with h0 | ⟨hta, hmul⟩
     · exact (hts h0).elim
     · simp [hts, mintedShares] at haddS haddB
+      have hreq :
+          0 < w.self.totalAssets ∧
+            w.self.totalAssets ≤ w.self.totalShares * assets.toNat :=
+        (minted_require_iff w.self assets hts).mp hminted
       have hB :
           ¬ w.self.totalShares * assets.toNat / w.self.totalAssets + w.self.shares ctx.sender
               < wordBound :=
         Nat.not_lt.mpr haddB
-      simp [hts, hta, hmul, haddA, haddS, hB]
+      simp [hts, hta, hmul, hreq]
+      unfold Tx.call
+      dsimp only [Tx.run]
+      simp [assetB]
+      simp [hf, hxfer, haddA, haddS, hB]
 
 theorem deposit_shares_le_assets_when_rate_ge_one (assets : Amount ASSET assetScale)
     (hrate : w.self.totalShares ≤ w.self.totalAssets) :
@@ -322,24 +410,47 @@ theorem withdraw_reverts_on_mul_overflow (sharesIn : Amount SHARE shareScale)
     Tx.run (withdraw sharesIn) ctx w = .error (.arith .overflow) := by
   simp [withdraw, hp, hpos, hbal, hden, hmul]
 
+theorem withdraw_reverts_on_zero_assets (sharesIn : Amount SHARE shareScale)
+    (hp : w.self.paused = Flag.off) (hpos : 0 < sharesIn.toNat)
+    (hbal : sharesIn.toNat ≤ w.self.shares ctx.sender)
+    (hden : w.self.totalShares ≠ 0)
+    (hmul : w.self.totalAssets * sharesIn.toNat < wordBound)
+    (hzero : ¬ 0 < redeemedAssets w.self sharesIn) :
+    Tx.run (withdraw sharesIn) ctx w = .error (.user .ZeroAssets) := by
+  have hreq :
+      ¬ (0 < w.self.totalShares ∧
+          w.self.totalShares ≤ w.self.totalAssets * sharesIn.toNat) :=
+    mt (redeemed_require_iff w.self sharesIn).mpr hzero
+  simp [withdraw, hp, hpos, hbal, hden, hmul, hreq]
+
 theorem withdraw_reverts_on_insufficient_supply (sharesIn : Amount SHARE shareScale)
     (hp : w.self.paused = Flag.off) (hpos : 0 < sharesIn.toNat)
     (hbal : sharesIn.toNat ≤ w.self.shares ctx.sender)
     (hden : w.self.totalShares ≠ 0)
     (hmul : w.self.totalAssets * sharesIn.toNat < wordBound)
+    (hassets : 0 < redeemedAssets w.self sharesIn)
     (hsup : w.self.totalShares < sharesIn.toNat) :
     Tx.run (withdraw sharesIn) ctx w = .error (.arith .underflow) := by
-  simp [withdraw, hp, hpos, hbal, hden, hmul, Nat.not_le.mpr hsup]
+  have hreq :
+      0 < w.self.totalShares ∧
+        w.self.totalShares ≤ w.self.totalAssets * sharesIn.toNat :=
+    (redeemed_require_iff w.self sharesIn).mp hassets
+  simp [withdraw, hp, hpos, hbal, hden, hmul, hreq, Nat.not_le.mpr hsup]
 
 theorem withdraw_reverts_on_assets_underflow (sharesIn : Amount SHARE shareScale)
     (hp : w.self.paused = Flag.off) (hpos : 0 < sharesIn.toNat)
     (hbal : sharesIn.toNat ≤ w.self.shares ctx.sender)
     (hsup : sharesIn.toNat ≤ w.self.totalShares) (hden : w.self.totalShares ≠ 0)
     (hmul : w.self.totalAssets * sharesIn.toNat < wordBound)
+    (hassets : 0 < redeemedAssets w.self sharesIn)
     (hfit : ¬ redeemedAssets w.self sharesIn ≤ w.self.totalAssets) :
     Tx.run (withdraw sharesIn) ctx w = .error (.arith .underflow) := by
   simp only [redeemedAssets] at hfit
-  simp [withdraw, hp, hpos, hbal, hden, hmul, hsup, hfit]
+  have hreq :
+      0 < w.self.totalShares ∧
+        w.self.totalShares ≤ w.self.totalAssets * sharesIn.toNat :=
+    (redeemed_require_iff w.self sharesIn).mp hassets
+  simp [withdraw, hp, hpos, hbal, hden, hmul, hreq, hsup, hfit]
 
 /-- Success hypotheses for `withdraw` up to the external call. -/
 structure WithdrawOk (w : World Storage Ext Event) (sharesIn : Amount SHARE shareScale) : Prop where
@@ -349,6 +460,7 @@ structure WithdrawOk (w : World Storage Ext Event) (sharesIn : Amount SHARE shar
   supply : sharesIn.toNat ≤ w.self.totalShares
   denom : w.self.totalShares ≠ 0
   prod : w.self.totalAssets * sharesIn.toNat < wordBound
+  assetsPos : 0 < redeemedAssets w.self sharesIn
   assetsFit : redeemedAssets w.self sharesIn ≤ w.self.totalAssets
   noFault : w.faults w.ncalls = false
   cover : redeemedAssets w.self sharesIn ≤ w.ext.asset.balances ctx.self
@@ -358,11 +470,16 @@ theorem withdraw_reverts_on_fault (sharesIn : Amount SHARE shareScale)
     (hbal : sharesIn.toNat ≤ w.self.shares ctx.sender)
     (hsup : sharesIn.toNat ≤ w.self.totalShares) (hden : w.self.totalShares ≠ 0)
     (hmul : w.self.totalAssets * sharesIn.toNat < wordBound)
+    (hassets : 0 < redeemedAssets w.self sharesIn)
     (hfit : redeemedAssets w.self sharesIn ≤ w.self.totalAssets)
     (hf : w.faults w.ncalls = true) :
     Tx.run (withdraw sharesIn) ctx w = .error .callFailed := by
   simp only [redeemedAssets] at hfit
-  simp [withdraw, hp, hpos, hbal, hden, hmul, hsup, hfit, Binding.transfer]
+  have hreq :
+      0 < w.self.totalShares ∧
+        w.self.totalShares ≤ w.self.totalAssets * sharesIn.toNat :=
+    (redeemed_require_iff w.self sharesIn).mp hassets
+  simp [withdraw, hp, hpos, hbal, hden, hmul, hreq, hsup, hfit, Binding.transfer]
   unfold Tx.call
   dsimp only [Tx.run]
   simp [hf]
@@ -372,12 +489,17 @@ theorem withdraw_reverts_on_no_cover (sharesIn : Amount SHARE shareScale)
     (hbal : sharesIn.toNat ≤ w.self.shares ctx.sender)
     (hsup : sharesIn.toNat ≤ w.self.totalShares) (hden : w.self.totalShares ≠ 0)
     (hmul : w.self.totalAssets * sharesIn.toNat < wordBound)
+    (hassets : 0 < redeemedAssets w.self sharesIn)
     (hfit : redeemedAssets w.self sharesIn ≤ w.self.totalAssets)
     (hf : w.faults w.ncalls = false)
     (hcov : ¬ redeemedAssets w.self sharesIn ≤ w.ext.asset.balances ctx.self) :
     Tx.run (withdraw sharesIn) ctx w = .error .callFailed := by
   simp only [redeemedAssets] at hfit hcov
-  simp [withdraw, hp, hpos, hbal, hden, hmul, hsup, hfit, Binding.transfer]
+  have hreq :
+      0 < w.self.totalShares ∧
+        w.self.totalShares ≤ w.self.totalAssets * sharesIn.toNat :=
+    (redeemed_require_iff w.self sharesIn).mp hassets
+  simp [withdraw, hp, hpos, hbal, hden, hmul, hreq, hsup, hfit, Binding.transfer]
   unfold Tx.call
   dsimp only [Tx.run]
   simp [assetB]
@@ -390,13 +512,17 @@ theorem withdraw_ok (sharesIn : Amount SHARE shareScale) (h : WithdrawOk ctx w s
           (extAfterMove w.ext ctx.self ctx.sender (redeemedAssets w.self sharesIn))
           (w.log ++ [.Withdraw ctx.sender (Amount.ofNat (redeemedAssets w.self sharesIn)) sharesIn])
           w.faults (w.ncalls + 1)) := by
-  rcases h with ⟨hp, hpos, hbal, hsup, hden, hmul, hfit, hf, hcov⟩
+  rcases h with ⟨hp, hpos, hbal, hsup, hden, hmul, hassets, hfit, hf, hcov⟩
   have hxfer :
       model .transfer ctx.self [ctx.sender, redeemedAssets w.self sharesIn] w.ext.asset =
         some (1, move w.ext.asset ctx.self ctx.sender (redeemedAssets w.self sharesIn)) :=
     model_transfer hcov
   simp only [redeemedAssets] at hfit hxfer hcov
-  simp [withdraw, hp, hpos, hbal, hden, hmul, hsup, hfit, Binding.transfer]
+  have hreq :
+      0 < w.self.totalShares ∧
+        w.self.totalShares ≤ w.self.totalAssets * sharesIn.toNat :=
+    (redeemed_require_iff w.self sharesIn).mp hassets
+  simp [withdraw, hp, hpos, hbal, hden, hmul, hreq, hsup, hfit, Binding.transfer]
   unfold Tx.call
   dsimp only [Tx.run]
   simp [assetB]

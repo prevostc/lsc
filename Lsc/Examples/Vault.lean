@@ -56,6 +56,8 @@ inductive Error
   | InsufficientShares
   | NotOwner
   | Zero
+  | ZeroShares
+  | ZeroAssets
   deriving DecidableEq, Repr
 
 abbrev M := Tx Storage Ext Event Error
@@ -69,7 +71,8 @@ def constructor (owner tok : Address) : M Unit := do
   write assetDecimals d
 
 /-- Deposit `assets`; mint shares 1:1 if empty, otherwise `⌊supply * assets / totalAssets⌋`.
-Pulls the asset via `transferFrom` before updating accounting. Storage words are `Nat`
+Computes minted from pre-state `TA`/`TS` and reverts with `ZeroShares` if that floor is 0,
+then pulls the asset via `transferFrom`, then updates accounting. Storage words are `Nat`
 (`Amount` fields make multi-step `rfl` certificates time out). -/
 def deposit (assets : Amount ASSET assetScale) : M Nat := do
   let p ← read paused
@@ -77,7 +80,6 @@ def deposit (assets : Amount ASSET assetScale) : M Nat := do
   Tx.require (0 < assets.toNat) .Zero
   let who ← Tx.sender
   let me ← Tx.selfAddress
-  let _ ← Binding.transferFrom assetB who me assets.toNat
   let ta ← read totalAssets
   let ts ← read totalShares
   let minted ←
@@ -85,6 +87,8 @@ def deposit (assets : Amount ASSET assetScale) : M Nat := do
       pure assets.toNat
     else
       Tx.mulDivDown ts assets.toNat ta
+  Tx.require (0 < minted) .ZeroShares
+  let _ ← Binding.transferFrom assetB who me assets.toNat
   let ta' ← ta +? assets.toNat
   write totalAssets ta'
   let ts' ← minted +? ts
@@ -96,6 +100,7 @@ def deposit (assets : Amount ASSET assetScale) : M Nat := do
   pure minted
 
 /-- Burn `sharesIn` and return `⌊totalAssets * sharesIn / totalShares⌋` as a word.
+Reverts with `ZeroAssets` if that floor is 0 (burning shares for nothing is a caller loss).
 Pushes the asset via `transfer` after updating accounting. -/
 def withdraw (sharesIn : Amount SHARE shareScale) : M Nat := do
   let p ← read paused
@@ -107,6 +112,7 @@ def withdraw (sharesIn : Amount SHARE shareScale) : M Nat := do
   let ta ← read totalAssets
   let ts ← read totalShares
   let assetsOut ← Tx.mulDivDown ta sharesIn.toNat ts
+  Tx.require (0 < assetsOut) .ZeroAssets
   let bal' ← bal -? sharesIn.toNat
   write shares[who] bal'
   let ts' ← ts -? sharesIn.toNat
