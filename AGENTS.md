@@ -29,6 +29,10 @@ Do not let execution agents make major architectural decisions implicitly throug
 
 Treat Lean execution as one global lock across all agents. This includes `lake build`, `lake env lean`, project-wide checks, and equivalent Lean processes.
 
+The lock is enforced by `scripts/lean`: always run Lean through it, e.g. `scripts/lean lake build Lsc.Security.Wealth`. It blocks until the other Lean process finishes. Never invoke `lake` or `lean` directly.
+
+Build only the targets you need (`lake build <Module>`), not the whole library, so another agent's in-progress file cannot fail your build.
+
 Parallel reasoning is fine; parallel Lean builds are not.
 
 ## Theorem organization

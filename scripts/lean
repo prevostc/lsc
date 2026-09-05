@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Run one Lean/lake command under the global Lean lock (see AGENTS.md).
+# Usage: scripts/lean lake build Lsc Checks
+#        scripts/lean lake env lean Lsc/Security/Wealth.lean
+# Blocks until no other Lean process started through this wrapper is running.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+LOCK="${LSC_LEAN_LOCK:-/tmp/lsc-lean.lock}"
+exec flock -w "${LSC_LEAN_LOCK_TIMEOUT:-3600}" "$LOCK" "$@"
