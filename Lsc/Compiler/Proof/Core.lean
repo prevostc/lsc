@@ -1,4 +1,4 @@
-import Lsc.Compiler.Proof.OpsMore
+import Lsc.Compiler.Proof.OpsToken
 import YulSemantics.Observation
 
 set_option linter.unusedSimpArgs false
@@ -19,11 +19,20 @@ def M1Frag : {t : RetTy} → Core t → Prop
   | .word, .ret _ => True
   | .word, .opTail op => M1Op op
   | _, .stmtTail s => M1Stmt s
+  | _, .revertTail _ args => args.length = 0
   | _, .letOp op k => M1Op op ∧ M1Frag k
   | _, .seq s k => M1Stmt s ∧ M1Frag k
   | _, .letPure p args k => p = .id ∧ args.length = 1 ∧ M1Frag k
   | _, .ite c a b => M1Cond c ∧ M1Frag a ∧ M1Frag b
   | _, _ => False
+
+/-- Call-free fragment proved in S1: no `Op.call`/`Stmt.call`, plus the operators
+Token and Counter actually use. Remaining call-free constructors (`mulChecked`,
+`mulDiv*`, wrapping `letPure`, ctx ops other than `sender`, `emit`/`require`/`revert`
+with other arities, `addr`/`flag`/`pair` returns) are still excluded. -/
+def CallFreeOp : Lsc.Op → Prop := M1Op
+def CallFreeStmt : Lsc.Stmt → Prop := M1Stmt
+def CallFree : {t : RetTy} → Core t → Prop := M1Frag
 
 theorem m1frag_letOp {t op} {k : Core t} :
     M1Frag (.letOp op k) ↔ M1Op op ∧ M1Frag k := by
@@ -68,6 +77,21 @@ theorem length_eq_one {α} {l : List α} : l.length = 1 ↔ ∃ a, l = [a] := by
     cases rest with
     | nil => simp
     | cons _ _ => simp
+
+theorem length_eq_three {α} {l : List α} : l.length = 3 ↔ ∃ a b c, l = [a, b, c] := by
+  cases l with
+  | nil => simp
+  | cons a l1 =>
+    cases l1 with
+    | nil => simp
+    | cons b l2 =>
+      cases l2 with
+      | nil => simp
+      | cons c l3 =>
+        cases l3 with
+        | nil => simp
+        | cons _ _ => simp
+
 
 theorem HaltKind.stop_commits : HaltKind.stop.commits = true := rfl
 theorem HaltKind.revert_commits : HaltKind.revert.commits = false := rfl
@@ -132,22 +156,40 @@ theorem stmt_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
   | .store f val =>
     simp [Stmt.denote, Tx.run_store]
     exact stmt_sim_store funs hinv hΓ hκ hlen hwf hn
+  | .storeMap f k val =>
+    simp [Stmt.denote, Tx.run_storeMap]
+    exact stmt_sim_storeMap funs hinv hΓ hκ hlen hwf hn
+  | .storeMap2 f k1 k2 val =>
+    simp [Stmt.denote, Tx.run_storeMap2]
+    exact stmt_sim_storeMap2 funs hinv hΓ hκ hlen hwf hn
   | .emit ev args =>
-    have ⟨a, hargs⟩ := length_eq_one.mp (hM1 : args.length = 1)
-    subst hargs
-    simp [Stmt.denote, Tx.run_emit]
-    exact stmt_sim_emit funs hinv hwf hn
+    rcases (hM1 : args.length = 1 ∨ args.length = 3) with h1 | h3
+    · have ⟨a, hargs⟩ := length_eq_one.mp h1
+      subst hargs
+      simp [Stmt.denote, Tx.run_emit]
+      exact stmt_sim_emit funs hinv hwf hn
+    · have ⟨a, b, c, hargs⟩ := length_eq_three.mp h3
+      subst hargs
+      simp [Stmt.denote, Tx.run_emit]
+      exact stmt_sim_emit3 funs hinv hwf hn
   | .require cond err args =>
     have ⟨hC, hlen⟩ := (hM1 : M1Cond cond ∧ args.length = 0)
     match args with
     | [] => exact stmt_sim_require funs hinv hC hwf hn
     | _ :: _ => cases hlen
-  | .storeMap .. | .storeMap2 .. | .revert .. | .call .. =>
+  | .revert err args =>
+    have hnil : args.length = 0 := hM1
+    match args with
+    | [] => exact stmt_sim_revert funs hinv hwf
+    | _ :: _ => cases hnil
+  | .call .. =>
     exact (show False from hM1).elim
 
 theorem op_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx} {w : World S X E} {env V st} {op : Lsc.Op}
     (funs : FunEnv evm) (hinv : Inv Γ c κ ctx w env V st)
+    (hΓ : Γ.st.Lawful c.fields) (hκ : KeccakSep c κ)
+    (hlen : c.fields.length < wordBound)
     (hM1 : M1Op op) (hwf : opWF c op = true)
     (hn : identsNodup (env.length + 1) = true) :
     match Tx.run (Op.denote Γ env op) ctx w with
@@ -166,6 +208,18 @@ theorem op_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
   | .load f =>
     simp [emitLetOp_load, Op.denote, Tx.run_load]
     exact op_sim_load funs hinv hwf
+  | .loadMap f k =>
+    simp only [emitLetOp_loadMap]
+    simp [Op.denote, Tx.run_loadMap]
+    exact op_sim_loadMap funs hinv hlen hwf hn
+  | .loadMap2 f k1 k2 =>
+    simp only [emitLetOp_loadMap2]
+    simp [Op.denote, Tx.run_loadMap2]
+    exact op_sim_loadMap2 funs hinv hlen hwf hn
+  | .sender =>
+    simp only [emitLetOp]
+    simp [Op.denote, Tx.run_sender]
+    exact op_sim_sender funs hinv
   | .addChecked a b =>
     simp only [emitLetOp_addChecked]
     exact op_sim_addChecked funs hinv hwf hn
@@ -175,8 +229,8 @@ theorem op_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
   | .pure a =>
     simp only [emitLetOp_pure]
     exact op_sim_pure funs hinv hwf hn
-  | .loadMap .. | .loadMap2 .. | .sender | .value | .timestamp | .blockNumber
-    | .selfAddress | .mulChecked .. | .divChecked ..
+  | .value | .timestamp | .blockNumber | .selfAddress
+    | .mulChecked .. | .divChecked ..
     | .mulDivDown .. | .mulDivUp .. | .call .. =>
     exact (show False from hM1).elim
 
@@ -265,7 +319,7 @@ theorem core_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
         simpa [coreExtraDepth, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using hn
       cases hopr : Tx.run (Op.denote Γ env op) ctx w with
       | ok p =>
-        have hsim := op_sim funs hinv hop hopWF hn1
+        have hsim := op_sim funs hinv hΓ hκ hlen hop hopWF hn1
         rw [hopr] at hsim
         simp only [hE] at hsim
         obtain ⟨st1, hexec, hinv1⟩ := hsim
@@ -289,7 +343,7 @@ theorem core_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
           rw [hst]
           exact execStmts_append hexec hexeck
       | error err =>
-        have hsim := op_sim funs hinv hop hopWF hn1
+        have hsim := op_sim funs hinv hΓ hκ hlen hop hopWF hn1
         rw [hopr] at hsim
         simp only [hE] at hsim
         obtain ⟨V', st', bytes, hexec, hh, herr⟩ := hsim
@@ -359,7 +413,7 @@ theorem core_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
         emitRet_word_stmts _ _ _ _
       cases hopr : Tx.run (Op.denote Γ env op) ctx w with
       | ok p =>
-        have hsim := op_sim funs hinv hop hopWF hn1
+        have hsim := op_sim funs hinv hΓ hκ hlen hop hopWF hn1
         rw [hopr] at hsim
         simp only [hE] at hsim
         obtain ⟨st1, hexec, hinv1⟩ := hsim
@@ -375,7 +429,7 @@ theorem core_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
         rw [hretE]
         exact execStmts_append hexec hret
       | error err =>
-        have hsim := op_sim funs hinv hop hopWF hn1
+        have hsim := op_sim funs hinv hΓ hκ hlen hop hopWF hn1
         rw [hopr] at hsim
         simp only [hE] at hsim
         obtain ⟨V', st', bytes, hexec, hh, herr⟩ := hsim
@@ -497,8 +551,18 @@ theorem core_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
         simp only [except_error_prod]
         refine ⟨restore V V', st', bytes, ?_, hh, herr⟩
         exact exec_switch_halt hcond hsel (hoist_emitCore hB) hexec
-  | opTailAddr _ | opTailFlag _ | revertTail _ _ =>
+  | opTailAddr _ | opTailFlag _ =>
     intro hM1; simp [M1Frag] at hM1
+  | revertTail err args =>
+    intro hM1 w env V st funs hwf hn hinv e' hem
+    have hnil : args.length = 0 := by simpa [M1Frag] using hM1
+    match args with
+    | _ :: _ => cases hnil
+    | [] =>
+      simp only [emitCore] at hem
+      cases hem
+      simp only [Core.denote, Tx.run_revert]
+      exact revertTail_sim funs hinv hwf
 
 theorem params_sim_zero (funs : FunEnv evm) (V : VEnv evm) (st : EvmState) (off : Nat) :
     ExecStmts evm funs V st (emitParams {} off 0).stmts V st .normal := by
@@ -534,21 +598,31 @@ theorem toYulFn_inv {c f yul} (h : toYulFn c f = some yul) (hk : f.kind ≠ .con
   simp [hem] at h
   exact ⟨hwfB, hnodB, e, hem, by cases h; rfl⟩
 
-theorem toYulFn_correct_m1 {S X E ε : Type} (c : ContractDef) (Γ : ContractSchema S X E ε)
+theorem toYulFn_execStmts_callFree {S X E ε : Type} (c : ContractDef)
+    (Γ : ContractSchema S X E ε)
     (hΓ : Γ.st.Lawful c.fields) (κ : List UInt8 → U256) (hκ : KeccakSep c κ)
     (f : FnDef) (hf : f.kind ≠ .constructor)
-    (hM1 : M1Frag f.core) (hlen : c.fields.length < wordBound)
+    (hM1 : CallFree f.core) (hlen : c.fields.length < wordBound)
     (hbound : 4 + 32 * f.params.length < wordBound)
     (yul : YBlock) (hyul : toYulFn c f = some yul)
     (ctx : Ctx) (w : World S X E) (st0 : EvmState)
-    (hctx : ctxRel ctx st0) (hR : R c Γ κ w st0) :
-    ToYulFnCorrect c Γ κ f yul ctx w st0 := by
+    (hctx : ctxRel ctx st0) (hR : R c Γ κ w st0) (funs : FunEnv evm) :
+    match Tx.run (Core.denote Γ f.core (decodeArgs f st0.env.calldata).reverse) ctx w with
+    | .ok (v, w') =>
+        ∃ V' st', ExecStmts evm funs [] st0 yul V' st' .halt ∧
+          haltSuccess f.ret v st'.halted ∧ R c Γ κ w' st'
+    | .error e =>
+        ∃ V' st' bytes,
+          ExecStmts evm funs [] st0 yul V' st' .halt ∧
+            st'.halted = some (.revert, bytes) ∧ haltError c Γ e bytes := by
   have ⟨hwf, hnod, e, hem, hy⟩ := toYulFn_inv hyul hf
   subst hy
   set args := decodeArgs f st0.env.calldata
+  have hargs : args = decodeArgs f st0.env.calldata := rfl
+  simp only [← hargs]
   have henv : EnvWF args.reverse := decodeArgs_wf f st0.env.calldata
   have hdec := decodeArgs_runtime (f := f) (cd := st0.env.calldata) hf
-  have hpar := params_sim (funs := [[]]) st0 4 f.params.length hbound
+  have hpar := params_sim (funs := funs) st0 4 f.params.length hbound
   have hinv : Inv Γ c κ ctx w args.reverse (toVEnv args.reverse) st0 :=
     ⟨rfl, henv, hR, hctx⟩
   obtain ⟨e0, h0, hst⟩ := emitCore_prefix hem
@@ -558,51 +632,86 @@ theorem toYulFn_correct_m1 {S X E ε : Type} (c : ContractDef) (Γ : ContractSch
     simpa [args, decodeArgs_length, List.length_reverse] using hn
   have h0' : emitCore c {} args.reverse.length true f.core = some e0 := by
     simpa [args, decodeArgs_length, List.length_reverse] using h0
-  simp only [ToYulFnCorrect]
   have hsim := core_sim (c := c) (Γ := Γ) (κ := κ) (ctx := ctx) (haltUnit := true) rfl
-    hΓ hκ hlen f.core hM1 (funs := [[]]) hwf hn' hinv h0'
-  have hhoist : hoist evm e.stmts = [] := by
-    rw [hst, hoist_append, hoist_params, hoist_emitCore h0]
-    simp
+    hΓ hκ hlen f.core hM1 (funs := funs) hwf hn' hinv h0'
   cases hrun : Tx.run (Core.denote Γ f.core args.reverse) ctx w with
   | ok p =>
-    rw [hrun] at hsim
+    simp only [hrun, except_ok_prod] at hsim ⊢
     obtain ⟨V', st', hexec, hsucc, hR'⟩ := hsim
-    have hexec' : ExecStmts evm [[]] [] st0 e.stmts V' st' .halt := by
-      rw [hst]
-      have hpar' : ExecStmts evm [[]] [] st0 (emitParams {} 4 f.params.length).stmts
-          (toVEnv args.reverse) st0 .normal := by
-        convert hpar
-        try simp [args, hdec]
-      exact execStmts_append hpar' hexec
-    have hRun : Run evm e.stmts st0 [] st' .halt := by
+    rcases p with ⟨v, w'⟩
+    refine ⟨V', st', ?_, hsucc, hR'⟩
+    rw [hst]
+    have hpar' : ExecStmts evm funs [] st0 (emitParams {} 4 f.params.length).stmts
+        (toVEnv args.reverse) st0 .normal := by
+      convert hpar
+      try simp [args, hdec]
+    exact execStmts_append hpar' hexec
+  | error err =>
+    simp only [hrun, except_error_prod] at hsim ⊢
+    obtain ⟨V', st', bytes, hexec, hh, herr⟩ := hsim
+    refine ⟨V', st', bytes, ?_, hh, herr⟩
+    rw [hst]
+    have hpar' : ExecStmts evm funs [] st0 (emitParams {} 4 f.params.length).stmts
+        (toVEnv args.reverse) st0 .normal := by
+      convert hpar
+      try simp [args, hdec]
+    exact execStmts_append hpar' hexec
+
+theorem toYulFn_hoist {c f yul} (h : toYulFn c f = some yul)
+    (hk : f.kind ≠ .constructor) : hoist evm yul = [] := by
+  have ⟨_, _, e, hem, hy⟩ := toYulFn_inv h hk
+  subst hy
+  obtain ⟨e0, h0, hst⟩ := emitCore_prefix hem
+  rw [hst, hoist_append, hoist_params, hoist_emitCore h0]
+  simp
+
+theorem toYulFn_correct_callFree {S X E ε : Type} (c : ContractDef)
+    (Γ : ContractSchema S X E ε)
+    (hΓ : Γ.st.Lawful c.fields) (κ : List UInt8 → U256) (hκ : KeccakSep c κ)
+    (f : FnDef) (hf : f.kind ≠ .constructor)
+    (hM1 : CallFree f.core) (hlen : c.fields.length < wordBound)
+    (hbound : 4 + 32 * f.params.length < wordBound)
+    (yul : YBlock) (hyul : toYulFn c f = some yul)
+    (ctx : Ctx) (w : World S X E) (st0 : EvmState)
+    (hctx : ctxRel ctx st0) (hR : R c Γ κ w st0) :
+    ToYulFnCorrect c Γ κ f yul ctx w st0 := by
+  have hsim := toYulFn_execStmts_callFree (c := c) (Γ := Γ) hΓ κ hκ f hf hM1 hlen
+    hbound yul hyul ctx w st0 hctx hR [[]]
+  have hhoist := toYulFn_hoist hyul hf
+  set args := decodeArgs f st0.env.calldata
+  have hargs : args = decodeArgs f st0.env.calldata := rfl
+  simp only [← hargs] at hsim
+  change match Tx.run (Core.denote Γ f.core args.reverse) ctx w with
+    | .ok (v, w') =>
+        ∃ stObs, RunCommitted yul st0 [] stObs .halt ∧
+          haltSuccess f.ret v stObs.halted ∧ R c Γ κ w' stObs
+    | .error e =>
+        ∃ stObs bytes,
+          RunCommitted yul st0 [] stObs .halt ∧
+            stObs.halted = some (.revert, bytes) ∧
+            haltError c Γ e bytes ∧ R c Γ κ w stObs
+  cases hrun : Tx.run (Core.denote Γ f.core args.reverse) ctx w with
+  | ok p =>
+    simp only [hrun, except_ok_prod] at hsim ⊢
+    obtain ⟨V', st', hexec, hsucc, hR'⟩ := hsim
+    have hRun : Run evm yul st0 [] st' .halt := by
       have hblock := Step.block (D := evm) (by
         rw [hhoist]
-        exact hexec')
+        exact hexec)
       rw [restore_nil] at hblock
       exact hblock
-    rcases p with ⟨v, w'⟩
-    simp only [except_ok_prod]
     refine ⟨st', ⟨st', hRun, ?_⟩, hsucc, hR'⟩
     obtain ⟨k, bs, hh, hk⟩ := haltSuccess_commits hsucc
     exact (committedState_commit hh hk).symm
   | error err =>
-    rw [hrun] at hsim
+    simp only [hrun, except_error_prod] at hsim ⊢
     obtain ⟨V', st', bytes, hexec, hh, herr⟩ := hsim
-    have hexec' : ExecStmts evm [[]] [] st0 e.stmts V' st' .halt := by
-      rw [hst]
-      have hpar' : ExecStmts evm [[]] [] st0 (emitParams {} 4 f.params.length).stmts
-          (toVEnv args.reverse) st0 .normal := by
-        convert hpar
-        try simp [args, hdec]
-      exact execStmts_append hpar' hexec
-    have hRun : Run evm e.stmts st0 [] st' .halt := by
+    have hRun : Run evm yul st0 [] st' .halt := by
       have hblock := Step.block (D := evm) (by
         rw [hhoist]
-        exact hexec')
+        exact hexec)
       rw [restore_nil] at hblock
       exact hblock
-    simp only [except_error_prod]
     refine ⟨committedState st0 st', bytes, ⟨st', hRun, rfl⟩, ?_, herr,
       R_rollback_obs hR hh HaltKind.revert_commits⟩
     simp [committedState_rollback hh HaltKind.revert_commits, hh]

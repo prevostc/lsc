@@ -43,6 +43,30 @@ theorem ofNat_add (a b : Nat) :
   apply BitVec.eq_of_toNat_eq
   simp [BitVec.toNat_add, BitVec.toNat_ofNat, Nat.add_mod]
 
+theorem ofNat_mul (a b : Nat) :
+    BitVec.ofNat 256 a * BitVec.ofNat 256 b = BitVec.ofNat 256 (a * b) := by
+  apply BitVec.eq_of_toNat_eq
+  simp [BitVec.toNat_mul, BitVec.toNat_ofNat, Nat.mul_mod]
+
+theorem ofNat_div {a b : Nat} (ha : a < wordBound) (hb : b < wordBound) :
+    BitVec.ofNat 256 a / BitVec.ofNat 256 b = BitVec.ofNat 256 (a / b) := by
+  apply BitVec.eq_of_toNat_eq
+  rw [BitVec.toNat_udiv, toNat_ofNat_of_lt ha, toNat_ofNat_of_lt hb,
+    toNat_ofNat_of_lt (Nat.lt_of_le_of_lt (Nat.div_le_self a b) ha)]
+
+theorem ofNat_mod {a b : Nat} (ha : a < wordBound) (hb : b < wordBound) :
+    BitVec.ofNat 256 a % BitVec.ofNat 256 b = BitVec.ofNat 256 (a % b) := by
+  apply BitVec.eq_of_toNat_eq
+  rw [BitVec.toNat_umod, toNat_ofNat_of_lt ha, toNat_ofNat_of_lt hb,
+    toNat_ofNat_of_lt (Nat.lt_of_le_of_lt (Nat.mod_le a b) ha)]
+
+theorem ofNat_eq_zero {a : Nat} (ha : a < wordBound) :
+    BitVec.ofNat 256 a = 0 ↔ a = 0 := by
+  constructor
+  · intro h
+    simpa [toNat_ofNat_of_lt ha] using congrArg BitVec.toNat h
+  · rintro rfl; rfl
+
 theorem ult_ofNat {a b : Nat} (ha : a < wordBound) (hb : b < wordBound) :
     (BitVec.ofNat 256 a).ult (BitVec.ofNat 256 b) = decide (a < b) := by
   simp [BitVec.ult, toNat_ofNat_of_lt ha, toNat_ofNat_of_lt hb]
@@ -104,5 +128,66 @@ theorem b2w_eq_zero {c : Bool} : b2w c = 0 ↔ c = false := by
 
 theorem b2w_ne_zero {c : Bool} : b2w c ≠ 0 ↔ c = true := by
   cases c <;> simp [b2w]
+
+theorem b2w_and (c d : Bool) : b2w c &&& b2w d = b2w (c && d) := by
+  cases c <;> cases d <;> simp [b2w]
+
+theorem b2w_or (c d : Bool) : b2w c ||| b2w d = b2w (c || d) := by
+  cases c <;> cases d <;> simp [b2w]
+
+theorem ofNat_sub_wrap {a b : Nat} (ha : a < wordBound) (hb : b < wordBound) :
+    BitVec.ofNat 256 a - BitVec.ofNat 256 b =
+      BitVec.ofNat 256 ((a + wordBound - b) % wordBound) := by
+  apply BitVec.eq_of_toNat_eq
+  have ha' := toNat_ofNat_of_lt ha
+  have hb' := toNat_ofNat_of_lt hb
+  rw [BitVec.toNat_sub, ha', hb']
+  have hmod : (a + wordBound - b) % wordBound < wordBound :=
+    Nat.mod_lt _ (by unfold wordBound; exact Nat.two_pow_pos 256)
+  rw [toNat_ofNat_of_lt hmod]
+  change (wordBound - b + a) % wordBound = (a + wordBound - b) % wordBound
+  rw [Nat.add_comm (wordBound - b), Nat.add_sub_assoc (Nat.le_of_lt hb)]
+
+/-- `or(iszero(a), eq(div(mul(a,b), a), b))` holds iff the product fits in a word. -/
+theorem mul_fits_iff {a b : Nat} (ha : a < wordBound) (hb : b < wordBound) :
+    a * b < wordBound ↔
+      BitVec.ofNat 256 a = 0 ∨
+        (BitVec.ofNat 256 a * BitVec.ofNat 256 b) / BitVec.ofNat 256 a =
+          BitVec.ofNat 256 b := by
+  rw [ofNat_mul]
+  constructor
+  · intro hfit
+    by_cases ha0 : a = 0
+    · exact .inl ((ofNat_eq_zero ha).mpr ha0)
+    · refine .inr ?_
+      rw [ofNat_div hfit ha, Nat.mul_div_cancel_left _ (Nat.pos_of_ne_zero ha0)]
+  · intro h
+    rcases h with h0 | hdiv
+    · have : a = 0 := (ofNat_eq_zero ha).mp h0
+      subst this
+      simpa using zero_lt_wordBound
+    · by_contra hge
+      have hle : wordBound ≤ a * b := Nat.le_of_not_gt hge
+      have ha0 : a ≠ 0 := by
+        rintro rfl
+        exact Nat.not_le.mpr zero_lt_wordBound (by simpa using hle)
+      have hp : (BitVec.ofNat 256 (a * b)).toNat = (a * b) % wordBound := by
+        simp [BitVec.toNat_ofNat, wordBound]
+      have hmod : (a * b) % wordBound < wordBound :=
+        Nat.mod_lt _ (by unfold wordBound; exact Nat.two_pow_pos 256)
+      have hdivN :
+          (BitVec.ofNat 256 (a * b) / BitVec.ofNat 256 a).toNat =
+            ((a * b) % wordBound) / a := by
+        rw [BitVec.toNat_udiv, hp, toNat_ofNat_of_lt ha]
+      have hlt : ((a * b) % wordBound) / a < b := by
+        refine (Nat.div_lt_iff_lt_mul (Nat.pos_of_ne_zero ha0)).mpr ?_
+        rw [Nat.mul_comm b]
+        exact Nat.lt_of_lt_of_le hmod hle
+      have hne : BitVec.ofNat 256 (a * b) / BitVec.ofNat 256 a ≠ BitVec.ofNat 256 b := by
+        intro he
+        have := congrArg BitVec.toNat he
+        rw [hdivN, toNat_ofNat_of_lt hb] at this
+        exact Nat.ne_of_lt hlt this
+      exact hne hdiv
 
 end Lsc.Compiler

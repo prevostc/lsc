@@ -6,10 +6,9 @@ import Batteries.Data.List.Basic
 # `toYulFn_correct` / `runtimeBlock_correct` (call-free fragment)
 
 Stated against powdr `RunCommitted` so a Yul `revert` rolls back storage/logs, matching
-`Tx`'s `Except.error`. Proof is S1 work; this file is not imported from `Lsc.lean` or
-`Checks.lean`.
-
--- TODO(S1): proof
+`Tx`'s `Except.error`. S1 (call-free fragment) is proved in `Proof/Core.lean` and
+`Proof/Dispatch.lean`; this file keeps the unrestricted S2 statements (`sorry`) and is
+imported by the proof modules.
 -/
 
 namespace Lsc.Compiler
@@ -26,7 +25,8 @@ def CtxWF (ctx : Ctx) : Prop :=
     ctx.blockNumber < wordBound ∧ self < wordBound
 
 /-- Context fields the Yul dialect exposes as `caller` / `callvalue` / `timestamp` /
-`number` / `address`, plus a non-static unhalted frame. -/
+`number` / `address`, plus a non-static unhalted frame. `calldata.length < 2^256` is an
+EVM well-formedness fact: it makes `calldatasize` agree with `List.length`. -/
 def ctxRel (ctx : Ctx) (st : EvmState) : Prop :=
   st.env.caller = BitVec.ofNat 256 ctx.sender ∧
   st.env.callvalue = BitVec.ofNat 256 ctx.value ∧
@@ -35,6 +35,7 @@ def ctxRel (ctx : Ctx) (st : EvmState) : Prop :=
   st.env.address = BitVec.ofNat 256 ctx.self ∧
   st.env.static = false ∧
   st.halted = none ∧
+  st.env.calldata.length < wordBound ∧
   CtxWF ctx
 
 /-- Every Core local is a word. -/
@@ -165,7 +166,10 @@ are defeq to the general theorem (`RetTy.unit.denote` unfolds with `f.ret`). -/
 /-- If `Tx.run (Core.denote … f) = .ok (v, w')`, a `RunCommitted` of `toYulFn c f` from a
 related state halts with `.ret` (or `stop` for unit) and ABI bytes of `v`, and the
 final observed state is related to `w'`. If it reverts with `e`, the run halts with
-`.revert` and the Panic/custom-error bytes, observed state related to the pre-world `w`. -/
+`.revert` and the Panic/custom-error bytes, observed state related to the pre-world `w`.
+
+S1 (call-free) is `toYulFn_correct_callFree` in `Proof/Core.lean` (import cycle: this
+file is imported by the proof modules). -/
 theorem toYulFn_correct {S X E ε : Type} (c : ContractDef) (Γ : ContractSchema S X E ε)
     (hΓ : Γ.st.Lawful c.fields) (κ : List UInt8 → U256) (hκ : KeccakSep c κ)
     (f : FnDef) (hf : f.kind ≠ .constructor)
@@ -173,11 +177,13 @@ theorem toYulFn_correct {S X E ε : Type} (c : ContractDef) (Γ : ContractSchema
     (ctx : Ctx) (w : World S X E) (st0 : EvmState)
     (hctx : ctxRel ctx st0) (hR : R c Γ κ w st0) :
     ToYulFnCorrect c Γ κ f yul ctx w st0 := by
-  -- TODO(S1): proof
+  -- TODO(S2): letCall
   sorry
 
 /-- Dispatcher: a unique selected entrypoint agrees with `toYulFn_correct`; otherwise the
-run reverts with empty data and the pre-world relation. -/
+run reverts with empty data and the pre-world relation.
+
+S1 (call-free) is `runtimeBlock_correct_callFree` in `Proof/Dispatch.lean`. -/
 theorem runtimeBlock_correct {S X E ε : Type} (c : ContractDef) (Γ : ContractSchema S X E ε)
     (hΓ : Γ.st.Lawful c.fields) (κ : List UInt8 → U256) (hκ : KeccakSep c κ)
     (yul : YBlock) (hyul : runtimeBlock c = some yul)
@@ -193,7 +199,7 @@ theorem runtimeBlock_correct {S X E ε : Type} (c : ContractDef) (Γ : ContractS
         | .error e =>
           ∃ bytes, stObs.halted = some (.revert, bytes) ∧
             haltError c Γ e bytes ∧ R c Γ κ w stObs := by
-  -- TODO(S1): proof
+  -- TODO(S2): letCall
   sorry
 
 end Lsc.Compiler

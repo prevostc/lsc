@@ -19,21 +19,20 @@ bytecode    ──(4) EndToEnd glue──────  bytecode-level anti-explo
    talks about `Core.denote` (Nat). Amount programs therefore need a future `toNat`/`ofNat`
    agreement lemma between `denoteAWord`/`denoteAUnit` and `Core.denote` before the bytecode
    link is as tight as for `Nat` programs.
-2. **Core → Yul.** Two theorems in `Lsc/Compiler/Correctness.lean` (`sorry`, not imported by
-   `Lsc.lean`): `toYulFn_correct` (one runtime entrypoint, `V' = []`) and
-   `runtimeBlock_correct` (dispatcher). Hypotheses: `Γ.st.Lawful c.fields` (nine update equations,
-   generated as `C.schema_lawful`), `KeccakSep c κ`, `ctxRel` (`static = false`, `halted = none`,
-   `CtxWF`), `R` including `WorldWF` and `logsRel` via `List.Forall₂` with `Γ.ev.build` /
-   `abiBytes` witnesses. Args are `decodeArgs f st0.env.calldata` (no `calldataRel`). The
-   `letCall` case (S2) still quantifies existentially over the fault oracle. Status:
-   **M2a proved** for every Counter runtime entrypoint (`Lsc.Compiler.counter_correct`, and the
-   named `counter_increment_correct` / `counter_incrementBy_correct` /
-   `counter_decrement_correct` / `counter_get_correct`; axioms `propext` / `Classical.choice` /
-   `Quot.sound`) via `core_sim` on `M1Frag` (`load`, `addChecked`, `subChecked`, `Op.pure`,
-   `store`, one-word `emit`, 0-arg `require` with `eq`/`ne`, `letOp`/`seq`/`stmtTail`/`letPure`
-   id / `ite` / `opTail` word `ret`). Params `n ≤ 1` with `calldataload`. General
-   `toYulFn_correct` / dispatcher remain `sorry`. `ctxRel` does not bound `calldata.length`, so
-   the general `runtimeBlock_correct` is not proved (Yul `calldatasize` wraps at `2^256`).
+2. **Core → Yul.** Two layers in `Lsc/Compiler/Correctness.lean` (`sorry`, not imported by
+   `Lsc.lean`) plus S1 proofs in `Lsc/Compiler/Proof/`:
+   - **S1 (call-free fragment, no `sorry`):** `toYulFn_correct_callFree` (`Proof/Core.lean`) and
+     `runtimeBlock_correct_callFree` (`Proof/Dispatch.lean`). Extra hypothesis `CallFree` (currently
+     an alias of `M1Frag`: the operators Counter and Token use — not every constructor except
+     `Op.call`/`Stmt.call`). `ctxRel` includes `calldata.length < 2^256` so `calldatasize` agrees
+     with `List.length`. `token_correct` / `counter_correct` instantiate the function theorem;
+     `token_dispatch_correct` / `counter_dispatch_correct` instantiate the dispatcher. Axioms
+     `propext` / `Classical.choice` / `Quot.sound`.
+   - **S2 (unrestricted):** `toYulFn_correct` / `runtimeBlock_correct` remain `sorry`
+     (`-- TODO(S2): letCall`). Hypotheses: `Γ.st.Lawful c.fields` (`C.schema_lawful`), `KeccakSep c κ`,
+     `ctxRel` (`static = false`, `halted = none`, `CtxWF`, calldata bound), `R` including `WorldWF`
+     and `logsRel`. Args are `decodeArgs f st0.env.calldata`. The `letCall` case still quantifies
+     existentially over the fault oracle.
    Emitter: temp-free nested Yul, gated by `coreWF` / `Nodup`. Tested for Counter and Token by
    `Lsc/Compiler/YulTests.lean`.
 3. **Yul → bytecode.** powdr `YulEvmCompiler.compileObject_correct`, axioms exactly

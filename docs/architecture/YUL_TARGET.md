@@ -41,7 +41,7 @@ Decisions for `Lsc/Compiler` fixed by the study of `yul-semantics`, `evm_semanti
 
 - de Bruijn local `i` → `let v_i`; `letOp`/`letPure` → `let`; `seq` → sequence.
 - Scalar field `f` → slot `f`; `loadMap f k` → `mstore(0,k) mstore(32,f) sload(keccak256(0,64))`.
-  `map2` nests, but `keccak256(0,64)` reads `[0,64)`, so the inner hash is written to `[32]`
+  `map2` nests, but `keccak256(0,64)` reads `[0,64)` and **touches memory**, so the inner hash is written to `[32]`
   *before* `mstore(0, k₂)` (`mstore(32, keccak256(0,64)); mstore(0, k₂); sload(keccak256(0,64))`).
   Ctx reads → `caller/callvalue/timestamp/number/address`.
 - Checked arithmetic → guard + `revert` with `Panic(uint256)` selector and code `0x11`/`0x12`;

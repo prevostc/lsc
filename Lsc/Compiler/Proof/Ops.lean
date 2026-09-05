@@ -14,20 +14,18 @@ open YulSemantics
 open YulSemantics.EVM
 
 def M1Op : Lsc.Op → Prop
-  | .load _ => True
-  | .addChecked _ _ => True
-  | .subChecked _ _ => True
-  | .pure _ => True
+  | .load _ | .loadMap _ _ | .loadMap2 _ _ _ | .sender => True
+  | .addChecked _ _ | .subChecked _ _ | .pure _ => True
   | _ => False
 
 def M1Cond : Lsc.Cond → Prop
-  | .eq _ _ | .ne _ _ => True
-  | _ => False
+  | _ => True
 
 def M1Stmt : Lsc.Stmt → Prop
-  | .store _ _ => True
-  | .emit _ args => args.length = 1
+  | .store _ _ | .storeMap _ _ _ | .storeMap2 _ _ _ _ => True
+  | .emit _ args => args.length = 1 ∨ args.length = 3
   | .require c _ args => M1Cond c ∧ args.length = 0
+  | .revert _ args => args.length = 0
   | _ => False
 
 theorem memOnly_mstore (st : EvmState) (p v : U256) :

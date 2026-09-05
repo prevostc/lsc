@@ -37,9 +37,9 @@ def MemOnly (st st' : EvmState) : Prop :=
 
 theorem ctxRel_memOnly {ctx st st'} (h : ctxRel ctx st) (hm : MemOnly st st') :
     ctxRel ctx st' := by
-  rcases h with ⟨h1, h2, h3, h4, h5, h6, h7, hwf⟩
-  rcases hm with ⟨_, _, hc, hv, ht, hn, ha, hs, _, _, hh⟩
-  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, hwf⟩
+  rcases h with ⟨h1, h2, h3, h4, h5, h6, h7, hcd, hwf⟩
+  rcases hm with ⟨_, _, hc, hv, ht, hn, ha, hs, _, hcall, hh⟩
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, hwf⟩
   · rw [hc, h1]
   · rw [hv, h2]
   · rw [ht, h3]
@@ -47,6 +47,7 @@ theorem ctxRel_memOnly {ctx st st'} (h : ctxRel ctx st) (hm : MemOnly st st') :
   · rw [ha, h5]
   · rw [hs, h6]
   · rw [hh, h7]
+  · rw [hcall]; exact hcd
 
 theorem logsRel_memOnly {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {w : World S X E} {st st'} (h : logsRel c Γ w st) (hm : MemOnly st st') :
@@ -72,12 +73,17 @@ theorem Inv_memOnly {S X E ε} {Γ : ContractSchema S X E ε} {c κ ctx w env V 
   ⟨h.venv, h.wf, R_memOnly h.rel hm, ctxRel_memOnly h.ctxr hm⟩
 
 theorem ctxRel_static {ctx st} (h : ctxRel ctx st) : st.env.static = false := by
-  rcases h with ⟨_, _, _, _, _, hs, _, _⟩
+  rcases h with ⟨_, _, _, _, _, hs, _, _, _⟩
   exact hs
 
 theorem ctxRel_halted {ctx st} (h : ctxRel ctx st) : st.halted = none := by
-  rcases h with ⟨_, _, _, _, _, _, hh, _⟩
+  rcases h with ⟨_, _, _, _, _, _, hh, _, _⟩
   exact hh
+
+theorem ctxRel_calldata_lt {ctx st} (h : ctxRel ctx st) :
+    st.env.calldata.length < wordBound := by
+  rcases h with ⟨_, _, _, _, _, _, _, hcd, _⟩
+  exact hcd
 
 theorem atom_eval_lt {env a} (hwf : EnvWF env) (ha : atomWF a = true) :
     a.eval env < wordBound := by
@@ -209,22 +215,29 @@ theorem ctxRel_sstore {ctx st} (h : ctxRel ctx st) (k v : U256) :
         storage := upd st.storage k v
         env := { st.env with
           storageOf := updAccount st.env.storageOf st.env.address k v } } := by
-  rcases h with ⟨h1, h2, h3, h4, h5, hs, hh, hwf⟩
-  exact ⟨h1, h2, h3, h4, h5, hs, hh, hwf⟩
+  rcases h with ⟨h1, h2, h3, h4, h5, hs, hh, hcd, hwf⟩
+  exact ⟨h1, h2, h3, h4, h5, hs, hh, hcd, hwf⟩
 
 theorem ctxRel_touch {ctx st} (h : ctxRel ctx st) (p n : Nat) :
     ctxRel ctx (touchMemory st p n) := by
-  rcases h with ⟨h1, h2, h3, h4, h5, hs, hh, hwf⟩
-  exact ⟨h1, h2, h3, h4, h5, hs, hh, hwf⟩
+  rcases h with ⟨h1, h2, h3, h4, h5, hs, hh, hcd, hwf⟩
+  exact ⟨h1, h2, h3, h4, h5, hs, hh, hcd, hwf⟩
 
 theorem ctxRel_appendLog {ctx st} (h : ctxRel ctx st) (topics : List U256) (p n : U256) :
     ctxRel ctx (appendLog st topics p n) := by
-  rcases h with ⟨h1, h2, h3, h4, h5, hs, hh, hwf⟩
+  rcases h with ⟨h1, h2, h3, h4, h5, hs, hh, hcd, hwf⟩
   simp [appendLog, touchMemory]
-  exact ⟨h1, h2, h3, h4, h5, hs, hh, hwf⟩
+  exact ⟨h1, h2, h3, h4, h5, hs, hh, hcd, hwf⟩
 
 theorem memOnly_touch (st : EvmState) (p n : Nat) : MemOnly st (touchMemory st p n) := by
   simp [MemOnly, touchMemory]
+
+theorem MemOnly.trans {st1 st2 st3} (h12 : MemOnly st1 st2) (h23 : MemOnly st2 st3) :
+    MemOnly st1 st3 := by
+  rcases h12 with ⟨a, b, c, d, e, f, g, h, i, j, k⟩
+  rcases h23 with ⟨a', b', c', d', e', f', g', h', i', j', k'⟩
+  exact ⟨a'.trans a, b'.trans b, c'.trans c, d'.trans d, e'.trans e, f'.trans f,
+    g'.trans g, h'.trans h, i'.trans i, j'.trans j, k'.trans k⟩
 
 theorem R_touch_halted {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ} {w : World S X E} {st : EvmState}

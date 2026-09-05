@@ -216,5 +216,28 @@ theorem customErrorBytes_nil (c : ContractDef) {err : Nat} {ed : ErrorDef}
 theorem abiBytes_singleton (n : Nat) : abiBytes [n] = wordBytes n := by
   simp [abiBytes]
 
+theorem readBytes_storeWord_pair (mem : Nat → UInt8) (k slot : Nat)
+    (hk : k < wordBound) (hs : slot < wordBound) :
+    readBytes
+      (storeWord (storeWord mem 0 (BitVec.ofNat 256 k)) 32 (BitVec.ofNat 256 slot))
+      0 64 = wordBytes k ++ wordBytes slot := by
+  have h64 : (64 : Nat) = 32 + 32 := rfl
+  rw [h64, readBytes_split, readBytes_storeWord_wordBytes (hn := hs)]
+  have h1 :
+      readBytes (storeWord (storeWord mem 0 (BitVec.ofNat 256 k)) 32 (BitVec.ofNat 256 slot))
+        0 32 = readBytes (storeWord mem 0 (BitVec.ofNat 256 k)) 0 32 := by
+    unfold readBytes
+    apply List.map_congr_left
+    intro i hi
+    have : i < 32 := List.mem_range.mp hi
+    exact storeWord_out _ _ _ _ (.inl (by omega))
+  rw [h1, readBytes_storeWord_wordBytes (hn := hk)]
+
+theorem wordBytes_u256 (v : U256) :
+    wordBytes v.toNat = (List.range 32).map (fun i => byteAt v (31 - i)) := by
+  have hv : v.toNat < wordBound := by simpa [wordBound] using v.isLt
+  rw [wordBytes_eq_byteAt hv]
+  have : BitVec.ofNat 256 v.toNat = v := BitVec.eq_of_toNat_eq (toNat_ofNat_of_lt hv)
+  simp [this]
 
 end Lsc.Compiler

@@ -84,7 +84,7 @@ theorem counter_increment_correct
     (hctx : ctxRel ctx st0)
     (hR : R Counter.contract Counter.schema κ w st0) :
     ToYulFnCorrect Counter.contract Counter.schema κ incrementFn yul ctx w st0 :=
-  toYulFn_correct_m1 (S := Counter.Storage) (X := Unit) (E := Counter.Event)
+    toYulFn_correct_callFree (S := Counter.Storage) (X := Unit) (E := Counter.Event)
     (ε := Counter.Error)
     Counter.contract Counter.schema Counter.schema_lawful κ hκ
     incrementFn (by simp [incrementFn]) increment_m1 counter_fields_lt
@@ -97,7 +97,7 @@ theorem counter_incrementBy_correct
     (hctx : ctxRel ctx st0)
     (hR : R Counter.contract Counter.schema κ w st0) :
     ToYulFnCorrect Counter.contract Counter.schema κ incrementByFn yul ctx w st0 :=
-  toYulFn_correct_m1 (S := Counter.Storage) (X := Unit) (E := Counter.Event)
+    toYulFn_correct_callFree (S := Counter.Storage) (X := Unit) (E := Counter.Event)
     (ε := Counter.Error)
     Counter.contract Counter.schema Counter.schema_lawful κ hκ
     incrementByFn (by simp [incrementByFn]) incrementBy_m1 counter_fields_lt
@@ -110,7 +110,7 @@ theorem counter_decrement_correct
     (hctx : ctxRel ctx st0)
     (hR : R Counter.contract Counter.schema κ w st0) :
     ToYulFnCorrect Counter.contract Counter.schema κ decrementFn yul ctx w st0 :=
-  toYulFn_correct_m1 (S := Counter.Storage) (X := Unit) (E := Counter.Event)
+    toYulFn_correct_callFree (S := Counter.Storage) (X := Unit) (E := Counter.Event)
     (ε := Counter.Error)
     Counter.contract Counter.schema Counter.schema_lawful κ hκ
     decrementFn (by simp [decrementFn]) decrement_m1 counter_fields_lt
@@ -123,7 +123,7 @@ theorem counter_get_correct
     (hctx : ctxRel ctx st0)
     (hR : R Counter.contract Counter.schema κ w st0) :
     ToYulFnCorrect Counter.contract Counter.schema κ getFn yul ctx w st0 :=
-  toYulFn_correct_m1 (S := Counter.Storage) (X := Unit) (E := Counter.Event)
+    toYulFn_correct_callFree (S := Counter.Storage) (X := Unit) (E := Counter.Event)
     (ε := Counter.Error)
     Counter.contract Counter.schema Counter.schema_lawful κ hκ
     getFn (by simp [getFn]) get_m1 counter_fields_lt
@@ -161,7 +161,7 @@ theorem counter_correct
     (hctx : ctxRel ctx st0)
     (hR : R Counter.contract Counter.schema κ w st0) :
     ToYulFnCorrect Counter.contract Counter.schema κ f yul ctx w st0 :=
-  toYulFn_correct_m1 (S := Counter.Storage) (X := Unit) (E := Counter.Event)
+    toYulFn_correct_callFree (S := Counter.Storage) (X := Unit) (E := Counter.Event)
     (ε := Counter.Error)
     Counter.contract Counter.schema Counter.schema_lawful κ hκ
     f (by

@@ -5,6 +5,8 @@ import Lsc.Examples.TokenSecurity
 import Lsc.Examples.VaultSecurity
 import Lsc.Security.Wealth
 import Lsc.Compiler.Proof.Counter
+import Lsc.Compiler.Proof.Token
+import Lsc.Compiler.Proof.Dispatch
 
 /-!
 # Axiom footprint checks
@@ -52,3 +54,18 @@ axioms. `#guard_msgs` turns a widened footprint into a build error (see
 
 /-- info: 'Lsc.Compiler.counter_correct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms Lsc.Compiler.counter_correct
+
+/-- info: 'Lsc.Compiler.token_correct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms Lsc.Compiler.token_correct
+
+/-- info: 'Lsc.Compiler.toYulFn_correct_callFree' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms Lsc.Compiler.toYulFn_correct_callFree
+
+/-- info: 'Lsc.Compiler.runtimeBlock_correct_callFree' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms Lsc.Compiler.runtimeBlock_correct_callFree
+
+/-- info: 'Lsc.Compiler.counter_dispatch_correct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms Lsc.Compiler.counter_dispatch_correct
+
+/-- info: 'Lsc.Compiler.token_dispatch_correct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms Lsc.Compiler.token_dispatch_correct

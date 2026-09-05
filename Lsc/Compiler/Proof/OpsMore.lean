@@ -70,14 +70,37 @@ theorem b2w_decide_eq {a b : Nat} (ha : a < wordBound) (hb : b < wordBound) :
   · have : a = b := of_decide_eq_true h
     simp [this, b2w]
 
+theorem step_and (st : EvmState) (a b : U256) :
+    stepOp Op.and [a, b] st = some (.ok [a &&& b] st) := rfl
+
+theorem step_or (st : EvmState) (a b : U256) :
+    stepOp Op.or [a, b] st = some (.ok [a ||| b] st) := rfl
+
+theorem b2w_iszero (c : Bool) :
+    b2w (b2w c = 0) = b2w (!c) := by
+  cases c <;> simp [b2w]
+
+theorem b2w_decide_not (p : Prop) [Decidable p] :
+    b2w (!decide p) = b2w (decide (¬ p)) := by
+  by_cases h : p <;> simp [h, b2w]
+
+theorem b2w_decide_and (p q : Prop) [Decidable p] [Decidable q] :
+    b2w (decide p && decide q) = b2w (decide (p ∧ q)) := by
+  by_cases hp : p <;> by_cases hq : q <;> simp [hp, hq, b2w]
+
+theorem b2w_decide_or (p q : Prop) [Decidable p] [Decidable q] :
+    b2w (decide p || decide q) = b2w (decide (p ∨ q)) := by
+  by_cases hp : p <;> by_cases hq : q <;> simp [hp, hq, b2w]
+
 theorem eval_cond {env : List Nat} {V : VEnv evm} {st : EvmState} {c : Cond}
     (funs : FunEnv evm) (hV : V = toVEnv env) (henv : EnvWF env)
-    (hn : identsNodup env.length = true) (hC : M1Cond c)
+    (hn : identsNodup env.length = true) (_hC : M1Cond c)
     (hwf : condWF c = true) :
     EvalExpr evm funs V st (emitCond env.length c)
       (.vals [b2w (decide (c.denote env))] st) := by
-  match c with
-  | .eq a b =>
+  revert _hC hwf
+  induction c <;> intro _hC hwf
+  case eq a b =>
     have hwf' : atomWF a = true ∧ atomWF b = true := by
       simpa [condWF, Bool.and_eq_true] using hwf
     have ha := atom_eval_lt henv hwf'.1
@@ -91,7 +114,7 @@ theorem eval_cond {env : List Nat} {V : VEnv evm} {st : EvmState} {c : Cond}
     rw [b2w_decide_eq ha hb] at heq
     simp only [emitCond, Cond.denote, Cond.instDecidable]
     exact heq
-  | .ne a b =>
+  case ne a b =>
     have hwf' : atomWF a = true ∧ atomWF b = true := by
       simpa [condWF, Bool.and_eq_true] using hwf
     have ha := atom_eval_lt henv hwf'.1
@@ -108,26 +131,88 @@ theorem eval_cond {env : List Nat} {V : VEnv evm} {st : EvmState} {c : Cond}
           (bop Op.iszero [bop Op.eq [atomE env.length a, atomE env.length b]])
           (.vals [b2w (b2w (decide (a.eval env = b.eval env)) = 0)] st) :=
       Step.builtinOk (Step.argsCons Step.argsNil heq) (step_iszero _ _)
-    have hbool :
-        b2w (b2w (decide (a.eval env = b.eval env)) = 0) =
-          b2w (!decide (a.eval env = b.eval env)) := by
-      cases h : decide (a.eval env = b.eval env) <;> simp [b2w, h]
-    rw [hbool] at hisz
+    rw [b2w_iszero, b2w_decide_not] at hisz
     simp only [emitCond]
-    have hdec : decide ((Cond.ne a b).denote env) = !decide (a.eval env = b.eval env) := by
-      by_cases h : a.eval env = b.eval env
-      · have hL : decide ((Cond.ne a b).denote env) = false := by
-          simp [Cond.denote, h]
-        have hR : decide (a.eval env = b.eval env) = true := decide_eq_true h
-        simp [hL, hR]
-      · have hL : decide ((Cond.ne a b).denote env) = true := by
-          simp [Cond.denote, h]
-        have hR : decide (a.eval env = b.eval env) = false := decide_eq_false h
-        simp [hL, hR]
-    rw [hdec]
     exact hisz
-  | .lt _ _ | .le _ _ | .and _ _ | .or _ _ | .not _ | .tt | .ff =>
-    exact (show False from hC).elim
+  case lt a b =>
+    have hwf' : atomWF a = true ∧ atomWF b = true := by
+      simpa [condWF, Bool.and_eq_true] using hwf
+    have ha := atom_eval_lt henv hwf'.1
+    have hb := atom_eval_lt henv hwf'.2
+    have hea := eval_atom funs (st := st) hV hn a
+    have heb := eval_atom funs (st := st) hV hn b
+    have hlt :
+        EvalExpr evm funs V st (bop Op.lt [atomE env.length a, atomE env.length b])
+          (.vals [b2w ((BitVec.ofNat 256 (a.eval env)).ult (BitVec.ofNat 256 (b.eval env)))] st) :=
+      Step.builtinOk (Step.argsCons (Step.argsCons Step.argsNil heb) hea) (step_lt _ _ _)
+    rw [ult_ofNat ha hb] at hlt
+    simp only [emitCond, Cond.denote, Cond.instDecidable]
+    exact hlt
+  case le a b =>
+    have hwf' : atomWF a = true ∧ atomWF b = true := by
+      simpa [condWF, Bool.and_eq_true] using hwf
+    have ha := atom_eval_lt henv hwf'.1
+    have hb := atom_eval_lt henv hwf'.2
+    have hea := eval_atom funs (st := st) hV hn a
+    have heb := eval_atom funs (st := st) hV hn b
+    have hlt :
+        EvalExpr evm funs V st (bop Op.lt [atomE env.length b, atomE env.length a])
+          (.vals [b2w ((BitVec.ofNat 256 (b.eval env)).ult (BitVec.ofNat 256 (a.eval env)))] st) :=
+      Step.builtinOk (Step.argsCons (Step.argsCons Step.argsNil hea) heb) (step_lt _ _ _)
+    rw [ult_ofNat hb ha] at hlt
+    have hisz :
+        EvalExpr evm funs V st
+          (bop Op.iszero [bop Op.lt [atomE env.length b, atomE env.length a]])
+          (.vals [b2w (b2w (decide (b.eval env < a.eval env)) = 0)] st) :=
+      Step.builtinOk (Step.argsCons Step.argsNil hlt) (step_iszero _ _)
+    rw [b2w_iszero] at hisz
+    simp only [emitCond, Cond.denote, Cond.instDecidable]
+    have hdec : (!decide (b.eval env < a.eval env)) = decide (a.eval env ≤ b.eval env) := by
+      by_cases h : b.eval env < a.eval env
+      · rw [decide_eq_true h, Bool.not_true, decide_eq_false (Nat.not_le.mpr h)]
+      · rw [decide_eq_false h, Bool.not_false, decide_eq_true (Nat.le_of_not_gt h)]
+    rw [hdec] at hisz
+    exact hisz
+  case and c d ihc ihd =>
+    have hwf' : condWF c = true ∧ condWF d = true := by
+      simpa [condWF, Bool.and_eq_true] using hwf
+    have hec := ihc trivial hwf'.1
+    have hed := ihd trivial hwf'.2
+    have hand :
+        EvalExpr evm funs V st (bop Op.and [emitCond env.length c, emitCond env.length d])
+          (.vals [b2w (decide (c.denote env)) &&& b2w (decide (d.denote env))] st) :=
+      Step.builtinOk (Step.argsCons (Step.argsCons Step.argsNil hed) hec) (step_and _ _ _)
+    rw [b2w_and, b2w_decide_and] at hand
+    simp only [emitCond, Cond.denote, Cond.instDecidable]
+    exact hand
+  case or c d ihc ihd =>
+    have hwf' : condWF c = true ∧ condWF d = true := by
+      simpa [condWF, Bool.and_eq_true] using hwf
+    have hec := ihc trivial hwf'.1
+    have hed := ihd trivial hwf'.2
+    have hor :
+        EvalExpr evm funs V st (bop Op.or [emitCond env.length c, emitCond env.length d])
+          (.vals [b2w (decide (c.denote env)) ||| b2w (decide (d.denote env))] st) :=
+      Step.builtinOk (Step.argsCons (Step.argsCons Step.argsNil hed) hec) (step_or _ _ _)
+    rw [b2w_or, b2w_decide_or] at hor
+    simp only [emitCond, Cond.denote, Cond.instDecidable]
+    exact hor
+  case not c ih =>
+    have hc := ih trivial (by simpa [condWF] using hwf)
+    have hisz :
+        EvalExpr evm funs V st (bop Op.iszero [emitCond env.length c])
+          (.vals [b2w (b2w (decide (c.denote env)) = 0)] st) :=
+      Step.builtinOk (Step.argsCons Step.argsNil hc) (step_iszero _ _)
+    rw [b2w_iszero, b2w_decide_not] at hisz
+    simp only [emitCond, Cond.denote, Cond.instDecidable]
+    exact hisz
+  case tt =>
+    simp only [emitCond, Cond.denote, Cond.instDecidable, decide_true, b2w]
+    exact Step.lit
+  case ff =>
+    simp only [emitCond, Cond.denote, Cond.instDecidable, decide_false, b2w]
+    exact Step.lit
+
 
 theorem eval_iszero_cond {env : List Nat} {V : VEnv evm} {st : EvmState} {c : Cond}
     (funs : FunEnv evm) (hV : V = toVEnv env) (henv : EnvWF env)
