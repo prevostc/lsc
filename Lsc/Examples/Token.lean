@@ -32,7 +32,7 @@ inductive Error
 abbrev M := Tx Storage Event Error
 
 /-- Deployment: the deployer owns the whole initial supply. -/
-def init (owner : Address) (supply : Nat) : M Unit := do
+def constructor (owner : Address) (supply : Nat) : M Unit := do
   write owner owner
   write totalSupply supply
   write balances[owner] supply
@@ -95,6 +95,6 @@ def totalSupply : M Nat := read totalSupply
 end Token
 
 lsc_schema Token
-lsc_reify Token.init Token.transfer Token.approve Token.transferFrom Token.mint Token.burn
+lsc_reify Token.constructor Token.transfer Token.approve Token.transferFrom Token.mint Token.burn
 lsc_reify Token.balanceOf Token.allowance Token.totalSupply
-lsc_contract Token init transfer approve transferFrom mint burn balanceOf allowance totalSupply
+lsc_contract Token constructor transfer approve transferFrom mint burn balanceOf allowance totalSupply

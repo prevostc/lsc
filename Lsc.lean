@@ -7,8 +7,16 @@ import Lsc.Tools.AbiJson
 import Lsc.Examples.Counter
 import Lsc.Examples.Token
 import Lsc.Examples.TokenProofs
+import Lsc.Examples.TokenSecurity
 import Lsc.Examples.Vault
 import Lsc.Examples.VaultProofs
+import Lsc.Compiler.Yul
+import Lsc.Compiler.YulExec
+import Lsc.Compiler.Bytecode
+import Lsc.Compiler.YulTests
+import Lsc.Security.Trace
+import Lsc.Security.Invariant
+import Lsc.Security.Wealth
 
 /-!
 # LSC — a provable DeFi language compiling to EVM

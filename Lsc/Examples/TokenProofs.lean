@@ -43,6 +43,22 @@ theorem totalSupply_returns_stored :
     Tx.run totalSupply ctx w = .ok (w.self.totalSupply, w) := by
   simp [totalSupply]
 
+theorem allowance_returns_stored (owner spender : Address) :
+    Tx.run (allowance owner spender) ctx w = .ok (w.self.allowances owner spender, w) := by
+  simp [allowance]
+
+/-! ### constructor -/
+
+/-- Storage after a successful `constructor`. -/
+def ctorPost (σ : Storage) (owner : Address) (supply : Nat) : Storage :=
+  Storage.mk owner supply (Function.update σ.balances owner supply) σ.allowances
+
+theorem ctor_ok (owner : Address) (supply : Nat) :
+    Tx.run (Token.constructor owner supply) ctx w =
+      .ok ((), World.mk (ctorPost w.self owner supply)
+        (w.log ++ [.Transfer 0 owner supply]) w.ext) := by
+  simp [Token.constructor, ctorPost]
+
 /-! ### transfer -/
 
 /-- Storage after a successful `transfer`. -/
@@ -121,6 +137,13 @@ theorem transfer_reverts_on_insufficient_balance (to : Address) (amount : Nat)
     Tx.run (transfer to amount) ctx w = .error (.user .InsufficientBalance) := by
   simp [transfer, Nat.not_le.mpr h]
 
+theorem transfer_reverts_on_overflow (to : Address) (amount : Nat)
+    (hsub : amount ≤ w.self.balances ctx.sender)
+    (hadd : wordBound ≤ debit w.self.balances ctx.sender amount to + amount) :
+    Tx.run (transfer to amount) ctx w = .error (.arith .overflow) := by
+  simp only [debit] at hadd
+  simp [transfer, hsub, Nat.not_lt.mpr hadd]
+
 /-! ### mint -/
 
 def mintPost (σ : Storage) (to : Address) (amount : Nat) : Storage :=
@@ -164,6 +187,13 @@ theorem mint_reverts_on_overflow (to : Address) (amount : Nat) (howner : ctx.sen
     (h : wordBound ≤ w.self.totalSupply + amount) :
     Tx.run (mint to amount) ctx w = .error (.arith .overflow) := by
   simp [mint, howner, Nat.not_lt.mpr h]
+
+theorem mint_reverts_on_balance_overflow (to : Address) (amount : Nat)
+    (howner : ctx.sender = w.self.owner)
+    (hsupply : w.self.totalSupply + amount < wordBound)
+    (h : wordBound ≤ w.self.balances to + amount) :
+    Tx.run (mint to amount) ctx w = .error (.arith .overflow) := by
+  simp [mint, howner, hsupply, Nat.not_lt.mpr h]
 
 /-! ### approve -/
 
@@ -274,6 +304,38 @@ theorem transferFrom_preserves_other_allowances (src to : Address) (amount : Nat
     · subst ho; simp [transferFromPost, Function.update_of_ne h]
     · simp [transferFromPost, Function.update_of_ne ho]
 
+theorem transferFrom_conserves (src to : Address) (amount : Nat) (hne : src ≠ to)
+    (hallow : amount ≤ w.self.allowances src ctx.sender)
+    (hsub : amount ≤ w.self.balances src)
+    (hadd : w.self.balances to + amount < wordBound) :
+    ∃ w', Tx.run (transferFrom src to amount) ctx w = .ok ((), w') ∧
+      w'.self.balances src + w'.self.balances to =
+        w.self.balances src + w.self.balances to := by
+  refine ⟨_, transferFrom_ok ctx w src to amount hallow hsub
+    (by simpa [debit_other _ hne.symm] using hadd), ?_⟩
+  simp [transferFromPost, credit_other _ hne, debit_other _ hne.symm]
+  omega
+
+theorem transferFrom_self_transfer_is_noop (src : Address) (amount : Nat)
+    (hallow : amount ≤ w.self.allowances src ctx.sender)
+    (hsub : amount ≤ w.self.balances src)
+    (hbound : w.self.balances src < wordBound) :
+    ∃ w', Tx.run (transferFrom src src amount) ctx w = .ok ((), w') ∧
+      w'.self.balances = w.self.balances := by
+  refine ⟨_, transferFrom_ok ctx w src src amount hallow hsub (by simp; omega), ?_⟩
+  funext a
+  by_cases h : a = src
+  · subst h; simp [transferFromPost]; omega
+  · simp [transferFromPost, credit_other _ h, debit_other _ h]
+
+theorem transferFrom_reverts_on_overflow (src to : Address) (amount : Nat)
+    (hallow : amount ≤ w.self.allowances src ctx.sender)
+    (hsub : amount ≤ w.self.balances src)
+    (hadd : wordBound ≤ debit w.self.balances src amount to + amount) :
+    Tx.run (transferFrom src to amount) ctx w = .error (.arith .overflow) := by
+  simp only [debit] at hadd
+  simp [transferFrom, hallow, hsub, Nat.not_lt.mpr hadd]
+
 /-! ### burn -/
 
 theorem burn_reverts_on_insufficient_balance (amount : Nat) (h : w.self.balances ctx.sender < amount) :
@@ -295,5 +357,16 @@ theorem burn_decreases_supply (amount : Nat)
       w'.self.totalSupply = w.self.totalSupply - amount ∧
       w'.self.balances ctx.sender = w.self.balances ctx.sender - amount :=
   ⟨_, burn_ok ctx w amount hsub hsupply, rfl, by simp [burnPost]⟩
+
+theorem burn_preserves_other_balances (amount : Nat) (a : Address) (ha : a ≠ ctx.sender)
+    (hsub : amount ≤ w.self.balances ctx.sender) (hsupply : amount ≤ w.self.totalSupply) :
+    ∃ w', Tx.run (burn amount) ctx w = .ok ((), w') ∧
+      w'.self.balances a = w.self.balances a :=
+  ⟨_, burn_ok ctx w amount hsub hsupply, by simp [burnPost, debit_other _ ha]⟩
+
+theorem burn_reverts_on_insufficient_supply (amount : Nat)
+    (hsub : amount ≤ w.self.balances ctx.sender) (hsupply : w.self.totalSupply < amount) :
+    Tx.run (burn amount) ctx w = .error (.arith .underflow) := by
+  simp [burn, hsub, Nat.not_le.mpr hsupply]
 
 end Token

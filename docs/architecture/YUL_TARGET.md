@@ -9,7 +9,7 @@ Decisions for `Lsc/Compiler` fixed by the study of `yul-semantics`, `evm_semanti
   resolved object run from `L.initState` (empty calldata/storage) to the compiled creation code.
   Object shape: `object C { code { datacopy(0, dataoffset("runtime"), datasize("runtime"))
   return(0, datasize("runtime")) } object "runtime" { code { dispatcher } } }`
-  (`YulSemantics.constructorCode`).
+  (`YulSemantics.EVM.constructorCode`, in `ObjectRun.lean`).
 - **Runtime calls**: `compile_correct` / `compile_runContract` (`Correctness.lean`,
   `ContractCorrectness.lean`) on the *resolved runtime block* from a custom `EvmState`
   (calldata, storage, `keccakOf`, caller, …). There is no `compileObject_runContract`.
@@ -45,8 +45,12 @@ Decisions for `Lsc/Compiler` fixed by the study of `yul-semantics`, `evm_semanti
   `mulDiv*` → overflow guard on the product then `div` (512-bit later).
 - `require c err args` → `if iszero(c) { <custom error ABI at 0x80> revert(0x80, 4+32n) }`.
 - `emit` → ABI-pack at `0x80`, `log1(0x80, 32n, topic0)`.
-- `ite` (two-armed, value-producing) → predeclared result variables + `switch c case 0 {…}
-  default {…}` (Yul `if` has no `else`).
+- `ite` → `switch c case 0 {…} default {…}` (Yul `if` has no `else`). Core's `ite` carries two
+  full tail continuations, so no result variables need to be joined.
+- Each Core step is emitted inside its own nested `{ … }` so temporaries die at the end of the
+  step. powdr's `compileExpr` returns `none` when a `DUP`/`SWAP` index reaches 16; Token was
+  rejected until this nesting was added. Parameters are bound as
+  `let v_i := calldataload(4 + 32 i)` (a `Run` starts with an empty `VEnv`).
 - `ret` → ABI-encode at `0x80`, `return(0x80, 32k)`; unit → `stop()`.
 - External ERC20 call → `call(<literal gas word>, tok, 0, in, n, out, 32)`; **never `gas()`**
   (powdr rejects it). Under the lock, `toYul_correct` constrains `ExternalCalls` to the

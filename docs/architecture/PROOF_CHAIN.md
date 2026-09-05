@@ -18,7 +18,13 @@ bytecode    ──(4) EndToEnd glue──────  bytecode-level anti-explo
    state by the layout relation `R`, `Core.denote c` and `YulSemantics.Run (toYul c)` agree on
    outcome (return data, revert data, storage under `R`, logs); external calls are simulated under
    `ExternalsRealized` and "responses follow the interface model". Status: **incomplete** (S1
-   for the call-free fragment, S2 for `letCall`).
+   for the call-free fragment, S2 for `letCall`). Current state: `Lsc/Compiler/Yul.lean` emits
+   the call-free fragment; `Lsc/Compiler/Correctness.lean` states `toYul_correct` for one
+   `FnDef` (`sorry`, not imported by `Lsc.lean`). The statement is **tested** for Counter and
+   Token by the differential harness in `Lsc/Compiler/YulTests.lean` (powdr's Yul interpreter vs
+   `Tx.run`; compiled by powdr: Counter 480/494 bytes, Token 1650/1742). Known weaknesses of the
+   stated theorem: `R` relates logs only by length and address (event data not yet related), and
+   the dispatcher (`runtimeBlock`: selector → `toYulFn`, calldata decoding) has no theorem yet.
 3. **Yul → bytecode.** powdr `YulEvmCompiler.compileObject_correct`, axioms exactly
    `propext`, `Classical.choice`, `Quot.sound`. Status: **proved** (external, pinned).
 4. **Glue.** Generic theorem: a `Security` result about `Tx.run` traces implies the same statement

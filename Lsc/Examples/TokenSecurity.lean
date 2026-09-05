@@ -1,0 +1,713 @@
+import Mathlib.Tactic.SplitIfs
+import Mathlib.Algebra.BigOperators.Group.Finset.Basic
+import Lsc.Security.Wealth
+import Lsc.Examples.TokenProofs
+
+open Lsc Lsc.Security Token
+
+namespace Token
+
+/-! `constructor` is excluded: it is a constructor, not a live entrypoint. No pause. -/
+
+inductive Fn where
+  | transfer | approve | transferFrom | mint | burn
+  | balanceOf | allowance | totalSupply
+  deriving DecidableEq
+
+/-- Dispatch table from the finite `Fn` inductive to Token's `Tx` bodies. -/
+@[reducible] def entry : Fn → Security.Entry Storage Event Error
+  | .transfer => ⟨Address × Nat, Unit, fun p => transfer p.1 p.2⟩
+  | .approve => ⟨Address × Nat, Unit, fun p => approve p.1 p.2⟩
+  | .transferFrom => ⟨Address × Address × Nat, Unit, fun p => transferFrom p.1 p.2.1 p.2.2⟩
+  | .mint => ⟨Address × Nat, Unit, fun p => mint p.1 p.2⟩
+  | .burn => ⟨Nat, Unit, burn⟩
+  | .balanceOf => ⟨Address, Nat, balanceOf⟩
+  | .allowance => ⟨Address × Address, Nat, fun p => allowance p.1 p.2⟩
+  | .totalSupply => ⟨Unit, Nat, fun _ => Token.totalSupply⟩
+
+/-- Token as a security `Spec` (no constructor in the trace alphabet). -/
+@[reducible] def spec : Spec Storage Event Error where
+  Fn := Fn
+  entry := entry
+
+/-- `claim a` is `a`'s ERC-20 balance. -/
+def claim (a : Address) (s : Storage) : Nat := s.balances a
+
+/-- Tight permission: mint/approve/views never decrease `claim`, so `Auth` is false.
+`transferFrom` is allowance-aware so reverting spam still satisfies `NoAuthAlong`. -/
+def Auth (a : Address) (c : Call spec) (s : Storage) : Prop :=
+  match c.fn, c.args with
+  | .transfer, _ => c.sender = a
+  | .burn, _ => c.sender = a
+  | .transferFrom, (src, _, amount) => src = a ∧ amount ≤ s.allowances src c.sender
+  | _, _ => False
+
+/-- Mint is the only inflow; it is `0` on revert. -/
+def inflow (c : Call spec) (w : World Storage Event) : Nat :=
+  match c.fn, c.args with
+  | .mint, (dst, amt) =>
+    match Tx.run (mint dst amt) c.toCtx w with
+    | .ok _ => amt
+    | .error _ => 0
+  | _, _ => 0
+
+/-- Token holdings are the recorded `totalSupply`. -/
+def holdings (w : World Storage Event) : Nat := w.self.totalSupply
+
+/-- Finite support is a ghost: not stored. Equivalent to `Finsupp.support` without changing `Mapping`. -/
+def Inv (s : Storage) : Prop :=
+  ∃ H : Finset Address,
+    (∀ a, a ∉ H → s.balances a = 0) ∧
+    H.sum (fun a => s.balances a) = s.totalSupply
+
+theorem inv_solvent (w : World Storage Event) (h : Inv w.self) :
+    Solvent claim holdings w := by
+  obtain ⟨H, h0, hs⟩ := h
+  exact ⟨H, h0, hs.le⟩
+
+/-! ### `exec` unfolding -/
+
+@[simp] lemma exec_transfer (dst : Address) (n : Nat) :
+    spec.exec .transfer (dst, n) = transfer dst n := rfl
+@[simp] lemma exec_approve (spender : Address) (n : Nat) :
+    spec.exec .approve (spender, n) = approve spender n := rfl
+@[simp] lemma exec_transferFrom (src dst : Address) (n : Nat) :
+    spec.exec .transferFrom (src, dst, n) = transferFrom src dst n := rfl
+@[simp] lemma exec_mint (dst : Address) (n : Nat) :
+    spec.exec .mint (dst, n) = mint dst n := rfl
+@[simp] lemma exec_burn (n : Nat) :
+    spec.exec .burn n = burn n := rfl
+@[simp] lemma exec_balanceOf (who : Address) :
+    spec.exec .balanceOf who = balanceOf who := rfl
+@[simp] lemma exec_allowance (o s : Address) :
+    spec.exec .allowance (o, s) = allowance o s := rfl
+@[simp] lemma exec_totalSupply (u : Unit) :
+    spec.exec .totalSupply u = Token.totalSupply := by cases u; rfl
+
+/-! ### Auth reductions -/
+
+lemma Auth_transfer (a : Address) (ctx : Ctx) (dst : Address) (n : Nat) (s : Storage) :
+    Auth a (Call.ofCtx ctx .transfer (dst, n)) s ↔ ctx.sender = a :=
+  Iff.rfl
+
+lemma Auth_burn (a : Address) (ctx : Ctx) (n : Nat) (s : Storage) :
+    Auth a (Call.ofCtx ctx .burn n) s ↔ ctx.sender = a :=
+  Iff.rfl
+
+lemma Auth_transferFrom (a : Address) (ctx : Ctx) (src dst : Address) (n : Nat) (s : Storage) :
+    Auth a (Call.ofCtx ctx .transferFrom (src, dst, n)) s ↔
+      src = a ∧ n ≤ s.allowances src ctx.sender :=
+  Iff.rfl
+
+/-! ### Sum helpers for `Inv` -/
+
+private theorem sum_debit (H : Finset Address) (bals : Address → Nat) {src : Address}
+    (hs : src ∈ H) {n : Nat} (hn : n ≤ bals src) :
+    H.sum (debit bals src n) + n = H.sum bals := by
+  unfold debit
+  have hupd := sum_update_mem H bals hs (bals src - n)
+  revert hn hupd
+  generalize hS' : H.sum (Function.update bals src (bals src - n)) = S'
+  generalize hS : H.sum bals = S
+  generalize hd : bals src = d
+  intro hn hupd
+  omega
+
+private theorem inv_of_transferPost (σ : Storage) (src dst : Address) (n : Nat)
+    (hInv : Inv σ) (hn : n ≤ σ.balances src) :
+    Inv (transferPost σ src dst n) := by
+  obtain ⟨H, h0, hsum⟩ := hInv
+  by_cases hsrc : src ∈ H
+  · by_cases hto : dst ∈ H
+    · refine ⟨H, ?_, ?_⟩
+      · intro a ha
+        have ha_to : a ≠ dst := by intro h; subst h; exact ha hto
+        have ha_src : a ≠ src := by intro h; subst h; exact ha hsrc
+        simp [transferPost, credit_other _ ha_to, debit_other _ ha_src]
+        exact h0 a ha
+      · have hs1 := sum_debit H σ.balances hsrc hn
+        have hsum' :
+            H.sum (Function.update (debit σ.balances src n) dst
+              (debit σ.balances src n dst + n)) =
+              H.sum (debit σ.balances src n) + n := by
+          have hcredit :=
+            sum_update_mem H (debit σ.balances src n) hto (debit σ.balances src n dst + n)
+          revert hcredit
+          generalize hS' : H.sum (Function.update (debit σ.balances src n) dst
+              (debit σ.balances src n dst + n)) = S'
+          generalize hSd : H.sum (debit σ.balances src n) = Sd
+          generalize hd : debit σ.balances src n dst = d
+          intro hcredit
+          omega
+        change (∑ a ∈ H, (transferPost σ src dst n).balances a) =
+          (transferPost σ src dst n).totalSupply
+        simp only [transferPost, credit]
+        exact (hsum'.trans hs1).trans hsum
+    · have hne : src ≠ dst := by intro h; subst h; exact hto hsrc
+      refine ⟨insert dst H, ?_, ?_⟩
+      · intro a ha
+        have hat : a ≠ dst := by
+          intro h; subst h; exact ha (Finset.mem_insert_self _ _)
+        have haH : a ∉ H := fun hH => ha (Finset.mem_insert_of_mem hH)
+        have ha_src : a ≠ src := by intro h; subst h; exact haH hsrc
+        simp [transferPost, credit_other _ hat, debit_other _ ha_src]
+        exact h0 a haH
+      · have hs1 := sum_debit H σ.balances hsrc hn
+        have hframe := sum_update_not_mem H (debit σ.balances src n) hto
+          (debit σ.balances src n dst + n)
+        have hb0 : σ.balances dst = 0 := h0 dst hto
+        have hdt : debit σ.balances src n dst = 0 := by
+          simp [debit, Function.update_of_ne hne.symm, hb0]
+        have hsum' :
+            (∑ a ∈ insert dst H, (transferPost σ src dst n).balances a) =
+              H.sum σ.balances := by
+          rw [Finset.sum_insert hto]
+          simp only [transferPost, credit, Function.update_self]
+          rw [hframe, hdt]
+          omega
+        change (∑ a ∈ insert dst H, (transferPost σ src dst n).balances a) =
+          (transferPost σ src dst n).totalSupply
+        simpa [transferPost] using hsum'.trans hsum
+  · have hb0 : σ.balances src = 0 := h0 src hsrc
+    have hn0 : n = 0 := Nat.eq_zero_of_le_zero (hn.trans_eq hb0)
+    subst hn0
+    have hbals : (transferPost σ src dst 0).balances = σ.balances := by
+      funext a
+      simp [transferPost, credit, debit, Nat.sub_zero, Function.update_eq_self]
+    refine ⟨H, fun a ha => ?_, ?_⟩
+    · rw [show (transferPost σ src dst 0).balances a = σ.balances a from
+        congrFun hbals a]
+      exact h0 a ha
+    · have hsum' : (∑ a ∈ H, (transferPost σ src dst 0).balances a) = H.sum σ.balances := by
+        apply Finset.sum_congr rfl
+        intro a _; rw [hbals]
+      simpa [transferPost] using hsum'.trans hsum
+
+private theorem inv_of_mintPost (σ : Storage) (dst : Address) (n : Nat) (hInv : Inv σ) :
+    Inv (mintPost σ dst n) := by
+  obtain ⟨H, h0, hsum⟩ := hInv
+  refine ⟨insert dst H, ?_, ?_⟩
+  · intro a ha
+    have hat : a ≠ dst := by
+      intro h; subst h; exact ha (Finset.mem_insert_self _ _)
+    have haH : a ∉ H := fun hH => ha (Finset.mem_insert_of_mem hH)
+    simp [mintPost, credit_other _ hat]
+    exact h0 a haH
+  · by_cases ht : dst ∈ H
+    · rw [Finset.insert_eq_of_mem ht]
+      have hcancel :
+          H.sum (Function.update σ.balances dst (σ.balances dst + n)) =
+            H.sum σ.balances + n := by
+        have hupd := sum_update_mem H σ.balances ht (σ.balances dst + n)
+        revert hupd
+        generalize hS' : H.sum (Function.update σ.balances dst (σ.balances dst + n)) = S'
+        generalize hS : H.sum σ.balances = S
+        generalize hd : σ.balances dst = d
+        intro hupd
+        omega
+      change (∑ a ∈ H, (mintPost σ dst n).balances a) = (mintPost σ dst n).totalSupply
+      simp only [mintPost, credit]
+      rw [hcancel, hsum]
+    · have hframe := sum_update_not_mem H σ.balances ht (σ.balances dst + n)
+      have hb0 : σ.balances dst = 0 := h0 dst ht
+      have hsum' :
+          (∑ a ∈ insert dst H, (mintPost σ dst n).balances a) =
+            H.sum σ.balances + n := by
+        rw [Finset.sum_insert ht]
+        simp only [mintPost, credit, Function.update_self]
+        rw [hframe, hb0]
+        omega
+      change (∑ a ∈ insert dst H, (mintPost σ dst n).balances a) =
+        (mintPost σ dst n).totalSupply
+      simpa [mintPost] using hsum'.trans (by rw [hsum])
+
+private theorem inv_of_burnPost (σ : Storage) (src : Address) (n : Nat)
+    (hInv : Inv σ) (hn : n ≤ σ.balances src) :
+    Inv (burnPost σ src n) := by
+  obtain ⟨H, h0, hsum⟩ := hInv
+  by_cases hs : src ∈ H
+  · refine ⟨H, ?_, ?_⟩
+    · intro a ha
+      have ha_src : a ≠ src := by intro h; subst h; exact ha hs
+      simp [burnPost, debit_other _ ha_src]
+      exact h0 a ha
+    · have hs1 := sum_debit H σ.balances hs hn
+      have hsumd : H.sum (debit σ.balances src n) = H.sum σ.balances - n := by
+        rw [← Nat.add_sub_cancel (H.sum (debit σ.balances src n)) n, hs1]
+      simp [burnPost, hsumd, hsum]
+  · have hb0 : σ.balances src = 0 := h0 src hs
+    have hn0 : n = 0 := Nat.eq_zero_of_le_zero (hn.trans_eq hb0)
+    subst hn0
+    refine ⟨H, ?_, ?_⟩
+    · intro a ha
+      simp [burnPost, debit, Function.update_eq_self, Nat.sub_zero]
+      exact h0 a ha
+    · simp [burnPost, debit, Function.update_eq_self, Nat.sub_zero, hsum]
+
+/-! ### (a) No unauthorized decrease -/
+
+theorem transfer_auth : NoUnauthorizedDecreaseFn spec claim Auth .transfer := by
+  intro ⟨dst, amount⟩ ctx w a hdec
+  rw [Auth_transfer]
+  by_cases hs : ctx.sender = a
+  · exact hs
+  · by_cases hsub : amount ≤ w.self.balances ctx.sender
+    · by_cases hadd : debit w.self.balances ctx.sender amount dst + amount < wordBound
+      · have hrun := transfer_ok ctx w dst amount hsub hadd
+        unfold worldAfter at hdec; rw [hrun] at hdec
+        simp [claim, transferPost] at hdec
+        by_cases ht : a = dst
+        · subst ht
+          simp [credit, debit, Function.update_of_ne (Ne.symm hs)] at hdec
+          omega
+        · simp [credit_other _ ht, debit_other _ (Ne.symm hs)] at hdec
+      · have hrun := transfer_reverts_on_overflow ctx w dst amount hsub (Nat.not_lt.mp hadd)
+        unfold worldAfter at hdec; rw [hrun] at hdec
+        exact (Nat.lt_irrefl _ hdec).elim
+    · have hrun := transfer_reverts_on_insufficient_balance ctx w dst amount (Nat.not_le.mp hsub)
+      unfold worldAfter at hdec; rw [hrun] at hdec
+      exact (Nat.lt_irrefl _ hdec).elim
+
+theorem transferFrom_auth : NoUnauthorizedDecreaseFn spec claim Auth .transferFrom := by
+  intro ⟨src, dst, amount⟩ ctx w a hdec
+  rw [Auth_transferFrom]
+  by_cases ha : src = a
+  · by_cases hallow : amount ≤ w.self.allowances src ctx.sender
+    · exact ⟨ha, hallow⟩
+    · have hrun := transferFrom_reverts_on_insufficient_allowance ctx w src dst amount
+        (Nat.not_le.mp hallow)
+      unfold worldAfter at hdec; rw [hrun] at hdec
+      exact (Nat.lt_irrefl _ hdec).elim
+  · by_cases hallow : amount ≤ w.self.allowances src ctx.sender
+    · by_cases hsub : amount ≤ w.self.balances src
+      · by_cases hadd : debit w.self.balances src amount dst + amount < wordBound
+        · have hrun := transferFrom_ok ctx w src dst amount hallow hsub hadd
+          unfold worldAfter at hdec; rw [hrun] at hdec
+          simp [claim, transferFromPost] at hdec
+          by_cases ht : a = dst
+          · subst ht
+            simp [credit, debit, Function.update_of_ne (Ne.symm ha)] at hdec
+            omega
+          · simp [credit_other _ ht, debit_other _ (Ne.symm ha)] at hdec
+        · have hrun := transferFrom_reverts_on_overflow ctx w src dst amount hallow hsub
+            (Nat.not_lt.mp hadd)
+          unfold worldAfter at hdec; rw [hrun] at hdec
+          exact (Nat.lt_irrefl _ hdec).elim
+      · have hrun := transferFrom_reverts_on_insufficient_balance ctx w src dst amount hallow
+          (Nat.not_le.mp hsub)
+        unfold worldAfter at hdec; rw [hrun] at hdec
+        exact (Nat.lt_irrefl _ hdec).elim
+    · have hrun := transferFrom_reverts_on_insufficient_allowance ctx w src dst amount
+        (Nat.not_le.mp hallow)
+      unfold worldAfter at hdec; rw [hrun] at hdec
+      exact (Nat.lt_irrefl _ hdec).elim
+
+theorem burn_auth : NoUnauthorizedDecreaseFn spec claim Auth .burn := by
+  intro amount ctx w a hdec
+  rw [Auth_burn]
+  by_cases hs : ctx.sender = a
+  · exact hs
+  · by_cases hsub : amount ≤ w.self.balances ctx.sender
+    · by_cases hsupply : amount ≤ w.self.totalSupply
+      · have hrun := burn_ok ctx w amount hsub hsupply
+        unfold worldAfter at hdec; rw [hrun] at hdec
+        simp [claim, burnPost, debit_other _ (Ne.symm hs)] at hdec
+      · have hrun := burn_reverts_on_insufficient_supply ctx w amount hsub
+          (Nat.not_le.mp hsupply)
+        unfold worldAfter at hdec; rw [hrun] at hdec
+        exact (Nat.lt_irrefl _ hdec).elim
+    · have hrun := burn_reverts_on_insufficient_balance ctx w amount (Nat.not_le.mp hsub)
+      unfold worldAfter at hdec; rw [hrun] at hdec
+      exact (Nat.lt_irrefl _ hdec).elim
+
+theorem mint_auth : NoUnauthorizedDecreaseFn spec claim Auth .mint := by
+  intro ⟨dst, amount⟩ ctx w a hdec
+  by_cases howner : ctx.sender = w.self.owner
+  · by_cases hsupply : w.self.totalSupply + amount < wordBound
+    · by_cases hadd : w.self.balances dst + amount < wordBound
+      · have hrun := mint_ok ctx w dst amount howner hsupply hadd
+        unfold worldAfter at hdec; rw [hrun] at hdec
+        simp [claim, mintPost] at hdec
+        by_cases ht : a = dst
+        · subst ht
+          simp [credit] at hdec
+          omega
+        · simp [credit_other _ ht] at hdec
+      · have hrun := mint_reverts_on_balance_overflow ctx w dst amount howner hsupply
+          (Nat.not_lt.mp hadd)
+        unfold worldAfter at hdec; rw [hrun] at hdec
+        exact (Nat.lt_irrefl _ hdec).elim
+    · have hrun := mint_reverts_on_overflow ctx w dst amount howner (Nat.not_lt.mp hsupply)
+      unfold worldAfter at hdec; rw [hrun] at hdec
+      exact (Nat.lt_irrefl _ hdec).elim
+  · have hrun := mint_reverts_for_non_owner ctx w dst amount howner
+    unfold worldAfter at hdec; rw [hrun] at hdec
+    exact (Nat.lt_irrefl _ hdec).elim
+
+theorem approve_auth : NoUnauthorizedDecreaseFn spec claim Auth .approve := by
+  intro ⟨spender, amount⟩ ctx w a hdec
+  have ⟨w', hrun, hb⟩ := approve_preserves_balances ctx w spender amount
+  unfold worldAfter at hdec; rw [hrun] at hdec
+  simp [claim, hb] at hdec
+
+theorem balanceOf_auth : NoUnauthorizedDecreaseFn spec claim Auth .balanceOf := by
+  intro who ctx w a hdec
+  unfold worldAfter at hdec
+  rw [balanceOf_returns_stored_balance ctx w who] at hdec
+  exact (Nat.lt_irrefl _ hdec).elim
+
+theorem allowance_auth : NoUnauthorizedDecreaseFn spec claim Auth .allowance := by
+  intro ⟨owner, spender⟩ ctx w a hdec
+  unfold worldAfter at hdec
+  rw [allowance_returns_stored ctx w owner spender] at hdec
+  exact (Nat.lt_irrefl _ hdec).elim
+
+theorem totalSupply_auth : NoUnauthorizedDecreaseFn spec claim Auth .totalSupply := by
+  intro u ctx w a hdec
+  unfold worldAfter at hdec
+  rw [totalSupply_returns_stored ctx w] at hdec
+  exact (Nat.lt_irrefl _ hdec).elim
+
+theorem token_no_unauth : NoUnauthorizedDecrease spec claim Auth :=
+  NoUnauthorizedDecrease.of_fns fun fn =>
+    match fn with
+    | .transfer => transfer_auth
+    | .transferFrom => transferFrom_auth
+    | .burn => burn_auth
+    | .mint => mint_auth
+    | .approve => approve_auth
+    | .balanceOf => balanceOf_auth
+    | .allowance => allowance_auth
+    | .totalSupply => totalSupply_auth
+
+theorem token_no_unauthorized_extraction
+    (tr : List (Call spec)) (w : World Storage Event) (a : Address)
+    (hA : NoAuthAlong Auth a tr w) :
+    claim a w.self ≤ claim a (run tr w).self :=
+  no_unauthorized_extraction token_no_unauth tr w a hA
+
+/-! ### (b) Conservation -/
+
+theorem transfer_conservesFn : ConservesFn spec claim inflow .transfer := by
+  intro ⟨dst, amount⟩ ctx w
+  refine ⟨({ctx.sender, dst} : Finset Address), ?frame, ?sum⟩
+  · intro a ha
+    have hst : a ≠ ctx.sender ∧ a ≠ dst := by
+      simpa [Finset.mem_insert, Finset.mem_singleton] using ha
+    by_cases hsub : amount ≤ w.self.balances ctx.sender
+    · by_cases hadd : debit w.self.balances ctx.sender amount dst + amount < wordBound
+      · have ⟨w', hrun, hb⟩ :=
+          transfer_preserves_other_balances ctx w dst amount a hst.1 hst.2 hsub hadd
+        unfold worldAfter; rw [hrun]; simp [claim, hb]
+      · have hrun := transfer_reverts_on_overflow ctx w dst amount hsub (Nat.not_lt.mp hadd)
+        unfold worldAfter; rw [hrun]
+    · have hrun := transfer_reverts_on_insufficient_balance ctx w dst amount (Nat.not_le.mp hsub)
+      unfold worldAfter; rw [hrun]
+  · by_cases hsub : amount ≤ w.self.balances ctx.sender
+    · by_cases hadd : debit w.self.balances ctx.sender amount dst + amount < wordBound
+      · by_cases hne : ctx.sender = dst
+        · subst hne
+          have hbound : w.self.balances ctx.sender < wordBound := by
+            simp [debit] at hadd
+            omega
+          have ⟨w', hrun, hb⟩ := transfer_self_transfer_is_noop ctx w amount hsub hbound
+          unfold worldAfter; rw [hrun]; simp [claim, hb, inflow, Call.ofCtx]
+        · have hne' : ctx.sender ≠ dst := hne
+          have hadd' : w.self.balances dst + amount < wordBound := by
+            simpa [debit_other _ hne'.symm] using hadd
+          have ⟨w', hrun, hcons⟩ := transfer_conserves ctx w dst amount hne' hsub hadd'
+          unfold worldAfter; rw [hrun]
+          rw [Finset.sum_pair hne', Finset.sum_pair hne']
+          simp [claim, inflow, Call.ofCtx]
+          exact le_of_eq hcons
+      · have hrun := transfer_reverts_on_overflow ctx w dst amount hsub (Nat.not_lt.mp hadd)
+        unfold worldAfter; rw [hrun]; simp [inflow, Call.ofCtx]
+    · have hrun := transfer_reverts_on_insufficient_balance ctx w dst amount (Nat.not_le.mp hsub)
+      unfold worldAfter; rw [hrun]; simp [inflow, Call.ofCtx]
+
+theorem transferFrom_conservesFn : ConservesFn spec claim inflow .transferFrom := by
+  intro ⟨src, dst, amount⟩ ctx w
+  refine ⟨({src, dst} : Finset Address), ?frame, ?sum⟩
+  · intro a ha
+    have hst : a ≠ src ∧ a ≠ dst := by
+      simpa [Finset.mem_insert, Finset.mem_singleton] using ha
+    by_cases hallow : amount ≤ w.self.allowances src ctx.sender
+    · by_cases hsub : amount ≤ w.self.balances src
+      · by_cases hadd : debit w.self.balances src amount dst + amount < wordBound
+        · have ⟨w', hrun, hb⟩ :=
+            transferFrom_preserves_other_balances ctx w src dst amount a hst.1 hst.2
+              hallow hsub hadd
+          unfold worldAfter; rw [hrun]; simp [claim, hb]
+        · have hrun := transferFrom_reverts_on_overflow ctx w src dst amount hallow hsub
+            (Nat.not_lt.mp hadd)
+          unfold worldAfter; rw [hrun]
+      · have hrun := transferFrom_reverts_on_insufficient_balance ctx w src dst amount hallow
+          (Nat.not_le.mp hsub)
+        unfold worldAfter; rw [hrun]
+    · have hrun := transferFrom_reverts_on_insufficient_allowance ctx w src dst amount
+        (Nat.not_le.mp hallow)
+      unfold worldAfter; rw [hrun]
+  · by_cases hallow : amount ≤ w.self.allowances src ctx.sender
+    · by_cases hsub : amount ≤ w.self.balances src
+      · by_cases hadd : debit w.self.balances src amount dst + amount < wordBound
+        · by_cases hne : src = dst
+          · subst hne
+            have hbound : w.self.balances src < wordBound := by
+              simp [debit] at hadd
+              omega
+            have ⟨w', hrun, hb⟩ :=
+              transferFrom_self_transfer_is_noop ctx w src amount hallow hsub hbound
+            unfold worldAfter; rw [hrun]; simp [claim, hb, inflow, Call.ofCtx]
+          · have hne' : src ≠ dst := hne
+            have hadd' : w.self.balances dst + amount < wordBound := by
+              simpa [debit_other _ hne'.symm] using hadd
+            have ⟨w', hrun, hcons⟩ :=
+              transferFrom_conserves ctx w src dst amount hne' hallow hsub hadd'
+            unfold worldAfter; rw [hrun]
+            rw [Finset.sum_pair hne', Finset.sum_pair hne']
+            simp [claim, inflow, Call.ofCtx]
+            exact le_of_eq hcons
+        · have hrun := transferFrom_reverts_on_overflow ctx w src dst amount hallow hsub
+            (Nat.not_lt.mp hadd)
+          unfold worldAfter; rw [hrun]; simp [inflow, Call.ofCtx]
+      · have hrun := transferFrom_reverts_on_insufficient_balance ctx w src dst amount hallow
+          (Nat.not_le.mp hsub)
+        unfold worldAfter; rw [hrun]; simp [inflow, Call.ofCtx]
+    · have hrun := transferFrom_reverts_on_insufficient_allowance ctx w src dst amount
+        (Nat.not_le.mp hallow)
+      unfold worldAfter; rw [hrun]; simp [inflow, Call.ofCtx]
+
+theorem mint_conservesFn : ConservesFn spec claim inflow .mint := by
+  intro ⟨dst, amount⟩ ctx w
+  refine ⟨({dst} : Finset Address), ?frame, ?sum⟩
+  · intro a ha
+    have hat : a ≠ dst := by simpa [Finset.mem_singleton] using ha
+    by_cases howner : ctx.sender = w.self.owner
+    · by_cases hsupply : w.self.totalSupply + amount < wordBound
+      · by_cases hadd : w.self.balances dst + amount < wordBound
+        · have ⟨w', hrun, hb⟩ :=
+            mint_preserves_other_balances ctx w dst amount a hat howner hsupply hadd
+          unfold worldAfter; rw [hrun]; simp [claim, hb]
+        · have hrun := mint_reverts_on_balance_overflow ctx w dst amount howner hsupply
+            (Nat.not_lt.mp hadd)
+          unfold worldAfter; rw [hrun]
+      · have hrun := mint_reverts_on_overflow ctx w dst amount howner (Nat.not_lt.mp hsupply)
+        unfold worldAfter; rw [hrun]
+    · have hrun := mint_reverts_for_non_owner ctx w dst amount howner
+      unfold worldAfter; rw [hrun]
+  · by_cases howner : ctx.sender = w.self.owner
+    · by_cases hsupply : w.self.totalSupply + amount < wordBound
+      · by_cases hadd : w.self.balances dst + amount < wordBound
+        · have hrun := mint_ok ctx w dst amount howner hsupply hadd
+          unfold worldAfter; rw [hrun]
+          simp [claim, mintPost, credit, Finset.sum_singleton, inflow, Call.ofCtx, Call.toCtx, hrun]
+        · have hrun := mint_reverts_on_balance_overflow ctx w dst amount howner hsupply
+            (Nat.not_lt.mp hadd)
+          unfold worldAfter; rw [hrun]; simp [inflow, Call.ofCtx]
+      · have hrun := mint_reverts_on_overflow ctx w dst amount howner (Nat.not_lt.mp hsupply)
+        unfold worldAfter; rw [hrun]; simp [inflow, Call.ofCtx]
+    · have hrun := mint_reverts_for_non_owner ctx w dst amount howner
+      unfold worldAfter; rw [hrun]; simp [inflow, Call.ofCtx]
+
+theorem burn_conservesFn : ConservesFn spec claim inflow .burn := by
+  intro amount ctx w
+  refine ⟨({ctx.sender} : Finset Address), ?frame, ?sum⟩
+  · intro a ha
+    have hs : a ≠ ctx.sender := by simpa [Finset.mem_singleton] using ha
+    by_cases hsub : amount ≤ w.self.balances ctx.sender
+    · by_cases hsupply : amount ≤ w.self.totalSupply
+      · have ⟨w', hrun, hb⟩ :=
+          burn_preserves_other_balances ctx w amount a hs hsub hsupply
+        unfold worldAfter; rw [hrun]; simp [claim, hb]
+      · have hrun := burn_reverts_on_insufficient_supply ctx w amount hsub
+          (Nat.not_le.mp hsupply)
+        unfold worldAfter; rw [hrun]
+    · have hrun := burn_reverts_on_insufficient_balance ctx w amount (Nat.not_le.mp hsub)
+      unfold worldAfter; rw [hrun]
+  · by_cases hsub : amount ≤ w.self.balances ctx.sender
+    · by_cases hsupply : amount ≤ w.self.totalSupply
+      · have hrun := burn_ok ctx w amount hsub hsupply
+        unfold worldAfter; rw [hrun]
+        simp [claim, burnPost, debit, Finset.sum_singleton, inflow, Call.ofCtx]
+      · have hrun := burn_reverts_on_insufficient_supply ctx w amount hsub
+          (Nat.not_le.mp hsupply)
+        unfold worldAfter; rw [hrun]; simp [inflow, Call.ofCtx]
+    · have hrun := burn_reverts_on_insufficient_balance ctx w amount (Nat.not_le.mp hsub)
+      unfold worldAfter; rw [hrun]; simp [inflow, Call.ofCtx]
+
+theorem approve_conservesFn : ConservesFn spec claim inflow .approve := by
+  intro ⟨spender, amount⟩ ctx w
+  refine ⟨∅, ?_, ?_⟩
+  · intro a _
+    have ⟨w', hrun, hb⟩ := approve_preserves_balances ctx w spender amount
+    unfold worldAfter; rw [hrun]; simp [claim, hb]
+  · have ⟨w', hrun, hb⟩ := approve_preserves_balances ctx w spender amount
+    unfold worldAfter; rw [hrun]; simp [claim, hb, inflow, Call.ofCtx]
+
+theorem balanceOf_conservesFn : ConservesFn spec claim inflow .balanceOf := by
+  intro who ctx w
+  refine ⟨∅, ?_, ?_⟩
+  · intro a _
+    unfold worldAfter
+    rw [balanceOf_returns_stored_balance ctx w who]
+  · unfold worldAfter
+    rw [balanceOf_returns_stored_balance ctx w who]
+    simp [claim, inflow, Call.ofCtx]
+
+theorem allowance_conservesFn : ConservesFn spec claim inflow .allowance := by
+  intro ⟨owner, spender⟩ ctx w
+  refine ⟨∅, ?_, ?_⟩
+  · intro a _
+    unfold worldAfter
+    rw [allowance_returns_stored ctx w owner spender]
+  · unfold worldAfter
+    rw [allowance_returns_stored ctx w owner spender]
+    simp [claim, inflow, Call.ofCtx]
+
+theorem totalSupply_conservesFn : ConservesFn spec claim inflow .totalSupply := by
+  intro u ctx w
+  refine ⟨∅, ?_, ?_⟩
+  · intro a _
+    unfold worldAfter
+    rw [totalSupply_returns_stored ctx w]
+  · unfold worldAfter
+    rw [totalSupply_returns_stored ctx w]
+    simp [claim, inflow, Call.ofCtx]
+
+theorem token_conservation : Conservation spec claim inflow :=
+  Conservation.of_fns fun fn =>
+    match fn with
+    | .transfer => transfer_conservesFn
+    | .transferFrom => transferFrom_conservesFn
+    | .burn => burn_conservesFn
+    | .mint => mint_conservesFn
+    | .approve => approve_conservesFn
+    | .balanceOf => balanceOf_conservesFn
+    | .allowance => allowance_conservesFn
+    | .totalSupply => totalSupply_conservesFn
+
+/-! ### (c) Invariant preservation -/
+
+theorem transfer_preserves_inv : PreservesInvFn spec Inv .transfer := by
+  intro ⟨dst, amount⟩ ctx w hInv
+  by_cases hsub : amount ≤ w.self.balances ctx.sender
+  · by_cases hadd : debit w.self.balances ctx.sender amount dst + amount < wordBound
+    · have hrun := transfer_ok ctx w dst amount hsub hadd
+      unfold worldAfter; rw [hrun]
+      exact inv_of_transferPost w.self ctx.sender dst amount hInv hsub
+    · have hrun := transfer_reverts_on_overflow ctx w dst amount hsub (Nat.not_lt.mp hadd)
+      unfold worldAfter; rw [hrun]
+      exact hInv
+  · have hrun := transfer_reverts_on_insufficient_balance ctx w dst amount (Nat.not_le.mp hsub)
+    unfold worldAfter; rw [hrun]
+    exact hInv
+
+theorem transferFrom_preserves_inv : PreservesInvFn spec Inv .transferFrom := by
+  intro ⟨src, dst, amount⟩ ctx w hInv
+  by_cases hallow : amount ≤ w.self.allowances src ctx.sender
+  · by_cases hsub : amount ≤ w.self.balances src
+    · by_cases hadd : debit w.self.balances src amount dst + amount < wordBound
+      · have hrun := transferFrom_ok ctx w src dst amount hallow hsub hadd
+        unfold worldAfter; rw [hrun]
+        exact inv_of_transferPost w.self src dst amount hInv hsub
+      · have hrun := transferFrom_reverts_on_overflow ctx w src dst amount hallow hsub
+          (Nat.not_lt.mp hadd)
+        unfold worldAfter; rw [hrun]
+        exact hInv
+    · have hrun := transferFrom_reverts_on_insufficient_balance ctx w src dst amount hallow
+        (Nat.not_le.mp hsub)
+      unfold worldAfter; rw [hrun]
+      exact hInv
+  · have hrun := transferFrom_reverts_on_insufficient_allowance ctx w src dst amount
+      (Nat.not_le.mp hallow)
+    unfold worldAfter; rw [hrun]
+    exact hInv
+
+theorem mint_preserves_inv : PreservesInvFn spec Inv .mint := by
+  intro ⟨dst, amount⟩ ctx w hInv
+  by_cases howner : ctx.sender = w.self.owner
+  · by_cases hsupply : w.self.totalSupply + amount < wordBound
+    · by_cases hadd : w.self.balances dst + amount < wordBound
+      · have hrun := mint_ok ctx w dst amount howner hsupply hadd
+        unfold worldAfter; rw [hrun]
+        exact inv_of_mintPost w.self dst amount hInv
+      · have hrun := mint_reverts_on_balance_overflow ctx w dst amount howner hsupply
+          (Nat.not_lt.mp hadd)
+        unfold worldAfter; rw [hrun]
+        exact hInv
+    · have hrun := mint_reverts_on_overflow ctx w dst amount howner (Nat.not_lt.mp hsupply)
+      unfold worldAfter; rw [hrun]
+      exact hInv
+  · have hrun := mint_reverts_for_non_owner ctx w dst amount howner
+    unfold worldAfter; rw [hrun]
+    exact hInv
+
+theorem burn_preserves_inv : PreservesInvFn spec Inv .burn := by
+  intro amount ctx w hInv
+  by_cases hsub : amount ≤ w.self.balances ctx.sender
+  · by_cases hsupply : amount ≤ w.self.totalSupply
+    · have hrun := burn_ok ctx w amount hsub hsupply
+      unfold worldAfter; rw [hrun]
+      exact inv_of_burnPost w.self ctx.sender amount hInv hsub
+    · have hrun := burn_reverts_on_insufficient_supply ctx w amount hsub (Nat.not_le.mp hsupply)
+      unfold worldAfter; rw [hrun]
+      exact hInv
+  · have hrun := burn_reverts_on_insufficient_balance ctx w amount (Nat.not_le.mp hsub)
+    unfold worldAfter; rw [hrun]
+    exact hInv
+
+theorem approve_preserves_inv : PreservesInvFn spec Inv .approve := by
+  intro ⟨spender, amount⟩ ctx w hInv
+  have hrun := approve_ok ctx w spender amount
+  unfold worldAfter; rw [hrun]
+  obtain ⟨H, h0, hsum⟩ := hInv
+  exact ⟨H, fun a ha => h0 a ha, hsum⟩
+
+theorem balanceOf_preserves_inv : PreservesInvFn spec Inv .balanceOf := by
+  intro who ctx w hInv
+  unfold worldAfter
+  rw [balanceOf_returns_stored_balance ctx w who]
+  exact hInv
+
+theorem allowance_preserves_inv : PreservesInvFn spec Inv .allowance := by
+  intro ⟨owner, spender⟩ ctx w hInv
+  unfold worldAfter
+  rw [allowance_returns_stored ctx w owner spender]
+  exact hInv
+
+theorem totalSupply_preserves_inv : PreservesInvFn spec Inv .totalSupply := by
+  intro u ctx w hInv
+  unfold worldAfter
+  rw [totalSupply_returns_stored ctx w]
+  exact hInv
+
+theorem token_preserves_inv : PreservesInv spec Inv :=
+  PreservesInv.of_fns fun fn =>
+    match fn with
+    | .transfer => transfer_preserves_inv
+    | .transferFrom => transferFrom_preserves_inv
+    | .burn => burn_preserves_inv
+    | .mint => mint_preserves_inv
+    | .approve => approve_preserves_inv
+    | .balanceOf => balanceOf_preserves_inv
+    | .allowance => allowance_preserves_inv
+    | .totalSupply => totalSupply_preserves_inv
+
+/-- Deployment from empty balances establishes `Inv`. -/
+theorem «constructor_inv» (owner : Address) (supply : Nat) (ctx : Ctx)
+    (w : World Storage Event)
+    (hempty : ∀ a, w.self.balances a = 0) (_hbound : supply < wordBound) :
+    Inv (worldAfter (Token.constructor owner supply) ctx w).self := by
+  have hrun := ctor_ok ctx w owner supply
+  unfold worldAfter; rw [hrun]
+  refine ⟨{owner}, ?_, ?_⟩
+  · intro a ha
+    have hne : a ≠ owner := by simpa [Finset.mem_singleton] using ha
+    simp [ctorPost, Function.update_of_ne hne, hempty]
+  · simp [ctorPost, Finset.sum_singleton, Function.update_self]
+
+theorem token_solvent (tr : List (Call spec)) (w : World Storage Event)
+    (h : Inv w.self) : Solvent claim holdings (run tr w) :=
+  solvent_run token_preserves_inv inv_solvent h tr
+
+end Token
