@@ -1,47 +1,54 @@
-import Lsc.Lang.AST
-import Lsc.Selectors
+import Lsc.Lang.Contract
+
+/-!
+# ABI JSON
+
+Renders a `ContractDef` as a Solidity-compatible JSON ABI (functions, events, errors), for
+deployment tooling and differential harnesses. Pure string assembly, no proofs.
+-/
 
 namespace Lsc.Tools
 
 open Lsc
 
-private def fnStateMutability (kind : FunctionKind) : String :=
-  match kind with
+private def quote (s : String) : String := "\"" ++ s ++ "\""
+
+private def paramJson (p : Param) : String :=
+  "{\"name\":" ++ quote p.name ++ ",\"type\":" ++ quote p.ty.render ++ "}"
+
+private def eventParamJson (p : Param) : String :=
+  "{\"name\":" ++ quote p.name ++ ",\"type\":" ++ quote p.ty.render ++ ",\"indexed\":false}"
+
+private def stateMutability : FnKind → String
   | .view => "view"
-  | .external => "nonpayable"
-  | .internal => "nonpayable"
+  | .tx => "nonpayable"
   | .constructor => "nonpayable"
 
-private def paramJson (name : Ident) (ty : Ty) : String :=
-  "{\"name\":\"" ++ name ++ "\",\"type\":\"" ++ ty.abiStr ++ "\"}"
+private def outputsJson (ret : RetTy) : String :=
+  String.intercalate "," (ret.abi.map fun t => "{\"name\":\"\",\"type\":" ++ quote t.render ++ "}")
 
-private def fnAbiEntry (fn : FunctionDef) : String :=
-  let inputs := String.intercalate "," (fn.params.map fun (n, t) => paramJson n t)
-  let outputs :=
-    if fn.retTy == .unit then ""
-    else ",\"outputs\":[{\"name\":\"\",\"type\":\"" ++ fn.retTy.abiStr ++ "\"}]"
-  "{\"type\":\"function\",\"name\":\"" ++ fn.name ++ "\",\"inputs\":[" ++ inputs ++ "]" ++
-    outputs ++ ",\"stateMutability\":\"" ++ fnStateMutability fn.kind ++ "\"}"
+private def fnAbiEntry (fn : FnDef) : String :=
+  "{\"type\":\"function\",\"name\":" ++ quote fn.name ++
+    ",\"inputs\":[" ++ String.intercalate "," (fn.params.map paramJson) ++ "]" ++
+    ",\"outputs\":[" ++ outputsJson fn.ret ++ "]" ++
+    ",\"stateMutability\":" ++ quote (stateMutability fn.kind) ++ "}"
 
-private def eventParamJson (name : Ident) (ty : Ty) : String :=
-  "{\"name\":\"" ++ name ++ "\",\"type\":\"" ++ ty.abiStr ++ "\",\"indexed\":false}"
+private def ctorAbiEntry (fn : FnDef) : String :=
+  "{\"type\":\"constructor\",\"inputs\":[" ++ String.intercalate "," (fn.params.map paramJson) ++
+    "],\"stateMutability\":\"nonpayable\"}"
 
-private def eventAbiEntry (name : Ident) (params : List (Ident × Ty)) : String :=
-  let inputs := String.intercalate "," (params.map fun (n, t) => eventParamJson n t)
-  "{\"type\":\"event\",\"name\":\"" ++ name ++ "\",\"inputs\":[" ++ inputs ++ "],\"anonymous\":false}"
+private def eventAbiEntry (e : EventDef) : String :=
+  "{\"type\":\"event\",\"name\":" ++ quote e.name ++ ",\"inputs\":[" ++
+    String.intercalate "," (e.params.map eventParamJson) ++ "],\"anonymous\":false}"
 
-private def errorAbiEntry (name : Ident) (params : List (Ident × Ty)) : String :=
-  let inputs := String.intercalate "," (params.map fun (n, t) => paramJson n t)
-  "{\"type\":\"error\",\"name\":\"" ++ name ++ "\",\"inputs\":[" ++ inputs ++ "]}"
+private def errorAbiEntry (e : ErrorDef) : String :=
+  "{\"type\":\"error\",\"name\":" ++ quote e.name ++ ",\"inputs\":[" ++
+    String.intercalate "," (e.params.map paramJson) ++ "]}"
 
-/-- JSON ABI array for heimdall `-a` (keccak selectors via [`computeSelector`]). -/
+/-- JSON ABI array for a contract. -/
 def contractAbiJson (c : ContractDef) : String :=
-  let fns := c.functions.filter fun fn =>
-    fn.kind == .external || fn.kind == .view
-  let fnEntries := fns.map fnAbiEntry
-  let eventEntries := c.events.map fun (n, ps) => eventAbiEntry n ps
-  let errorEntries := c.errors.map fun (n, ps) => errorAbiEntry n ps
-  let all := fnEntries ++ eventEntries ++ errorEntries
-  "[" ++ String.intercalate ",\n" all ++ "\n]"
+  let entries := (c.ctor.toList.map ctorAbiEntry) ++ c.functions.map fnAbiEntry ++
+    c.events.map eventAbiEntry ++ c.errors.map errorAbiEntry
+  "[" ++ String.intercalate ",\n" entries ++ "\n]"
 
 end Lsc.Tools

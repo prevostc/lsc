@@ -1,6 +1,0 @@
-Lsc.Compile.IR.Stmt.seq
-  (Lsc.Compile.IR.Stmt.letBind "who" (Lsc.Compile.IR.Expr.calldataWord 4))
-  (Lsc.Compile.IR.Stmt.seq
-    (Lsc.Compile.IR.Stmt.skip)
-    (Lsc.Compile.IR.Stmt.ret
-      (Lsc.Compile.IR.Expr.dynSload (Lsc.Compile.IR.Expr.mapSlot 2 (Lsc.Compile.IR.Expr.local "who")))))

@@ -16,9 +16,6 @@ docs/
 ├── PROJECT_GOAL.md
 └── architecture/
     └── README.md
-
-prompts/
-└── architecture-review-2026-09.md
 ```
 
 ## Classification

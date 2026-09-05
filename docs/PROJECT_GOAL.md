@@ -1,6 +1,6 @@
 # Project Goal
 
-Build a **new provable DeFi programming language compiling to EVM**.
+Build a **provable DeFi programming language compiling to EVM bytecode**.
 
 The primary product goal is not exhaustive functional correctness. It is:
 

@@ -1,0 +1,32 @@
+name: Lsc
+
+on:
+  push:
+    branches: [v3, main, master]
+  pull_request:
+
+jobs:
+  build:
+    name: lake build (Lsc + Checks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install elan
+        run: |
+          curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf \
+            | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.elan
+            .lake
+          key: ${{ runner.os }}-lsc-${{ hashFiles('lean-toolchain', 'lake-manifest.json') }}
+      - name: Mathlib cache
+        run: lake exe cache get || true
+      - name: Build
+        run: lake build Lsc Checks
+      - name: No project axioms
+        run: |
+          if grep -rnE '^\s*axiom ' Lsc --include='*.lean'; then exit 1; fi
