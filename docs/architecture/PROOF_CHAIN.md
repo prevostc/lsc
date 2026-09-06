@@ -52,7 +52,7 @@ bytecode    ──(4) EndToEnd glue──────  bytecode-level anti-explo
   Deleted.
 - Home-grown EVM machine → EvmYulLean: word and decode lemmas only, no step refinement. Deleted.
 - Bytecode → real EVM: `#eval` only. Replaced by powdr's conformance-tested semantics plus a
-  revm/anvil differential harness.
+  revm/anvil differential harness (`scripts/difftest.sh`: Counter/Token `Tx.run` vs Osaka anvil).
 
 ## Hypotheses that appear in every end-to-end theorem
 

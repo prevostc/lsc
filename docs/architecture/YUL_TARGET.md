@@ -78,8 +78,8 @@ Decisions for `Lsc/Compiler` fixed by the study of `yul-semantics`, `evm_semanti
   and `gas` are stuck in the executable dialect).
 - EVM: `EvmSemantics.stepF` iterated until halt; calldata in `executionEnv.calldata`, storage in
   `accountMap`.
-- Differential harness: `Tx.run` vs `Interp.run` on emitted Yul vs `stepF` on compiled bytes vs
-  revm/anvil on the same calldata.
+- Differential harness: `scripts/difftest.sh` — `Tx.run` vs anvil (revm) on `compileRuntime`
+  bytecode for Counter and Token (same cases as `YulTests.lean`).
 - Measured bytecode (`compileRuntime` / `compileDeploy` from `YulTests.lean`): Counter 424 / 438,
   Token 1408 / 1498. Token `stackOK2` holds (no DUP16). Nested `map2` hashes inner `keccak256(0,64)`
   into `[32]` before `mstore(0, k₂)`, so the read does not see a clobbered `[0]`.

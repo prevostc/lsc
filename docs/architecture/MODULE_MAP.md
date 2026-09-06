@@ -61,7 +61,8 @@ Depends on `Lsc/Lang` (`Core`, `Interface`) and powdr; never on `Lsc/Security`.
 
 ## `Lsc/Tools`
 
-Deploy hex, ABI JSON, revm/anvil differential harness.
+ABI JSON (`AbiJson.lean`). EVM differential harness: `scripts/difftest.sh` (Lean `Tx.run`
+vs anvil/revm on `compileRuntime` / `compileDeploy` bytecode).
 
 ## `Lsc/Examples`
 
