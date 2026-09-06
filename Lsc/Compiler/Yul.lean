@@ -239,7 +239,8 @@ def selectorsNodup (c : ContractDef) : Bool :=
 
 /-- EVM ops whose open-world interpretation is not `stepOp`. -/
 def noExtOp : YOp → Bool
-  | .call | .callcode | .delegatecall | .staticcall | .create | .create2 | .gas => false
+  | .call | .callcode | .delegatecall | .staticcall | .create | .create2 | .gas
+  | .selfdestruct => false
   | _ => true
 
 mutual

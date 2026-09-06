@@ -498,58 +498,6 @@ theorem RX_callFree {I : Interface} {S X E} {α : Abs I.Ghost}
   rw [haddr, hstab, hext]
   exact hRX
 
-/-! ## `toYulFn_correct_ext` (call-free) -/
-
-/-- Call-free S2 with global `haddr`/`hstab`. Generalized `S2Frag` / `∀ g` form is `core_sim_ext` (resume). -/
-theorem toYulFn_correct_ext {I : Interface} {S X E ε : Type}
-    (α : Abs I.Ghost) (bind : Binding I S X)
-    (c : ContractDef) (Γ : ContractSchema S X E ε)
-    (hΓ : Γ.st.Lawful c.fields) (κ : List UInt8 → U256) (hκ : KeccakSep c κ)
-    (calls : ExternalCalls) (f : FnDef) (hf : f.kind ≠ .constructor)
-    (hM1 : CallFree f.core) (hlen : c.fields.length < wordBound)
-    (hbound : 4 + 32 * f.params.length < wordBound)
-    (yul : YBlock) (hyul : toYulFn c f = some yul)
-    (ctx : Ctx) (w : World S X E) (st0 : EvmState)
-    (hctx : ctxRel ctx st0) (hR : R c Γ κ w st0)
-    (hRX : RX α bind w st0) (_hign : α.ignoresLocal)
-    (haddr : ∀ σ : S, bind.addr σ = bind.addr w.self)
-    (hstab : ∀ st'', α.ofState st'' (bind.addr w.self) = α.ofState st0 (bind.addr w.self)) :
-    ToYulFnCorrectExt α bind c Γ κ calls f yul ctx w st0 := by
-  intro st' o hrun
-  refine ⟨w.faults, ?_⟩
-  have hwfo : { w with faults := w.faults } = w := rfl
-  have hhoist_evm := toYulFn_hoist hyul hf
-  have hhoist : hoist (yulD calls) yul = [] := hoist_yulD_of_evm hhoist_evm
-  have hno : noExtBlock yul = true := noExt_toYulFn_callFree hM1 hyul hf
-  obtain ⟨Vb, hbody, hV⟩ := run_block_inv hrun
-  rw [hhoist] at hbody
-  have hdesc : ExecStmts evm [[]] [] st0 yul Vb st' o := by
-    have h := execStmts_descend (calls := calls) noExtFuns_nilScope hno hbody
-    rw [funEnvUncast_nilScope] at h
-    exact h
-  have hsim := toYulFn_execStmts_callFree (c := c) (Γ := Γ) hΓ κ hκ f hf hM1 hlen
-    hbound yul hyul ctx w st0 hctx hR [[]]
-  set args := decodeArgs f st0.env.calldata
-  have hargs : args = decodeArgs f st0.env.calldata := rfl
-  simp only [hwfo, ← hargs] at hsim ⊢
-  cases hTx : Tx.run (Core.denote Γ f.core args.reverse) ctx w with
-  | ok p =>
-    simp only [hTx, except_ok_prod] at hsim ⊢
-    obtain ⟨V1, st1, hexec, hsucc, hR'⟩ := hsim
-    obtain ⟨_, hst, ho⟩ := execStmts_det_evm hdesc hexec
-    subst hst; subst ho
-    rcases p with ⟨v, w'⟩
-    have hg := callFree_preserves_ghost (Γ := Γ) hM1 args.reverse ctx w (by
-      simpa [Tx.run] using hTx)
-    obtain ⟨k, bs, hh, hk⟩ := haltSuccess_commits hsucc
-    rw [committedState_commit hh hk]
-    refine ⟨rfl, hsucc, hR', RX_callFree hRX (hstab st') hg.1 (haddr w'.self)⟩
-  | error err =>
-    simp only [hTx, except_error_prod] at hsim ⊢
-    obtain ⟨V1, st1, bytes, hexec, hh, herr⟩ := hsim
-    obtain ⟨_, hst, ho⟩ := execStmts_det_evm hdesc hexec
-    subst hst; subst ho
-    refine ⟨bytes, rfl, ?_, herr, R_rollback_obs hR hh HaltKind.revert_commits⟩
-    simp [committedState_rollback hh HaltKind.revert_commits, hh]
+/-! `toYulFn_correct_ext` (no `haddr`/`hstab`) lives in `Proof/CoreExtSim.lean`. -/
 
 end Lsc.Compiler

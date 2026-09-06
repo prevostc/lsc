@@ -8,6 +8,7 @@ import Lsc.Compiler.Proof.Counter
 import Lsc.Compiler.Proof.Token
 import Lsc.Compiler.Proof.Dispatch
 import Lsc.Compiler.Proof.CoreExt
+import Lsc.Compiler.Proof.CoreExtSim
 import Lsc.Compiler.EndToEnd
 import Lsc.Examples.TokenEndToEnd
 
@@ -66,6 +67,9 @@ axioms. `#guard_msgs` turns a widened footprint into a build error (see
 
 /-- info: 'Lsc.Compiler.toYulFn_correct_ext' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms Lsc.Compiler.toYulFn_correct_ext
+
+/-- info: 'Lsc.Compiler.core_sim_ext_callFree' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms Lsc.Compiler.core_sim_ext_callFree
 
 /-- info: 'Lsc.Compiler.runtimeBlock_correct_callFree' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms Lsc.Compiler.runtimeBlock_correct_callFree
