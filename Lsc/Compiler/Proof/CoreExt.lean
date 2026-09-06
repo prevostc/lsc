@@ -56,6 +56,18 @@ theorem s2op_of_m1 {op} (h : M1Op op) : S2Op op := by
 theorem s2stmt_of_m1 {s} (h : M1Stmt s) : S2Stmt s := by
   cases s <;> first | exact h | simp [S2Stmt, M1Stmt] at h
 
+theorem s2op_elim {op} (h : S2Op op) :
+    (∃ b m args, op = .call b m args) ∨ M1Op op := by
+  cases op with
+  | call b m args => exact .inl ⟨b, m, args, rfl⟩
+  | _ => exact .inr h
+
+theorem s2stmt_elim {s} (h : S2Stmt s) :
+    (∃ b m args, s = .call b m args) ∨ M1Stmt s := by
+  cases s with
+  | call b m args => exact .inl ⟨b, m, args, rfl⟩
+  | _ => exact .inr h
+
 theorem s2frag_of_callFree {t} {core : Core t} (h : CallFree core) : S2Frag core := by
   revert h
   induction core with
