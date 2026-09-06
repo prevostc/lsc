@@ -22,12 +22,16 @@ bytecode    ──(4) EndToEnd glue──────  bytecode-level anti-explo
 2. **Core → Yul.** Two layers in `Lsc/Compiler/Correctness.lean` (`sorry`, not imported by
    `Lsc.lean`) plus S1 proofs in `Lsc/Compiler/Proof/`:
    - **S1 (call-free fragment, no `sorry`):** `toYulFn_correct_callFree` (`Proof/Core.lean`) and
-     `runtimeBlock_correct_callFree` (`Proof/Dispatch.lean`). Extra hypothesis `CallFree` (currently
-     an alias of `M1Frag`: the operators Counter and Token use — not every constructor except
-     `Op.call`/`Stmt.call`). `ctxRel` includes `calldata.length < 2^256` so `calldatasize` agrees
-     with `List.length`. `token_correct` / `counter_correct` instantiate the function theorem;
+     `runtimeBlock_correct_callFree` (`Proof/Dispatch.lean`). Extra hypothesis `CallFree` (alias
+     of `M1Frag`): every Core constructor Vault uses except `Op.call`/`Stmt.call` — ctx reads
+     including `selfAddress`, checked `mul`/`div`/`mulDiv*`, `emit` of arity 0/1/3, and
+     `addr`/`flag` (single-word) returns. Still excluded: wrapping `letPure`, other
+     `require`/`revert`/`emit` arities, `pair` returns. `ctxRel` includes
+     `calldata.length < 2^256` so `calldatasize` agrees with `List.length`.
+     `token_correct` / `counter_correct` instantiate the function theorem;
      `token_dispatch_correct` / `counter_dispatch_correct` instantiate the dispatcher. Axioms
-     `propext` / `Classical.choice` / `Quot.sound`.
+     `propext` / `Classical.choice` / `Quot.sound`. Vault `deposit`/`withdraw` remain outside
+     `CallFree` because they `Stmt.call`; `constructor` is excluded by `f.kind ≠ .constructor`.
    - **S2 (unrestricted):** `toYulFn_correct` / `runtimeBlock_correct` remain `sorry`
      (`-- TODO(S2): letCall`). Hypotheses: `Γ.st.Lawful c.fields` (`C.schema_lawful`), `KeccakSep c κ`,
      `ctxRel` (`static = false`, `halted = none`, `CtxWF`, calldata bound), `R` including `WorldWF`

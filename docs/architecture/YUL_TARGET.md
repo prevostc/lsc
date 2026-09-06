@@ -45,7 +45,9 @@ Decisions for `Lsc/Compiler` fixed by the study of `yul-semantics`, `evm_semanti
   *before* `mstore(0, k₂)` (`mstore(32, keccak256(0,64)); mstore(0, k₂); sload(keccak256(0,64))`).
   Ctx reads → `caller/callvalue/timestamp/number/address`.
 - Checked arithmetic → guard + `revert` with `Panic(uint256)` selector and code `0x11`/`0x12`;
-  `mulDiv*` → overflow guard on the product then `div` (512-bit later).
+  `mulDivDown` → `if iszero(c) { panic 0x12 }; let v := mul(a,b); overflow guard; v := div(v,c)`;
+  `mulDivUp` → same product/guard then `switch mod(v,c)` (`case 0` floor, default `div+1`).
+  Guard is `iszero(or(iszero(a), eq(div(v,a), b)))` (`a=0 ∨ (a*b)/a = b` iff the product fits).
 - `require c err args` → `if iszero(c) { <custom error ABI at 0x80> revert(0x80, 4+32n) }`.
 - `emit` → ABI-pack at `0x80`, `log1(0x80, 32n, topic0)`.
 - `ite` → `switch c case 0 {…} default {…}` (Yul `if` has no `else`). Core's `ite` carries two

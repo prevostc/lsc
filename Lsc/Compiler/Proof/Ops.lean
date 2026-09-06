@@ -14,8 +14,10 @@ open YulSemantics
 open YulSemantics.EVM
 
 def M1Op : Lsc.Op → Prop
-  | .load _ | .loadMap _ _ | .loadMap2 _ _ _ | .sender => True
-  | .addChecked _ _ | .subChecked _ _ | .pure _ => True
+  | .load _ | .loadMap _ _ | .loadMap2 _ _ _ => True
+  | .sender | .value | .timestamp | .blockNumber | .selfAddress => True
+  | .addChecked _ _ | .subChecked _ _ | .mulChecked _ _ | .divChecked _ _ => True
+  | .mulDivDown _ _ _ | .mulDivUp _ _ _ | .pure _ => True
   | _ => False
 
 def M1Cond : Lsc.Cond → Prop
@@ -23,7 +25,7 @@ def M1Cond : Lsc.Cond → Prop
 
 def M1Stmt : Lsc.Stmt → Prop
   | .store _ _ | .storeMap _ _ _ | .storeMap2 _ _ _ _ => True
-  | .emit _ args => args.length = 1 ∨ args.length = 3
+  | .emit _ args => args.length = 0 ∨ args.length = 1 ∨ args.length = 3
   | .require c _ args => M1Cond c ∧ args.length = 0
   | .revert _ args => args.length = 0
   | _ => False

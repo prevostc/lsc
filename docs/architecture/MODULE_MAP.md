@@ -50,10 +50,7 @@ proved invariants/laws.
   differential tests against `Tx.run`.
 - `Bytecode.lean` — `compileRuntime`/`compileDeploy` through powdr's verified compiler.
 - `Correctness.lean` — `R` and the `toYul_correct` statement; proofs under `Proof/`.
-- `Proof/{Words,Memory,Env,Layout,Ops,OpsMore,Emit,Core,Counter}.lean` — `M1Frag` simulation
-  (`load`/`addChecked`/`subChecked`/`pure`, `store`/`emit`/`require`, `ite`/`opTail` word
-  return, params); `counter_correct` for every Counter runtime function. General
-  `toYulFn_correct` / `runtimeBlock_correct` remain `sorry` in `Correctness.lean`.
+- `Proof/{Words,Memory,Env,Layout,Ops,OpsMore,OpsToken,OpsArith,OpsMulDiv,OpsCtx,Emit,Core,Counter,Token,Vault,Dispatch}.lean` — `CallFree`/`M1Frag` simulation (`load`/`addChecked`/`subChecked`/`mulChecked`/`divChecked`/`mulDiv*`/`pure`, ctx reads including `selfAddress`, `store`/`emit` 0/1/3/`require`, `ite`/`opTail` word/addr/flag return, params); `counter_correct` / `token_correct` / `runtimeBlock_correct_callFree`; Vault call-free entrypoints (`preview*`/`pause`/`unpause`/`paused?`/`decimals`). General `toYulFn_correct` / `runtimeBlock_correct` remain `sorry` in `Correctness.lean`.
 - `EndToEnd.lean` — glue: `bytecode_call_correct`, `EvmCallRun` (unique halted post-storage),
   `bytecode_trace_transport` / `bytecode_trace_all`. The only
   compiler module that imports `Security`.

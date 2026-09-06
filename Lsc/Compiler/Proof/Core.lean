@@ -1,4 +1,5 @@
-import Lsc.Compiler.Proof.OpsToken
+import Lsc.Compiler.Proof.OpsMulDiv
+import Lsc.Compiler.Proof.OpsCtx
 import YulSemantics.Observation
 
 set_option linter.unusedSimpArgs false
@@ -17,7 +18,11 @@ open Lsc
 def M1Frag : {t : RetTy} → Core t → Prop
   | .unit, .ret _ => True
   | .word, .ret _ => True
+  | .addr, .ret _ => True
+  | .flag, .ret _ => True
   | .word, .opTail op => M1Op op
+  | .addr, .opTailAddr op => M1Op op
+  | .flag, .opTailFlag op => M1Op op
   | _, .stmtTail s => M1Stmt s
   | _, .revertTail _ args => args.length = 0
   | _, .letOp op k => M1Op op ∧ M1Frag k
@@ -26,10 +31,10 @@ def M1Frag : {t : RetTy} → Core t → Prop
   | _, .ite c a b => M1Cond c ∧ M1Frag a ∧ M1Frag b
   | _, _ => False
 
-/-- Call-free fragment proved in S1: no `Op.call`/`Stmt.call`, plus the operators
-Token and Counter actually use. Remaining call-free constructors (`mulChecked`,
-`mulDiv*`, wrapping `letPure`, ctx ops other than `sender`, `emit`/`require`/`revert`
-with other arities, `addr`/`flag`/`pair` returns) are still excluded. -/
+/-- Call-free fragment: no `Op.call`/`Stmt.call`. Covered operators are the S1 Token/Counter
+set plus checked `mul`/`div`/`mulDiv*`, remaining ctx reads, 0-arg `emit`, and `addr`/`flag`
+(single-word) returns. Still excluded: wrapping `letPure`, `require`/`revert`/`emit` with
+other arities, `pair` returns. -/
 def CallFreeOp : Lsc.Op → Prop := M1Op
 def CallFreeStmt : Lsc.Stmt → Prop := M1Stmt
 def CallFree : {t : RetTy} → Core t → Prop := M1Frag
@@ -108,15 +113,15 @@ theorem haltSuccess_word {v : Nat} {h}
     (hh : h = some (.ret, wordBytes v)) : haltSuccess .word v h := by
   simp [haltSuccess, hh, retWords, abiBytes_singleton]
 
-theorem selectSwitch_zero {eA eB : YBlock} :
-    selectSwitch evm (0 : U256) [(YulSemantics.Literal.number 0, eB)] (some eA) = eB := by
-  simp [selectSwitch, litValue_number]
+theorem haltSuccess_addr {v : Address} {h}
+    (hh : h = some (.ret, wordBytes (v : Nat))) : haltSuccess .addr v h := by
+  simp [haltSuccess, hh, retWords]
+  exact (abiBytes_singleton (v : Nat)).symm
 
-theorem selectSwitch_nonzero {eA eB : YBlock} {cv : U256} (h : cv ≠ 0) :
-    selectSwitch evm cv [(YulSemantics.Literal.number 0, eB)] (some eA) = eA := by
-  have hne : cv ≠ evm.litValue (.number 0) := by
-    rw [evm_litValue_number]; exact h
-  simp [selectSwitch, List.find?, decide_eq_false hne]
+theorem haltSuccess_flag {v : Flag} {h}
+    (hh : h = some (.ret, wordBytes (v : Nat))) : haltSuccess .flag v h := by
+  simp [haltSuccess, hh, retWords]
+  exact (abiBytes_singleton (v : Nat)).symm
 
 theorem exec_switch_halt {funs V st V' st'} {cnd : YExpr} {eA eB body : YBlock} {cv : U256}
     (he : EvalExpr evm funs V st cnd (.vals [cv] st))
@@ -163,7 +168,12 @@ theorem stmt_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     simp [Stmt.denote, Tx.run_storeMap2]
     exact stmt_sim_storeMap2 funs hinv hΓ hκ hlen hwf hn
   | .emit ev args =>
-    rcases (hM1 : args.length = 1 ∨ args.length = 3) with h1 | h3
+    rcases (hM1 : args.length = 0 ∨ args.length = 1 ∨ args.length = 3) with h0 | h1 | h3
+    · match args with
+      | [] =>
+        simp [Stmt.denote, Tx.run_emit]
+        exact stmt_sim_emit0 funs hinv hwf
+      | _ :: _ => cases h0
     · have ⟨a, hargs⟩ := length_eq_one.mp h1
       subst hargs
       simp [Stmt.denote, Tx.run_emit]
@@ -220,18 +230,44 @@ theorem op_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     simp only [emitLetOp]
     simp [Op.denote, Tx.run_sender]
     exact op_sim_sender funs hinv
+  | .value =>
+    simp only [emitLetOp]
+    simp [Op.denote, Tx.run_value]
+    exact op_sim_value funs hinv
+  | .timestamp =>
+    simp only [emitLetOp]
+    simp [Op.denote, Tx.run_timestamp]
+    exact op_sim_timestamp funs hinv
+  | .blockNumber =>
+    simp only [emitLetOp]
+    simp [Op.denote, Tx.run_blockNumber]
+    exact op_sim_blockNumber funs hinv
+  | .selfAddress =>
+    simp only [emitLetOp]
+    simp [Op.denote, Tx.run_selfAddress]
+    exact op_sim_selfAddress funs hinv
   | .addChecked a b =>
     simp only [emitLetOp_addChecked]
     exact op_sim_addChecked funs hinv hwf hn
   | .subChecked a b =>
     simp only [emitLetOp_subChecked]
     exact op_sim_subChecked funs hinv hwf hn
+  | .mulChecked a b =>
+    simp only [emitLetOp_mulChecked]
+    exact op_sim_mulChecked funs hinv hwf hn
+  | .divChecked a b =>
+    simp only [emitLetOp_divChecked]
+    exact op_sim_divChecked funs hinv hwf hn
+  | .mulDivDown a b d =>
+    simp only [emitLetOp_mulDivDown]
+    exact op_sim_mulDivDown funs hinv hwf hn
+  | .mulDivUp a b d =>
+    simp only [emitLetOp_mulDivUp]
+    exact op_sim_mulDivUp funs hinv hwf hn
   | .pure a =>
     simp only [emitLetOp_pure]
     exact op_sim_pure funs hinv hwf hn
-  | .value | .timestamp | .blockNumber | .selfAddress
-    | .mulChecked .. | .divChecked ..
-    | .mulDivDown .. | .mulDivUp .. | .call .. =>
+  | .call .. =>
     exact (show False from hM1).elim
 
 theorem core_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
@@ -274,7 +310,29 @@ theorem core_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
       obtain ⟨st', hexec, hh, hR'⟩ := return_word_sim funs V hv he hinv.rel
       rw [Core.denote, Tx.run_pure]
       exact ⟨V, st', hexec, haltSuccess_word hh, hR'⟩
-    | addr _ | flag _ | pair _ _ =>
+    | addr a =>
+      simp only [emitCore, emitRet] at hem
+      cases hem
+      have hn0 : identsNodup env.length = true :=
+        identsNodup_mono (by simp [coreExtraDepth]) hn
+      have hwfA : atomWF a = true := by simpa [coreWF, retWF] using hwf
+      have hv := atom_eval_lt hinv.wf hwfA
+      have he := eval_atom funs (st := st) hinv.venv hn0 a
+      obtain ⟨st', hexec, hh, hR'⟩ := return_word_sim funs V hv he hinv.rel
+      rw [Core.denote, Tx.run_pure]
+      exact ⟨V, st', hexec, haltSuccess_addr hh, hR'⟩
+    | flag a =>
+      simp only [emitCore, emitRet] at hem
+      cases hem
+      have hn0 : identsNodup env.length = true :=
+        identsNodup_mono (by simp [coreExtraDepth]) hn
+      have hwfA : atomWF a = true := by simpa [coreWF, retWF] using hwf
+      have hv := atom_eval_lt hinv.wf hwfA
+      have he := eval_atom funs (st := st) hinv.venv hn0 a
+      obtain ⟨st', hexec, hh, hR'⟩ := return_word_sim funs V hv he hinv.rel
+      rw [Core.denote, Tx.run_pure]
+      exact ⟨V, st', hexec, haltSuccess_flag hh, hR'⟩
+    | pair _ _ =>
       simp [M1Frag] at hM1
   | stmtTail s =>
     intro hM1 w env V st funs hwf hn hinv e' hem
@@ -551,8 +609,92 @@ theorem core_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
         simp only [except_error_prod]
         refine ⟨restore V V', st', bytes, ?_, hh, herr⟩
         exact exec_switch_halt hcond hsel (hoist_emitCore hB) hexec
-  | opTailAddr _ | opTailFlag _ =>
-    intro hM1; simp [M1Frag] at hM1
+  | opTailAddr op =>
+    intro hM1 w env V st funs hwf hn hinv e' hem
+    simp only [Core.denote, RetTy.denote, Address]
+    simp only [emitCore] at hem
+    cases hE : emitLetOp c {} env.length op with
+    | none => simp [hE] at hem
+    | some e1 =>
+      simp only [hE] at hem
+      cases hem
+      have hop : M1Op op := by simpa [M1Frag] using hM1
+      have hopWF : opWF c op = true := by simpa [coreWF] using hwf
+      have hn1 : identsNodup (env.length + 1) = true :=
+        identsNodup_mono (by simp [coreExtraDepth]) hn
+      have hretE :
+          (emitRet e1 (env.length + 1) haltUnit (.addr (.var 0))).stmts =
+            e1.stmts ++ (emitReturnWords {} [atomE (env.length + 1) (.var 0)]).stmts :=
+        emitRet_addr_stmts _ _ _ _
+      cases hopr : Tx.run (Op.denote Γ env op) ctx w with
+      | ok p =>
+        have hsim := op_sim funs hinv hΓ hκ hlen hop hopWF hn1
+        rw [hopr] at hsim
+        simp only [hE] at hsim
+        obtain ⟨st1, hexec, hinv1⟩ := hsim
+        rcases p with ⟨v, w'⟩
+        simp only [except_ok_prod]
+        have hn0 : identsNodup (v :: env).length = true := by
+          simpa using hn1
+        have he := eval_atom funs (st := st1) hinv1.venv hn0 (.var 0)
+        have hv : v < wordBound := hinv1.wf v (by simp)
+        obtain ⟨st', hret, hh, hR'⟩ :=
+          return_word_sim funs ((identV env.length, BitVec.ofNat 256 v) :: V) hv he hinv1.rel
+        refine ⟨(identV env.length, BitVec.ofNat 256 v) :: V, st', ?_, haltSuccess_addr hh, hR'⟩
+        rw [hretE]
+        exact execStmts_append hexec hret
+      | error err =>
+        have hsim := op_sim funs hinv hΓ hκ hlen hop hopWF hn1
+        rw [hopr] at hsim
+        simp only [hE] at hsim
+        obtain ⟨V', st', bytes, hexec, hh, herr⟩ := hsim
+        simp only [except_error_prod]
+        refine ⟨V', st', bytes, ?_, hh, herr⟩
+        rw [hretE]
+        exact execStmts_append_halt hexec
+  | opTailFlag op =>
+    intro hM1 w env V st funs hwf hn hinv e' hem
+    simp only [Core.denote, RetTy.denote, Flag]
+    simp only [emitCore] at hem
+    cases hE : emitLetOp c {} env.length op with
+    | none => simp [hE] at hem
+    | some e1 =>
+      simp only [hE] at hem
+      cases hem
+      have hop : M1Op op := by simpa [M1Frag] using hM1
+      have hopWF : opWF c op = true := by simpa [coreWF] using hwf
+      have hn1 : identsNodup (env.length + 1) = true :=
+        identsNodup_mono (by simp [coreExtraDepth]) hn
+      have hretE :
+          (emitRet e1 (env.length + 1) haltUnit (.flag (.var 0))).stmts =
+            e1.stmts ++ (emitReturnWords {} [atomE (env.length + 1) (.var 0)]).stmts :=
+        emitRet_flag_stmts _ _ _ _
+      cases hopr : Tx.run (Op.denote Γ env op) ctx w with
+      | ok p =>
+        have hsim := op_sim funs hinv hΓ hκ hlen hop hopWF hn1
+        rw [hopr] at hsim
+        simp only [hE] at hsim
+        obtain ⟨st1, hexec, hinv1⟩ := hsim
+        rcases p with ⟨v, w'⟩
+        simp only [except_ok_prod]
+        have hn0 : identsNodup (v :: env).length = true := by
+          simpa using hn1
+        have he := eval_atom funs (st := st1) hinv1.venv hn0 (.var 0)
+        have hv : v < wordBound := hinv1.wf v (by simp)
+        obtain ⟨st', hret, hh, hR'⟩ :=
+          return_word_sim funs ((identV env.length, BitVec.ofNat 256 v) :: V) hv he hinv1.rel
+        refine ⟨(identV env.length, BitVec.ofNat 256 v) :: V, st', ?_, haltSuccess_flag hh, hR'⟩
+        rw [hretE]
+        exact execStmts_append hexec hret
+      | error err =>
+        have hsim := op_sim funs hinv hΓ hκ hlen hop hopWF hn1
+        rw [hopr] at hsim
+        simp only [hE] at hsim
+        obtain ⟨V', st', bytes, hexec, hh, herr⟩ := hsim
+        simp only [except_error_prod]
+        refine ⟨V', st', bytes, ?_, hh, herr⟩
+        rw [hretE]
+        exact execStmts_append_halt hexec
   | revertTail err args =>
     intro hM1 w env V st funs hwf hn hinv e' hem
     have hnil : args.length = 0 := by simpa [M1Frag] using hM1

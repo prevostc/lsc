@@ -17,6 +17,18 @@ open Lsc (Stmt Tx Core Err RetTy Atom)
 theorem step_caller (st : EvmState) :
     stepOp Op.caller [] st = some (.ok [st.env.caller] st) := rfl
 
+theorem step_address (st : EvmState) :
+    stepOp Op.address [] st = some (.ok [st.env.address] st) := rfl
+
+theorem step_callvalue (st : EvmState) :
+    stepOp Op.callvalue [] st = some (.ok [st.env.callvalue] st) := rfl
+
+theorem step_timestamp (st : EvmState) :
+    stepOp YulSemantics.EVM.Op.timestamp [] st = some (.ok [st.env.timestamp] st) := rfl
+
+theorem step_number (st : EvmState) :
+    stepOp Op.number [] st = some (.ok [st.env.number] st) := rfl
+
 theorem toNat_96 : (BitVec.ofNat 256 96).toNat = 96 :=
   toNat_ofNat_of_lt (lt_256_wordBound (by decide))
 
@@ -56,6 +68,66 @@ theorem op_sim_sender {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε
   refine op_sim_nullary funs hinv Op.caller ctx.sender hs ?_
   refine Step.builtinOk Step.argsNil ?_
   simp only [step_caller, hc]
+
+theorem op_sim_value {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
+    {κ ctx} {w : World S X E} {env V st}
+    (funs : FunEnv evm) (hinv : Inv Γ c κ ctx w env V st) :
+    let v := ctx.value
+    ∃ st',
+      ExecStmts evm funs V st
+        (emitLet {} (identV env.length) (bop Op.callvalue [])).stmts
+        ((identV env.length, BitVec.ofNat 256 v) :: V) st' .normal ∧
+      Inv Γ c κ ctx w (v :: env)
+        ((identV env.length, BitVec.ofNat 256 v) :: V) st' := by
+  rcases hinv.ctxr with ⟨_, hv, _, _, _, _, _, _, ⟨_, hval, _⟩⟩
+  refine op_sim_nullary funs hinv Op.callvalue ctx.value hval ?_
+  refine Step.builtinOk Step.argsNil ?_
+  simp only [step_callvalue, hv]
+
+theorem op_sim_timestamp {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
+    {κ ctx} {w : World S X E} {env V st}
+    (funs : FunEnv evm) (hinv : Inv Γ c κ ctx w env V st) :
+    let v := ctx.timestamp
+    ∃ st',
+      ExecStmts evm funs V st
+        (emitLet {} (identV env.length) (bop YulSemantics.EVM.Op.timestamp [])).stmts
+        ((identV env.length, BitVec.ofNat 256 v) :: V) st' .normal ∧
+      Inv Γ c κ ctx w (v :: env)
+        ((identV env.length, BitVec.ofNat 256 v) :: V) st' := by
+  rcases hinv.ctxr with ⟨_, _, ht, _, _, _, _, _, ⟨_, _, hts, _⟩⟩
+  refine op_sim_nullary funs hinv YulSemantics.EVM.Op.timestamp ctx.timestamp hts ?_
+  refine Step.builtinOk Step.argsNil ?_
+  simp only [step_timestamp, ht]
+
+theorem op_sim_blockNumber {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
+    {κ ctx} {w : World S X E} {env V st}
+    (funs : FunEnv evm) (hinv : Inv Γ c κ ctx w env V st) :
+    let v := ctx.blockNumber
+    ∃ st',
+      ExecStmts evm funs V st
+        (emitLet {} (identV env.length) (bop Op.number [])).stmts
+        ((identV env.length, BitVec.ofNat 256 v) :: V) st' .normal ∧
+      Inv Γ c κ ctx w (v :: env)
+        ((identV env.length, BitVec.ofNat 256 v) :: V) st' := by
+  rcases hinv.ctxr with ⟨_, _, _, hn, _, _, _, _, ⟨_, _, _, hbn, _⟩⟩
+  refine op_sim_nullary funs hinv Op.number ctx.blockNumber hbn ?_
+  refine Step.builtinOk Step.argsNil ?_
+  simp only [step_number, hn]
+
+theorem op_sim_selfAddress {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
+    {κ ctx} {w : World S X E} {env V st}
+    (funs : FunEnv evm) (hinv : Inv Γ c κ ctx w env V st) :
+    let v := ctx.self
+    ∃ st',
+      ExecStmts evm funs V st
+        (emitLet {} (identV env.length) (bop Op.address [])).stmts
+        ((identV env.length, BitVec.ofNat 256 v) :: V) st' .normal ∧
+      Inv Γ c κ ctx w (v :: env)
+        ((identV env.length, BitVec.ofNat 256 v) :: V) st' := by
+  rcases hinv.ctxr with ⟨_, _, _, _, ha, _, _, _, ⟨_, _, _, _, hs⟩⟩
+  refine op_sim_nullary funs hinv Op.address ctx.self hs ?_
+  refine Step.builtinOk Step.argsNil ?_
+  simp only [step_address, ha]
 
 theorem emitLog1_three (e : Emit) (topic : Nat) (a b c : YExpr) :
     (emitLog1 e topic [a, b, c]).stmts =

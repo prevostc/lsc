@@ -190,4 +190,35 @@ theorem mul_fits_iff {a b : Nat} (ha : a < wordBound) (hb : b < wordBound) :
         exact Nat.ne_of_lt hlt this
       exact hne hdiv
 
+/-- EVM `div` / `mod` return 0 on a zero divisor; otherwise they match `Nat`. -/
+theorem evm_div_ofNat {a b : Nat} (ha : a < wordBound) (hb : b < wordBound) (hb0 : b ≠ 0) :
+    (if BitVec.ofNat 256 b = 0 then 0 else BitVec.ofNat 256 a / BitVec.ofNat 256 b) =
+      BitVec.ofNat 256 (a / b) := by
+  have : BitVec.ofNat 256 b ≠ 0 := mt (ofNat_eq_zero hb).mp hb0
+  rw [if_neg this, ofNat_div ha hb]
+
+theorem evm_mod_ofNat {a b : Nat} (ha : a < wordBound) (hb : b < wordBound) (hb0 : b ≠ 0) :
+    (if BitVec.ofNat 256 b = 0 then 0 else BitVec.ofNat 256 a % BitVec.ofNat 256 b) =
+      BitVec.ofNat 256 (a % b) := by
+  have : BitVec.ofNat 256 b ≠ 0 := mt (ofNat_eq_zero hb).mp hb0
+  rw [if_neg this, ofNat_mod ha hb]
+
+/-- Ceil `⌈a*b/c⌉` still fits when the product does. -/
+theorem mulDiv_up_lt {a b c : Nat}
+    (hfit : a * b < wordBound) (hc0 : c ≠ 0) (hrem : a * b % c ≠ 0) :
+    a * b / c + 1 < wordBound := by
+  have hc1 : 1 < c := by
+    match c with
+    | 0 => exact (hc0 rfl).elim
+    | 1 =>
+      have : a * b % 1 = 0 := Nat.mod_one _
+      exact (hrem this).elim
+    | n + 2 => omega
+  have hpos : 0 < a * b := by
+    by_contra h
+    have : a * b = 0 := Nat.eq_zero_of_not_pos h
+    simp [this] at hrem
+  have := Nat.div_lt_self hpos hc1
+  omega
+
 end Lsc.Compiler

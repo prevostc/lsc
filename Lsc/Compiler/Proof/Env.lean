@@ -301,4 +301,15 @@ theorem hoist_params (off n : Nat) : hoist evm (emitParams {} off n).stmts = [] 
 
 theorem halt_ne_normal : Outcome.halt ≠ .normal := by decide
 
+theorem VEnv.set_head (x : Ident) (v w : U256) (V : VEnv evm) :
+    VEnv.set ((x, v) :: V) x w = (x, w) :: V := by
+  simp [VEnv.set]
+
+theorem VEnv.setMany_one (V : VEnv evm) (x : Ident) (v : U256) :
+    VEnv.setMany V [x] [v] = VEnv.set V x v := rfl
+
+theorem restore_length {V Vb : VEnv evm} (h : V.length = Vb.length) :
+    restore V Vb = Vb := by
+  simp [restore, h]
+
 end Lsc.Compiler

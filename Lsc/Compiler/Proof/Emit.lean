@@ -251,6 +251,18 @@ theorem emitRet_word_stmts (e : Emit) (d : Nat) (halt : Bool) (a : Atom) :
   rw [emitRet_acc e d halt (.word a), Emit.cat_stmts]
   simp only [emitRet, retAtoms, List.map_cons, List.map_nil]
 
+theorem emitRet_addr_stmts (e : Emit) (d : Nat) (halt : Bool) (a : Atom) :
+    (emitRet e d halt (.addr a)).stmts =
+      e.stmts ++ (emitReturnWords {} [atomE d a]).stmts := by
+  rw [emitRet_acc e d halt (.addr a), Emit.cat_stmts]
+  simp only [emitRet, retAtoms, List.map_cons, List.map_nil]
+
+theorem emitRet_flag_stmts (e : Emit) (d : Nat) (halt : Bool) (a : Atom) :
+    (emitRet e d halt (.flag a)).stmts =
+      e.stmts ++ (emitReturnWords {} [atomE d a]).stmts := by
+  rw [emitRet_acc e d halt (.flag a), Emit.cat_stmts]
+  simp only [emitRet, retAtoms, List.map_cons, List.map_nil]
+
 theorem emitCore_acc {c : ContractDef} {halt : Bool} {t : RetTy} :
     ∀ (core : Core t) (e : Emit) (d : Nat),
       emitCore c e d halt core = (emitCore c {} d halt core).map fun e0 =>
