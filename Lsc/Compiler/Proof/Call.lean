@@ -1,407 +1,27 @@
 import Lsc.Compiler.Proof.AbiCall
+import Lsc.Compiler.Proof.CallState
+import Lsc.Compiler.Proof.Descend
 import Lsc.Compiler.Proof.OpsMore
-import Lsc.Compiler.Proof.Lift
 
 set_option linter.unusedSimpArgs false
 set_option linter.unusedVariables false
 set_option maxHeartbeats 800000
 
 /-!
-Backward simulation of `emitExtCall` for the M0 mini-fragment (arity 0).
-
-S1 lemmas stay forward on `FunEnv evm`. Threading `∃ fo` through `core_sim` would
-restate every S1 case, so M0 proves
-`letOp (.call b m []) (ret .word (.var 0))` and `stmtTail (.call b m [])`.
+Backward simulation of the scoped `emitExtCall` block (`op_sim_call_bwd`).
 
 Fault oracle: the call reads `w.ncalls`. Failure uses `composeFault ncalls true rest`
 (Core does not bump `ncalls`). Success uses `composeFault ncalls false rest`; a
-continuation would see indices `≥ ncalls + 1`. The mini-fragment has no continuation
-calls, so `rest := fun _ => false`.
+continuation sees indices `≥ ncalls + 1`.
 -/
 
 namespace Lsc.Compiler
 
 open YulSemantics
-open Lsc hiding Op
+open Lsc hiding Op Stmt
 open YulSemantics.EVM
 
-def extTok (d : Nat) : YIdent := s!"_tok_{d}"
-def extOk (d : Nat) : YIdent := s!"_ok_{d}"
-
-theorem restore_self_open {D : Dialect} (V : VEnv D) : restore V V = V := by
-  simp [restore]
-
-theorem execStmts_append_open {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
-    {V : VEnv (yulD calls)} {st : EvmState}
-    {ss1 : YBlock} {V1 : VEnv (yulD calls)} {st1 : EvmState} {ss2 : YBlock}
-    {V2 : VEnv (yulD calls)} {st2 : EvmState} {o : Outcome}
-    (h1 : ExecStmts (yulD calls) funs V st ss1 V1 st1 .normal)
-    (h2 : ExecStmts (yulD calls) funs V1 st1 ss2 V2 st2 o) :
-    ExecStmts (yulD calls) funs V st (ss1 ++ ss2) V2 st2 o := by
-  induction ss1 generalizing V st V1 st1 with
-  | nil =>
-    cases h1
-    exact h2
-  | cons s rest ih =>
-    cases h1 with
-    | seqCons hhead htail => exact Step.seqCons hhead (ih htail h2)
-    | seqStop _ hne => exact (hne rfl).elim
-
-theorem execStmts_append_halt_open {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
-    {V : VEnv (yulD calls)} {st : EvmState}
-    {ss1 : YBlock} {V1 : VEnv (yulD calls)} {st1 : EvmState} {ss2 : YBlock}
-    (h1 : ExecStmts (yulD calls) funs V st ss1 V1 st1 .halt) :
-    ExecStmts (yulD calls) funs V st (ss1 ++ ss2) V1 st1 .halt := by
-  induction ss1 generalizing V st with
-  | nil => cases h1
-  | cons s rest ih =>
-    cases h1 with
-    | seqCons hhead htail => exact Step.seqCons hhead (ih htail)
-    | seqStop hs ho => exact Step.seqStop hs ho
-
 theorem yulD_zero (calls : ExternalCalls) : (yulD calls).zero = (0 : U256) := rfl
-
-theorem builtin_iszero (calls : ExternalCalls) (st : EvmState) (x : U256) :
-    builtinWithExternal calls .none .none Op.iszero [x] st
-      (.ok [b2w (x = 0)] st) :=
-  step_iszero st x
-
-theorem builtin_lt (calls : ExternalCalls) (st : EvmState) (a b : U256) :
-    builtinWithExternal calls .none .none Op.lt [a, b] st
-      (.ok [b2w (a.ult b)] st) :=
-  step_lt st a b
-
-theorem selectorBytes_length (n : Nat) : (selectorBytes n).length = 4 := by
-  simp [selectorBytes]
-
-theorem wordBytes_length (n : Nat) : (wordBytes n).length = 32 := by
-  simp [wordBytes]
-
-theorem abiInput_length (spec : AbiSpec) (args : List Nat) :
-    (abiInput spec args).length = 4 + 32 * args.length := by
-  simp [abiInput, selectorBytes_length, List.length_append, List.length_flatMap,
-    wordBytes_length]
-  induction args with
-  | nil => simp
-  | cons _ args ih =>
-    simp [ih]
-    omega
-
-theorem Abs.ofState_mstore {G} (α : Abs G) (st : EvmState) (p v : U256) (a : Address) :
-    α.ofState { touchMemory st p.toNat 32 with memory := storeWord st.memory p.toNat v } a =
-      α.ofState st a := by
-  simp [α.ofState_proj, CallWorld.ofState, touchMemory]
-
-theorem eval_sload_open {calls : ExternalCalls} (funs : FunEnv (yulD calls))
-    (V : VEnv (yulD calls)) (st : EvmState) (slot : Nat) :
-    EvalExpr (yulD calls) funs V st (bop Op.sload [lit slot])
-      (.vals [st.storage (BitVec.ofNat 256 slot)] st) :=
-  Step.builtinOk (Step.argsCons Step.argsNil Step.lit) (by
-    change builtinWithExternal calls .none .none Op.sload _ _ _
-    simp only [evm_litValue_number, step_sload]
-    rfl)
-
-theorem exec_let_sload {calls : ExternalCalls} (funs : FunEnv (yulD calls))
-    (V : VEnv (yulD calls)) (st : EvmState) (n : YIdent) (slot : Nat) :
-    ExecStmt (yulD calls) funs V st
-      (.letDecl [n] (some (bop Op.sload [lit slot])))
-      ((n, st.storage (BitVec.ofNat 256 slot)) :: V) st .normal :=
-  Step.letVal (eval_sload_open funs V st slot) rfl
-
-theorem eval_shl_sel {calls : ExternalCalls} (funs : FunEnv (yulD calls))
-    (V : VEnv (yulD calls)) (st : EvmState) (sel : Nat) :
-    EvalExpr (yulD calls) funs V st (bop Op.shl [lit 224, lit sel])
-      (.vals [BitVec.ofNat 256 sel <<< 224] st) :=
-  Step.builtinOk (Step.argsCons (Step.argsCons Step.argsNil Step.lit) Step.lit) (by
-    change builtinWithExternal calls .none .none Op.shl _ _ _
-    simp only [evm_litValue_number, step_shl, toNat_224]
-    rfl)
-
-theorem exec_mstore_sel {calls : ExternalCalls} (funs : FunEnv (yulD calls))
-    (V : VEnv (yulD calls)) (st : EvmState) (sel : Nat) :
-    ExecStmt (yulD calls) funs V st
-      (.exprStmt (bop Op.mstore [lit abiPtr, bop Op.shl [lit 224, lit sel]]))
-      V { touchMemory st abiPtr 32 with
-          memory := storeWord st.memory abiPtr (BitVec.ofNat 256 sel <<< 224) } .normal :=
-  Step.exprStmt (Step.builtinOk
-    (Step.argsCons (Step.argsCons Step.argsNil (eval_shl_sel funs V st sel)) Step.lit)
-    (by
-      change builtinWithExternal calls .none .none Op.mstore _ _ _
-      simp only [evm_litValue_number, step_mstore, toNat_abiPtr]
-      rfl))
-
-theorem revert00_exec {calls : ExternalCalls} (funs : FunEnv (yulD calls))
-    (V : VEnv (yulD calls)) (st : EvmState) :
-    ExecStmt (yulD calls) funs V st revert00 V
-      { touchMemory st 0 0 with halted := some (.revert, []) } .halt := by
-  refine Step.exprStmtHalt (Step.builtinHalt
-    (Step.argsCons (Step.argsCons Step.argsNil Step.lit) Step.lit)
-    (by
-      change builtinWithExternal calls .none .none Op.revert _ _ _
-      simp only [evm_litValue_number, step_revert, toNat_ofNat_of_lt zero_lt_wordBound]
-      rfl))
-
-theorem revert00_block {calls : ExternalCalls} (funs : FunEnv (yulD calls))
-    (V : VEnv (yulD calls)) (st : EvmState) :
-    ExecStmt (yulD calls) funs V st (.block [revert00]) V
-      { touchMemory st 0 0 with halted := some (.revert, []) } .halt := by
-  have hhoist : hoist (yulD calls) [revert00] = [] := by
-    simp [hoist, revert00]
-  have hbody :
-      ExecStmts (yulD calls) (hoist (yulD calls) [revert00] :: funs) V st [revert00] V
-        { touchMemory st 0 0 with halted := some (.revert, []) } .halt := by
-    rw [hhoist]
-    exact Step.seqStop (revert00_exec ([] :: funs) V st) halt_ne_normal
-  have h := Step.block (D := yulD calls) hbody
-  rw [restore_self_open] at h
-  exact h
-
-theorem eval_call_args {calls : ExternalCalls} (funs : FunEnv (yulD calls))
-    (V : VEnv (yulD calls)) (st : EvmState)
-    (tok : YIdent) (target : U256) (hget : VEnv.get V tok = some target)
-    (gas insize : Nat) :
-    EvalArgs (yulD calls) funs V st
-      [lit gas, var tok, lit 0, lit abiPtr, lit insize, lit abiPtr, lit 32]
-      (.vals [BitVec.ofNat 256 gas, target, 0, BitVec.ofNat 256 abiPtr,
-        BitVec.ofNat 256 insize, BitVec.ofNat 256 abiPtr, BitVec.ofNat 256 32] st) :=
-  Step.argsCons
-    (Step.argsCons
-      (Step.argsCons
-        (Step.argsCons
-          (Step.argsCons
-            (Step.argsCons
-              (Step.argsCons Step.argsNil Step.lit)
-              Step.lit)
-            Step.lit)
-          Step.lit)
-        Step.lit)
-      (Step.var hget))
-    Step.lit
-
-theorem eval_call_of_resp {calls : ExternalCalls} (funs : FunEnv (yulD calls))
-    (V : VEnv (yulD calls)) (st : EvmState)
-    (tok : YIdent) (target : U256) (hget : VEnv.get V tok = some target)
-    (gas insize : Nat) (hstatic : st.env.static = false)
-    (resp : CallResponse)
-    (hCall : calls.Call
-      { kind := .call
-        gas := BitVec.ofNat 256 gas
-        target := target
-        value := 0
-        input := readBytes st.memory (BitVec.ofNat 256 abiPtr).toNat
-          (BitVec.ofNat 256 insize).toNat }
-      st resp) :
-    EvalExpr (yulD calls) funs V st
-      (bop YulSemantics.EVM.Op.call
-        [lit gas, var tok, lit 0, lit abiPtr, lit insize, lit abiPtr, lit 32])
-      (.vals [resp.flag]
-        (finishCall .call st resp
-          (BitVec.ofNat 256 abiPtr).toNat (BitVec.ofNat 256 insize).toNat
-          (BitVec.ofNat 256 abiPtr).toNat (BitVec.ofNat 256 32).toNat)) := by
-  refine Step.builtinOk (eval_call_args funs V st tok target hget gas insize) ?_
-  dsimp [yulD, evmWithExternal]
-  simp only [builtinWithExternal, hstatic, Bool.false_and, ↓reduceIte]
-  refine ⟨resp, ?_, ?_⟩
-  · convert hCall
-  · rfl
-
-theorem exec_if_ok_fail {calls : ExternalCalls} (funs : FunEnv (yulD calls))
-    (V : VEnv (yulD calls)) (st : EvmState)
-    (ok : YIdent) (hget : VEnv.get V ok = some (0 : U256)) :
-    ExecStmt (yulD calls) funs V st
-      (.cond (bop Op.iszero [var ok]) [revert00]) V
-      { touchMemory st 0 0 with halted := some (.revert, []) } .halt := by
-  have hisz :
-      EvalExpr (yulD calls) funs V st (bop Op.iszero [var ok]) (.vals [(1 : U256)] st) :=
-    Step.builtinOk (Step.argsCons Step.argsNil (Step.var hget)) (by
-      dsimp [yulD, evmWithExternal]
-      simpa [b2w] using builtin_iszero calls st (0 : U256))
-  have hne : (1 : U256) ≠ (yulD calls).zero := by simp [yulD_zero]
-  exact Step.ifTrue hisz hne (revert00_block funs V st)
-
-theorem exec_if_ok_succ {calls : ExternalCalls} (funs : FunEnv (yulD calls))
-    (V : VEnv (yulD calls)) (st : EvmState)
-    (ok : YIdent) (hget : VEnv.get V ok = some (1 : U256)) :
-    ExecStmt (yulD calls) funs V st
-      (.cond (bop Op.iszero [var ok]) [revert00]) V st .normal := by
-  have hisz :
-      EvalExpr (yulD calls) funs V st (bop Op.iszero [var ok]) (.vals [(0 : U256)] st) :=
-    Step.builtinOk (Step.argsCons Step.argsNil (Step.var hget)) (by
-      dsimp [yulD, evmWithExternal]
-      simpa [b2w] using builtin_iszero calls st (1 : U256))
-  exact Step.ifFalse hisz (by simp [yulD_zero])
-
-theorem eval_rds {calls : ExternalCalls} (funs : FunEnv (yulD calls))
-    (V : VEnv (yulD calls)) (st : EvmState) :
-    EvalExpr (yulD calls) funs V st (bop Op.returndatasize [])
-      (.vals [BitVec.ofNat 256 st.returndata.length] st) :=
-  Step.builtinOk Step.argsNil (by
-    change builtinWithExternal calls .none .none Op.returndatasize _ _ _
-    exact step_returndatasize st)
-
-theorem exec_word_check_fail {calls : ExternalCalls} (funs : FunEnv (yulD calls))
-    (V : VEnv (yulD calls)) (st : EvmState)
-    (h : (BitVec.ofNat 256 st.returndata.length).ult 32 = true) :
-    ExecStmt (yulD calls) funs V st
-      (.cond (bop Op.lt [bop Op.returndatasize [], lit 32]) [revert00]) V
-      { touchMemory st 0 0 with halted := some (.revert, []) } .halt := by
-  have hlt :
-      EvalExpr (yulD calls) funs V st (bop Op.lt [bop Op.returndatasize [], lit 32])
-        (.vals [(1 : U256)] st) := by
-    refine Step.builtinOk (Step.argsCons (Step.argsCons Step.argsNil Step.lit)
-      (eval_rds funs V st)) ?_
-    dsimp [yulD, evmWithExternal]
-    have heq :
-        (BitVec.ofNat 256 st.returndata.length).ult
-          (YulSemantics.EVM.litValue (.number 32)) = true := by
-      have : YulSemantics.EVM.litValue (.number 32) = (32 : U256) := rfl
-      rw [this]
-      exact h
-    have hbu := builtin_lt calls st (BitVec.ofNat 256 st.returndata.length)
-      (YulSemantics.EVM.litValue (.number 32))
-    simpa [heq, b2w] using hbu
-  have hne : (1 : U256) ≠ (yulD calls).zero := by simp [yulD_zero]
-  exact Step.ifTrue hlt hne (revert00_block funs V st)
-
-theorem exec_word_check_ok {calls : ExternalCalls} (funs : FunEnv (yulD calls))
-    (V : VEnv (yulD calls)) (st : EvmState)
-    (h : (BitVec.ofNat 256 st.returndata.length).ult 32 = false) :
-    ExecStmt (yulD calls) funs V st
-      (.cond (bop Op.lt [bop Op.returndatasize [], lit 32]) [revert00]) V st .normal := by
-  have hlt :
-      EvalExpr (yulD calls) funs V st (bop Op.lt [bop Op.returndatasize [], lit 32])
-        (.vals [(0 : U256)] st) := by
-    refine Step.builtinOk (Step.argsCons (Step.argsCons Step.argsNil Step.lit)
-      (eval_rds funs V st)) ?_
-    dsimp [yulD, evmWithExternal]
-    have heq :
-        (BitVec.ofNat 256 st.returndata.length).ult
-          (YulSemantics.EVM.litValue (.number 32)) = false := by
-      have : YulSemantics.EVM.litValue (.number 32) = (32 : U256) := rfl
-      rw [this]
-      exact h
-    have hbu := builtin_lt calls st (BitVec.ofNat 256 st.returndata.length)
-      (YulSemantics.EVM.litValue (.number 32))
-    simpa [heq, b2w] using hbu
-  exact Step.ifFalse hlt (by simp [yulD_zero])
-
-theorem eval_mload_abi {calls : ExternalCalls} (funs : FunEnv (yulD calls))
-    (V : VEnv (yulD calls)) (st : EvmState) :
-    EvalExpr (yulD calls) funs V st (bop Op.mload [lit abiPtr])
-      (.vals [loadWord st.memory abiPtr] (touchMemory st abiPtr 32)) :=
-  Step.builtinOk (Step.argsCons Step.argsNil Step.lit) (by
-    change builtinWithExternal calls .none .none Op.mload _ _ _
-    simp only [evm_litValue_number, step_mload, toNat_abiPtr]
-    rfl)
-
-theorem R_finishCall_fail {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
-    {κ} {w : World S X E} {st : EvmState} {resp : CallResponse} {iOff iSz oOff oSz : Nat}
-    (hR : R c Γ κ w st) (h : resp.success = false) :
-    R c Γ κ w (finishCall .call st resp iOff iSz oOff oSz) := by
-  rcases hR with ⟨hs, hl, hk, hwf⟩
-  refine ⟨?_, ?_, ?_, hwf⟩
-  · rw [finishCall_storage_fail_eq (h := h)]; exact hs
-  · unfold logsRel; rw [selfLogs_finishCall_fail (h := h), finishCall_address]; exact hl
-  · rw [finishCall_keccak, hk]
-
-theorem R_finishCall_success {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
-    {κ G} {α : Abs G} {w : World S X E} {st : EvmState} {resp : CallResponse}
-    {callee : Address} {iOff iSz oOff oSz : Nat}
-    (hR : R c Γ κ w st) (hs : resp.success = true)
-    (hni : NoInterfere α st resp.world callee) :
-    R c Γ κ w (finishCall .call st resp iOff iSz oOff oSz) := by
-  rcases hR with ⟨hsto, hl, hk, hwf⟩
-  have ⟨hσ, _, _, _, _, _⟩ := hni
-  refine ⟨?_, ?_, ?_, hwf⟩
-  · rw [finishCall_storage_success_eq (hs := hs), hσ]; exact hsto
-  · unfold logsRel
-    rw [selfLogs_finishCall_success (α := α) hs hni, finishCall_address]
-    exact hl
-  · rw [finishCall_keccak, hk]
-
-theorem emitCallRetCheck_word_stmts (e : Emit) :
-    (emitCallRetCheck e .word).stmts =
-      e.stmts ++ [.cond (bop Op.lt [bop Op.returndatasize [], lit 32]) [revert00]] :=
-  emitIf_stmts _ _ _
-
-theorem emitCallRetCheck_boolOpt_stmts (e : Emit) :
-    (emitCallRetCheck e .boolOpt).stmts =
-      e.stmts ++
-        [.cond (bop Op.iszero
-          [bop Op.or
-            [bop Op.iszero [bop Op.returndatasize []],
-              bop Op.and
-                [bop Op.iszero [bop Op.lt [bop Op.returndatasize [], lit 32]],
-                  bop Op.eq [bop Op.mload [lit abiPtr], lit 1]]]])
-          [revert00]] :=
-  emitIf_stmts _ _ _
-
-theorem emitCallRetCheck_nil_word :
-    (emitCallRetCheck {} .word).stmts =
-      [.cond (bop Op.lt [bop Op.returndatasize [], lit 32]) [revert00]] := by
-  simp [emitCallRetCheck_word_stmts, Emit.stmts_nil]
-
-theorem emitCallRetCheck_nil_boolOpt :
-    (emitCallRetCheck {} .boolOpt).stmts =
-      [.cond (bop Op.iszero
-        [bop Op.or
-          [bop Op.iszero [bop Op.returndatasize []],
-            bop Op.and
-              [bop Op.iszero [bop Op.lt [bop Op.returndatasize [], lit 32]],
-                bop Op.eq [bop Op.mload [lit abiPtr], lit 1]]]])
-        [revert00]] := by
-  simp [emitCallRetCheck_boolOpt_stmts, Emit.stmts_nil]
-
-theorem emitExtCall_nil_stmts (c : ContractDef) (depth b m : Nat)
-    (bind : Option YIdent) :
-    (emitExtCall c {} depth b m [] bind).stmts =
-      [.letDecl [extTok depth]
-        (some (bop Op.sload [lit (bindingSlot c b)]))] ++
-      [.exprStmt (bop Op.mstore
-        [lit abiPtr, bop Op.shl [lit 224, lit (bindingMethod c b m).1]])] ++
-      [.letDecl [extOk depth]
-        (some (bop YulSemantics.EVM.Op.call
-          [lit extCallGas, var (extTok depth), lit 0, lit abiPtr, lit 4,
-            lit abiPtr, lit 32]))] ++
-      [.cond (bop Op.iszero [var (extOk depth)]) [revert00]] ++
-      (emitCallRetCheck {} (bindingMethod c b m).2).stmts ++
-      match bind with
-      | none => []
-      | some name =>
-        match (bindingMethod c b m).2 with
-        | .boolOpt | .none => [.letDecl [name] (some (lit 1))]
-        | .word => [.letDecl [name] (some (bop Op.mload [lit abiPtr]))] := by
-  simp [emitExtCall, List.foldl_nil, emitLet, emitDo, emitIf, Emit.push, Emit.stmts,
-    extTok, extOk, bop]
-  cases bind with
-  | none =>
-    cases (bindingMethod c b m).2 with
-    | word => simp [emitCallRetCheck, emitIf, Emit.push, bop]
-    | boolOpt => simp [emitCallRetCheck, emitIf, Emit.push, bop]
-    | none => simp [emitCallRetCheck, bop]
-  | some name =>
-    cases (bindingMethod c b m).2 with
-    | word => simp [emitCallRetCheck, emitIf, emitLet, Emit.push, bop]
-    | boolOpt => simp [emitCallRetCheck, emitIf, emitLet, Emit.push, bop]
-    | none => simp [emitCallRetCheck, emitLet, Emit.push, bop]
-
-/-- Mini-fragment: one arity-0 external call, then return the word / stop. -/
-def CallProbe0 : {t : RetTy} → Core t → Prop
-  | .word, .letOp (Lsc.Op.call _ _ args) (.ret (.word (.var 0))) => args = []
-  | .unit, .stmtTail (Lsc.Stmt.call _ _ args) => args = []
-  | _, _ => False
-
-theorem VEnv.get_cons_open {D : Dialect} {x : Ident} {v : D.Value}
-    {V : VEnv D} {y : Ident} :
-    VEnv.get ((x, v) :: V) y = if x = y then some v else VEnv.get V y := by
-  simp only [VEnv.get, List.find?]
-  by_cases h : x = y
-  · simp [h]
-  · simp [h]
-
-theorem restore_nil_open {D : Dialect} (Vb : VEnv D) :
-    restore ([] : VEnv D) Vb = [] := by
-  simp [restore]
 
 theorem hoist_nil_open {calls : ExternalCalls} {ss : YBlock}
     (h : ∀ s ∈ ss, notFunDef s = true) : hoist (yulD calls) ss = [] := by
@@ -411,42 +31,6 @@ theorem hoist_nil_open {calls : ExternalCalls} {ss : YBlock}
   have hs' := h s hs
   cases s <;> simp [notFunDef] at hs' ⊢
 
-theorem execStmts_cons_inv {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
-    {V : VEnv (yulD calls)} {st : EvmState} {s : YStmt} {ss : YBlock}
-    {V' : VEnv (yulD calls)} {st' : EvmState} {o : Outcome}
-    (h : ExecStmts (yulD calls) funs V st (s :: ss) V' st' o) :
-    (∃ V1 st1, ExecStmt (yulD calls) funs V st s V1 st1 .normal ∧
-      ExecStmts (yulD calls) funs V1 st1 ss V' st' o) ∨
-    (o ≠ .normal ∧ ExecStmt (yulD calls) funs V st s V' st' o) := by
-  cases h with
-  | seqCons h1 h2 => exact .inl ⟨_, _, h1, h2⟩
-  | seqStop hs hne => exact .inr ⟨hne, hs⟩
-
-theorem execStmts_append_inv {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
-    {V : VEnv (yulD calls)} {st : EvmState} {ss1 ss2 : YBlock}
-    {V' : VEnv (yulD calls)} {st' : EvmState} {o : Outcome}
-    (h : ExecStmts (yulD calls) funs V st (ss1 ++ ss2) V' st' o) :
-    (∃ V1 st1, ExecStmts (yulD calls) funs V st ss1 V1 st1 .normal ∧
-      ExecStmts (yulD calls) funs V1 st1 ss2 V' st' o) ∨
-    (o ≠ .normal ∧ ExecStmts (yulD calls) funs V st ss1 V' st' o) := by
-  induction ss1 generalizing V st with
-  | nil =>
-    exact .inl ⟨V, st, Step.seqNil, h⟩
-  | cons s rest ih =>
-    rw [List.cons_append] at h
-    cases execStmts_cons_inv h with
-    | inl h =>
-      obtain ⟨V1, st1, hs, ht⟩ := h
-      cases ih ht with
-      | inl h2 =>
-        obtain ⟨V2, st2, hr, hss⟩ := h2
-        exact .inl ⟨V2, st2, Step.seqCons hs hr, hss⟩
-      | inr h2 =>
-        obtain ⟨hne, hr⟩ := h2
-        exact .inr ⟨hne, Step.seqCons hs hr⟩
-    | inr h =>
-      obtain ⟨hne, hs⟩ := h
-      exact .inr ⟨hne, Step.seqStop hs hne⟩
 
 theorem eval_lit_unique {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
     {V : VEnv (yulD calls)} {st : EvmState} {n : Nat} {r}
@@ -1094,25 +678,6 @@ theorem exec_word_check_inv {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
     have hr := eval_lt_rds32_unique he
     injection hr
 
-theorem emitCore_call0_word (c : ContractDef) (b m : Nat) :
-    emitCore c {} 0 true
-      (.letOp (Lsc.Op.call b m []) (.ret (.word (.var 0)))) =
-      some (emitRet (emitExtCall c {} 0 b m [] (some (identV 0))) 1 true
-        (.word (.var 0))) := by
-  simp [emitCore, emitLetOp]
-
-theorem emitCore_call0_unit (c : ContractDef) (b m : Nat) :
-    emitCore c {} 0 true (.stmtTail (Lsc.Stmt.call b m [])) =
-      some (emitReturnUnit (emitExtCall c {} 0 b m [] none) true) := by
-  simp [emitCore, emitStmt]
-
-theorem atomE_var0 : atomE 1 (.var 0) = var (identV 0) := by
-  simp [atomE]
-
-theorem decodeArgs_nil (f : FnDef) (cd : List UInt8) (h : f.params = []) :
-    decodeArgs f cd = [] := by
-  simp [decodeArgs, h]
-
 theorem bindingSlot_eq {c : ContractDef} {b : Nat} {bd : BindingDef}
     (h : c.bindings[b]? = some bd) : bindingSlot c b = bd.fieldSlot := by
   simp [bindingSlot, h]
@@ -1122,5 +687,25 @@ theorem bindingMethod_eq {c : ContractDef} {b m : Nat} {bd : BindingDef}
     (hb : c.bindings[b]? = some bd) (hm : bd.methods[m]? = some p) :
     bindingMethod c b m = (p.2.selector, p.2.ret) := by
   simp [bindingMethod, hb, hm]
+
+theorem emitCallRetCheck_word_stmts (e : Emit) :
+    (emitCallRetCheck e .word).stmts =
+      e.stmts ++ [.cond (bop Op.lt [bop Op.returndatasize [], lit 32]) [revert00]] :=
+  emitIf_stmts _ _ _
+
+theorem emitCallRetCheck_none_stmts (e : Emit) :
+    (emitCallRetCheck e .none).stmts = e.stmts := rfl
+
+/-- `let name := 0 { body }` or `{ body }` as produced by `emitExtCall`. -/
+theorem emitExtCall_stmts' (c : ContractDef) (e : Emit) (d b m : Nat)
+    (args : List Atom) (bind : Option YIdent) :
+    (emitExtCall c e d b m args bind).stmts =
+      e.stmts ++
+        match bind with
+        | none => [.block (emitExtCallBody c d b m args none)]
+        | some name =>
+          [.letDecl [name] (some (lit 0)),
+           .block (emitExtCallBody c d b m args (some name))] :=
+  emitExtCall_stmts c e d b m args bind
 
 end Lsc.Compiler

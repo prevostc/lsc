@@ -145,6 +145,6 @@ Core gains exactly `Op.call b m args` and `Stmt.call b m args`. `ContractSchema.
 - Fault-oracle composition: the call reads `w.ncalls`. Failure uses
   `composeFault ncalls true rest` (Core does not bump `ncalls`). Success uses
   `composeFault ncalls false rest`; a continuation sees indices `≥ ncalls + 1`.
-- `Inv.venv` (`V = toVEnv env`) is **not** restored after `emitExtCall` (leftover `_tok_*` /
-  `_ok_*`). Post-call simulation uses the V suffix and `VEnv.get` for the result name.
-  `ctxRel` **is** preserved by `finishCall`; `R.storageRel` is restored by `NoInterfere`.
+- `Inv.venv` (`V = toVEnv env`) is restored after `emitExtCall`: temps live in a Yul block,
+  the result name is declared outside and assigned inside, and `restore` drops `_tok_*` /
+  `_ok_*`. `ctxRel` **is** preserved by `finishCall`; `R.storageRel` is restored by `NoInterfere`.

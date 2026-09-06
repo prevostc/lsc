@@ -11,8 +11,8 @@ Stated against powdr `RunCommitted` (S1, closed `evm`) and `RunCommittedExt` (S2
 `yulD calls`). A Yul `revert` rolls back storage/logs, matching `Tx`'s `Except.error`.
 S1 (call-free) is `toYulFn_correct_callFree` in `Proof/Core.lean`. S2 is backward:
 every Yul run admitted by `Conforms` `calls` is predicted by Core under some fault
-oracle (`ToYulFnCorrectExt` in this file; mini-fragment proof in `Proof/Call.lean`).
-`runtimeBlock_correct` (dispatcher over `yulD`) is M3.
+oracle (`ToYulFnCorrectExt` here; call-free proof `toYulFn_correct_ext` in
+`Proof/CoreExt.lean`). `runtimeBlock_correct` (dispatcher over `yulD`) is M3.
 -/
 
 namespace Lsc.Compiler
@@ -203,24 +203,31 @@ under some fault oracle `fo` (`w` with `faults := fo`). Success ⇒ `haltSuccess
               haltError c Γ e bytes ∧ R c Γ κ w stObs
 
 /-- S1 (call-free, forward) is `toYulFn_correct_callFree`. S2 (backward, `yulD calls`)
-is `ToYulFnCorrectExt` here; the mini-fragment proof belongs in `Proof/Call.lean` (import
-cycle: `Call` may import `Core`, not the reverse). Dispatcher over `yulD` is M3. -/
+is `ToYulFnCorrectExt` here; the call-free proof is `toYulFn_correct_ext` in
+`Proof/CoreExt.lean` (import cycle: Proof → Layout → Correctness). Dispatcher over `yulD`
+is M3. -/
 theorem runtimeBlock_correct {S X E ε : Type} (c : ContractDef) (Γ : ContractSchema S X E ε)
     (hΓ : Γ.st.Lawful c.fields) (κ : List UInt8 → U256) (hκ : KeccakSep c κ)
-    (yul : YBlock) (hyul : runtimeBlock c = some yul)
+    (calls : ExternalCalls) (yul : YBlock) (hyul : runtimeBlock c = some yul)
     (ctx : Ctx) (w : World S X E) (st0 : EvmState)
     (hctx : ctxRel ctx st0) (hR : R c Γ κ w st0) :
-    ∃ stObs, RunCommitted yul st0 [] stObs .halt ∧
-      match selectedFn c st0.env.calldata with
-      | none => stObs.halted = some (.revert, []) ∧ R c Γ κ w stObs
-      | some f =>
-        let args := decodeArgs f st0.env.calldata
-        match Tx.run (Core.denote Γ f.core args.reverse) ctx w with
-        | .ok (v, w') => haltSuccess f.ret v stObs.halted ∧ R c Γ κ w' stObs
-        | .error e =>
-          ∃ bytes, stObs.halted = some (.revert, bytes) ∧
-            haltError c Γ e bytes ∧ R c Γ κ w stObs := by
-  -- TODO(S2): letCall
+    ∀ (st' : EvmState) (o : Outcome),
+      Run (yulD calls) yul st0 [] st' o →
+        ∃ fo : Nat → Bool,
+          let wfo : World S X E := { w with faults := fo }
+          let stObs := committedState st0 st'
+          match selectedFn c st0.env.calldata with
+          | none =>
+              o = Outcome.halt ∧ stObs.halted = some (.revert, []) ∧ R c Γ κ w stObs
+          | some f =>
+            let args := decodeArgs f st0.env.calldata
+            match Tx.run (Core.denote Γ f.core args.reverse) ctx wfo with
+            | .ok (v, w') =>
+                o = Outcome.halt ∧ haltSuccess f.ret v stObs.halted ∧ R c Γ κ w' stObs
+            | .error e =>
+                ∃ bytes, o = Outcome.halt ∧ stObs.halted = some (.revert, bytes) ∧
+                  haltError c Γ e bytes ∧ R c Γ κ w stObs := by
+  -- M3: dispatcher over `yulD`
   sorry
 
 end Lsc.Compiler

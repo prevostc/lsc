@@ -61,6 +61,12 @@ def RX {I : Interface} {S X E} (α : Abs I.Ghost) (b : Binding I S X)
     (w : World S X E) (st : EvmState) : Prop :=
   α.ofState st (b.addr w.self) = b.get w.ext
 
+/-- Foreign ghosts are read from per-address maps (`storageOf`, …), not from the
+executing account's `storage`/`transient`. Needed so call-free `sstore` preserves `RX`. -/
+def Abs.ignoresLocal {G} (α : Abs G) : Prop :=
+  ∀ (st : EvmState) (σ τ : U256 → U256) (a : Address),
+    α.ofState { st with storage := σ, transient := τ } a = α.ofState st a
+
 /-- Every **successful** Yul/EVM call from `self` to `addr` decodes to some method
 of `I`, matches `I.model`, and `NoInterfere`. Failed responses (`success = false`)
 are unconstrained. ABI-false / short `boolOpt` cannot be a success. -/

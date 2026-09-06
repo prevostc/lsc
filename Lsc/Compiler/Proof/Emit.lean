@@ -1,6 +1,7 @@
 import Lsc.Compiler.Proof.Env
 
 set_option linter.unusedSimpArgs false
+set_option linter.unusedVariables false
 
 /-!
 Accumulator homomorphism: `emit* e = { acc := (emit* {}).acc ++ e.acc }`.
@@ -22,8 +23,25 @@ theorem emitDo_acc (e : Emit) (op : YOp) (args : List YExpr) :
 theorem emitLet_acc (e : Emit) (n : YIdent) (x : YExpr) :
     emitLet e n x = { acc := (emitLet ({} : Emit) n x).acc ++ e.acc } := rfl
 
+theorem emitAssign_acc (e : Emit) (n : YIdent) (x : YExpr) :
+    emitAssign e n x = { acc := (emitAssign ({} : Emit) n x).acc ++ e.acc } := rfl
+
+theorem emitBlock_acc (e : Emit) (body : YBlock) :
+    emitBlock e body = { acc := (emitBlock ({} : Emit) body).acc ++ e.acc } := rfl
+
 theorem emitIf_acc (e : Emit) (cnd : YExpr) (body : YBlock) :
     emitIf e cnd body = { acc := (emitIf ({} : Emit) cnd body).acc ++ e.acc } := rfl
+
+theorem emitExtCall_stmts (c : ContractDef) (e : Emit) (depth b m : Nat)
+    (args : List Atom) (bind : Option YIdent) :
+    (emitExtCall c e depth b m args bind).stmts =
+      e.stmts ++
+        match bind with
+        | none => [.block (emitExtCallBody c depth b m args none)]
+        | some name =>
+          [.letDecl [name] (some (lit 0)),
+           .block (emitExtCallBody c depth b m args (some name))] := by
+  cases bind <;> simp [emitExtCall, emitBlock, emitLet, Emit.stmts_push]
 
 theorem emitReturnUnit_acc (e : Emit) (halt : Bool) :
     emitReturnUnit e halt = { acc := (emitReturnUnit {} halt).acc ++ e.acc } := by
@@ -180,17 +198,11 @@ theorem emitExtCall_acc (c : ContractDef) (e : Emit) (depth b m : Nat) (args : L
     (bindResult : Option YIdent) :
     emitExtCall c e depth b m args bindResult =
       { acc := (emitExtCall c {} depth b m args bindResult).acc ++ e.acc } := by
-  simp only [emitExtCall]
-  rw [emitLet_acc e]
-  rw [emitDo_cat]
-  rw [foldl_mstore_args_cat]
-  rw [emitLet_cat]
-  rw [emitIf_cat]
-  rw [emitCallRetCheck_cat]
   cases bindResult with
-  | none => rfl
+  | none =>
+    simp [emitExtCall, emitBlock, Emit.push]
   | some name =>
-    cases (bindingMethod c b m).2 <;> exact emitLet_cat _ _ _ _
+    simp [emitExtCall, emitLet, emitBlock, Emit.push]
 
 theorem emitLetOp_acc (c : ContractDef) (e : Emit) (d : Nat) (op : Lsc.Op) :
     emitLetOp c e d op =
@@ -382,6 +394,8 @@ theorem noFun_push {e : Emit} {s : YStmt} (he : e.noFun) (hs : notFunDef s = tru
 
 theorem noFun_do {e op args} (he : e.noFun) : (emitDo e op args).noFun := noFun_push he rfl
 theorem noFun_let {e n x} (he : e.noFun) : (emitLet e n x).noFun := noFun_push he rfl
+theorem noFun_assign {e n x} (he : e.noFun) : (emitAssign e n x).noFun := noFun_push he rfl
+theorem noFun_block {e b} (he : e.noFun) : (emitBlock e b).noFun := noFun_push he rfl
 theorem noFun_if {e c b} (he : e.noFun) : (emitIf e c b).noFun := noFun_push he rfl
 
 theorem noFun_foldl_mstore {e : Emit} {base i0} {xs : List YExpr} (he : e.noFun) :
@@ -462,27 +476,13 @@ theorem noFun_callRetCheck (e : Emit) (ret : AbiRet) (he : e.noFun) :
 theorem noFun_extCall (c : ContractDef) (e : Emit) (depth b m : Nat) (args : List Atom)
     (bindResult : Option YIdent) (he : e.noFun) :
     (emitExtCall c e depth b m args bindResult).noFun := by
-  simp only [emitExtCall]
-  have hpack :
-      (args.foldl (fun p a =>
-          (emitDo p.1 Op.mstore [lit (abiAfterSel + 32 * p.2), atomE depth a], p.2 + 1))
-        (emitDo (emitLet e s!"_tok_{depth}"
-            (bop Op.sload [lit (bindingSlot c b)]))
-          Op.mstore
-          [lit abiPtr, bop Op.shl [lit 224, lit (bindingMethod c b m).1]], 0)).1.noFun :=
-    noFun_foldl_mstore_args (noFun_do (noFun_let he))
-  have hok :=
-    noFun_let (n := s!"_ok_{depth}") (x := bop YulSemantics.EVM.Op.call
-      [lit extCallGas, var s!"_tok_{depth}", lit 0, lit abiPtr,
-        lit (4 + 32 * args.length), lit abiPtr, lit 32]) hpack
-  have hcall := noFun_callRetCheck _
-      (bindingMethod c b m).2
-      (noFun_if (c := bop Op.iszero [var s!"_ok_{depth}"]) (b := [revert00]) hok)
   cases bindResult with
-  | none => exact hcall
+  | none =>
+    simp only [emitExtCall]
+    exact noFun_block he
   | some name =>
-    revert hcall
-    cases (bindingMethod c b m).2 <;> intro hcall <;> exact noFun_let hcall
+    simp only [emitExtCall]
+    exact noFun_block (noFun_let he)
 
 theorem noFun_letOp (c : ContractDef) (e : Emit) (d : Nat) (op : Lsc.Op) (he : e.noFun)
     {e1} (h1 : emitLetOp c e d op = some e1) : e1.noFun := by
@@ -593,5 +593,371 @@ theorem emitParams_acc (e : Emit) (off n : Nat) :
         emitParams e off n from rfl]
     rw [ih]
     simp [Emit.push, emitParams]
+
+/-! ## `NoExternalOps` of emitted CallFree Yul -/
+
+theorem noExtBlock_append {a b : YBlock}
+    (ha : noExtBlock a = true) (hb : noExtBlock b = true) :
+    noExtBlock (a ++ b) = true := by
+  induction a with
+  | nil => simpa [noExtBlock] using hb
+  | cons s rest ih =>
+    simp [noExtBlock, noExtStmts, Bool.and_eq_true] at ha ⊢
+    exact ⟨ha.1, ih ha.2⟩
+
+theorem noExt_atomE (d : Nat) (a : Atom) : noExtExpr (atomE d a) = true := by
+  cases a with
+  | var i =>
+    simp only [atomE]
+    split_ifs <;> rfl
+  | lit n => rfl
+
+theorem noExt_lit (n : Nat) : noExtExpr (lit n) = true := rfl
+theorem noExt_var (x : YIdent) : noExtExpr (var x) = true := rfl
+
+theorem noExt_bop {op : YOp} {args : List YExpr}
+    (hop : noExtOp op = true) (ha : noExtExprs args = true) :
+    noExtExpr (bop op args) = true := by
+  change (noExtOp op && noExtExprs args) = true
+  simp [hop, ha]
+
+theorem noExtExprs_cons_true {e es}
+    (he : noExtExpr e = true) (hs : noExtExprs es = true) :
+    noExtExprs (e :: es) = true := by
+  simp [he, hs]
+
+theorem noExt_push {e : Emit} {s : YStmt}
+    (he : noExtBlock e.stmts = true) (hs : noExtStmt s = true) :
+    noExtBlock (e.push s).stmts = true := by
+  simpa [Emit.stmts_push] using noExtBlock_append he (by simp [noExtBlock, noExtStmts, hs])
+
+theorem noExt_nil : noExtBlock ({} : Emit).stmts = true := by
+  simp [Emit.stmts_nil, noExtBlock]
+
+theorem noExt_do {e op args} (he : noExtBlock e.stmts = true)
+    (hop : noExtOp op = true) (ha : noExtExprs args = true) :
+    noExtBlock (emitDo e op args).stmts = true :=
+  noExt_push he (by
+    change noExtExpr (bop op args) = true
+    exact noExt_bop hop ha)
+
+theorem noExt_let {e n x} (he : noExtBlock e.stmts = true) (hx : noExtExpr x = true) :
+    noExtBlock (emitLet e n x).stmts = true :=
+  noExt_push he (by simp [noExtStmt, hx])
+
+theorem noExt_if {e cnd b} (he : noExtBlock e.stmts = true)
+    (hc : noExtExpr cnd = true) (hb : noExtBlock b = true) :
+    noExtBlock (emitIf e cnd b).stmts = true :=
+  noExt_push he (by simp [noExtStmt, hc]; exact hb)
+
+theorem noExt_assign {e n x} (he : noExtBlock e.stmts = true) (hx : noExtExpr x = true) :
+    noExtBlock (emitAssign e n x).stmts = true :=
+  noExt_push he (by simp [noExtStmt, hx])
+
+theorem noExt_block {e b} (he : noExtBlock e.stmts = true) (hb : noExtBlock b = true) :
+    noExtBlock (emitBlock e b).stmts = true :=
+  noExt_push he (by simp [noExtStmt]; exact hb)
+
+theorem noExt_params (off n : Nat) :
+    noExtBlock (emitParams {} off n).stmts = true := by
+  induction n with
+  | zero => simp [emitParams, Emit.stmts_nil, noExtBlock]
+  | succ n ih =>
+    have hrange : List.range (n + 1) = List.range n ++ [n] := List.range_succ
+    simp only [emitParams]
+    rw [hrange, List.foldl_append, List.foldl_cons, List.foldl_nil]
+    exact noExt_push (e := emitParams {} off n) ih
+      (by
+        simp [noExtStmt]
+        exact noExt_bop (op := YulSemantics.EVM.Op.calldataload) rfl
+          (noExtExprs_cons_true (noExt_lit _) noExtExprs_nil))
+
+theorem noExt_keccak064 : noExtExpr keccak064 = true :=
+  noExt_bop rfl (noExtExprs_cons_true (noExt_lit _) (noExtExprs_cons_true (noExt_lit _) noExtExprs_nil))
+
+theorem noExt_stop : noExtStmt stopStmt = true :=
+  noExt_bop (op := YulSemantics.EVM.Op.stop) rfl noExtExprs_nil
+
+theorem noExt_revert00 : noExtStmt revert00 = true :=
+  noExt_bop (op := YulSemantics.EVM.Op.revert) rfl
+    (noExtExprs_cons_true (noExt_lit _) (noExtExprs_cons_true (noExt_lit _) noExtExprs_nil))
+
+theorem noExt_switch {e : Emit} {cnd : YExpr} {cases : List (YulSemantics.Literal × YBlock)}
+    {dflt : Option YBlock}
+    (he : noExtBlock e.stmts = true) (hc : noExtExpr cnd = true)
+    (hcs : noExtCases cases = true)
+    (hd : match dflt with | none => True | some b => noExtBlock b = true) :
+    noExtBlock (e.push (.switch cnd cases dflt)).stmts = true :=
+  noExt_push he (by
+    cases dflt with
+    | none =>
+      simp [noExtStmt, hc, hcs]
+    | some b =>
+      have hb : noExtStmts b = true := by simpa [noExtBlock] using hd
+      simp [noExtStmt, hc, hcs, hb])
+
+theorem noExt_emitCond (d : Nat) : ∀ c, noExtExpr (emitCond d c) = true := by
+  intro c
+  induction c with
+  | lt a b =>
+    exact noExt_bop (op := YulSemantics.EVM.Op.lt) rfl
+      (noExtExprs_cons_true (noExt_atomE d a) (noExtExprs_cons_true (noExt_atomE d b) noExtExprs_nil))
+  | le a b =>
+    exact noExt_bop (op := YulSemantics.EVM.Op.iszero) rfl
+      (noExtExprs_cons_true
+        (noExt_bop (op := YulSemantics.EVM.Op.lt) rfl
+          (noExtExprs_cons_true (noExt_atomE d b) (noExtExprs_cons_true (noExt_atomE d a) noExtExprs_nil)))
+        noExtExprs_nil)
+  | eq a b =>
+    exact noExt_bop (op := YulSemantics.EVM.Op.eq) rfl
+      (noExtExprs_cons_true (noExt_atomE d a) (noExtExprs_cons_true (noExt_atomE d b) noExtExprs_nil))
+  | ne a b =>
+    exact noExt_bop (op := YulSemantics.EVM.Op.iszero) rfl
+      (noExtExprs_cons_true
+        (noExt_bop (op := YulSemantics.EVM.Op.eq) rfl
+          (noExtExprs_cons_true (noExt_atomE d a) (noExtExprs_cons_true (noExt_atomE d b) noExtExprs_nil)))
+        noExtExprs_nil)
+  | and c1 c2 ih1 ih2 =>
+    exact noExt_bop (op := YulSemantics.EVM.Op.and) rfl
+      (noExtExprs_cons_true ih1 (noExtExprs_cons_true ih2 noExtExprs_nil))
+  | or c1 c2 ih1 ih2 =>
+    exact noExt_bop (op := YulSemantics.EVM.Op.or) rfl
+      (noExtExprs_cons_true ih1 (noExtExprs_cons_true ih2 noExtExprs_nil))
+  | not c ih =>
+    exact noExt_bop (op := YulSemantics.EVM.Op.iszero) rfl
+      (noExtExprs_cons_true ih noExtExprs_nil)
+  | tt | ff => exact noExt_lit _
+
+theorem noExt_emitPrim (d : Nat) (p : Prim) (args : List Atom) :
+    noExtExpr (emitPrim d p args) = true := by
+  simp only [emitPrim]
+  split
+  · exact noExt_atomE d _
+  · exact noExt_bop (op := YulSemantics.EVM.Op.add) rfl
+      (noExtExprs_cons_true (noExt_atomE d _) (noExtExprs_cons_true (noExt_atomE d _) noExtExprs_nil))
+  · exact noExt_bop (op := YulSemantics.EVM.Op.sub) rfl
+      (noExtExprs_cons_true (noExt_atomE d _) (noExtExprs_cons_true (noExt_atomE d _) noExtExprs_nil))
+  · exact noExt_bop (op := YulSemantics.EVM.Op.mul) rfl
+      (noExtExprs_cons_true (noExt_atomE d _) (noExtExprs_cons_true (noExt_atomE d _) noExtExprs_nil))
+  · exact noExt_lit 0
+
+theorem noExt_foldl_mstore {e : Emit} {base i0 : Nat} {xs : List YExpr}
+    (he : noExtBlock e.stmts = true) (hx : ∀ x ∈ xs, noExtExpr x = true) :
+    noExtBlock ((xs.foldl (fun p a =>
+        (emitDo p.1 YulSemantics.EVM.Op.mstore [lit (base + 32 * p.2), a], p.2 + 1))
+      (e, i0)).1).stmts = true := by
+  induction xs generalizing e i0 with
+  | nil => simpa using he
+  | cons a xs ih =>
+    simp only [List.foldl_cons]
+    exact ih (noExt_do he rfl (noExtExprs_cons_true (noExt_lit _)
+      (noExtExprs_cons_true (hx a (by simp)) noExtExprs_nil)))
+      (fun x hx' => hx x (by simp [hx']))
+
+theorem noExt_panic (e : Emit) (code : Nat) (he : noExtBlock e.stmts = true) :
+    noExtBlock (emitPanic e code).stmts = true := by
+  simp only [emitPanic]
+  exact noExt_do (noExt_do (noExt_do he
+    (op := YulSemantics.EVM.Op.mstore) rfl
+      (noExtExprs_cons_true (noExt_lit _)
+        (noExtExprs_cons_true
+          (noExt_bop rfl (noExtExprs_cons_true (noExt_lit _) (noExtExprs_cons_true (noExt_lit _) noExtExprs_nil)))
+          noExtExprs_nil)))
+    (op := YulSemantics.EVM.Op.mstore) rfl
+      (noExtExprs_cons_true (noExt_lit _) (noExtExprs_cons_true (noExt_lit _) noExtExprs_nil)))
+    (op := YulSemantics.EVM.Op.revert) rfl
+      (noExtExprs_cons_true (noExt_lit _) (noExtExprs_cons_true (noExt_lit _) noExtExprs_nil))
+
+theorem noExt_customError (c : ContractDef) (e : Emit) (err : Nat) (args : List YExpr)
+    (he : noExtBlock e.stmts = true) (ha : ∀ x ∈ args, noExtExpr x = true) :
+    noExtBlock (emitCustomError c e err args).stmts = true := by
+  simp only [emitCustomError]
+  exact noExt_do (noExt_foldl_mstore (noExt_do he rfl
+      (noExtExprs_cons_true (noExt_lit _)
+        (noExtExprs_cons_true
+          (noExt_bop rfl (noExtExprs_cons_true (noExt_lit _) (noExtExprs_cons_true (noExt_lit _) noExtExprs_nil)))
+          noExtExprs_nil)))
+    ha)
+    (op := YulSemantics.EVM.Op.revert) rfl
+      (noExtExprs_cons_true (noExt_lit _) (noExtExprs_cons_true (noExt_lit _) noExtExprs_nil))
+
+theorem noExt_returnWords (e : Emit) (xs : List YExpr) (he : noExtBlock e.stmts = true)
+    (hx : ∀ x ∈ xs, noExtExpr x = true) :
+    noExtBlock (emitReturnWords e xs).stmts = true := by
+  cases xs with
+  | nil => exact noExt_push he noExt_stop
+  | cons _ _ =>
+    simp only [emitReturnWords]
+    exact noExt_do (noExt_foldl_mstore he hx)
+      (op := YulSemantics.EVM.Op.ret) rfl
+        (noExtExprs_cons_true (noExt_lit _) (noExtExprs_cons_true (noExt_lit _) noExtExprs_nil))
+
+theorem noExt_returnUnit (e : Emit) (halt : Bool) (he : noExtBlock e.stmts = true) :
+    noExtBlock (emitReturnUnit e halt).stmts = true := by
+  cases halt with
+  | false => simpa [emitReturnUnit] using he
+  | true => simp only [emitReturnUnit]; exact noExt_push he noExt_stop
+
+theorem noExt_log1 (e : Emit) (topic : Nat) (args : List YExpr)
+    (he : noExtBlock e.stmts = true) (ha : ∀ x ∈ args, noExtExpr x = true) :
+    noExtBlock (emitLog1 e topic args).stmts = true := by
+  simp only [emitLog1]
+  exact noExt_do (noExt_foldl_mstore he ha)
+    (op := YulSemantics.EVM.Op.log1) rfl
+      (noExtExprs_cons_true (noExt_lit _)
+        (noExtExprs_cons_true (noExt_lit _) (noExtExprs_cons_true (noExt_lit _) noExtExprs_nil)))
+
+theorem noExt_mapSlotPrep (e : Emit) (slot : Nat) (k : YExpr)
+    (he : noExtBlock e.stmts = true) (hk : noExtExpr k = true) :
+    noExtBlock (emitMapSlotPrep e slot k).stmts = true := by
+  simp only [emitMapSlotPrep]
+  exact noExt_do (noExt_do he rfl (noExtExprs_cons_true (noExt_lit _)
+      (noExtExprs_cons_true hk noExtExprs_nil)))
+    rfl (noExtExprs_cons_true (noExt_lit _) (noExtExprs_cons_true (noExt_lit _) noExtExprs_nil))
+
+theorem noExt_map2SlotPrep (e : Emit) (slot : Nat) (k₁ k₂ : YExpr)
+    (he : noExtBlock e.stmts = true) (h1 : noExtExpr k₁ = true) (h2 : noExtExpr k₂ = true) :
+    noExtBlock (emitMap2SlotPrep e slot k₁ k₂).stmts = true := by
+  simp only [emitMap2SlotPrep]
+  exact noExt_do (noExt_do (noExt_mapSlotPrep e slot k₁ he h1)
+      rfl (noExtExprs_cons_true (noExt_lit _) (noExtExprs_cons_true noExt_keccak064 noExtExprs_nil)))
+    rfl (noExtExprs_cons_true (noExt_lit _) (noExtExprs_cons_true h2 noExtExprs_nil))
+
+theorem noExt_mulOverflowGuard (e : Emit) (a b p : YExpr)
+    (he : noExtBlock e.stmts = true) (ha : noExtExpr a = true)
+    (hb : noExtExpr b = true) (hp : noExtExpr p = true) :
+    noExtBlock (emitMulOverflowGuard e a b p).stmts = true := by
+  simp only [emitMulOverflowGuard]
+  exact noExt_if he
+    (noExt_bop (op := YulSemantics.EVM.Op.iszero) rfl (noExtExprs_cons_true
+      (noExt_bop (op := YulSemantics.EVM.Op.or) rfl (noExtExprs_cons_true
+        (noExt_bop (op := YulSemantics.EVM.Op.iszero) rfl (noExtExprs_cons_true ha noExtExprs_nil))
+        (noExtExprs_cons_true
+          (noExt_bop (op := YulSemantics.EVM.Op.eq) rfl (noExtExprs_cons_true
+            (noExt_bop (op := YulSemantics.EVM.Op.div) rfl
+              (noExtExprs_cons_true hp (noExtExprs_cons_true ha noExtExprs_nil)))
+            (noExtExprs_cons_true hb noExtExprs_nil)))
+          noExtExprs_nil)))
+      noExtExprs_nil))
+    (noExt_panic {} 0x11 noExt_nil)
+
+theorem noExt_addChecked (e : Emit) (name : YIdent) (a b : YExpr)
+    (he : noExtBlock e.stmts = true) (ha : noExtExpr a = true) (hb : noExtExpr b = true) :
+    noExtBlock (emitAddChecked e name a b).stmts = true := by
+  simp only [emitAddChecked]
+  exact noExt_if (noExt_let he (noExt_bop (op := YulSemantics.EVM.Op.add) rfl
+      (noExtExprs_cons_true ha (noExtExprs_cons_true hb noExtExprs_nil))))
+    (noExt_bop (op := YulSemantics.EVM.Op.lt) rfl
+      (noExtExprs_cons_true (noExt_var name) (noExtExprs_cons_true ha noExtExprs_nil)))
+    (noExt_panic {} 0x11 noExt_nil)
+
+theorem noExt_subChecked (e : Emit) (name : YIdent) (a b : YExpr)
+    (he : noExtBlock e.stmts = true) (ha : noExtExpr a = true) (hb : noExtExpr b = true) :
+    noExtBlock (emitSubChecked e name a b).stmts = true := by
+  simp only [emitSubChecked]
+  exact noExt_let (noExt_if he
+      (noExt_bop (op := YulSemantics.EVM.Op.lt) rfl
+        (noExtExprs_cons_true ha (noExtExprs_cons_true hb noExtExprs_nil)))
+      (noExt_panic {} 0x11 noExt_nil))
+    (noExt_bop (op := YulSemantics.EVM.Op.sub) rfl
+      (noExtExprs_cons_true ha (noExtExprs_cons_true hb noExtExprs_nil)))
+
+theorem noExt_mulChecked (e : Emit) (name : YIdent) (a b : YExpr)
+    (he : noExtBlock e.stmts = true) (ha : noExtExpr a = true) (hb : noExtExpr b = true) :
+    noExtBlock (emitMulChecked e name a b).stmts = true := by
+  simp only [emitMulChecked]
+  exact noExt_mulOverflowGuard (emitLet e name (bop YulSemantics.EVM.Op.mul [a, b]))
+    a b (var name)
+    (noExt_let he (noExt_bop (op := YulSemantics.EVM.Op.mul) rfl
+      (noExtExprs_cons_true ha (noExtExprs_cons_true hb noExtExprs_nil))))
+    ha hb (noExt_var name)
+
+theorem noExt_divChecked (e : Emit) (name : YIdent) (a b : YExpr)
+    (he : noExtBlock e.stmts = true) (ha : noExtExpr a = true) (hb : noExtExpr b = true) :
+    noExtBlock (emitDivChecked e name a b).stmts = true := by
+  simp only [emitDivChecked]
+  exact noExt_let (noExt_if he
+      (noExt_bop (op := YulSemantics.EVM.Op.iszero) rfl (noExtExprs_cons_true hb noExtExprs_nil))
+      (noExt_panic {} 0x12 noExt_nil))
+    (noExt_bop (op := YulSemantics.EVM.Op.div) rfl
+      (noExtExprs_cons_true ha (noExtExprs_cons_true hb noExtExprs_nil)))
+
+theorem noExt_mulDivDown (e : Emit) (name : YIdent) (a b c : YExpr)
+    (he : noExtBlock e.stmts = true) (ha : noExtExpr a = true)
+    (hb : noExtExpr b = true) (hc : noExtExpr c = true) :
+    noExtBlock (emitMulDivDown e name a b c).stmts = true := by
+  simp only [emitMulDivDown]
+  exact noExt_assign
+    (noExt_mulOverflowGuard
+      (emitLet (emitIf e (bop YulSemantics.EVM.Op.iszero [c]) (emitPanic {} 0x12).stmts)
+        name (bop YulSemantics.EVM.Op.mul [a, b]))
+      a b (var name)
+      (noExt_let (noExt_if he
+          (noExt_bop (op := YulSemantics.EVM.Op.iszero) rfl (noExtExprs_cons_true hc noExtExprs_nil))
+          (noExt_panic {} 0x12 noExt_nil))
+        (noExt_bop (op := YulSemantics.EVM.Op.mul) rfl
+          (noExtExprs_cons_true ha (noExtExprs_cons_true hb noExtExprs_nil))))
+      ha hb (noExt_var name))
+    (noExt_bop (op := YulSemantics.EVM.Op.div) rfl
+      (noExtExprs_cons_true (noExt_var name) (noExtExprs_cons_true hc noExtExprs_nil)))
+
+theorem noExt_assign_div_mod (name : YIdent) (c : YExpr) (hc : noExtExpr c = true) :
+    noExtStmt (.assign [name] (bop YulSemantics.EVM.Op.div [var name, c])) = true :=
+  noExt_bop (op := YulSemantics.EVM.Op.div) rfl
+    (noExtExprs_cons_true (noExt_var name) (noExtExprs_cons_true hc noExtExprs_nil))
+
+theorem noExt_mulDivUp (e : Emit) (name : YIdent) (a b c : YExpr)
+    (he : noExtBlock e.stmts = true) (ha : noExtExpr a = true)
+    (hb : noExtExpr b = true) (hc : noExtExpr c = true) :
+    noExtBlock (emitMulDivUp e name a b c).stmts = true := by
+  simp only [emitMulDivUp]
+  refine noExt_switch
+    (e := emitMulOverflowGuard
+      (emitLet (emitIf e (bop YulSemantics.EVM.Op.iszero [c]) (emitPanic {} 0x12).stmts)
+        name (bop YulSemantics.EVM.Op.mul [a, b]))
+      a b (var name))
+    (noExt_mulOverflowGuard
+      (emitLet (emitIf e (bop YulSemantics.EVM.Op.iszero [c]) (emitPanic {} 0x12).stmts)
+        name (bop YulSemantics.EVM.Op.mul [a, b]))
+      a b (var name)
+      (noExt_let (noExt_if he
+          (noExt_bop (op := YulSemantics.EVM.Op.iszero) rfl (noExtExprs_cons_true hc noExtExprs_nil))
+          (noExt_panic {} 0x12 noExt_nil))
+        (noExt_bop (op := YulSemantics.EVM.Op.mul) rfl
+          (noExtExprs_cons_true ha (noExtExprs_cons_true hb noExtExprs_nil))))
+      ha hb (noExt_var name))
+    (noExt_bop (op := YulSemantics.EVM.Op.mod) rfl
+      (noExtExprs_cons_true (noExt_var name) (noExtExprs_cons_true hc noExtExprs_nil)))
+    (by
+      change (noExtStmts [.assign [name] (bop YulSemantics.EVM.Op.div [var name, c])] &&
+          noExtCases []) = true
+      simp [noExt_assign_div_mod name c hc])
+    (by
+      change noExtBlock
+        [.assign [name] (bop YulSemantics.EVM.Op.add
+          [bop YulSemantics.EVM.Op.div [var name, c], lit 1])] = true
+      simp [noExtBlock, noExtStmts, noExtStmt]
+      exact noExt_bop (op := YulSemantics.EVM.Op.add) rfl (noExtExprs_cons_true
+        (noExt_bop (op := YulSemantics.EVM.Op.div) rfl
+          (noExtExprs_cons_true (noExt_var name) (noExtExprs_cons_true hc noExtExprs_nil)))
+        (noExtExprs_cons_true (noExt_lit 1) noExtExprs_nil)))
+
+theorem noExt_atomEs (d : Nat) (as : List Atom) :
+    ∀ x ∈ as.map (atomE d), noExtExpr x = true := by
+  intro x hx
+  obtain ⟨a, _, rfl⟩ := List.mem_map.mp hx
+  exact noExt_atomE d a
+
+theorem noExt_ret (e : Emit) (d : Nat) (halt : Bool) {t} (r : RetExpr t)
+    (he : noExtBlock e.stmts = true) :
+    noExtBlock (emitRet e d halt r).stmts = true := by
+  cases r with
+  | unit => simp only [emitRet]; exact noExt_returnUnit e halt he
+  | word a | addr a | flag a =>
+    simp only [emitRet]
+    exact noExt_returnWords e _ he (noExt_atomEs d _)
+  | pair a b =>
+    simp only [emitRet]
+    exact noExt_returnWords e _ he (noExt_atomEs d _)
 
 end Lsc.Compiler

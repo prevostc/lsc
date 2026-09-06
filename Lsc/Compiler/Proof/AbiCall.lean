@@ -30,6 +30,27 @@ theorem step_or (st : EvmState) (a b : U256) :
 theorem step_and (st : EvmState) (a b : U256) :
     stepOp Op.and [a, b] st = some (.ok [a &&& b] st) := rfl
 
+theorem selectorBytes_length (n : Nat) : (selectorBytes n).length = 4 := by
+  simp [selectorBytes]
+
+theorem wordBytes_length (n : Nat) : (wordBytes n).length = 32 := by
+  simp [wordBytes]
+
+theorem abiInput_length (spec : AbiSpec) (args : List Nat) :
+    (abiInput spec args).length = 4 + 32 * args.length := by
+  simp [abiInput, selectorBytes_length, List.length_append, List.length_flatMap,
+    wordBytes_length]
+  induction args with
+  | nil => simp
+  | cons _ args ih =>
+    simp [ih]
+    omega
+
+theorem Abs.ofState_mstore {G} (α : Abs G) (st : EvmState) (p v : U256) (a : Address) :
+    α.ofState { touchMemory st p.toNat 32 with memory := storeWord st.memory p.toNat v } a =
+      α.ofState st a := by
+  simp [α.ofState_proj, CallWorld.ofState, touchMemory]
+
 theorem extCallGas_lt_wordBound : extCallGas < wordBound := by
   unfold extCallGas wordBound
   exact Nat.lt_trans (by decide : 1000000 < 2 ^ 20)

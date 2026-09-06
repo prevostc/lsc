@@ -54,16 +54,18 @@ Decisions for `Lsc/Compiler` fixed by the study of `yul-semantics`, `evm_semanti
   full tail continuations, so no result variables need to be joined.
 - Nested Yul expressions (no flatten / `t_i` temps). `Cond`, map-slot `keccak256(0,64)`, and
   pure primitives are expression trees; checked ops reuse the result variable as scratch
-  (`let v_d := add(a,b); if lt(v_d,a) { panic }`). `{ … }` only wraps `if` bodies and `switch`
-  cases. `toYulFn` returns `none` unless `coreWF` (literals `< 2^256`, field kinds, event/error
+- `{ … }` wraps `if` bodies, `switch` cases, **and** the external-call body (`emitExtCall`)
+  so `_tok_*`/`_ok_*` do not escape. `toYulFn` returns `none` unless `coreWF` (literals `< 2^256`, field kinds, event/error
   arity) and `identV` names on `[0, maxDepth)` are pairwise distinct; `runtimeBlock` also
   requires unique selectors. Parameters are `let v_i := calldataload(4 + 32 i)` (empty `VEnv`).
 - `ret` → ABI-encode at `0x80`, `return(0x80, 32k)`; unit → `stop()`.
-- `Op.call` / `Stmt.call` → `sload` the bound address slot, ABI-pack at `0x80`,
-  `call(<gas literal>, tok, 0, …)` (**never `gas()`**; powdr rejects it),
-  `if iszero(ok) { revert(0,0) }`. Return handling: `boolOpt` — success ⇔ call ok ∧
-  (`returndatasize() = 0` ∨ returned word `= 1`) (missing-return-value tokens OK);
-  `word` — require `returndatasize() ≥ 32`. `toYul_correct`'s `letCall` case: `PROOF_CHAIN.md`.
+- `Op.call` / `Stmt.call` → `let v_d := 0 { let tok := sload(slot); … let ok := call(…);
+  if iszero(ok) { revert(0,0) }; <ret check>; v_d := <1 | mload(0x80)> }` (or `{ body }` for
+  `Stmt.call`). Temps `_tok_*` / `_ok_*` are scoped so `restore` drops them and `Inv.venv` is
+  `toVEnv` again. `call(<gas literal>, tok, 0, …)` (**never `gas()`**; powdr rejects it).
+  Return handling: `boolOpt` — success ⇔ call ok ∧ (`returndatasize() = 0` ∨ returned word
+  `= 1`); `word` — require `returndatasize() ≥ 32`. Backward `toYul_correct` for call-free
+  cores is `toYulFn_correct_ext`; `Op.call`/`Stmt.call` is `PROOF_CHAIN.md` (M1).
 - Constructor-time `call` (e.g. caching `decimals`) is subject to verification against powdr's
   deploy theorem (`compileObject_correct` / `evmWithExternal` in init code). If that theorem
   cannot take external calls in creation code, `decimals` is a constructor argument.

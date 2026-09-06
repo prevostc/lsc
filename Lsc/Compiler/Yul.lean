@@ -8,15 +8,18 @@ import KeccakEngine.Sponge
 # Core → Yul
 
 `toYulFn` compiles one `FnDef` to a powdr `YulSemantics` block. `Op.call` / `Stmt.call`
-are emitted (`sload` of the bound slot, ABI pack at `0x80`, `call` with a gas literal,
-`if iszero(ok) { revert(0,0) }`, then `boolOpt` / `word` return handling). `toYulFn` does
+are emitted as a scoped Yul block (`sload` of the bound slot, ABI pack at `0x80`, `call`
+with a gas literal, `if iszero(ok) { revert(0,0) }`, then `boolOpt` / `word` return
+handling). Temporaries `_tok_*` / `_ok_*` live inside the block so `restore` drops them;
+the Core result variable is declared outside and assigned inside. `toYulFn` does
 **not** return `none` on calls.
 
 Not emitted in this slice: `tload`/`tstore` (reentrancy lock), `gas()`, `for`, `delegatecall`,
 `selfdestruct`, `create`. `ite` is `switch` (Yul `if` has no else). Dispatcher is
 `switch shr(224, calldataload(0))`. Sub-expressions are nested Yul builtins (no flatten /
-`t_i` temps); `{ … }` only wraps `if` bodies and `switch` cases. `toYulFn` requires
-`coreWF` and `Nodup` `identV` names; `runtimeBlock` requires unique selectors.
+`t_i` temps); `{ … }` wraps `if` bodies, `switch` cases, and external-call temps.
+`toYulFn` requires `coreWF` and `Nodup` `identV` names; `runtimeBlock` requires unique
+selectors.
 -/
 
 namespace Lsc.Compiler
@@ -232,6 +235,64 @@ def identsNodup (n : Nat) : Bool :=
 def selectorsNodup (c : ContractDef) : Bool :=
   decide ((c.functions.map (fun f => f.selector)).Pairwise (fun a b => a ≠ b))
 
+/-! ## `NoExternalOps`: call-free Yul (no `call`/`create`/`gas`) -/
+
+/-- EVM ops whose open-world interpretation is not `stepOp`. -/
+def noExtOp : YOp → Bool
+  | .call | .callcode | .delegatecall | .staticcall | .create | .create2 | .gas => false
+  | _ => true
+
+mutual
+def noExtExpr : YExpr → Bool
+  | .lit _ | .var _ => true
+  | .builtin op args => noExtOp op && noExtExprs args
+  | .call _ args => noExtExprs args
+
+def noExtExprs : List YExpr → Bool
+  | [] => true
+  | e :: es => noExtExpr e && noExtExprs es
+
+def noExtStmt : YStmt → Bool
+  | .block b => noExtStmts b
+  | .funDef _ _ _ b => noExtStmts b
+  | .letDecl _ none => true
+  | .letDecl _ (some e) => noExtExpr e
+  | .assign _ e => noExtExpr e
+  | .cond c b => noExtExpr c && noExtStmts b
+  | .switch c cases dflt =>
+      noExtExpr c && noExtCases cases &&
+        match dflt with
+        | none => true
+        | some b => noExtStmts b
+  | .forLoop init c post body =>
+      noExtStmts init && noExtExpr c && noExtStmts post && noExtStmts body
+  | .exprStmt e => noExtExpr e
+  | .«break» | .«continue» | .leave => true
+
+def noExtStmts : List YStmt → Bool
+  | [] => true
+  | s :: ss => noExtStmt s && noExtStmts ss
+
+def noExtCases : List (YulSemantics.Literal × List YStmt) → Bool
+  | [] => true
+  | p :: rest => noExtStmts p.2 && noExtCases rest
+end
+
+def noExtBlock (ss : YBlock) : Bool := noExtStmts ss
+
+@[simp] theorem noExtExprs_nil : noExtExprs [] = true := rfl
+@[simp] theorem noExtExprs_cons (e es) :
+    noExtExprs (e :: es) = (noExtExpr e && noExtExprs es) := rfl
+@[simp] theorem noExtStmts_nil : noExtStmts [] = true := rfl
+@[simp] theorem noExtStmts_cons (s ss) :
+    noExtStmts (s :: ss) = (noExtStmt s && noExtStmts ss) := rfl
+@[simp] theorem noExtCases_nil : noExtCases [] = true := rfl
+@[simp] theorem noExtCases_cons (p rest) :
+    noExtCases (p :: rest) = (noExtStmts p.2 && noExtCases rest) := rfl
+@[simp] theorem noExtBlock_nil : noExtBlock [] = true := rfl
+@[simp] theorem noExtBlock_cons (s ss) :
+    noExtBlock (s :: ss) = (noExtStmt s && noExtBlock ss) := rfl
+
 theorem atomWF_iff (a : Atom) :
     atomWF a = true ↔ match a with | .var _ => True | .lit n => n < wordBound := by
   cases a <;> simp [atomWF, decide_eq_true_eq]
@@ -276,8 +337,18 @@ def emitDo (e : Emit) (op : YulSemantics.EVM.Op) (args : List YExpr) : Emit :=
 def emitLet (e : Emit) (name : YIdent) (x : YExpr) : Emit :=
   e.push (.letDecl [name] (some x))
 
+def emitAssign (e : Emit) (name : YIdent) (x : YExpr) : Emit :=
+  e.push (.assign [name] x)
+
+def emitBlock (e : Emit) (body : YBlock) : Emit :=
+  e.push (.block body)
+
 def emitIf (e : Emit) (cnd : YExpr) (body : YBlock) : Emit :=
   e.push (.cond cnd body)
+
+/-- Call temporaries; distinct from `identV`. -/
+def extTok (d : Nat) : YIdent := s!"_tok_{d}"
+def extOk (d : Nat) : YIdent := s!"_ok_{d}"
 
 /-- `if lt(calldatasize(), n) { revert(0,0) }`. -/
 def emitGuardLt (e : Emit) (n : Nat) : Emit :=
@@ -424,15 +495,16 @@ def emitCallRetCheck (e : Emit) (ret : AbiRet) : Emit :=
       [bop YulSemantics.EVM.Op.returndatasize [], lit 32]) [revert00]
   | .none => e
 
-/-- `sload` bound address, ABI-pack at `0x80`, `call(extCallGas, tok, 0, …)`, revert on failure.
-When `bindResult` is set, the Core local is the returned word (`boolOpt` yields `1`). -/
-def emitExtCall (c : ContractDef) (e : Emit) (depth : Nat) (b m : Nat) (args : List Atom)
-    (bindResult : Option YIdent) : Emit :=
+/-- Body of an external CALL. Temps `_tok_*` / `_ok_*` are intended to live inside a
+Yul block so `restore` drops them. When `assignResult` is set, that outer variable is
+assigned the ABI result (`boolOpt` / `.none` yield `1`). -/
+def emitExtCallBody (c : ContractDef) (depth : Nat) (b m : Nat) (args : List Atom)
+    (assignResult : Option YIdent) : YBlock :=
   let slot := bindingSlot c b
   let (sel, ret) := bindingMethod c b m
-  let tok : YIdent := s!"_tok_{depth}"
-  let ok : YIdent := s!"_ok_{depth}"
-  let e := emitLet e tok (bop YulSemantics.EVM.Op.sload [lit slot])
+  let tok := extTok depth
+  let ok := extOk depth
+  let e := emitLet {} tok (bop YulSemantics.EVM.Op.sload [lit slot])
   let e := emitDo e YulSemantics.EVM.Op.mstore
     [lit abiPtr, bop YulSemantics.EVM.Op.shl [lit 224, lit sel]]
   let (e, _) := args.foldl (fun (e, i) a =>
@@ -442,12 +514,21 @@ def emitExtCall (c : ContractDef) (e : Emit) (depth : Nat) (b m : Nat) (args : L
     [lit extCallGas, var tok, lit 0, lit abiPtr, lit insize, lit abiPtr, lit 32])
   let e := emitIf e (bop YulSemantics.EVM.Op.iszero [var ok]) [revert00]
   let e := emitCallRetCheck e ret
-  match bindResult with
-  | none => e
+  match assignResult with
+  | none => e.stmts
   | some name =>
     match ret with
-    | .boolOpt | .none => emitLet e name (lit 1)
-    | .word => emitLet e name (bop YulSemantics.EVM.Op.mload [lit abiPtr])
+    | .boolOpt | .none => (emitAssign e name (lit 1)).stmts
+    | .word => (emitAssign e name (bop YulSemantics.EVM.Op.mload [lit abiPtr])).stmts
+
+/-- `sload` bound address, ABI-pack at `0x80`, `call(extCallGas, tok, 0, …)`, revert on
+failure. Temps are scoped in `{ … }`. When `bindResult` is set: `let v := 0 { … v := r }`. -/
+def emitExtCall (c : ContractDef) (e : Emit) (depth : Nat) (b m : Nat) (args : List Atom)
+    (bindResult : Option YIdent) : Emit :=
+  match bindResult with
+  | none => emitBlock e (emitExtCallBody c depth b m args none)
+  | some name =>
+    emitBlock (emitLet e name (lit 0)) (emitExtCallBody c depth b m args (some name))
 
 def emitLetOp (c : ContractDef) (e : Emit) (depth : Nat) : Lsc.Op → Option Emit
   | .load f => some (emitLet e (identV depth) (bop YulSemantics.EVM.Op.sload [lit f]))

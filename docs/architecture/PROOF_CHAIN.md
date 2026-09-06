@@ -39,18 +39,17 @@ bytecode    ──(4) EndToEnd glue──────  bytecode-level anti-explo
      `{w with faults := fo}` predicts it. `Realizes` is not a hypothesis (only `_exists`).
      Soundness fixes: `logsRel` vs `selfLogs` (filter by `st.env.address`); `boolOpt` return
      check requires empty or `≥ 32` bytes with `mload(0x80) = 1`.
-     **M0 status:** architecture + `execStmts_lift` (`Proof/Lift.lean`, 3-arg dialect `yulExt`)
-     + pack/`finishCall` lemmas (`Proof/AbiCall.lean`) + CALL inversion through `sload` /
-     selector `mstore` / `let ok := call` / `if iszero(ok)` / word `returndatasize` check
-     (`Proof/Call.lean`). Threading `∃ fo` through S1 `core_sim` would restate every S1 lemma
-     (S1 is forward on `FunEnv evm`); M0 does **not** switch `core_sim`. The mini-fragment
-     theorem `toYulFn_correct_ext` (`CallProbe0`: arity-0 `letOp (.call …) (ret .word …)` and
-     `stmtTail (.call …)`) is **not yet closed** — remaining work is composing those inversions
-     through `emitExtCall ++ emitReturn`, `Conforms` selector matching, and `Tx.call` under
-     `composeFault`. `runtimeBlock_correct` (dispatcher over `yulD`) stays `sorry` (M3).
-     Hypotheses when the theorem lands: `Γ.st.Lawful`, `KeccakSep`, `ctxRel`, `R`, `Conforms`,
-     `RX`, `ExtAgrees`, binding scalar slot = `bind.addr`, `bind.get (bind.set x g) = g`,
-     selector uniqueness. Args are `decodeArgs f st0.env.calldata`.
+     **Status:** `step_descend` / `execStmts_append_inv` (`Proof/Descend.lean`) + scoped
+     `emitExtCall` (temps `_tok_*`/`_ok_*` live in a Yul `{ … }` so `restore` drops them and
+     `Inv.venv` is structural). Call-free backward `toYulFn_correct_ext` (`Proof/CoreExt.lean`)
+     is **proved**: invert `Run` → descend → S1 → `EVM.evm_deterministic`. Extra `hstab` /
+     `haddr` close `RX` (call-free `sstore` updates `storageOf` at the executing address;
+     `ignoresLocal` only covers executing `storage`/`transient`). `Op.call`/`Stmt.call`
+     (`op_sim_call_bwd`, `core_sim_ext`) and Vault `deposit`/`withdraw` remain **M1**.
+     `runtimeBlock_correct` is now stated backward over `yulD` / `RunCommittedExt` shape
+     and stays `sorry` (M3). Axioms of the call-free theorem: `propext` / `Classical.choice` /
+     `Quot.sound`. Hypotheses: `Γ.st.Lawful`, `KeccakSep`, `ctxRel`, `R`, `RX`, `ignoresLocal`,
+     `haddr`, `hstab`. Args are `decodeArgs f st0.env.calldata`.
    Emitter: temp-free nested Yul, gated by `coreWF` / `Nodup`. Tested for Counter and Token by
    `Lsc/Compiler/YulTests.lean`.
 3. **Yul → bytecode.** Runtime: powdr `YulEvmCompiler.compile_correct` (consumed by
