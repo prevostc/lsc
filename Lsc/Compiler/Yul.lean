@@ -163,6 +163,15 @@ def errorOK (c : ContractDef) (err n : Nat) : Bool :=
   | some ed => decide (ed.params.length = n)
   | none => false
 
+/-- Binding `b` exists and method `m` has this arity; otherwise `toYulFn` is `none`. -/
+def callWF (c : ContractDef) (b m : Nat) (args : List Atom) : Bool :=
+  match c.bindings[b]? with
+  | none => false
+  | some bd =>
+    match bd.methods[m]? with
+    | none => false
+    | some (_, spec) => decide (args.length = spec.arity) && args.all atomWF
+
 def opWF (c : ContractDef) : Lsc.Op → Bool
   | .load f => fieldKindOK c f .scalar
   | .loadMap f k => fieldKindOK c f .map1 && atomWF k
@@ -171,7 +180,7 @@ def opWF (c : ContractDef) : Lsc.Op → Bool
   | .addChecked a b | .subChecked a b | .mulChecked a b | .divChecked a b =>
       atomWF a && atomWF b
   | .mulDivDown a b d | .mulDivUp a b d => atomWF a && atomWF b && atomWF d
-  | .call _b _m args => args.all atomWF
+  | .call b m args => callWF c b m args
   | .pure a => atomWF a
 
 def stmtWF (c : ContractDef) : Lsc.Stmt → Bool
@@ -181,7 +190,7 @@ def stmtWF (c : ContractDef) : Lsc.Stmt → Bool
   | .require cond err args => condWF cond && errorOK c err args.length && args.all atomWF
   | .emit ev args => eventOK c ev args.length && args.all atomWF
   | .revert err args => errorOK c err args.length && args.all atomWF
-  | .call _b _m args => args.all atomWF
+  | .call b m args => callWF c b m args
 
 def retWF : {t : RetTy} → RetExpr t → Bool
   | _, .unit => true
@@ -392,16 +401,23 @@ def bindingSlot (c : ContractDef) (b : Nat) : Nat :=
   | some bd => bd.fieldSlot
   | none => 0
 
-/-- After a successful CALL: `boolOpt` (missing return OK) or `word` (`returndatasize ≥ 32`). -/
+/-- After a successful CALL: `boolOpt` accepts empty return or a 32-byte `true`;
+`word` requires `returndatasize ≥ 32`. Short (1–31 byte) `boolOpt` returns revert:
+the old `or(iszero(returndatasize), eq(mload, 1))` accepted them with stale memory. -/
 def emitCallRetCheck (e : Emit) (ret : AbiRet) : Emit :=
   match ret with
   | .boolOpt =>
+    -- revert unless `returndatasize = 0 ∨ (returndatasize ≥ 32 ∧ mload(0x80) = 1)`
     emitIf e
       (bop YulSemantics.EVM.Op.iszero
         [bop YulSemantics.EVM.Op.or
           [bop YulSemantics.EVM.Op.iszero [bop YulSemantics.EVM.Op.returndatasize []],
-            bop YulSemantics.EVM.Op.eq
-              [bop YulSemantics.EVM.Op.mload [lit abiPtr], lit 1]]])
+            bop YulSemantics.EVM.Op.and
+              [bop YulSemantics.EVM.Op.iszero
+                [bop YulSemantics.EVM.Op.lt
+                  [bop YulSemantics.EVM.Op.returndatasize [], lit 32]],
+                bop YulSemantics.EVM.Op.eq
+                  [bop YulSemantics.EVM.Op.mload [lit abiPtr], lit 1]]]])
       [revert00]
   | .word =>
     emitIf e (bop YulSemantics.EVM.Op.lt

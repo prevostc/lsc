@@ -69,9 +69,11 @@ theorem stmt_sim_emit0 {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E �
         simp [stL, appendLog, touchMemory]
       refine ⟨?_, ?_, ?_, hW⟩
       · simpa [stL, appendLog, touchMemory] using hs
-      · unfold logsRel at hl' ⊢
+      · unfold logsRel selfLogs at hl' ⊢
+        simp [this, haddr, hdata, touchMemory, List.filter_append] at hl' ⊢
         have hget : c.events[ev] = ed := (List.getElem?_eq_some_iff.mp hed).2
-        simpa [this, haddr, hdata, hget, touchMemory] using hl'
+        rw [hget] at hl'
+        exact hl'
       · simpa [stL, appendLog, touchMemory] using hk
     exact ⟨hV, henv, hR',
       ctxRel_appendLog hctx [BitVec.ofNat 256 ed.topic0]

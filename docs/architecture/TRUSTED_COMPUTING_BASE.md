@@ -30,18 +30,28 @@ What an end-to-end theorem of this project relies on beyond its own proof.
 - S1 call-free glue uses a closed external model (`calls := .none`, `creates := .none`) and
   `ExternalsRealized.none`. Unrestricted programs still need `ExternalsRealized` / `Conforms`
   as below.
-- `ExternalsRealized`: external call responses are realised by complete EVM executions
-  (S2 / programs with `Op.call`).
-- Per binding `b` of interface `I`: `Conforms I self σ₀.addr_b ext` — refinement of powdr
-  `ExternalCalls` through `α_b`, including non-interference with our storage/transient and no
-  cross-binding effect (`INTERFACE_MODEL.md`). Non-interference is **assumed**, justified
-  informally by the `tload`/`tstore` lock (reentrant entry hits the dispatcher and reverts; views
-  revert while locked). A bytecode-level proof from the lock is deferred.
+- `α : Abs I.Ghost` maps an EVM/`CallWorld` snapshot at a bound address to `I.Ghost`. Foreign
+  token layout is not proved; `α` is a TCB parameter.
+- `Conforms I self addr calls α`: every **successful** Yul/EVM call from `self` to `addr`
+  decodes to some method of `I`, matches `I.model`, satisfies `decodeRet` (ABI-false / short
+  `boolOpt` cannot be a success), and `NoInterfere`. Failed responses (`success = false`) are
+  unconstrained.
+- `NoInterfere`: our storage and transient are unchanged, ETH balances are unchanged
+  (`value = 0`), other addresses' `α` are unchanged, and callee logs are not attributed to
+  `self`. Reentrancy is excluded by this hypothesis, **not** by an emitted `tload`/`tstore`
+  lock. A bytecode-level lock proof is not part of S2.
+- `Realizes`: inhabitation only; used solely by a forward `_exists` companion, **not** by the
+  backward `toYulFn_correct_ext`. Glue may set `faults n := ¬resp.success`.
+- `ExternalsRealized { calls, creates := .none, gas := .none }` / `CallsRealized` stays TCB
+  for later bytecode glue; M0 has no `compile_correct` over `yulD`.
+- Fault oracle: backward `toYulFn_correct_ext` existentially chooses `fo` via
+  `composeFault ncalls (¬resp.success) rest` so Core and Yul agree on each external outcome;
+  security theorems remain `∀ w` and transport along the backward theorem. A failing `call`
+  reverts both sides with empty data and needs no `Conforms` success clause. Core failure
+  does not bump `ncalls`; a successful call's continuation sees indices `≥ ncalls + 1`.
 - `RelyEnv`: between two of our calls, `I.Rely self (α_b st) (α_b st')`.
-- Fault oracle: `toYul_correct` existentially chooses `faults ncalls := ¬resp.success` so Core
-  and Yul agree on each external outcome; security theorems remain `∀ w` and the glue instantiates
-  them at that oracle. A failing `call` reverts both sides with empty data and needs no `Conforms`
-  success clause.
+- Keccak: existing `KeccakSep`; `logsRel` ignores `address ≠ self`; top-level revert rollback
+  unchanged; constructor `decimals` is deploy, not the runtime S2 theorem.
 - Fork = Osaka.
 - Adversary model scope (`SECURITY_MODEL.md`): any call sequence from any addresses, `env` steps
   under `RelyEnv`, `sender ≠ self`; excludes private-key compromise, block-producer ordering/MEV,

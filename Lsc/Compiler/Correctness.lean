@@ -1,14 +1,18 @@
 import Lsc.Compiler.Yul
+import Lsc.Compiler.Externals
+import YulSemantics.BigStep
 import YulSemantics.Observation
 import Batteries.Data.List.Basic
 
 /-!
-# `toYulFn_correct` / `runtimeBlock_correct` (call-free fragment)
+# `toYulFn_correct` / `runtimeBlock_correct`
 
-Stated against powdr `RunCommitted` so a Yul `revert` rolls back storage/logs, matching
-`Tx`'s `Except.error`. S1 (call-free fragment) is proved in `Proof/Core.lean` and
-`Proof/Dispatch.lean`; this file keeps the unrestricted S2 statements (`sorry`) and is
-imported by the proof modules.
+Stated against powdr `RunCommitted` (S1, closed `evm`) and `RunCommittedExt` (S2,
+`yulD calls`). A Yul `revert` rolls back storage/logs, matching `Tx`'s `Except.error`.
+S1 (call-free) is `toYulFn_correct_callFree` in `Proof/Core.lean`. S2 is backward:
+every Yul run admitted by `Conforms` `calls` is predicted by Core under some fault
+oracle (`ToYulFnCorrectExt` in this file; mini-fragment proof in `Proof/Call.lean`).
+`runtimeBlock_correct` (dispatcher over `yulD`) is M3.
 -/
 
 namespace Lsc.Compiler
@@ -117,14 +121,20 @@ def storageRel {S X E ε} (c : ContractDef) (Γ : ContractSchema S X E ε)
     | .map2 => ∀ k₁ k₂, k₁ < wordBound → k₂ < wordBound →
         storage (mapSlot2 keccak i k₁ k₂) = BitVec.ofNat 256 (Γ.st.map2 i σ k₁ k₂)
 
-/-- Logs related in order: each Core event is some `Γ.ev.build i args` with matching ABI data. -/
+/-- Logs this frame emitted (address = `st.env.address`). Token `Transfer` logs land in
+`st.logs` via `finishCall` and must not be related to `w.log`. -/
+def selfLogs (st : EvmState) : List LogEntry :=
+  st.logs.filter (fun l => l.address = st.env.address)
+
+/-- Logs related in order: each Core event is some `Γ.ev.build i args` with matching ABI data,
+compared against `st.logs` **filtered by `st.env.address`**. -/
 def logsRel {S X E ε} (c : ContractDef) (Γ : ContractSchema S X E ε)
     (w : World S X E) (st : EvmState) : Prop :=
   List.Forall₂ (fun ev l =>
       ∃ i args, ev = Γ.ev.build i args ∧ ∃ hi : i < c.events.length,
         l = LogEntry.mk st.env.address
           [BitVec.ofNat 256 (c.events[i]).topic0] (abiBytes args))
-    w.log st.logs
+    w.log (selfLogs st)
 
 /-- Layout relation `R : World S X E → EvmState → Prop`. Ghost/`faults` are not in `R`. -/
 def R {S X E ε} (c : ContractDef) (Γ : ContractSchema S X E ε)
@@ -163,27 +173,38 @@ are defeq to the general theorem (`RetTy.unit.denote` unfolds with `f.ret`). -/
         haltError c Γ e bytes ∧
         R c Γ κ w stObs
 
-/-- If `Tx.run (Core.denote … f) = .ok (v, w')`, a `RunCommitted` of `toYulFn c f` from a
-related state halts with `.ret` (or `stop` for unit) and ABI bytes of `v`, and the
-final observed state is related to `w'`. If it reverts with `e`, the run halts with
-`.revert` and the Panic/custom-error bytes, observed state related to the pre-world `w`.
+/-- Observed run on the S2 dialect. Never `RunCommitted.det` (`evmWithExternal` is
+nondeterministic). -/
+def RunCommittedExt (calls : ExternalCalls) (prog : YBlock) (st0 : EvmState)
+    (V' : VEnv (yulD calls)) (stObs : EvmState) (o : Outcome) : Prop :=
+  ∃ st', Run (yulD calls) prog st0 V' st' o ∧ stObs = committedState st0 st'
 
-S1 (call-free) is `toYulFn_correct_callFree` in `Proof/Core.lean` (import cycle: this
-file is imported by the proof modules). -/
-theorem toYulFn_correct {S X E ε : Type} (c : ContractDef) (Γ : ContractSchema S X E ε)
-    (hΓ : Γ.st.Lawful c.fields) (κ : List UInt8 → U256) (hκ : KeccakSep c κ)
-    (f : FnDef) (hf : f.kind ≠ .constructor)
-    (yul : YBlock) (hyul : toYulFn c f = some yul)
-    (ctx : Ctx) (w : World S X E) (st0 : EvmState)
-    (hctx : ctxRel ctx st0) (hR : R c Γ κ w st0) :
-    ToYulFnCorrect c Γ κ f yul ctx w st0 := by
-  -- TODO(S2): letCall
-  sorry
+/-- Backward simulation: every Yul run admitted by `calls` is predicted by Core
+under some fault oracle `fo` (`w` with `faults := fo`). Success ⇒ `haltSuccess` ∧
+`R w' stObs` ∧ `RX α w' stObs`; error ⇒ revert ∧ `haltError` ∧ `R w stObs`.
+`Realizes` is not a hypothesis. -/
+@[reducible] def ToYulFnCorrectExt {I : Interface} {S X E ε : Type}
+    (α : Abs I.Ghost) (bind : Binding I S X)
+    (c : ContractDef) (Γ : ContractSchema S X E ε) (κ : List UInt8 → U256)
+    (calls : ExternalCalls) (f : FnDef) (yul : YBlock)
+    (ctx : Ctx) (w : World S X E) (st0 : EvmState) : Prop :=
+  ∀ (st' : EvmState) (o : Outcome),
+    Run (yulD calls) yul st0 [] st' o →
+      ∃ fo : Nat → Bool,
+        let wfo : World S X E := { w with faults := fo }
+        let stObs := committedState st0 st'
+        match Tx.run (Core.denote Γ f.core (decodeArgs f st0.env.calldata).reverse)
+            ctx wfo with
+        | .ok (v, w') =>
+            o = Outcome.halt ∧ haltSuccess f.ret v stObs.halted ∧
+              R c Γ κ w' stObs ∧ RX α bind w' stObs
+        | .error e =>
+            ∃ bytes, o = Outcome.halt ∧ stObs.halted = some (.revert, bytes) ∧
+              haltError c Γ e bytes ∧ R c Γ κ w stObs
 
-/-- Dispatcher: a unique selected entrypoint agrees with `toYulFn_correct`; otherwise the
-run reverts with empty data and the pre-world relation.
-
-S1 (call-free) is `runtimeBlock_correct_callFree` in `Proof/Dispatch.lean`. -/
+/-- S1 (call-free, forward) is `toYulFn_correct_callFree`. S2 (backward, `yulD calls`)
+is `ToYulFnCorrectExt` here; the mini-fragment proof belongs in `Proof/Call.lean` (import
+cycle: `Call` may import `Core`, not the reverse). Dispatcher over `yulD` is M3. -/
 theorem runtimeBlock_correct {S X E ε : Type} (c : ContractDef) (Γ : ContractSchema S X E ε)
     (hΓ : Γ.st.Lawful c.fields) (κ : List UInt8 → U256) (hκ : KeccakSep c κ)
     (yul : YBlock) (hyul : runtimeBlock c = some yul)

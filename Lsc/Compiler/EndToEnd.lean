@@ -435,7 +435,7 @@ theorem ctxRel_mkEvmState (cd : List UInt8) (σ : U256 → U256) (κ : List UInt
 theorem logsRel_empty {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {w : World S X E} {st : EvmState} (hlog : w.log = []) (hl : st.logs = []) :
     logsRel c Γ w st := by
-  simp [logsRel, hlog, hl]
+  simp [logsRel, selfLogs, hlog, hl]
 
 theorem R_mkEvmState {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     (κ : List UInt8 → U256) (w : World S X E) (cd σ ctx)

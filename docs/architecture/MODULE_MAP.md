@@ -49,13 +49,18 @@ proved invariants/laws.
 - `YulExec.lean`, `YulTests.lean` — executable harness on powdr's Yul interpreter and the
   differential tests against `Tx.run`.
 - `Bytecode.lean` — `compileRuntime`/`compileDeploy` through powdr's verified compiler.
-- `Correctness.lean` — `R` and the `toYul_correct` statement; proofs under `Proof/`.
-- `Proof/{Words,Memory,Env,Layout,Ops,OpsMore,OpsToken,OpsArith,OpsMulDiv,OpsCtx,Emit,Core,Counter,Token,Vault,Dispatch}.lean` — `CallFree`/`M1Frag` simulation (`load`/`addChecked`/`subChecked`/`mulChecked`/`divChecked`/`mulDiv*`/`pure`, ctx reads including `selfAddress`, `store`/`emit` 0/1/3/`require`, `ite`/`opTail` word/addr/flag return, params); `counter_correct` / `token_correct` / `runtimeBlock_correct_callFree`; Vault call-free entrypoints (`preview*`/`pause`/`unpause`/`paused?`/`decimals`). General `toYulFn_correct` / `runtimeBlock_correct` remain `sorry` in `Correctness.lean`.
+- `Correctness.lean` — `R`, `logsRel`/`selfLogs`, `RunCommittedExt`, `ToYulFnCorrectExt`
+  (backward S2); S1 `toYulFn_correct_callFree`; `runtimeBlock_correct` remains `sorry` (M3).
+- `Externals.lean` — `yulD`, `Abs`, `NoInterfere`, `decodeRet`, `RX`, `Conforms`, `Realizes`,
+  `composeFault`, `ExtAgrees`. Never imported by `Lsc/Lang`.
+- `Proof/{Words,Memory,Env,Layout,Ops,OpsMore,OpsToken,OpsArith,OpsMulDiv,OpsCtx,Emit,Core,Counter,Token,Vault,Dispatch}.lean` — `CallFree`/`M1Frag` simulation (`load`/`addChecked`/`subChecked`/`mulChecked`/`divChecked`/`mulDiv*`/`pure`, ctx reads including `selfAddress`, `store`/`emit` 0/1/3/`require`, `ite`/`opTail` word/addr/flag return, params); `counter_correct` / `token_correct` / `runtimeBlock_correct_callFree`; Vault call-free entrypoints (`preview*`/`pause`/`unpause`/`paused?`/`decimals`).
+- `Proof/AbiCall.lean` — pack/`finishCall`/`decodeRet` lemmas for S2 (`readBytes` of selector+args, `mload` after `finishCall`, `boolOpt` bit algebra).
+- `Proof/Call.lean` — backward CALL inversion for the M0 mini-fragment (arity 0): `eval_call_inv`, `exec_let_call_inv`, selector `mstore`, `if iszero(ok)`, word ret-check. `CallProbe0` is temporary scaffolding. `toYulFn_correct_ext` not yet closed. Does not switch S1 `core_sim`.
+- `Proof/Lift.lean` — `execStmts_lift` / `evalExpr_lift` from `evm` into `yulExt calls creates gas` (3-arg); `yulD` is the 1-arg S2 dialect in `Externals.lean`.
 - `EndToEnd.lean` — glue: `bytecode_call_correct`, `EvmCallRun` (unique halted post-storage),
   `bytecode_trace_transport` / `bytecode_trace_all`. The only
   compiler module that imports `Security`.
 - `Proof/Calldata.lean` — `decodeArgs_fnCalldata` / `selectedFn_fnCalldata`.
-- `Proof/Lift.lean` — `RunCommitted` → `Run (evmWithExternal …)`.
 - `Proof/EvmDet.lean` — `Halted`, `steps_halted_unique`.
 
 Depends on `Lsc/Lang` (`Core`, `Interface`) and powdr; never on `Lsc/Security` except

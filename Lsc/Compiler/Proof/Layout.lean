@@ -49,11 +49,34 @@ theorem ctxRel_memOnly {ctx st st'} (h : ctxRel ctx st) (hm : MemOnly st st') :
   · rw [hh, h7]
   · rw [hcall]; exact hcd
 
+theorem selfLogs_eq_of_all_self (st : EvmState)
+    (h : ∀ l ∈ st.logs, l.address = st.env.address) :
+    selfLogs st = st.logs :=
+  List.filter_eq_self.mpr (fun l hl => by simp [h l hl])
+
+/-- When every log is ours, the address filter is a no-op. S1 emit/store proofs use this. -/
+theorem logsRel_of_self {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
+    {w : World S X E} {st : EvmState}
+    (h : List.Forall₂ (fun ev l =>
+        ∃ i args, ev = Γ.ev.build i args ∧ ∃ hi : i < c.events.length,
+          l = LogEntry.mk st.env.address
+            [BitVec.ofNat 256 (c.events[i]).topic0] (abiBytes args))
+      w.log st.logs)
+    (hall : ∀ l ∈ st.logs, l.address = st.env.address) :
+    logsRel c Γ w st := by
+  unfold logsRel
+  rwa [selfLogs_eq_of_all_self st hall]
+
+theorem selfLogs_memOnly {st st' : EvmState} (hm : MemOnly st st') :
+    selfLogs st' = selfLogs st := by
+  rcases hm with ⟨_, hl, _, _, _, _, ha, _, _, _, _⟩
+  simp [selfLogs, hl, ha]
+
 theorem logsRel_memOnly {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {w : World S X E} {st st'} (h : logsRel c Γ w st) (hm : MemOnly st st') :
     logsRel c Γ w st' := by
   rcases hm with ⟨_, hl, _, _, _, _, ha, _, _, _, _⟩
-  unfold logsRel at h ⊢
+  unfold logsRel selfLogs at h ⊢
   rw [hl, ha]
   exact h
 
@@ -184,6 +207,11 @@ theorem forall₂_append {α β} {R : α → β → Prop} :
   | _, _, _, _, .nil, h => h
   | _, _, _, _, .cons ha t, h => .cons ha (forall₂_append t h)
 
+theorem selfLogs_append_self (st : EvmState) (l : LogEntry)
+    (haddr : l.address = st.env.address) :
+    selfLogs { st with logs := st.logs ++ [l] } = selfLogs st ++ [l] := by
+  simp [selfLogs, List.filter_append, haddr]
+
 theorem logsRel_emit {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {w : World S X E} {st : EvmState} {i : Nat} {args : List Nat}
     (h : logsRel c Γ w st) (hev : i < c.events.length) :
@@ -191,6 +219,10 @@ theorem logsRel_emit {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
       { st with logs := st.logs ++
         [LogEntry.mk st.env.address [BitVec.ofNat 256 (c.events[i]).topic0] (abiBytes args)] } := by
   unfold logsRel at h ⊢
+  have hl :=
+    selfLogs_append_self st
+      (LogEntry.mk st.env.address [BitVec.ofNat 256 (c.events[i]).topic0] (abiBytes args)) rfl
+  rw [hl]
   refine forall₂_append h (List.Forall₂.cons ?_ .nil)
   exact ⟨i, args, rfl, hev, rfl⟩
 

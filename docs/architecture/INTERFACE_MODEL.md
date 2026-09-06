@@ -48,8 +48,9 @@ some `m, args`; `I.model` returns the observed word and `α(post) = g'`; our sto
 transient are unchanged; other bindings' `α` are unchanged. Failed calls need no model
 clause (`finishCall` rolls back; our code reverts).
 
-Non-interference is **assumed**, justified informally by the `tload`/`tstore` lock.
-Bytecode-level proof from the lock is deferred.
+Non-interference is **assumed** as `NoInterfere` (our storage/transient and ETH balances
+unchanged, other bindings' `α` unchanged, callee logs not ours). Reentrancy is excluded by
+that hypothesis, not by an emitted lock. Bytecode-level lock proof is deferred.
 
 `Implements C I` (with `β : C.S → I.Ghost`): our own contracts refine the may-model on success.
 Used to validate Token, never as the model of a foreign token.
@@ -113,3 +114,37 @@ Core gains exactly `Op.call b m args` and `Stmt.call b m args`. `ContractSchema.
   Constructor-time `call` (for `decimals`) is covered by `compileObject_correct` under
   `evmWithExternal`.
 - `@[simp] run_call` may be dropped if it loops in protocol proofs; then use it by `rw`.
+
+## Resolved implementation decisions (S2)
+
+- Dialect: `yulD calls := evmWithExternal calls .none .none` with `calls : ExternalCalls`
+  **relational**. Observed runs are `RunCommittedExt` (`∃ st', Run (yulD calls) … ∧ stObs =
+  committedState st0 st'`). Never `RunCommitted.det`.
+- `Conforms` / `NoInterfere` / `RX α` / `Realizes` live in `Lsc/Compiler/Externals.lean`,
+  never in `Lsc/Lang`. `X` stays in `w.ext`. `RX` is a separate relation, not a field of `R`.
+  `α : Abs I.Ghost` is a parameter (foreign ERC20 layout is not ours).
+- **Main theorem is backward simulation.** For every Yul run admitted by a `Conforms` `calls`
+  there exists a fault oracle `fo` such that Core with `w.faults := fo` predicts it: success ⇒
+  `haltSuccess` ∧ `R w' stObs` ∧ `RX α w' stObs`; error ⇒ revert ∧ `haltError` ∧ `R w stObs`.
+  `Realizes` is **not** a hypothesis of that theorem; it is only for a separate `_exists`
+  (forward/non-vacuity) companion. Security theorems already quantify over all `w` (hence all
+  `faults`).
+- `Conforms` treats an ABI-false / short `boolOpt` return as **non-success** (`decodeRet`), so
+  Core `some 1` cannot pair with a Yul revert. Failed responses (`success = false`) are
+  unconstrained.
+- Reentrancy is excluded by `NoInterfere` (our storage/transient unchanged, other bindings' `α`
+  unchanged, ETH balances unchanged since `value = 0`), not by any emitted lock.
+- `logsRel` compares Core events against `st.logs` **filtered by `st.env.address`**. Token
+  `Transfer` logs land in `st.logs` via `finishCall` and must not be related to `w.log`.
+  `NoInterfere` requires `∀ l ∈ world.logs, l.address ≠ st.env.address`.
+- Emitter `boolOpt` check is `returndatasize = 0 ∨ (returndatasize ≥ 32 ∧ mload(0x80) = 1)`
+  (revert unless that holds). The previous `or(iszero(returndatasize), eq(mload, 1))` accepted
+  1–31-byte returns with stale memory.
+- `opWF` / `callWF` for `.call`: the binding index exists, the method exists, and
+  `args.length = arity`.
+- Fault-oracle composition: the call reads `w.ncalls`. Failure uses
+  `composeFault ncalls true rest` (Core does not bump `ncalls`). Success uses
+  `composeFault ncalls false rest`; a continuation sees indices `≥ ncalls + 1`.
+- `Inv.venv` (`V = toVEnv env`) is **not** restored after `emitExtCall` (leftover `_tok_*` /
+  `_ok_*`). Post-call simulation uses the V suffix and `VEnv.get` for the result name.
+  `ctxRel` **is** preserved by `finishCall`; `R.storageRel` is restored by `NoInterfere`.
