@@ -7,6 +7,8 @@ import Lsc.Security.Wealth
 import Lsc.Compiler.Proof.Counter
 import Lsc.Compiler.Proof.Token
 import Lsc.Compiler.Proof.Dispatch
+import Lsc.Compiler.EndToEnd
+import Lsc.Examples.TokenEndToEnd
 
 /-!
 # Axiom footprint checks
@@ -69,3 +71,9 @@ axioms. `#guard_msgs` turns a widened footprint into a build error (see
 
 /-- info: 'Lsc.Compiler.token_dispatch_correct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms Lsc.Compiler.token_dispatch_correct
+
+/-- info: 'Lsc.Compiler.bytecode_call_correct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms Lsc.Compiler.bytecode_call_correct
+
+/-- info: 'Token.token_bytecode_no_unauthorized_extraction' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms Token.token_bytecode_no_unauthorized_extraction

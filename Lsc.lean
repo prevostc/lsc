@@ -12,6 +12,7 @@ import Lsc.Examples.AmountDemo
 import Lsc.Examples.Token
 import Lsc.Examples.TokenProofs
 import Lsc.Examples.TokenSecurity
+import Lsc.Examples.TokenEndToEnd
 import Lsc.Examples.Vault
 import Lsc.Examples.VaultProofs
 import Lsc.Examples.VaultSecurity

@@ -54,10 +54,14 @@ proved invariants/laws.
   (`load`/`addChecked`/`subChecked`/`pure`, `store`/`emit`/`require`, `ite`/`opTail` word
   return, params); `counter_correct` for every Counter runtime function. General
   `toYulFn_correct` / `runtimeBlock_correct` remain `sorry` in `Correctness.lean`.
-- `EndToEnd.lean` — generic glue from a `Security` theorem to a bytecode-level theorem via
-  `core_denote`, `toYul_correct`, powdr `compileObject_correct`. States `Conforms` against powdr.
+- `EndToEnd.lean` — glue: `bytecode_call_correct` (one call-free compiled call) and
+  `bytecode_trace_transport` (forward Security/Core traces → `EvmTraceRun`). The only
+  compiler module that imports `Security`.
+- `Proof/Calldata.lean` — `decodeArgs_fnCalldata` / `selectedFn_fnCalldata`.
+- `Proof/Lift.lean` — `RunCommitted` → `Run (evmWithExternal …)`.
 
-Depends on `Lsc/Lang` (`Core`, `Interface`) and powdr; never on `Lsc/Security`.
+Depends on `Lsc/Lang` (`Core`, `Interface`) and powdr; never on `Lsc/Security` except
+`EndToEnd.lean`.
 
 ## `Lsc/Tools`
 
@@ -66,7 +70,7 @@ vs anvil/revm on `compileRuntime` / `compileDeploy` bytecode).
 
 ## `Lsc/Examples`
 
-`Token`, `Vault`, `AMM`: contract source, proofs, end-to-end instance.
+`Token`, `Vault`, `AMM`: contract source, proofs, end-to-end instance (`TokenEndToEnd.lean`).
 
 ## Deleted in S0
 

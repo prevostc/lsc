@@ -8,7 +8,7 @@ Each link's status is tracked here; a change to any link must update this file.
 ```
 Tx theorem  ──(1) core_denote (rfl)──  Core
 Core        ──(2) toYul_correct──────  Yul (powdr yul-semantics `Run`)
-Yul         ──(3) powdr compileObject_correct──  bytecode (powdr evm-semantics)
+Yul         ──(3) powdr compile_correct──  bytecode (powdr evm-semantics)
 bytecode    ──(4) EndToEnd glue──────  bytecode-level anti-exploit theorem
 ```
 
@@ -35,15 +35,26 @@ bytecode    ──(4) EndToEnd glue──────  bytecode-level anti-explo
      existentially over the fault oracle.
    Emitter: temp-free nested Yul, gated by `coreWF` / `Nodup`. Tested for Counter and Token by
    `Lsc/Compiler/YulTests.lean`.
-3. **Yul → bytecode.** powdr `YulEvmCompiler.compileObject_correct`, axioms exactly
+3. **Yul → bytecode.** Runtime: powdr `YulEvmCompiler.compile_correct` (consumed by
+   `bytecode_call_correct`). Deploy: `compileObject_correct`. Axioms exactly
    `propext`, `Classical.choice`, `Quot.sound`. Status: **proved** (external, pinned).
    Known gap for the deploy object: `compileObject_correct` starts from `L.initState` (empty
    calldata), while constructor arguments are currently read with `calldataload`. The emitter
    must switch to the Solidity convention (arguments appended to the creation code and read with
    `codecopy`) before the constructor link can be proved. Runtime calls are unaffected.
-4. **Glue.** Generic theorem: a `Security` result about `Tx.run` traces implies the same statement
-   about EVM call sequences on the compiled bytecode, storage read through `R`, under the
-   hypotheses listed in `TRUSTED_COMPUTING_BASE.md`. Status: **incomplete** (S1).
+4. **Glue.** S1, call-free, **forward** only (`Lsc/Compiler/EndToEnd.lean`,
+   `Lsc/Examples/TokenEndToEnd.lean`):
+   - `bytecode_call_correct`: one compiled call matches the dispatcher conclusion
+     (`runtimeBlock_correct_callFree` → `runCommitted_lift_run` → `compile_correct`).
+   - `bytecode_trace_transport`: a list of encoded Core calls has an `EvmTraceRun` whose
+     storage is `storageRel` of `coreRun` (logs stripped each step).
+   - `token_bytecode_no_unauthorized_extraction` / `token_bytecode_solvent`: Token Security
+     theorems transported onto compiled runtime bytecode, storage read through `R` /
+     `mapSlot1 evmKeccak 2`.
+   The converse (every EVM call sequence is predicted by a Security trace) is **open**:
+   powdr `StepDeterminism` is per-`Step`, not unique halted `Steps`. Top-level revert
+   rollback is a modelling assumption (`TRUSTED_COMPUTING_BASE.md`). Status: **proved (S1,
+   forward)**.
 
 ## Status of the v3 chain being replaced (for the record)
 
@@ -56,9 +67,9 @@ bytecode    ──(4) EndToEnd glue──────  bytecode-level anti-explo
 
 ## Hypotheses that appear in every end-to-end theorem
 
-Sufficient gas for each call; keccak oracle injective on the keys used; per-binding `Conforms`
-(including non-interference) and `RelyEnv` (`INTERFACE_MODEL.md`, `TRUSTED_COMPUTING_BASE.md`);
-powdr `ExternalsRealized`; fork = Osaka; adversary model scope per `SECURITY_MODEL.md`.
+See `TRUSTED_COMPUTING_BASE.md`. S1 call-free glue (`bytecode_call_correct`, Token
+bytecode theorems) uses `ExternalsRealized.none` and does not mention `Conforms`.
+S2 / `Op.call` programs still need `Conforms` / `RelyEnv` / a realised external model.
 
 ## Rules
 

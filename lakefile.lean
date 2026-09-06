@@ -37,6 +37,7 @@ lean_lib Lsc where
     Glob.one `Lsc.Examples.Token,
     Glob.one `Lsc.Examples.TokenProofs,
     Glob.one `Lsc.Examples.TokenSecurity,
+    Glob.one `Lsc.Examples.TokenEndToEnd,
     Glob.one `Lsc.Examples.Vault,
     Glob.one `Lsc.Examples.VaultProofs,
     Glob.one `Lsc.Examples.VaultSecurity,
