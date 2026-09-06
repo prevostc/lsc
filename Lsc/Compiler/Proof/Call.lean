@@ -696,6 +696,45 @@ theorem emitCallRetCheck_word_stmts (e : Emit) :
 theorem emitCallRetCheck_none_stmts (e : Emit) :
     (emitCallRetCheck e .none).stmts = e.stmts := rfl
 
+theorem emitAssign_stmts (e : Emit) (n : YIdent) (x : YExpr) :
+    (emitAssign e n x).stmts = e.stmts ++ [.assign [n] x] :=
+  Emit.stmts_push _ _
+
+theorem emitCallRetCheck_boolOpt_stmts (e : Emit) :
+    (emitCallRetCheck e .boolOpt).stmts =
+      e.stmts ++
+        [.cond
+          (bop Op.iszero
+            [bop Op.or
+              [bop Op.iszero [bop Op.returndatasize []],
+                bop Op.and
+                  [bop Op.iszero [bop Op.lt [bop Op.returndatasize [], lit 32]],
+                    bop Op.eq [bop Op.mload [lit abiPtr], lit 1]]]])
+          [revert00]] :=
+  emitIf_stmts _ _ _
+
+theorem emitLetOp_call (c : ContractDef) (e : Emit) (d b m : Nat) (args : List Atom) :
+    emitLetOp c e d (.call b m args) =
+      some (emitExtCall c e d b m args (some (identV d))) := rfl
+
+theorem emitStmt_call (c : ContractDef) (e : Emit) (d b m : Nat) (args : List Atom) :
+    emitStmt c e d (.call b m args) = emitExtCall c e d b m args none := rfl
+
+theorem identV_ne_extTok (i d : Nat) : identV i ≠ extTok d := by
+  intro h
+  have h' := congrArg String.toList h
+  simp [identV, extTok, toString, String.toList_append] at h'
+
+theorem identV_ne_extOk (i d : Nat) : identV i ≠ extOk d := by
+  intro h
+  have h' := congrArg String.toList h
+  simp [identV, extOk, toString, String.toList_append] at h'
+
+theorem extTok_ne_extOk (d : Nat) : extTok d ≠ extOk d := by
+  intro h
+  have h' := congrArg String.toList h
+  simp [extTok, extOk, toString, String.toList_append] at h'
+
 /-- `let name := 0 { body }` or `{ body }` as produced by `emitExtCall`. -/
 theorem emitExtCall_stmts' (c : ContractDef) (e : Emit) (d b m : Nat)
     (args : List Atom) (bind : Option YIdent) :

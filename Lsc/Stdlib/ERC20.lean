@@ -87,6 +87,18 @@ abbrev IERC20.Ref : Type := Address
 
 @[simp] theorem IERC20.model_eq : IERC20.model = model := rfl
 
+theorem IERC20.abi_selector_inj {m₁ m₂ : Method}
+    (h : (IERC20.abi m₁).selector = (IERC20.abi m₂).selector) : m₁ = m₂ := by
+  cases m₁ <;> cases m₂ <;> first | rfl | cases h
+
+theorem IERC20.abi_ret_transfer : (IERC20.abi .transfer).ret = .boolOpt := rfl
+theorem IERC20.abi_ret_transferFrom : (IERC20.abi .transferFrom).ret = .boolOpt := rfl
+theorem IERC20.abi_sel_lt (m : Method) : (IERC20.abi m).selector < 2 ^ 32 := by
+  cases m <;> decide
+
+theorem IERC20.abi_arity_le_3 (m : Method) : (IERC20.abi m).arity ≤ 3 := by
+  cases m <;> decide
+
 end Lsc.Stdlib
 
 namespace Lsc.Binding

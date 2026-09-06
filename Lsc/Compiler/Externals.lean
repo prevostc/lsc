@@ -61,11 +61,22 @@ def RX {I : Interface} {S X E} (α : Abs I.Ghost) (b : Binding I S X)
     (w : World S X E) (st : EvmState) : Prop :=
   α.ofState st (b.addr w.self) = b.get w.ext
 
-/-- Foreign ghosts are read from per-address maps (`storageOf`, …), not from the
-executing account's `storage`/`transient`. Needed so call-free `sstore` preserves `RX`. -/
+/-- Foreign ghosts are read from per-address maps (`storageOf` of the callee, …), not from
+the executing account's `storage`/`transient` or `storageOf`/`transientOf` at `st.env.address`.
+Call-free `sstore` (which also updates `storageOf` at the executing address) preserves `RX`. -/
 def Abs.ignoresLocal {G} (α : Abs G) : Prop :=
-  ∀ (st : EvmState) (σ τ : U256 → U256) (a : Address),
-    α.ofState { st with storage := σ, transient := τ } a = α.ofState st a
+  ∀ (st : EvmState) (σ τ : U256 → U256)
+      (sto : U256 → U256 → U256) (tro : U256 → U256 → U256) (a : Address),
+    (∀ addr k, accountKey addr ≠ accountKey st.env.address →
+        sto addr k = st.env.storageOf addr k) →
+    (∀ addr k, accountKey addr ≠ accountKey st.env.address →
+        tro addr k = st.env.transientOf addr k) →
+    α.ofState
+      { st with
+        storage := σ
+        transient := τ
+        env := { st.env with storageOf := sto, transientOf := tro } } a =
+      α.ofState st a
 
 /-- Every **successful** Yul/EVM call from `self` to `addr` decodes to some method
 of `I`, matches `I.model`, and `NoInterfere`. Failed responses (`success = false`)
@@ -81,6 +92,7 @@ def Conforms (I : Interface) (self addr : Address) (calls : ExternalCalls)
       ∃ (m : I.Method) (args : List Nat) (ret : Nat) (g' : I.Ghost),
         req.input = abiInput (I.abi m) args ∧
         args.length = (I.abi m).arity ∧
+        (∀ x ∈ args, x < wordBound) ∧
         I.model m self args (α.ofState st addr) = some (ret, g') ∧
         decodeRet (I.abi m).ret resp.returndata ret ∧
         α.ofWorld resp.world addr = g' ∧
@@ -126,5 +138,22 @@ def ExtAgrees {I : Interface} {S X E ε}
     (Γ : ContractSchema S X E ε) (bIdx : Nat) (bind : Binding I S X)
     (mIdx : Nat) (meth : I.Method) : Prop :=
   ∀ args, Γ.ext.call bIdx mIdx args = Tx.call (E := E) (ε := ε) bind meth args
+
+/-- Compiler binding `bIdx`/`mIdx` is schema `bind`/`meth`. Address is the scalar at
+the binding's field slot (read through `R`/`storageRel`, not assumed constant in `S`). -/
+structure BindWF {I : Interface} {S X E ε : Type}
+    (c : ContractDef) (Γ : ContractSchema S X E ε)
+    (bind : Binding I S X) (bIdx mIdx : Nat) (meth : I.Method) : Prop where
+  lookup :
+    ∃ bd, c.bindings[bIdx]? = some bd ∧
+      (bd.methods[mIdx]?).map (·.snd) = some (I.abi meth) ∧
+      (∀ σ, Γ.st.scalar bd.fieldSlot σ = bind.addr σ) ∧
+      (c.fields[bd.fieldSlot]?).map (·.kind) = some FieldKind.scalar
+  hgetset : ∀ x g, bind.get (bind.set x g) = g
+  hext : ExtAgrees Γ bIdx bind mIdx meth
+  hsel : ∀ m', (I.abi m').selector < 2 ^ 32
+  huniq : ∀ m', (I.abi m').selector = (I.abi meth).selector → m' = meth
+  hret : (I.abi meth).ret = .word ∨ (I.abi meth).ret = .boolOpt
+  harity : (I.abi meth).arity ≤ 3
 
 end Lsc.Compiler

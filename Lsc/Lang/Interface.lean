@@ -94,6 +94,16 @@ def callUnit (b : Binding I S X) (m : I.Method) (args : List Nat) : Tx S X E ε 
       | .error e => .error e :=
   rfl
 
+theorem call_self (b : Binding I S X) (m : I.Method) (args : List Nat)
+    {ctx : Ctx} {w : World S X E} {v : Nat} {w' : World S X E} :
+    Tx.run (Tx.call (E := E) (ε := ε) b m args) ctx w = .ok (v, w') → w'.self = w.self := by
+  simp [Tx.run_call]
+  split
+  · intro h; cases h
+  · split
+    · intro h; cases h
+    · intro h; cases h; rfl
+
 end Tx
 
 end Lsc
