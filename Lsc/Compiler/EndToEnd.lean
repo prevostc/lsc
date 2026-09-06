@@ -1,6 +1,7 @@
 import Lsc.Compiler.Proof.Dispatch
 import Lsc.Compiler.Proof.Lift
 import Lsc.Compiler.Proof.Calldata
+import Lsc.Compiler.Proof.EvmDet
 import Lsc.Compiler.Bytecode
 import Lsc.Compiler.YulExec
 import Lsc.Security.Trace
@@ -12,6 +13,7 @@ set_option linter.unusedVariables false
 
 /-!
 End-to-end glue: call-free `RunCommitted` → powdr `compile_correct` → EVM `Steps`.
+`EvmCallRun` is universal over halted executions (`steps_halted_unique`).
 The compiler still does not import `Security` except in this module.
 -/
 
@@ -107,16 +109,98 @@ theorem obs_storage_rollback {st0 st' stObs : EvmState} {bytes : List UInt8}
   have hh' : st'.halted = some (.revert, bytes) := hhalted ▸ hh
   rw [hobs, committedState_rollback hh' HaltKind.revert_commits]
 
-/-- One compiled call: from every EVM state matching `yst0`, a `Steps` run that
-either reverts (storage restored to `yst0.storage`) or commits `accountYulStorage`.
-Top-level revert rollback is a modelling assumption (`TRUSTED_COMPUTING_BASE.md`). -/
+theorem halt_ne_running_of_HaltMatch {hk : YulSemantics.EVM.HaltKind × List UInt8}
+    {s : State} (h : HaltMatch hk s) : s.halt ≠ .Running := by
+  intro hrun
+  unfold HaltMatch at h
+  split at h
+  · cases (h.symm.trans hrun)
+  · cases (h.1.symm.trans hrun)
+  · cases (h.1.symm.trans hrun)
+  · cases (h.symm.trans hrun)
+  · cases (h.symm.trans hrun)
+  · cases (h.symm.trans hrun)
+  · cases (h.1.symm.trans hrun)
+
+theorem Halted_of_HaltedMatch {yst : EvmState} {s : State}
+    (h : HaltedMatch yst s) (hcs : s.callStack = []) : Halted s :=
+  ⟨by
+    obtain ⟨hk, _, hM⟩ := h
+    exact halt_ne_running_of_HaltMatch hM, hcs⟩
+
+theorem Halted_of_compile_out {s' : State} {yst' : EvmState} {o : Outcome}
+    (hcs : s'.callStack = [])
+    (hOut : (o = .normal ∧ s'.halt = .Success ∧ s'.hReturn = .empty) ∨
+            (o = .halt ∧ HaltedMatch yst' s')) : Halted s' := by
+  rcases hOut with ⟨_, hs, _⟩ | ⟨_, hHM⟩
+  · exact ⟨by simp [hs], hcs⟩
+  · exact Halted_of_HaltedMatch hHM hcs
+
+/-- Observable post-storage of a top-level halted frame. Revert rollback is a
+modelling assumption (`TRUSTED_COMPUTING_BASE.md`): raw `Steps` does not roll back. -/
+def postStorage (yst0 : EvmState) (s' : State) : U256 → U256 :=
+  match s'.halt with
+  | .Reverted => yst0.storage
+  | _ => accountYulStorage s'
+
+theorem postStorage_reverted {yst0 s'} (h : s'.halt = .Reverted) :
+    postStorage yst0 s' = yst0.storage := by simp [postStorage, h]
+
+theorem postStorage_commit {yst0 s'} (h : s'.halt ≠ .Reverted) :
+    postStorage yst0 s' = accountYulStorage s' := by
+  unfold postStorage
+  split
+  · next h' => exact absurd h' h
+  · rfl
+
+def EvmStartOK (is : List Instr) (yst0 : EvmState) (s0 : State) : Prop :=
+  FrameOK (assemble is) s0 ∧ StateMatch yst0 s0 ∧
+  s0.pc = EvmSemantics.UInt256.ofNat 0 ∧ s0.stack = []
+
+def setGas (s : State) (g : Nat) : State :=
+  { s with gasAvailable := g }
+
+@[simp] theorem setGas_gas (s g) : (setGas s g).gasAvailable = g := rfl
+@[simp] theorem setGas_pc (s g) : (setGas s g).pc = s.pc := rfl
+@[simp] theorem setGas_stack (s g) : (setGas s g).stack = s.stack := rfl
+
+theorem frameOK_setGas {code s g} (h : FrameOK code s) : FrameOK code (setGas s g) :=
+  ⟨h.hcode, h.codeSmall, h.fork, h.noPrecompile, h.callStack, h.running⟩
+
+theorem stateMatch_setGas {yst s g} (h : StateMatch yst s) :
+    StateMatch yst (setGas s g) := by
+  cases h
+  constructor <;> assumption
+
+theorem evmStartOK_setGas {is yst0 s0 g} (h : EvmStartOK is yst0 s0) :
+    EvmStartOK is yst0 (setGas s0 g) :=
+  ⟨frameOK_setGas h.1, stateMatch_setGas h.2.1, h.2.2.1, h.2.2.2⟩
+
+/-- One compiled call: every matching start state with enough gas has a halted
+`Steps` run, and **every** halted run determines the same post-storage `σ'`. -/
 def EvmCallRun (is : List Instr) (yst0 : EvmState) (σ' : U256 → U256) : Prop :=
   ∃ b : Nat, ∀ s0 : State,
-    FrameOK (assemble is) s0 → StateMatch yst0 s0 →
-    s0.pc = EvmSemantics.UInt256.ofNat 0 → s0.stack = [] → b ≤ s0.gasAvailable →
-    ∃ s', Steps s0 s' ∧ s'.callStack = [] ∧
-      ((s'.halt = .Reverted ∧ σ' = yst0.storage) ∨
-        (s'.halt ≠ .Reverted ∧ σ' = accountYulStorage s'))
+    EvmStartOK is yst0 s0 → b ≤ s0.gasAvailable →
+    (∃ s', Steps s0 s' ∧ Halted s') ∧
+    ∀ s', Steps s0 s' → Halted s' → σ' = postStorage yst0 s'
+
+theorem evmCallRun_eq_of_start {is yst0 σ1 σ2 s0}
+    (h1 : EvmCallRun is yst0 σ1) (h2 : EvmCallRun is yst0 σ2)
+    (hs : EvmStartOK is yst0 s0) : σ1 = σ2 := by
+  obtain ⟨b1, hb1⟩ := h1
+  obtain ⟨b2, hb2⟩ := h2
+  let s0' := setGas s0 (s0.gasAvailable + b1 + b2)
+  have hs' : EvmStartOK is yst0 s0' := evmStartOK_setGas hs
+  have hgas1 : b1 ≤ s0'.gasAvailable := by
+    change b1 ≤ s0.gasAvailable + b1 + b2
+    omega
+  have hgas2 : b2 ≤ s0'.gasAvailable := by
+    change b2 ≤ s0.gasAvailable + b1 + b2
+    omega
+  obtain ⟨s', hS, hH⟩ := (hb1 s0' hs' hgas1).1
+  have e1 := (hb1 s0' hs' hgas1).2 s' hS hH
+  have e2 := (hb2 s0' hs' hgas2).2 s' hS hH
+  exact e1.trans e2.symm
 
 structure EvmCall where
   ctx : Ctx
@@ -130,6 +214,16 @@ inductive EvmTraceRun (is : List Instr) : List EvmCall → (U256 → U256) → (
       (h1 : EvmCallRun is yst0 σ₁)
       (htl : EvmTraceRun is tr σ₁ σ') :
       EvmTraceRun is (call :: tr) σ σ'
+
+/-- Universal trace: each call is an `EvmCallRun` at `mkEvmState` of that
+call, witnessed by some matching start state (so post-storage is unique). -/
+inductive EvmTraceRunAll (is : List Instr) : List EvmCall → (U256 → U256) → (U256 → U256) → Prop
+  | nil (σ : U256 → U256) : EvmTraceRunAll is [] σ σ
+  | cons {call : EvmCall} {tr : List EvmCall} {σ σ₁ σ' : U256 → U256} {s0 : State}
+      (hstart : EvmStartOK is (mkEvmState call.calldata σ evmKeccak call.ctx) s0)
+      (h1 : EvmCallRun is (mkEvmState call.calldata σ evmKeccak call.ctx) σ₁)
+      (htl : EvmTraceRunAll is tr σ₁ σ') :
+      EvmTraceRunAll is (call :: tr) σ σ'
 
 /-- Dispatcher conclusion, interpreted on the compiled bytecode. -/
 def BytecodeCallCorrect {S X E ε : Type} (c : ContractDef)
@@ -234,41 +328,46 @@ theorem evmCallRun_of_correct {S X E ε : Type} (c : ContractDef)
     rw [hobs, committedState_halted]
   refine ⟨stObs.storage, ?_, ?_⟩
   · refine ⟨b, ?_⟩
-    intro s0 hOK hM hpc hstk hgas
+    intro s0 hstart hgas
+    rcases hstart with ⟨hOK, hM, hpc, hstk⟩
     obtain ⟨s', hSteps, hcs, hSM, hOut⟩ := hb s0 hOK hM hpc hstk hgas
+    have hH : Halted s' := Halted_of_compile_out hcs hOut
     have hHM : HaltedMatch yst' s' := by
-      rcases hOut with ⟨hn, _⟩ | ⟨_, hH⟩
+      rcases hOut with ⟨hn, _⟩ | ⟨_, hH'⟩
       · cases hn
-      · exact hH
-    refine ⟨s', hSteps, hcs, ?_⟩
-    cases hsel : selectedFn c yst0.env.calldata with
-    | none =>
-      simp only [hsel] at hconcl
-      obtain ⟨hh, _⟩ := hconcl
-      have hr := reverted_of_halted (bytes := []) (hhalted ▸ hh) hHM
-      exact Or.inl ⟨hr.1, obs_storage_rollback hobs hhalted hh⟩
-    | some f =>
-      simp only [hsel] at hconcl
-      cases htx : Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse) ctx w with
-      | ok prod =>
-        rcases prod with ⟨v, w'⟩
-        simp only [htx] at hconcl
-        obtain ⟨hsucc, _⟩ := hconcl
-        obtain ⟨k, bs, hh, hk⟩ := haltSuccess_commits hsucc
-        have heq : stObs = yst' := obs_eq_of_commit hobs hhalted hh hk
-        have hOK' := haltOK_of_success (heq ▸ hsucc) hHM
-        have hnr : s'.halt ≠ .Reverted := by
-          unfold haltOK at hOK'
-          split at hOK'
-          · intro h; cases (hOK'.symm.trans h)
-          · intro h; cases (hOK'.1.symm.trans h)
-        refine Or.inr ⟨hnr, ?_⟩
-        rw [storage_eq_account hSM, heq]
-      | error e =>
-        simp only [htx] at hconcl
-        obtain ⟨bytes, hh, _, _⟩ := hconcl
-        have hr := reverted_of_halted (hhalted ▸ hh) hHM
-        exact Or.inl ⟨hr.1, obs_storage_rollback hobs hhalted hh⟩
+      · exact hH'
+    have hpost : stObs.storage = postStorage yst0 s' := by
+      cases hsel : selectedFn c yst0.env.calldata with
+      | none =>
+        simp only [hsel] at hconcl
+        obtain ⟨hh, _⟩ := hconcl
+        have hr := reverted_of_halted (bytes := []) (hhalted ▸ hh) hHM
+        rw [postStorage_reverted hr.1, obs_storage_rollback hobs hhalted hh]
+      | some f =>
+        simp only [hsel] at hconcl
+        cases htx : Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse) ctx w with
+        | ok prod =>
+          rcases prod with ⟨v, w'⟩
+          simp only [htx] at hconcl
+          obtain ⟨hsucc, _⟩ := hconcl
+          obtain ⟨k, bs, hh, hk⟩ := haltSuccess_commits hsucc
+          have heq : stObs = yst' := obs_eq_of_commit hobs hhalted hh hk
+          have hOK' := haltOK_of_success (heq ▸ hsucc) hHM
+          have hnr : s'.halt ≠ .Reverted := by
+            unfold haltOK at hOK'
+            split at hOK'
+            · intro h; cases (hOK'.symm.trans h)
+            · intro h; cases (hOK'.1.symm.trans h)
+          rw [postStorage_commit hnr, storage_eq_account hSM, heq]
+        | error e =>
+          simp only [htx] at hconcl
+          obtain ⟨bytes, hh, _, _⟩ := hconcl
+          have hr := reverted_of_halted (hhalted ▸ hh) hHM
+          rw [postStorage_reverted hr.1, obs_storage_rollback hobs hhalted hh]
+    refine ⟨⟨s', hSteps, hH⟩, ?_⟩
+    intro s'' hS'' hH''
+    rw [steps_halted_unique hS'' hSteps hH'' hH]
+    exact hpost
   · cases hsel : selectedFn c yst0.env.calldata with
     | none =>
       simp only [hsel] at hconcl ⊢
@@ -484,6 +583,96 @@ theorem bytecode_trace_transport {S X E ε : Type} (c : ContractDef)
         (mkEvmState_calldata _ _ _ _) (mkEvmState_storage _ _ _ _) h1 htl, ?_, ?_⟩
     · simpa [coreRun, w1] using hs'
     · simpa [coreRun, w1] using hwf'
+
+/-- Universal transport: an `EvmTraceRunAll` post-storage is `storageRel` of `coreRun`.
+Needs a matching start state at each call so `evmCallRun_eq_of_start` applies. -/
+theorem bytecode_trace_all {S X E ε : Type} (c : ContractDef)
+    (Γ : ContractSchema S X E ε)
+    (hΓ : Γ.st.Lawful c.fields) (hκ : KeccakSep c evmKeccak)
+    (hcf : ∀ f ∈ c.functions, CallFree f.core)
+    (hctor : ∀ f ∈ c.functions, f.kind ≠ .constructor)
+    (hlen : c.fields.length < wordBound)
+    (hbound : ∀ f ∈ c.functions, 4 + 32 * f.params.length < wordBound)
+    (hnd : selectorsNodup c = true)
+    (rt : YBlock) (hrt : runtimeBlock c = some rt)
+    (is : List Instr) (hcomp : compile rt = some is)
+    (calls : List (Ctx × FnDef × List Nat))
+    (w : World S X E) (σ σ' : U256 → U256)
+    (hs : storageRel c Γ evmKeccak w.self σ)
+    (hlog : w.log = []) (hwf : WorldWF c Γ w)
+    (hcalls : ∀ p ∈ calls,
+        p.2.1 ∈ c.functions ∧ p.2.1.kind ≠ .constructor ∧
+        p.2.2.length = p.2.1.params.length ∧ (∀ n ∈ p.2.2, n < wordBound) ∧
+        CtxWF p.1 ∧ (fnCalldata p.2.1 p.2.2).length < wordBound)
+    (hE : EvmTraceRunAll is (calls.map fun p => ⟨p.1, fnCalldata p.2.1 p.2.2⟩) σ σ') :
+    storageRel c Γ evmKeccak (coreRun Γ calls { w with log := [] }).self σ' ∧
+    WorldWF c Γ (coreRun Γ calls { w with log := [] }) := by
+  induction calls generalizing w σ σ' with
+  | nil =>
+    cases hE
+    refine ⟨?_, ?_⟩
+    · simpa [coreRun] using hs
+    · simpa [coreRun] using WorldWF_log [] hwf
+  | cons p rest ih =>
+    rcases p with ⟨ctx, f, args⟩
+    have hp := hcalls ⟨ctx, f, args⟩ (List.mem_cons.mpr (Or.inl rfl))
+    rcases hp with ⟨hf, hk, hlenA, hW, hctxWF, hcd⟩
+    have hrest : ∀ q ∈ rest, _ := fun q hq =>
+      hcalls q (List.mem_cons_of_mem _ hq)
+    have hE' : EvmTraceRunAll is
+        (⟨ctx, fnCalldata f args⟩ :: rest.map fun q => ⟨q.1, fnCalldata q.2.1 q.2.2⟩) σ σ' := by
+      simpa using hE
+    cases hE' with
+    | cons hstart h1 htl =>
+      let yst0 := mkEvmState (fnCalldata f args) σ evmKeccak ctx
+      obtain ⟨σp, hRun, hpost⟩ :=
+        evmCallRun_fnCalldata c Γ hΓ hκ hcf hctor hlen hbound hnd rt hrt is hcomp
+          ctx f args { w with log := [] } σ hf hk hlenA hW hctxWF (by simpa using hs) rfl
+          (WorldWF_log [] hwf) hcd
+      have heq := evmCallRun_eq_of_start h1 hRun hstart
+      rw [heq] at htl
+      let w1 : World S X E :=
+        let w' := Security.worldAfter (Core.denote Γ f.core args.reverse) ctx { w with log := [] }
+        { w' with log := [] }
+      have hs1 : storageRel c Γ evmKeccak w1.self σp := by
+        dsimp [w1]
+        cases htx : Tx.run (Core.denote Γ f.core args.reverse) ctx { w with log := [] } with
+        | ok prod =>
+          rcases prod with ⟨_, w'⟩
+          simp [Security.worldAfter, htx] at hpost ⊢
+          exact hpost
+        | error e =>
+          simp [Security.worldAfter, htx] at hpost ⊢
+          simpa [hpost] using hs
+      have hwf1 : WorldWF c Γ w1 := by
+        have hctx : ctxRel ctx yst0 := ctxRel_mkEvmState _ _ _ _ hctxWF hcd
+        have hR : R c Γ evmKeccak { w with log := [] } yst0 :=
+          R_mkEvmState evmKeccak _ _ σ ctx (by simpa using hs) rfl (WorldWF_log [] hwf)
+        obtain ⟨stObs, _, hconcl⟩ :=
+          runtimeBlock_correct_callFree c Γ hΓ evmKeccak hκ hcf hctor hlen hbound
+            rt hrt ctx { w with log := [] } yst0 hctx hR
+        have hsel : selectedFn c yst0.env.calldata = some f := by
+          simpa [yst0, mkEvmState_calldata] using
+            selectedFn_fnCalldata c f args hf hnd hlenA
+        have hdec : decodeArgs f yst0.env.calldata = args := by
+          simpa [yst0, mkEvmState_calldata] using decodeArgs_fnCalldata f args hk hlenA hW
+        simp only [hsel, hdec] at hconcl
+        cases htx : Tx.run (Core.denote Γ f.core args.reverse) ctx { w with log := [] } with
+        | ok prod =>
+          rcases prod with ⟨_, w'⟩
+          simp only [htx] at hconcl
+          rcases hconcl with ⟨_, hR'⟩
+          rcases hR' with ⟨_, _, _, hwf'⟩
+          simpa [w1, Security.worldAfter, htx] using WorldWF_log [] hwf'
+        | error e =>
+          simp only [htx] at hconcl
+          rcases hconcl with ⟨_, _, _, hR'⟩
+          rcases hR' with ⟨_, _, _, hwf'⟩
+          simpa [w1, Security.worldAfter, htx] using hwf'
+      obtain ⟨hs', hwf'⟩ := ih w1 σp σ' hs1 rfl hwf1 hrest htl
+      refine ⟨?_, ?_⟩
+      · simpa [coreRun, w1] using hs'
+      · simpa [coreRun, w1] using hwf'
 
 end Lsc.Compiler
 

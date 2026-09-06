@@ -42,19 +42,24 @@ bytecode    ──(4) EndToEnd glue──────  bytecode-level anti-explo
    calldata), while constructor arguments are currently read with `calldataload`. The emitter
    must switch to the Solidity convention (arguments appended to the creation code and read with
    `codecopy`) before the constructor link can be proved. Runtime calls are unaffected.
-4. **Glue.** S1, call-free, **forward** only (`Lsc/Compiler/EndToEnd.lean`,
+4. **Glue.** S1, call-free (`Lsc/Compiler/EndToEnd.lean`,
    `Lsc/Examples/TokenEndToEnd.lean`):
    - `bytecode_call_correct`: one compiled call matches the dispatcher conclusion
      (`runtimeBlock_correct_callFree` → `runCommitted_lift_run` → `compile_correct`).
-   - `bytecode_trace_transport`: a list of encoded Core calls has an `EvmTraceRun` whose
-     storage is `storageRel` of `coreRun` (logs stripped each step).
-   - `token_bytecode_no_unauthorized_extraction` / `token_bytecode_solvent`: Token Security
-     theorems transported onto compiled runtime bytecode, storage read through `R` /
-     `mapSlot1 evmKeccak 2`.
-   The converse (every EVM call sequence is predicted by a Security trace) is **open**:
-   powdr `StepDeterminism` is per-`Step`, not unique halted `Steps`. Top-level revert
-   rollback is a modelling assumption (`TRUSTED_COMPUTING_BASE.md`). Status: **proved (S1,
-   forward)**.
+   - `steps_halted_unique` (`Proof/EvmDet.lean`): two halted `Steps` runs from the same
+     start state are equal (`Step` is deterministic; a done frame has no successor).
+   - `EvmCallRun`: `∃ b, ∀` matching start states with gas `≥ b`, a halted run exists
+     **and** every halted run has the same post-storage (identified with the
+     `compile_correct` run via `steps_halted_unique`).
+   - `bytecode_trace_transport`: a list of encoded Core calls has an `EvmTraceRun`
+     whose storage is `storageRel` of `coreRun` (logs stripped each step).
+   - `bytecode_trace_all` / `EvmTraceRunAll`: the same post-storage for every matching
+     start state (needs one `EvmStartOK` witness per call so uniqueness is non-vacuous).
+   - `token_bytecode_no_unauthorized_extraction` / `token_bytecode_solvent`: `∀ σ'`,
+     `EvmTraceRunAll` implies the Security conclusion, storage read through `R` /
+     `mapSlot1 evmKeccak 2`. Companions `*_exists` keep the predicted `EvmTraceRun`.
+   Top-level revert rollback is a modelling assumption (`TRUSTED_COMPUTING_BASE.md`).
+   Status: **proved (S1, universal over halted matching executions)**.
 
 ## Status of the v3 chain being replaced (for the record)
 

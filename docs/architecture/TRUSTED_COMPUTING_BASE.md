@@ -52,8 +52,12 @@ What an end-to-end theorem of this project relies on beyond its own proof.
   match `Tx`'s `Except.error`. This is a modelling assumption, not a lemma about `Steps`.
 - Each `mkEvmState` used in transport starts from empty logs (`R` tracks `.self` only across
   a trace). Token `.self` is proved independent of the log.
-- Forward direction only: a Security/Core trace is realized by some `EvmTraceRun`. The converse
-  (every halted `Steps` sequence is predicted) is open; `StepDeterminism` is per-`Step`.
+- `EvmCallRun` / `EvmTraceRunAll` quantify over matching start states (`FrameOK`,
+  `StateMatch`, `pc = 0`, empty stack) with gas at least the existential bound from
+  `compile_correct`. A matching `EvmStartOK` witness is part of `EvmTraceRunAll` so
+  post-storage uniqueness is not vacuous; `*_exists` theorems keep the `∀ s0` shape of
+  `compile_correct` (no constructed `State`). The converse (every EVM calldata sequence is
+  a Security trace) remains open.
 
 ## Untrusted (checked or irrelevant to soundness)
 

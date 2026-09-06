@@ -8,8 +8,9 @@ set_option linter.unusedVariables false
 set_option linter.unnecessarySimpa false
 
 /-!
-Bytecode-level Token theorems: forward transport of a Security trace onto compiled
-runtime bytecode. Converse (every EVM sequence is predicted) is open.
+Bytecode-level Token theorems: Security traces transported onto compiled runtime
+bytecode. `token_bytecode_*_exists` is the predicted run; the main theorems are
+universal over halted matching executions (`EvmTraceRunAll`).
 -/
 
 open Lsc Lsc.Compiler Lsc.Security Token
@@ -364,8 +365,9 @@ theorem token_transport
   · exact WorldWF_of_self hself hwf'
 
 /-- Compiled Token runtime: a well-formed, no-auth-for-`a` Security trace, executed as
-EVM calls predicted by that trace, does not decrease `a`'s balance as read through `R`. -/
-theorem token_bytecode_no_unauthorized_extraction
+EVM calls predicted by that trace, does not decrease `a`'s balance as read through `R`.
+Non-vacuity: `token_bytecode_no_unauthorized_extraction_exists`. -/
+theorem token_bytecode_no_unauthorized_extraction_exists
     (rt : YBlock) (hrt : runtimeBlock Token.contract = some rt)
     (is : List Instr) (hcomp : compile rt = some is)
     (hκ : KeccakSep Token.contract evmKeccak)
@@ -387,8 +389,58 @@ theorem token_bytecode_no_unauthorized_extraction
     (token_map1_bound (run tr w) a hwf' ha)
   simpa [hpre, hpost] using hclaim
 
-/-- Compiled Token runtime: a well-formed Security trace stays solvent in EVM storage. -/
-theorem token_bytecode_solvent
+theorem token_all_rel
+    (rt : YBlock) (hrt : runtimeBlock Token.contract = some rt)
+    (is : List Instr) (hcomp : compile rt = some is)
+    (hκ : KeccakSep Token.contract evmKeccak)
+    (tr : List (Step spec)) (w : World Storage Unit Event) (σ σ' : U256 → U256)
+    (hs : storageRel Token.contract Token.schema evmKeccak w.self σ)
+    (hwf : WorldWF Token.contract Token.schema w)
+    (hb : CallsBounded tr)
+    (hE : EvmTraceRunAll is
+        ((tokenCalls tr).map fun p => ⟨p.1, fnCalldata p.2.1 p.2.2⟩) σ σ') :
+    storageRel Token.contract Token.schema evmKeccak (run tr w).self σ' ∧
+    WorldWF Token.contract Token.schema (run tr w) := by
+  have hnd : selectorsNodup Token.contract = true := (runtimeBlock_inv hrt).1
+  obtain ⟨hs', hwf'⟩ :=
+    bytecode_trace_all Token.contract Token.schema Token.schema_lawful hκ
+      (fun f hf => token_fn_callFree hf) (fun f hf => token_fn_not_ctor hf)
+      token_fields_lt (fun f hf => token_fn_params_bound hf) hnd rt hrt is hcomp
+      (tokenCalls tr) { w with log := [] } σ σ' (by simpa using hs) rfl (WorldWF_log [] hwf)
+      (tokenCalls_spec tr hb) hE
+  have hself :
+      (coreRun Token.schema (tokenCalls tr) { w with log := [] }).self = (run tr w).self :=
+    (token_run_self_eq_coreRun tr w).symm
+  refine ⟨?_, ?_⟩
+  · simpa [hself] using hs'
+  · exact WorldWF_of_self hself hwf'
+
+/-- Compiled Token runtime: every halted matching execution of a well-formed,
+no-auth-for-`a` Security trace does not decrease `a`'s balance as read through `R`. -/
+theorem token_bytecode_no_unauthorized_extraction
+    (rt : YBlock) (hrt : runtimeBlock Token.contract = some rt)
+    (is : List Instr) (hcomp : compile rt = some is)
+    (hκ : KeccakSep Token.contract evmKeccak)
+    (self : Address) (tr : List (Step spec)) (w : World Storage Unit Event) (a : Address)
+    (σ : U256 → U256)
+    (hw : Inv w) (hW : Wf self tr) (hR : RelyAlong (fun _ _ => True) tr w)
+    (hA : NoAuthAlong Auth a tr w)
+    (hs : storageRel Token.contract Token.schema evmKeccak w.self σ)
+    (hwf : WorldWF Token.contract Token.schema w)
+    (hb : CallsBounded tr) (ha : Nat.lt a wordBound) :
+    ∀ σ', EvmTraceRunAll is
+        ((tokenCalls tr).map fun p => ⟨p.1, fnCalldata p.2.1 p.2.2⟩) σ σ' →
+      (σ (mapSlot1 evmKeccak 2 a)).toNat ≤ (σ' (mapSlot1 evmKeccak 2 a)).toNat := by
+  intro σ' hE
+  obtain ⟨hs', hwf'⟩ := token_all_rel rt hrt is hcomp hκ tr w σ σ' hs hwf hb hE
+  have hclaim := token_no_unauthorized_extraction self tr w a hw hW hR hA
+  have hpre := token_claim_slot w.self σ a hs ha (token_map1_bound w a hwf ha)
+  have hpost := token_claim_slot (run tr w).self σ' a hs' ha
+    (token_map1_bound (run tr w) a hwf' ha)
+  simpa [hpre, hpost] using hclaim
+
+/-- Non-vacuity: some predicted `EvmTraceRun` stays solvent. -/
+theorem token_bytecode_solvent_exists
     (rt : YBlock) (hrt : runtimeBlock Token.contract = some rt)
     (is : List Instr) (hcomp : compile rt = some is)
     (hκ : KeccakSep Token.contract evmKeccak)
@@ -404,5 +456,25 @@ theorem token_bytecode_solvent
       storageRel Token.contract Token.schema evmKeccak (run tr w).self σ' := by
   obtain ⟨σ', hE, hs', _⟩ := token_transport rt hrt is hcomp hκ tr w σ hs hwf hb
   exact ⟨σ', hE, token_solvent self tr w hW hR hw, hs'⟩
+
+/-- Compiled Token runtime: every halted matching execution of a well-formed
+Security trace stays solvent in EVM storage. -/
+theorem token_bytecode_solvent
+    (rt : YBlock) (hrt : runtimeBlock Token.contract = some rt)
+    (is : List Instr) (hcomp : compile rt = some is)
+    (hκ : KeccakSep Token.contract evmKeccak)
+    (self : Address) (tr : List (Step spec)) (w : World Storage Unit Event)
+    (σ : U256 → U256)
+    (hw : Inv w) (hW : Wf self tr) (hR : RelyAlong (fun _ _ => True) tr w)
+    (hs : storageRel Token.contract Token.schema evmKeccak w.self σ)
+    (hwf : WorldWF Token.contract Token.schema w)
+    (hb : CallsBounded tr) :
+    ∀ σ', EvmTraceRunAll is
+        ((tokenCalls tr).map fun p => ⟨p.1, fnCalldata p.2.1 p.2.2⟩) σ σ' →
+      Solvent claim holdings self (run tr w) ∧
+      storageRel Token.contract Token.schema evmKeccak (run tr w).self σ' := by
+  intro σ' hE
+  obtain ⟨hs', _⟩ := token_all_rel rt hrt is hcomp hκ tr w σ σ' hs hwf hb hE
+  exact ⟨token_solvent self tr w hW hR hw, hs'⟩
 
 end Token
