@@ -1283,16 +1283,22 @@ theorem extCall_block_bwd {I : Interface} {S X E ε : Type}
     (h : ExecStmt (yulD calls) funs pre st
       (.block (emitExtCallBody c env.length b m args assign)) V' st' o) :
     ∃ bit : Bool,
-      let w₁ : World S X E := { w with faults := composeFault w.ncalls bit w.faults }
       (bit = true →
-        Tx.run (Op.denote Γ env (.call b m args)) ctx w₁ = .error .callFailed ∧
-        o = .halt ∧ st'.halted = some (.revert, [])) ∧
+        ∀ g : Nat → Bool, g w.ncalls = true →
+          Tx.run (Op.denote Γ env (.call b m args)) ctx { w with faults := g } =
+            .error .callFailed ∧
+          o = .halt ∧ st'.halted = some (.revert, [])) ∧
       (bit = false →
-        ∃ v w', Tx.run (Op.denote Γ env (.call b m args)) ctx w₁ = .ok (v, w') ∧
-          o = .normal ∧ RX α bind w' st' ∧
-          (assign = none → V' = toVEnv env ∧ Inv Γ c κ ctx w' env V' st') ∧
-          (assign.isSome → V' = toVEnv (v :: env) ∧
-            Inv Γ c κ ctx w' (v :: env) V' st')) := by
+        ∃ (v : Nat) (w0 : World S X E),
+          w0.self = w.self ∧ w0.log = w.log ∧ w0.ncalls = w.ncalls + 1 ∧
+          ∀ g : Nat → Bool, g w.ncalls = false →
+            Tx.run (Op.denote Γ env (.call b m args)) ctx { w with faults := g } =
+              .ok (v, { w0 with faults := g }) ∧
+            o = .normal ∧ RX α bind { w0 with faults := g } st' ∧
+            (assign = none → V' = toVEnv env ∧
+              Inv Γ c κ ctx { w0 with faults := g } env V' st') ∧
+            (assign.isSome → V' = toVEnv (v :: env) ∧
+              Inv Γ c κ ctx { w0 with faults := g } (v :: env) V' st')) := by
   let d := env.length
   have ⟨harity, hvals⟩ := callWF_arity_of_BindWF hwfCall hbd
   have hn3 : args.length ≤ 3 := by rw [harity]; exact hbd.harity
@@ -1351,9 +1357,9 @@ theorem extCall_block_bwd {I : Interface} {S X E ε : Type}
           (assign := assign) funsE hgetOk
       have ⟨hVSeq, hstSeq, hoeq⟩ := execStmts_det_evm hSfwd hSdesc
       refine ⟨!resp.success, ?_⟩
-      intro w₁
       constructor
-      · intro hbit
+      · intro hbit g hg
+        let w₁ : World S X E := { w with faults := g }
         have hsuccF : resp.success = false := by
           cases hsu : resp.success
           · rfl
@@ -1367,8 +1373,7 @@ theorem extCall_block_bwd {I : Interface} {S X E ε : Type}
         have hrun : Tx.run (Op.denote Γ env (.call b m args)) ctx w₁ =
             .error .callFailed := by
           rw [Op.denote, hbd.hext]
-          have hf : w₁.faults w₁.ncalls = true :=
-            (composeFault_at w.ncalls (!resp.success) w.faults).trans hbit
+          have hf : w₁.faults w₁.ncalls = true := hg
           simp [Tx.run_call, hf]
         exact ⟨hrun, hoeq.symm.trans hoS, hstSeq ▸ hh⟩
       · intro hbit
@@ -1421,15 +1426,6 @@ theorem extCall_block_bwd {I : Interface} {S X E ε : Type}
           simpa [finishCall_returndata] using
             decodeRet_suffixOk hflag hdec hmload
         have ⟨hoS, hMOS, hVeq⟩ := hSok hSok'
-        have hrun : Tx.run (Op.denote Γ env (.call b m args)) ctx w₁ =
-            .ok (retv,
-              { w₁ with ext := bind.set w₁.ext g', ncalls := w₁.ncalls + 1 }) := by
-          rw [Op.denote, hbd.hext]
-          have hf : w₁.faults w₁.ncalls = false :=
-            (composeFault_at w.ncalls (!resp.success) w.faults).trans hbit
-          simp [Tx.run_call, hf]
-          have hgext : bind.get w₁.ext = bind.get w.ext := rfl
-          rw [hgext, ← hα, hmodel]
         have hval : suffixVal (I.abi meth).ret
             (finishCall .call stP resp abiPtr (4 + 32 * args.length) abiPtr 32) =
             BitVec.ofNat 256 retv := by
@@ -1463,14 +1459,23 @@ theorem extCall_block_bwd {I : Interface} {S X E ε : Type}
         have hRX2 := RX_finishCall_success (iOff := abiPtr)
           (iSz := 4 + 32 * args.length) (oOff := abiPtr) (oSz := 32)
           hα hsucc hg hni hbd.hgetset
-        have hRX2' : RX α bind
-            { w₁ with ext := bind.set w₁.ext g', ncalls := w₁.ncalls + 1 } st' := by
+        let w0 : World S X E :=
+          { w with ext := bind.set w.ext g', ncalls := w.ncalls + 1 }
+        refine ⟨retv, w0, rfl, rfl, rfl, ?_⟩
+        intro g hgo
+        let w₁ : World S X E := { w with faults := g }
+        have hrun : Tx.run (Op.denote Γ env (.call b m args)) ctx w₁ =
+            .ok (retv, { w0 with faults := g }) := by
+          rw [Op.denote, hbd.hext]
+          have hf : w₁.faults w₁.ncalls = false := hgo
+          simp [Tx.run_call, hf]
+          have hgext : bind.get w₁.ext = bind.get w.ext := rfl
+          rw [hgext, ← hα, hmodel]
+        have hRX2' : RX α bind { w0 with faults := g } st' := by
           unfold RX at hRX2 ⊢
           rw [α.ofState_proj, hCWS, ← α.ofState_proj]
           exact hRX2
-        let w' : World S X E :=
-          { w₁ with ext := bind.set w₁.ext g', ncalls := w₁.ncalls + 1 }
-        refine ⟨retv, w', hrun, hoeq.symm.trans hoS, hRX2', ?_, ?_⟩
+        refine ⟨hrun, hoeq.symm.trans hoS, hRX2', ?_, ?_⟩
         · intro hnone
           have hpreEq : pre = toVEnv env := by
             cases hassign with
@@ -1487,7 +1492,7 @@ theorem extCall_block_bwd {I : Interface} {S X E ε : Type}
             rw [hrestore, ← hVSeq, hVS, hpreEq]
             exact restore_drop2
           exact ⟨hVeq', hVeq', henv,
-            R_with_ghost (bind.set w.ext g') (w.ncalls + 1) w₁.faults hR3,
+            R_with_ghost (bind.set w.ext g') (w.ncalls + 1) g hR3,
             ctxRel_memOnly hctx2 hMOS⟩
         · intro hsome
           have ⟨name, hname⟩ : ∃ n, assign = some n := Option.isSome_iff_exists.mp hsome
@@ -1537,7 +1542,7 @@ theorem extCall_block_bwd {I : Interface} {S X E ε : Type}
             rw [hrestore, ← hVSeq, hVS, hset, hval, hpreEq, toVEnv_cons]
             exact restore_call_result
           exact ⟨hVeq', hVeq', envWF_cons hvlt henv,
-            R_with_ghost (bind.set w.ext g') (w.ncalls + 1) w₁.faults hR3,
+            R_with_ghost (bind.set w.ext g') (w.ncalls + 1) g hR3,
             ctxRel_memOnly hctx2 hMOS⟩
 
 theorem op_sim_call_bwd {I : Interface} {S X E ε : Type}
@@ -1558,14 +1563,20 @@ theorem op_sim_call_bwd {I : Interface} {S X E ε : Type}
     (h : ExecStmts (yulD calls) funs V st
       ((emitLetOp c {} env.length (.call b m args)).getD {}).stmts V' st' o) :
     ∃ bit : Bool,
-      let w₁ : World S X E := { w with faults := composeFault w.ncalls bit w.faults }
       (bit = true →
-        Tx.run (Op.denote Γ env (.call b m args)) ctx w₁ = .error .callFailed ∧
-        o = .halt ∧ st'.halted = some (.revert, [])) ∧
+        ∀ g : Nat → Bool, g w.ncalls = true →
+          Tx.run (Op.denote Γ env (.call b m args)) ctx { w with faults := g } =
+            .error .callFailed ∧
+          o = .halt ∧ st'.halted = some (.revert, [])) ∧
       (bit = false →
-        ∃ v w', Tx.run (Op.denote Γ env (.call b m args)) ctx w₁ = .ok (v, w') ∧
-          o = .normal ∧ V' = toVEnv (v :: env) ∧
-          Inv Γ c κ ctx w' (v :: env) V' st' ∧ RX α bind w' st') := by
+        ∃ (v : Nat) (w0 : World S X E),
+          w0.self = w.self ∧ w0.log = w.log ∧ w0.ncalls = w.ncalls + 1 ∧
+          ∀ g : Nat → Bool, g w.ncalls = false →
+            Tx.run (Op.denote Γ env (.call b m args)) ctx { w with faults := g } =
+              .ok (v, { w0 with faults := g }) ∧
+            o = .normal ∧ V' = toVEnv (v :: env) ∧
+            Inv Γ c κ ctx { w0 with faults := g } (v :: env) V' st' ∧
+            RX α bind { w0 with faults := g } st') := by
   let d := env.length
   rcases hinv with ⟨hVeq, henv, hR, hctx⟩
   rw [hVeq, emitLetOp_call_stmts] at h
@@ -1586,14 +1597,15 @@ theorem op_sim_call_bwd {I : Interface} {S X E ε : Type}
     have hbit := extCall_block_bwd (α := α) hR hctx henv hbd hRX hconf hfuns hwfCall
       (.inr hpre) (.inr ⟨rfl, hpre⟩)
       (identsNodup_mono (Nat.le_succ _) hn) (fun _ => hn) hblkStmt
-    rcases hbit with ⟨bit, hconj⟩
-    refine ⟨bit, ?_⟩
-    intro w₁
-    have ⟨hfail, hok⟩ := hconj
-    exact ⟨hfail, fun hb => by
-      obtain ⟨v, w', hrun, ho, hRX', _, hsome⟩ := hok hb
-      have ⟨hV', hInv⟩ := hsome (by simp)
-      exact ⟨v, w', hrun, ho, hV', hInv, hRX'⟩⟩
+    rcases hbit with ⟨bit, hfail, hok⟩
+    refine ⟨bit, hfail, ?_⟩
+    intro hb
+    obtain ⟨v, w0, hself, hlog, hncalls, hg⟩ := hok hb
+    refine ⟨v, w0, hself, hlog, hncalls, ?_⟩
+    intro g hgo
+    obtain ⟨hrun, ho, hRX', _, hsome⟩ := hg g hgo
+    have ⟨hV', hInv⟩ := hsome (by simp)
+    exact ⟨hrun, ho, hV', hInv, hRX'⟩
 
 theorem stmt_sim_call_bwd {I : Interface} {S X E ε : Type}
     {c : ContractDef} {Γ : ContractSchema S X E ε}
@@ -1613,14 +1625,20 @@ theorem stmt_sim_call_bwd {I : Interface} {S X E ε : Type}
     (h : ExecStmts (yulD calls) funs V st
       (emitStmt c {} env.length (.call b m args)).stmts V' st' o) :
     ∃ bit : Bool,
-      let w₁ : World S X E := { w with faults := composeFault w.ncalls bit w.faults }
       (bit = true →
-        Tx.run (Stmt.denote Γ env (.call b m args)) ctx w₁ = .error .callFailed ∧
-        o = .halt ∧ st'.halted = some (.revert, [])) ∧
+        ∀ g : Nat → Bool, g w.ncalls = true →
+          Tx.run (Stmt.denote Γ env (.call b m args)) ctx { w with faults := g } =
+            .error .callFailed ∧
+          o = .halt ∧ st'.halted = some (.revert, [])) ∧
       (bit = false →
-        ∃ w', Tx.run (Stmt.denote Γ env (.call b m args)) ctx w₁ = .ok ((), w') ∧
-          o = .normal ∧ V' = toVEnv env ∧
-          Inv Γ c κ ctx w' env V' st' ∧ RX α bind w' st') := by
+        ∃ (w0 : World S X E),
+          w0.self = w.self ∧ w0.log = w.log ∧ w0.ncalls = w.ncalls + 1 ∧
+          ∀ g : Nat → Bool, g w.ncalls = false →
+            Tx.run (Stmt.denote Γ env (.call b m args)) ctx { w with faults := g } =
+              .ok ((), { w0 with faults := g }) ∧
+            o = .normal ∧ V' = toVEnv env ∧
+            Inv Γ c κ ctx { w0 with faults := g } env V' st' ∧
+            RX α bind { w0 with faults := g } st') := by
   rcases hinv with ⟨hVeq, henv, hR, hctx⟩
   rw [hVeq, emitStmt_call_stmts] at h
   have hblkStmt : ExecStmt (yulD calls) funs (toVEnv env) st
@@ -1632,24 +1650,26 @@ theorem stmt_sim_call_bwd {I : Interface} {S X E ε : Type}
       have := congrArg List.length hpre
       simp at this)
     hblkStmt
-  rcases hbit with ⟨bit, hconj⟩
-  refine ⟨bit, ?_⟩
-  intro w₁
-  have ⟨hfail, hok⟩ := hconj
-  constructor
-  · intro hb
-    have ⟨hrun, ho, hh⟩ := hfail hb
+  rcases hbit with ⟨bit, hfail, hok⟩
+  refine ⟨bit, ?_, ?_⟩
+  · intro hb g hgo
+    have ⟨hrun, ho, hh⟩ := hfail hb g hgo
     refine ⟨?_, ho, hh⟩
     have hE :
-        (Γ.ext.call b m (args.map (·.eval env))).run ctx w₁ = .error .callFailed := by
+        (Γ.ext.call b m (args.map (·.eval env))).run ctx { w with faults := g } =
+          .error .callFailed := by
       simpa [Op.denote] using hrun
     simp [Stmt.denote, Tx.run_bind, hE]
   · intro hb
-    obtain ⟨v, w', hrun, ho, hRX', hnone, _⟩ := hok hb
+    obtain ⟨v, w0, hself, hlog, hncalls, hg⟩ := hok hb
+    refine ⟨w0, hself, hlog, hncalls, ?_⟩
+    intro g hgo
+    obtain ⟨hrun, ho, hRX', hnone, _⟩ := hg g hgo
     have ⟨hV', hInv⟩ := hnone rfl
-    refine ⟨w', ?_, ho, hV', hInv, hRX'⟩
+    refine ⟨?_, ho, hV', hInv, hRX'⟩
     have hE :
-        (Γ.ext.call b m (args.map (·.eval env))).run ctx w₁ = .ok (v, w') := by
+        (Γ.ext.call b m (args.map (·.eval env))).run ctx { w with faults := g } =
+          .ok (v, { w0 with faults := g }) := by
       simpa [Op.denote] using hrun
     simp [Stmt.denote, Tx.run_bind, hE]
 

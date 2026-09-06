@@ -57,9 +57,11 @@ proved invariants/laws.
 - `Proof/{Words,Memory,Env,Layout,Ops,OpsMore,OpsToken,OpsArith,OpsMulDiv,OpsCtx,Emit,Core,Counter,Token,Vault,Dispatch}.lean` — `CallFree`/`M1Frag` simulation (`load`/`addChecked`/`subChecked`/`mulChecked`/`divChecked`/`mulDiv*`/`pure`, ctx reads including `selfAddress`, `store`/`emit` 0/1/3/`require`, `ite`/`opTail` word/addr/flag return, params); `counter_correct` / `token_correct` / `runtimeBlock_correct_callFree`; Vault call-free entrypoints (`preview*`/`pause`/`unpause`/`paused?`/`decimals`).
 - `Proof/Descend.lean` — `NoExternalOps`, `step_descend` (inverse of `step_lift` for call-free Yul), `execStmts_append_inv`, `execStmts_det_evm` (`EVM.evm_deterministic`).
 - `Proof/CallState.lean` — `restore` after a scoped call block; `R`/`RX` after `finishCall`.
-- `Proof/CoreExt.lean` — call-free `toYulFn_correct_ext` (descend + S1 + determinism). Call cases (`op_sim_call_bwd`) not closed.
+- `Proof/CoreExt.lean` — call-free `toYulFn_correct_ext` (descend + S1 + determinism). Still takes `haddr`/`hstab`.
+- `Proof/CoreExtSim.lean` — S2 helpers: `mapWorldFaults` / `callFree_run_faults` / `m1op_run_faults` (no `World` congruence), `s1_match_prefix_*`, `ofState_of_sstore` / `ofState_of_tstore` / `bind_addr_store` / `callFree_preserves_addr` / `Inv_faults` / `RX_faults` / `oracleAgrees`. `core_sim_ext` not started; `stepOp_ok_ofState` (full `Op` cases) not closed.
+- `Proof/CallBwd.lean` — `extCall_block_bwd` / `op_sim_call_bwd` / `stmt_sim_call_bwd` restated with `∀ g, g w.ncalls = bit` and a `g`-independent `w0` on success (`w' = {w0 with faults := g}`).
 - `Proof/AbiCall.lean` — pack/`finishCall`/`decodeRet` lemmas for S2 (`readBytes` of selector+args, `mload` after `finishCall`, `boolOpt` bit algebra).
-- `Proof/Call.lean` — CALL inversion for scoped `emitExtCall` (`eval_call_inv`, `exec_let_call_inv`, selector `mstore`, `if iszero(ok)`, word ret-check). `op_sim_call_bwd` not closed. Does not switch S1 `core_sim`.
+- `Proof/Call.lean` — CALL inversion for scoped `emitExtCall` (`eval_call_inv`, `exec_let_call_inv`, selector `mstore`, `if iszero(ok)`, word ret-check). Does not switch S1 `core_sim`.
 - `Proof/Lift.lean` — `execStmts_lift` / `evalExpr_lift` from `evm` into `yulExt calls creates gas` (3-arg); `yulD` is the 1-arg S2 dialect in `Externals.lean`.
 - `EndToEnd.lean` — glue: `bytecode_call_correct`, `EvmCallRun` (unique halted post-storage),
   `bytecode_trace_transport` / `bytecode_trace_all`. The only

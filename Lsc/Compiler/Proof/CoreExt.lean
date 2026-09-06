@@ -68,6 +68,22 @@ theorem s2stmt_elim {s} (h : S2Stmt s) :
   | call b m args => exact .inl ⟨b, m, args, rfl⟩
   | _ => exact .inr h
 
+theorem s2frag_letOp {t op} {k : Core t} :
+    S2Frag (.letOp op k) ↔ S2Op op ∧ S2Frag k := by
+  simp [S2Frag]
+
+theorem s2frag_seq {t s} {k : Core t} :
+    S2Frag (.seq s k) ↔ S2Stmt s ∧ S2Frag k := by
+  simp [S2Frag]
+
+theorem s2frag_ite {t c} {a b : Core t} :
+    S2Frag (.ite c a b) ↔ M1Cond c ∧ S2Frag a ∧ S2Frag b := by
+  simp [S2Frag]
+
+theorem s2frag_letPure {t p args} {k : Core t} :
+    S2Frag (.letPure p args k) ↔ p = .id ∧ args.length = 1 ∧ S2Frag k := by
+  simp [S2Frag]
+
 theorem s2frag_of_callFree {t} {core : Core t} (h : CallFree core) : S2Frag core := by
   revert h
   induction core with
@@ -484,6 +500,7 @@ theorem RX_callFree {I : Interface} {S X E} {α : Abs I.Ghost}
 
 /-! ## `toYulFn_correct_ext` (call-free) -/
 
+/-- Call-free S2 with global `haddr`/`hstab`. Generalized `S2Frag` / `∀ g` form is `core_sim_ext` (resume). -/
 theorem toYulFn_correct_ext {I : Interface} {S X E ε : Type}
     (α : Abs I.Ghost) (bind : Binding I S X)
     (c : ContractDef) (Γ : ContractSchema S X E ε)
