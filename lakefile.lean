@@ -41,6 +41,9 @@ lean_lib Lsc where
     Glob.one `Lsc.Examples.Vault,
     Glob.one `Lsc.Examples.VaultProofs,
     Glob.one `Lsc.Examples.VaultSecurity,
+    Glob.one `Lsc.Examples.Amm,
+    Glob.one `Lsc.Examples.AmmProofs,
+    Glob.one `Lsc.Examples.AmmSecurity,
     Glob.one `Lsc
   ]
 
