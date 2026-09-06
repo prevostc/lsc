@@ -357,6 +357,52 @@ theorem deposit_reverts_on_add_bal (assets : Amount ASSET assetScale)
       simp [assetB]
       simp [hf, hxfer, haddA, haddS, hB]
 
+/-- Success of `deposit` implies the `DepositOk` bundle. -/
+theorem deposit_ok_of_run {assets : Amount ASSET assetScale} {n : Nat}
+    {w' : World Storage Ext Event}
+    (hrun : Tx.run (deposit assets) ctx w = .ok (n, w')) :
+    DepositOk ctx w assets := by
+  have hp : w.self.paused = Flag.off := by
+    by_contra h; exact Tx.run_ok_error hrun (deposit_reverts_when_paused ctx w assets h)
+  have hpos : 0 < assets.toNat := by
+    by_contra h; exact Tx.run_ok_error hrun (deposit_reverts_on_nonpos ctx w assets hp h)
+  have hprod :
+      w.self.totalShares = 0 ∨
+        (w.self.totalAssets ≠ 0 ∧ w.self.totalShares * assets.toNat < wordBound) := by
+    by_cases hts : w.self.totalShares = 0
+    · exact Or.inl hts
+    · by_cases hta : w.self.totalAssets = 0
+      · exact (Tx.run_ok_error hrun (deposit_reverts_on_divByZero ctx w assets hp hpos hts hta)).elim
+      · by_cases hmul : w.self.totalShares * assets.toNat < wordBound
+        · exact Or.inr ⟨hta, hmul⟩
+        · exact (Tx.run_ok_error hrun
+            (deposit_reverts_on_mul_overflow ctx w assets hp hpos hts hta hmul)).elim
+  have hminted : 0 < mintedShares w.self assets := by
+    by_contra h
+    exact Tx.run_ok_error hrun (deposit_reverts_on_zero_shares ctx w assets hp hpos hprod h)
+  have hnf : w.faults w.ncalls = false := by
+    by_cases hf : w.faults w.ncalls = true
+    · exact (Tx.run_ok_error hrun
+        (deposit_reverts_on_fault ctx w assets hp hpos hprod hminted hf)).elim
+    · exact (Bool.not_eq_true _).mp hf
+  have hcov : assets.toNat ≤ w.ext.asset.balances ctx.sender := by
+    by_contra h
+    exact Tx.run_ok_error hrun
+      (deposit_reverts_on_no_cover ctx w assets hp hpos hprod hminted hnf h)
+  have haddA : w.self.totalAssets + assets.toNat < wordBound := by
+    by_contra h
+    exact Tx.run_ok_error hrun
+      (deposit_reverts_on_add_assets ctx w assets hp hpos hprod hminted hnf hcov h)
+  have haddS : mintedShares w.self assets + w.self.totalShares < wordBound := by
+    by_contra h
+    exact Tx.run_ok_error hrun
+      (deposit_reverts_on_add_shares ctx w assets hp hpos hprod hminted hnf hcov haddA h)
+  have haddB : mintedShares w.self assets + w.self.shares ctx.sender < wordBound := by
+    by_contra h
+    exact Tx.run_ok_error hrun
+      (deposit_reverts_on_add_bal ctx w assets hp hpos hprod hminted hnf hcov haddA haddS h)
+  exact ⟨hp, hpos, hminted, hnf, hcov, hprod, haddA, haddS, haddB⟩
+
 theorem deposit_shares_le_assets_when_rate_ge_one (assets : Amount ASSET assetScale)
     (hrate : w.self.totalShares ≤ w.self.totalAssets) :
     mintedShares w.self assets ≤ assets.toNat := by
@@ -527,6 +573,48 @@ theorem withdraw_ok (sharesIn : Amount SHARE shareScale) (h : WithdrawOk ctx w s
   dsimp only [Tx.run]
   simp [assetB]
   simp [hf, hxfer, extAfterMove, withdrawPost, redeemedAssets, hp]
+
+/-- Success of `withdraw` implies the `WithdrawOk` bundle. -/
+theorem withdraw_ok_of_run {sharesIn : Amount SHARE shareScale} {n : Nat}
+    {w' : World Storage Ext Event}
+    (hrun : Tx.run (withdraw sharesIn) ctx w = .ok (n, w')) :
+    WithdrawOk ctx w sharesIn := by
+  have hp : w.self.paused = Flag.off := by
+    by_contra h; exact Tx.run_ok_error hrun (withdraw_reverts_when_paused ctx w sharesIn h)
+  have hpos : 0 < sharesIn.toNat := by
+    by_contra h; exact Tx.run_ok_error hrun (withdraw_reverts_on_nonpos ctx w sharesIn hp h)
+  have hbal : sharesIn.toNat ≤ w.self.shares ctx.sender := by
+    by_contra h
+    exact Tx.run_ok_error hrun
+      (withdraw_reverts_on_insufficient_shares ctx w sharesIn hp hpos (Nat.not_le.mp h))
+  have hden : w.self.totalShares ≠ 0 := by
+    by_contra h
+    exact Tx.run_ok_error hrun (withdraw_reverts_on_divByZero ctx w sharesIn hp hpos hbal h)
+  have hmul : w.self.totalAssets * sharesIn.toNat < wordBound := by
+    by_contra h
+    exact Tx.run_ok_error hrun (withdraw_reverts_on_mul_overflow ctx w sharesIn hp hpos hbal hden h)
+  have hassets : 0 < redeemedAssets w.self sharesIn := by
+    by_contra h
+    exact Tx.run_ok_error hrun
+      (withdraw_reverts_on_zero_assets ctx w sharesIn hp hpos hbal hden hmul h)
+  have hsup : sharesIn.toNat ≤ w.self.totalShares := by
+    by_contra h
+    exact Tx.run_ok_error hrun (withdraw_reverts_on_insufficient_supply ctx w sharesIn
+      hp hpos hbal hden hmul hassets (Nat.not_le.mp h))
+  have hfit : redeemedAssets w.self sharesIn ≤ w.self.totalAssets := by
+    by_contra h
+    exact Tx.run_ok_error hrun (withdraw_reverts_on_assets_underflow ctx w sharesIn
+      hp hpos hbal hsup hden hmul hassets h)
+  have hnf : w.faults w.ncalls = false := by
+    by_cases hf : w.faults w.ncalls = true
+    · exact (Tx.run_ok_error hrun (withdraw_reverts_on_fault ctx w sharesIn
+        hp hpos hbal hsup hden hmul hassets hfit hf)).elim
+    · exact (Bool.not_eq_true _).mp hf
+  have hcov : redeemedAssets w.self sharesIn ≤ w.ext.asset.balances ctx.self := by
+    by_contra h
+    exact Tx.run_ok_error hrun (withdraw_reverts_on_no_cover ctx w sharesIn
+      hp hpos hbal hsup hden hmul hassets hfit hnf h)
+  exact ⟨hp, hpos, hbal, hsup, hden, hmul, hassets, hfit, hnf, hcov⟩
 
 theorem withdraw_assets_le_proportional (sharesIn : Amount SHARE shareScale)
     (_h : WithdrawOk ctx w sharesIn) :

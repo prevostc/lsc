@@ -245,115 +245,50 @@ theorem inv_solvent (self : Address) (w : World Storage Ext Event) (h : Inv self
       rw [hcl]
       exact Nat.le_trans hle hta
 
+private theorem deposit_ok_inv (self : Address) {ctx : Ctx} {w : World Storage Ext Event}
+    {assets : Amount ASSET assetScale}
+    (hself : ctx.self = self) (hsne : ctx.sender ≠ self)
+    (hInv : Inv self w) (h : DepositOk ctx w assets) :
+    Inv self (worldAfter (deposit assets) ctx w) := by
+  have hrun := deposit_ok ctx w assets h
+  simp [worldAfter, hrun]
+  obtain ⟨hta, hst⟩ := hInv
+  refine ⟨?hold, invStorage_of_depositPost w.self ctx.sender assets hst⟩
+  subst hself
+  have hb := move_dst (g := w.ext.asset) (amt := assets.toNat) hsne
+  simp [holdings, extAfterMove, depositPost, hb] at hta ⊢
+  omega
+
+private theorem withdraw_ok_inv (self : Address) {ctx : Ctx} {w : World Storage Ext Event}
+    {sharesIn : Amount SHARE shareScale}
+    (hself : ctx.self = self) (hsne : ctx.sender ≠ self)
+    (hInv : Inv self w) (h : WithdrawOk ctx w sharesIn) :
+    Inv self (worldAfter (withdraw sharesIn) ctx w) := by
+  have hrun := withdraw_ok ctx w sharesIn h
+  simp [worldAfter, hrun]
+  obtain ⟨hta, hst⟩ := hInv
+  refine ⟨?hold, invStorage_of_withdrawPost w.self ctx.sender sharesIn
+    (redeemedAssets w.self sharesIn) hst h.bal⟩
+  subst hself
+  have hb := move_src (g := w.ext.asset)
+    (amt := redeemedAssets w.self sharesIn) hsne.symm
+  have hcov := h.cover
+  simp [holdings, extAfterMove, withdrawPost, hb] at hta hcov ⊢
+  omega
+
 /-! ### Invariant preservation -/
 
 theorem deposit_preserves_inv (self : Address) :
-    PreservesInvFnAt spec (Inv self) self .deposit := by
-  intro assets ctx w hself hsne hInv
-  by_cases hp : w.self.paused = Flag.off
-  · by_cases hpos : 0 < assets.toNat
-    · by_cases hprod :
-          w.self.totalShares = 0 ∨
-            (w.self.totalAssets ≠ 0 ∧ w.self.totalShares * assets.toNat < wordBound)
-      · by_cases hminted : 0 < mintedShares w.self assets
-        · by_cases hf : w.faults w.ncalls = true
-          · have hrun := deposit_reverts_on_fault ctx w assets hp hpos hprod hminted hf
-            simp [worldAfter, hrun]; exact hInv
-          · have hf' : w.faults w.ncalls = false := (Bool.not_eq_true _).mp hf
-            by_cases hcov : assets.toNat ≤ w.ext.asset.balances ctx.sender
-            · by_cases haddA : w.self.totalAssets + assets.toNat < wordBound
-              · by_cases haddS : mintedShares w.self assets + w.self.totalShares < wordBound
-                · by_cases haddB : mintedShares w.self assets + w.self.shares ctx.sender < wordBound
-                  · have hok : DepositOk ctx w assets :=
-                      ⟨hp, hpos, hminted, hf', hcov, hprod, haddA, haddS, haddB⟩
-                    have hrun := deposit_ok ctx w assets hok
-                    simp [worldAfter, hrun]
-                    obtain ⟨hta, hst⟩ := hInv
-                    refine ⟨?hold, invStorage_of_depositPost w.self ctx.sender assets hst⟩
-                    subst hself
-                    have hb := move_dst (g := w.ext.asset) (amt := assets.toNat) hsne
-                    simp [holdings, extAfterMove, depositPost, hb] at hta ⊢
-                    omega
-                  · have hrun := deposit_reverts_on_add_bal ctx w assets hp hpos hprod hminted
-                      hf' hcov haddA haddS haddB
-                    simp [worldAfter, hrun]; exact hInv
-                · have hrun := deposit_reverts_on_add_shares ctx w assets hp hpos hprod hminted
-                    hf' hcov haddA haddS
-                  simp [worldAfter, hrun]; exact hInv
-              · have hrun := deposit_reverts_on_add_assets ctx w assets hp hpos hprod hminted
-                  hf' hcov haddA
-                simp [worldAfter, hrun]; exact hInv
-            · have hrun := deposit_reverts_on_no_cover ctx w assets hp hpos hprod hminted hf' hcov
-              simp [worldAfter, hrun]; exact hInv
-        · have hrun := deposit_reverts_on_zero_shares ctx w assets hp hpos hprod hminted
-          simp [worldAfter, hrun]; exact hInv
-      · by_cases hts : w.self.totalShares = 0
-        · exact (hprod (Or.inl hts)).elim
-        · by_cases hta0 : w.self.totalAssets = 0
-          · have hrun := deposit_reverts_on_divByZero ctx w assets hp hpos hts hta0
-            simp [worldAfter, hrun]; exact hInv
-          · have hmul : ¬ w.self.totalShares * assets.toNat < wordBound := by
-              intro hm; exact hprod (Or.inr ⟨hta0, hm⟩)
-            have hrun := deposit_reverts_on_mul_overflow ctx w assets hp hpos hts hta0 hmul
-            simp [worldAfter, hrun]; exact hInv
-    · have hrun := deposit_reverts_on_nonpos ctx w assets hp hpos
-      simp [worldAfter, hrun]; exact hInv
-  · have hrun := deposit_reverts_when_paused ctx w assets hp
-    simp [worldAfter, hrun]; exact hInv
+    PreservesInvFnAt spec (Inv self) self .deposit :=
+  PreservesInvFnAt_of_ok fun assets ctx w _n _w' hself hsne hInv hrun => by
+    have hI := deposit_ok_inv self hself hsne hInv (deposit_ok_of_run ctx w hrun)
+    simpa [worldAfter, hrun] using hI
 
 theorem withdraw_preserves_inv (self : Address) :
-    PreservesInvFnAt spec (Inv self) self .withdraw := by
-  intro sharesIn ctx w hself hsne hInv
-  by_cases hp : w.self.paused = Flag.off
-  · by_cases hpos : 0 < sharesIn.toNat
-    · by_cases hbal : sharesIn.toNat ≤ w.self.shares ctx.sender
-      · by_cases hden : w.self.totalShares = 0
-        · have hrun := withdraw_reverts_on_divByZero ctx w sharesIn hp hpos hbal hden
-          simp [worldAfter, hrun]; exact hInv
-        · have hden' : w.self.totalShares ≠ 0 := hden
-          by_cases hmul : w.self.totalAssets * sharesIn.toNat < wordBound
-          · by_cases hassets : 0 < redeemedAssets w.self sharesIn
-            · by_cases hsup : sharesIn.toNat ≤ w.self.totalShares
-              · by_cases hfit : redeemedAssets w.self sharesIn ≤ w.self.totalAssets
-                · by_cases hf : w.faults w.ncalls = true
-                  · have hrun := withdraw_reverts_on_fault ctx w sharesIn hp hpos hbal hsup
-                      hden' hmul hassets hfit hf
-                    simp [worldAfter, hrun]; exact hInv
-                  · have hf' : w.faults w.ncalls = false := (Bool.not_eq_true _).mp hf
-                    by_cases hcov : redeemedAssets w.self sharesIn ≤ w.ext.asset.balances ctx.self
-                    · have hok : WithdrawOk ctx w sharesIn :=
-                        ⟨hp, hpos, hbal, hsup, hden', hmul, hassets, hfit, hf', hcov⟩
-                      have hrun := withdraw_ok ctx w sharesIn hok
-                      simp [worldAfter, hrun]
-                      obtain ⟨hta, hst⟩ := hInv
-                      refine ⟨?hold, invStorage_of_withdrawPost w.self ctx.sender sharesIn
-                        (redeemedAssets w.self sharesIn) hst hbal⟩
-                      subst hself
-                      have hb := move_src (g := w.ext.asset)
-                        (amt := redeemedAssets w.self sharesIn) hsne.symm
-                      simp [holdings, extAfterMove, withdrawPost, hb] at hta hcov ⊢
-                      omega
-                    · have hrun := withdraw_reverts_on_no_cover ctx w sharesIn hp hpos hbal
-                        hsup hden' hmul hassets hfit hf' hcov
-                      simp [worldAfter, hrun]; exact hInv
-                · have hrun := withdraw_reverts_on_assets_underflow ctx w sharesIn hp hpos
-                    hbal hsup hden' hmul hassets hfit
-                  simp [worldAfter, hrun]; exact hInv
-              · have hrun := withdraw_reverts_on_insufficient_supply ctx w sharesIn hp hpos
-                  hbal hden' hmul hassets (Nat.not_le.mp hsup)
-                simp [worldAfter, hrun]; exact hInv
-            · have hrun := withdraw_reverts_on_zero_assets ctx w sharesIn hp hpos hbal
-                hden' hmul hassets
-              simp [worldAfter, hrun]; exact hInv
-          · have hrun := withdraw_reverts_on_mul_overflow ctx w sharesIn hp hpos hbal hden' hmul
-            simp [worldAfter, hrun]; exact hInv
-      · have hrun := withdraw_reverts_on_insufficient_shares ctx w sharesIn hp hpos
-          (Nat.not_le.mp hbal)
-        simp [worldAfter, hrun]; exact hInv
-    · have hrun := withdraw_reverts_on_nonpos ctx w sharesIn hp hpos
-      simp [worldAfter, hrun]; exact hInv
-  · have hrun := withdraw_reverts_when_paused ctx w sharesIn hp
-    simp [worldAfter, hrun]; exact hInv
+    PreservesInvFnAt spec (Inv self) self .withdraw :=
+  PreservesInvFnAt_of_ok fun sharesIn ctx w _n _w' hself hsne hInv hrun => by
+    have hI := withdraw_ok_inv self hself hsne hInv (withdraw_ok_of_run ctx w hrun)
+    simpa [worldAfter, hrun] using hI
 
 theorem pause_preserves_inv (self : Address) :
     PreservesInvFnAt spec (Inv self) self .pause := by
@@ -434,105 +369,23 @@ theorem vault_solvent (self : Address) (tr : List (Step spec))
 /-! ### Authorization -/
 
 theorem deposit_auth (self : Address) :
-    NoUnauthorizedDecreaseFn spec (Inv self) claim Auth .deposit := by
-  intro assets ctx w a _hInv hdec
-  by_cases hp : w.self.paused = Flag.off
-  · by_cases hpos : 0 < assets.toNat
-    · by_cases hprod :
-          w.self.totalShares = 0 ∨
-            (w.self.totalAssets ≠ 0 ∧ w.self.totalShares * assets.toNat < wordBound)
-      · by_cases hminted : 0 < mintedShares w.self assets
-        · by_cases hf : w.faults w.ncalls = true
-          · have hrun := deposit_reverts_on_fault ctx w assets hp hpos hprod hminted hf
-            simp [worldAfter, hrun] at hdec
-          · have hf' : w.faults w.ncalls = false := (Bool.not_eq_true _).mp hf
-            by_cases hcov : assets.toNat ≤ w.ext.asset.balances ctx.sender
-            · by_cases haddA : w.self.totalAssets + assets.toNat < wordBound
-              · by_cases haddS : mintedShares w.self assets + w.self.totalShares < wordBound
-                · by_cases haddB : mintedShares w.self assets + w.self.shares ctx.sender < wordBound
-                  · have hok : DepositOk ctx w assets :=
-                      ⟨hp, hpos, hminted, hf', hcov, hprod, haddA, haddS, haddB⟩
-                    have hrun := deposit_ok ctx w assets hok
-                    simp [worldAfter, hrun] at hdec
-                    exact Nat.not_lt.mpr (claim_le_of_depositPost w.self ctx.sender a assets) hdec
-                  · have hrun := deposit_reverts_on_add_bal ctx w assets hp hpos hprod hminted
-                      hf' hcov haddA haddS haddB
-                    simp [worldAfter, hrun] at hdec
-                · have hrun := deposit_reverts_on_add_shares ctx w assets hp hpos hprod hminted
-                    hf' hcov haddA haddS
-                  simp [worldAfter, hrun] at hdec
-              · have hrun := deposit_reverts_on_add_assets ctx w assets hp hpos hprod hminted
-                  hf' hcov haddA
-                simp [worldAfter, hrun] at hdec
-            · have hrun := deposit_reverts_on_no_cover ctx w assets hp hpos hprod hminted hf' hcov
-              simp [worldAfter, hrun] at hdec
-        · have hrun := deposit_reverts_on_zero_shares ctx w assets hp hpos hprod hminted
-          simp [worldAfter, hrun] at hdec
-      · by_cases hts : w.self.totalShares = 0
-        · exact (hprod (Or.inl hts)).elim
-        · by_cases hta0 : w.self.totalAssets = 0
-          · have hrun := deposit_reverts_on_divByZero ctx w assets hp hpos hts hta0
-            simp [worldAfter, hrun] at hdec
-          · have hmul : ¬ w.self.totalShares * assets.toNat < wordBound := by
-              intro hm; exact hprod (Or.inr ⟨hta0, hm⟩)
-            have hrun := deposit_reverts_on_mul_overflow ctx w assets hp hpos hts hta0 hmul
-            simp [worldAfter, hrun] at hdec
-    · have hrun := deposit_reverts_on_nonpos ctx w assets hp hpos
-      simp [worldAfter, hrun] at hdec
-  · have hrun := deposit_reverts_when_paused ctx w assets hp
-    simp [worldAfter, hrun] at hdec
+    NoUnauthorizedDecreaseFn spec (Inv self) claim Auth .deposit :=
+  NoUnauthorizedDecreaseFn_of_ok fun assets ctx w a n w' _hInv hrun hdec => by
+    have hok := deposit_ok_of_run ctx w hrun
+    cases hrun.symm.trans (deposit_ok ctx w assets hok)
+    exact Nat.not_lt.mpr (claim_le_of_depositPost w.self ctx.sender a assets) hdec
 
 theorem withdraw_auth (self : Address) :
-    NoUnauthorizedDecreaseFn spec (Inv self) claim Auth .withdraw := by
-  intro sharesIn ctx w a hInv hdec
-  change ctx.sender = a
-  by_cases hs : ctx.sender = a
-  · exact hs
-  · obtain ⟨_, hst⟩ := hInv
-    by_cases hp : w.self.paused = Flag.off
-    · by_cases hpos : 0 < sharesIn.toNat
-      · by_cases hbal : sharesIn.toNat ≤ w.self.shares ctx.sender
-        · by_cases hden : w.self.totalShares = 0
-          · have hrun := withdraw_reverts_on_divByZero ctx w sharesIn hp hpos hbal hden
-            simp [worldAfter, hrun] at hdec
-          · have hden' : w.self.totalShares ≠ 0 := hden
-            by_cases hmul : w.self.totalAssets * sharesIn.toNat < wordBound
-            · by_cases hassets : 0 < redeemedAssets w.self sharesIn
-              · by_cases hsup : sharesIn.toNat ≤ w.self.totalShares
-                · by_cases hfit : redeemedAssets w.self sharesIn ≤ w.self.totalAssets
-                  · by_cases hf : w.faults w.ncalls = true
-                    · have hrun := withdraw_reverts_on_fault ctx w sharesIn hp hpos hbal hsup
-                        hden' hmul hassets hfit hf
-                      simp [worldAfter, hrun] at hdec
-                    · have hf' : w.faults w.ncalls = false := (Bool.not_eq_true _).mp hf
-                      by_cases hcov : redeemedAssets w.self sharesIn ≤ w.ext.asset.balances ctx.self
-                      · have hok : WithdrawOk ctx w sharesIn :=
-                          ⟨hp, hpos, hbal, hsup, hden', hmul, hassets, hfit, hf', hcov⟩
-                        have hrun := withdraw_ok ctx w sharesIn hok
-                        simp [worldAfter, hrun] at hdec
-                        exact (Nat.not_lt.mpr (claim_le_of_withdrawPost w.self ctx.sender a
-                          sharesIn hst hs hbal hden' hsup) hdec).elim
-                      · have hrun := withdraw_reverts_on_no_cover ctx w sharesIn hp hpos hbal
-                          hsup hden' hmul hassets hfit hf' hcov
-                        simp [worldAfter, hrun] at hdec
-                  · have hrun := withdraw_reverts_on_assets_underflow ctx w sharesIn hp hpos
-                      hbal hsup hden' hmul hassets hfit
-                    simp [worldAfter, hrun] at hdec
-                · have hrun := withdraw_reverts_on_insufficient_supply ctx w sharesIn hp hpos
-                    hbal hden' hmul hassets (Nat.not_le.mp hsup)
-                  simp [worldAfter, hrun] at hdec
-              · have hrun := withdraw_reverts_on_zero_assets ctx w sharesIn hp hpos hbal
-                  hden' hmul hassets
-                simp [worldAfter, hrun] at hdec
-            · have hrun := withdraw_reverts_on_mul_overflow ctx w sharesIn hp hpos hbal hden' hmul
-              simp [worldAfter, hrun] at hdec
-        · have hrun := withdraw_reverts_on_insufficient_shares ctx w sharesIn hp hpos
-            (Nat.not_le.mp hbal)
-          simp [worldAfter, hrun] at hdec
-      · have hrun := withdraw_reverts_on_nonpos ctx w sharesIn hp hpos
-        simp [worldAfter, hrun] at hdec
-    · have hrun := withdraw_reverts_when_paused ctx w sharesIn hp
-      simp [worldAfter, hrun] at hdec
+    NoUnauthorizedDecreaseFn spec (Inv self) claim Auth .withdraw :=
+  NoUnauthorizedDecreaseFn_of_ok fun sharesIn ctx w a n w' hInv hrun hdec => by
+    change ctx.sender = a
+    by_cases hs : ctx.sender = a
+    · exact hs
+    · obtain ⟨_, hst⟩ := hInv
+      have hok := withdraw_ok_of_run ctx w hrun
+      cases hrun.symm.trans (withdraw_ok ctx w sharesIn hok)
+      exact (Nat.not_lt.mpr (claim_le_of_withdrawPost w.self ctx.sender a
+        sharesIn hst hs hok.bal hok.denom hok.supply) hdec).elim
 
 theorem pause_auth (self : Address) :
     NoUnauthorizedDecreaseFn spec (Inv self) claim Auth .pause := by
@@ -621,3 +474,6 @@ def vault_runtime_some : Bool := (compileRuntime Vault.contract).isSome
 #guard vault_runtime_some
 
 #eval (compileRuntime Vault.contract).map List.length
+
+#print axioms Vault.vault_solvent
+#print axioms Vault.vault_no_unauthorized_extraction

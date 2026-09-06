@@ -89,6 +89,26 @@ def mintedShares (σ : Storage) (a0 a1 : Nat) : Nat :=
   else
     a1 * σ.totalShares / σ.reserve1
 
+private theorem not_side0 {σ : Storage} {a0 a1 : Nat}
+    (hts : σ.totalShares ≠ 0) (hr0 : 0 < σ.reserve0)
+    (hle : a0 * σ.totalShares / σ.reserve0 ≤ a1 * σ.totalShares / σ.reserve1)
+    (hminted : ¬ 0 < mintedShares σ a0 a1) :
+    ¬ σ.reserve0 ≤ a0 * σ.totalShares := by
+  intro h
+  refine hminted ?_
+  simp [mintedShares, hts, hle, pos_div_iff]
+  exact ⟨hr0, h⟩
+
+private theorem not_side1 {σ : Storage} {a0 a1 : Nat}
+    (hts : σ.totalShares ≠ 0) (hr1 : 0 < σ.reserve1)
+    (hle : ¬ a0 * σ.totalShares / σ.reserve0 ≤ a1 * σ.totalShares / σ.reserve1)
+    (hminted : ¬ 0 < mintedShares σ a0 a1) :
+    ¬ σ.reserve1 ≤ a1 * σ.totalShares := by
+  intro h
+  refine hminted ?_
+  simp [mintedShares, hts, hle, pos_div_iff]
+  exact ⟨hr1, h⟩
+
 def addLiquidityPost (σ : Storage) (who : Address) (a0 a1 : Nat) : Storage :=
   let n := mintedShares σ a0 a1
   { σ with
@@ -268,6 +288,21 @@ theorem quote0for1_reverts_on_mul (dx : Amount TOKEN0 scale0)
     Tx.run (quote0for1 dx) ctx w = .error (.arith .overflow) := by
   have hr0n : w.self.reserve0 ≠ 0 := Nat.ne_of_gt hr0
   simp [quote0for1, hpos, hr0, hr0n, hden, hmul]
+
+theorem quote0for1_same_world {dx : Amount TOKEN0 scale0} {n : Nat}
+    {w' : World Storage Ext Event}
+    (hrun : Tx.run (quote0for1 dx) ctx w = .ok (n, w')) : w' = w := by
+  have hpos : 0 < dx.toNat := by
+    by_contra hp; simp [quote0for1, hp] at hrun
+  have hr0 : 0 < w.self.reserve0 := by
+    by_contra h; simp [quote0for1, hpos, h] at hrun
+  have hden : w.self.reserve0 + dx.toNat < wordBound := by
+    by_contra h
+    exact Tx.run_ok_error hrun (quote0for1_reverts_on_add ctx w dx hpos hr0 h)
+  have hmul : dx.toNat * w.self.reserve1 < wordBound := by
+    by_contra h
+    exact Tx.run_ok_error hrun (quote0for1_reverts_on_mul ctx w dx hpos hr0 hden h)
+  cases hrun.symm.trans (quote0for1_ok ctx w dx hpos hr0 hden hmul); rfl
 
 /-! ### `addLiquidity` -/
 
@@ -691,6 +726,88 @@ theorem addLiquidity_reverts_on_add_bal (a0 : Amount TOKEN0 scale0)
           rwa [if_neg hts, if_neg hle] at haddB
         simp [hts, hr0, hr1, hr0n, hr1n, hm0, hm1, hle, hreq, hadd0, hadd1, hS, hB]
 
+/-- Success of `addLiquidity` implies the `AddLiqOk` bundle. -/
+theorem addLiquidity_ok_of_run {a0 : Amount TOKEN0 scale0} {a1 : Amount TOKEN1 scale1}
+    {n : Nat} {w' : World Storage Ext Event}
+    (hrun : Tx.run (addLiquidity a0 a1) ctx w = .ok (n, w')) :
+    AddLiqOk w ctx a0 a1 := by
+  have hpos0 : 0 < a0.toNat := by
+    by_contra hp; simp [addLiquidity, hp] at hrun
+  have hpos1 : 0 < a1.toNat := by
+    by_contra hp; simp [addLiquidity, hpos0, hp] at hrun
+  have hprod :
+      w.self.totalShares = 0 ∨
+        (0 < w.self.reserve0 ∧ 0 < w.self.reserve1 ∧
+          a0.toNat * w.self.totalShares < wordBound ∧
+          a1.toNat * w.self.totalShares < wordBound) := by
+    by_cases hts : w.self.totalShares = 0
+    · exact Or.inl hts
+    · by_cases hr0 : 0 < w.self.reserve0
+      · by_cases hr1 : 0 < w.self.reserve1
+        · have hr0n : w.self.reserve0 ≠ 0 := Nat.ne_of_gt hr0
+          have hr1n : w.self.reserve1 ≠ 0 := Nat.ne_of_gt hr1
+          by_cases hm0 : a0.toNat * w.self.totalShares < wordBound
+          · by_cases hm1 : a1.toNat * w.self.totalShares < wordBound
+            · exact Or.inr ⟨hr0, hr1, hm0, hm1⟩
+            · simp [addLiquidity, hpos0, hpos1, hts, hr0, hr0n, hr1, hr1n, hm0, hm1] at hrun
+          · simp [addLiquidity, hpos0, hpos1, hts, hr0, hr0n, hr1, hr1n, hm0] at hrun
+        · have hz : w.self.reserve1 = 0 := Nat.eq_zero_of_le_zero (Nat.not_lt.mp hr1)
+          have hr0n : w.self.reserve0 ≠ 0 := Nat.ne_of_gt hr0
+          simp [addLiquidity, hpos0, hpos1, hts, hr0, hr0n, hz] at hrun
+      · have hz : w.self.reserve0 = 0 := Nat.eq_zero_of_le_zero (Nat.not_lt.mp hr0)
+        simp [addLiquidity, hpos0, hpos1, hts, hz] at hrun
+  have hminted : 0 < mintedShares w.self a0.toNat a1.toNat := by
+    by_contra hm
+    by_cases hts : w.self.totalShares = 0
+    · simp [mintedShares, hts] at hm
+      omega
+    · rcases hprod with h0 | ⟨hr0, hr1, hm0, hm1⟩
+      · exact hts h0
+      · have hr0n : w.self.reserve0 ≠ 0 := Nat.ne_of_gt hr0
+        have hr1n : w.self.reserve1 ≠ 0 := Nat.ne_of_gt hr1
+        by_cases hle :
+            a0.toNat * w.self.totalShares / w.self.reserve0 ≤
+              a1.toNat * w.self.totalShares / w.self.reserve1
+        · have hreq := not_side0 hts hr0 hle hm
+          simp [addLiquidity, hpos0, hpos1, hts, hr0, hr0n, hr1, hr1n, hm0, hm1, hle, hreq] at hrun
+        · have hreq := not_side1 hts hr1 hle hm
+          simp [addLiquidity, hpos0, hpos1, hts, hr0, hr0n, hr1, hr1n, hm0, hm1, hle, hreq] at hrun
+  have hadd0 : w.self.reserve0 + a0.toNat < wordBound := by
+    by_contra h
+    exact Tx.run_ok_error hrun (addLiquidity_reverts_on_add_r0 ctx w a0 a1
+      hpos0 hpos1 hminted hprod h)
+  have hadd1 : w.self.reserve1 + a1.toNat < wordBound := by
+    by_contra h
+    exact Tx.run_ok_error hrun (addLiquidity_reverts_on_add_r1 ctx w a0 a1
+      hpos0 hpos1 hminted hprod hadd0 h)
+  have haddS : mintedShares w.self a0.toNat a1.toNat + w.self.totalShares < wordBound := by
+    by_contra h
+    exact Tx.run_ok_error hrun (addLiquidity_reverts_on_add_shares ctx w a0 a1
+      hpos0 hpos1 hminted hprod hadd0 hadd1 h)
+  have haddB : mintedShares w.self a0.toNat a1.toNat + w.self.shares ctx.sender < wordBound := by
+    by_contra h
+    exact Tx.run_ok_error hrun (addLiquidity_reverts_on_add_bal ctx w a0 a1
+      hpos0 hpos1 hminted hprod hadd0 hadd1 haddS h)
+  have hnf0 : w.faults w.ncalls = false := by
+    by_cases hf : w.faults w.ncalls = true
+    · exact (Tx.run_ok_error hrun (addLiquidity_reverts_on_fault0 ctx w a0 a1
+        hpos0 hpos1 hminted hprod hadd0 hadd1 haddS haddB hf)).elim
+    · exact (Bool.not_eq_true _).mp hf
+  have hcov0 : a0.toNat ≤ w.ext.token0.balances ctx.sender := by
+    by_contra h
+    exact Tx.run_ok_error hrun (addLiquidity_reverts_on_no_cover0 ctx w a0 a1
+      hpos0 hpos1 hminted hprod hadd0 hadd1 haddS haddB hnf0 h)
+  have hnf1 : w.faults (w.ncalls + 1) = false := by
+    by_cases hf : w.faults (w.ncalls + 1) = true
+    · exact (Tx.run_ok_error hrun (addLiquidity_reverts_on_fault1 ctx w a0 a1
+        hpos0 hpos1 hminted hprod hadd0 hadd1 haddS haddB hnf0 hcov0 hf)).elim
+    · exact (Bool.not_eq_true _).mp hf
+  have hcov1 : a1.toNat ≤ w.ext.token1.balances ctx.sender := by
+    by_contra h
+    exact Tx.run_ok_error hrun (addLiquidity_reverts_on_no_cover1 ctx w a0 a1
+      hpos0 hpos1 hminted hprod hadd0 hadd1 haddS haddB hnf0 hcov0 hnf1 h)
+  exact ⟨hpos0, hpos1, hminted, hprod, hadd0, hadd1, haddS, haddB, hnf0, hnf1, hcov0, hcov1⟩
+
 /-! ### `removeLiquidity` -/
 
 theorem removeLiquidity_ok (s : Amount SHARE shareScale) (h : RemoveOk w ctx s) :
@@ -848,6 +965,65 @@ theorem removeLiquidity_reverts_on_no_cover1 (s : Amount SHARE shareScale)
   unfold Tx.call; dsimp only [Tx.run]
   simp [token0B, IERC20.model_eq, hf0, hx0]
   simp [token1B, IERC20.model_eq, hf1, model, hcov1]
+
+/-- Success of `removeLiquidity` implies the `RemoveOk` bundle. -/
+theorem removeLiquidity_ok_of_run {s : Amount SHARE shareScale} {n : Nat × Nat}
+    {w' : World Storage Ext Event}
+    (hrun : Tx.run (removeLiquidity s) ctx w = .ok (n, w')) :
+    RemoveOk w ctx s := by
+  have hpos : 0 < s.toNat := by
+    by_contra hp; simp [removeLiquidity, hp] at hrun
+  have hbal : s.toNat ≤ w.self.shares ctx.sender := by
+    by_contra h
+    simp [removeLiquidity, hpos, h] at hrun
+  have hts : 0 < w.self.totalShares := by
+    by_contra h
+    simp [removeLiquidity, hpos, hbal, h] at hrun
+  have hmul0 : s.toNat * w.self.reserve0 < wordBound := by
+    by_contra h
+    exact Tx.run_ok_error hrun (removeLiquidity_reverts_on_mul0 ctx w s hpos hbal hts h)
+  have hmul1 : s.toNat * w.self.reserve1 < wordBound := by
+    by_contra h
+    exact Tx.run_ok_error hrun (removeLiquidity_reverts_on_mul1 ctx w s hpos hbal hts hmul0 h)
+  have hout0 : 0 < (redeemed w.self s.toNat).1 := by
+    by_contra h
+    exact Tx.run_ok_error hrun (removeLiquidity_reverts_on_zeroOut0 ctx w s
+      hpos hbal hts hmul0 hmul1 h)
+  have hout1 : 0 < (redeemed w.self s.toNat).2 := by
+    by_contra h
+    exact Tx.run_ok_error hrun (removeLiquidity_reverts_on_zeroOut1 ctx w s
+      hpos hbal hts hmul0 hmul1 hout0 h)
+  have hsLe : s.toNat ≤ w.self.totalShares := by
+    by_contra h
+    have hreq0 : w.self.totalShares ≤ s.toNat * w.self.reserve0 :=
+      (pos_div_iff.mp (by simpa [redeemed] using hout0)).2
+    have hreq1 : w.self.totalShares ≤ s.toNat * w.self.reserve1 :=
+      (pos_div_iff.mp (by simpa [redeemed] using hout1)).2
+    simp [removeLiquidity, hpos, hbal, hts, Nat.ne_of_gt hts, hmul0, hmul1,
+      hreq0, hreq1, h] at hrun
+  have hle0 : (redeemed w.self s.toNat).1 ≤ w.self.reserve0 :=
+    remove_le_reserves s.toNat w.self.reserve0 w.self.totalShares hsLe hts
+  have hle1 : (redeemed w.self s.toNat).2 ≤ w.self.reserve1 :=
+    remove_le_reserves s.toNat w.self.reserve1 w.self.totalShares hsLe hts
+  have hnf0 : w.faults w.ncalls = false := by
+    by_cases hf : w.faults w.ncalls = true
+    · exact (Tx.run_ok_error hrun (removeLiquidity_reverts_on_fault0 ctx w s
+        hpos hbal hts hsLe hout0 hout1 hle0 hle1 hmul0 hmul1 hf)).elim
+    · exact (Bool.not_eq_true _).mp hf
+  have hcov0 : (redeemed w.self s.toNat).1 ≤ w.ext.token0.balances ctx.self := by
+    by_contra h
+    exact Tx.run_ok_error hrun (removeLiquidity_reverts_on_no_cover0 ctx w s
+      hpos hbal hts hsLe hout0 hout1 hle0 hle1 hmul0 hmul1 hnf0 h)
+  have hnf1 : w.faults (w.ncalls + 1) = false := by
+    by_cases hf : w.faults (w.ncalls + 1) = true
+    · exact (Tx.run_ok_error hrun (removeLiquidity_reverts_on_fault1 ctx w s
+        hpos hbal hts hsLe hout0 hout1 hle0 hle1 hmul0 hmul1 hnf0 hcov0 hf)).elim
+    · exact (Bool.not_eq_true _).mp hf
+  have hcov1 : (redeemed w.self s.toNat).2 ≤ w.ext.token1.balances ctx.self := by
+    by_contra h
+    exact Tx.run_ok_error hrun (removeLiquidity_reverts_on_no_cover1 ctx w s
+      hpos hbal hts hsLe hout0 hout1 hle0 hle1 hmul0 hmul1 hnf0 hcov0 hnf1 h)
+  exact ⟨hpos, hbal, hts, hsLe, hout0, hout1, hle0, hle1, hmul0, hmul1, hnf0, hnf1, hcov0, hcov1⟩
 
 /-! ### Swaps -/
 
@@ -1084,6 +1260,106 @@ theorem swap1for0_reverts_on_no_cover_out (dx : Amount TOKEN1 scale1)
   unfold Tx.call; dsimp only [Tx.run]
   simp [token1B, IERC20.model_eq, hf0, hxIn]
   simp [token0B, IERC20.model_eq, hf1, model, hcovOut]
+
+/-- Success of `swap0for1` implies the `Swap0Ok` bundle. -/
+theorem swap0for1_ok_of_run {dx : Amount TOKEN0 scale0} {minOut : Amount TOKEN1 scale1}
+    {n : Nat} {w' : World Storage Ext Event}
+    (hrun : Tx.run (swap0for1 dx minOut) ctx w = .ok (n, w')) :
+    Swap0Ok w ctx dx minOut := by
+  have hpos : 0 < dx.toNat := by
+    by_contra hp; simp [swap0for1, hp] at hrun
+  have hr0 : 0 < w.self.reserve0 := by
+    by_contra h; simp [swap0for1, hpos, h] at hrun
+  have hr1 : 0 < w.self.reserve1 := by
+    by_contra h; simp [swap0for1, hpos, hr0, h] at hrun
+  have hr0n : w.self.reserve0 ≠ 0 := Nat.ne_of_gt hr0
+  have hden : w.self.reserve0 + dx.toNat < wordBound := by
+    by_contra h; simp [swap0for1, hpos, hr0, hr0n, hr1, h] at hrun
+  have hmul : dx.toNat * w.self.reserve1 < wordBound := by
+    by_contra h; simp [swap0for1, hpos, hr0, hr0n, hr1, hden, h] at hrun
+  have hmin : minOut.toNat ≤ amountOut w.self.reserve0 w.self.reserve1 dx.toNat := by
+    by_contra h
+    simp only [amountOut] at h
+    simp [swap0for1, hpos, hr0, hr0n, hr1, hden, hmul, h] at hrun
+  have hout : 0 < amountOut w.self.reserve0 w.self.reserve1 dx.toNat := by
+    by_contra h
+    have hreq : ¬ w.self.reserve0 + dx.toNat ≤ dx.toNat * w.self.reserve1 := by
+      intro hle
+      apply h
+      simp [amountOut, pos_div_iff]
+      exact ⟨Nat.add_pos_left hr0 _, hle⟩
+    simp only [amountOut] at hmin
+    simp [swap0for1, hpos, hr0, hr0n, hr1, hden, hmul, hmin, hreq] at hrun
+  have hnf0 : w.faults w.ncalls = false := by
+    by_cases hf : w.faults w.ncalls = true
+    · exact (Tx.run_ok_error hrun (swap0for1_reverts_on_fault0 ctx w dx minOut
+        hpos hr0 hr1 hden hmul hmin hout hf)).elim
+    · exact (Bool.not_eq_true _).mp hf
+  have hcovIn : dx.toNat ≤ w.ext.token0.balances ctx.sender := by
+    by_contra h
+    exact Tx.run_ok_error hrun (swap0for1_reverts_on_no_cover_in ctx w dx minOut
+      hpos hr0 hr1 hden hmul hmin hout hnf0 h)
+  have hnf1 : w.faults (w.ncalls + 1) = false := by
+    by_cases hf : w.faults (w.ncalls + 1) = true
+    · exact (Tx.run_ok_error hrun (swap0for1_reverts_on_fault1 ctx w dx minOut
+        hpos hr0 hr1 hden hmul hmin hout hnf0 hcovIn hf)).elim
+    · exact (Bool.not_eq_true _).mp hf
+  have hcovOut : amountOut w.self.reserve0 w.self.reserve1 dx.toNat ≤
+      w.ext.token1.balances ctx.self := by
+    by_contra h
+    exact Tx.run_ok_error hrun (swap0for1_reverts_on_no_cover_out ctx w dx minOut
+      hpos hr0 hr1 hden hmul hmin hout hnf0 hcovIn hnf1 h)
+  exact ⟨hpos, hr0, hr1, hden, hmul, hmin, hout, hden, hnf0, hnf1, hcovIn, hcovOut⟩
+
+/-- Success of `swap1for0` implies the `Swap1Ok` bundle. -/
+theorem swap1for0_ok_of_run {dx : Amount TOKEN1 scale1} {minOut : Amount TOKEN0 scale0}
+    {n : Nat} {w' : World Storage Ext Event}
+    (hrun : Tx.run (swap1for0 dx minOut) ctx w = .ok (n, w')) :
+    Swap1Ok w ctx dx minOut := by
+  have hpos : 0 < dx.toNat := by
+    by_contra hp; simp [swap1for0, hp] at hrun
+  have hr0 : 0 < w.self.reserve0 := by
+    by_contra h; simp [swap1for0, hpos, h] at hrun
+  have hr1 : 0 < w.self.reserve1 := by
+    by_contra h; simp [swap1for0, hpos, hr0, h] at hrun
+  have hr1n : w.self.reserve1 ≠ 0 := Nat.ne_of_gt hr1
+  have hden : w.self.reserve1 + dx.toNat < wordBound := by
+    by_contra h; simp [swap1for0, hpos, hr0, hr1, hr1n, h] at hrun
+  have hmul : dx.toNat * w.self.reserve0 < wordBound := by
+    by_contra h; simp [swap1for0, hpos, hr0, hr1, hr1n, hden, h] at hrun
+  have hmin : minOut.toNat ≤ amountOut w.self.reserve1 w.self.reserve0 dx.toNat := by
+    by_contra h
+    simp only [amountOut] at h
+    simp [swap1for0, hpos, hr0, hr1, hr1n, hden, hmul, h] at hrun
+  have hout : 0 < amountOut w.self.reserve1 w.self.reserve0 dx.toNat := by
+    by_contra h
+    have hreq : ¬ w.self.reserve1 + dx.toNat ≤ dx.toNat * w.self.reserve0 := by
+      intro hle
+      apply h
+      simp [amountOut, pos_div_iff]
+      exact ⟨Nat.add_pos_left hr1 _, hle⟩
+    simp only [amountOut] at hmin
+    simp [swap1for0, hpos, hr0, hr1, hr1n, hden, hmul, hmin, hreq] at hrun
+  have hnf0 : w.faults w.ncalls = false := by
+    by_cases hf : w.faults w.ncalls = true
+    · exact (Tx.run_ok_error hrun (swap1for0_reverts_on_fault0 ctx w dx minOut
+        hpos hr0 hr1 hden hmul hmin hout hf)).elim
+    · exact (Bool.not_eq_true _).mp hf
+  have hcovIn : dx.toNat ≤ w.ext.token1.balances ctx.sender := by
+    by_contra h
+    exact Tx.run_ok_error hrun (swap1for0_reverts_on_no_cover_in ctx w dx minOut
+      hpos hr0 hr1 hden hmul hmin hout hnf0 h)
+  have hnf1 : w.faults (w.ncalls + 1) = false := by
+    by_cases hf : w.faults (w.ncalls + 1) = true
+    · exact (Tx.run_ok_error hrun (swap1for0_reverts_on_fault1 ctx w dx minOut
+        hpos hr0 hr1 hden hmul hmin hout hnf0 hcovIn hf)).elim
+    · exact (Bool.not_eq_true _).mp hf
+  have hcovOut : amountOut w.self.reserve1 w.self.reserve0 dx.toNat ≤
+      w.ext.token0.balances ctx.self := by
+    by_contra h
+    exact Tx.run_ok_error hrun (swap1for0_reverts_on_no_cover_out ctx w dx minOut
+      hpos hr0 hr1 hden hmul hmin hout hnf0 hcovIn hnf1 h)
+  exact ⟨hpos, hr0, hr1, hden, hmul, hmin, hout, hden, hnf0, hnf1, hcovIn, hcovOut⟩
 
 theorem swap0for1_k (dx : Amount TOKEN0 scale0) (minOut : Amount TOKEN1 scale1)
     (h : Swap0Ok w ctx dx minOut) :

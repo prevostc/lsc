@@ -53,6 +53,21 @@ theorem NoUnauthorizedDecrease.of_fns {Inv : World S X E → Prop} {claim : Clai
   intro c w a hInv hlt
   simpa [step, Call.ofCtx_toCtx] using h c.fn c.args c.toCtx w a hInv hlt
 
+/-- Reduce `NoUnauthorizedDecreaseFn` to the success path: a revert cannot decrease `claim`. -/
+theorem NoUnauthorizedDecreaseFn_of_ok {Inv : World S X E → Prop} {claim : Claim S}
+    {Auth : AuthPred C} {fn : C.Fn}
+    (hok : ∀ (args : C.Args fn) (ctx : Ctx) (w : World S X E) (a : Address)
+        (ret : C.Ret fn) (w' : World S X E),
+      Inv w → Tx.run (C.exec fn args) ctx w = .ok (ret, w') →
+      claim a w'.self < claim a w.self →
+      Auth a (Call.ofCtx ctx fn args) w.self) :
+    NoUnauthorizedDecreaseFn C Inv claim Auth fn := by
+  intro args ctx w a hInv hdec
+  cases h : Tx.run (C.exec fn args) ctx w with
+  | error _ => simp [worldAfter, h] at hdec
+  | ok p =>
+    exact hok args ctx w a p.1 p.2 hInv h (by simpa [worldAfter, h] using hdec)
+
 /--
 `Auth` is state-dependent (allowance), so the hyp must follow the prefix state.
 Environment steps are skipped (`Auth` is only judged at calls).
@@ -143,6 +158,26 @@ theorem Conservation.of_fns {Inv : World S X E → Prop} {claim : Claim S} {infl
     (h : ∀ fn, ConservesFn C Inv claim inflow fn) : Conservation C Inv claim inflow := by
   intro c w hInv
   simpa [step, Call.ofCtx_toCtx] using h c.fn c.args c.toCtx w hInv
+
+/-- Reduce `ConservesFn` to the success path: a revert is conservation with empty touch-set. -/
+theorem ConservesFn_of_ok {Inv : World S X E → Prop} {claim : Claim S}
+    {inflow : Inflow C} {fn : C.Fn}
+    (hok : ∀ (args : C.Args fn) (ctx : Ctx) (w : World S X E) (ret : C.Ret fn)
+        (w' : World S X E),
+      Inv w → Tx.run (C.exec fn args) ctx w = .ok (ret, w') →
+      ∃ T : Finset Address,
+        (∀ a, a ∉ T → claim a w'.self = claim a w.self) ∧
+        T.sum (fun a => claim a w'.self) ≤
+          T.sum (fun a => claim a w.self) + inflow (Call.ofCtx ctx fn args) w) :
+    ConservesFn C Inv claim inflow fn := by
+  intro args ctx w hInv
+  cases h : Tx.run (C.exec fn args) ctx w with
+  | error _ =>
+    refine ⟨∅, ?_, ?_⟩
+    · intro a _; simp [worldAfter, h]
+    · simp [worldAfter, h]
+  | ok p =>
+    simpa [worldAfter, h] using hok args ctx w p.1 p.2 hInv h
 
 /-- Assets the contract actually controls, read from storage or the external-token ghost. -/
 abbrev Holdings (S X E : Type) := Address → World S X E → Nat

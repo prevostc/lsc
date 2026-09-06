@@ -59,6 +59,22 @@ def worldAfter (x : Tx S X E ε α) (ctx : Ctx) (w : World S X E) : World S X E 
     (h : Tx.run x ctx w = .error e) : worldAfter x ctx w = w := by
   simp [worldAfter, h]
 
+/-- `P` holds after `x` if it holds of the pre-world and of every successful post-world.
+Reverts are a no-op, so the error branch is `hw`. -/
+theorem worldAfter_preserves {P : World S X E → Prop} {x : Tx S X E ε α}
+    {ctx : Ctx} {w : World S X E}
+    (hw : P w) (hok : ∀ a w', Tx.run x ctx w = .ok (a, w') → P w') :
+    P (worldAfter x ctx w) := by
+  cases h : Tx.run x ctx w with
+  | error _ => simpa [worldAfter, h] using hw
+  | ok p => simpa [worldAfter, h] using hok p.1 p.2 h
+
+/-- If every success path returns the pre-world, then `worldAfter` is the identity. -/
+theorem worldAfter_eq_self {x : Tx S X E ε α} {ctx : Ctx} {w : World S X E}
+    (hok : ∀ a w', Tx.run x ctx w = .ok (a, w') → w' = w) :
+    worldAfter x ctx w = w :=
+  worldAfter_preserves (P := fun w' => w' = w) rfl hok
+
 variable {C : Spec S X E ε}
 
 /-- One trace step: a contract call, or an environment (ghost) update between our calls. -/

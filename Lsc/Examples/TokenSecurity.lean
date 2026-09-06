@@ -673,3 +673,5 @@ theorem token_solvent (self : Address) (tr : List (Step spec)) (w : World Storag
   solvent_run token_preserves_inv token_inv_rely inv_solvent h tr hW hR
 
 end Token
+
+#print axioms Token.token_no_unauthorized_extraction

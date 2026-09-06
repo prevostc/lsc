@@ -269,6 +269,11 @@ section RunLemmas
     run (if c then x else y) ctx w = if c then run x ctx w else run y ctx w := by
   split <;> rfl
 
+theorem run_ok_error {x : Tx S X E ε α} {ctx : Ctx} {w : World S X E}
+    {a : α} {w' : World S X E} {e : Err ε}
+    (hok : run x ctx w = .ok (a, w')) (herr : run x ctx w = .error e) : False :=
+  nomatch hok.symm.trans herr
+
 end RunLemmas
 
 end Tx
