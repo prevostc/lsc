@@ -1,5 +1,6 @@
 import Lsc.Compiler.EndToEnd
 import Lsc.Compiler.Proof.DispatchExt
+import Lsc.Compiler.Proof.ProgressCore
 import YulEvmCompiler.Correctness
 import YulEvmCompiler.LowerDefs
 
@@ -8,10 +9,11 @@ set_option linter.unusedVariables false
 
 /-!
 S2 bytecode glue. powdr `compile_correct` is **forward only** (`Run → ∃ Steps`).
-There is no `compile_complete` / adequacy. `EvmCallRunExt` is therefore Yul-level:
-every `Run (yulD calls)` is predicted (`∃ fo`) and has matching EVM `Steps`;
-halted `Steps` from the same start are unique (`steps_halted_unique`).
-The converse (every EVM execution is a Yul run) is a TCB gap.
+There is no `compile_complete` / adequacy. `CallsTotal` gives a Yul `Run`
+(`yul_progress`); that run plus `compile_correct` plus `steps_halted_unique`
+gives `EvmCallRunExtAll`: every halted matching EVM execution has the unique
+post-storage predicted by Core under some `fo`. powdr adequacy is still not
+used (and not needed).
 -/
 
 namespace Lsc.Compiler
@@ -166,6 +168,213 @@ theorem bytecode_call_correct_ext {I : Interface} {S X E ε : Type}
   refine ⟨⟨s', hSteps, hH⟩, ?_⟩
   intro s'' hS'' hH''
   rw [steps_halted_unique hS'' hSteps hH'' hH]
+  exact hpost
+
+/-- Universal over halted EVM runs: some gas bound, a halted `Steps` exists, every
+halted `Steps` has post-storage `σ'`, and Core under some `fo` predicts that
+storage (`storageRel` / `RX` on a witnessing committed Yul state). -/
+def EvmCallRunExtAll {I : Interface} {S X E ε : Type}
+    (α : Abs I.Ghost) (bind : Binding I S X)
+    (c : ContractDef) (Γ : ContractSchema S X E ε) (κ : List UInt8 → U256)
+    (calls : ExternalCalls) (ctx : Ctx) (w : World S X E)
+    (is : List Instr) (yst0 : EvmState) (σ' : U256 → U256) : Prop :=
+  ∃ b : Nat, ∀ s0 : State,
+    EvmStartOK is yst0 s0 → b ≤ s0.gasAvailable →
+    (∃ s', Steps s0 s' ∧ Halted s') ∧
+    ∀ s', Steps s0 s' → Halted s' →
+      σ' = postStorage yst0 s' ∧
+      ∃ fo : Nat → Bool,
+        let wfo : World S X E := { w with faults := fo }
+        match selectedFn c yst0.env.calldata with
+        | none => σ' = yst0.storage
+        | some f =>
+            match Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse)
+                ctx wfo with
+            | .ok (_, w') =>
+                storageRel c Γ κ w'.self σ' ∧
+                  ∃ stObs : EvmState, stObs.storage = σ' ∧
+                    R c Γ κ w' stObs ∧ RX α bind w' stObs
+            | .error _ => σ' = yst0.storage
+
+theorem evmCallRunExtAll_of_progress {I : Interface} {S X E ε : Type}
+    (α : Abs I.Ghost) (bind : Binding I S X)
+    (c : ContractDef) (Γ : ContractSchema S X E ε)
+    (hΓ : Γ.st.Lawful c.fields) (hκ : KeccakSep c evmKeccak)
+    (calls : ExternalCalls) (hCalls : CallsRealized calls) (htot : CallsTotal calls)
+    (hctor : ∀ f ∈ c.functions, f.kind ≠ .constructor)
+    (hS2 : ∀ f ∈ c.functions, S2Frag f.core)
+    (hlen : c.fields.length < wordBound)
+    (hbound : ∀ f ∈ c.functions, 4 + 32 * f.params.length < wordBound)
+    (rt : YBlock) (hrt : runtimeBlock c = some rt)
+    (is : List Instr) (hcomp : compile rt = some is)
+    (ctx : Ctx) (w : World S X E) (yst0 : EvmState)
+    (hctx : ctxRel ctx yst0) (hR : R c Γ evmKeccak w yst0)
+    (hRX : RX α bind w yst0) (hign : α.ignoresLocal)
+    (hconf : Conforms I ctx.self (bind.addr w.self) calls α)
+    (hBind : ∀ b m args, callWF c b m args = true → ∃ meth, BindWF c Γ bind b m meth)
+    (hslot : ∀ f ∈ c.functions, ∃ slot : Nat,
+        (∀ σ, Γ.st.scalar slot σ = bind.addr σ) ∧
+        (c.fields[slot]?).map (·.kind) = some FieldKind.scalar ∧
+        coreAvoids slot f.core)
+    (himm0 : ∀ k, yst0.env.immutable k = 0) :
+    ∃ σ', EvmCallRunExtAll α bind c Γ evmKeccak calls ctx w is yst0 σ' := by
+  obtain ⟨st', o, hrun⟩ :=
+    yul_progress (I := I) α bind c Γ hΓ evmKeccak hκ calls htot hctor hS2 hlen hbound
+      rt hrt ctx w yst0 hctx hR hconf hBind hslot
+  have ⟨hpred, hEvm⟩ :=
+    bytecode_call_correct_ext (I := I) α bind c Γ hΓ hκ calls hCalls hctor hS2
+      hlen hbound rt hrt is hcomp ctx w yst0 hctx hR hRX hign hconf hBind hslot himm0
+      st' o hrun
+  set stObs := committedState yst0 st'
+  refine ⟨stObs.storage, ?_⟩
+  obtain ⟨b, hb⟩ := hEvm
+  refine ⟨b, ?_⟩
+  intro s0 hstart hgas
+  obtain ⟨hex, huni⟩ := hb s0 hstart hgas
+  refine ⟨hex, ?_⟩
+  intro s'' hS hH
+  refine ⟨huni s'' hS hH, ?_⟩
+  obtain ⟨fo, hconcl⟩ := hpred
+  refine ⟨fo, ?_⟩
+  have hhalted : stObs.halted = st'.halted := committedState_halted yst0 st'
+  cases hsel : selectedFn c yst0.env.calldata with
+  | none =>
+    simp only [hsel] at hconcl ⊢
+    rcases hconcl with ⟨_, ⟨hh, _⟩⟩
+    exact obs_storage_rollback rfl hhalted hh
+  | some f =>
+    simp only [hsel] at hconcl ⊢
+    cases htx : Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse)
+        ctx { w with faults := fo } with
+    | ok prod =>
+      rcases prod with ⟨v, w'⟩
+      simp only [htx] at hconcl ⊢
+      rcases hconcl with ⟨_, hsucc, hR', hRX'⟩
+      exact ⟨hR'.1, stObs, rfl, hR', hRX'⟩
+    | error e =>
+      simp only [htx] at hconcl ⊢
+      rcases hconcl with ⟨bytes, ⟨_, ⟨hh, _⟩⟩⟩
+      exact obs_storage_rollback rfl hhalted hh
+
+theorem evmCallRun_of_correct_ext {I : Interface} {S X E ε : Type}
+    (α : Abs I.Ghost) (bind : Binding I S X)
+    (c : ContractDef) (Γ : ContractSchema S X E ε)
+    (hΓ : Γ.st.Lawful c.fields) (hκ : KeccakSep c evmKeccak)
+    (calls : ExternalCalls) (hCalls : CallsRealized calls) (htot : CallsTotal calls)
+    (hctor : ∀ f ∈ c.functions, f.kind ≠ .constructor)
+    (hS2 : ∀ f ∈ c.functions, S2Frag f.core)
+    (hlen : c.fields.length < wordBound)
+    (hbound : ∀ f ∈ c.functions, 4 + 32 * f.params.length < wordBound)
+    (rt : YBlock) (hrt : runtimeBlock c = some rt)
+    (is : List Instr) (hcomp : compile rt = some is)
+    (ctx : Ctx) (w : World S X E) (yst0 : EvmState)
+    (hctx : ctxRel ctx yst0) (hR : R c Γ evmKeccak w yst0)
+    (hRX : RX α bind w yst0) (hign : α.ignoresLocal)
+    (hconf : Conforms I ctx.self (bind.addr w.self) calls α)
+    (hBind : ∀ b m args, callWF c b m args = true → ∃ meth, BindWF c Γ bind b m meth)
+    (hslot : ∀ f ∈ c.functions, ∃ slot : Nat,
+        (∀ σ, Γ.st.scalar slot σ = bind.addr σ) ∧
+        (c.fields[slot]?).map (·.kind) = some FieldKind.scalar ∧
+        coreAvoids slot f.core)
+    (himm0 : ∀ k, yst0.env.immutable k = 0) :
+    ∃ σ', EvmCallRun is yst0 σ' ∧
+      ∃ fo : Nat → Bool,
+        match selectedFn c yst0.env.calldata with
+        | none => σ' = yst0.storage
+        | some f =>
+            match Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse)
+                ctx { w with faults := fo } with
+            | .ok (_, w') => storageRel c Γ evmKeccak w'.self σ' ∧ WorldWF c Γ w'
+            | .error _ => σ' = yst0.storage := by
+  obtain ⟨st', o, hrun⟩ :=
+    yul_progress (I := I) α bind c Γ hΓ evmKeccak hκ calls htot hctor hS2 hlen hbound
+      rt hrt ctx w yst0 hctx hR hconf hBind hslot
+  have ⟨hpred, hEvm⟩ :=
+    bytecode_call_correct_ext (I := I) α bind c Γ hΓ hκ calls hCalls hctor hS2
+      hlen hbound rt hrt is hcomp ctx w yst0 hctx hR hRX hign hconf hBind hslot himm0
+      st' o hrun
+  refine ⟨(committedState yst0 st').storage, hEvm, ?_⟩
+  obtain ⟨fo, hconcl⟩ := hpred
+  refine ⟨fo, ?_⟩
+  have hhalted : (committedState yst0 st').halted = st'.halted :=
+    committedState_halted yst0 st'
+  cases hsel : selectedFn c yst0.env.calldata with
+  | none =>
+    simp only [hsel] at hconcl ⊢
+    rcases hconcl with ⟨_, ⟨hh, _⟩⟩
+    exact obs_storage_rollback rfl hhalted hh
+  | some f =>
+    simp only [hsel] at hconcl ⊢
+    cases htx : Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse)
+        ctx { w with faults := fo } with
+    | ok prod =>
+      rcases prod with ⟨v, w'⟩
+      simp only [htx] at hconcl ⊢
+      rcases hconcl with ⟨_, hsucc, hR', _⟩
+      exact ⟨hR'.1, hR'.2.2.2⟩
+    | error e =>
+      simp only [htx] at hconcl ⊢
+      rcases hconcl with ⟨bytes, ⟨_, ⟨hh, _⟩⟩⟩
+      exact obs_storage_rollback rfl hhalted hh
+
+/-- Universal trace: each call is an `EvmCallRun` at `mkEvmState`, witnessed by a
+matching start (same shape as `EvmTraceRunAll`). `RX` / `α` are hypotheses of the
+one-call simulation that identifies post-storage, not of this relation. -/
+abbrev EvmTraceRunExtAll (is : List Instr) :
+    List EvmCall → (U256 → U256) → (U256 → U256) → Prop :=
+  EvmTraceRunAll is
+
+theorem evmCallRun_fnCalldata_ext {I : Interface} {S X E ε : Type}
+    (α : Abs I.Ghost) (bind : Binding I S X)
+    (c : ContractDef) (Γ : ContractSchema S X E ε)
+    (hΓ : Γ.st.Lawful c.fields) (hκ : KeccakSep c evmKeccak)
+    (calls : ExternalCalls) (hCalls : CallsRealized calls) (htot : CallsTotal calls)
+    (hctor : ∀ f ∈ c.functions, f.kind ≠ .constructor)
+    (hS2 : ∀ f ∈ c.functions, S2Frag f.core)
+    (hlen : c.fields.length < wordBound)
+    (hbound : ∀ f ∈ c.functions, 4 + 32 * f.params.length < wordBound)
+    (hnd : selectorsNodup c = true)
+    (rt : YBlock) (hrt : runtimeBlock c = some rt)
+    (is : List Instr) (hcomp : compile rt = some is)
+    (hign : α.ignoresLocal)
+    (hBind : ∀ b m args, callWF c b m args = true → ∃ meth, BindWF c Γ bind b m meth)
+    (hslot : ∀ f ∈ c.functions, ∃ slot : Nat,
+        (∀ σ, Γ.st.scalar slot σ = bind.addr σ) ∧
+        (c.fields[slot]?).map (·.kind) = some FieldKind.scalar ∧
+        coreAvoids slot f.core)
+    (ctx : Ctx) (f : FnDef) (args : List Nat) (w : World S X E)
+    (σ : U256 → U256)
+    (hf : f ∈ c.functions) (hk : f.kind ≠ .constructor)
+    (hlenA : args.length = f.params.length)
+    (hW : ∀ n ∈ args, n < wordBound)
+    (hctxWF : CtxWF ctx)
+    (hs : storageRel c Γ evmKeccak w.self σ)
+    (hlog : w.log = []) (hwf : WorldWF c Γ w)
+    (hcd : (fnCalldata f args).length < wordBound)
+    (hRX : RX α bind w (mkEvmState (fnCalldata f args) σ evmKeccak ctx))
+    (hconf : Conforms I ctx.self (bind.addr w.self) calls α) :
+    let yst0 := mkEvmState (fnCalldata f args) σ evmKeccak ctx
+    ∃ σ', EvmCallRun is yst0 σ' ∧
+      ∃ fo : Nat → Bool,
+        match Tx.run (Core.denote Γ f.core args.reverse) ctx { w with faults := fo } with
+        | .ok (_, w') => storageRel c Γ evmKeccak w'.self σ' ∧ WorldWF c Γ w'
+        | .error _ => σ' = σ := by
+  intro yst0
+  have hsel : selectedFn c (fnCalldata f args) = some f :=
+    selectedFn_fnCalldata c f args hf hnd hlenA
+  have hdec : decodeArgs f (fnCalldata f args) = args :=
+    decodeArgs_fnCalldata f args hk hlenA hW
+  have hctx : ctxRel ctx yst0 := ctxRel_mkEvmState _ _ _ _ hctxWF hcd
+  have hR : R c Γ evmKeccak w yst0 := R_mkEvmState evmKeccak w _ σ ctx hs hlog hwf
+  have himm0 : ∀ k, yst0.env.immutable k = 0 := fun k => mkEvmState_immutable _ _ _ _ k
+  obtain ⟨σ', hRun, fo, hpost⟩ :=
+    evmCallRun_of_correct_ext (I := I) α bind c Γ hΓ hκ calls hCalls htot hctor hS2
+      hlen hbound rt hrt is hcomp ctx w yst0 hctx hR hRX hign hconf hBind hslot himm0
+  refine ⟨σ', hRun, fo, ?_⟩
+  rw [mkEvmState_calldata] at hpost
+  simp only [hsel] at hpost
+  rw [hdec] at hpost
+  rw [show yst0.storage = σ from mkEvmState_storage _ _ _ _] at hpost
   exact hpost
 
 end Lsc.Compiler

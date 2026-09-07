@@ -678,4 +678,15 @@ theorem deposit_rate_nondecreasing (TA TS sa assets : Nat)
       _ = sa * (TA + assets) * TS := (Nat.mul_assoc _ _ _).symm
   exact div_le_div_of_mul_le hTS hTS' hprod
 
+/-- ABI `Amount` arguments are `toNat` words; Core `denote` agrees with the surface
+`Tx` (certificate `f.core_denote`, `rfl`). Not `denoteAWord`: these functions
+return `Nat`. -/
+theorem deposit_core_toNat (assets : Amount ASSET assetScale) :
+    Core.denote schema deposit.core [assets.toNat] = deposit assets :=
+  deposit.core_denote assets
+
+theorem withdraw_core_toNat (sharesIn : Amount SHARE shareScale) :
+    Core.denote schema withdraw.core [sharesIn.toNat] = withdraw sharesIn :=
+  withdraw.core_denote sharesIn
+
 end Vault

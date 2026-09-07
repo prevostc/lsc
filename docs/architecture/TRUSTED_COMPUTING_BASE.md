@@ -46,12 +46,15 @@ What an end-to-end theorem of this project relies on beyond its own proof.
   hypothesis of `bytecode_call_correct_ext` (`CreatesRealized.none` and
   `GasCallsRealized.noneOracle` are discharged). `ExternalModel.gas` must be set to `.none`
   (class default is `.any`) so the dialect equals `yulD`.
-- **powdr direction gap (S2 M3):** `compile_correct` is forward only (`Yul Run → ∃ EVM Steps`).
-  There is no `compile_complete` / adequacy. S2 therefore states `EvmCallRunExt` at the Yul
-  level: every admitted `Run` is predicted and has matching `Steps`; uniqueness of halted
-  `Steps` is per start state (`steps_halted_unique`). The converse (every EVM execution is
-  a Yul run) remains a modelling gap, unlike S1's `EvmTraceRunAll` which uses a constructed
-  forward Yul run from call-free simulation.
+- **powdr direction (S2 M4):** `compile_correct` is forward only (`Yul Run → ∃ EVM Steps`).
+  There is no `compile_complete` / adequacy. Universality over halted matching EVM runs
+  is `CallsTotal` (EVM CALL always returns) + `yul_progress` (a Yul `Run` exists) +
+  `compile_correct` + `steps_halted_unique`, packaged as `EvmCallRunExtAll` /
+  `EvmTraceRunExtAll`. powdr adequacy is still not needed. The converse (every EVM
+  execution is a Yul run) remains a modelling gap.
+- `hRXfun`: each `mkEvmState` zeros foreign `storageOf`. Trace theorems assume `RX` at
+  every such snapshot; a live ERC-20 ghost typically matches that only under a strong
+  `∀ w', RX … (mkEvmState …)` hypothesis (TCB).
 - Fault oracle: backward `toYulFn_correct_ext` existentially chooses `fo` via
   `composeFault ncalls (¬resp.success) rest` so Core and Yul agree on each external outcome;
   security theorems remain `∀ w` and transport along the backward theorem. A failing `call`

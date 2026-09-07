@@ -80,16 +80,19 @@ bytecode    ──(4) EndToEnd glue──────  bytecode-level anti-explo
      `mapSlot1 evmKeccak 2`. Companions `*_exists` keep the predicted `EvmTraceRun`.
    Top-level revert rollback is a modelling assumption (`TRUSTED_COMPUTING_BASE.md`).
    Status: **proved (S1, universal over halted matching executions)**.
-   S2 (`EndToEndExt.lean`, `VaultEndToEnd.lean`): `bytecode_call_correct_ext` is **backward
-   and Yul-level**. powdr `compile_correct` is `Run → ∃ Steps` only (no `compile_complete`).
-   Every Yul `Run (yulD calls)` is predicted (`∃ fo` via `runtimeBlock_correct_ext`) and has
-   matching EVM `Steps`; halted `Steps` from the same start are unique (`steps_halted_unique`).
-   Model is `openModel calls` (`creates := .none`, `gas := .none`) with hypothesis
-   `CallsRealized calls` (`CreatesRealized.none` / `GasCallsRealized.noneOracle` discharged).
-   `vault_bytecode_no_unauthorized_extraction` / `vault_bytecode_solvent` conjoin the Spec
-   Security theorems with `BytecodeCallCorrectExt`. Slot-level `claim` transport along a
-   Spec trace needs Amount `core_denote`/`toNat` agreement (open). The converse (every EVM
-   execution is a Yul run) is **not** claimed.
+   S2 (`EndToEndExt.lean`, `VaultEndToEnd.lean`): `CallsTotal` + `yul_progress` produce
+   a Yul `Run`; `compile_correct` + `steps_halted_unique` give `EvmCallRunExtAll` /
+   `EvmTraceRunExtAll` (Token's `EvmTraceRunAll` shape). Core at a witnessing `fo`
+   predicts unique halted post-storage. Vault `deposit`/`withdraw` are Nat-returning;
+   ABI words agree via `f.core_denote` (`deposit_core_toNat`).
+   `vault_bytecode_no_unauthorized_extraction` is `∀ σ', EvmTraceRunExtAll →`
+   `vaultClaimRead σ a ≤ vaultClaimRead σ' a` (shares schema, not a Spec∧Yul
+   conjunction). Companions `*_exists` keep a predicted `EvmTraceRun`.
+   `vault_bytecode_solvent` is Spec `Solvent` at `run tr w` for every matching
+   halted trace (does not yet transport `storageRel (run tr w).self σ'`).
+   powdr adequacy is not used. The converse (every EVM execution is a Yul run) is
+   **not** claimed. `hRXfun` re-establishes `RX` at each `mkEvmState` (foreign
+   `storageOf` is zeroed there).
 
 ## Status of the v3 chain being replaced (for the record)
 

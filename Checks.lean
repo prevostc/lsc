@@ -15,6 +15,7 @@ import Lsc.Compiler.EndToEndExt
 import Lsc.Compiler.Proof.DispatchExt
 import Lsc.Examples.TokenEndToEnd
 import Lsc.Examples.VaultEndToEnd
+import Lsc.Compiler.Proof.ProgressCore
 
 /-!
 # Axiom footprint checks
@@ -96,11 +97,23 @@ axioms. `#guard_msgs` turns a widened footprint into a build error (see
 /-- info: 'Lsc.Compiler.bytecode_call_correct_ext' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms Lsc.Compiler.bytecode_call_correct_ext
 
+/-- info: 'Lsc.Compiler.yul_progress' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms Lsc.Compiler.yul_progress
+
+/-- info: 'Lsc.Compiler.evmCallRunExtAll_of_progress' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms Lsc.Compiler.evmCallRunExtAll_of_progress
+
 /-- info: 'Vault.vault_bytecode_no_unauthorized_extraction' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms Vault.vault_bytecode_no_unauthorized_extraction
 
+/-- info: 'Vault.vault_bytecode_no_unauthorized_extraction_exists' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms Vault.vault_bytecode_no_unauthorized_extraction_exists
+
 /-- info: 'Vault.vault_bytecode_solvent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms Vault.vault_bytecode_solvent
+
+/-- info: 'Vault.vault_bytecode_solvent_exists' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms Vault.vault_bytecode_solvent_exists
 
 /-- info: 'Token.token_bytecode_no_unauthorized_extraction' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms Token.token_bytecode_no_unauthorized_extraction

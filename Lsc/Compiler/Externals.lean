@@ -100,6 +100,14 @@ def Conforms (I : Interface) (self addr : Address) (calls : ExternalCalls)
         α.ofWorld resp.world addr = g' ∧
         NoInterfere α st resp.world addr
 
+/-- Totality of the bound-token relation: every request from every pre-state has
+some response. Realistic for EVM `CALL` (the opcode always returns a success
+flag and a returndata buffer). TCB: used by `yul_progress` so a Yul `Run` of
+the compiled runtime exists, which with EVM determinism gives universality
+over halted `Steps`. -/
+def CallsTotal (calls : ExternalCalls) : Prop :=
+  ∀ req st, ∃ resp, calls.Call req st resp
+
 /-- Inhabitation (forward/non-vacuity). Used only by an `_exists` companion, not
 by the backward `toYulFn_correct_ext`. Glue may set `faults n := ¬resp.success`. -/
 def Realizes {I : Interface} (α : Abs I.Ghost) (self addr : Address)
