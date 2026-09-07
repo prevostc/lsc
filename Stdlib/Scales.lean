@@ -1,4 +1,5 @@
 import Lsc.Lang.Amount
+import Lsc.Lang.Inline
 
 /-!
 # Named scales and derived `Amount` operations
@@ -7,10 +8,10 @@ import Lsc.Lang.Amount
 reduces them with `closedNat?`; they are not Core primitives.
 
 `Amount.mulDown` / `mulUp` / `divDown` / `divUp` / `ratioDown` / `ratioUp` /
-`rescale` / `convert` unfold to `Tx.mulDivDown` / `mulDivUp` (Reify's
-`isSurfaceOp`). They are not used by `Core.denoteA`. Names stay `Lsc.Amount.*`
-so existing Reify matching and `open Lsc` continue to work once this module is
-imported.
+`rescale` / `convert` are `@[lsc_inline]` do-blocks over `Tx.mulDivDown` /
+`mulDivUp`. `rescale` / `convert` still require a literal `.down` / `.up`.
+Names stay `Lsc.Amount.*` so existing Reify matching and `open Lsc` continue to
+work once this module is imported.
 -/
 
 namespace Stdlib
@@ -38,42 +39,130 @@ variable {S X E ε : Type}
 /-! ### Scaling by a dimensionless factor (`Amount τ s * Fixed s → Amount τ s`) -/
 
 /-- `⌊a * x / s⌋`. `s` is passed as a runtime word. -/
-def mulDown (a : Amount τ s) (x : Fixed s) : Tx S X E ε (Amount τ s) :=
-  (fun n => ofNat n) <$> Tx.mulDivDown a.toNat x.toNat s
+@[lsc_inline]
+def mulDown (a : Amount τ s) (x : Fixed s) : Tx S X E ε (Amount τ s) := do
+  let r ← Tx.mulDivDown a.toNat x.toNat s
+  pure (Amount.ofNat r)
 /-- `⌈a * x / s⌉`. -/
-def mulUp (a : Amount τ s) (x : Fixed s) : Tx S X E ε (Amount τ s) :=
-  (fun n => ofNat n) <$> Tx.mulDivUp a.toNat x.toNat s
+@[lsc_inline]
+def mulUp (a : Amount τ s) (x : Fixed s) : Tx S X E ε (Amount τ s) := do
+  let r ← Tx.mulDivUp a.toNat x.toNat s
+  pure (Amount.ofNat r)
 /-- `⌊a * s / x⌋`. -/
-def divDown (a : Amount τ s) (x : Fixed s) : Tx S X E ε (Amount τ s) :=
-  (fun n => ofNat n) <$> Tx.mulDivDown a.toNat s x.toNat
+@[lsc_inline]
+def divDown (a : Amount τ s) (x : Fixed s) : Tx S X E ε (Amount τ s) := do
+  let r ← Tx.mulDivDown a.toNat s x.toNat
+  pure (Amount.ofNat r)
 /-- `⌈a * s / x⌉`. -/
-def divUp (a : Amount τ s) (x : Fixed s) : Tx S X E ε (Amount τ s) :=
-  (fun n => ofNat n) <$> Tx.mulDivUp a.toNat s x.toNat
+@[lsc_inline]
+def divUp (a : Amount τ s) (x : Fixed s) : Tx S X E ε (Amount τ s) := do
+  let r ← Tx.mulDivUp a.toNat s x.toNat
+  pure (Amount.ofNat r)
 
 /-! ### Ratios of two same-unit amounts (dimensionless) -/
 
 /-- `⌊a * s / b⌋ : Fixed s`. -/
-def ratioDown (a b : Amount τ s) : Tx S X E ε (Fixed s) :=
-  (fun n => ofNat n) <$> Tx.mulDivDown a.toNat s b.toNat
+@[lsc_inline]
+def ratioDown (a b : Amount τ s) : Tx S X E ε (Fixed s) := do
+  let r ← Tx.mulDivDown a.toNat s b.toNat
+  pure (Amount.ofNat r)
 /-- `⌈a * s / b⌉ : Fixed s`. -/
-def ratioUp (a b : Amount τ s) : Tx S X E ε (Fixed s) :=
-  (fun n => ofNat n) <$> Tx.mulDivUp a.toNat s b.toNat
+@[lsc_inline]
+def ratioUp (a b : Amount τ s) : Tx S X E ε (Fixed s) := do
+  let r ← Tx.mulDivUp a.toNat s b.toNat
+  pure (Amount.ofNat r)
 
 /-! ### Changing scale and unit -/
 
 /-- Re-express an amount at another scale (`a * tgtScale / srcScale`), rounding as requested.
 Both scales are runtime words. -/
+@[lsc_inline]
 def rescale (srcScale tgtScale : Nat) (r : Rounding) (a : Amount τ s) :
     Tx S X E ε (Amount τ s') :=
   match r with
-  | .down => (fun n => ofNat n) <$> Tx.mulDivDown a.toNat tgtScale srcScale
-  | .up => (fun n => ofNat n) <$> Tx.mulDivUp a.toNat tgtScale srcScale
+  | .down => do
+    let n ← Tx.mulDivDown a.toNat tgtScale srcScale
+    pure (Amount.ofNat n)
+  | .up => do
+    let n ← Tx.mulDivUp a.toNat tgtScale srcScale
+    pure (Amount.ofNat n)
 
 /-- Convert `τ₁` into `τ₂` at price `p` (`a * p / s`). `s` is a runtime word. -/
+@[lsc_inline]
 def convert {τ₁ τ₂ : Type} (p : Price τ₁ τ₂ s) (scale : Nat) (r : Rounding)
     (a : Amount τ₁ s) : Tx S X E ε (Amount τ₂ s) :=
   match r with
-  | .down => (fun n => ofNat n) <$> Tx.mulDivDown a.toNat p.toNat scale
-  | .up => (fun n => ofNat n) <$> Tx.mulDivUp a.toNat p.toNat scale
+  | .down => do
+    let n ← Tx.mulDivDown a.toNat p.toNat scale
+    pure (Amount.ofNat n)
+  | .up => do
+    let n ← Tx.mulDivUp a.toNat p.toNat scale
+    pure (Amount.ofNat n)
+
+/-! ### Run lemmas (do-notation over `Tx.mulDiv*`) -/
+
+@[simp] theorem run_mulDown (a : Amount τ s) (x : Fixed s) (ctx : Ctx) (w : World S X E) :
+    Tx.run (mulDown (S := S) (X := X) (E := E) (ε := ε) a x) ctx w =
+      Tx.run ((fun n => ofNat n) <$>
+        Tx.mulDivDown (S := S) (X := X) (E := E) (ε := ε) a.toNat x.toNat s) ctx w :=
+  rfl
+
+@[simp] theorem run_mulUp (a : Amount τ s) (x : Fixed s) (ctx : Ctx) (w : World S X E) :
+    Tx.run (mulUp (S := S) (X := X) (E := E) (ε := ε) a x) ctx w =
+      Tx.run ((fun n => ofNat n) <$>
+        Tx.mulDivUp (S := S) (X := X) (E := E) (ε := ε) a.toNat x.toNat s) ctx w :=
+  rfl
+
+@[simp] theorem run_divDown (a : Amount τ s) (x : Fixed s) (ctx : Ctx) (w : World S X E) :
+    Tx.run (divDown (S := S) (X := X) (E := E) (ε := ε) a x) ctx w =
+      Tx.run ((fun n => ofNat n) <$>
+        Tx.mulDivDown (S := S) (X := X) (E := E) (ε := ε) a.toNat s x.toNat) ctx w :=
+  rfl
+
+@[simp] theorem run_divUp (a : Amount τ s) (x : Fixed s) (ctx : Ctx) (w : World S X E) :
+    Tx.run (divUp (S := S) (X := X) (E := E) (ε := ε) a x) ctx w =
+      Tx.run ((fun n => ofNat n) <$>
+        Tx.mulDivUp (S := S) (X := X) (E := E) (ε := ε) a.toNat s x.toNat) ctx w :=
+  rfl
+
+@[simp] theorem run_ratioDown (a b : Amount τ s) (ctx : Ctx) (w : World S X E) :
+    Tx.run (ratioDown (S := S) (X := X) (E := E) (ε := ε) a b) ctx w =
+      Tx.run ((fun n => ofNat n) <$>
+        Tx.mulDivDown (S := S) (X := X) (E := E) (ε := ε) a.toNat s b.toNat) ctx w :=
+  rfl
+
+@[simp] theorem run_ratioUp (a b : Amount τ s) (ctx : Ctx) (w : World S X E) :
+    Tx.run (ratioUp (S := S) (X := X) (E := E) (ε := ε) a b) ctx w =
+      Tx.run ((fun n => ofNat n) <$>
+        Tx.mulDivUp (S := S) (X := X) (E := E) (ε := ε) a.toNat s b.toNat) ctx w :=
+  rfl
+
+@[simp] theorem run_rescale (srcScale tgtScale : Nat) (r : Rounding) (a : Amount τ s)
+    (ctx : Ctx) (w : World S X E) :
+    Tx.run (rescale (s' := s') (S := S) (X := X) (E := E) (ε := ε) srcScale tgtScale r a) ctx w =
+      match r with
+      | .down =>
+        Tx.run ((fun n => ofNat n) <$>
+          Tx.mulDivDown (S := S) (X := X) (E := E) (ε := ε)
+            a.toNat tgtScale srcScale) ctx w
+      | .up =>
+        Tx.run ((fun n => ofNat n) <$>
+          Tx.mulDivUp (S := S) (X := X) (E := E) (ε := ε)
+            a.toNat tgtScale srcScale) ctx w := by
+  cases r <;> rfl
+
+@[simp] theorem run_convert {τ₁ τ₂ : Type} (p : Price τ₁ τ₂ s) (scale : Nat) (r : Rounding)
+    (a : Amount τ₁ s) (ctx : Ctx) (w : World S X E) :
+    Tx.run (convert (S := S) (X := X) (E := E) (ε := ε) p scale r a) ctx w =
+      match r with
+      | .down =>
+        Tx.run ((fun n => ofNat n) <$>
+          Tx.mulDivDown (S := S) (X := X) (E := E) (ε := ε)
+            a.toNat p.toNat scale) ctx w
+      | .up =>
+        Tx.run ((fun n => ofNat n) <$>
+          Tx.mulDivUp (S := S) (X := X) (E := E) (ε := ε)
+            a.toNat p.toNat scale) ctx w := by
+  cases r <;> rfl
 
 end Lsc.Amount

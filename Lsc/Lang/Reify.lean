@@ -1,5 +1,6 @@
 import Lsc.Lang.Core
 import Lsc.Lang.Contract
+import Lsc.Lang.Inline
 import Lsc.Lang.Spec
 
 /-!
@@ -20,8 +21,11 @@ prints the security theorems to prove; it does not import `Lsc.Security`.
 
 The reifier only accepts the *reifiable fragment* — the fixed set of
 `Tx` primitives combined with `do`, `let`, `if` on decidable word comparisons, and
-`pure` of words/addresses/pairs. Anything else is rejected with the offending subterm,
-so a reifier bug or an out-of-fragment program is a build error, never a miscompile.
+`pure` of words/addresses/pairs. Library helpers tagged `@[lsc_inline]` are
+delta-unfolded (β with arguments, fuel-bounded; recursive defs are rejected at
+the attribute) and reified from the resulting body. Anything else is rejected
+with the offending subterm, so a reifier bug or an out-of-fragment program is a
+build error, never a miscompile.
 
 The translation follows the shapes Lean's `do` elaborator produces:
 
@@ -525,6 +529,8 @@ def isSurfaceOp : Name → Bool
   | .str (.str `Lsc "Binding") s =>
       s == "transfer" || s == "transferFrom" || s == "balanceOf" || s == "decimals"
         || s == "transferUnit" || s == "transferFromUnit"
+        || s == "checkOk" || s == "safeTransfer" || s == "safeTransferFrom"
+        || s == "safeApprove"
   | _ => false
 
 /-- `Rounding` must be a literal constructor so the reifier can pick `mulDivDown` vs `mulDivUp`. -/
@@ -535,34 +541,63 @@ def roundingOf (e : Expr) : MetaM Rounding := do
   | some ``Lsc.Rounding.up => return .up
   | _ => throwError "reify: rounding `{e}` must be a literal `.down` or `.up`"
 
-/-- Unfold `Amount.*` / `Binding.*` (and reduce a `Rounding` match) until the head is a
-`Tx` primitive. -/
-partial def unfoldToTx (x : Expr) (fuel : Nat := 8) : MetaM Expr := do
-  let x := x.consumeMData
-  let n := x.getAppFn.constName?
-  if n == some ``Lsc.Tx.addChecked || n == some ``Lsc.Tx.subChecked
-      || n == some ``Lsc.Tx.mulChecked || n == some ``Lsc.Tx.divChecked
-      || n == some ``Lsc.Tx.mulDivDown || n == some ``Lsc.Tx.mulDivUp
-      || n == some ``Lsc.Tx.call || n == some ``Lsc.Tx.callUnit then
-    return x
-  if fuel = 0 then return x
-  if n.any isSurfaceOp then
-    if n == some (.str (.str `Lsc "Amount") "rescale")
-        || n == some (.str (.str `Lsc "Amount") "convert") then
-      let args := x.getAppArgs
-      if args.size > 0 then
-        let _ ← roundingOf args[args.size - 2]!
-    match ← unfoldDefinition? x with
-    | some x' => return (← unfoldToTx x' (fuel - 1))
+/-- Heads that `deltaUnfold` must not unfold past (primitives, `do` combinators,
+and `Amount.add`/`sub`/`share*` whose bodies are `if`s, not `Tx.*`). -/
+def isDeltaStop : Name → Bool
+  | ``Lsc.Tx.addChecked | ``Lsc.Tx.subChecked | ``Lsc.Tx.mulChecked | ``Lsc.Tx.divChecked
+  | ``Lsc.Tx.mulDivDown | ``Lsc.Tx.mulDivUp
+  | ``Lsc.Tx.call | ``Lsc.Tx.callUnit
+  | ``Lsc.Tx.load | ``Lsc.Tx.loadMap | ``Lsc.Tx.loadMap2
+  | ``Lsc.Tx.store | ``Lsc.Tx.storeMap | ``Lsc.Tx.storeMap2
+  | ``Lsc.Tx.require | ``Lsc.Tx.emit | ``Lsc.Tx.revert
+  | ``Lsc.Tx.sender | ``Lsc.Tx.value | ``Lsc.Tx.timestamp | ``Lsc.Tx.blockNumber
+  | ``Lsc.Tx.selfAddress
+  | ``Bind.bind | ``Pure.pure | ``ite
+  | ``Lsc.Amount.add | ``Lsc.Amount.sub | ``Lsc.Amount.shareDown | ``Lsc.Amount.shareUp =>
+    true
+  | _ => false
+
+def isLscInline (n : Name) : MetaM Bool := do
+  return Lsc.lscInlineAttr.hasTag (← getEnv) n
+
+/-- Error when an `@[lsc_inline]` body (or a non-primitive bind) is out of fragment. -/
+def throwInlineOr {α : Type} (inline? : Option Name) (sub : Expr) (fallback : MessageData) :
+    MetaM α :=
+  match inline? with
+  | some n =>
+    throwError "reify: `@[lsc_inline]` `{.ofConstName n}` body is outside the reifiable fragment; offending sub-term:{indentExpr sub}"
+  | none => throwError fallback
+
+/-- Unfold `@[lsc_inline]` (and `isSurfaceOp` fallback), reducing `Rounding` matches.
+Before unfolding `rescale`/`convert`, `roundingOf` requires a literal `.down`/`.up`. -/
+partial def deltaUnfold (e : Expr) (fuel : Nat := 8) : MetaM (Expr × Option Name) := do
+  let rec go (e : Expr) (fuel : Nat) (seen : Option Name) : MetaM (Expr × Option Name) := do
+    let e := e.consumeMData
+    if fuel = 0 then return (e, seen)
+    let n? := e.getAppFn.constName?
+    if n?.any isDeltaStop then return (e, seen)
+    if let some n := n? then
+      let tagged ← isLscInline n
+      if tagged || isSurfaceOp n then
+        if n == (.str (.str `Lsc "Amount") "rescale")
+            || n == (.str (.str `Lsc "Amount") "convert") then
+          let args := e.getAppArgs
+          if args.size > 0 then
+            let _ ← roundingOf args[args.size - 2]!
+        let seen' := if tagged then some n else seen
+        match ← unfoldDefinition? e with
+        | some e' => return (← go e' (fuel - 1) seen')
+        | none =>
+          let e' ← whnfR e
+          if e' == e then return (e, seen')
+          else return (← go e' (fuel - 1) seen')
+    match ← unfoldDefinition? e with
+    | some e' => go e' (fuel - 1) seen
     | none =>
-      let x' ← whnfR x
-      if x' == x then return x
-      else return (← unfoldToTx x' (fuel - 1))
-  let x' ← whnfR x
-  if x' != x then return (← unfoldToTx x' (fuel - 1))
-  match ← unfoldDefinition? x with
-  | some x' => unfoldToTx x' (fuel - 1)
-  | none => return x
+      let e' ← whnfR e
+      if e' == e then return (e, seen)
+      else go e' (fuel - 1) seen
+  go e fuel none
 
 partial def atomsOfList (env : Env t) (e : Expr) : MetaM (List Atom) := do
   let e := e.consumeMData
@@ -613,9 +648,14 @@ def opOf (ci : ContractInfo) (env : Env t) (x : Expr) : MetaM (Option Op) := do
     | some ``Lsc.Amount.shareUp, n =>
       return some (.mulDivUp (← atom args[n - 3]!) (← atom args[n - 2]!) (← atom args[n - 1]!))
     | _, _ => return none
-  let x ←
-    if n0.any isSurfaceOp then unfoldToTx x
-    else pure x
+  let x ← do
+    match n0 with
+    | some n =>
+      if (← isLscInline n) || isSurfaceOp n then
+        pure (← deltaUnfold x).1
+      else
+        pure x
+    | none => pure x
   let args := x.getAppArgs
   let atom := atomOf env
   match x.getAppFn.constName?, args.size with
@@ -664,9 +704,15 @@ def opOf (ci : ContractInfo) (env : Env t) (x : Expr) : MetaM (Option Op) := do
 /-- Unit-valued primitives. -/
 def stmtOf (ci : ContractInfo) (env : Env t) (x : Expr) : MetaM (Option Stmt) := do
   let x := x.consumeMData
-  let x ←
-    if x.getAppFn.constName?.any isSurfaceOp then unfoldToTx x
-    else pure x
+  let n0 := x.getAppFn.constName?
+  let x ← do
+    match n0 with
+    | some n =>
+      if (← isLscInline n) || isSurfaceOp n then
+        pure (← deltaUnfold x).1
+      else
+        pure x
+    | none => pure x
   let args := x.getAppArgs
   let atom := atomOf env
   match x.getAppFn.constName?, args.size with
@@ -740,7 +786,8 @@ def ensureLambda (k : Expr) : MetaM Expr := do
   | .forallE n d _ bi => return .lam n d (mkApp k (.bvar 0)) bi
   | _ => throwError "reify: continuation `{k}` is not a function"
 
-partial def reify (ci : ContractInfo) (t : RetTy) (env : Env t) (e : Expr) : MetaM (Core t) := do
+partial def reify (ci : ContractInfo) (t : RetTy) (env : Env t) (e : Expr)
+    (inline? : Option Name := none) : MetaM (Core t) := do
   let e := e.consumeMData
   match e with
   | .letE n ty v b _ =>
@@ -750,14 +797,14 @@ partial def reify (ci : ContractInfo) (t : RetTy) (env : Env t) (e : Expr) : Met
       let hasArg := !(← isUnitTy v.bindingDomain!)
       let body ← lambdaBoundedTelescope v 1 fun ys rest => do
         let vars := if hasArg then ys[0]!.fvarId! :: env.vars else env.vars
-        reify ci t { env with vars } rest
+        reify ci t { env with vars } rest inline?
       withLetDecl n ty v fun jpVar => do
         let jp : JoinPoint t := { fvar := jpVar.fvarId!, hasArg, depth := env.vars.length, body }
-        reify ci t { env with jp := some jp } (b.instantiate1 jpVar)
+        reify ci t { env with jp := some jp } (b.instantiate1 jpVar) inline?
     else
       let (p, args) ← primOf env v
       withLetDecl n ty v fun x => do
-        let k ← reify ci t { env with vars := x.fvarId! :: env.vars } (b.instantiate1 x)
+        let k ← reify ci t { env with vars := x.fvarId! :: env.vars } (b.instantiate1 x) inline?
         return .letPure p args k
   | _ =>
     let f := e.getAppFn
@@ -778,39 +825,45 @@ partial def reify (ci : ContractInfo) (t : RetTy) (env : Env t) (e : Expr) : Met
     | .const name _ =>
       match name, args.size with
       | ``Bind.bind, 6 =>
-        let x := args[4]!
+        let x0 := args[4]!
         let k ← ensureLambda args[5]!
+        let (x, seen) ← deltaUnfold x0
+        let inline? := seen.orElse fun _ => inline?
         if let some op ← opOf ci env x then
           lambdaBoundedTelescope k 1 fun ys body => do
-            let kc ← reify ci t { env with vars := ys[0]!.fvarId! :: env.vars } body
+            let kc ← reify ci t { env with vars := ys[0]!.fvarId! :: env.vars } body inline?
             return .letOp op kc
         else if let some s ← stmtOf ci env x then
           lambdaBoundedTelescope k 1 fun _ body => do
-            let kc ← reify ci t env body
+            let kc ← reify ci t env body inline?
             return .seq s kc
         else
-          throwError "reify: `{x}` is not a contract primitive"
+          throwInlineOr inline? x m!"reify: `{x0}` is not a contract primitive"
       | ``Pure.pure, 4 => return .ret (← retExprOf env t args[3]!)
       | ``ite, 5 =>
         let c ← condOf env args[1]!
-        let a ← reify ci t env args[3]!
-        let b ← reify ci t env args[4]!
+        let a ← reify ci t env args[3]! inline?
+        let b ← reify ci t env args[4]! inline?
         return .ite c a b
       | ``Lsc.Tx.revert, 6 =>
         let (i, eargs) ← ctorIndex ci.errCtors args[5]!
         return .revertTail i (← eargs.toList.mapM (atomOf env))
       | _, _ =>
-        if let some op ← opOf ci env e then
+        let (e', seen) ← deltaUnfold e
+        let inline? := seen.orElse fun _ => inline?
+        if e' != e then
+          reify ci t env e' inline?
+        else if let some op ← opOf ci env e then
           match opTailCore t op with
           | some c => return c
-          | none => throwError "reify: `{e}` returns a word but the function does not"
+          | none => throwInlineOr inline? e m!"reify: `{e}` returns a word but the function does not"
         else if let some s ← stmtOf ci env e then
           match stmtTailCore t s with
           | some c => return c
-          | none => throwError "reify: `{e}` returns Unit but the function does not"
+          | none => throwInlineOr inline? e m!"reify: `{e}` returns Unit but the function does not"
         else
-          throwError "reify: `{e}` is outside the reifiable fragment"
-    | _ => throwError "reify: `{e}` is outside the reifiable fragment"
+          throwInlineOr inline? e m!"reify: `{e}` is outside the reifiable fragment"
+    | _ => throwInlineOr inline? e m!"reify: `{e}` is outside the reifiable fragment"
 
 /-! ## Commands -/
 

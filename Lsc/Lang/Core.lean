@@ -308,7 +308,10 @@ def Core.denoteAWord {τ : Type} {scale : Nat} (Γ : ContractSchema S X E ε) :
   | _, .revertTail err args, env => Tx.revert (Γ.err.build err (args.map (·.eval env)))
   | _, .letOp op k, env =>
       match op with
-      | .sender | .value | .timestamp | .blockNumber | .selfAddress | .call .. =>
+      -- Word ops whose surface is `Tx.* >>= fun r => pure (ofNat r)` (inlined
+      -- `Amount.mulDown`, …). `opTail` still uses `Op.denoteA` / `shareDown`.
+      | .sender | .value | .timestamp | .blockNumber | .selfAddress | .call ..
+        | .mulDivDown .. | .mulDivUp .. =>
           Op.denote Γ env op >>= fun v =>
             Core.denoteAWord (τ := τ) (scale := scale) Γ k (v :: env)
       | _ =>
@@ -334,7 +337,8 @@ def Core.denoteAUnit {τ : Type} {scale : Nat} (Γ : ContractSchema S X E ε) :
   | _, .revertTail err args, env => Tx.revert (Γ.err.build err (args.map (·.eval env)))
   | _, .letOp op k, env =>
       match op with
-      | .sender | .value | .timestamp | .blockNumber | .selfAddress | .call .. =>
+      | .sender | .value | .timestamp | .blockNumber | .selfAddress | .call ..
+        | .mulDivDown .. | .mulDivUp .. =>
           Op.denote Γ env op >>= fun v =>
             Core.denoteAUnit (τ := τ) (scale := scale) Γ k (v :: env)
       | _ =>

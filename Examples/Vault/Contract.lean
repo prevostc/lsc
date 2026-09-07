@@ -59,6 +59,7 @@ inductive Error
   | Zero
   | ZeroShares
   | ZeroAssets
+  | TransferFailed
   deriving DecidableEq, Repr
 
 abbrev M := Tx Storage Ext Event Error
@@ -89,7 +90,8 @@ def deposit (assets : Amount ASSET assetScale) : M Nat := do
     else
       Tx.mulDivDown ts assets.toNat ta
   Tx.require (0 < minted) .ZeroShares
-  let _ ← Binding.transferFrom assetB who me assets.toNat
+  let ok ← Binding.transferFrom assetB who me assets.toNat
+  Tx.require (ok ≠ 0) .TransferFailed
   let ta' ← ta +? assets.toNat
   write totalAssets ta'
   let ts' ← minted +? ts
@@ -120,7 +122,8 @@ def withdraw (sharesIn : Amount SHARE shareScale) : M Nat := do
   write totalShares ts'
   let ta' ← ta -? assetsOut
   write totalAssets ta'
-  let _ ← Binding.transfer assetB who assetsOut
+  let ok ← Binding.transfer assetB who assetsOut
+  Tx.require (ok ≠ 0) .TransferFailed
   Tx.emit (.Withdraw who (Amount.ofNat assetsOut) sharesIn)
   pure assetsOut
 

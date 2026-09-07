@@ -1,5 +1,6 @@
 import Mathlib.Data.Fintype.Basic
 import Mathlib.Tactic.FinCases
+import Lsc.Lang.Inline
 import Lsc.Lang.Interface
 
 /-!
@@ -112,21 +113,27 @@ open Lsc.Stdlib
 
 variable {S X E ε : Type}
 
+@[lsc_inline]
 def transfer (b : Binding IERC20 S X) (dst : Address) (amt : Nat) : Tx S X E ε Nat :=
   Tx.call b .transfer [dst, amt]
 
+@[lsc_inline]
 def transferFrom (b : Binding IERC20 S X) (src dst : Address) (amt : Nat) : Tx S X E ε Nat :=
   Tx.call b .transferFrom [src, dst, amt]
 
+@[lsc_inline]
 def balanceOf (b : Binding IERC20 S X) (owner : Address) : Tx S X E ε Nat :=
   Tx.call b .balanceOf [owner]
 
+@[lsc_inline]
 def decimals (b : Binding IERC20 S X) : Tx S X E ε Nat :=
   Tx.call b .decimals []
 
+@[lsc_inline]
 def transferUnit (b : Binding IERC20 S X) (dst : Address) (amt : Nat) : Tx S X E ε Unit :=
   Tx.callUnit b .transfer [dst, amt]
 
+@[lsc_inline]
 def transferFromUnit (b : Binding IERC20 S X) (src dst : Address) (amt : Nat) : Tx S X E ε Unit :=
   Tx.callUnit b .transferFrom [src, dst, amt]
 
