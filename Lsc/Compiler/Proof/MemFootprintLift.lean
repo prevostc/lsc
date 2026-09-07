@@ -670,20 +670,22 @@ theorem guarded_litValue_ne_zero {calls : ExternalCalls} {creates : ExternalCrea
 /-- A `Run` of the memoryguard-erased runtime in the ordinary dialect is a
 `GuardedRun` of the raw runtime: every executed memory builtin stays in
 `[0, memoryGuardK)`, and the discarded `if 256 {}` is replaced by
-`if reserved {}`. -/
-theorem GuardedRunOfErased {c : ContractDef} {rt : YBlock}
+`if reserved {}`. Parametric in the call/create oracles (`run_to_guarded`
+already is); S1 instantiates `.none`, S2 the open CALL oracle. -/
+theorem GuardedRunOfErased {calls : ExternalCalls} {creates : ExternalCreates}
+    {c : ContractDef} {rt : YBlock}
     {r : MemorySpillSelect.Result} {yst0 yst' : EvmState} {o : Outcome}
     (hrt : runtimeBlock c = some rt) (hsp : spillRuntime? rt = some r)
-    (h : Run (evmWithExternal ExternalCalls.none ExternalCreates.none ExternalGas.any)
+    (h : Run (evmWithExternal calls creates ExternalGas.any)
       (eraseMemoryGuardStmts rt) yst0 [] yst' o) :
-    GuardedRun ExternalCalls.none ExternalCreates.none rt r.base r.reserved
+    GuardedRun calls creates rt r.base r.reserved
       yst0 [] yst' o := by
   have hbase : r.base = memoryGuardK := spillRuntime_base hrt hsp
   have ⟨hneR, hltR⟩ := spillRuntime_reserved_facts hsp
   have hG :
-      Run (guardedEvm ExternalCalls.none ExternalCreates.none memoryGuardK r.reserved)
+      Run (guardedEvm calls creates memoryGuardK r.reserved)
         (eraseMemoryGuardStmts rt) yst0 [] yst' o :=
-    run_to_guarded (calls := .none) (creates := .none) (base := memoryGuardK)
+    run_to_guarded (calls := calls) (creates := creates) (base := memoryGuardK)
       (reserved := r.reserved) memoryGuardK_lt_wordBound (staticSafe_erase_runtime hrt) h
   obtain ⟨cs, hmapE, hE⟩ := erase_runtimeBlock hrt
   obtain ⟨cs', hmapR, hR⟩ := resolve_runtimeBlock hrt r.reserved
@@ -692,15 +694,15 @@ theorem GuardedRunOfErased {c : ContractDef} {rt : YBlock}
   rw [hE] at hG
   have hG' :=
     run_replace_identity_guard
-      (D := guardedEvm ExternalCalls.none ExternalCreates.none memoryGuardK r.reserved)
+      (D := guardedEvm calls creates memoryGuardK r.reserved)
       (n := memoryGuardK) (m := r.reserved)
-      (guarded_litValue_ne_zero (calls := .none) (creates := .none)
+      (guarded_litValue_ne_zero (calls := calls) (creates := creates)
         (base := memoryGuardK) (reserved := r.reserved)
         memoryGuardK_pos memoryGuardK_lt_wordBound)
-      (guarded_litValue_ne_zero (calls := .none) (creates := .none)
+      (guarded_litValue_ne_zero (calls := calls) (creates := creates)
         (base := memoryGuardK) (reserved := r.reserved) hneR hltR)
       (by simpa [memoryGuardErased, lit] using hG)
-  show Run (guardedEvm ExternalCalls.none ExternalCreates.none r.base r.reserved)
+  show Run (guardedEvm calls creates r.base r.reserved)
       (resolveMemoryGuardStmts r.base r.reserved rt) yst0 [] yst' o
   rw [hbase, hR]
   simpa [lit] using hG'
