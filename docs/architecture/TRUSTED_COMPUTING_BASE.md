@@ -72,11 +72,13 @@ Not derived from powdr:
 - **Fresh per-call `EvmState`.** Each `mkEvmState` / `mkEvmStateExt` starts from
   `EvmState.init` with empty logs (`R` tracks `.self` only across a trace).
 - **Universality.** `EvmCallRun` / `EvmTraceRunAll` (S1) and `EvmCallRunExtAll` /
-  `EvmTraceRunExtAll` (S2) quantify over **every halted matching EVM run of every
-  predicted call sequence** (ABI `fnCalldata` of a well-formed Security trace),
-  with an `EvmStartOK` witness so uniqueness is not vacuous. Arbitrary-calldata
-  universality is **not** present: unknown or malformed calldata is not identified
-  with a Security trace. powdr `compile_correct` is forward (`Yul Run → ∃ EVM
+  `EvmTraceRunExtAll` (S2) quantify over **every halted matching EVM run of an
+  arbitrary calldata list** (`Lsc/Compiler/Transport.lean`): each call either fails
+  the dispatcher (an EVM no-op, dropped from the trace) or decodes to the Security
+  step `decodeTrace` assigns to it. `Wf` (`sender ≠ self`, `CtxWF`) and `NoAuthAlong`
+  are hypotheses on the decoded calls (`CallsWF`), and the initial world has empty
+  logs. An `EvmStartOK` witness keeps uniqueness non-vacuous; `*_exists` companions
+  use the ABI-encoded Security trace. powdr `compile_correct` is forward (`Yul Run → ∃ EVM
   Steps`). Progress (`CallsTotal` + `yul_progress`) supplies a Yul run and
   `steps_halted_unique` identifies every halted matching EVM run with it, so powdr
   adequacy (every EVM execution is a Yul run) is not needed.
@@ -86,7 +88,6 @@ Not derived from powdr:
 - Deploy / constructor: `compileObject_correct` starts from empty calldata;
   constructor arguments are not linked. Runtime theorems exclude constructors.
 - AMM through the compiler (two bindings; needs multi-binding `toYulFn_correct_ext`).
-- Arbitrary-calldata universality (above).
 - Bytecode-level reentrancy lock (not emitted).
 - Core outside `S2Frag` (e.g. wrapping `letPure` other than `id`, `pair` returns,
   other `require`/`revert`/`emit` arities).

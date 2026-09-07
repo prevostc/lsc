@@ -44,7 +44,5 @@ and powdr, never on `Security`; only `EndToEnd*.lean` see both.
 - **Deploy / constructor.** `compileObject_correct` starts from empty calldata;
   constructor arguments currently use `calldataload`. Runtime calls are unaffected.
 - **AMM through the compiler.** Needs a multi-binding `toYulFn_correct_ext`.
-- **Arbitrary-calldata universality.** Theorems quantify over ABI-encoded Security
-  traces (`fnCalldata`), not every EVM calldata sequence.
-- **Generic transport refactor.** Token and Vault each assemble the four links in
-  example files; a contract-generic transport is not factored out.
+- **S2 post-world.** Vault's transported world is the fault-oracle-adjusted fold, while
+  Token relates `Security.run` directly; unifying them is cosmetic (Security is `∀ w`).
