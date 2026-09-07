@@ -1,7 +1,9 @@
 import Lsc.Compiler.EndToEnd
 import Lsc.Compiler.EvmDetDefs
 import Lsc.Compiler.Externals
+import Lsc.Compiler.ExtOracle
 import YulEvmCompiler.Optimizer.Implementation.MemorySpill
+import YulEvmCompiler.LowerDefs
 
 set_option linter.unusedVariables false
 
@@ -23,6 +25,11 @@ open EvmSemantics.EVM (State Steps)
   calls := calls
   creates := ExternalCreates.none
   gas := ExternalGas.none
+
+theorem externalsRealized_open {calls : ExternalCalls}
+    (h : CallsRealized calls) :
+    ExternalsRealized (openModel calls) :=
+  ⟨h, CreatesRealized.none, GasCallsRealized.noneOracle calls⟩
 
 /-- Given a Yul run, Core under some `fo` predicts the committed observation. -/
 def EvmCallRunExt {I : Interface} {S X E ε : Type}

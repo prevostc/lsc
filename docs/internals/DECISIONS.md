@@ -2,6 +2,34 @@
 
 Short dated records.
 
+## 2026-09-07 — Memory-blind external-call adversary
+
+S2 theorems take a CALL oracle. powdr's spill theorem needs
+`CallsScratchInsensitive`: the oracle must not depend on caller memory in
+`[base, reserved)` or on `activeWords`/`msize`. That does not follow from
+`CallsRealized` / `CallsTotal` / `Conforms`. A previous attempt therefore
+left S2 on `compileErased`, so the AMM (spill-only) had vacuous bytecode
+theorems.
+
+Decision: the adversary is **memory-blind**. A real EVM callee cannot
+observe the caller's memory or `msize` at all — it sees the call request
+(calldata, value, gas, target) and the world/account state. An oracle that
+peeks at caller memory models something no callee can do, so excluding it
+is not a weakening of any guarantee about real deployments.
+
+Preferred form (taken): `ExtOracle := CallRequest → ExtView → CallResponse`
+with `ExtView := Obs` (every `EvmState` field except byte memory and
+`msize`). `toCall` / `toCalls` wrap it into `ExternalCalls`.
+`CallsScratchInsensitive (toCalls o)` and the stronger `CallsMemoryBlind
+(toCalls o)` are proved once. S2 exports take `o : ExtOracle` and
+`hcomp : compileBlock rt = some is`. `Conforms` / `CallsRealized` stay on
+`ExternalCalls`. `CreatesScratchInsensitive ExternalCreates.none` is
+trivial. `CallsTotal` is implied by `toCalls_total`.
+
+Fallback not taken: keep a raw `Call` plus `hblind : CallsMemoryBlind Call`.
+The type-level wrapper did not force a rewrite of `Conforms` /
+`CallsRealized` / transport glue.
+
 ## 2026-09-07 — Keep S1 and S2 as two strata
 
 S1 is the call-free fragment: forward completeness on a closed external
@@ -67,13 +95,12 @@ peak (all remain live innermost); genuine last-use splitting reshapes
 results become statement calls (17 → 15 live locals) so the current AMM
 compiles.
 
-**Status (2026-09-07):** S1 bytecode theorems take `hcomp : compileBlock rt = some is`
-(erase, else powdr spill). `GuardedRunOfErased` lifts an ordinary `Run` of
-`eraseMemoryGuardStmts rt` to a `GuardedRun` of the resolved raw runtime
-(`if 256 {}` → `if reserved {}`; memory builtins stay in `[0, 256)`). S2
-(`EndToEndExt*`, Vault/AMM exports) still takes `compileErased`;
-`TransportBindings.herase` stays. Remaining: S2 `GuardedExternals` /
-`CallsScratchInsensitive` / `run_none_to_any`; deploy `PlannedTopRun`.
+**Status (2026-09-07):** S1 and S2 bytecode theorems take
+`hcomp : compileBlock rt = some is` (erase, else powdr spill).
+`GuardedRunOfErased` lifts an ordinary `Run` of `eraseMemoryGuardStmts rt`
+to a `GuardedRun` of the resolved raw runtime. S2 uses a memory-blind
+`ExtOracle` so `GuardedExternals` holds on the spill branch (see
+"Memory-blind external-call adversary"). Remaining: deploy `PlannedTopRun`.
 
 ## 2026-09-07 — Pin Yul→EVM compiler to `prevostc/yul-compiler` @ `30230e1`
 

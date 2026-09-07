@@ -39,10 +39,13 @@ with scalar slots.
 
 For contracts that call out: every successful `CALL` from us to a bound
 address conforms to `IERC20` as in [External calls](EXTERNAL_CALLS.md);
-the CALL oracle always returns (the opcode always returns a success flag
-and data); powdr's external model is inhabited. The bytecode proof
-existentially picks a fault oracle so core and Yul agree on each external
-outcome. Security statements remain "for every starting world".
+the CALL oracle is memory-blind (other contracts cannot see this
+contract's private memory, which is true of the EVM) and always returns
+(the opcode always returns a success flag and data); powdr's external
+model is inhabited. The compiler may have used either the erase path or
+powdr spill. The bytecode proof existentially picks a fault oracle so
+core and Yul agree on each external outcome. Security statements remain
+"for every starting world".
 
 The adversary is the one in [Security model](SECURITY.md).
 
@@ -75,11 +78,6 @@ fragment (including most `letPure`, nested pair returns, and unusual
 require/revert/emit arities) is not compiled. Bytecode glue talks about
 word-level core; Vault's Amount ABI is identified with the reifier
 certificate.
-
-The AMM runtime hex is produced by powdr's memory-spilling path. Its
-bytecode theorem still assumes the non-spilled compile, so that theorem
-is not yet a bytecode guarantee for the AMM (Tx-level and Yul-level
-theorems stand).
 
 The differential harness (`scripts/difftest.sh`) is defence in depth, not
 a proof.

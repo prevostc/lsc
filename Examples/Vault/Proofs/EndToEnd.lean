@@ -1,4 +1,5 @@
 import Lsc.Compiler.TransportTheorems
+import Lsc.Compiler.ExtOracle
 import Examples.Vault.Spec
 import Examples.Vault.Proofs.Compile
 import Examples.Vault.Proofs.Security
@@ -89,7 +90,7 @@ theorem vault_shares_bound (w : World Storage Ext Event) (a : Address)
 
 @[reducible] def mkVaultSetup (hκ : KeccakSep Vault.contract evmKeccak)
     (rt : YBlock) (hrt : runtimeBlock Vault.contract = some rt)
-    (is : List Instr) (hcomp : compileErased rt = some is) :
+    (is : List Instr) (hcomp : compileBlock rt = some is) :
     TransportSetup Storage Ext Event Error where
   c := Vault.contract
   Γ := Vault.schema
@@ -103,7 +104,7 @@ theorem vault_shares_bound (w : World Storage Ext Event) (a : Address)
   rt := rt
   hrt := hrt
   is := is
-  hcomp := compileErased_to_compileBlock hcomp
+  hcomp := hcomp
 
 theorem vault_inv_faults (self : Address) (w : World Storage Ext Event) (fo : Nat → Bool)
     (h : Inv self w) : Inv self { w with faults := fo } := h
@@ -279,16 +280,15 @@ theorem vault_asset_stable_core (fn : Fn) (args : spec.Args fn) (ctx : Ctx)
 @[reducible] def mkVaultBindings
     (hκ : KeccakSep Vault.contract evmKeccak)
     (rt : YBlock) (hrt : runtimeBlock Vault.contract = some rt)
-    (is : List Instr) (hcomp : compileErased rt = some is)
-    (α : Abs IERC20.Ghost) (ext : ExternalCalls)
-    (hCalls : CallsRealized ext) (htot : CallsTotal ext)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
+    (α : Abs IERC20.Ghost) (o : ExtOracle)
+    (hCalls : CallsRealized (toCalls o))
     (hign : α.ignoresLocal) (hF : α.ofState_foreign) :
     TransportBindings Storage Ext Event Error IERC20
       (mkVaultSetup hκ rt hrt is hcomp) where
   bs := [vaultEnv α]
-  extCalls := ext
+  oracle := o
   hCalls := hCalls
-  htot := htot
   hS2 := fun f hf => vault_fn_s2 hf
   hign := BindEnvs.ignoresLocal_singleton (vaultEnv α) hign
   hF := BindEnvs.ofState_foreign_singleton (vaultEnv α) hF
@@ -296,7 +296,6 @@ theorem vault_asset_stable_core (fn : Fn) (args : spec.Args fn) (ctx : Ctx)
   horth := BindEnvs.orthogonal_singleton (vaultEnv α)
   hBind := BindEnvs.lookupWF_singleton (α := α) (bind := Vault.assetB) vault_bindWF
   hslot := fun f hf => BindEnvs.avoids_singleton (vault_hslot hf)
-  herase := hcomp
   bindAddr_stable := fun e he fn args ctx w => by
     have : e = vaultEnv α := List.mem_singleton.mp he
     subst this
@@ -361,10 +360,10 @@ example : ∃ α : Abs IERC20.Ghost, α.ignoresLocal ∧ α.ofState_foreign :=
 namespace Proof
 
 theorem vault_bytecode_no_unauthorized_extraction
-    (α : Abs IERC20.Ghost) (ext : ExternalCalls)
-    (hCalls : CallsRealized ext) (htot : CallsTotal ext)
+    (α : Abs IERC20.Ghost) (o : ExtOracle)
+    (hCalls : CallsRealized (toCalls o))
     (rt : YBlock) (hrt : runtimeBlock Vault.contract = some rt)
-    (is : List Instr) (hcomp : compileErased rt = some is)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
     (hκ : KeccakSep Vault.contract evmKeccak)
     (hign : α.ignoresLocal) (hF : α.ofState_foreign)
     (self : Address) (calls : List EvmCall) (w : World Storage Ext Event)
@@ -377,14 +376,14 @@ theorem vault_bytecode_no_unauthorized_extraction
     (ha : Nat.lt a wordBound)
     (hRX : RX α Vault.assetB w
       (mkEvmStateExt ([] : List UInt8) σ ξ evmKeccak (dummyCtx self)))
-    (hconf : ConfFun self ext α)
+    (hconf : ConfFun self (toCalls o) α)
     (hBindNe : accountKey (BitVec.ofNat 256 (Vault.assetB.addr w.self)) ≠
                 accountKey (BitVec.ofNat 256 self)) :
     ∀ σ' ξ', EvmTraceRunExtAll is calls σ ξ σ' ξ' →
       vaultClaimRead evmKeccak σ a ≤ vaultClaimRead evmKeccak σ' a := by
   intro σ' ξ' hE
   let T := mkVaultSetup hκ rt hrt is hcomp
-  let Xpkg := mkVaultBindings hκ rt hrt is hcomp α ext hCalls htot hign hF
+  let Xpkg := mkVaultBindings hκ rt hrt is hcomp α o hCalls hign hF
   have ⟨w', hs', hwf', _, _, hle⟩ :=
     transport_claim_ext T Xpkg (Inv self) claim Auth self a
       (vault_no_unauth self) (vault_preserves_inv self)
@@ -393,7 +392,7 @@ theorem vault_bytecode_no_unauthorized_extraction
       (fun tr w w' => noAuthAlong_irrel a tr w w')
       calls w σ ξ σ' ξ' hs hlog hwf hWF
       (vault_RXs_of α w _ hRX) (vault_neSelf_of α self w.self hBindNe)
-      (vault_confs_of α self ext hconf) (vault_inj_of α w.self) hA hw hE
+      (vault_confs_of α self (toCalls o) hconf) (vault_inj_of α w.self) hA hw hE
   have hpre := vault_claim_of_rel w.self σ a hs ha
     (vault_ta_bound w hwf) (vault_ts_bound w hwf) (vault_shares_bound w a hwf ha)
   have hpost := vault_claim_of_rel w'.self σ' a hs' ha
@@ -402,10 +401,10 @@ theorem vault_bytecode_no_unauthorized_extraction
   exact hle
 
 theorem vault_bytecode_no_unauthorized_extraction_exists
-    (α : Abs IERC20.Ghost) (ext : ExternalCalls)
-    (hCalls : CallsRealized ext) (htot : CallsTotal ext)
+    (α : Abs IERC20.Ghost) (o : ExtOracle)
+    (hCalls : CallsRealized (toCalls o))
     (rt : YBlock) (hrt : runtimeBlock Vault.contract = some rt)
-    (is : List Instr) (hcomp : compileErased rt = some is)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
     (hκ : KeccakSep Vault.contract evmKeccak)
     (hign : α.ignoresLocal) (hF : α.ofState_foreign)
     (self : Address) (tr : List (Step spec)) (w : World Storage Ext Event)
@@ -418,14 +417,14 @@ theorem vault_bytecode_no_unauthorized_extraction_exists
     (ha : Nat.lt a wordBound)
     (hRX : RX α Vault.assetB w
       (mkEvmStateExt ([] : List UInt8) σ ξ evmKeccak (dummyCtx self)))
-    (hconf : ConfFun self ext α)
+    (hconf : ConfFun self (toCalls o) α)
     (hBindNe : accountKey (BitVec.ofNat 256 (Vault.assetB.addr w.self)) ≠
                 accountKey (BitVec.ofNat 256 self)) :
     ∃ σ' ξ', EvmTraceRunExt is
         (encodeCalls (mkVaultSetup hκ rt hrt is hcomp) tr) σ ξ σ' ξ' ∧
       vaultClaimRead evmKeccak σ a ≤ vaultClaimRead evmKeccak σ' a := by
   let T := mkVaultSetup hκ rt hrt is hcomp
-  let Xpkg := mkVaultBindings hκ rt hrt is hcomp α ext hCalls htot hign hF
+  let Xpkg := mkVaultBindings hκ rt hrt is hcomp α o hCalls hign hF
   have hwlog : { w with log := ([] : List Event) } = w := by
     cases w; simp at hlog; subst hlog; rfl
   obtain ⟨σ', ξ', w', hE, hs', hwf', _, _, hle⟩ :=
@@ -436,7 +435,7 @@ theorem vault_bytecode_no_unauthorized_extraction_exists
       (fun tr w w' => noAuthAlong_irrel a tr w w')
       tr w σ ξ hs hwf hb hW hw (vault_noAuthAlong_callsOf a tr w hA)
       (by simpa [hwlog] using vault_RXs_of α w _ hRX)
-      (vault_neSelf_of α self w.self hBindNe) (vault_confs_of α self ext hconf)
+      (vault_neSelf_of α self w.self hBindNe) (vault_confs_of α self (toCalls o) hconf)
       (vault_inj_of α w.self)
   refine ⟨σ', ξ', hE, ?_⟩
   have hpre := vault_claim_of_rel w.self σ a hs ha
@@ -447,10 +446,10 @@ theorem vault_bytecode_no_unauthorized_extraction_exists
   exact hle
 
 theorem vault_bytecode_solvent
-    (α : Abs IERC20.Ghost) (ext : ExternalCalls)
-    (hCalls : CallsRealized ext) (htot : CallsTotal ext)
+    (α : Abs IERC20.Ghost) (o : ExtOracle)
+    (hCalls : CallsRealized (toCalls o))
     (rt : YBlock) (hrt : runtimeBlock Vault.contract = some rt)
-    (is : List Instr) (hcomp : compileErased rt = some is)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
     (hκ : KeccakSep Vault.contract evmKeccak)
     (hign : α.ignoresLocal) (hF : α.ofState_foreign)
     (self : Address) (calls : List EvmCall) (w : World Storage Ext Event)
@@ -461,18 +460,18 @@ theorem vault_bytecode_solvent
     (hwf : WorldWF Vault.contract Vault.schema w)
     (hRX : RX α Vault.assetB w
       (mkEvmStateExt ([] : List UInt8) σ ξ evmKeccak (dummyCtx self)))
-    (hconf : ConfFun self ext α)
+    (hconf : ConfFun self (toCalls o) α)
     (hBindNe : accountKey (BitVec.ofNat 256 (Vault.assetB.addr w.self)) ≠
                 accountKey (BitVec.ofNat 256 self)) :
     ∀ σ' ξ', EvmTraceRunExtAll is calls σ ξ σ' ξ' →
       vaultSolventRead α σ' ξ' self (Vault.assetB.addr w.self) := by
   intro σ' ξ' hE
   let T := mkVaultSetup hκ rt hrt is hcomp
-  let Xpkg := mkVaultBindings hκ rt hrt is hcomp α ext hCalls htot hign hF
+  let Xpkg := mkVaultBindings hκ rt hrt is hcomp α o hCalls hign hF
   have ⟨_, w', hs', hwf', hRX', hInv', haddr⟩ :=
     transport_trace_ext T Xpkg self calls w σ ξ σ' ξ' hs hlog hwf hWF
       (vault_RXs_of α w _ hRX) (vault_neSelf_of α self w.self hBindNe)
-      (vault_confs_of α self ext hconf) (vault_inj_of α w.self) (Inv self) (vault_preserves_inv self)
+      (vault_confs_of α self (toCalls o) hconf) (vault_inj_of α w.self) (Inv self) (vault_preserves_inv self)
       (fun w fo h => vault_inv_faults self w fo h)
       (fun w log h => vault_inv_log self w log h)
       hw hE
@@ -484,10 +483,10 @@ theorem vault_bytecode_solvent
   exact hsol
 
 theorem vault_bytecode_solvent_exists
-    (α : Abs IERC20.Ghost) (ext : ExternalCalls)
-    (hCalls : CallsRealized ext) (htot : CallsTotal ext)
+    (α : Abs IERC20.Ghost) (o : ExtOracle)
+    (hCalls : CallsRealized (toCalls o))
     (rt : YBlock) (hrt : runtimeBlock Vault.contract = some rt)
-    (is : List Instr) (hcomp : compileErased rt = some is)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
     (hκ : KeccakSep Vault.contract evmKeccak)
     (hign : α.ignoresLocal) (hF : α.ofState_foreign)
     (self : Address) (tr : List (Step spec)) (w : World Storage Ext Event)
@@ -498,14 +497,14 @@ theorem vault_bytecode_solvent_exists
     (hb : EncodeBounded (mkVaultSetup hκ rt hrt is hcomp) tr)
     (hRX : RX α Vault.assetB w
       (mkEvmStateExt ([] : List UInt8) σ ξ evmKeccak (dummyCtx self)))
-    (hconf : ConfFun self ext α)
+    (hconf : ConfFun self (toCalls o) α)
     (hBindNe : accountKey (BitVec.ofNat 256 (Vault.assetB.addr w.self)) ≠
                 accountKey (BitVec.ofNat 256 self)) :
     ∃ σ' ξ', EvmTraceRunExt is
         (encodeCalls (mkVaultSetup hκ rt hrt is hcomp) tr) σ ξ σ' ξ' ∧
       vaultSolventRead α σ' ξ' self (Vault.assetB.addr w.self) := by
   let T := mkVaultSetup hκ rt hrt is hcomp
-  let Xpkg := mkVaultBindings hκ rt hrt is hcomp α ext hCalls htot hign hF
+  let Xpkg := mkVaultBindings hκ rt hrt is hcomp α o hCalls hign hF
   have hwlog : { w with log := ([] : List Event) } = w := by
     cases w; simp at hlog; subst hlog; rfl
   obtain ⟨σ', ξ', w', hE, hs', hwf', hRX', hInv', haddr⟩ :=
@@ -515,7 +514,7 @@ theorem vault_bytecode_solvent_exists
       (fun w log h => vault_inv_log self w log h)
       tr w σ ξ hs hwf hb hW hw
       (by simpa [hwlog] using vault_RXs_of α w _ hRX)
-      (vault_neSelf_of α self w.self hBindNe) (vault_confs_of α self ext hconf)
+      (vault_neSelf_of α self w.self hBindNe) (vault_confs_of α self (toCalls o) hconf)
       (vault_inj_of α w.self)
   refine ⟨σ', ξ', hE, ?_⟩
   have hsol := vaultSolventRead_of_inv α self w' σ' ξ' hInv' hs' hwf'

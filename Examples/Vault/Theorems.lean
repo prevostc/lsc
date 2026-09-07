@@ -5,6 +5,7 @@ import Examples.Vault.Proofs.Compile
 import Examples.Vault.Proofs.EndToEnd
 import Examples.Vault.Contract
 import Stdlib.ERC20
+import Lsc.Compiler.ExtOracle
 
 set_option linter.unusedVariables false
 
@@ -91,15 +92,17 @@ namespace Vault
 bytecode, Alice's redeemable assets as stored on chain never fall unless
 she authorised a decoded `withdraw` in that sequence. Unknown selectors
 and short calldata are ignored. The compiler must have accepted the
-contract; the asset token must behave like a conforming ERC-20 at an
-address other than the vault; storage keys must not collide. This carries
-the spec-level anti-extraction fact down to the bytecode, including the
-token CALLs `deposit` and `withdraw` make. -/
+contract (`compileBlock`: erase or powdr spill); the asset token must
+behave like a conforming ERC-20 at an address other than the vault and
+cannot see the vault's private memory, which is true of the EVM;
+storage keys must not collide. This carries the spec-level
+anti-extraction fact down to the bytecode, including the token CALLs
+`deposit` and `withdraw` make. -/
 theorem vault_bytecode_no_unauthorized_extraction
-    (α : Abs IERC20.Ghost) (ext : ExternalCalls)
-    (hCalls : CallsRealized ext) (htot : CallsTotal ext)
+    (α : Abs IERC20.Ghost) (o : ExtOracle)
+    (hCalls : CallsRealized (toCalls o))
     (rt : YBlock) (hrt : runtimeBlock Vault.contract = some rt)
-    (is : List Instr) (hcomp : compileErased rt = some is)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
     (hκ : KeccakSep Vault.contract evmKeccak)
     (hign : α.ignoresLocal) (hF : α.ofState_foreign)
     (self : Address) (calls : List EvmCall) (w : World Storage Ext Event)
@@ -112,12 +115,12 @@ theorem vault_bytecode_no_unauthorized_extraction
     (ha : Nat.lt a wordBound)
     (hRX : RX α Vault.assetB w
       (mkEvmStateExt ([] : List UInt8) σ ξ evmKeccak (dummyCtx self)))
-    (hconf : ConfFun self ext α)
+    (hconf : ConfFun self (toCalls o) α)
     (hBindNe : accountKey (BitVec.ofNat 256 (Vault.assetB.addr w.self)) ≠
                 accountKey (BitVec.ofNat 256 self)) :
     ∀ σ' ξ', EvmTraceRunExtAll is calls σ ξ σ' ξ' →
       vaultClaimRead evmKeccak σ a ≤ vaultClaimRead evmKeccak σ' a :=
-  Proof.vault_bytecode_no_unauthorized_extraction α ext hCalls htot rt hrt is hcomp
+  Proof.vault_bytecode_no_unauthorized_extraction α o hCalls rt hrt is hcomp
     hκ hign hF self calls w a σ ξ hw hlog hWF hA hs hwf ha hRX hconf hBindNe
 
 /-- If Alice never authorised a `withdraw` in a given Vault trace, there is
@@ -128,10 +131,10 @@ have a high-level call sequence rather than raw calldata;
 every halted run of arbitrary calldata. Environment steps are dropped
 when encoding. Same token-conformance and compiler assumptions. -/
 theorem vault_bytecode_no_unauthorized_extraction_exists
-    (α : Abs IERC20.Ghost) (ext : ExternalCalls)
-    (hCalls : CallsRealized ext) (htot : CallsTotal ext)
+    (α : Abs IERC20.Ghost) (o : ExtOracle)
+    (hCalls : CallsRealized (toCalls o))
     (rt : YBlock) (hrt : runtimeBlock Vault.contract = some rt)
-    (is : List Instr) (hcomp : compileErased rt = some is)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
     (hκ : KeccakSep Vault.contract evmKeccak)
     (hign : α.ignoresLocal) (hF : α.ofState_foreign)
     (self : Address) (tr : List (Step spec)) (w : World Storage Ext Event)
@@ -144,13 +147,13 @@ theorem vault_bytecode_no_unauthorized_extraction_exists
     (ha : Nat.lt a wordBound)
     (hRX : RX α Vault.assetB w
       (mkEvmStateExt ([] : List UInt8) σ ξ evmKeccak (dummyCtx self)))
-    (hconf : ConfFun self ext α)
+    (hconf : ConfFun self (toCalls o) α)
     (hBindNe : accountKey (BitVec.ofNat 256 (Vault.assetB.addr w.self)) ≠
                 accountKey (BitVec.ofNat 256 self)) :
     ∃ σ' ξ', EvmTraceRunExt is
         (encodeCalls (mkVaultSetup hκ rt hrt is hcomp) tr) σ ξ σ' ξ' ∧
       vaultClaimRead evmKeccak σ a ≤ vaultClaimRead evmKeccak σ' a :=
-  Proof.vault_bytecode_no_unauthorized_extraction_exists α ext hCalls htot rt hrt
+  Proof.vault_bytecode_no_unauthorized_extraction_exists α o hCalls rt hrt
     is hcomp hκ hign hF self tr w a σ ξ hw hW hlog hA hs hwf hb ha hRX hconf hBindNe
 
 /-- After any halted EVM execution of a well-formed Vault call sequence,
@@ -161,10 +164,10 @@ this is observed on chain, not as a high-level post-world: a fault
 oracle may adjust which external calls succeed. Same compiler and
 conforming-token assumptions as the anti-extraction theorem. -/
 theorem vault_bytecode_solvent
-    (α : Abs IERC20.Ghost) (ext : ExternalCalls)
-    (hCalls : CallsRealized ext) (htot : CallsTotal ext)
+    (α : Abs IERC20.Ghost) (o : ExtOracle)
+    (hCalls : CallsRealized (toCalls o))
     (rt : YBlock) (hrt : runtimeBlock Vault.contract = some rt)
-    (is : List Instr) (hcomp : compileErased rt = some is)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
     (hκ : KeccakSep Vault.contract evmKeccak)
     (hign : α.ignoresLocal) (hF : α.ofState_foreign)
     (self : Address) (calls : List EvmCall) (w : World Storage Ext Event)
@@ -175,12 +178,12 @@ theorem vault_bytecode_solvent
     (hwf : WorldWF Vault.contract Vault.schema w)
     (hRX : RX α Vault.assetB w
       (mkEvmStateExt ([] : List UInt8) σ ξ evmKeccak (dummyCtx self)))
-    (hconf : ConfFun self ext α)
+    (hconf : ConfFun self (toCalls o) α)
     (hBindNe : accountKey (BitVec.ofNat 256 (Vault.assetB.addr w.self)) ≠
                 accountKey (BitVec.ofNat 256 self)) :
     ∀ σ' ξ', EvmTraceRunExtAll is calls σ ξ σ' ξ' →
       vaultSolventRead α σ' ξ' self (Vault.assetB.addr w.self) :=
-  Proof.vault_bytecode_solvent α ext hCalls htot rt hrt is hcomp hκ hign hF
+  Proof.vault_bytecode_solvent α o hCalls rt hrt is hcomp hκ hign hF
     self calls w σ ξ hw hlog hWF hs hwf hRX hconf hBindNe
 
 /-- Given a well-formed Vault trace, some EVM execution of the encoded
@@ -188,10 +191,10 @@ calldata ends with on-chain claims still covered by the vault's token
 balance. Dual of `vault_bytecode_solvent` when you start from a
 high-level trace rather than raw calldata. -/
 theorem vault_bytecode_solvent_exists
-    (α : Abs IERC20.Ghost) (ext : ExternalCalls)
-    (hCalls : CallsRealized ext) (htot : CallsTotal ext)
+    (α : Abs IERC20.Ghost) (o : ExtOracle)
+    (hCalls : CallsRealized (toCalls o))
     (rt : YBlock) (hrt : runtimeBlock Vault.contract = some rt)
-    (is : List Instr) (hcomp : compileErased rt = some is)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
     (hκ : KeccakSep Vault.contract evmKeccak)
     (hign : α.ignoresLocal) (hF : α.ofState_foreign)
     (self : Address) (tr : List (Step spec)) (w : World Storage Ext Event)
@@ -202,13 +205,13 @@ theorem vault_bytecode_solvent_exists
     (hb : EncodeBounded (mkVaultSetup hκ rt hrt is hcomp) tr)
     (hRX : RX α Vault.assetB w
       (mkEvmStateExt ([] : List UInt8) σ ξ evmKeccak (dummyCtx self)))
-    (hconf : ConfFun self ext α)
+    (hconf : ConfFun self (toCalls o) α)
     (hBindNe : accountKey (BitVec.ofNat 256 (Vault.assetB.addr w.self)) ≠
                 accountKey (BitVec.ofNat 256 self)) :
     ∃ σ' ξ', EvmTraceRunExt is
         (encodeCalls (mkVaultSetup hκ rt hrt is hcomp) tr) σ ξ σ' ξ' ∧
       vaultSolventRead α σ' ξ' self (Vault.assetB.addr w.self) :=
-  Proof.vault_bytecode_solvent_exists α ext hCalls htot rt hrt is hcomp hκ hign hF
+  Proof.vault_bytecode_solvent_exists α o hCalls rt hrt is hcomp hκ hign hF
     self tr w σ ξ hw hW hlog hs hwf hb hRX hconf hBindNe
 
 /-- There exists a reading of ERC-20 storage — a balances mapping plus a

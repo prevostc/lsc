@@ -1,4 +1,5 @@
 import Lsc.Compiler.EndToEndExt
+import Lsc.Compiler.ExtOracle
 import Lsc.Security.Wealth
 import Lsc.Security.WealthTheorems
 
@@ -52,13 +53,15 @@ structure TransportSetup (S X E ε : Type) where
   is : List Instr
   hcomp : compileBlock rt = some is
 
-/-- S2 binding family. One-binding contracts instantiate `bs := [⟨α, bind⟩]`. -/
+/-- S2 binding family. One-binding contracts instantiate `bs := [⟨α, bind⟩]`.
+The CALL oracle is memory-blind by construction (`ExtOracle`): other
+contracts cannot see this contract's private memory, which is true of
+the EVM. -/
 structure TransportBindings (S X E ε : Type) (I : Interface)
     (T : TransportSetup S X E ε) where
   bs : List (BindEnv I S X)
-  extCalls : ExternalCalls
-  hCalls : CallsRealized extCalls
-  htot : CallsTotal extCalls
+  oracle : ExtOracle
+  hCalls : CallsRealized (toCalls oracle)
   hS2 : ∀ f ∈ T.c.functions, S2Frag f.core
   hign : BindEnvs.ignoresLocal bs
   hF : BindEnvs.ofState_foreign bs
@@ -66,11 +69,19 @@ structure TransportBindings (S X E ε : Type) (I : Interface)
   horth : BindEnvs.orthogonal bs
   hBind : BindEnvs.lookupWF T.c T.Γ bs
   hslot : ∀ f ∈ T.c.functions, BindEnvs.avoids T.Γ T.c bs f.core
-  /-- S2 bytecode glue is still the erase path (Checkpoint 3 wires spill). -/
-  herase : compileErased T.rt = some T.is
   bindAddr_stable :
     ∀ e ∈ bs, ∀ (fn : T.spec.Fn) (args : T.spec.Args fn) (ctx : Ctx) (w : World S X E),
       e.bind.addr (worldAfter (T.spec.exec fn args) ctx w).self = e.bind.addr w.self
+
+abbrev TransportBindings.extCalls {S X E ε : Type} {I : Interface}
+    {T : TransportSetup S X E ε} (X : TransportBindings S X E ε I T) :
+    ExternalCalls :=
+  toCalls X.oracle
+
+theorem TransportBindings.htot {S X E ε : Type} {I : Interface}
+    {T : TransportSetup S X E ε} (X : TransportBindings S X E ε I T) :
+    CallsTotal X.extCalls :=
+  toCalls_total X.oracle
 
 variable {S X E ε : Type}
 

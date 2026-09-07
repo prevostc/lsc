@@ -1,4 +1,5 @@
 import Lsc.Compiler.TransportTheorems
+import Lsc.Compiler.ExtOracle
 import Examples.Amm.Spec
 import Examples.Amm.Proofs.Compile
 import Examples.Amm.Proofs.Security
@@ -48,7 +49,7 @@ theorem amm_shares_bound (w : World Storage Ext Event) (a : Address)
 
 @[reducible] def mkAmmSetup (hκ : KeccakSep Amm.contract evmKeccak)
     (rt : YBlock) (hrt : runtimeBlock Amm.contract = some rt)
-    (is : List Instr) (hcomp : compileErased rt = some is) :
+    (is : List Instr) (hcomp : compileBlock rt = some is) :
     TransportSetup Storage Ext Event Error where
   c := Amm.contract
   Γ := Amm.schema
@@ -62,7 +63,7 @@ theorem amm_shares_bound (w : World Storage Ext Event) (a : Address)
   rt := rt
   hrt := hrt
   is := is
-  hcomp := compileErased_to_compileBlock hcomp
+  hcomp := hcomp
 
 theorem amm_inv_faults (self : Address) (w : World Storage Ext Event) (fo : Nat → Bool)
     (h : Inv self w) : Inv self { w with faults := fo } := h
@@ -307,16 +308,15 @@ theorem amm_token1_stable_core (fn : Fn) (args : spec.Args fn) (ctx : Ctx)
 @[reducible] def mkAmmBindings
     (hκ : KeccakSep Amm.contract evmKeccak)
     (rt : YBlock) (hrt : runtimeBlock Amm.contract = some rt)
-    (is : List Instr) (hcomp : compileErased rt = some is)
-    (α : Abs IERC20.Ghost) (ext : ExternalCalls)
-    (hCalls : CallsRealized ext) (htot : CallsTotal ext)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
+    (α : Abs IERC20.Ghost) (o : ExtOracle)
+    (hCalls : CallsRealized (toCalls o))
     (hign : α.ignoresLocal) (hF : α.ofState_foreign) :
     TransportBindings Storage Ext Event Error IERC20
       (mkAmmSetup hκ rt hrt is hcomp) where
   bs := ammBs α
-  extCalls := ext
+  oracle := o
   hCalls := hCalls
-  htot := htot
   hS2 := fun f hf => amm_fn_s2 hf
   hign := amm_ignoresLocal α hign
   hF := amm_ofState_foreign α hF
@@ -324,7 +324,6 @@ theorem amm_token1_stable_core (fn : Fn) (args : spec.Args fn) (ctx : Ctx)
   horth := amm_orthogonal α
   hBind := amm_lookupWF α
   hslot := fun f hf => amm_hslot α hf
-  herase := hcomp
   bindAddr_stable := fun e he fn args ctx w => by
     have : e = ammEnv0 α ∨ e = ammEnv1 α := by
       simpa [ammBs, ammEnv0, ammEnv1, List.mem_cons, List.mem_singleton] using he
@@ -389,10 +388,10 @@ example : ∃ α : Abs IERC20.Ghost, α.ignoresLocal ∧ α.ofState_foreign :=
 namespace Proof
 
 theorem amm_bytecode_no_unauthorized_extraction
-    (α : Abs IERC20.Ghost) (ext : ExternalCalls)
-    (hCalls : CallsRealized ext) (htot : CallsTotal ext)
+    (α : Abs IERC20.Ghost) (o : ExtOracle)
+    (hCalls : CallsRealized (toCalls o))
     (rt : YBlock) (hrt : runtimeBlock Amm.contract = some rt)
-    (is : List Instr) (hcomp : compileErased rt = some is)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
     (hκ : KeccakSep Amm.contract evmKeccak)
     (hign : α.ignoresLocal) (hF : α.ofState_foreign)
     (self : Address) (calls : List EvmCall) (w : World Storage Ext Event)
@@ -407,7 +406,7 @@ theorem amm_bytecode_no_unauthorized_extraction
       (mkEvmStateExt ([] : List UInt8) σ ξ evmKeccak (dummyCtx self)))
     (hRX1 : RX α token1B w
       (mkEvmStateExt ([] : List UInt8) σ ξ evmKeccak (dummyCtx self)))
-    (hconf : ConfFun self ext α)
+    (hconf : ConfFun self (toCalls o) α)
     (hBindNe0 : accountKey (BitVec.ofNat 256 (token0B.addr w.self)) ≠
                 accountKey (BitVec.ofNat 256 self))
     (hBindNe1 : accountKey (BitVec.ofNat 256 (token1B.addr w.self)) ≠
@@ -417,7 +416,7 @@ theorem amm_bytecode_no_unauthorized_extraction
       ammClaimRead evmKeccak σ a ≤ ammClaimRead evmKeccak σ' a := by
   intro σ' ξ' hE
   let T := mkAmmSetup hκ rt hrt is hcomp
-  let Xpkg := mkAmmBindings hκ rt hrt is hcomp α ext hCalls htot hign hF
+  let Xpkg := mkAmmBindings hκ rt hrt is hcomp α o hCalls hign hF
   have ⟨w', hs', hwf', _, _, hle⟩ :=
     transport_claim_ext T Xpkg (Inv self) claim Auth self a
       (amm_no_unauth self) (amm_preserves_inv self)
@@ -426,7 +425,7 @@ theorem amm_bytecode_no_unauthorized_extraction
       (fun tr w w' => noAuthAlong_irrel a tr w w')
       calls w σ ξ σ' ξ' hs hlog hwf hWF
       (amm_RXs_of α w _ hRX0 hRX1) (amm_neSelf_of α self w.self hBindNe0 hBindNe1)
-      (amm_confs_of α self ext hconf) (amm_inj_of α w.self hneq) hA hw hE
+      (amm_confs_of α self (toCalls o) hconf) (amm_inj_of α w.self hneq) hA hw hE
   have hpre := amm_claim_of_rel w.self σ a hs ha (amm_shares_bound w a hwf ha)
   have hpost := amm_claim_of_rel w'.self σ' a hs' ha (amm_shares_bound w' a hwf' ha)
   rw [hpre, hpost]

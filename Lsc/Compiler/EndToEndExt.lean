@@ -1,6 +1,7 @@
 import Lsc.Compiler.EndToEndExtDefs
 import Lsc.Compiler.EndToEndExtTheorems
 import Lsc.Compiler.ProgressCoreTheorems
+import Lsc.Compiler.ExtOracle
 
 set_option linter.unusedSimpArgs false
 set_option linter.unusedVariables false
@@ -23,18 +24,18 @@ theorem evmCallRun_of_correct_ext {I : Interface} {S X E ε : Type}
     (bs : List (BindEnv I S X))
     (c : ContractDef) (Γ : ContractSchema S X E ε)
     (hΓ : Γ.st.Lawful c.fields) (hκ : KeccakSep c evmKeccak)
-    (calls : ExternalCalls) (hCalls : CallsRealized calls) (htot : CallsTotal calls)
+    (o : ExtOracle) (hCalls : CallsRealized (toCalls o))
     (hctor : ∀ f ∈ c.functions, f.kind ≠ .constructor)
     (hS2 : ∀ f ∈ c.functions, S2Frag f.core)
     (hlen : c.fields.length < wordBound)
     (hbound : ∀ f ∈ c.functions, 4 + 32 * f.params.length < wordBound)
     (rt : YBlock) (hrt : runtimeBlock c = some rt)
-    (is : List Instr) (hcomp : compileErased rt = some is)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
     (ctx : Ctx) (w : World S X E) (yst0 : EvmState)
     (hctx : ctxRel ctx yst0) (hR : R c Γ evmKeccak w yst0)
     (hRX : RXs bs w yst0) (hign : BindEnvs.ignoresLocal bs)
     (hBindNe : BindEnvs.neSelf bs ctx.self w.self)
-    (hconf : BindEnvs.conforms bs ctx.self w.self calls)
+    (hconf : BindEnvs.conforms bs ctx.self w.self (toCalls o))
     (hsame : BindEnvs.sameAbs bs) (horth : BindEnvs.orthogonal bs)
     (hinj : BindEnvs.addrInj bs w.self)
     (hBind : BindEnvs.lookupWF c Γ bs)
@@ -52,14 +53,14 @@ theorem evmCallRun_of_correct_ext {I : Interface} {S X E ε : Type}
                   ∃ stObs : EvmState, stObs.storage = σ' ∧ evmForeign stObs = ξ' ∧
                     RXs bs w' stObs
             | .error _ => σ' = yst0.storage ∧ ξ' = evmForeign yst0 := by
-  obtain ⟨st', o, hrun⟩ :=
-    yul_progress (I := I) bs c Γ hΓ evmKeccak hκ calls htot hctor hS2 hlen hbound
-      rt hrt ctx w yst0 hctx hR hconf hBind hslot
+  obtain ⟨st', out, hrun⟩ :=
+    yul_progress (I := I) bs c Γ hΓ evmKeccak hκ (toCalls o) (toCalls_total o)
+      hctor hS2 hlen hbound rt hrt ctx w yst0 hctx hR hconf hBind hslot
   have ⟨hpred, hEvm⟩ :=
-    bytecode_call_correct_ext (I := I) bs c Γ hΓ hκ calls hCalls hctor hS2
+    bytecode_call_correct_ext (I := I) bs c Γ hΓ hκ o hCalls hctor hS2
       hlen hbound rt hrt is hcomp ctx w yst0 hctx hR hRX hign hBindNe hconf
       hsame horth hinj hBind hslot himm0
-      st' o hrun
+      st' out hrun
   set stObs := committedState yst0 st'
   refine ⟨stObs.storage, evmForeign stObs, hEvm, ?_⟩
   obtain ⟨fo, hconcl⟩ := hpred
@@ -140,14 +141,14 @@ theorem evmCallRun_fnCalldata_ext {I : Interface} {S X E ε : Type}
     (bs : List (BindEnv I S X))
     (c : ContractDef) (Γ : ContractSchema S X E ε)
     (hΓ : Γ.st.Lawful c.fields) (hκ : KeccakSep c evmKeccak)
-    (calls : ExternalCalls) (hCalls : CallsRealized calls) (htot : CallsTotal calls)
+    (o : ExtOracle) (hCalls : CallsRealized (toCalls o))
     (hctor : ∀ f ∈ c.functions, f.kind ≠ .constructor)
     (hS2 : ∀ f ∈ c.functions, S2Frag f.core)
     (hlen : c.fields.length < wordBound)
     (hbound : ∀ f ∈ c.functions, 4 + 32 * f.params.length < wordBound)
     (hnd : selectorsNodup c = true)
     (rt : YBlock) (hrt : runtimeBlock c = some rt)
-    (is : List Instr) (hcomp : compileErased rt = some is)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
     (hign : BindEnvs.ignoresLocal bs)
     (hBind : BindEnvs.lookupWF c Γ bs)
     (hslot : ∀ f ∈ c.functions, BindEnvs.avoids Γ c bs f.core)
@@ -163,7 +164,7 @@ theorem evmCallRun_fnCalldata_ext {I : Interface} {S X E ε : Type}
     (hcd : (fnCalldata f args).length < wordBound)
     (hRX : RXs bs w (mkEvmStateExt (fnCalldata f args) σ ξ evmKeccak ctx))
     (hBindNe : BindEnvs.neSelf bs ctx.self w.self)
-    (hconf : BindEnvs.conforms bs ctx.self w.self calls)
+    (hconf : BindEnvs.conforms bs ctx.self w.self (toCalls o))
     (hinj : BindEnvs.addrInj bs w.self) :
     let yst0 := mkEvmStateExt (fnCalldata f args) σ ξ evmKeccak ctx
     ∃ σ' ξ', EvmCallRunξ is yst0 σ' ξ' ∧
@@ -183,7 +184,7 @@ theorem evmCallRun_fnCalldata_ext {I : Interface} {S X E ε : Type}
   have hR : R c Γ evmKeccak w yst0 := R_mkEvmStateExt evmKeccak w _ σ ξ ctx hs hlog hwf
   have himm0 : ∀ k, yst0.env.immutable k = 0 := fun k => mkEvmStateExt_immutable _ _ _ _ _ k
   obtain ⟨σ', ξ', hRun, fo, hpost⟩ :=
-    evmCallRun_of_correct_ext (I := I) bs c Γ hΓ hκ calls hCalls htot hctor hS2
+    evmCallRun_of_correct_ext (I := I) bs c Γ hΓ hκ o hCalls hctor hS2
       hlen hbound rt hrt is hcomp ctx w yst0 hctx hR hRX hign hBindNe hconf
       hsame horth hinj hBind hslot himm0
   refine ⟨σ', ξ', hRun, fo, ?_⟩

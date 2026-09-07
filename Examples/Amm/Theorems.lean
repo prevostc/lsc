@@ -5,6 +5,7 @@ import Examples.Amm.Proofs.Compile
 import Examples.Amm.Proofs.EndToEnd
 import Examples.Amm.Contract
 import Stdlib.ERC20
+import Lsc.Compiler.ExtOracle
 
 set_option linter.unusedVariables false
 
@@ -92,15 +93,17 @@ bytecode, Alice's LP share count in EVM storage never falls unless she
 herself called `removeLiquidity` in that sequence. Swaps and other users
 adding or removing liquidity cannot burn her shares; unknown selectors
 are ignored. Both tokens must behave like conforming ERC-20s, at
-distinct addresses different from the pool; the compiler must have
-accepted the contract; storage keys must not collide. This does not
-protect Alice against impermanent loss, and there is no bytecode
-solvency theorem — coverage of pro-rata reserves stays at the spec. -/
+distinct addresses different from the pool, and cannot see the pool's
+private memory, which is true of the EVM. The compiler must have
+accepted the contract (`compileBlock`: erase or powdr spill); storage
+keys must not collide. This does not protect Alice against impermanent
+loss, and there is no bytecode solvency theorem — coverage of pro-rata
+reserves stays at the spec. -/
 theorem amm_bytecode_no_unauthorized_extraction
-    (α : Abs IERC20.Ghost) (ext : ExternalCalls)
-    (hCalls : CallsRealized ext) (htot : CallsTotal ext)
+    (α : Abs IERC20.Ghost) (o : ExtOracle)
+    (hCalls : CallsRealized (toCalls o))
     (rt : YBlock) (hrt : runtimeBlock Amm.contract = some rt)
-    (is : List Instr) (hcomp : compileErased rt = some is)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
     (hκ : KeccakSep Amm.contract evmKeccak)
     (hign : α.ignoresLocal) (hF : α.ofState_foreign)
     (self : Address) (calls : List EvmCall) (w : World Storage Ext Event)
@@ -115,7 +118,7 @@ theorem amm_bytecode_no_unauthorized_extraction
       (mkEvmStateExt ([] : List UInt8) σ ξ evmKeccak (dummyCtx self)))
     (hRX1 : RX α token1B w
       (mkEvmStateExt ([] : List UInt8) σ ξ evmKeccak (dummyCtx self)))
-    (hconf : ConfFun self ext α)
+    (hconf : ConfFun self (toCalls o) α)
     (hBindNe0 : accountKey (BitVec.ofNat 256 (token0B.addr w.self)) ≠
                 accountKey (BitVec.ofNat 256 self))
     (hBindNe1 : accountKey (BitVec.ofNat 256 (token1B.addr w.self)) ≠
@@ -123,7 +126,7 @@ theorem amm_bytecode_no_unauthorized_extraction
     (hneq : w.self.token0 ≠ w.self.token1) :
     ∀ σ' ξ', EvmTraceRunExtAll is calls σ ξ σ' ξ' →
       ammClaimRead evmKeccak σ a ≤ ammClaimRead evmKeccak σ' a :=
-  Proof.amm_bytecode_no_unauthorized_extraction α ext hCalls htot rt hrt is hcomp
+  Proof.amm_bytecode_no_unauthorized_extraction α o hCalls rt hrt is hcomp
     hκ hign hF self calls w a σ ξ hw hlog hWF hA hs hwf ha hRX0 hRX1 hconf
     hBindNe0 hBindNe1 hneq
 

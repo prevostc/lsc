@@ -36,7 +36,9 @@ identified via `deposit.core_denote` / `withdraw.core_denote`.
 
 See `TRUSTED_COMPUTING_BASE.md`. S1 Token glue uses `ExternalsRealized.none` and
 does not mention `Conforms`. S2 still needs `Conforms` / `RelyAlong` / a realised
-external model (`CallsRealized`, `CallsTotal`). No `sorry`, `native_decide`,
+memory-blind CALL oracle (`ExtOracle`, `CallsRealized (toCalls o)`; totality
+is by construction). S2 bytecode glue takes `compileBlock` (erase or powdr
+spill), the same compile hypothesis as S1. No `sorry`, `native_decide`,
 `bv_decide`, or project `axiom` in any link; CI pins the axiom footprint in
 `Checks.lean`. `Security` depends only on `Lang`; `Compiler` depends on `Lang`
 and powdr, never on `Security`; only `EndToEnd*.lean` see both.

@@ -99,8 +99,8 @@ theorem transport_step_ext (T : TransportSetup S X E ε)
     fun k => mkEvmStateExt_immutable _ _ _ _ _ k
   obtain ⟨σ', ξ', hRun, fo, hpost⟩ :=
     evmCallRun_of_correct_ext (I := I) Xpkg.bs T.c T.Γ T.lawful T.hκ
-      Xpkg.extCalls Xpkg.hCalls Xpkg.htot T.hctor Xpkg.hS2 T.hlen T.hbound
-      T.rt T.hrt T.is Xpkg.herase ctx w yst0 hctx hR hRX Xpkg.hign hBindNe hconf
+      Xpkg.oracle Xpkg.hCalls T.hctor Xpkg.hS2 T.hlen T.hbound
+      T.rt T.hrt T.is T.hcomp ctx w yst0 hctx hR hRX Xpkg.hign hBindNe hconf
       Xpkg.hsame Xpkg.horth hinj Xpkg.hBind Xpkg.hslot himm0
   refine ⟨σ', ξ', hRun, fo, ?_⟩
   rw [mkEvmStateExt_calldata] at hpost

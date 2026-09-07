@@ -6,10 +6,10 @@ transfers are checked after storage writes.
 
 **Proved:** each reserve is ≤ the pool's ghost balance of that token; share
 balances sum to `totalShares`. An address's share count never falls unless
-they called `removeLiquidity` (spec and bytecode). Solvency of each reserve
-vs pro-rata LP claims is at the spec only. Constructor writes token slots
-(outside S2 runtime). The runtime hex may use spilling; the bytecode theorem
-assumes the non-spilled compile.
+they called `removeLiquidity` (spec and bytecode, including the spill
+compile). Solvency of each reserve vs pro-rata LP claims is at the spec
+only. Constructor writes token slots (outside S2 runtime). Other contracts
+cannot see the pool's private memory, which is true of the EVM.
 
 | File | Role |
 |------|------|

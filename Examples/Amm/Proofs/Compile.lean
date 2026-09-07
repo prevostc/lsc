@@ -1,4 +1,5 @@
 import Lsc.Compiler.CoreExtSimTheorems
+import Lsc.Compiler.Bytecode
 import Examples.Amm.Spec
 import Examples.Amm.Contract
 import Stdlib.ERC20
@@ -373,3 +374,14 @@ theorem amm_correct_ext
 end Proof
 
 end Lsc.Compiler
+
+set_option maxHeartbeats 8000000
+open Lsc.Compiler
+
+/-- Runtime bytecode exists through `compileBlock` (erase or powdr spill). -/
+def amm_compileBlock_some : Bool :=
+  match runtimeBlock Amm.contract with
+  | none => false
+  | some rt => (compileBlock rt).isSome
+
+#guard amm_compileBlock_some

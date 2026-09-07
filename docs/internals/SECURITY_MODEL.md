@@ -90,7 +90,8 @@ constrained by `RelyAlong`.
 Any set of addresses `A`, any sequence of calls with arbitrary arguments from `A`, interleaved
 arbitrarily with honest calls; between our calls, `env` steps constrained by `RelyAlong`;
 well-formed traces have `sender ≠ self` (`Call.sender ≠ target`). External contracts behave per
-their declared `Conforms` / `Rely`.
+their declared `Conforms` / `Rely`. Other contracts are modelled as unable to see this
+contract's private memory or `msize`, which is true of the EVM (`ExtOracle`).
 
 Out of scope (stated in `TRUSTED_COMPUTING_BASE.md`): private-key compromise, block-producer
 ordering/MEV, gas griefing of *our* execution, and token behaviours excluded by

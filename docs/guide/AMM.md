@@ -36,12 +36,12 @@ and share balances sum to `totalShares`.
 Solvency (spec): every LP's pro-rata `⌊s·r_i/S⌋` is covered by the
 corresponding ghost balance.
 
-Unauthorised extraction (spec and Yul): an address's **share count**
-never falls unless that address called `removeLiquidity`. Swaps and
-adding liquidity do not decrease another LP's share count. The compiled
-runtime is produced by the memory-spilling path; `amm_bytecode_no_unauthorized_extraction`
-still assumes the non-spilled compile, so it is not yet a bytecode
-guarantee.
+Unauthorised extraction (spec, Yul, and bytecode): an address's **share
+count** never falls unless that address called `removeLiquidity`. Swaps
+and adding liquidity do not decrease another LP's share count. Other
+contracts cannot see the pool's private memory, which is true of the EVM.
+The compiler may have used either the erase path or powdr spill
+(`compileBlock`).
 
 Assumed, not proved in the AMM file: the `IERC20` model, `Rely`, and
 conformance of both tokens; well-formed traces (`sender ≠ self`); the two

@@ -2,6 +2,8 @@ import Lsc.Compiler.EndToEndExtDefs
 import Lsc.Compiler.DispatchExtTheorems
 import Lsc.Compiler.ProgressCoreTheorems
 import Lsc.Compiler.EvmDetTheorems
+import Lsc.Compiler.ExtOracle
+import Lsc.Compiler.Proof.SpillOpen
 import YulEvmCompiler.Correctness
 import YulEvmCompiler.LowerDefs
 import YulEvmCompiler.Optimizer.Implementation.MemorySpill
@@ -21,51 +23,42 @@ open YulSemantics.EVM
 open YulEvmCompiler
 open EvmSemantics.EVM (State Steps)
 
-theorem externalsRealized_open {calls : ExternalCalls}
-    (h : CallsRealized calls) :
-    ExternalsRealized (openModel calls) :=
-  ⟨h, CreatesRealized.none, GasCallsRealized.noneOracle calls⟩
-
 namespace Proof
 
 theorem bytecode_call_correct_ext {I : Interface} {S X E ε : Type}
     (bs : List (BindEnv I S X))
     (c : ContractDef) (Γ : ContractSchema S X E ε)
     (hΓ : Γ.st.Lawful c.fields) (hκ : KeccakSep c evmKeccak)
-    (calls : ExternalCalls) (hCalls : CallsRealized calls)
+    (o : ExtOracle) (hCalls : CallsRealized (toCalls o))
     (hctor : ∀ f ∈ c.functions, f.kind ≠ .constructor)
     (hS2 : ∀ f ∈ c.functions, S2Frag f.core)
     (hlen : c.fields.length < wordBound)
     (hbound : ∀ f ∈ c.functions, 4 + 32 * f.params.length < wordBound)
     (rt : YBlock) (hrt : runtimeBlock c = some rt)
-    (is : List Instr) (hcomp : compileErased rt = some is)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
     (ctx : Ctx) (w : World S X E) (yst0 : EvmState)
     (hctx : ctxRel ctx yst0) (hR : R c Γ evmKeccak w yst0)
     (hRX : RXs bs w yst0) (hign : BindEnvs.ignoresLocal bs)
     (hBindNe : BindEnvs.neSelf bs ctx.self w.self)
-    (hconf : BindEnvs.conforms bs ctx.self w.self calls)
+    (hconf : BindEnvs.conforms bs ctx.self w.self (toCalls o))
     (hsame : BindEnvs.sameAbs bs) (horth : BindEnvs.orthogonal bs)
     (hinj : BindEnvs.addrInj bs w.self)
     (hBind : BindEnvs.lookupWF c Γ bs)
     (hslot : ∀ f ∈ c.functions, BindEnvs.avoids Γ c bs f.core)
     (himm0 : ∀ k, yst0.env.immutable k = 0) :
-    BytecodeCallCorrectExt bs c Γ evmKeccak calls ctx w yst0 rt is := by
-  intro st' o hrun
-  have hpred : EvmCallRunExt bs c Γ evmKeccak calls ctx w yst0 st' o :=
-    runtimeBlock_correct_ext (I := I) bs c Γ hΓ evmKeccak hκ calls
+    BytecodeCallCorrectExt bs c Γ evmKeccak (toCalls o) ctx w yst0 rt is := by
+  intro st' out hrun
+  have hpred : EvmCallRunExt bs c Γ evmKeccak (toCalls o) ctx w yst0 st' out :=
+    runtimeBlock_correct_ext (I := I) bs c Γ hΓ evmKeccak hκ (toCalls o)
       hctor hS2 hlen hbound rt hrt ctx w yst0 hctx hR hRX hign hBindNe hconf
       hsame horth hinj hBind hslot
-      st' o hrun
+      st' out hrun
   refine ⟨hpred, ?_⟩
-  let _model : ExternalModel := openModel calls
   have himm : ∀ key, unpatchedImmutables key =
       yst0.env.immutable (litValue (.string key)) := by
     intro key
     simp [unpatchedImmutables, himm0]
-  have hce : compileErased rt = some is := hcomp
-  have ⟨b, hb⟩ :=
-    compile_correct (model := openModel calls) (externalsRealized_open hCalls)
-      hce himm hrun
+  have ⟨b, hb0⟩ := compileBlock_open_sim hCalls hrt hcomp himm hrun
   obtain ⟨fo, hconcl⟩ := hpred
   let stObs := committedState yst0 st'
   have hobs : stObs = committedState yst0 st' := rfl
@@ -73,9 +66,12 @@ theorem bytecode_call_correct_ext {I : Interface} {S X E ε : Type}
   refine ⟨b, ?_⟩
   intro s0 hstart hgas
   rcases hstart with ⟨hOK, hM, hpc, hstk⟩
-  obtain ⟨s', hSteps, hcs, hSM, hOut⟩ := hb s0 hOK hM hpc hstk hgas
+  obtain ⟨s', ystF, hSteps, hcs, hSM, hOut, hFe, hFs⟩ :=
+    hb0 s0 hOK hM hpc hstk hgas
+  have ⟨hstor, hhalt⟩ := ystF_agree hcomp hFe hFs
+  have hξeq := ystF_foreign hcomp hFe hFs
   have hH : Halted s' := Halted_of_compile_out hcs hOut
-  have ho : o = Outcome.halt := by
+  have ho : out = Outcome.halt := by
     cases hsel : selectedFn c yst0.env.calldata with
     | none =>
       simp only [hsel] at hconcl
@@ -94,7 +90,7 @@ theorem bytecode_call_correct_ext {I : Interface} {S X E ε : Type}
   have hHM : HaltedMatch st' s' := by
     rcases hOut with ⟨hn, _⟩ | ⟨_, hH'⟩
     · cases (hn.symm.trans ho)
-    · exact hH'
+    · exact HaltedMatch_of_ystF hH' hhalt
   have hpost : stObs.storage = postStorage yst0 s' := by
     cases hsel : selectedFn c yst0.env.calldata with
     | none =>
@@ -119,7 +115,7 @@ theorem bytecode_call_correct_ext {I : Interface} {S X E ε : Type}
           split at hOK'
           · intro h; cases (hOK'.symm.trans h)
           · intro h; cases (hOK'.1.symm.trans h)
-        rw [postStorage_commit hnr, storage_eq_account hSM, heq]
+        rw [postStorage_commit hnr, storage_eq_account hSM, hstor, heq]
       | error e =>
         simp only [htx] at hconcl
         rcases hconcl with ⟨bytes, ⟨_, ⟨hh, _⟩⟩⟩
@@ -149,7 +145,7 @@ theorem bytecode_call_correct_ext {I : Interface} {S X E ε : Type}
           split at hOK'
           · intro h; cases (hOK'.symm.trans h)
           · intro h; cases (hOK'.1.symm.trans h)
-        rw [postForeign_commit hnr, foreign_eq_account hSM, heq]
+        rw [postForeign_commit hnr, foreign_eq_account hSM, hξeq, heq]
       | error e =>
         simp only [htx] at hconcl
         rcases hconcl with ⟨bytes, ⟨_, ⟨hh, _⟩⟩⟩
@@ -164,32 +160,32 @@ theorem evmCallRunExtAll_of_progress {I : Interface} {S X E ε : Type}
     (bs : List (BindEnv I S X))
     (c : ContractDef) (Γ : ContractSchema S X E ε)
     (hΓ : Γ.st.Lawful c.fields) (hκ : KeccakSep c evmKeccak)
-    (calls : ExternalCalls) (hCalls : CallsRealized calls) (htot : CallsTotal calls)
+    (o : ExtOracle) (hCalls : CallsRealized (toCalls o))
     (hctor : ∀ f ∈ c.functions, f.kind ≠ .constructor)
     (hS2 : ∀ f ∈ c.functions, S2Frag f.core)
     (hlen : c.fields.length < wordBound)
     (hbound : ∀ f ∈ c.functions, 4 + 32 * f.params.length < wordBound)
     (rt : YBlock) (hrt : runtimeBlock c = some rt)
-    (is : List Instr) (hcomp : compileErased rt = some is)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
     (ctx : Ctx) (w : World S X E) (yst0 : EvmState)
     (hctx : ctxRel ctx yst0) (hR : R c Γ evmKeccak w yst0)
     (hRX : RXs bs w yst0) (hign : BindEnvs.ignoresLocal bs)
     (hBindNe : BindEnvs.neSelf bs ctx.self w.self)
-    (hconf : BindEnvs.conforms bs ctx.self w.self calls)
+    (hconf : BindEnvs.conforms bs ctx.self w.self (toCalls o))
     (hsame : BindEnvs.sameAbs bs) (horth : BindEnvs.orthogonal bs)
     (hinj : BindEnvs.addrInj bs w.self)
     (hBind : BindEnvs.lookupWF c Γ bs)
     (hslot : ∀ f ∈ c.functions, BindEnvs.avoids Γ c bs f.core)
     (himm0 : ∀ k, yst0.env.immutable k = 0) :
-    ∃ σ' ξ', EvmCallRunExtAll bs c Γ evmKeccak calls ctx w is yst0 σ' ξ' := by
-  obtain ⟨st', o, hrun⟩ :=
-    yul_progress (I := I) bs c Γ hΓ evmKeccak hκ calls htot hctor hS2 hlen hbound
-      rt hrt ctx w yst0 hctx hR hconf hBind hslot
+    ∃ σ' ξ', EvmCallRunExtAll bs c Γ evmKeccak (toCalls o) ctx w is yst0 σ' ξ' := by
+  obtain ⟨st', out, hrun⟩ :=
+    yul_progress (I := I) bs c Γ hΓ evmKeccak hκ (toCalls o) (toCalls_total o)
+      hctor hS2 hlen hbound rt hrt ctx w yst0 hctx hR hconf hBind hslot
   have ⟨hpred, hEvm⟩ :=
-    bytecode_call_correct_ext (I := I) bs c Γ hΓ hκ calls hCalls hctor hS2
+    bytecode_call_correct_ext (I := I) bs c Γ hΓ hκ o hCalls hctor hS2
       hlen hbound rt hrt is hcomp ctx w yst0 hctx hR hRX hign hBindNe hconf
       hsame horth hinj hBind hslot himm0
-      st' o hrun
+      st' out hrun
   set stObs := committedState yst0 st'
   refine ⟨stObs.storage, evmForeign stObs, ?_⟩
   obtain ⟨b, hb⟩ := hEvm

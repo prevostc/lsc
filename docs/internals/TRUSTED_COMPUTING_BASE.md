@@ -42,20 +42,26 @@ Spec → Core → Yul → EVM bytecode. Axiom footprint of the chain is `propext
 precompile, empty call stack). Gas is existential (`∃ b` from `compile_correct`).
 `EvmStartOK` is `FrameOK`, `StateMatch`, `pc = 0`, empty stack.
 
-**(b) Compiler acceptance.** `runtimeBlock c = some rt` and `compile rt = some is`.
+**(b) Compiler acceptance.** `runtimeBlock c = some rt` and
+`compileBlock rt = some is` (erase path or powdr spill).
 
 **(c) Well-formedness.** `WorldWF`, `CtxWF`, ABI args and addresses used as keys
 `< 2^256`, `KeccakSep`, field/param length bounds.
 
-**(d) External calls (S2 only).** `α : Abs I.Ghost` maps an EVM snapshot at a bound
-address to `I.Ghost` (foreign layout is not proved in general). `Conforms`: every
-**successful** call from `self` to `addr` decodes to a method of `I`, matches
-`I.model`, passes `decodeRet`, and `NoInterfere`. Failed responses unconstrained.
+**(d) External calls (S2 only).** The CALL oracle is an `ExtOracle`
+(`CallRequest → ExtView → CallResponse`): memory-free by construction.
+Other contracts cannot see this contract's private memory or `msize`,
+which is true of the EVM. Wrapping with `toCalls` yields `ExternalCalls`
+that is scratch-insensitive on every reservation interval (needed by
+powdr's spill theorem) and total (`toCalls_total`). `α : Abs I.Ghost`
+maps an EVM snapshot at a bound address to `I.Ghost` (foreign layout is
+not proved in general). `Conforms`: every **successful** call from `self`
+to `addr` decodes to a method of `I`, matches `I.model`, passes
+`decodeRet`, and `NoInterfere`. Failed responses unconstrained.
 `NoInterfere`: our storage and transient unchanged, ETH balances unchanged
 (`value = 0`), other addresses' `α` unchanged, callee logs not attributed to
 `self`. Reentrancy is excluded by this hypothesis; no `tload`/`tstore` lock is
-emitted. `CallsRealized` (powdr inhabitation) and `CallsTotal` (EVM CALL always
-returns). `ignoresLocal` is foreign-address only. Foreign state `ξ` (`storageOf`)
+emitted. `CallsRealized` (powdr inhabitation). `ignoresLocal` is foreign-address only. Foreign state `ξ` (`storageOf`)
 is threaded through S2 traces; post-call `ξ'` is read from the halted EVM state.
 A family `bs : List (BindEnv I S X)` carries per-package `RX`/`Conforms`/`neSelf`
 (conjunction `RXs`, `BindEnvs.conforms`, `BindEnvs.neSelf`). Extra family

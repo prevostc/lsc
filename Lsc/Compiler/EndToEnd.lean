@@ -365,6 +365,22 @@ theorem ystF_agree {b : YBlock} {is : List Instr} {yst' ystF : EvmState}
     exact ⟨(ScratchRel.storage_eq hrel).symm,
       (congrArg Obs.halted hrel.observables_eq).symm⟩
 
+theorem ystF_foreign {b : YBlock} {is : List Instr} {yst' ystF : EvmState}
+    (hcomp : compileBlock b = some is)
+    (hFe : compileErased b = some is → ystF = yst')
+    (hFs : ∀ r, compileErased b = none → spillRuntime? b = some r →
+      ScratchRel r.base r.reserved yst' ystF) :
+    evmForeign ystF = evmForeign yst' := by
+  cases compileBlock_elim hcomp with
+  | inl hce => rw [hFe hce]
+  | inr h =>
+    obtain ⟨hne, hsp⟩ := h
+    obtain ⟨r, hr, _⟩ := compileSpilled_inv hsp
+    have hrel := hFs r hne hr
+    have henv : ystF.env = yst'.env :=
+      (congrArg Obs.env hrel.observables_eq).symm
+    simp [evmForeign, henv]
+
 theorem HaltedMatch_of_ystF {yst' ystF : EvmState} {s' : State}
     (hHM : HaltedMatch ystF s') (hh : ystF.halted = yst'.halted) :
     HaltedMatch yst' s' := by

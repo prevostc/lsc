@@ -99,8 +99,11 @@ statement-level structures.
   imports `Security`.
 - `EndToEndExt.lean` / `EndToEndExtDefs.lean` / `EndToEndExtTheorems.lean` /
   `EndToEndExtProof.lean` — S2 glue (`EvmCallRunExt` / `EvmTraceRunExtAll`);
-  `bytecode_call_correct_ext`, `evmCallRunExtAll_of_progress`. Imports
+  `bytecode_call_correct_ext`, `evmCallRunExtAll_of_progress` over a
+  memory-blind `ExtOracle` and `compileBlock` (erase or powdr spill). Imports
   `EndToEnd`, so it sees `Security`.
+- `ExtOracle.lean` — `ExtOracle` / `toCalls` / `CallsMemoryBlind`; spill
+  `GuardedExternals` for free.
 - `Transport.lean` / `TransportTheorems.lean` / `TransportProof.lean` —
   `transport_trace` / `_exists` and S2 `_ext` / `_claim_ext` variants.
 - `Transport/Defs.lean` — `TransportCodec` / `TransportSetup` / `TransportBindings`,
