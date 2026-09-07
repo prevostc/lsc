@@ -22,6 +22,8 @@ open YulSemantics.EVM
 open YulEvmCompiler
 open YulEvmCompiler (compile Instr)
 
+lsc_codec Amm
+
 namespace Amm
 
 def ammClaimRead (κ : List UInt8 → U256) (σ : U256 → U256) (a : Address) : Nat :=
@@ -48,177 +50,6 @@ theorem amm_shares_bound (w : World Storage Ext Event) (a : Address)
   have h := hwf 3 _ amm_field_shares
   simpa [amm_schema_shares] using h a ha
 
-@[reducible] def asWord (a : Address) : Nat := a
-
-def ammFnDef : Fn → FnDef
-  | .addLiquidity =>
-    { name := "addLiquidity", decl := ``Amm.addLiquidity, kind := .view,
-      params := [{ name := "a0", ty := .uint256 }, { name := "a1", ty := .uint256 }],
-      ret := .word, core := Amm.addLiquidity.core }
-  | .removeLiquidity =>
-    { name := "removeLiquidity", decl := ``Amm.removeLiquidity, kind := .view,
-      params := [{ name := "s", ty := .uint256 }],
-      ret := .pair .word .word, core := Amm.removeLiquidity.core }
-  | .swap0for1 =>
-    { name := "swap0for1", decl := ``Amm.swap0for1, kind := .view,
-      params := [{ name := "amountIn", ty := .uint256 }, { name := "minOut", ty := .uint256 }],
-      ret := .word, core := Amm.swap0for1.core }
-  | .swap1for0 =>
-    { name := "swap1for0", decl := ``Amm.swap1for0, kind := .view,
-      params := [{ name := "amountIn", ty := .uint256 }, { name := "minOut", ty := .uint256 }],
-      ret := .word, core := Amm.swap1for0.core }
-  | .getReserves =>
-    { name := "getReserves", decl := ``Amm.getReserves, kind := .view,
-      params := [], ret := .pair .word .word, core := Amm.getReserves.core }
-  | .sharesOf =>
-    { name := "sharesOf", decl := ``Amm.sharesOf, kind := .view,
-      params := [{ name := "who", ty := .address }],
-      ret := .word, core := Amm.sharesOf.core }
-  | .quote0for1 =>
-    { name := "quote0for1", decl := ``Amm.quote0for1, kind := .view,
-      params := [{ name := "amountIn", ty := .uint256 }],
-      ret := .word, core := Amm.quote0for1.core }
-
-theorem ammFnDef_mem (fn : Fn) : ammFnDef fn ∈ Amm.contract.functions := by
-  cases fn <;> simp [ammFnDef, Amm.contract]
-
-def encodeAmm : (fn : Fn) → spec.Args fn → List Nat
-  | .addLiquidity, (a0, a1) => [a0.toNat, a1.toNat]
-  | .removeLiquidity, s => [s.toNat]
-  | .swap0for1, (amountIn, minOut) => [amountIn.toNat, minOut.toNat]
-  | .swap1for0, (amountIn, minOut) => [amountIn.toNat, minOut.toNat]
-  | .getReserves, _ => []
-  | .sharesOf, who => [asWord who]
-  | .quote0for1, amountIn => [amountIn.toNat]
-
-theorem encodeAmm_length (fn : Fn) (args : spec.Args fn) :
-    (encodeAmm fn args).length = (ammFnDef fn).params.length := by
-  cases fn <;> simp [encodeAmm, ammFnDef]
-
-theorem amm_worldAfter_core_eq (fn : Fn) (args : spec.Args fn) (ctx : Ctx)
-    (w : World Storage Ext Event) :
-    worldAfter (Core.denote Amm.schema (ammFnDef fn).core
-      (encodeAmm fn args).reverse) ctx w =
-    worldAfter (Spec.exec spec fn args) ctx w := by
-  cases fn with
-  | addLiquidity =>
-    rcases args with ⟨a0, a1⟩
-    dsimp [ammFnDef, encodeAmm]
-    change worldAfter (Core.denote Amm.schema Amm.addLiquidity.core [a1.toNat, a0.toNat]) ctx w =
-      worldAfter (Spec.exec spec .addLiquidity (a0, a1)) ctx w
-    rw [Amm.addLiquidity.core_denote, Amm.spec_exec_addLiquidity]
-    rfl
-  | removeLiquidity =>
-    dsimp [ammFnDef, encodeAmm]
-    change worldAfter (Core.denote Amm.schema Amm.removeLiquidity.core [args.toNat]) ctx w =
-      worldAfter (Spec.exec spec .removeLiquidity args) ctx w
-    rw [Amm.removeLiquidity.core_denote, Amm.spec_exec_removeLiquidity]
-    rfl
-  | swap0for1 =>
-    rcases args with ⟨amountIn, minOut⟩
-    dsimp [ammFnDef, encodeAmm]
-    change worldAfter (Core.denote Amm.schema Amm.swap0for1.core
-        [minOut.toNat, amountIn.toNat]) ctx w =
-      worldAfter (Spec.exec spec .swap0for1 (amountIn, minOut)) ctx w
-    rw [Amm.swap0for1.core_denote, Amm.spec_exec_swap0for1]
-    rfl
-  | swap1for0 =>
-    rcases args with ⟨amountIn, minOut⟩
-    dsimp [ammFnDef, encodeAmm]
-    change worldAfter (Core.denote Amm.schema Amm.swap1for0.core
-        [minOut.toNat, amountIn.toNat]) ctx w =
-      worldAfter (Spec.exec spec .swap1for0 (amountIn, minOut)) ctx w
-    rw [Amm.swap1for0.core_denote, Amm.spec_exec_swap1for0]
-    rfl
-  | getReserves =>
-    cases args
-    dsimp [ammFnDef, encodeAmm]
-    change worldAfter (Core.denote Amm.schema Amm.getReserves.core []) ctx w =
-      worldAfter (Spec.exec spec .getReserves ()) ctx w
-    rw [Amm.getReserves.core_denote, Amm.spec_exec_getReserves]
-    rfl
-  | sharesOf =>
-    dsimp [ammFnDef, encodeAmm, asWord]
-    change worldAfter (Core.denote Amm.schema Amm.sharesOf.core [args]) ctx w =
-      worldAfter (Spec.exec spec .sharesOf args) ctx w
-    rw [Amm.sharesOf.core_denote, Amm.spec_exec_sharesOf]
-    rfl
-  | quote0for1 =>
-    dsimp [ammFnDef, encodeAmm]
-    change worldAfter (Core.denote Amm.schema Amm.quote0for1.core [args.toNat]) ctx w =
-      worldAfter (Spec.exec spec .quote0for1 args) ctx w
-    rw [Amm.quote0for1.core_denote, Amm.spec_exec_quote0for1]
-    rfl
-
-def decodeAmmFn (f : FnDef) : Option Fn :=
-  if f.name = "addLiquidity" then some .addLiquidity
-  else if f.name = "removeLiquidity" then some .removeLiquidity
-  else if f.name = "swap0for1" then some .swap0for1
-  else if f.name = "swap1for0" then some .swap1for0
-  else if f.name = "getReserves" then some .getReserves
-  else if f.name = "sharesOf" then some .sharesOf
-  else if f.name = "quote0for1" then some .quote0for1
-  else none
-
-theorem decodeAmmFn_fnDef (fn : Fn) : decodeAmmFn (ammFnDef fn) = some fn := by
-  cases fn <;> simp [decodeAmmFn, ammFnDef]
-
-theorem decodeAmmFn_of_mem (f : FnDef) (hf : f ∈ Amm.contract.functions) :
-    ∃ fn, decodeAmmFn f = some fn ∧ f = ammFnDef fn := by
-  simp [Amm.contract] at hf
-  rcases hf with rfl | rfl | rfl | rfl | rfl | rfl | rfl
-  · exact ⟨.addLiquidity, by simp [decodeAmmFn, ammFnDef], rfl⟩
-  · exact ⟨.removeLiquidity, by simp [decodeAmmFn, ammFnDef], rfl⟩
-  · exact ⟨.swap0for1, by simp [decodeAmmFn, ammFnDef], rfl⟩
-  · exact ⟨.swap1for0, by simp [decodeAmmFn, ammFnDef], rfl⟩
-  · exact ⟨.getReserves, by simp [decodeAmmFn, ammFnDef], rfl⟩
-  · exact ⟨.sharesOf, by simp [decodeAmmFn, ammFnDef], rfl⟩
-  · exact ⟨.quote0for1, by simp [decodeAmmFn, ammFnDef], rfl⟩
-
-def decodeAmm : (fn : Fn) → List Nat → spec.Args fn
-  | .addLiquidity, a0 :: a1 :: _ => (Amount.ofNat a0, Amount.ofNat a1)
-  | .addLiquidity, _ => (Amount.ofNat 0, Amount.ofNat 0)
-  | .removeLiquidity, n :: _ => Amount.ofNat n
-  | .removeLiquidity, _ => Amount.ofNat 0
-  | .swap0for1, a :: b :: _ => (Amount.ofNat a, Amount.ofNat b)
-  | .swap0for1, _ => (Amount.ofNat 0, Amount.ofNat 0)
-  | .swap1for0, a :: b :: _ => (Amount.ofNat a, Amount.ofNat b)
-  | .swap1for0, _ => (Amount.ofNat 0, Amount.ofNat 0)
-  | .getReserves, _ => ()
-  | .sharesOf, who :: _ => who
-  | .sharesOf, _ => 0
-  | .quote0for1, n :: _ => Amount.ofNat n
-  | .quote0for1, _ => Amount.ofNat 0
-
-theorem encodeAmm_decode (fn : Fn) (ns : List Nat)
-    (h : ns.length = (ammFnDef fn).params.length) :
-    encodeAmm fn (decodeAmm fn ns) = ns := by
-  cases fn <;> simp [ammFnDef] at h
-  · obtain ⟨a0, a1, rfl⟩ := length_eq_two.mp h; rfl
-  · obtain ⟨n, rfl⟩ := length_eq_one.mp h; rfl
-  · obtain ⟨a, b, rfl⟩ := length_eq_two.mp h; rfl
-  · obtain ⟨a, b, rfl⟩ := length_eq_two.mp h; rfl
-  · cases ns <;> simp at h; rfl
-  · obtain ⟨who, rfl⟩ := length_eq_one.mp h; rfl
-  · obtain ⟨n, rfl⟩ := length_eq_one.mp h; rfl
-
-theorem decodeAmm_encode (fn : Fn) (args : spec.Args fn) :
-    decodeAmm fn (encodeAmm fn args) = args := by
-  cases fn <;> simp [decodeAmm, encodeAmm, asWord]
-
-@[reducible] def ammCodec : TransportCodec Amm.contract Amm.schema Amm.spec where
-  fnDef := ammFnDef
-  encode := encodeAmm
-  decodeFn := decodeAmmFn
-  decode := decodeAmm
-  mem := ammFnDef_mem
-  encode_length := encodeAmm_length
-  decodeFn_fnDef := decodeAmmFn_fnDef
-  decodeFn_of_mem := decodeAmmFn_of_mem
-  encode_decode := encodeAmm_decode
-  decode_encode := decodeAmm_encode
-  core_exec := amm_worldAfter_core_eq
-
 @[reducible] def mkAmmSetup (hκ : KeccakSep Amm.contract evmKeccak)
     (rt : YBlock) (hrt : runtimeBlock Amm.contract = some rt)
     (is : List Instr) (hcomp : compile rt = some is) :
@@ -226,7 +57,7 @@ theorem decodeAmm_encode (fn : Fn) (args : spec.Args fn) :
   c := Amm.contract
   Γ := Amm.schema
   spec := Amm.spec
-  codec := ammCodec
+  codec := Amm.codec
   lawful := Amm.schema_lawful
   hκ := hκ
   hctor := fun f hf => amm_fn_not_ctor hf
@@ -448,39 +279,39 @@ private theorem amm_ext_call_self
 
 theorem amm_token0_stable_core (fn : Fn) (args : spec.Args fn) (ctx : Ctx)
     (w : World Storage Ext Event) :
-    (worldAfter (Core.denote Amm.schema (ammFnDef fn).core
-      (encodeAmm fn args).reverse) ctx w).self.token0 = w.self.token0 := by
-  cases htx : Tx.run (Core.denote Amm.schema (ammFnDef fn).core
-      (encodeAmm fn args).reverse) ctx w with
+    (worldAfter (Core.denote Amm.schema (Amm.fnDef fn).core
+      (Amm.encode fn args).reverse) ctx w).self.token0 = w.self.token0 := by
+  cases htx : Tx.run (Core.denote Amm.schema (Amm.fnDef fn).core
+      (Amm.encode fn args).reverse) ctx w with
   | error _ => simp [worldAfter, htx]
   | ok p =>
     rcases p with ⟨v, w'⟩
     simp [worldAfter, htx]
     exact effects_frame_on (P := fun s : Storage => s.token0)
-      (ammFnDef fn).core (encodeAmm fn args).reverse 4
+      (Amm.fnDef fn).core (Amm.encode fn args).reverse 4
       (fun i σ v hne => amm_scalarUpd_token0 i σ v hne)
       (fun i σ m _hne => amm_map1Upd_token0 i σ m)
       (fun i σ m _hne => amm_map2Upd_token0 i σ m)
       (fun b m args ctx w v w' hok => amm_ext_call_self hok)
-      (coreAvoids_not_write (amm_fn_avoids0 (ammFnDef_mem fn))) htx
+      (coreAvoids_not_write (amm_fn_avoids0 (Amm.fnDef_mem fn))) htx
 
 theorem amm_token1_stable_core (fn : Fn) (args : spec.Args fn) (ctx : Ctx)
     (w : World Storage Ext Event) :
-    (worldAfter (Core.denote Amm.schema (ammFnDef fn).core
-      (encodeAmm fn args).reverse) ctx w).self.token1 = w.self.token1 := by
-  cases htx : Tx.run (Core.denote Amm.schema (ammFnDef fn).core
-      (encodeAmm fn args).reverse) ctx w with
+    (worldAfter (Core.denote Amm.schema (Amm.fnDef fn).core
+      (Amm.encode fn args).reverse) ctx w).self.token1 = w.self.token1 := by
+  cases htx : Tx.run (Core.denote Amm.schema (Amm.fnDef fn).core
+      (Amm.encode fn args).reverse) ctx w with
   | error _ => simp [worldAfter, htx]
   | ok p =>
     rcases p with ⟨v, w'⟩
     simp [worldAfter, htx]
     exact effects_frame_on (P := fun s : Storage => s.token1)
-      (ammFnDef fn).core (encodeAmm fn args).reverse 5
+      (Amm.fnDef fn).core (Amm.encode fn args).reverse 5
       (fun i σ v hne => amm_scalarUpd_token1 i σ v hne)
       (fun i σ m _hne => amm_map1Upd_token1 i σ m)
       (fun i σ m _hne => amm_map2Upd_token1 i σ m)
       (fun b m args ctx w v w' hok => amm_ext_call_self hok)
-      (coreAvoids_not_write (amm_fn_avoids1 (ammFnDef_mem fn))) htx
+      (coreAvoids_not_write (amm_fn_avoids1 (Amm.fnDef_mem fn))) htx
 
 @[reducible] def ammEnv0 (α : Abs IERC20.Ghost) : BindEnv IERC20 Storage Ext :=
   ⟨α, token0B⟩
@@ -512,10 +343,12 @@ theorem amm_token1_stable_core (fn : Fn) (args : spec.Args fn) (ctx : Ctx)
     have : e = ammEnv0 α ∨ e = ammEnv1 α := by
       simpa [ammBs, ammEnv0, ammEnv1, List.mem_cons, List.mem_singleton] using he
     rcases this with rfl | rfl
-    · simpa [ammEnv0, token0B, amm_worldAfter_core_eq] using
-        amm_token0_stable_core fn args ctx w
-    · simpa [ammEnv1, token1B, amm_worldAfter_core_eq] using
-        amm_token1_stable_core fn args ctx w
+    · simp [ammEnv0, token0B]
+      rw [← Amm.codec.core_exec fn args ctx w]
+      exact amm_token0_stable_core fn args ctx w
+    · simp [ammEnv1, token1B]
+      rw [← Amm.codec.core_exec fn args ctx w]
+      exact amm_token1_stable_core fn args ctx w
 
 theorem amm_RXs_of (α : Abs IERC20.Ghost) (w : World Storage Ext Event) (st : EvmState)
     (h0 : RX α token0B w st) (h1 : RX α token1B w st) :

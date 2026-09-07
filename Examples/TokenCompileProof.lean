@@ -38,17 +38,8 @@ theorem token_fn_not_ctor {f : FnDef} (hf : f ∈ Token.contract.functions) :
   rcases hf with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl <;> simp
 
 theorem token_fn_callFree {f : FnDef} (hf : f ∈ Token.contract.functions) :
-    CallFree f.core := by
-  simp [Token.contract] at hf
-  rcases hf with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl
-  · simp [CallFree, M1Frag, M1Op, M1Stmt, M1Cond, Token.transfer.core]
-  · simp [CallFree, M1Frag, M1Op, M1Stmt, M1Cond, Token.approve.core]
-  · simp [CallFree, M1Frag, M1Op, M1Stmt, M1Cond, Token.transferFrom.core]
-  · simp [CallFree, M1Frag, M1Op, M1Stmt, M1Cond, Token.mint.core]
-  · simp [CallFree, M1Frag, M1Op, M1Stmt, M1Cond, Token.burn.core]
-  · simp [CallFree, M1Frag, M1Op, M1Stmt, M1Cond, Token.balanceOf.core]
-  · simp [CallFree, M1Frag, M1Op, M1Stmt, M1Cond, Token.allowance.core]
-  · simp [CallFree, M1Frag, M1Op, M1Stmt, M1Cond, Token.totalSupply.core]
+    CallFree f.core :=
+  callFree_of_all (by decide) f hf
 
 end Lsc.Compiler
 

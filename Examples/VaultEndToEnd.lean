@@ -22,6 +22,8 @@ open YulSemantics.EVM
 open YulEvmCompiler
 open YulEvmCompiler (compile Instr)
 
+lsc_codec Vault
+
 namespace Vault
 
 def vaultClaimRead (κ : List UInt8 → U256) (σ : U256 → U256) (a : Address) : Nat :=
@@ -93,183 +95,6 @@ theorem vault_shares_bound (w : World Storage Ext Event) (a : Address)
   have h := hwf 2 _ vault_field_shares
   simpa [vault_schema_shares] using h a ha
 
-def vaultFnDef : Fn → FnDef
-  | .deposit =>
-    { name := "deposit", decl := ``Vault.deposit, kind := .view,
-      params := [{ name := "assets", ty := .uint256 }],
-      ret := .word, core := Vault.deposit.core }
-  | .withdraw =>
-    { name := "withdraw", decl := ``Vault.withdraw, kind := .view,
-      params := [{ name := "sharesIn", ty := .uint256 }],
-      ret := .word, core := Vault.withdraw.core }
-  | .previewDeposit =>
-    { name := "previewDeposit", decl := ``Vault.previewDeposit, kind := .view,
-      params := [{ name := "assets", ty := .uint256 }],
-      ret := .word, core := Vault.previewDeposit.core }
-  | .previewRedeem =>
-    { name := "previewRedeem", decl := ``Vault.previewRedeem, kind := .view,
-      params := [{ name := "sharesIn", ty := .uint256 }],
-      ret := .word, core := Vault.previewRedeem.core }
-  | .pause =>
-    { name := "pause", decl := ``Vault.pause, kind := .tx,
-      params := [], ret := .unit, core := Vault.pause.core }
-  | .unpause =>
-    { name := "unpause", decl := ``Vault.unpause, kind := .tx,
-      params := [], ret := .unit, core := Vault.unpause.core }
-  | .paused? =>
-    { name := "paused?", decl := ``Vault.paused?, kind := .view,
-      params := [], ret := .flag, core := Vault.paused?.core }
-  | .decimals =>
-    { name := "decimals", decl := ``Vault.decimals, kind := .view,
-      params := [], ret := .word, core := Vault.decimals.core }
-
-theorem vaultFnDef_mem (fn : Fn) : vaultFnDef fn ∈ Vault.contract.functions := by
-  cases fn <;> simp [vaultFnDef, Vault.contract]
-
-def encodeVault : (fn : Fn) → spec.Args fn → List Nat
-  | .deposit, assets => [assets.toNat]
-  | .withdraw, sharesIn => [sharesIn.toNat]
-  | .previewDeposit, assets => [assets.toNat]
-  | .previewRedeem, sharesIn => [sharesIn.toNat]
-  | .pause, _ => []
-  | .unpause, _ => []
-  | .paused?, _ => []
-  | .decimals, _ => []
-
-theorem encodeVault_length (fn : Fn) (args : spec.Args fn) :
-    (encodeVault fn args).length = (vaultFnDef fn).params.length := by
-  cases fn <;> simp [encodeVault, vaultFnDef]
-
-theorem vault_worldAfter_core_eq (fn : Fn) (args : spec.Args fn) (ctx : Ctx)
-    (w : World Storage Ext Event) :
-    worldAfter (Core.denote Vault.schema (vaultFnDef fn).core
-      (encodeVault fn args).reverse) ctx w =
-    worldAfter (Spec.exec spec fn args) ctx w := by
-  cases fn with
-  | deposit =>
-    dsimp [vaultFnDef, encodeVault]
-    change worldAfter (Core.denote Vault.schema Vault.deposit.core [args.toNat]) ctx w =
-      worldAfter (Spec.exec spec .deposit args) ctx w
-    rw [Vault.deposit.core_denote, Vault.spec_exec_deposit]
-    rfl
-  | withdraw =>
-    dsimp [vaultFnDef, encodeVault]
-    change worldAfter (Core.denote Vault.schema Vault.withdraw.core [args.toNat]) ctx w =
-      worldAfter (Spec.exec spec .withdraw args) ctx w
-    rw [Vault.withdraw.core_denote, Vault.spec_exec_withdraw]
-    rfl
-  | previewDeposit =>
-    dsimp [vaultFnDef, encodeVault]
-    change worldAfter (Core.denote Vault.schema Vault.previewDeposit.core [args.toNat]) ctx w =
-      worldAfter (Spec.exec spec .previewDeposit args) ctx w
-    rw [Vault.previewDeposit.core_denote, Vault.spec_exec_previewDeposit]
-    rfl
-  | previewRedeem =>
-    dsimp [vaultFnDef, encodeVault]
-    change worldAfter (Core.denote Vault.schema Vault.previewRedeem.core [args.toNat]) ctx w =
-      worldAfter (Spec.exec spec .previewRedeem args) ctx w
-    rw [Vault.previewRedeem.core_denote, Vault.spec_exec_previewRedeem]
-    rfl
-  | pause =>
-    cases args
-    dsimp [vaultFnDef, encodeVault]
-    change worldAfter (Core.denote Vault.schema Vault.pause.core []) ctx w =
-      worldAfter (Spec.exec spec .pause ()) ctx w
-    rw [Vault.pause.core_denote, Vault.spec_exec_pause]
-    rfl
-  | unpause =>
-    cases args
-    dsimp [vaultFnDef, encodeVault]
-    change worldAfter (Core.denote Vault.schema Vault.unpause.core []) ctx w =
-      worldAfter (Spec.exec spec .unpause ()) ctx w
-    rw [Vault.unpause.core_denote, Vault.spec_exec_unpause]
-    rfl
-  | paused? =>
-    cases args
-    dsimp [vaultFnDef, encodeVault]
-    change worldAfter (Core.denote Vault.schema Vault.paused?.core []) ctx w =
-      worldAfter (Spec.exec spec .paused? ()) ctx w
-    rw [Vault.paused?.core_denote, Vault.spec_exec_paused?]
-    rfl
-  | decimals =>
-    cases args
-    dsimp [vaultFnDef, encodeVault]
-    change worldAfter (Core.denote Vault.schema Vault.decimals.core []) ctx w =
-      worldAfter (Spec.exec spec .decimals ()) ctx w
-    rw [Vault.decimals.core_denote, Vault.spec_exec_decimals]
-    rfl
-
-def decodeVaultFn (f : FnDef) : Option Fn :=
-  if f.name = "deposit" then some .deposit
-  else if f.name = "withdraw" then some .withdraw
-  else if f.name = "previewDeposit" then some .previewDeposit
-  else if f.name = "previewRedeem" then some .previewRedeem
-  else if f.name = "pause" then some .pause
-  else if f.name = "unpause" then some .unpause
-  else if f.name = "paused?" then some .paused?
-  else if f.name = "decimals" then some .decimals
-  else none
-
-theorem decodeVaultFn_fnDef (fn : Fn) : decodeVaultFn (vaultFnDef fn) = some fn := by
-  cases fn <;> simp [decodeVaultFn, vaultFnDef]
-
-theorem decodeVaultFn_of_mem (f : FnDef) (hf : f ∈ Vault.contract.functions) :
-    ∃ fn, decodeVaultFn f = some fn ∧ f = vaultFnDef fn := by
-  simp [Vault.contract] at hf
-  rcases hf with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl
-  · exact ⟨.deposit, by simp [decodeVaultFn, vaultFnDef], rfl⟩
-  · exact ⟨.withdraw, by simp [decodeVaultFn, vaultFnDef], rfl⟩
-  · exact ⟨.previewDeposit, by simp [decodeVaultFn, vaultFnDef], rfl⟩
-  · exact ⟨.previewRedeem, by simp [decodeVaultFn, vaultFnDef], rfl⟩
-  · exact ⟨.pause, by simp [decodeVaultFn, vaultFnDef], rfl⟩
-  · exact ⟨.unpause, by simp [decodeVaultFn, vaultFnDef], rfl⟩
-  · exact ⟨.paused?, by simp [decodeVaultFn, vaultFnDef], rfl⟩
-  · exact ⟨.decimals, by simp [decodeVaultFn, vaultFnDef], rfl⟩
-
-def decodeVault : (fn : Fn) → List Nat → spec.Args fn
-  | .deposit, n :: _ => Amount.ofNat n
-  | .deposit, _ => Amount.ofNat 0
-  | .withdraw, n :: _ => Amount.ofNat n
-  | .withdraw, _ => Amount.ofNat 0
-  | .previewDeposit, n :: _ => Amount.ofNat n
-  | .previewDeposit, _ => Amount.ofNat 0
-  | .previewRedeem, n :: _ => Amount.ofNat n
-  | .previewRedeem, _ => Amount.ofNat 0
-  | .pause, _ => ()
-  | .unpause, _ => ()
-  | .paused?, _ => ()
-  | .decimals, _ => ()
-
-theorem encodeVault_decode (fn : Fn) (ns : List Nat)
-    (h : ns.length = (vaultFnDef fn).params.length) :
-    encodeVault fn (decodeVault fn ns) = ns := by
-  cases fn <;> simp [vaultFnDef] at h
-  · obtain ⟨n, rfl⟩ := length_eq_one.mp h; rfl
-  · obtain ⟨n, rfl⟩ := length_eq_one.mp h; rfl
-  · obtain ⟨n, rfl⟩ := length_eq_one.mp h; rfl
-  · obtain ⟨n, rfl⟩ := length_eq_one.mp h; rfl
-  · cases ns <;> simp at h; rfl
-  · cases ns <;> simp at h; rfl
-  · cases ns <;> simp at h; rfl
-  · cases ns <;> simp at h; rfl
-
-theorem decodeVault_encode (fn : Fn) (args : spec.Args fn) :
-    decodeVault fn (encodeVault fn args) = args := by
-  cases fn <;> simp [decodeVault, encodeVault]
-
-@[reducible] def vaultCodec : TransportCodec Vault.contract Vault.schema Vault.spec where
-  fnDef := vaultFnDef
-  encode := encodeVault
-  decodeFn := decodeVaultFn
-  decode := decodeVault
-  mem := vaultFnDef_mem
-  encode_length := encodeVault_length
-  decodeFn_fnDef := decodeVaultFn_fnDef
-  decodeFn_of_mem := decodeVaultFn_of_mem
-  encode_decode := encodeVault_decode
-  decode_encode := decodeVault_encode
-  core_exec := vault_worldAfter_core_eq
-
 @[reducible] def mkVaultSetup (hκ : KeccakSep Vault.contract evmKeccak)
     (rt : YBlock) (hrt : runtimeBlock Vault.contract = some rt)
     (is : List Instr) (hcomp : compile rt = some is) :
@@ -277,7 +102,7 @@ theorem decodeVault_encode (fn : Fn) (args : spec.Args fn) :
   c := Vault.contract
   Γ := Vault.schema
   spec := Vault.spec
-  codec := vaultCodec
+  codec := Vault.codec
   lawful := Vault.schema_lawful
   hκ := hκ
   hctor := fun f hf => vault_fn_not_ctor hf
@@ -463,21 +288,21 @@ private theorem vault_ext_call_self
 
 theorem vault_asset_stable_core (fn : Fn) (args : spec.Args fn) (ctx : Ctx)
     (w : World Storage Ext Event) :
-    (worldAfter (Core.denote Vault.schema (vaultFnDef fn).core
-      (encodeVault fn args).reverse) ctx w).self.asset = w.self.asset := by
-  cases htx : Tx.run (Core.denote Vault.schema (vaultFnDef fn).core
-      (encodeVault fn args).reverse) ctx w with
+    (worldAfter (Core.denote Vault.schema (Vault.fnDef fn).core
+      (Vault.encode fn args).reverse) ctx w).self.asset = w.self.asset := by
+  cases htx : Tx.run (Core.denote Vault.schema (Vault.fnDef fn).core
+      (Vault.encode fn args).reverse) ctx w with
   | error _ => simp [worldAfter, htx]
   | ok p =>
     rcases p with ⟨v, w'⟩
     simp [worldAfter, htx]
     exact effects_frame_on (P := fun s : Storage => s.asset)
-      (vaultFnDef fn).core (encodeVault fn args).reverse 5
+      (Vault.fnDef fn).core (Vault.encode fn args).reverse 5
       (fun i σ v hne => vault_scalarUpd_asset i σ v hne)
       (fun i σ m _hne => vault_map1Upd_asset i σ m)
       (fun i σ m _hne => vault_map2Upd_asset i σ m)
       (fun b m args ctx w v w' hok => vault_ext_call_self hok)
-      (coreAvoids_not_write (vault_fn_avoids (vaultFnDef_mem fn))) htx
+      (coreAvoids_not_write (vault_fn_avoids (Vault.fnDef_mem fn))) htx
 
 @[reducible] def vaultEnv (α : Abs IERC20.Ghost) : BindEnv IERC20 Storage Ext :=
   ⟨α, Vault.assetB⟩
@@ -505,8 +330,9 @@ theorem vault_asset_stable_core (fn : Fn) (args : spec.Args fn) (ctx : Ctx)
   bindAddr_stable := fun e he fn args ctx w => by
     have : e = vaultEnv α := List.mem_singleton.mp he
     subst this
-    simpa [vaultEnv, Vault.assetB, vault_worldAfter_core_eq] using
-      vault_asset_stable_core fn args ctx w
+    simp [vaultEnv, Vault.assetB]
+    rw [← Vault.codec.core_exec fn args ctx w]
+    exact vault_asset_stable_core fn args ctx w
 
 theorem vault_RXs_of (α : Abs IERC20.Ghost) (w : World Storage Ext Event) (st : EvmState)
     (h : RX α Vault.assetB w st) : RXs [vaultEnv α] w st :=

@@ -35,7 +35,7 @@ theorem token_bytecode_no_unauthorized_extraction
   intro σ' hE
   let T := mkTokenSetup hκ rt hrt is hcomp
   have ⟨_, hs', hwf'⟩ :=
-    transport_trace T (fun f hf => token_fn_callFree hf) token_post_congr self calls w σ σ'
+    transport_trace T (fun f hf => token_fn_callFree hf) (post_congr_callFree T (fun f hf => token_fn_callFree hf)) self calls w σ σ'
       hs hlog hwf hWF hE
   have hR : RelyAlong (fun _ _ => True) (decodeTrace T calls) w :=
     relyAlong_calls (decodeTrace T calls) w (decodeTrace_are_calls T calls)
@@ -64,7 +64,7 @@ theorem token_bytecode_no_unauthorized_extraction_exists
       (σ (mapSlot1 evmKeccak 2 a)).toNat ≤ (σ' (mapSlot1 evmKeccak 2 a)).toNat := by
   let T := mkTokenSetup hκ rt hrt is hcomp
   obtain ⟨σ', hE, hs', hwf'⟩ :=
-    transport_exists T (fun f hf => token_fn_callFree hf) token_post_congr tr w σ hs hwf hb
+    transport_exists T (fun f hf => token_fn_callFree hf) (post_congr_callFree T (fun f hf => token_fn_callFree hf)) tr w σ hs hwf hb
   refine ⟨σ', hE, ?_⟩
   rw [decodeTrace_encodeCalls T tr hb] at hs' hwf'
   have hwlog : { w with log := [] } = w := by
@@ -98,7 +98,7 @@ theorem token_bytecode_solvent
   intro σ' hE
   let T := mkTokenSetup hκ rt hrt is hcomp
   have ⟨_, hs', _⟩ :=
-    transport_trace T (fun f hf => token_fn_callFree hf) token_post_congr self calls w σ σ'
+    transport_trace T (fun f hf => token_fn_callFree hf) (post_congr_callFree T (fun f hf => token_fn_callFree hf)) self calls w σ σ'
       hs hlog hwf hWF hE
   have hR : RelyAlong (fun _ _ => True) (decodeTrace T calls) w :=
     relyAlong_calls (decodeTrace T calls) w (decodeTrace_are_calls T calls)
@@ -121,7 +121,7 @@ theorem token_bytecode_solvent_exists
         (run (callsOf tr) w).self σ' := by
   let T := mkTokenSetup hκ rt hrt is hcomp
   obtain ⟨σ', hE, hs', _⟩ :=
-    transport_exists T (fun f hf => token_fn_callFree hf) token_post_congr tr w σ hs hwf hb
+    transport_exists T (fun f hf => token_fn_callFree hf) (post_congr_callFree T (fun f hf => token_fn_callFree hf)) tr w σ hs hwf hb
   have hwlog : { w with log := [] } = w := by
     cases w; simp at hlog; subst hlog; rfl
   refine ⟨σ', hE, ?_, ?_⟩

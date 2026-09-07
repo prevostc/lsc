@@ -281,9 +281,12 @@ end RunLemmas
 
 end Tx
 
-/-- Post-world of a `Tx`: success keeps the returned world, revert keeps `w`.
-Language-level so `lsc_contract` can certify Core vs Spec without importing
-`Security`. -/
+/-! Post-world of a `Tx`: success keeps the returned world, revert keeps `w`.
+Lives in `Lsc.Lang` (not `Lsc`) so `open Lsc Lsc.Security` does not see two
+`worldAfter`s. `lsc_contract` cites `Lsc.Lang.worldAfter` in Core-vs-Spec lemmas. -/
+namespace Lang
+
+/-- Post-world of a `Tx`: success keeps the returned world, revert keeps `w`. -/
 def worldAfter {S X E ε α} (x : Tx S X E ε α) (ctx : Ctx) (w : World S X E) :
     World S X E :=
   match Tx.run x ctx w with
@@ -297,6 +300,8 @@ def worldAfter {S X E ε α} (x : Tx S X E ε α) (ctx : Ctx) (w : World S X E) 
 @[simp] theorem worldAfter_error {S X E ε α} {x : Tx S X E ε α} {ctx w e}
     (h : Tx.run x ctx w = .error e) : worldAfter x ctx w = w := by
   simp [worldAfter, h]
+
+end Lang
 
 /-! ### Surface sugar
 

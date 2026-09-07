@@ -229,12 +229,12 @@ theorem worldAfter_frame_on {α} {Γ : ContractSchema S X E ε} {t : RetTy} (c :
       Tx.run (Γ.ext.call b m args) ctx w = .ok (v, w') → w'.self = w.self)
     (hf : f ∉ (Core.effects c).writes)
     (ctx : Ctx) (w : World S X E) :
-    P (worldAfter (Core.denote Γ c env) ctx w).self = P w.self := by
+    P (Lang.worldAfter (Core.denote Γ c env) ctx w).self = P w.self := by
   cases h : Tx.run (Core.denote Γ c env) ctx w with
-  | error _ => simp [worldAfter, h]
+  | error _ => simp [Lang.worldAfter, h]
   | ok p =>
     rcases p with ⟨v, w'⟩
-    simp [worldAfter, h]
+    simp [Lang.worldAfter, h]
     exact effects_frame_on c env f P hStore hStoreMap hStoreMap2 hCall hf h
 
 end Lsc.Proof

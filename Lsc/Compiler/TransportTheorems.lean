@@ -53,8 +53,13 @@ theorem worldAfter_callFree_congr {S X E ε} {Γ : ContractSchema S X E ε} {t}
     (worldAfter (Core.denote Γ core env) ctx w).self =
       (worldAfter (Core.denote Γ core env) ctx w').self ∧
     (worldAfter (Core.denote Γ core env) ctx w).ext =
-      (worldAfter (Core.denote Γ core env) ctx w').ext :=
-  Proof.worldAfter_callFree_congr core hM1 env ctx w w' hs he
+      (worldAfter (Core.denote Γ core env) ctx w').ext := by
+  change
+    (Lang.worldAfter (Core.denote Γ core env) ctx w).self =
+      (Lang.worldAfter (Core.denote Γ core env) ctx w').self ∧
+    (Lang.worldAfter (Core.denote Γ core env) ctx w).ext =
+      (Lang.worldAfter (Core.denote Γ core env) ctx w').ext
+  exact Proof.worldAfter_callFree_congr core hM1 env ctx w w' hs he
 
 /-- `hpc` for a `TransportSetup` whose every runtime function is call-free:
 Spec post-worlds agree on `self`/`ext` whenever the pre-worlds do, via

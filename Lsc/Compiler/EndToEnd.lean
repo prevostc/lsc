@@ -594,20 +594,32 @@ theorem bytecode_trace_transport {S X E ε : Type} (c : ContractDef)
       cases htx : Tx.run (Core.denote Γ f.core args.reverse) ctx { w with log := [] } with
       | ok prod =>
         rcases prod with ⟨_, w'⟩
-        simp [Security.worldAfter, htx] at hpost ⊢
+        have htx' : Tx.run (Core.denote Γ f.core args.reverse) ctx { w with log := [] } =
+            .ok (_, w') := htx
+        simp [htx'] at hpost
+        rw [Security.worldAfter_ok htx']
         exact hpost.1
       | error e =>
-        simp [Security.worldAfter, htx] at hpost ⊢
+        have htx' : Tx.run (Core.denote Γ f.core args.reverse) ctx { w with log := [] } =
+            .error e := htx
+        simp [htx'] at hpost
+        rw [Security.worldAfter_error htx']
         simpa [hpost] using hs
     have hwf1 : WorldWF c Γ w1 := by
       dsimp [w1]
       cases htx : Tx.run (Core.denote Γ f.core args.reverse) ctx { w with log := [] } with
       | ok prod =>
         rcases prod with ⟨_, w'⟩
-        simp [Security.worldAfter, htx] at hpost ⊢
+        have htx' : Tx.run (Core.denote Γ f.core args.reverse) ctx { w with log := [] } =
+            .ok (_, w') := htx
+        simp [htx'] at hpost
+        rw [Security.worldAfter_ok htx']
         exact WorldWF_log [] hpost.2
       | error e =>
-        simp [Security.worldAfter, htx] at hpost ⊢
+        have htx' : Tx.run (Core.denote Γ f.core args.reverse) ctx { w with log := [] } =
+            .error e := htx
+        simp [htx'] at hpost
+        rw [Security.worldAfter_error htx']
         exact WorldWF_log [] hwf
     obtain ⟨σ', htl, hs', hwf'⟩ := ih w1 σ₁ hs1 rfl hwf1 hrest
     refine ⟨σ', EvmTraceRun.cons (yst0 := yst0)

@@ -1272,39 +1272,47 @@ def mkCoreEqAlt (ns fn : Name) : MetaM (TSyntax ``Lean.Parser.Tactic.inductionAl
   let schemaId := mkIdent (ns ++ `schema)
   let specId := mkIdent (ns ++ `spec)
   let coreId : Term := ⟨mkIdent (fn ++ `core)⟩
+  let argsId := mkIdent `args
+  let ctxId := mkIdent `ctx
+  let wId := mkIdent `w
   let binders : Array Ident := surf.params.mapIdx fun i (nm, _) =>
     mkIdent (if nm.hasMacroScopes then Name.mkSimple s!"a{i}" else nm)
   let tac ←
     match n with
     | 0 =>
       `(Lean.Parser.Tactic.tacticSeq|
-          cases args
+          cases $argsId:ident
           dsimp [$fnDefId:ident, $encodeId:ident]
           rfl)
     | 1 => do
-      let argsId := mkIdent `args
+      let enc ← encodeWordTerm surf.params[0]!.2 ⟨argsId⟩
       `(Lean.Parser.Tactic.tacticSeq|
           dsimp [$fnDefId:ident, $encodeId:ident, Lsc.Address.toWord]
-          change Lsc.worldAfter (Lsc.Core.denote $schemaId $coreId [$argsId]) ctx w =
-            Lsc.worldAfter (Lsc.Spec.exec $specId .$ctor:ident $argsId) ctx w
+          change Lsc.Lang.worldAfter (Lsc.Core.denote $schemaId $coreId [$enc]) $ctxId $wId =
+            Lsc.Lang.worldAfter (Lsc.Spec.exec $specId .$ctor:ident $argsId) $ctxId $wId
           rw [$coreDenote:ident, $specExec:ident]
           rfl)
     | 2 => do
       let b0 := binders[0]!; let b1 := binders[1]!
+      let e0 ← encodeWordTerm surf.params[0]!.2 ⟨b0⟩
+      let e1 ← encodeWordTerm surf.params[1]!.2 ⟨b1⟩
       `(Lean.Parser.Tactic.tacticSeq|
-          rcases args with ⟨$b0, $b1⟩
+          rcases $argsId:ident with ⟨$b0, $b1⟩
           dsimp [$fnDefId:ident, $encodeId:ident, Lsc.Address.toWord]
-          change Lsc.worldAfter (Lsc.Core.denote $schemaId $coreId [$b1, $b0]) ctx w =
-            Lsc.worldAfter (Lsc.Spec.exec $specId .$ctor:ident ($b0, $b1)) ctx w
+          change Lsc.Lang.worldAfter (Lsc.Core.denote $schemaId $coreId [$e1, $e0]) $ctxId $wId =
+            Lsc.Lang.worldAfter (Lsc.Spec.exec $specId .$ctor:ident ($b0, $b1)) $ctxId $wId
           rw [$coreDenote:ident, $specExec:ident]
           rfl)
     | 3 => do
       let b0 := binders[0]!; let b1 := binders[1]!; let b2 := binders[2]!
+      let e0 ← encodeWordTerm surf.params[0]!.2 ⟨b0⟩
+      let e1 ← encodeWordTerm surf.params[1]!.2 ⟨b1⟩
+      let e2 ← encodeWordTerm surf.params[2]!.2 ⟨b2⟩
       `(Lean.Parser.Tactic.tacticSeq|
-          rcases args with ⟨$b0, $b1, $b2⟩
+          rcases $argsId:ident with ⟨$b0, $b1, $b2⟩
           dsimp [$fnDefId:ident, $encodeId:ident, Lsc.Address.toWord]
-          change Lsc.worldAfter (Lsc.Core.denote $schemaId $coreId [$b2, $b1, $b0]) ctx w =
-            Lsc.worldAfter (Lsc.Spec.exec $specId .$ctor:ident ($b0, $b1, $b2)) ctx w
+          change Lsc.Lang.worldAfter (Lsc.Core.denote $schemaId $coreId [$e2, $e1, $e0]) $ctxId $wId =
+            Lsc.Lang.worldAfter (Lsc.Spec.exec $specId .$ctor:ident ($b0, $b1, $b2)) $ctxId $wId
           rw [$coreDenote:ident, $specExec:ident]
           rfl)
     | _ => throwError "lsc_contract: worldAfter_core_eq supports at most 3 parameters"
@@ -1315,38 +1323,43 @@ def mkEncodeDecodeAlt (ns fn : Name) : MetaM (TSyntax ``Lean.Parser.Tactic.induc
   let surf ← fnSurface fn
   let n := surf.params.size
   let fnDefId := mkIdent (ns ++ `fnDef)
+  let encodeId := mkIdent (ns ++ `encode)
+  let decodeId := mkIdent (ns ++ `decode)
+  let hId := mkIdent `h
+  let aId := mkIdent `a
+  let bId := mkIdent `b
+  let cId := mkIdent `c
+  let eqId := mkIdent `hns
   let tac ←
     match n with
     | 0 =>
       `(Lean.Parser.Tactic.tacticSeq|
-          simp [$fnDefId:ident] at h
-          subst h
+          simp [$fnDefId:ident] at $hId:ident
+          subst $hId:ident
           rfl)
     | 1 =>
       `(Lean.Parser.Tactic.tacticSeq|
-          simp [$fnDefId:ident] at h
-          obtain ⟨a, rfl⟩ := Lsc.length_eq_one.mp h
-          simp [$(mkIdent (ns ++ `encode)):ident, $(mkIdent (ns ++ `decode)):ident,
-            Lsc.Address.toWord])
+          simp [$fnDefId:ident] at $hId:ident
+          obtain ⟨$aId, $eqId⟩ := Lsc.length_eq_one.mp $hId
+          subst $eqId:ident
+          simp [$encodeId:ident, $decodeId:ident, Lsc.Address.toWord])
     | 2 =>
       `(Lean.Parser.Tactic.tacticSeq|
-          simp [$fnDefId:ident] at h
-          obtain ⟨a, b, rfl⟩ := Lsc.length_eq_two.mp h
-          simp [$(mkIdent (ns ++ `encode)):ident, $(mkIdent (ns ++ `decode)):ident,
-            Lsc.Address.toWord])
+          simp [$fnDefId:ident] at $hId:ident
+          obtain ⟨$aId, $bId, $eqId⟩ := Lsc.length_eq_two.mp $hId
+          subst $eqId:ident
+          simp [$encodeId:ident, $decodeId:ident, Lsc.Address.toWord])
     | 3 =>
       `(Lean.Parser.Tactic.tacticSeq|
-          simp [$fnDefId:ident] at h
-          obtain ⟨a, b, c, rfl⟩ := Lsc.length_eq_three.mp h
-          simp [$(mkIdent (ns ++ `encode)):ident, $(mkIdent (ns ++ `decode)):ident,
-            Lsc.Address.toWord])
+          simp [$fnDefId:ident] at $hId:ident
+          obtain ⟨$aId, $bId, $cId, $eqId⟩ := Lsc.length_eq_three.mp $hId
+          subst $eqId:ident
+          simp [$encodeId:ident, $decodeId:ident, Lsc.Address.toWord])
     | _ => throwError "lsc_contract: encode supports at most 3 parameters"
   `(Lean.Parser.Tactic.inductionAlt| | $ctor:ident => $tac)
 
 partial def mkDecodeOfMemTac (ns : Name) (entries : Array Name) (i : Nat) :
     MetaM (TSyntax ``Lean.Parser.Tactic.tacticSeq) := do
-  let decodeFnId := mkIdent (ns ++ `decodeFn)
-  let fnDefId := mkIdent (ns ++ `fnDef)
   let ctor := ctorIdent entries[i]!
   if i + 1 = entries.size then
     `(Lean.Parser.Tactic.tacticSeq|
@@ -1426,24 +1439,24 @@ def mkCodecCommands (ns : Name) (fns : Array Name) : MetaM (Array (TSyntax `comm
         ($hB : List.length $nsB = List.length ($fnDefId $fnB).params),
         $encodeId $fnB ($decodeId $fnB $nsB) = $nsB := by
         intros $fnB $nsB $hB
-        cases $fnB with
+        cases $fnB:ident with
         $encDecAlts:inductionAlt*)
   let decEncThm := mkIdent (ns ++ `decode_encode)
   let decEncCmd ←
     `(command| theorem $decEncThm : ∀ ($fnB : $fnName) ($argsB : Lsc.Spec.Args $specId $fnB),
         $decodeId $fnB ($encodeId $fnB $argsB) = $argsB := by
         intros $fnB $argsB
-        cases $fnB <;> simp [$decodeId:ident, $encodeId:ident, Lsc.Address.toWord])
+        cases $fnB:ident <;> simp [$decodeId:ident, $encodeId:ident, Lsc.Address.toWord])
   let coreAlts ← entries.mapM (mkCoreEqAlt ns)
   let coreThm := mkIdent (ns ++ `worldAfter_core_eq)
   let coreCmd ←
     `(command| theorem $coreThm : ∀ ($fnB : $fnName) ($argsB : Lsc.Spec.Args $specId $fnB)
         ($ctxB : Lsc.Ctx) ($wB : Lsc.World $S $X $E),
-        Lsc.worldAfter (Lsc.Core.denote $schemaId ($fnDefId $fnB).core
+        Lsc.Lang.worldAfter (Lsc.Core.denote $schemaId ($fnDefId $fnB).core
           (List.reverse ($encodeId $fnB $argsB))) $ctxB $wB =
-        Lsc.worldAfter (Lsc.Spec.exec $specId $fnB $argsB) $ctxB $wB := by
+        Lsc.Lang.worldAfter (Lsc.Spec.exec $specId $fnB $argsB) $ctxB $wB := by
         intros $fnB $argsB $ctxB $wB
-        cases $fnB with
+        cases $fnB:ident with
         $coreAlts:inductionAlt*)
   return #[fnDefCmd, encodeCmd, decodeFnCmd, decodeCmd, memCmd, lenCmd, decFnCmd,
     ofMemCmd, encDecCmd, decEncCmd, coreCmd]
@@ -1632,6 +1645,12 @@ syntax (name := lscCodec) "lsc_codec " ident : command
     let contractId : Term := ⟨mkIdent (nsName ++ `contract)⟩
     let schemaId : Term := ⟨mkIdent (nsName ++ `schema)⟩
     let specId : Term := ⟨mkIdent (nsName ++ `spec)⟩
+    let fnDefId : Term := ⟨mkIdent (nsName ++ `fnDef)⟩
+    let encodeId : Term := ⟨mkIdent (nsName ++ `encode)⟩
+    let coreEq : Term := ⟨mkIdent (nsName ++ `worldAfter_core_eq)⟩
+    let waL : Term := ⟨mkIdent (`Lsc.Lang.worldAfter : Name)⟩
+    let denoteId : Term := ⟨mkIdent (`Lsc.Core.denote : Name)⟩
+    let execId : Term := ⟨mkIdent (`Lsc.Spec.exec : Name)⟩
     let cmd ← `(command|
       def $codecId : $tc $contractId $schemaId $specId where
         fnDef := $(mkIdent (nsName ++ `fnDef))
@@ -1644,7 +1663,10 @@ syntax (name := lscCodec) "lsc_codec " ident : command
         decodeFn_of_mem := $(mkIdent (nsName ++ `decodeFn_of_mem))
         encode_decode := $(mkIdent (nsName ++ `encode_decode))
         decode_encode := $(mkIdent (nsName ++ `decode_encode))
-        core_exec := $(mkIdent (nsName ++ `worldAfter_core_eq)))
+        core_exec := fun fn args ctx w => by
+          change $waL ($denoteId $schemaId ($fnDefId fn).core ($encodeId fn args).reverse) ctx w =
+            $waL ($execId $specId fn args) ctx w
+          exact $coreEq fn args ctx w)
     elabCommand cmd
   | _ => throwUnsupportedSyntax
 

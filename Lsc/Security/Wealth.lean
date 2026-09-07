@@ -64,9 +64,9 @@ theorem NoUnauthorizedDecreaseFn_of_ok {Inv : World S X E → Prop} {claim : Cla
     NoUnauthorizedDecreaseFn C Inv claim Auth fn := by
   intro args ctx w a hInv hdec
   cases h : Tx.run (C.exec fn args) ctx w with
-  | error _ => simp [worldAfter, h] at hdec
+  | error _ => simp [worldAfter_error h] at hdec
   | ok p =>
-    exact hok args ctx w a p.1 p.2 hInv h (by simpa [worldAfter, h] using hdec)
+    exact hok args ctx w a p.1 p.2 hInv h (by simpa [worldAfter_ok h] using hdec)
 
 /--
 `Auth` is state-dependent (allowance), so the hyp must follow the prefix state.
@@ -126,10 +126,10 @@ theorem ConservesFn_of_ok {Inv : World S X E → Prop} {claim : Claim S}
   cases h : Tx.run (C.exec fn args) ctx w with
   | error _ =>
     refine ⟨∅, ?_, ?_⟩
-    · intro a _; simp [worldAfter, h]
-    · simp [worldAfter, h]
+    · intro a _; simp [worldAfter_error h]
+    · simp [worldAfter_error h]
   | ok p =>
-    simpa [worldAfter, h] using hok args ctx w p.1 p.2 hInv h
+    simpa [worldAfter_ok h] using hok args ctx w p.1 p.2 hInv h
 
 /-- Assets the contract actually controls, read from storage or the external-token ghost. -/
 abbrev Holdings (S X E : Type) := Address → World S X E → Nat

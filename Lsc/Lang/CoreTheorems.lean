@@ -138,7 +138,7 @@ theorem worldAfter_frame_on {α} {Γ : ContractSchema S X E ε} {t : RetTy} (c :
       Tx.run (Γ.ext.call b m args) ctx w = .ok (v, w') → w'.self = w.self)
     (hf : f ∉ (Core.effects c).writes)
     (ctx : Ctx) (w : World S X E) :
-    P (worldAfter (Core.denote Γ c env) ctx w).self = P w.self :=
+    P (Lang.worldAfter (Core.denote Γ c env) ctx w).self = P w.self :=
   Proof.worldAfter_frame_on c env f P hStore hStoreMap hStoreMap2 hCall hf ctx w
 
 end Lsc

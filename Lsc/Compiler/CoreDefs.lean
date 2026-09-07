@@ -80,7 +80,7 @@ theorem m1OpB_eq (op : Lsc.Op) : m1OpB op = true ↔ M1Op op := by
 theorem m1StmtB_eq (s : Lsc.Stmt) : m1StmtB s = true ↔ M1Stmt s := by
   cases s with
   | store _ _ | storeMap _ _ _ | storeMap2 _ _ _ _ => simp [m1StmtB, M1Stmt]
-  | emit _ args => simp [m1StmtB, M1Stmt]
+  | emit _ args => simp [m1StmtB, M1Stmt]; tauto
   | require c _ args => simp [m1StmtB, M1Stmt, M1Cond]
   | revert _ args => simp [m1StmtB, M1Stmt]
   | call _ _ _ => simp [m1StmtB, M1Stmt]
@@ -107,7 +107,7 @@ theorem m1FragB_eq {t} (core : Core t) : m1FragB core = true ↔ M1Frag core := 
   | seq s k ih =>
     simp [m1FragB, M1Frag, m1StmtB_eq, ih]
   | letPure p args k ih =>
-    simp [m1FragB, M1Frag, ih]
+    simp [m1FragB, M1Frag, ih, and_assoc]
   | ite _ a b iha ihb =>
     simp [m1FragB, M1Frag, M1Cond, iha, ihb]
 

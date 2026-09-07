@@ -57,11 +57,11 @@ theorem transport_step (T : TransportSetup S X E ε)
     | ok prod =>
       rcases prod with ⟨_, w'⟩
       simp only [htx] at hpost
-      simp [worldAfter, htx]
+      simp [worldAfter_ok htx]
       exact ⟨hpost.1, WorldWF_log [] hpost.2⟩
     | error e =>
       simp only [htx] at hpost
-      simp [worldAfter, htx]
+      simp [worldAfter_error htx]
       refine ⟨?_, WorldWF_log [] hwf⟩
       simpa [yst0, mkEvmState_storage, hpost] using hs
 

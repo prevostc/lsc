@@ -105,7 +105,7 @@ theorem s2FragB_eq {t} (core : Core t) : s2FragB core = true ↔ S2Frag core := 
   | revertTail _ args => simp [s2FragB, S2Frag]
   | letOp op k ih => simp [s2FragB, S2Frag, s2OpB_eq, ih]
   | seq s k ih => simp [s2FragB, S2Frag, s2StmtB_eq, ih]
-  | letPure p args k ih => simp [s2FragB, S2Frag, ih]
+  | letPure p args k ih => simp [s2FragB, S2Frag, ih, and_assoc]
   | ite _ a b iha ihb => simp [s2FragB, S2Frag, M1Cond, iha, ihb]
 
 instance (op : Lsc.Op) : Decidable (S2Op op) :=
