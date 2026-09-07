@@ -7,7 +7,7 @@ set_option linter.unusedVariables false
 
 /-!
 Proofs that every Token runtime entrypoint is call-free and compiles
-correctly. The exported guarantee is `token_correct` in `TokenTheorems`.
+correctly. The exported guarantee is `token_correct` in `Theorems.lean`.
 -/
 
 namespace Lsc.Compiler

@@ -2,7 +2,8 @@ import Examples.Counter.Contract
 import Lsc.Lang.Contract
 
 /-!
-Counter runtime `FnDef`s used by the per-entrypoint `toYulFn` theorems.
+Counter spec: runtime `FnDef`s used by the per-entrypoint `toYulFn` theorems.
+No wealth predicates — Counter has no claim/Auth/Inv.
 -/
 
 namespace Lsc.Compiler

@@ -2,8 +2,8 @@ import Mathlib.Tactic.SplitIfs
 import Mathlib.Algebra.BigOperators.Group.Finset.Basic
 import Lsc.Security.Wealth
 import Lsc.Security.WealthTheorems
-import Examples.Vault.Proofs
-import Lsc.Compiler.Bytecode
+import Examples.Vault.Spec
+import Examples.Vault.Proofs.Tx
 
 open Lsc Lsc.Stdlib Lsc.Security Vault
 
@@ -14,42 +14,6 @@ Security obligations for the vault. `Inv` is indexed by the vault address becaus
 `holdings` reads `ext.asset.balances self`. Well-formed traces use
 `PreservesInvFnAt` (`ctx.self = self`, `ctx.sender ≠ self`).
 -/
-
-/-- Redeemable assets of `a`. Zero when the supply is empty. -/
-def claim (a : Address) (σ : Storage) : Nat :=
-  if σ.totalShares = 0 then 0 else σ.shares a * σ.totalAssets / σ.totalShares
-
-/-- Only a `withdraw` by `a` itself may decrease `claim a`. -/
-def Auth (a : Address) (c : Call spec) (_s : Storage) : Prop :=
-  match c.fn, c.args with
-  | .withdraw, _ => c.sender = a
-  | _, _ => False
-
-/-- Deposit is the only inflow of claim-units; it is `0` on revert. -/
-def inflow (c : Call spec) (w : World Storage Ext Event) : Nat :=
-  match c.fn, c.args with
-  | .deposit, assets =>
-    match Tx.run (deposit assets) c.toCtx w with
-    | .ok _ => assets.toNat
-    | .error _ => 0
-  | _, _ => 0
-
-/-- Underlying-token balance of the vault. -/
-def holdings (self : Address) (w : World Storage Ext Event) : Nat :=
-  w.ext.asset.balances self
-
-def InvStorage (σ : Storage) : Prop :=
-  ∃ H : Finset Address,
-    (∀ a, a ∉ H → σ.shares a = 0) ∧
-    H.sum (fun a => σ.shares a) = σ.totalShares
-
-/-- `totalAssets ≤` ghost balance of `self`, and share balances have finite support. -/
-def Inv (self : Address) (w : World Storage Ext Event) : Prop :=
-  w.self.totalAssets ≤ holdings self w ∧ InvStorage w.self
-
-/-- Between our calls: vault token balance is non-decreasing and `decimals` is fixed. -/
-def vaultRely (self : Address) (x x' : Ext) : Prop :=
-  Rely self x.asset x'.asset
 
 /-! ### Environment -/
 
@@ -450,14 +414,23 @@ theorem vault_no_unauth (self : Address) :
     | .paused? => paused?_auth self
     | .decimals => decimals_auth self
 
+
+namespace Proof
+
+theorem vault_solvent (self : Address) (tr : List (Step spec))
+    (w : World Storage Ext Event)
+    (hW : Wf self tr) (hR : RelyAlong (vaultRely self) tr w) (h : Inv self w) :
+    Solvent claim holdings self (run tr w) :=
+  solvent_run_at (vault_preserves_inv self) (inv_rely self) (inv_solvent self) h tr hW hR
+
+theorem vault_no_unauthorized_extraction (self : Address)
+    (tr : List (Step spec)) (w : World Storage Ext Event) (a : Address)
+    (hw : Inv self w) (hW : Wf self tr) (hR : RelyAlong (vaultRely self) tr w)
+    (hA : NoAuthAlong Auth a tr w) :
+    claim a w.self ≤ claim a (run tr w).self :=
+  no_unauthorized_extraction_at (vault_no_unauth self) (vault_preserves_inv self)
+    (inv_rely self) tr w a hw hW hR hA
+
+end Proof
+
 end Vault
-
-set_option maxHeartbeats 8000000
-open Lsc.Compiler
-
-/-- Runtime bytecode exists (`Op.call` is handled by the reifier and compiler). -/
-def vault_runtime_some : Bool := (compileRuntime Vault.contract).isSome
-
-#guard vault_runtime_some
-
-#eval (compileRuntime Vault.contract).map List.length

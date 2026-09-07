@@ -8,11 +8,11 @@ Spec → Core → Yul → EVM bytecode. Axiom footprint of the chain is `propext
 `Classical.choice`, `Quot.sound`, pinned by `#guard_msgs` in `Checks.lean`.
 
 - Token (S1, call-free): `token_bytecode_no_unauthorized_extraction` /
-  `token_bytecode_solvent` (`Examples/Token/EndToEndTheorems.lean`).
+  `token_bytecode_solvent` (`Examples/Token/Theorems.lean`).
 - Vault (S2, one external binding): `vault_bytecode_no_unauthorized_extraction` /
-  `vault_bytecode_solvent` (`Examples/Vault/EndToEndTheorems.lean`).
+  `vault_bytecode_solvent` (`Examples/Vault/Theorems.lean`).
 - AMM (S2, two `IERC20` bindings): `amm_bytecode_no_unauthorized_extraction`
-  (`Examples/Amm/EndToEndTheorems.lean`).
+  (`Examples/Amm/Theorems.lean`).
 - Glue: `bytecode_call_correct` (`EndToEndTheorems.lean`), `bytecode_call_correct_ext`
   (`EndToEndExtTheorems.lean`). AMM bytecode: `amm_bytecode_no_unauthorized_extraction`.
   Counter is compiler-level only.

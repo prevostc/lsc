@@ -2,12 +2,8 @@ import Mathlib.Tactic.SplitIfs
 import Examples.Token.Contract
 
 /-!
-# Token — theorems
-
-Every statement is about `Tx.run (Token.f args) ctx w`: the plain function view of the
-program the user wrote, which is also (by `f.core_denote`) the denotation of the `Core`
-term the compiler consumes. Proofs are `simp` with the run lemmas plus `omega`; no
-`native_decide`, no framework internals in the statements.
+Token Tx-level lemmas: exact `Tx.run` post-states, revert cases, and
+conservation of a successful `transfer`.
 -/
 
 open Lsc Token
@@ -357,5 +353,32 @@ theorem burn_reverts_on_insufficient_supply (amount : Nat)
     (hsub : amount ≤ w.self.balances ctx.sender) (hsupply : w.self.totalSupply < amount) :
     Tx.run (burn amount) ctx w = .error (.arith .underflow) := by
   simp [burn, hsub, Nat.not_le.mpr hsupply]
+
+namespace Proof
+
+/-- A successful `transfer` conserves the sum of the two balances, including
+when sender = recipient. Success implies the funds and overflow checks. -/
+theorem transfer_conserves (to : Address) (amount : Nat)
+    {w' : World Storage Unit Event}
+    (h : Tx.run (transfer to amount) ctx w = .ok ((), w')) :
+    w'.self.balances ctx.sender + w'.self.balances to =
+      w.self.balances ctx.sender + w.self.balances to := by
+  by_cases hsub : amount ≤ w.self.balances ctx.sender
+  · by_cases hadd : debit w.self.balances ctx.sender amount to + amount < wordBound
+    · rw [transfer_ok ctx w to amount hsub hadd] at h
+      cases h
+      if hne : ctx.sender = to then
+        subst hne
+        simp [transferPost, credit_self, debit_self]
+        exact congrArg (fun n => n + n) (Nat.sub_add_cancel hsub)
+      else
+        simp [transferPost, credit_other _ hne, debit_other _ (Ne.symm hne)]
+        omega
+    · rw [transfer_reverts_on_overflow ctx w to amount hsub (Nat.not_lt.mp hadd)] at h
+      cases h
+  · rw [transfer_reverts_on_insufficient_balance ctx w to amount (Nat.not_le.mp hsub)] at h
+    cases h
+
+end Proof
 
 end Token

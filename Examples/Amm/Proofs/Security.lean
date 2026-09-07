@@ -3,7 +3,8 @@ import Mathlib.Algebra.BigOperators.Group.Finset.Basic
 import Mathlib.Algebra.Order.BigOperators.Group.Finset
 import Lsc.Security.Wealth
 import Lsc.Security.WealthTheorems
-import Examples.Amm.Proofs
+import Examples.Amm.Spec
+import Examples.Amm.Proofs.Tx
 
 set_option linter.unusedSimpArgs false
 set_option maxHeartbeats 8000000
@@ -17,44 +18,6 @@ holdings read the IERC20 ghosts. `k` is a swap theorem, not `Inv`:
 open Lsc Lsc.Stdlib Lsc.Security Amm
 
 namespace Amm
-
-def claim (a : Address) (σ : Storage) : Nat := σ.shares a
-
-def claim0 (a : Address) (σ : Storage) : Nat :=
-  if σ.totalShares = 0 then 0 else σ.shares a * σ.reserve0 / σ.totalShares
-
-def claim1 (a : Address) (σ : Storage) : Nat :=
-  if σ.totalShares = 0 then 0 else σ.shares a * σ.reserve1 / σ.totalShares
-
-def Auth (a : Address) (c : Call spec) (_s : Storage) : Prop :=
-  match c.fn, c.args with
-  | .removeLiquidity, _ => c.sender = a
-  | _, _ => False
-
-def inflow (c : Call spec) (w : World Storage Ext Event) : Nat :=
-  match c.fn, c.args with
-  | .addLiquidity, (a0, a1) =>
-    match Tx.run (addLiquidity a0 a1) c.toCtx w with
-    | .ok (n, _) => n
-    | .error _ => 0
-  | _, _ => 0
-
-def holdings0 (self : Address) (w : World Storage Ext Event) : Nat :=
-  w.ext.token0.balances self
-
-def holdings1 (self : Address) (w : World Storage Ext Event) : Nat :=
-  w.ext.token1.balances self
-
-def holdings (self : Address) (w : World Storage Ext Event) : Nat :=
-  holdings0 self w
-
-def Inv (self : Address) (w : World Storage Ext Event) : Prop :=
-  w.self.reserve0 ≤ holdings0 self w ∧
-  w.self.reserve1 ≤ holdings1 self w ∧
-  InvStorage w.self
-
-def ammRely (self : Address) (x x' : Ext) : Prop :=
-  Rely self x.token0 x'.token0 ∧ Rely self x.token1 x'.token1
 
 theorem inv_rely (self : Address) :
     PreservesInvEnv spec (Inv self) (ammRely self) := by
@@ -319,6 +282,27 @@ theorem amm_no_unauth (self : Address) :
     | .getReserves => getReserves_auth self
     | .sharesOf => sharesOf_auth self
     | .quote0for1 => quote0for1_auth self
+
+
+namespace Proof
+
+theorem amm_solvent (self : Address) (tr : List (Step spec))
+    (w : World Storage Ext Event)
+    (hW : Wf self tr) (hR : RelyAlong (ammRely self) tr w) (h : Inv self w) :
+    Solvent claim0 holdings0 self (run tr w) ∧
+      Solvent claim1 holdings1 self (run tr w) :=
+  ⟨solvent_run_at (amm_preserves_inv self) (inv_rely self) (inv_solvent0 self) h tr hW hR,
+    solvent_run_at (amm_preserves_inv self) (inv_rely self) (inv_solvent1 self) h tr hW hR⟩
+
+theorem amm_no_unauthorized_extraction (self : Address)
+    (tr : List (Step spec)) (w : World Storage Ext Event) (a : Address)
+    (hw : Inv self w) (hW : Wf self tr) (hR : RelyAlong (ammRely self) tr w)
+    (hA : NoAuthAlong Auth a tr w) :
+    claim a w.self ≤ claim a (run tr w).self :=
+  no_unauthorized_extraction_at (amm_no_unauth self) (amm_preserves_inv self)
+    (inv_rely self) tr w a hw hW hR hA
+
+end Proof
 
 end Amm
 

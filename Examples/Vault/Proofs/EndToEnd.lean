@@ -1,7 +1,7 @@
 import Lsc.Compiler.TransportTheorems
-import Examples.Vault.CompileTheorems
-import Examples.Vault.Security
-import Examples.Vault.SecurityTheorems
+import Examples.Vault.Spec
+import Examples.Vault.Proofs.Compile
+import Examples.Vault.Proofs.Security
 import Lsc.Lang.CoreTheorems
 import YulEvmCompiler.Compile
 import YulEvmCompiler.LowerDefs
@@ -22,15 +22,7 @@ open YulSemantics.EVM
 open YulEvmCompiler
 open YulEvmCompiler (compile Instr)
 
-lsc_codec Vault
-
 namespace Vault
-
-def vaultClaimRead (κ : List UInt8 → U256) (σ : U256 → U256) (a : Address) : Nat :=
-  let ta := (σ (BitVec.ofNat 256 0)).toNat
-  let ts := (σ (BitVec.ofNat 256 1)).toNat
-  let sh := (σ (mapSlot1 κ 2 a)).toNat
-  if ts = 0 then 0 else sh * ta / ts
 
 theorem vault_field_totalAssets :
     Vault.contract.fields[0]? =
@@ -143,26 +135,6 @@ theorem noAuthAlong_irrel (a : Address) :
       exact and_congr
         (iff_of_eq (congrArg Not (vault_auth_storage a c w.self w'.self)))
         (ih (step (.call c) w) (step (.call c) w'))
-
-def ConfFun (self : Address) (ext : ExternalCalls) (α : Abs IERC20.Ghost) : Prop :=
-  ∀ (w' : World Storage Ext Event),
-    Conforms IERC20 self (Vault.assetB.addr w'.self) ext α
-
-/-- Holdings of `self` according to `α` at the token address, from bytecode `σ`/`ξ`. -/
-def vaultHoldingsRead (α : Abs IERC20.Ghost) (σ : U256 → U256) (ξ : Foreign)
-    (self assetAddr : Address) : Nat :=
-  (α.ofState (mkEvmStateExt ([] : List UInt8) σ ξ evmKeccak (dummyCtx self))
-    assetAddr).balances self
-
-/-- Storage-level solvency: finite support of `vaultClaimRead` on addresses below
-`wordBound`, and that support's sum is ≤ holdings read through `α` from `ξ`.
-Addresses `≥ wordBound` are outside `storageRel`. Trailing `env` steps may raise
-Spec holdings while `ξ'` stays at the last EVM call; this statement tracks `ξ'`. -/
-def vaultSolventRead (α : Abs IERC20.Ghost) (σ : U256 → U256) (ξ : Foreign)
-    (self assetAddr : Address) : Prop :=
-  ∃ H : Finset Address,
-    (∀ a, Nat.lt a wordBound → a ∉ H → vaultClaimRead evmKeccak σ a = 0) ∧
-    H.sum (vaultClaimRead evmKeccak σ) ≤ vaultHoldingsRead α σ ξ self assetAddr
 
 theorem vaultSolventRead_of_inv (α : Abs IERC20.Ghost)
     (self : Address) (w : World Storage Ext Event) (σ : U256 → U256) (ξ : Foreign)
@@ -304,9 +276,6 @@ theorem vault_asset_stable_core (fn : Fn) (args : spec.Args fn) (ctx : Ctx)
       (fun b m args ctx w v w' hok => vault_ext_call_self hok)
       (coreAvoids_not_write (vault_fn_avoids (Vault.fnDef_mem fn))) htx
 
-@[reducible] def vaultEnv (α : Abs IERC20.Ghost) : BindEnv IERC20 Storage Ext :=
-  ⟨α, Vault.assetB⟩
-
 @[reducible] def mkVaultBindings
     (hκ : KeccakSep Vault.contract evmKeccak)
     (rt : YBlock) (hrt : runtimeBlock Vault.contract = some rt)
@@ -372,20 +341,6 @@ theorem vault_noAuthAlong_callsOf (a : Address) (tr : List (Step spec))
       rcases h with ⟨hAc, hAtl⟩
       exact ⟨hAc, ih (w := step (.call c) w) hAtl⟩
 
-/-- Solidity ERC20 layout: `balances[o]` at `keccak(abi(o) ‖ abi(0))`, `decimals` at slot 1.
-`Ghost` has no allowances or `totalSupply`; both are unread. Uses the fixed `evmKeccak`
-oracle (not `st.env.keccakOf`) so `ofState_foreign` holds. -/
-def vaultGhostOf (sto : U256 → U256) : IERC20.Ghost where
-  balances := fun o =>
-    (sto (mapSlot1 evmKeccak IERC20.balancesMappingSlot (o : Nat))).toNat
-  decimals := (sto (BitVec.ofNat 256 IERC20.decimalsSlot)).toNat
-
-def vaultAbsSolidity : Abs IERC20.Ghost where
-  ofState st a := vaultGhostOf (evmForeign st (BitVec.ofNat 256 (a : Nat)))
-  ofWorld w a := vaultGhostOf (w.storageOf (BitVec.ofNat 256 (a : Nat)))
-  ofState_proj := fun _ _ => rfl
-  ofWorld_install := fun _ _ _ => rfl
-
 theorem vaultAbsSolidity_ignoresLocal : vaultAbsSolidity.ignoresLocal := by
   intro st σ τ sto tro a hfr hsto _htro
   apply congrArg vaultGhostOf
@@ -400,5 +355,179 @@ theorem vaultAbsSolidity_ofState_foreign : vaultAbsSolidity.ofState_foreign := b
 
 example : ∃ α : Abs IERC20.Ghost, α.ignoresLocal ∧ α.ofState_foreign :=
   ⟨vaultAbsSolidity, vaultAbsSolidity_ignoresLocal, vaultAbsSolidity_ofState_foreign⟩
+
+
+namespace Proof
+
+theorem vault_bytecode_no_unauthorized_extraction
+    (α : Abs IERC20.Ghost) (ext : ExternalCalls)
+    (hCalls : CallsRealized ext) (htot : CallsTotal ext)
+    (rt : YBlock) (hrt : runtimeBlock Vault.contract = some rt)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
+    (hκ : KeccakSep Vault.contract evmKeccak)
+    (hign : α.ignoresLocal) (hF : α.ofState_foreign)
+    (self : Address) (calls : List EvmCall) (w : World Storage Ext Event)
+    (a : Address) (σ : U256 → U256) (ξ : Foreign)
+    (hw : Inv self w) (hlog : w.log = [])
+    (hWF : CallsWF (mkVaultSetup hκ rt hrt is hcomp) self calls)
+    (hA : NoAuthAlong Auth a (decodeTrace (mkVaultSetup hκ rt hrt is hcomp) calls) w)
+    (hs : storageRel Vault.contract Vault.schema evmKeccak w.self σ)
+    (hwf : WorldWF Vault.contract Vault.schema w)
+    (ha : Nat.lt a wordBound)
+    (hRX : RX α Vault.assetB w
+      (mkEvmStateExt ([] : List UInt8) σ ξ evmKeccak (dummyCtx self)))
+    (hconf : ConfFun self ext α)
+    (hBindNe : accountKey (BitVec.ofNat 256 (Vault.assetB.addr w.self)) ≠
+                accountKey (BitVec.ofNat 256 self)) :
+    ∀ σ' ξ', EvmTraceRunExtAll is calls σ ξ σ' ξ' →
+      vaultClaimRead evmKeccak σ a ≤ vaultClaimRead evmKeccak σ' a := by
+  intro σ' ξ' hE
+  let T := mkVaultSetup hκ rt hrt is hcomp
+  let Xpkg := mkVaultBindings hκ rt hrt is hcomp α ext hCalls htot hign hF
+  have ⟨w', hs', hwf', _, _, hle⟩ :=
+    transport_claim_ext T Xpkg (Inv self) claim Auth self a
+      (vault_no_unauth self) (vault_preserves_inv self)
+      (fun w fo h => vault_inv_faults self w fo h)
+      (fun w log h => vault_inv_log self w log h)
+      (fun tr w w' => noAuthAlong_irrel a tr w w')
+      calls w σ ξ σ' ξ' hs hlog hwf hWF
+      (vault_RXs_of α w _ hRX) (vault_neSelf_of α self w.self hBindNe)
+      (vault_confs_of α self ext hconf) (vault_inj_of α w.self) hA hw hE
+  have hpre := vault_claim_of_rel w.self σ a hs ha
+    (vault_ta_bound w hwf) (vault_ts_bound w hwf) (vault_shares_bound w a hwf ha)
+  have hpost := vault_claim_of_rel w'.self σ' a hs' ha
+    (vault_ta_bound w' hwf') (vault_ts_bound w' hwf') (vault_shares_bound w' a hwf' ha)
+  rw [hpre, hpost]
+  exact hle
+
+theorem vault_bytecode_no_unauthorized_extraction_exists
+    (α : Abs IERC20.Ghost) (ext : ExternalCalls)
+    (hCalls : CallsRealized ext) (htot : CallsTotal ext)
+    (rt : YBlock) (hrt : runtimeBlock Vault.contract = some rt)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
+    (hκ : KeccakSep Vault.contract evmKeccak)
+    (hign : α.ignoresLocal) (hF : α.ofState_foreign)
+    (self : Address) (tr : List (Step spec)) (w : World Storage Ext Event)
+    (a : Address) (σ : U256 → U256) (ξ : Foreign)
+    (hw : Inv self w) (hW : Wf self tr) (hlog : w.log = [])
+    (hA : NoAuthAlong Auth a tr w)
+    (hs : storageRel Vault.contract Vault.schema evmKeccak w.self σ)
+    (hwf : WorldWF Vault.contract Vault.schema w)
+    (hb : EncodeBounded (mkVaultSetup hκ rt hrt is hcomp) tr)
+    (ha : Nat.lt a wordBound)
+    (hRX : RX α Vault.assetB w
+      (mkEvmStateExt ([] : List UInt8) σ ξ evmKeccak (dummyCtx self)))
+    (hconf : ConfFun self ext α)
+    (hBindNe : accountKey (BitVec.ofNat 256 (Vault.assetB.addr w.self)) ≠
+                accountKey (BitVec.ofNat 256 self)) :
+    ∃ σ' ξ', EvmTraceRunExt is
+        (encodeCalls (mkVaultSetup hκ rt hrt is hcomp) tr) σ ξ σ' ξ' ∧
+      vaultClaimRead evmKeccak σ a ≤ vaultClaimRead evmKeccak σ' a := by
+  let T := mkVaultSetup hκ rt hrt is hcomp
+  let Xpkg := mkVaultBindings hκ rt hrt is hcomp α ext hCalls htot hign hF
+  have hwlog : { w with log := ([] : List Event) } = w := by
+    cases w; simp at hlog; subst hlog; rfl
+  obtain ⟨σ', ξ', w', hE, hs', hwf', _, _, hle⟩ :=
+    transport_exists_claim_ext T Xpkg (Inv self) claim Auth self a
+      (vault_no_unauth self) (vault_preserves_inv self)
+      (fun w fo h => vault_inv_faults self w fo h)
+      (fun w log h => vault_inv_log self w log h)
+      (fun tr w w' => noAuthAlong_irrel a tr w w')
+      tr w σ ξ hs hwf hb hW hw (vault_noAuthAlong_callsOf a tr w hA)
+      (by simpa [hwlog] using vault_RXs_of α w _ hRX)
+      (vault_neSelf_of α self w.self hBindNe) (vault_confs_of α self ext hconf)
+      (vault_inj_of α w.self)
+  refine ⟨σ', ξ', hE, ?_⟩
+  have hpre := vault_claim_of_rel w.self σ a hs ha
+    (vault_ta_bound w hwf) (vault_ts_bound w hwf) (vault_shares_bound w a hwf ha)
+  have hpost := vault_claim_of_rel w'.self σ' a hs' ha
+    (vault_ta_bound w' hwf') (vault_ts_bound w' hwf') (vault_shares_bound w' a hwf' ha)
+  rw [hpre, hpost]
+  exact hle
+
+theorem vault_bytecode_solvent
+    (α : Abs IERC20.Ghost) (ext : ExternalCalls)
+    (hCalls : CallsRealized ext) (htot : CallsTotal ext)
+    (rt : YBlock) (hrt : runtimeBlock Vault.contract = some rt)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
+    (hκ : KeccakSep Vault.contract evmKeccak)
+    (hign : α.ignoresLocal) (hF : α.ofState_foreign)
+    (self : Address) (calls : List EvmCall) (w : World Storage Ext Event)
+    (σ : U256 → U256) (ξ : Foreign)
+    (hw : Inv self w) (hlog : w.log = [])
+    (hWF : CallsWF (mkVaultSetup hκ rt hrt is hcomp) self calls)
+    (hs : storageRel Vault.contract Vault.schema evmKeccak w.self σ)
+    (hwf : WorldWF Vault.contract Vault.schema w)
+    (hRX : RX α Vault.assetB w
+      (mkEvmStateExt ([] : List UInt8) σ ξ evmKeccak (dummyCtx self)))
+    (hconf : ConfFun self ext α)
+    (hBindNe : accountKey (BitVec.ofNat 256 (Vault.assetB.addr w.self)) ≠
+                accountKey (BitVec.ofNat 256 self)) :
+    ∀ σ' ξ', EvmTraceRunExtAll is calls σ ξ σ' ξ' →
+      vaultSolventRead α σ' ξ' self (Vault.assetB.addr w.self) := by
+  intro σ' ξ' hE
+  let T := mkVaultSetup hκ rt hrt is hcomp
+  let Xpkg := mkVaultBindings hκ rt hrt is hcomp α ext hCalls htot hign hF
+  have ⟨_, w', hs', hwf', hRX', hInv', haddr⟩ :=
+    transport_trace_ext T Xpkg self calls w σ ξ σ' ξ' hs hlog hwf hWF
+      (vault_RXs_of α w _ hRX) (vault_neSelf_of α self w.self hBindNe)
+      (vault_confs_of α self ext hconf) (vault_inj_of α w.self) (Inv self) (vault_preserves_inv self)
+      (fun w fo h => vault_inv_faults self w fo h)
+      (fun w log h => vault_inv_log self w log h)
+      hw hE
+  have hsol := vaultSolventRead_of_inv α self w' σ' ξ' hInv' hs' hwf'
+    (vault_RX_of α w' _ hRX')
+  have haddr' : Vault.assetB.addr w'.self = Vault.assetB.addr w.self :=
+    haddr (vaultEnv α) (List.mem_singleton.mpr rfl)
+  rw [← haddr']
+  exact hsol
+
+theorem vault_bytecode_solvent_exists
+    (α : Abs IERC20.Ghost) (ext : ExternalCalls)
+    (hCalls : CallsRealized ext) (htot : CallsTotal ext)
+    (rt : YBlock) (hrt : runtimeBlock Vault.contract = some rt)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
+    (hκ : KeccakSep Vault.contract evmKeccak)
+    (hign : α.ignoresLocal) (hF : α.ofState_foreign)
+    (self : Address) (tr : List (Step spec)) (w : World Storage Ext Event)
+    (σ : U256 → U256) (ξ : Foreign)
+    (hw : Inv self w) (hW : Wf self tr) (hlog : w.log = [])
+    (hs : storageRel Vault.contract Vault.schema evmKeccak w.self σ)
+    (hwf : WorldWF Vault.contract Vault.schema w)
+    (hb : EncodeBounded (mkVaultSetup hκ rt hrt is hcomp) tr)
+    (hRX : RX α Vault.assetB w
+      (mkEvmStateExt ([] : List UInt8) σ ξ evmKeccak (dummyCtx self)))
+    (hconf : ConfFun self ext α)
+    (hBindNe : accountKey (BitVec.ofNat 256 (Vault.assetB.addr w.self)) ≠
+                accountKey (BitVec.ofNat 256 self)) :
+    ∃ σ' ξ', EvmTraceRunExt is
+        (encodeCalls (mkVaultSetup hκ rt hrt is hcomp) tr) σ ξ σ' ξ' ∧
+      vaultSolventRead α σ' ξ' self (Vault.assetB.addr w.self) := by
+  let T := mkVaultSetup hκ rt hrt is hcomp
+  let Xpkg := mkVaultBindings hκ rt hrt is hcomp α ext hCalls htot hign hF
+  have hwlog : { w with log := ([] : List Event) } = w := by
+    cases w; simp at hlog; subst hlog; rfl
+  obtain ⟨σ', ξ', w', hE, hs', hwf', hRX', hInv', haddr⟩ :=
+    transport_exists_ext T Xpkg (Inv self) self
+      (vault_preserves_inv self)
+      (fun w fo h => vault_inv_faults self w fo h)
+      (fun w log h => vault_inv_log self w log h)
+      tr w σ ξ hs hwf hb hW hw
+      (by simpa [hwlog] using vault_RXs_of α w _ hRX)
+      (vault_neSelf_of α self w.self hBindNe) (vault_confs_of α self ext hconf)
+      (vault_inj_of α w.self)
+  refine ⟨σ', ξ', hE, ?_⟩
+  have hsol := vaultSolventRead_of_inv α self w' σ' ξ' hInv' hs' hwf'
+    (vault_RX_of α w' _ hRX')
+  have haddr' : Vault.assetB.addr w'.self = Vault.assetB.addr w.self :=
+    haddr (vaultEnv α) (List.mem_singleton.mpr rfl)
+  rw [← haddr']
+  exact hsol
+
+theorem vault_abs_nonvacuous :
+    ∃ α : Abs IERC20.Ghost, α.ignoresLocal ∧ α.ofState_foreign :=
+  ⟨vaultAbsSolidity, vaultAbsSolidity_ignoresLocal, vaultAbsSolidity_ofState_foreign⟩
+
+end Proof
 
 end Vault

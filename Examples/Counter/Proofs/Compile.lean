@@ -1,11 +1,11 @@
 import Lsc.Compiler.CoreTheorems
 import Lsc.Compiler.DispatchTheorems
-import Examples.Counter.CompileDefs
+import Examples.Counter.Spec
 import Examples.Counter.Contract
 
 /-!
 Proofs that every Counter runtime entrypoint compiles correctly under
-`toYulFn_correct_callFree`. Statements live in `CounterTheorems`.
+`toYulFn_correct_callFree`. Statements live in `Theorems.lean`.
 -/
 
 namespace Lsc.Compiler

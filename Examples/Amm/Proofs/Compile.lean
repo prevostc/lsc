@@ -1,13 +1,12 @@
 import Lsc.Compiler.CoreExtSimTheorems
-import Examples.Amm.CompileDefs
+import Examples.Amm.Spec
 import Examples.Amm.Contract
 import Stdlib.ERC20
 
 set_option linter.unusedSimpArgs false
 
 /-!
-Proofs of AMM S2 `toYulFn_correct_ext` instances. Statements live in
-`AmmTheorems`.
+Proofs of AMM S2 `toYulFn_correct_ext` instances. Statements live in `Theorems.lean`.
 -/
 
 namespace Lsc.Compiler

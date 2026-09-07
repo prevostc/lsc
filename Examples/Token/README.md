@@ -4,23 +4,18 @@ Closed ERC-20-style token: `transfer`, `approve`, `transferFrom`, `mint`,
 `burn`, views. No external CALLs. Storage: owner, totalSupply, balances,
 allowances.
 
-**Proved (plain language):** a successful transfer moves the amount and
-conserves the sum of the two balances. Nobody's balance falls unless they
-authorised the call (`Auth`). The contract stays solvent (balances sum to
-`totalSupply`). Those facts hold at `Tx.run` and on compiled runtime bytecode.
+**Proved:** a successful transfer conserves the sum of the two balances (no
+tokens created or destroyed). Nobody's balance falls unless they authorised
+the call. Recorded balances still sum to `totalSupply` after any well-formed
+trace. Those facts hold at `Tx.run` and on compiled runtime bytecode.
 Deploy-then-runtime anti-extraction is proved for Token's constructor.
 
-| File | Role | Depends on |
-|------|------|------------|
-| `Contract.lean` | Token surface + `lsc_contract` | `Lsc` |
-| `Proofs.lean` | `Tx.run` lemmas | `Contract.lean` |
-| `ProofsProof.lean` | Conservation proof body | `Proofs.lean` |
-| `ProofsTheorems.lean` | Exported `transfer_conserves` | `ProofsProof` |
-| `Security.lean` | `Inv`, `claim`, `Auth`, instances | `Proofs*` |
-| `SecurityProof.lean` | Security proof bodies | `Security.lean` |
-| `SecurityTheorems.lean` | Exported wealth theorems | `SecurityProof` |
-| `CompileProof.lean` | S1 compiler instance proofs | `Contract.lean` |
-| `CompileTheorems.lean` | Exported `token_correct` | `CompileProof` |
-| `EndToEnd.lean` | Bytecode transport glue | `Compile*`, `Security*` |
-| `EndToEndProof.lean` | Bytecode theorem bodies | `EndToEnd.lean` |
-| `EndToEndTheorems.lean` | Exported bytecode theorems | `EndToEndProof` |
+| File | Role |
+|------|------|
+| `Contract.lean` | Token surface + `lsc_contract` |
+| `Spec.lean` | `claim`, `Auth`, `Inv`, codec |
+| `Theorems.lean` | Exported Tx, security, compiler, and bytecode theorems |
+| `Proofs/Tx.lean` | `Tx.run` lemmas and `transfer_conserves` |
+| `Proofs/Security.lean` | Auth/conservation/invariant instances |
+| `Proofs/Compile.lean` | Call-free compiler instance |
+| `Proofs/EndToEnd.lean` | Bytecode transport glue and proofs |

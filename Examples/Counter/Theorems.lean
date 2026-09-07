@@ -1,7 +1,7 @@
-import Examples.Counter.CompileDefs
+import Examples.Counter.Spec
 import Lsc.Compiler.CoreTheorems
 import Lsc.Compiler.DispatchTheorems
-import Examples.Counter.CompileProof
+import Examples.Counter.Proofs.Compile
 import Examples.Counter.Contract
 
 /-!

@@ -1,12 +1,12 @@
 import Lsc.Compiler.CoreExtSimTheorems
 import Examples.Vault.Contract
+import Lsc.Compiler.Bytecode
 import Stdlib.ERC20
 
 set_option linter.unusedSimpArgs false
 
 /-!
-Proofs of Vault S2 `toYulFn_correct_ext` instances. Statements live in
-`VaultTheorems`.
+Proofs of Vault S2 `toYulFn_correct_ext` instances. Statements live in `Theorems.lean`.
 -/
 
 namespace Lsc.Compiler
@@ -223,3 +223,13 @@ theorem vault_correct_ext
 end Proof
 
 end Lsc.Compiler
+
+set_option maxHeartbeats 8000000
+open Lsc.Compiler
+
+/-- Runtime bytecode exists (`Op.call` is handled by the reifier and compiler). -/
+def vault_runtime_some : Bool := (compileRuntime Vault.contract).isSome
+
+#guard vault_runtime_some
+
+#eval (compileRuntime Vault.contract).map List.length

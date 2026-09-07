@@ -1,19 +1,83 @@
-import Examples.Vault.EndToEnd
-import Examples.Vault.EndToEndProof
+import Examples.Vault.Spec
+import Examples.Vault.Proofs.Tx
+import Examples.Vault.Proofs.Security
+import Examples.Vault.Proofs.Compile
+import Examples.Vault.Proofs.EndToEnd
+import Examples.Vault.Contract
+import Stdlib.ERC20
 
 set_option linter.unusedVariables false
 
 /-!
-Vault on compiled runtime bytecode: Alice's redeemable assets, read from
-EVM storage, cannot fall unless she withdrew, and the token balance
-still covers all claims.
-
-The compiler must have accepted the contract. The asset token must
-behave like a conforming ERC-20 at an address other than the vault, and
-successful CALLs from us must match that model (no reentrancy into vault
-storage). Unknown selectors are ignored. The constructor is out of
-scope. The `_exists` variants start from a high-level trace.
+Vault theorems: spec-level anti-extraction and solvency, the S2 compiler
+instance (external CALLs), and those facts on compiled runtime bytecode.
 -/
+
+open Lsc Lsc.Stdlib Lsc.Security Vault
+
+namespace Vault
+
+/-- After any well-formed sequence of Vault calls, the sum of depositors'
+redeemable assets still does not exceed the vault's token balance: the
+vault never owes more than it holds. The starting world must already be
+solvent in that sense, and between calls the asset token must not take
+the vault's balance (donations are allowed). Floor rounding can leak dust
+per step; solvency, not per-step conservation, is the statement. -/
+theorem vault_solvent (self : Address) (tr : List (Step spec))
+    (w : World Storage Ext Event)
+    (hW : Wf self tr) (hR : RelyAlong (vaultRely self) tr w) (h : Inv self w) :
+    Solvent claim holdings self (run tr w) :=
+  Proof.vault_solvent self tr w hW hR h
+
+/-- No sequence of calls by other users can reduce Alice's redeemable share
+of the vault's assets without a transaction she signed: the only
+authorised reduction is her own `withdraw`. Other depositors, the owner
+pausing or unpausing, and views cannot debit her; she may lose redeemable
+value only through her own withdrawals. Between calls the asset token must
+not take the vault's balance. Assumed, not proved: the token behaves like
+a conforming ERC-20 (no fee-on-transfer, no down-rebase, no reentrancy).
+This is not liveness — pause can block withdrawal without reducing the
+recorded claim. -/
+theorem vault_no_unauthorized_extraction (self : Address)
+    (tr : List (Step spec)) (w : World Storage Ext Event) (a : Address)
+    (hw : Inv self w) (hW : Wf self tr) (hR : RelyAlong (vaultRely self) tr w)
+    (hA : NoAuthAlong Auth a tr w) :
+    claim a w.self ≤ claim a (run tr w).self :=
+  Proof.vault_no_unauthorized_extraction self tr w a hw hW hR hA
+
+end Vault
+
+namespace Lsc.Compiler
+
+open YulSemantics
+open YulSemantics.EVM
+open Lsc.Stdlib
+
+/-- If the compiler accepted a Vault runtime function, every execution of
+the emitted Yul is predicted by the high-level Vault model under some
+choice of which external calls fail: success agrees on storage, shares,
+and token balances; a revert rolls our storage back. The asset token
+must behave like a conforming ERC-20 at an address other than the vault.
+Constructors are excluded — Vault's constructor CALLs `decimals` and is
+outside this theorem. -/
+theorem vault_correct_ext
+    (α : Abs IERC20.Ghost)
+    (κ : List UInt8 → U256) (hκ : KeccakSep Vault.contract κ)
+    (calls : ExternalCalls)
+    (f : FnDef) (hf : f ∈ Vault.contract.functions)
+    (_hk : f.kind ≠ .constructor)
+    (yul : YBlock) (hyul : toYulFn Vault.contract f = some yul)
+    (ctx : Ctx) (w : World Vault.Storage Vault.Ext Vault.Event) (st0 : EvmState)
+    (hctx : ctxRel ctx st0)
+    (hR : R Vault.contract Vault.schema κ w st0)
+    (hRX : RX α Vault.assetB w st0) (hign : α.ignoresLocal)
+    (hBindNe : accountKey (BitVec.ofNat 256 (Vault.assetB.addr w.self)) ≠
+      accountKey (BitVec.ofNat 256 ctx.self))
+    (hconf : Conforms IERC20 ctx.self (Vault.assetB.addr w.self) calls α) :
+    ToYulFnCorrectExt α Vault.assetB Vault.contract Vault.schema κ calls f yul ctx w st0 :=
+  Proof.vault_correct_ext α κ hκ calls f hf _hk yul hyul ctx w st0 hctx hR hRX hign hBindNe hconf
+
+end Lsc.Compiler
 
 open Lsc Lsc.Compiler Lsc.Security Lsc.Stdlib Vault
 open YulSemantics

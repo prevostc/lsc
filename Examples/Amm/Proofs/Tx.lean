@@ -1,6 +1,7 @@
 import Mathlib.Tactic.SplitIfs
 import Mathlib.Algebra.BigOperators.Group.Finset.Basic
 import Lsc.Security.Wealth
+import Examples.Amm.Spec
 import Examples.Amm.Contract
 import Stdlib.SafeERC20
 
@@ -69,11 +70,6 @@ theorem k_nondecreasing_1for0 (r0 r1 dx : Nat) (h1 : 0 < r1) :
   simpa [Nat.mul_comm r0 r1] using k_nondecreasing r1 r0 dx h1
 
 /-! ### Share accounting -/
-
-def InvStorage (σ : Storage) : Prop :=
-  ∃ H : Finset Address,
-    (∀ a, a ∉ H → σ.shares a = 0) ∧
-    H.sum (fun a => σ.shares a) = σ.totalShares
 
 theorem shares_conserved (σ : Storage) (h : InvStorage σ) :
     ∃ H : Finset Address,
@@ -1287,8 +1283,8 @@ theorem swap0for1_ok_of_run {dx : Amount TOKEN0 scale0} {minOut : Amount TOKEN1 
     have hreq : ¬ w.self.reserve0 + dx.toNat ≤ dx.toNat * w.self.reserve1 := by
       intro hle
       apply h
-      simp [amountOut, pos_div_iff]
-      exact ⟨Nat.add_pos_left hr0 _, hle⟩
+      simp only [amountOut, pos_div_iff]
+      exact ⟨Nat.add_pos_left hr0 dx.toNat, hle⟩
     simp only [amountOut] at hmin
     simp [swap0for1, hpos, hr0, hr0n, hr1, hden, hmul, hmin, hreq] at hrun
   have hnf0 : w.faults w.ncalls = false := by
@@ -1337,8 +1333,8 @@ theorem swap1for0_ok_of_run {dx : Amount TOKEN1 scale1} {minOut : Amount TOKEN0 
     have hreq : ¬ w.self.reserve1 + dx.toNat ≤ dx.toNat * w.self.reserve0 := by
       intro hle
       apply h
-      simp [amountOut, pos_div_iff]
-      exact ⟨Nat.add_pos_left hr1 _, hle⟩
+      simp only [amountOut, pos_div_iff]
+      exact ⟨Nat.add_pos_left hr1 dx.toNat, hle⟩
     simp only [amountOut] at hmin
     simp [swap1for0, hpos, hr0, hr1, hr1n, hden, hmul, hmin, hreq] at hrun
   have hnf0 : w.faults w.ncalls = false := by

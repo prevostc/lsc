@@ -153,10 +153,9 @@ Naming (each protocol is a directory; modules are `Examples.C.Role`):
 | Role | Files |
 |------|--------|
 | Contract | `Examples/C/Contract.lean` |
-| Tx-level lemmas | `Proofs.lean`, optionally `ProofsTheorems.lean` / `ProofsProof.lean` |
-| Security spec + theorems | `Security.lean`, `SecurityTheorems.lean`, `SecurityProof.lean` |
-| Compiler instance | `CompileTheorems.lean`, `CompileProof.lean`, optional `CompileDefs.lean` |
-| Bytecode theorems | `EndToEndTheorems.lean`, `EndToEndProof.lean`, `EndToEnd.lean` (glue) |
+| Spec | `Spec.lean` (`Inv`, `claim`, `Auth`, bindings/codec) |
+| Exported theorems | `Theorems.lean` |
+| Proofs | `Proofs/Tx.lean`, `Proofs/Security.lean`, `Proofs/Compile.lean`, `Proofs/EndToEnd.lean` |
 
 - **Counter** — `Examples/Counter/`. `counter_correct`, `counter_dispatch_correct`;
   no Security / bytecode theorem.

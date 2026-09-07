@@ -45,9 +45,13 @@ lean_lib Stdlib where
 lean_lib Examples where
   globs := #[
     Glob.submodules `Examples.Counter,
+    Glob.submodules `Examples.Counter.Proofs,
     Glob.submodules `Examples.Token,
+    Glob.submodules `Examples.Token.Proofs,
     Glob.submodules `Examples.Vault,
+    Glob.submodules `Examples.Vault.Proofs,
     Glob.submodules `Examples.Amm,
+    Glob.submodules `Examples.Amm.Proofs,
     Glob.submodules `Examples.Misc
   ]
 
