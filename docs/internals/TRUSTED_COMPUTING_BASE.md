@@ -124,7 +124,8 @@ Not derived from powdr:
 
 ## Untrusted (checked)
 
-Reifier certificates (`Lsc/Lang/Reify.lean`, kernel-checked `rfl`), `toYul`
+Reifier certificates (`Lsc/Lang/Reify.lean`, kernel-checked `rfl` or `Tx` monad
+laws), `toYul`
 (`toYulFn_correct_callFree` / `toYulFn_correct_ext`), the forked Yul→EVM compiler
 (`compile_correct`; `compileObject_correct` / `bytecode_deploy_correct` for
 init code without appended args; Yul `constructor_correct` for the CREATE

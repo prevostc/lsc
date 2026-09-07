@@ -29,8 +29,9 @@ lsc_contract Counter increment incrementBy decrement get
 
 `lsc_schema` derives the storage/event/error schema. `lsc_reify` turns each
 function into the compiler's core form and checks that the core means the
-same as the Lean function (a kernel `rfl`, so a reifier bug is a build
-error, not a silent miscompile). `lsc_contract` assembles the contract
+same as the Lean function (kernel-checked `Core.denote (reify f) = f`: `rfl`
+when the sides match definitionally, otherwise the `Tx` monad laws). A reifier
+bug is a build error, not a silent miscompile. `lsc_contract` assembles the contract
 object and the language-level spec used by security proofs.
 
 ## Token, vault, pool
@@ -76,4 +77,5 @@ or untyped calls. External calls go only through a `Binding`.
 ---
 
 For the curious: the theorem behind reification is the generated
-`f.core_denote` (kernel `rfl`).
+`f.core_denote` (kernel-checked; `rfl`, or `Tx` monad laws when an inlined
+helper sits mid-`do`).

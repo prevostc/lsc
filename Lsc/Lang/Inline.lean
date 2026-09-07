@@ -5,7 +5,8 @@ import Lean
 
 Tag a library `Tx` helper so Reify delta-unfolds it (β with arguments, fuel-bounded)
 and continues on the body. Recursive definitions are rejected at attribute
-application. Certificates remain kernel `rfl`.
+application. Certificates are kernel-checked `Core.denote (reify f) = f` (`rfl`,
+or `Tx` monad laws when a helper sits mid-`do`).
 -/
 
 open Lean

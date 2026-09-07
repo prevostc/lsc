@@ -1,6 +1,7 @@
 import Lsc.Lang.Amount
 import Lsc.Lang.Reify
 import Stdlib.ERC20
+import Stdlib.SafeERC20
 import Stdlib.Scales
 
 /-!
@@ -74,7 +75,7 @@ def constructor (owner tok : Address) : M Unit := do
 
 /-- Deposit `assets`; mint shares 1:1 if empty, otherwise `⌊supply * assets / totalAssets⌋`.
 Computes minted from pre-state `TA`/`TS` and reverts with `ZeroShares` if that floor is 0,
-then pulls the asset via `transferFrom`, then updates accounting. Storage words are `Nat`
+then pulls the asset via `safeTransferFrom`, then updates accounting. Storage words are `Nat`
 (`Amount` fields make multi-step `rfl` certificates time out). -/
 def deposit (assets : Amount ASSET assetScale) : M Nat := do
   let p ← read paused
@@ -90,8 +91,7 @@ def deposit (assets : Amount ASSET assetScale) : M Nat := do
     else
       Tx.mulDivDown ts assets.toNat ta
   Tx.require (0 < minted) .ZeroShares
-  let ok ← Binding.transferFrom assetB who me assets.toNat
-  Tx.require (ok ≠ 0) .TransferFailed
+  Binding.safeTransferFrom assetB who me assets.toNat .TransferFailed
   let ta' ← ta +? assets.toNat
   write totalAssets ta'
   let ts' ← minted +? ts
@@ -104,7 +104,7 @@ def deposit (assets : Amount ASSET assetScale) : M Nat := do
 
 /-- Burn `sharesIn` and return `⌊totalAssets * sharesIn / totalShares⌋` as a word.
 Reverts with `ZeroAssets` if that floor is 0 (burning shares for nothing is a caller loss).
-Pushes the asset via `transfer` after updating accounting. -/
+Pushes the asset via `safeTransfer` after updating accounting. -/
 def withdraw (sharesIn : Amount SHARE shareScale) : M Nat := do
   let p ← read paused
   Tx.require (p = Flag.off) .Paused
@@ -122,8 +122,7 @@ def withdraw (sharesIn : Amount SHARE shareScale) : M Nat := do
   write totalShares ts'
   let ta' ← ta -? assetsOut
   write totalAssets ta'
-  let ok ← Binding.transfer assetB who assetsOut
-  Tx.require (ok ≠ 0) .TransferFailed
+  Binding.safeTransfer assetB who assetsOut .TransferFailed
   Tx.emit (.Withdraw who (Amount.ofNat assetsOut) sharesIn)
   pure assetsOut
 

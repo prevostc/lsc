@@ -525,7 +525,7 @@ theorem withdraw_reverts_on_fault (sharesIn : Amount SHARE shareScale)
       0 < w.self.totalShares ∧
         w.self.totalShares ≤ w.self.totalAssets * sharesIn.toNat :=
     (redeemed_require_iff w.self sharesIn).mp hassets
-  simp [withdraw, hp, hpos, hbal, hden, hmul, hreq, hsup, hfit, Binding.transfer]
+  simp [withdraw, hp, hpos, hbal, hden, hmul, hreq, hsup, hfit, Binding.safeTransfer]
   unfold Tx.call
   dsimp only [Tx.run]
   simp [hf]
@@ -545,7 +545,7 @@ theorem withdraw_reverts_on_no_cover (sharesIn : Amount SHARE shareScale)
       0 < w.self.totalShares ∧
         w.self.totalShares ≤ w.self.totalAssets * sharesIn.toNat :=
     (redeemed_require_iff w.self sharesIn).mp hassets
-  simp [withdraw, hp, hpos, hbal, hden, hmul, hreq, hsup, hfit, Binding.transfer]
+  simp [withdraw, hp, hpos, hbal, hden, hmul, hreq, hsup, hfit, Binding.safeTransfer]
   unfold Tx.call
   dsimp only [Tx.run]
   simp [assetB]
@@ -568,7 +568,7 @@ theorem withdraw_ok (sharesIn : Amount SHARE shareScale) (h : WithdrawOk ctx w s
       0 < w.self.totalShares ∧
         w.self.totalShares ≤ w.self.totalAssets * sharesIn.toNat :=
     (redeemed_require_iff w.self sharesIn).mp hassets
-  simp [withdraw, hp, hpos, hbal, hden, hmul, hreq, hsup, hfit, Binding.transfer]
+  simp [withdraw, hp, hpos, hbal, hden, hmul, hreq, hsup, hfit, Binding.safeTransfer]
   unfold Tx.call
   dsimp only [Tx.run]
   simp [assetB]
@@ -679,7 +679,7 @@ theorem deposit_rate_nondecreasing (TA TS sa assets : Nat)
   exact div_le_div_of_mul_le hTS hTS' hprod
 
 /-- ABI `Amount` arguments are `toNat` words; Core `denote` agrees with the surface
-`Tx` (certificate `f.core_denote`, `rfl`). Not `denoteAWord`: these functions
+`Tx` (certificate `f.core_denote`). Not `denoteAWord`: these functions
 return `Nat`. -/
 theorem deposit_core_toNat (assets : Amount ASSET assetScale) :
     Core.denote schema deposit.core [assets.toNat] = deposit assets :=

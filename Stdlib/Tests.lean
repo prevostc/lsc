@@ -3,11 +3,11 @@ import Stdlib.SafeERC20
 import Stdlib.Scales
 
 /-!
-# Stdlib compile tests — `@[lsc_inline]` helpers as whole functions
+# Stdlib compile tests — `@[lsc_inline]` helpers, including mid-`do`
 
-Each helper is the entire reified function so `core_denote` stays `rfl`
-(Tx bind does not associate definitionally; a helper in the middle of a
-`do` block cannot be certified that way).
+Whole-function helpers still certify (often by `rfl`). `doSafeTransferFromMid`
+puts a compound helper between other binds so the certificate must use the
+`Tx` monad laws (`bind` is not definitionally associative).
 -/
 
 open Lsc Lsc.Syntax Lsc.Stdlib Stdlib
@@ -49,6 +49,12 @@ def doSafeTransfer (dst : Address) (amt : Nat) : M Unit :=
 def doSafeTransferFrom (src dst : Address) (amt : Nat) : M Unit :=
   Binding.safeTransferFrom tokenB src dst amt .TransferFailed
 
+/-- Compound helper mid-`do`: a bind before and after `safeTransferFrom`. -/
+def doSafeTransferFromMid (src dst : Address) (amt : Nat) : M Nat := do
+  let _ ← Binding.balanceOf tokenB src
+  Binding.safeTransferFrom tokenB src dst amt .TransferFailed
+  Binding.balanceOf tokenB dst
+
 def doSafeApprove (dst : Address) (amt : Nat) : M Unit :=
   Binding.safeApprove (Binding.transfer tokenB dst amt) .TransferFailed
 
@@ -89,7 +95,7 @@ end StdlibTests
 
 lsc_schema StdlibTests
 lsc_reify StdlibTests.doCheckOk StdlibTests.doSafeTransfer StdlibTests.doSafeTransferFrom
-  StdlibTests.doSafeApprove
+  StdlibTests.doSafeApprove StdlibTests.doSafeTransferFromMid
 lsc_reify StdlibTests.doTransfer StdlibTests.doTransferFrom StdlibTests.doBalanceOf
   StdlibTests.doDecimals StdlibTests.doTransferUnit StdlibTests.doTransferFromUnit
 lsc_reify StdlibTests.doMulDown StdlibTests.doMulUp StdlibTests.doDivDown StdlibTests.doDivUp
@@ -100,6 +106,7 @@ lsc_reify StdlibTests.doRescaleDown StdlibTests.doRescaleUp
 #check StdlibTests.doCheckOk.core_denote
 #check StdlibTests.doSafeTransfer.core_denote
 #check StdlibTests.doSafeTransferFrom.core_denote
+#check StdlibTests.doSafeTransferFromMid.core_denote
 #check StdlibTests.doSafeApprove.core_denote
 #check StdlibTests.doTransfer.core_denote
 #check StdlibTests.doTransferFrom.core_denote

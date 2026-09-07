@@ -6,7 +6,7 @@ language core, replace the backend, delete everything else.
 ## Shape
 
 ```
-plain Lean defs in `Tx`  --reify (untrusted) + rfl certificate-->  Core (ANF)
+plain Lean defs in `Tx`  --reify (untrusted) + kernel certificate-->  Core (ANF)
 Core  --toYul (ours)-->  Yul AST (powdr yul-semantics)  --powdr compile_correct-->  EVM bytecode
 ```
 
@@ -48,11 +48,13 @@ Core  --toYul (ours)-->  Yul AST (powdr yul-semantics)  --powdr compile_correct-
   ops tagged with their unit, `denoteTyped` producing surface types, one generic theorem
   `denoteTyped c = ofNat <$> Core.denote (erase c)` proved once by induction, compiler on the
   erased term. Scheduled after the first end-to-end bytecode theorem; not on its critical path.
-- The reifier (`lsc_reify`, MetaM) is **untrusted**: every run emits `f.core_denote` by `rfl`,
+- The reifier (`lsc_reify`, MetaM) is **untrusted**: every run emits `f.core_denote`,
   kernel-checked — `Core.denote schema f.core args = f args` for word-typed programs, or
   `Core.denoteAWord` / `Core.denoteAUnit` when the surface returns `Amount` or is `Unit` with
-  `Amount` storage. A reifier bug is a build error, never a miscompile. Rejections carry a
-  positioned message naming the offending subterm.
+  `Amount` storage. The proof is `rfl` when the sides are definitionally equal, otherwise
+  the `Tx` monad laws (`bind` is not definitionally associative). A propositional
+  certificate is not a trust extension: a reifier bug is still a build error. Rejections
+  carry a positioned message naming the offending subterm.
 - `Core.effects` (reads/writes/emits/`calls : List (binding × method)`) with a generic frame
   theorem replaces per-function `f_preserves_x` proofs. The frame includes: no `store` to
   field `f` in any entrypoint ⇒ `f` immutable (bound addresses).

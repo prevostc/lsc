@@ -21,9 +21,10 @@ bound value; function parameters are the initial environment, last parameter fir
 Storage fields, events and errors are referenced by index through a `ContractSchema`,
 which `lsc_schema` generates from the user's Lean `structure`/`inductive`s. Every case of
 `denote` is *literally* the surface primitive applied to evaluated atoms, which is what
-makes `Core.denote (reify f) = f` hold by `rfl` for word-typed programs. Amount-typed
-surface programs use `denoteAWord` / `denoteAUnit` (same Core AST; `ofNat` at each op
-rather than `Functor.map` over the whole `Tx`).
+makes `Core.denote (reify f) = f` hold by `rfl` for word-typed programs whose `bind`
+nesting already matches the ANF, and by the `Tx` monad laws when an `@[lsc_inline]`
+helper sits mid-`do`. Amount-typed surface programs use `denoteAWord` / `denoteAUnit`
+(same Core AST; `ofNat` at each op rather than `Functor.map` over the whole `Tx`).
 -/
 
 namespace Lsc
@@ -252,7 +253,8 @@ equal (kernel `rfl` does not push `bind` through `ite`).
 
 `denoteA` interprets word ops as `Amount τ s` (the same `Amount.add` / `load` the
 surface used) and uses `map1Set` so mapping writes are `Function.update` on the
-Amount-valued field. Certificates are `denoteAWord` / `denoteAUnit` `= f` by `rfl`.
+Amount-valued field. Certificates are `denoteAWord` / `denoteAUnit` `= f` by `rfl`
+(or the `Tx` monad laws, same as `denote`).
 The compiler still uses `denote` (Nat); the two agree on the underlying words. -/
 
 def Op.denoteA {τ : Type} {scale : Nat} (Γ : ContractSchema S X E ε) (env : List Nat) :

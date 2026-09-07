@@ -16,7 +16,8 @@ Lake libraries (`lakefile.lean`): `Lsc` (language, compiler, security — `Lsc.L
 ## `Lsc/Lang` — the language
 
 - `Tx.lean` — `Tx S X E ε`, `World S X E`, `Ctx`, `Err` (including `callFailed`),
-  primitives, the `run_*` simp normal form. Language specification.
+  primitives, the `run_*` simp normal form, monad laws (`bind_assoc` and friends)
+  for reifier certificates. Language specification.
 - `Interface.lean` — `Interface`, `Binding`, `Tx.call` / `Tx.callUnit`, `run_call`.
   Bindings are explicit constants.
 - `Amount.lean` — `Amount τ s`, `Flag`, `Price`, `Fixed`, `Rounding`,
@@ -62,7 +63,8 @@ Does not import `Examples`. `Lsc` does not import `Stdlib`.
 - `Scales.lean` — `WAD`, `RAY`, `USDC_SCALE`, `Q96`, `E8`; derived `Amount`
   ops (`mulDown` / `rescale` / `convert`, …) still named `Lsc.Amount.*`.
 - `SafeERC20.lean` — spec-level `safeTransfer` / `safeTransferFrom` /
-  `safeApprove` (`checkOk`); not reifiable until library inlining exists.
+  `safeApprove` (`checkOk`); `@[lsc_inline]`, usable mid-`do`.
+- `Tests.lean` — reify of stdlib helpers, including a compound helper mid-`do`.
 
 Protocol instances (Token, Vault, AMM, Counter) live under `Examples/`, not
 stdlib.

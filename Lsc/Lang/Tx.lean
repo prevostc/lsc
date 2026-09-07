@@ -6,12 +6,14 @@ import Mathlib.Logic.Function.Basic
 The surface language is plain Lean: contract functions are ordinary definitions in the
 `Tx S X E ε` monad, written with `do` notation and a fixed set of primitives. Everything
 in this file is the *semantics*; the reifier (`Lsc.Lang.Reify`) recovers a `Core` term from
-such definitions and certifies `Core.denote core = f` by `rfl`.
+such definitions and certifies `Core.denote core = f` by `rfl`, or by the monad laws below
+when an `@[lsc_inline]` helper sits mid-`do` (`bind` is not definitionally associative).
 
 Design constraints that matter for the certificate:
 
 * every primitive is a transparent function `Ctx → World → Except …`, so that the
-  kernel can unfold both the user program and `Core.denote` to the same normal form;
+  kernel can unfold both the user program and `Core.denote` to the same normal form
+  when association already matches;
 * `Address` is a `def` newtype over `Nat` (definitionally a word) so that the untyped
   `Core` and the typed surface agree up to unfolding;
 * checked arithmetic lives in the monad (`let x ← a +? b`) because it can revert;
@@ -286,6 +288,52 @@ theorem run_ok_error {x : Tx S X E ε α} {ctx : Ctx} {w : World S X E}
   nomatch hok.symm.trans herr
 
 end RunLemmas
+
+/-! ### Monad laws
+
+`Tx` inherits `LawfulMonad` from `ReaderT`/`StateT`/`Except`. The specialized
+equalities are what `lsc_reify` names in the certificate fallback; they are
+not `@[simp]` (the inherited `bind_assoc` / `pure_bind` already are). -/
+
+/--
+`bind` is associative as an equality of `Tx` values.
+
+`Tx` is `ReaderT`/`StateT`/`Except` and already has `LawfulMonad`; this is
+that `bind_assoc`, specialized. Unfolding an `@[lsc_inline]` helper in the
+middle of a `do` block yields `bind (bind call k₁) k₂`, while `Core.denote` of
+the ANF is `bind call (fun x => bind (k₁ x) k₂)`. Those are not definitionally
+equal, so `lsc_reify` may use this lemma in `f.core_denote`.
+
+That is not a trust extension: the reifier is still untrusted MetaM, and the
+kernel checks `Core.denote (reify f) = f`. A wrong Core term still fails to
+prove the equality. The lemma only names a law the monad already satisfies.
+-/
+theorem bind_assoc {β γ : Type} (x : Tx S X E ε α) (f : α → Tx S X E ε β)
+    (g : β → Tx S X E ε γ) :
+    (x >>= f) >>= g = x >>= fun a => f a >>= g := by
+  funext ctx w
+  simp only [bind, ReaderT.bind, StateT.bind]
+  cases x ctx w <;> rfl
+
+/-- `pure` is a left identity of `bind`. -/
+theorem pure_bind {β : Type} (a : α) (f : α → Tx S X E ε β) :
+    pure a >>= f = f a := by
+  funext ctx w
+  simp only [bind, pure, ReaderT.bind, ReaderT.pure, StateT.bind, StateT.pure]
+  rfl
+
+/-- `pure` is a right identity of `bind`. -/
+theorem bind_pure (x : Tx S X E ε α) : x >>= pure = x := by
+  funext ctx w
+  simp only [bind, pure, ReaderT.bind, ReaderT.pure, StateT.bind, StateT.pure]
+  cases x ctx w <;> rfl
+
+/-- `do emit e; pure v` elaborates to `map`; `Core.denote` of the ANF is `bind` then `pure`. -/
+theorem map_eq_pure_bind {β : Type} (f : α → β) (x : Tx S X E ε α) :
+    f <$> x = x >>= fun a => pure (f a) := by
+  funext ctx w
+  change run (f <$> x) ctx w = run (x >>= fun a => pure (f a)) ctx w
+  simp only [run_map, run_bind, run_pure]
 
 end Tx
 

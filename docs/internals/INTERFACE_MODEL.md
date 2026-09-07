@@ -91,7 +91,7 @@ Core gains exactly `Op.call b m args` and `Stmt.call b m args`. `ContractSchema.
   `ofNat <$> Tx.addChecked`, because `Functor.map` over `ReaderT/StateT/Except` is not
   definitionally `bind`-congruent and does not push through `ite`. Amount-returning certificates
   are `Core.denoteAWord Γ f.core [toNat args…] = f` (and `denoteAUnit` when the function returns
-  `Unit` but storage has `Amount` fields), closed by `rfl`. A single `(τ, s)` is taken from the
+  `Unit` but storage has `Amount` fields), closed by `rfl` or the `Tx` monad laws. A single `(τ, s)` is taken from the
   return type, or from the first Amount storage field for `Unit` functions — mixed-unit
   arithmetic in one entrypoint (`shareDown` across asset/share) needs a richer interp.
 - `Inv : World S X E → Prop`; protocols instantiate it at their own address (`Vault.Inv self`).

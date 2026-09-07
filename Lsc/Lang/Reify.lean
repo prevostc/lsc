@@ -13,7 +13,11 @@ user's Lean types, plus `C.schema_lawful : C.schema.st.Lawful …`, and `lsc_rei
 * `C.f.core : Core t` — the Core AST, and
 * `C.f.core_denote` — `Core.denote C.schema C.f.core [args] = C.f args` for word-typed
   programs, or `Core.denoteAWord` / `Core.denoteAUnit` when the surface returns
-  `Amount` or has `Amount` storage, both proved by `rfl`.
+  `Amount` or has `Amount` storage. Proved by `rfl` when the sides are
+  definitionally equal; otherwise by the `Tx` monad laws (`bind` is not
+  definitionally associative, so an `@[lsc_inline]` helper mid-`do` needs them).
+  A propositional certificate is not a trust extension: the kernel still checks
+  `denote (reify f) = f`.
 
 `lsc_contract C f₁ … fₙ` additionally defines `C.contract` and a
 language-level `C.spec` (`C.Fn` / `C.entry` / `C.spec_exec_*`). `#lsc_obligations C`
@@ -30,6 +34,7 @@ build error, never a miscompile.
 The translation follows the shapes Lean's `do` elaborator produces:
 
 * `bind op (fun x => k)`                          → `letOp` / `seq`
+* `bind (bind x k₁) k₂` (inlined helper mid-`do`) → reassociate to ANF, then `letOp` / `seq`
 * `have __do_jp := fun y => rest; body`            → reify `rest` once, then substitute it
                                                       for every `__do_jp y` leaf of `body`
 * `ite c a b`, `pure v`, tail primitives          → `ite`, `ret`, `opTail`/`stmtTail`/`revertTail`
@@ -786,6 +791,26 @@ def ensureLambda (k : Expr) : MetaM Expr := do
   | .forallE n d _ bi => return .lam n d (mkApp k (.bvar 0)) bi
   | _ => throwError "reify: continuation `{k}` is not a function"
 
+/-- `(inner >>= innerK) >>= k` as `inner >>= fun a => innerK a >>= k` (ANF). -/
+def assocBindRight (innerBind k γ : Expr) : MetaM Expr := do
+  let innerBind := innerBind.consumeMData
+  unless innerBind.isAppOfArity ``Bind.bind 6 do
+    throwError "reify: expected a nested `bind`"
+  let iargs := innerBind.getAppArgs
+  let bindFn := innerBind.getAppFn
+  let m := iargs[0]!
+  let inst := iargs[1]!
+  let α := iargs[2]!
+  let β := iargs[3]!
+  let inner := iargs[4]!
+  let innerK ← ensureLambda iargs[5]!
+  let k ← ensureLambda k
+  withLocalDeclD `a α fun a => do
+    let innerKa := innerK.beta #[a]
+    let body := mkAppN bindFn #[m, inst, β, γ, innerKa, k]
+    let composedK ← mkLambdaFVars #[a] body
+    return mkAppN bindFn #[m, inst, α, γ, inner, composedK]
+
 partial def reify (ci : ContractInfo) (t : RetTy) (env : Env t) (e : Expr)
     (inline? : Option Name := none) : MetaM (Core t) := do
   let e := e.consumeMData
@@ -829,7 +854,9 @@ partial def reify (ci : ContractInfo) (t : RetTy) (env : Env t) (e : Expr)
         let k ← ensureLambda args[5]!
         let (x, seen) ← deltaUnfold x0
         let inline? := seen.orElse fun _ => inline?
-        if let some op ← opOf ci env x then
+        if x.isAppOfArity ``Bind.bind 6 then
+          reify ci t env (← assocBindRight x k args[3]!) inline?
+        else if let some op ← opOf ci env x then
           lambdaBoundedTelescope k 1 fun ys body => do
             let kc ← reify ci t { env with vars := ys[0]!.fvarId! :: env.vars } body inline?
             return .letOp op kc
@@ -866,6 +893,125 @@ partial def reify (ci : ContractInfo) (t : RetTy) (env : Env t) (e : Expr)
     | _ => throwInlineOr inline? e m!"reify: `{e}` is outside the reifiable fragment"
 
 /-! ## Commands -/
+
+/-- `@[lsc_inline]` names reachable from `fn` (the helper and its callees). -/
+def inlinesUsedBy (fn : Name) : MetaM (Array Name) := do
+  let env ← getEnv
+  let info ← getConstInfoDefn fn
+  let mut acc : Array Name := #[]
+  let mut seen : NameSet := {}
+  let mut work : Array Name := #[]
+  for n in info.value.getUsedConstants do
+    if Lsc.lscInlineAttr.hasTag env n then
+      work := work.push n
+  let mut i := 0
+  while h : i < work.size do
+    let n := work[i]
+    i := i + 1
+    if seen.contains n then continue
+    seen := seen.insert n
+    acc := acc.push n
+    if let some v := (env.find? n).bind (·.value?) then
+      for m in v.getUsedConstants do
+        if Lsc.lscInlineAttr.hasTag env m && !seen.contains m then
+          work := work.push m
+  return acc
+
+def bindArgs? (e : Expr) : Option (Expr × Expr) :=
+  let e := e.consumeMData
+  if e.isAppOfArity ``Bind.bind 6 then some (e.getArg! 4, e.getArg! 5)
+  else none
+
+/-- Unfold `Core.denote*` and `@[lsc_inline]` so a diagnostic can see the `bind`s. -/
+partial def unfoldCertHead (e : Expr) (fuel : Nat := 16) : MetaM Expr := do
+  let e := e.consumeMData
+  if fuel = 0 then return e
+  match e.getAppFn.constName? with
+  | some ``Core.denote | some ``Core.denoteAWord | some ``Core.denoteAUnit =>
+    match ← unfoldDefinition? e with
+    | some e' => unfoldCertHead e' (fuel - 1)
+    | none =>
+      let e' ← whnfR e
+      if e' == e then return e else unfoldCertHead e' (fuel - 1)
+  | some n =>
+    if (← isLscInline n) || isSurfaceOp n then
+      match ← unfoldDefinition? e with
+      | some e' => unfoldCertHead e' (fuel - 1)
+      | none => return e
+    else return e
+  | none => return e
+
+/-- First `Bind.bind` whose bound computations are not defeq, if any. -/
+partial def firstDifferingBind (lhs rhs : Expr) (fuel : Nat := 32) :
+    MetaM (Option (Expr × Expr)) := do
+  if fuel = 0 then return some (lhs, rhs)
+  if ← withNewMCtxDepth (withDefault (isDefEq lhs rhs)) then return none
+  let lhs ← unfoldCertHead lhs
+  let rhs ← unfoldCertHead rhs
+  match bindArgs? lhs, bindArgs? rhs with
+  | some (lx, lk), some (rx, rk) =>
+    if ← withNewMCtxDepth (withDefault (isDefEq lx rx)) then
+      match lk, rk with
+      | .lam n t b _, .lam _ _ b' _ =>
+        withLocalDeclD n t fun x =>
+          firstDifferingBind (b.instantiate1 x) (b'.instantiate1 x) (fuel - 1)
+      | _, _ => firstDifferingBind lk rk (fuel - 1)
+    else
+      return some (lhs, rhs)
+  | none, none =>
+    if lhs.isAppOfArity ``ite 5 && rhs.isAppOfArity ``ite 5 then
+      if let some d ← firstDifferingBind (lhs.getArg! 3) (rhs.getArg! 3) (fuel - 1) then
+        return some d
+      firstDifferingBind (lhs.getArg! 4) (rhs.getArg! 4) (fuel - 1)
+    else if lhs.isLambda && rhs.isLambda then
+      lambdaBoundedTelescope lhs 1 fun xs b =>
+        firstDifferingBind b (rhs.bindingBody!.instantiate1 xs[0]!) (fuel - 1)
+    else
+      return some (lhs, rhs)
+  | _, _ => return some (lhs, rhs)
+
+/--
+Generate the `f.core_denote` proof term.
+
+The certificate tactic is `first | rfl | (simp only [<fn>, <@[lsc_inline]
+helpers>, Tx.bind_assoc, Tx.pure_bind, Tx.bind_pure, Tx.map_eq_pure_bind]; rfl)`.
+`rfl` (`isDefEq` / `mkEqRefl`) is the fast path when no inlines are used.
+With inlines the `rfl` attempt is skipped (it times out on a large
+non-matching `do` block) and only the `simp only` branch runs. A
+propositional certificate is not a trust extension: the reifier is still
+untrusted MetaM, and the kernel checks `Core.denote (reify f) = f`.
+-/
+def certifyDenote (fn : Name) (lhs rhs coreE : Expr) : TermElabM Expr := do
+  let eq ← mkEq lhs rhs
+  let inlines ← inlinesUsedBy fn
+  -- `isDefEq` on a large non-matching `do` block (inlined helper mid-body)
+  -- burns the heartbeat budget; skip it when inlines are present.
+  if inlines.isEmpty then
+    if ← withNewMCtxDepth (withDefault (isDefEq lhs rhs)) then
+      return (← mkEqRefl lhs)
+  let mut ids : Array Ident := #[
+    mkIdent ``Lsc.Tx.bind_assoc,
+    mkIdent ``Lsc.Tx.pure_bind,
+    mkIdent ``Lsc.Tx.bind_pure,
+    mkIdent ``Lsc.Tx.map_eq_pure_bind,
+    mkIdent fn]
+  for n in inlines do
+    ids := ids.push (mkIdent n)
+  let tac ←
+    if inlines.isEmpty then
+      `(by first | rfl | (simp only [$[$ids:ident],*]; rfl))
+    else
+      `(by simp only [$[$ids:ident],*]; rfl)
+  try
+    withoutErrToSorry (elabTermAndSynthesize tac eq)
+  catch _ =>
+    let extra ← do
+      if let some (l, r) ← firstDifferingBind lhs rhs then
+        pure m!"\nFirst differing bind:{indentExpr l}\nversus:{indentExpr r}"
+      else pure m!""
+    throwError "reify: certificate failed — denotation of the reified term is not \
+      equal to the original function (even after Tx monad laws).{indentExpr eq}{extra}\n\
+      Reified Core:{indentExpr coreE}"
 
 /-- Unfold `abbrev`s such as `C.M` until the head is `Lsc.Tx`. -/
 partial def whnfToTx (ty : Expr) : MetaM Expr := do
@@ -922,11 +1068,9 @@ def reifyFunction (fn : Name) : TermElabM Unit := do
           #[S, X, E, ε, schema, toExpr t, Lean.mkConst coreName, envList]
     let rhs := mkAppN (Lean.mkConst fn) params
     let eq ← mkEq lhs rhs
-    unless ← isDefEq lhs rhs do
-      throwError "reify: certificate failed — denotation of the reified term is not \
-        definitionally the original function.{indentExpr eq}\nReified Core:{indentExpr core.toExpr}"
+    let pf ← withDeclName (fn ++ `core_denote) <| certifyDenote fn lhs rhs core.toExpr
     let stmt ← mkForallFVars params eq
-    let proof ← mkLambdaFVars params (← mkEqRefl lhs)
+    let proof ← mkLambdaFVars params pf
     addDecl <| .thmDecl { name := fn ++ `core_denote, levelParams := [], type := stmt, value := proof }
     trace[Lsc.reify] "reified {fn} : Core {repr t}\n{repr core}"
 
@@ -1337,6 +1481,9 @@ def mkCoreEqAlt (ns fn : Name) : MetaM (TSyntax ``Lean.Parser.Tactic.inductionAl
       `(Lean.Parser.Tactic.tacticSeq|
           cases $argsId:ident
           dsimp [$fnDefId:ident, $encodeId:ident]
+          change Lsc.Lang.worldAfter (Lsc.Core.denote $schemaId $coreId []) $ctxId $wId =
+            Lsc.Lang.worldAfter (Lsc.Spec.exec $specId .$ctor:ident ()) $ctxId $wId
+          rw [$coreDenote:ident, $specExec:ident]
           rfl)
     | 1 => do
       let enc ← encodeWordTerm surf.params[0]!.2 ⟨argsId⟩
