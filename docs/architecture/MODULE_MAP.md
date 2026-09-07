@@ -49,16 +49,19 @@ proved invariants/laws.
 - `YulExec.lean`, `YulTests.lean` — executable harness on powdr's Yul interpreter and the
   differential tests against `Tx.run`.
 - `Bytecode.lean` — `compileRuntime`/`compileDeploy` through powdr's verified compiler.
-- `Correctness.lean` — `R`, `logsRel`/`selfLogs`, `RunCommittedExt`, `ToYulFnCorrectExt`,
-  `RuntimeBlockCorrectExt` (backward S2 statements). Proofs: `toYulFn_correct_ext` in
-  `Proof/CoreExtSim.lean`; `runtimeBlock_correct_ext` in `Proof/DispatchExt.lean`.
-- `Externals.lean` — `yulD`, `Abs`, `NoInterfere`, `decodeRet`, `RX`, `Conforms`, `Realizes`,
-  `CallsTotal`, `composeFault`, `ExtAgrees`, `BindWF`. Bytecode glue must use `gas := .none`. Never imported by `Lsc/Lang`.
+- `Correctness.lean` — `R`, `logsRel`/`selfLogs`, `mkEvmState` / `mkEvmStateExt` (threads
+  foreign `ξ`), `RunCommittedExt`, `ToYulFnCorrectExt`, `RuntimeBlockCorrectExt`
+  (backward S2 statements). Proofs: `toYulFn_correct_ext` in `Proof/CoreExtSim.lean`;
+  `runtimeBlock_correct_ext` in `Proof/DispatchExt.lean`.
+- `Externals.lean` — `yulD`, `Abs`, `ofState_foreign`, `Foreign` / `evmForeign`, `NoInterfere`,
+  `decodeRet`, `RX`, `Conforms`, `Realizes`, `CallsTotal`, `composeFault`, `ExtAgrees`, `BindWF`.
+  Bytecode glue must use `gas := .none`. Never imported by `Lsc/Lang`.
 - `Proof/DispatchExt.lean` — S2 backward dispatcher `runtimeBlock_correct_ext`.
 - `Proof/ProgressCore.lean` — `yul_progress`: a Yul `Run` of compiled S2Frag runtime exists under `CallsTotal`.
-- `EndToEndExt.lean` — S2 glue: `openModel`, `EvmCallRunExt` / `EvmCallRunExtAll`,
-  `yul_progress` transport, `bytecode_call_correct_ext`, `evmCallRun_fnCalldata_ext`.
-  Universality over halted EVM runs uses `CallsTotal` + EVM determinism (no powdr adequacy).
+- `EndToEndExt.lean` — S2 glue: `openModel`, `EvmCallRunExt` / `EvmCallRunExtAll` (threads
+  `(σ, ξ)`), `EvmTraceRunExt` / `EvmTraceRunExtAll`, `yul_progress` transport,
+  `bytecode_call_correct_ext`, `evmCallRun_fnCalldata_ext`. `ξ'` from halted EVM
+  (`postForeign`). Universality uses `CallsTotal` + EVM determinism (no powdr adequacy).
 - `Proof/{Words,Memory,Env,Layout,Ops,OpsMore,OpsToken,OpsArith,OpsMulDiv,OpsCtx,Emit,Core,Counter,Token,Vault,Dispatch}.lean` — `CallFree`/`M1Frag` simulation (`load`/`addChecked`/`subChecked`/`mulChecked`/`divChecked`/`mulDiv*`/`pure`, ctx reads including `selfAddress`, `store`/`emit` 0/1/3/`require`, `ite`/`opTail` word/addr/flag return, params); `counter_correct` / `token_correct` / `runtimeBlock_correct_callFree`; Vault `vault_correct_ext` for all runtime functions (`S2Frag`, binding `Vault.assetB`).
 - `Proof/Descend.lean` — `NoExternalOps`, `step_descend` (inverse of `step_lift` for call-free Yul), `execStmts_append_inv`, `execStmts_det_evm` (`EVM.evm_deterministic`).
 - `Proof/CallState.lean` — `restore` after a scoped call block; `R`/`RX` after `finishCall`.

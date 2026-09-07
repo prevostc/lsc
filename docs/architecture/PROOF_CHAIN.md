@@ -85,14 +85,15 @@ bytecode    ──(4) EndToEnd glue──────  bytecode-level anti-explo
    `EvmTraceRunExtAll` (Token's `EvmTraceRunAll` shape). Core at a witnessing `fo`
    predicts unique halted post-storage. Vault `deposit`/`withdraw` are Nat-returning;
    ABI words agree via `f.core_denote` (`deposit_core_toNat`).
-   `vault_bytecode_no_unauthorized_extraction` is `∀ σ', EvmTraceRunExtAll →`
+   `vault_bytecode_no_unauthorized_extraction` is `∀ σ' ξ', EvmTraceRunExtAll →`
    `vaultClaimRead σ a ≤ vaultClaimRead σ' a` (shares schema, not a Spec∧Yul
-   conjunction). Companions `*_exists` keep a predicted `EvmTraceRun`.
+   conjunction). Companions `*_exists` keep a predicted `EvmTraceRunExt`.
    `vault_bytecode_solvent` is Spec `Solvent` at `run tr w` for every matching
    halted trace (does not yet transport `storageRel (run tr w).self σ'`).
    powdr adequacy is not used. The converse (every EVM execution is a Yul run) is
-   **not** claimed. `hRXfun` re-establishes `RX` at each `mkEvmState` (foreign
-   `storageOf` is zeroed there).
+   **not** claimed. Foreign `ξ` is threaded; `α.ofState_foreign` plus initial `hRX`
+   re-establish `RX` at each `mkEvmStateExt`. `ξ'` is read from the halted EVM
+   state (`postForeign`).
 
 ## Status of the v3 chain being replaced (for the record)
 

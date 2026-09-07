@@ -23,6 +23,13 @@ Bytecode glue must instantiate powdr `ExternalModel` with `gas := .none`
 @[reducible] def yulD (calls : ExternalCalls) : Dialect :=
   evmWithExternal calls .none .none
 
+/-- Foreign account persistent storage (`env.storageOf`), indexed by 256-bit
+address words (low-160-bit aliases are the EVM account). -/
+abbrev Foreign := U256 → U256 → U256
+
+/-- Projection of an `EvmState` onto foreign persistent storage. -/
+def evmForeign (st : EvmState) : Foreign := st.env.storageOf
+
 /-- Abstraction of a ghost `G` from an EVM/`CallWorld` snapshot at a callee address.
 `ofState` / `ofWorld` agree on the `CallWorld` projection (they ignore memory,
 returndata, halt, and callee logs). -/
@@ -79,6 +86,21 @@ def Abs.ignoresLocal {G} (α : Abs G) : Prop :=
         transient := τ
         env := { st.env with storageOf := sto, transientOf := tro } } a =
       α.ofState st a
+
+/-- `α` reads a foreign account only through that account's `storageOf` slice
+(`evmForeign`). Independent of `ignoresLocal` (local `sstore` at the
+executing address). -/
+def Abs.ofState_foreign {G} (α : Abs G) : Prop :=
+  ∀ (st st' : EvmState) (a : Address),
+    (∀ k, evmForeign st (BitVec.ofNat 256 a) k = evmForeign st' (BitVec.ofNat 256 a) k) →
+    α.ofState st a = α.ofState st' a
+
+theorem RX_of_foreign {I : Interface} {S X E} {α : Abs I.Ghost} {bind : Binding I S X}
+    (hF : α.ofState_foreign) {w : World S X E} {st st' : EvmState}
+    (hξ : ∀ k, evmForeign st (BitVec.ofNat 256 (bind.addr w.self)) k =
+               evmForeign st' (BitVec.ofNat 256 (bind.addr w.self)) k)
+    (hRX : RX α bind w st) : RX α bind w st' :=
+  (hF st st' (bind.addr w.self) hξ).symm.trans hRX
 
 /-- Every **successful** Yul/EVM call from `self` to `addr` decodes to some method
 of `I`, matches `I.model`, and `NoInterfere`. Failed responses (`success = false`)

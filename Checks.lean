@@ -103,6 +103,9 @@ axioms. `#guard_msgs` turns a widened footprint into a build error (see
 /-- info: 'Lsc.Compiler.evmCallRunExtAll_of_progress' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms Lsc.Compiler.evmCallRunExtAll_of_progress
 
+/-- info: 'Vault.vault_abs_nonvacuous' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms Vault.vault_abs_nonvacuous
+
 /-- info: 'Vault.vault_bytecode_no_unauthorized_extraction' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms Vault.vault_bytecode_no_unauthorized_extraction
 

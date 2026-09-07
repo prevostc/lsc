@@ -229,4 +229,50 @@ under some fault oracle `fo` (`w` with `faults := fo`). Success ⇒ `haltSuccess
                 ∃ bytes, o = Outcome.halt ∧ stObs.halted = some (.revert, bytes) ∧
                   haltError c Γ e bytes ∧ R c Γ κ w stObs
 
+/-- Like `mkEvmState`, but foreign `storageOf` is `ξ` (the executing account
+still mirrors `storage`). `mkEvmState cd σ κ ctx = mkEvmStateExt cd σ (fun _ _ => 0) κ ctx`. -/
+def mkEvmStateExt (calldata : List UInt8) (storage : U256 → U256)
+    (ξ : Foreign) (keccak : List UInt8 → U256) (ctx : Ctx) : EvmState :=
+  let self : U256 := BitVec.ofNat 256 ctx.self
+  { EvmState.init with
+    storage
+    env :=
+      { EvmState.init.env with
+        calldata
+        caller := BitVec.ofNat 256 ctx.sender
+        origin := BitVec.ofNat 256 ctx.sender
+        address := self
+        callvalue := BitVec.ofNat 256 ctx.value
+        timestamp := BitVec.ofNat 256 ctx.timestamp
+        number := BitVec.ofNat 256 ctx.blockNumber
+        keccakOf := keccak
+        storageOf := fun addr slot =>
+          if accountKey addr = accountKey self then storage slot else ξ addr slot } }
+
+theorem mkEvmStateExt_halted (cd σ ξ κ ctx) :
+    (mkEvmStateExt cd σ ξ κ ctx).halted = none := rfl
+
+theorem mkEvmStateExt_immutable (cd σ ξ κ ctx k) :
+    (mkEvmStateExt cd σ ξ κ ctx).env.immutable k = 0 := rfl
+
+theorem mkEvmStateExt_storage (cd σ ξ κ ctx) :
+    (mkEvmStateExt cd σ ξ κ ctx).storage = σ := rfl
+
+theorem mkEvmStateExt_calldata (cd σ ξ κ ctx) :
+    (mkEvmStateExt cd σ ξ κ ctx).env.calldata = cd := rfl
+
+theorem mkEvmStateExt_keccak (cd σ ξ κ ctx) :
+    (mkEvmStateExt cd σ ξ κ ctx).env.keccakOf = κ := rfl
+
+theorem mkEvmStateExt_logs (cd σ ξ κ ctx) :
+    (mkEvmStateExt cd σ ξ κ ctx).logs = [] := rfl
+
+theorem mkEvmStateExt_address (cd σ ξ κ ctx) :
+    (mkEvmStateExt cd σ ξ κ ctx).env.address = BitVec.ofNat 256 ctx.self := rfl
+
+theorem mkEvmStateExt_foreign (cd σ ξ κ ctx addr slot) :
+    evmForeign (mkEvmStateExt cd σ ξ κ ctx) addr slot =
+      if accountKey addr = accountKey (BitVec.ofNat 256 ctx.self) then σ slot
+      else ξ addr slot := rfl
+
 end Lsc.Compiler

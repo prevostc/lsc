@@ -52,9 +52,14 @@ What an end-to-end theorem of this project relies on beyond its own proof.
   `compile_correct` + `steps_halted_unique`, packaged as `EvmCallRunExtAll` /
   `EvmTraceRunExtAll`. powdr adequacy is still not needed. The converse (every EVM
   execution is a Yul run) remains a modelling gap.
-- `hRXfun`: each `mkEvmState` zeros foreign `storageOf`. Trace theorems assume `RX` at
-  every such snapshot; a live ERC-20 ghost typically matches that only under a strong
-  `∀ w', RX … (mkEvmState …)` hypothesis (TCB).
+- Foreign state `ξ : Foreign` (`env.storageOf`) is threaded through S2 traces
+  (`mkEvmStateExt`, `EvmTraceRunExt` / `EvmTraceRunExtAll`). `α` reads a foreign
+  account through that account's `storageOf` slice (`ofState_foreign` / `evmForeign`).
+  Post-call `ξ'` is taken from the halted EVM state (`postForeign` / `accountForeign`;
+  `StateMatch.externalCode.storage` identifies it with Yul). Initial `hRX` at
+  `mkEvmStateExt [] σ ξ (rxCtx self)` plus `RX_mkEvmStateExt_ctx` /
+  `RX_mkEvmStateExt_ne` re-establish `RX` (token `accountKey` ≠ vault). Named hyp
+  `AssetStable`: runtime Vault steps do not write `Storage.asset`.
 - Fault oracle: backward `toYulFn_correct_ext` existentially chooses `fo` via
   `composeFault ncalls (¬resp.success) rest` so Core and Yul agree on each external outcome;
   security theorems remain `∀ w` and transport along the backward theorem. A failing `call`

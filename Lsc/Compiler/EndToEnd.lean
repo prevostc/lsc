@@ -42,6 +42,13 @@ theorem ofConv_conv (v : U256) : ofConv (conv v) = v := by
 def accountYulStorage (s : State) : U256 → U256 :=
   fun k => ofConv ((s.accountMap s.executionEnv.address).storage.get (conv k))
 
+/-- Yul `storageOf` recovered from every EVM account through `conv`.
+`StateMatch.externalCode.storage` identifies this with `evmForeign yst`. -/
+def accountForeign (s : State) : Foreign :=
+  fun addr slot =>
+    ofConv ((s.accountMap (EvmSemantics.AccountAddress.ofUInt256 (conv addr))).storage.get
+      (conv slot))
+
 def storageRel' {S X E ε} (c : ContractDef) (Γ : ContractSchema S X E ε)
     (κ : List UInt8 → U256) (σ : S) (s : State) : Prop :=
   storageRel c Γ κ σ (accountYulStorage s)
@@ -153,6 +160,39 @@ theorem postStorage_commit {yst0 s'} (h : s'.halt ≠ .Reverted) :
   · next h' => exact absurd h' h
   · rfl
 
+/-- Observable post-foreign-storage of a top-level halted frame. Revert restores
+the pre-state `storageOf` map, matching `postStorage`. -/
+def postForeign (yst0 : EvmState) (s' : State) : Foreign :=
+  match s'.halt with
+  | .Reverted => evmForeign yst0
+  | _ => accountForeign s'
+
+theorem postForeign_reverted {yst0 s'} (h : s'.halt = .Reverted) :
+    postForeign yst0 s' = evmForeign yst0 := by simp [postForeign, h]
+
+theorem postForeign_commit {yst0 s'} (h : s'.halt ≠ .Reverted) :
+    postForeign yst0 s' = accountForeign s' := by
+  unfold postForeign
+  split
+  · next h' => exact absurd h' h
+  · rfl
+
+theorem foreign_eq_account {yst : EvmState} {s : State} (hm : StateMatch yst s) :
+    accountForeign s = evmForeign yst := by
+  funext addr slot
+  have h := hm.externalCode.storage addr slot
+  simp only [accountForeign, evmForeign]
+  rw [← h, ofConv_conv]
+
+theorem obs_foreign_rollback {st0 st' stObs : EvmState} {bytes : List UInt8}
+    (hobs : stObs = committedState st0 st')
+    (hhalted : stObs.halted = st'.halted)
+    (hh : stObs.halted = some (.revert, bytes)) :
+    evmForeign stObs = evmForeign st0 := by
+  have hh' : st'.halted = some (.revert, bytes) := hhalted ▸ hh
+  rw [hobs, committedState_rollback hh' HaltKind.revert_commits]
+  rfl
+
 def EvmStartOK (is : List Instr) (yst0 : EvmState) (s0 : State) : Prop :=
   FrameOK (assemble is) s0 ∧ StateMatch yst0 s0 ∧
   s0.pc = EvmSemantics.UInt256.ofNat 0 ∧ s0.stack = []
@@ -201,6 +241,41 @@ theorem evmCallRun_eq_of_start {is yst0 σ1 σ2 s0}
   have e1 := (hb1 s0' hs' hgas1).2 s' hS hH
   have e2 := (hb2 s0' hs' hgas2).2 s' hS hH
   exact e1.trans e2.symm
+
+/-- Like `EvmCallRun`, also pinning post-foreign-storage `ξ'`. -/
+def EvmCallRunξ (is : List Instr) (yst0 : EvmState)
+    (σ' : U256 → U256) (ξ' : Foreign) : Prop :=
+  ∃ b : Nat, ∀ s0 : State,
+    EvmStartOK is yst0 s0 → b ≤ s0.gasAvailable →
+    (∃ s', Steps s0 s' ∧ Halted s') ∧
+    ∀ s', Steps s0 s' → Halted s' →
+      σ' = postStorage yst0 s' ∧ ξ' = postForeign yst0 s'
+
+theorem EvmCallRun_of_ξ {is yst0 σ' ξ'} (h : EvmCallRunξ is yst0 σ' ξ') :
+    EvmCallRun is yst0 σ' := by
+  obtain ⟨b, hb⟩ := h
+  refine ⟨b, ?_⟩
+  intro s0 hstart hgas
+  obtain ⟨hex, huni⟩ := hb s0 hstart hgas
+  exact ⟨hex, fun s' hS hH => (huni s' hS hH).1⟩
+
+theorem evmCallRunξ_eq_of_start {is yst0 σ1 ξ1 σ2 ξ2 s0}
+    (h1 : EvmCallRunξ is yst0 σ1 ξ1) (h2 : EvmCallRunξ is yst0 σ2 ξ2)
+    (hs : EvmStartOK is yst0 s0) : σ1 = σ2 ∧ ξ1 = ξ2 := by
+  obtain ⟨b1, hb1⟩ := h1
+  obtain ⟨b2, hb2⟩ := h2
+  let s0' := setGas s0 (s0.gasAvailable + b1 + b2)
+  have hs' : EvmStartOK is yst0 s0' := evmStartOK_setGas hs
+  have hgas1 : b1 ≤ s0'.gasAvailable := by
+    change b1 ≤ s0.gasAvailable + b1 + b2
+    omega
+  have hgas2 : b2 ≤ s0'.gasAvailable := by
+    change b2 ≤ s0.gasAvailable + b1 + b2
+    omega
+  obtain ⟨s', hS, hH⟩ := (hb1 s0' hs' hgas1).1
+  have e1 := (hb1 s0' hs' hgas1).2 s' hS hH
+  have e2 := (hb2 s0' hs' hgas2).2 s' hS hH
+  exact ⟨e1.1.trans e2.1.symm, e1.2.trans e2.2.symm⟩
 
 structure EvmCall where
   ctx : Ctx
@@ -444,6 +519,25 @@ theorem R_mkEvmState {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
   ⟨by simpa [mkEvmState_storage] using hs,
     logsRel_empty hlog (mkEvmState_logs cd σ κ ctx),
     mkEvmState_keccak cd σ κ ctx, hwf⟩
+
+theorem mkEvmState_eq_ext (cd σ κ ctx) :
+    mkEvmState cd σ κ ctx = mkEvmStateExt cd σ (fun _ _ => 0) κ ctx := by
+  simp [mkEvmState, mkEvmStateExt, EvmState.init]
+
+theorem ctxRel_mkEvmStateExt (cd : List UInt8) (σ : U256 → U256) (ξ : Foreign)
+    (κ : List UInt8 → U256) (ctx : Ctx) (hwf : CtxWF ctx) (hcd : cd.length < wordBound) :
+    ctxRel ctx (mkEvmStateExt cd σ ξ κ ctx) := by
+  refine ⟨rfl, rfl, rfl, rfl, rfl, ?_, mkEvmStateExt_halted cd σ ξ κ ctx, hcd, hwf⟩
+  simp [mkEvmStateExt, EvmState.init]
+  rfl
+
+theorem R_mkEvmStateExt {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
+    (κ : List UInt8 → U256) (w : World S X E) (cd σ ξ ctx)
+    (hs : storageRel c Γ κ w.self σ) (hlog : w.log = []) (hwf : WorldWF c Γ w) :
+    R c Γ κ w (mkEvmStateExt cd σ ξ κ ctx) :=
+  ⟨by simpa [mkEvmStateExt_storage] using hs,
+    logsRel_empty hlog (mkEvmStateExt_logs cd σ ξ κ ctx),
+    mkEvmStateExt_keccak cd σ ξ κ ctx, hwf⟩
 
 theorem WorldWF_log {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {w : World S X E} (log' : List E) (h : WorldWF c Γ w) :
