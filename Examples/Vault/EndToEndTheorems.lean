@@ -4,8 +4,15 @@ import Examples.Vault.EndToEndProof
 set_option linter.unusedVariables false
 
 /-!
-Vault bytecode security: Core-level anti-extraction and solvency, read
-back from compiled S2 runtime storage and the bound ERC-20 ghost.
+Vault on compiled runtime bytecode: Alice's redeemable assets, read from
+EVM storage, cannot fall unless she withdrew, and the token balance
+still covers all claims.
+
+The compiler must have accepted the contract. The asset token must
+behave like a conforming ERC-20 at an address other than the vault, and
+successful CALLs from us must match that model (no reentrancy into vault
+storage). Unknown selectors are ignored. The constructor is out of
+scope. The `_exists` variants start from a high-level trace.
 -/
 
 open Lsc Lsc.Compiler Lsc.Security Lsc.Stdlib Vault
@@ -16,12 +23,14 @@ open YulEvmCompiler (compile Instr)
 
 namespace Vault
 
-/-- Every halted EVM execution of a well-formed Vault call sequence, whose
-decoded Core trace never authorised `a`, does not decrease `a`'s share
-claim as read from bytecode storage. Assumes `Inv`, `storageRel`, a
-`Conforms` ERC-20 at the asset address (`CallsRealized` / `CallsTotal`),
-and that the compiler accepted the contract. This is the S2 end-to-end
-anti-extraction theorem for a single binding. -/
+/-- Whatever sequence of calls an adversary sends to the deployed Vault
+bytecode, Alice's redeemable assets as stored on chain never fall unless
+she authorised a decoded `withdraw` in that sequence. Unknown selectors
+and short calldata are ignored. The compiler must have accepted the
+contract; the asset token must behave like a conforming ERC-20 at an
+address other than the vault; storage keys must not collide. This carries
+the spec-level anti-extraction fact down to the bytecode, including the
+token CALLs `deposit` and `withdraw` make. -/
 theorem vault_bytecode_no_unauthorized_extraction
     (α : Abs IERC20.Ghost) (ext : ExternalCalls)
     (hCalls : CallsRealized ext) (htot : CallsTotal ext)
@@ -47,9 +56,13 @@ theorem vault_bytecode_no_unauthorized_extraction
   Proof.vault_bytecode_no_unauthorized_extraction α ext hCalls htot rt hrt is hcomp
     hκ hign hF self calls w a σ ξ hw hlog hWF hA hs hwf ha hRX hconf hBindNe
 
-/-- Anti-extraction for an encoded Security trace: some EVM run realises
-the calls and `a`'s claim slot does not fall. Env steps are dropped by
-`callsOf`. -/
+/-- If Alice never authorised a `withdraw` in a given Vault trace, there is
+an EVM execution of the encoded calldata that leaves her on-chain
+redeemable assets no lower than they started. Use this when you already
+have a high-level call sequence rather than raw calldata;
+`vault_bytecode_no_unauthorized_extraction` is the matching fact for
+every halted run of arbitrary calldata. Environment steps are dropped
+when encoding. Same token-conformance and compiler assumptions. -/
 theorem vault_bytecode_no_unauthorized_extraction_exists
     (α : Abs IERC20.Ghost) (ext : ExternalCalls)
     (hCalls : CallsRealized ext) (htot : CallsTotal ext)
@@ -76,10 +89,13 @@ theorem vault_bytecode_no_unauthorized_extraction_exists
   Proof.vault_bytecode_no_unauthorized_extraction_exists α ext hCalls htot rt hrt
     is hcomp hκ hign hF self tr w a σ ξ hw hW hlog hA hs hwf hb ha hRX hconf hBindNe
 
-/-- Every halted EVM execution of a well-formed Vault sequence leaves a
-solvent vault: the ERC-20 ghost at the asset address covers the sum of
-share claims. Post-world may be a fault-oracle-adjusted fold, not
-literally `Security.run`. -/
+/-- After any halted EVM execution of a well-formed Vault call sequence,
+the sum of redeemable claims read from bytecode still does not exceed
+the vault's token balance as read from the bound ERC-20's storage.
+Unknown selectors are ignored. Unlike Token's bytecode solvency theorem
+this is observed on chain, not as a high-level post-world: a fault
+oracle may adjust which external calls succeed. Same compiler and
+conforming-token assumptions as the anti-extraction theorem. -/
 theorem vault_bytecode_solvent
     (α : Abs IERC20.Ghost) (ext : ExternalCalls)
     (hCalls : CallsRealized ext) (htot : CallsTotal ext)
@@ -103,8 +119,10 @@ theorem vault_bytecode_solvent
   Proof.vault_bytecode_solvent α ext hCalls htot rt hrt is hcomp hκ hign hF
     self calls w σ ξ hw hlog hWF hs hwf hRX hconf hBindNe
 
-/-- Solvency for an encoded Security trace: some EVM run realises the
-calls and the post-ghost covers the claims. -/
+/-- Given a well-formed Vault trace, some EVM execution of the encoded
+calldata ends with on-chain claims still covered by the vault's token
+balance. Dual of `vault_bytecode_solvent` when you start from a
+high-level trace rather than raw calldata. -/
 theorem vault_bytecode_solvent_exists
     (α : Abs IERC20.Ghost) (ext : ExternalCalls)
     (hCalls : CallsRealized ext) (htot : CallsTotal ext)
@@ -129,9 +147,11 @@ theorem vault_bytecode_solvent_exists
   Proof.vault_bytecode_solvent_exists α ext hCalls htot rt hrt is hcomp hκ hign hF
     self tr w σ ξ hw hW hlog hs hwf hb hRX hconf hBindNe
 
-/-- A Solidity-layout ERC-20 abstraction (`balances` mapping + `decimals`
-slot, `evmKeccak`) is foreign-only and projects from any EVM snapshot.
-So the `α` hypothesis of the Vault bytecode theorems is inhabited. -/
+/-- There exists a reading of ERC-20 storage — a balances mapping plus a
+decimals slot, hashed as the EVM hashes them — that ignores the vault's
+own storage and can be taken from any EVM snapshot. So the Vault
+bytecode theorems are not vacuous: the "conforming token" hypothesis
+they assume can be instantiated. -/
 theorem vault_abs_nonvacuous :
     ∃ α : Abs IERC20.Ghost, α.ignoresLocal ∧ α.ofState_foreign :=
   Proof.vault_abs_nonvacuous

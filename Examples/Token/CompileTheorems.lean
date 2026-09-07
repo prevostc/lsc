@@ -4,9 +4,14 @@ import Examples.Token.CompileProof
 import Examples.Token.Contract
 
 /-!
-Token (S1) compiler instance: every runtime function is call-free, so
-`toYulFn_correct_callFree` applies to the whole ABI surface. Constructors
-are excluded (`hctor`); deploy is a separate theorem.
+Token's compiler instance: every runtime function, and the dispatcher,
+compile to Yul that matches the high-level Token model on storage,
+returns, and reverts.
+
+Token never calls another contract. Mapping slots (balances, allowances)
+are included. Constructors are excluded; deploy is a separate theorem.
+Shared assumptions: the compiler accepted the function, keccak keys do
+not collide, and the EVM frame matches the starting Token world.
 -/
 
 namespace Lsc.Compiler
@@ -14,10 +19,12 @@ namespace Lsc.Compiler
 open YulSemantics
 open YulSemantics.EVM
 
-/-- Every Token runtime function compiles to Yul that matches `Core.denote`
-under `R`. Token has mappings (balances, allowances) so this instance
-exercises keccak slot layout, not just Counter's single scalar. External
-CALLs are out of this fragment — Token never calls another contract. -/
+/-- If the compiler accepted a Token runtime function, running the emitted Yul
+has the same effect on storage, return data, and halt kind as the high-level
+Token model: a successful call agrees on the new balances and allowances, a
+revert rolls storage back and returns the same error bytes. Token uses
+mapping slots, unlike Counter's single word. Constructors are excluded;
+Token never calls another contract. -/
 theorem token_correct
     (κ : List UInt8 → U256) (hκ : KeccakSep Token.contract κ)
     (f : FnDef) (hf : f ∈ Token.contract.functions)
@@ -29,8 +36,11 @@ theorem token_correct
     ToYulFnCorrect Token.contract Token.schema κ f yul ctx w st0 :=
   Proof.token_correct κ hκ f hf _hk yul hyul ctx w st0 hctx hR
 
-/-- Token's dispatcher over the ERC20-style ABI (transfer, approve, …). Same
-as Counter but with mapping slots and longer calldata. -/
+/-- The compiled Token dispatcher agrees with the high-level model on every
+calldata: a known selector runs the matching function, an unknown selector
+or short calldata reverts with storage unchanged. Same compiler and layout
+assumptions as `token_correct`; this is the whole ABI surface, not one
+function. -/
 theorem token_dispatch_correct
     (κ : List UInt8 → U256) (hκ : KeccakSep Token.contract κ)
     (yul : YBlock) (hyul : runtimeBlock Token.contract = some yul)

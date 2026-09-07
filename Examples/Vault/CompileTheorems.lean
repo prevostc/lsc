@@ -3,9 +3,14 @@ import Examples.Vault.Contract
 import Stdlib.ERC20
 
 /-!
-Vault is the one-binding S2 instance: every runtime function (including
-`deposit`/`withdraw`, which `CALL` the asset token) compiles with
-`toYulFn_correct_ext`. The callee address lives in storage field `asset`.
+Vault's compiler instance: every runtime function, including
+`deposit` and `withdraw` which CALL the asset token, compiles to Yul
+that matches the high-level Vault model.
+
+The callee address is the `asset` slot. Shared assumptions: the
+compiler accepted the function, the asset behaves like a conforming
+ERC-20 at an address other than the vault, and the EVM frame matches
+the starting world. Constructors that CALL are out of scope.
 -/
 
 namespace Lsc.Compiler
@@ -14,10 +19,13 @@ open YulSemantics
 open YulSemantics.EVM
 open Lsc.Stdlib
 
-/-- Every Vault runtime function matches `Core.denote` on the external Yul
-dialect under some fault oracle. The asset token must `Conforms` to IERC20
-at the bound address (not `self`), and `RX` ties the ERC20 ghost to that
-account's EVM storage. Constructors with CALL are out of scope. -/
+/-- If the compiler accepted a Vault runtime function, every execution of
+the emitted Yul is predicted by the high-level Vault model under some
+choice of which external calls fail: success agrees on storage, shares,
+and token balances; a revert rolls our storage back. The asset token
+must behave like a conforming ERC-20 at an address other than the vault.
+Constructors are excluded — Vault's constructor CALLs `decimals` and is
+outside this theorem. -/
 theorem vault_correct_ext
     (α : Abs IERC20.Ghost)
     (κ : List UInt8 → U256) (hκ : KeccakSep Vault.contract κ)

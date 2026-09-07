@@ -4,8 +4,16 @@ import Examples.Token.EndToEndProof
 set_option linter.unusedVariables false
 
 /-!
-Token bytecode security: Core-level anti-extraction and solvency, read
-back from EVM storage of the compiled runtime.
+Token on compiled runtime bytecode: Alice's balance slot cannot fall
+without her authorisation, and recorded supply still covers all balances,
+after any halted sequence of EVM calls.
+
+The compiler must have accepted the contract; storage keys must not
+collide; starting storage must match a solvent Token world. Unknown
+selectors and short calldata are ignored.
+
+The `_exists` variants start from a high-level call sequence rather than
+raw calldata. Deploy-then covers the constructor-then-runtime path.
 -/
 
 open Lsc Lsc.Compiler Lsc.Security Token
@@ -14,11 +22,15 @@ open YulEvmCompiler (compile Instr)
 
 namespace Token
 
-/-- Every halted EVM execution of a well-formed call sequence against
-compiled Token, whose decoded Core trace never authorised `a`, does not
-decrease `a`'s balance slot. Assumes `Inv`, `storageRel` of the starting
-world, keccak-separated keys, and the compiler accepted the contract.
-This is the S1 end-to-end anti-extraction theorem. -/
+/-- Whatever sequence of calls an adversary sends to the deployed Token
+bytecode, Alice's balance in EVM storage never falls unless she authorised
+a decoded call in that sequence — she sent `transfer` or `burn`, or a
+`transferFrom` spent an allowance she had granted. Unknown selectors and
+short calldata are ignored. The compiler must have accepted the contract,
+storage keys must not collide, Alice's address and stored values must fit
+in a 256-bit word, and the starting storage must match a Token world whose
+balances already sum to supply. This carries the spec-level anti-extraction
+fact down to the bytecode. -/
 theorem token_bytecode_no_unauthorized_extraction
     (rt : YBlock) (hrt : runtimeBlock Token.contract = some rt)
     (is : List Instr) (hcomp : compile rt = some is)
@@ -36,10 +48,12 @@ theorem token_bytecode_no_unauthorized_extraction
   Proof.token_bytecode_no_unauthorized_extraction rt hrt is hcomp hκ self calls w a
     σ hw hlog hWF hA hs hwf ha
 
-/-- The same anti-extraction fact for a Security-layer trace that is
-encoded into calldata (`_exists`): some EVM run realises the encoded
-calls and `a`'s balance slot does not fall. Use this when you start from
-a Core trace rather than raw calldata. -/
+/-- If Alice never authorised any call in a given Token trace, there is an
+EVM execution of the encoded calldata that leaves her balance slot no
+lower than it started. Use this when you already have a high-level call
+sequence rather than raw calldata; `token_bytecode_no_unauthorized_extraction`
+is the matching fact for every halted run of arbitrary calldata. Encoded
+arguments must fit in a word; other assumptions match that theorem. -/
 theorem token_bytecode_no_unauthorized_extraction_exists
     (rt : YBlock) (hrt : runtimeBlock Token.contract = some rt)
     (is : List Instr) (hcomp : compile rt = some is)
@@ -58,10 +72,12 @@ theorem token_bytecode_no_unauthorized_extraction_exists
   Proof.token_bytecode_no_unauthorized_extraction_exists rt hrt is hcomp hκ self tr w a
     σ hw hW hlog hA hs hwf hb ha
 
-/-- Every halted EVM execution of a well-formed call sequence leaves a
-solvent Token world (`Σ balances ≤ totalSupply`) whose storage still
-matches `storageRel`. Same compiler and layout hypotheses as the
-anti-extraction theorem. -/
+/-- After any halted EVM execution of a well-formed call sequence against
+compiled Token, recorded balances still do not exceed total supply, and
+the ending EVM storage still matches that Token world. Unknown selectors
+are ignored. Unlike the anti-extraction theorem this concludes solvency
+and a full storage match, not a single balance slot. Same compiler and
+layout assumptions. -/
 theorem token_bytecode_solvent
     (rt : YBlock) (hrt : runtimeBlock Token.contract = some rt)
     (is : List Instr) (hcomp : compile rt = some is)
@@ -79,8 +95,10 @@ theorem token_bytecode_solvent
         (run (decodeTrace (mkTokenSetup hκ rt hrt is hcomp) calls) w).self σ' :=
   Proof.token_bytecode_solvent rt hrt is hcomp hκ self calls w σ hw hlog hWF hs hwf
 
-/-- Solvency for an encoded Security trace: some EVM run realises the
-calls and the post-world is solvent with matching storage. -/
+/-- Given a well-formed Token trace, some EVM execution of the encoded
+calldata ends in a solvent Token world whose storage matches. Dual of
+`token_bytecode_solvent` when you start from a high-level trace rather
+than raw calldata; encoded arguments must fit in a word. -/
 theorem token_bytecode_solvent_exists
     (rt : YBlock) (hrt : runtimeBlock Token.contract = some rt)
     (is : List Instr) (hcomp : compile rt = some is)
@@ -97,9 +115,12 @@ theorem token_bytecode_solvent_exists
         (run (callsOf tr) w).self σ' :=
   Proof.token_bytecode_solvent_exists rt hrt is hcomp hκ self tr w σ hw hW hlog hs hwf hb
 
-/-- Anti-extraction after a Yul constructor that established `R` (CREATE
-args as a suffix of `env.code`). Does not use `compileObject_correct`,
-whose init frame has no trailing constructor args. -/
+/-- After Token's constructor has run — CREATE arguments as a suffix of
+init code — and left a matching solvent world, Alice's balance slot still
+cannot fall under any subsequent runtime call sequence she did not
+authorise. This is the deploy-then-runtime story: it starts from a
+post-constructor EVM state, because the plain EVM deploy theorem does not
+model trailing constructor arguments. -/
 theorem token_deploy_then_no_unauthorized_extraction
     (rt : YBlock) (hrt : runtimeBlock Token.contract = some rt)
     (is : List Instr) (hcomp : compile rt = some is)

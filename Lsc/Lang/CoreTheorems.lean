@@ -2,19 +2,22 @@ import Lsc.Lang.Core
 import Lsc.Lang.CoreProof
 
 /-!
-Frame theorems for `Core.effects`: a successful run cannot change a storage
-projection that is not in the write set. Per-entrypoint "this field is
-immutable" facts are instances of these, not bespoke proofs.
+Frame facts for the Core IR: a successful (or reverting) run cannot change
+a storage field the function never writes.
+
+Contract authors use these so a bound token address, an owner slot, or an
+allowance mapping stays put without a per-entrypoint lemma. Shared
+assumption: if the function CALLs out, the callee is assumed not to write
+our storage — the IERC20 non-interference hypothesis.
 -/
 
 namespace Lsc
 
 variable {S X E ε : Type}
 
-/-- A successful primitive never writes `self`. Loads, arithmetic, and context
-words are pure in storage; a CALL is allowed only under the hypothesis that
-the callee model does not mutate our storage (`hCall`). This is the leaf of
-the generic frame theorem: field-immutability proofs never reopen `Op.denote`. -/
+/-- A successful primitive step — a load, an add, a context word, a CALL —
+never changes our storage, provided a CALL's callee is assumed not to
+write us. Field-immutability for whole functions is built on this leaf. -/
 theorem Op.effects_frame {Γ : ContractSchema S X E ε} (op : Op) (env : List Nat)
     (hCall : ∀ b m args ctx w v w',
       Tx.run (Γ.ext.call b m args) ctx w = .ok (v, w') → w'.self = w.self)
@@ -23,10 +26,10 @@ theorem Op.effects_frame {Γ : ContractSchema S X E ε} (op : Op) (env : List Na
     w'.self = w.self :=
   Proof.Op.effects_frame op env hCall h
 
-/-- If statement `s` does not list field index `f` among its writes, a successful
-`Stmt.denote` leaves an arbitrary projection `P` of storage unchanged. Scalar
-and mapping updaters are required to frame `P` when they target some other
-index, and CALLs must not write `self`. Bound-address fields that no
+/-- If a statement never stores to a given field, a successful run of that
+statement leaves any observation of that field unchanged — a scalar, a
+whole mapping, a bound address. Mapping stores to a different field must
+not alias it, and CALLs must not write us. Bound-address slots that no
 entrypoint stores therefore stay fixed without a per-function lemma. -/
 theorem Stmt.effects_frame_on {α} {Γ : ContractSchema S X E ε} (P : S → α)
     (s : Stmt) (env : List Nat) (f : Nat)
@@ -41,10 +44,9 @@ theorem Stmt.effects_frame_on {α} {Γ : ContractSchema S X E ε} (P : S → α)
     P w'.self = P w.self :=
   Proof.Stmt.effects_frame_on P s env f hStore hStoreMap hStoreMap2 hCall hf h
 
-/-- Scalar specialisation of `Stmt.effects_frame_on`: a statement that does not
-store to scalar slot `f` leaves that slot unchanged. Mapping stores are
-required not to alias `f`, which generated `StorageSchema.Lawful` instances
-discharge. -/
+/-- If a statement never stores to a given scalar slot, a successful run
+leaves that word unchanged. Mapping stores are required not to alias the
+slot, which a lawful storage layout guarantees. CALLs must not write us. -/
 theorem Stmt.effects_frame {Γ : ContractSchema S X E ε} (s : Stmt) (env : List Nat)
     (f : Nat)
     (hΓ : ∀ f₁ f₂ σ v, f₁ ≠ f₂ →
@@ -59,11 +61,10 @@ theorem Stmt.effects_frame {Γ : ContractSchema S X E ε} (s : Stmt) (env : List
     Γ.st.scalar f w'.self = Γ.st.scalar f w.self :=
   Proof.Stmt.effects_frame s env f hΓ hMap1 hMap2 hCall hf h
 
-/-- Generic Core frame: if field index `f` is absent from `Core.effects c`, a
-successful `Core.denote` leaves projection `P` of `self` unchanged. This is
-the theorem LANGUAGE_ARCHITECTURE uses in place of handwritten
-`f_preserves_x` lemmas for every entrypoint. CALLs still require that the
-external model not mutate our storage. -/
+/-- If a whole function body never stores to a given field, a successful
+run leaves any observation of that field unchanged. This is the theorem
+that replaces handwritten "this entrypoint does not touch X" lemmas.
+CALLs must still be assumed not to write our storage. -/
 theorem effects_frame_on {α} {Γ : ContractSchema S X E ε} {t : RetTy} (c : Core t)
     (env : List Nat) (f : Nat) (P : S → α)
     (hStore : ∀ i σ v, f ≠ i → P (Γ.st.scalarUpd i σ v) = P σ)
@@ -77,9 +78,10 @@ theorem effects_frame_on {α} {Γ : ContractSchema S X E ε} {t : RetTy} (c : Co
     P w'.self = P w.self :=
   Proof.effects_frame_on c env f P hStore hStoreMap hStoreMap2 hCall hf h
 
-/-- A successful Core run does not change scalar field `f` unless `f` is in the
-write set. Used to freeze bound callee addresses that no runtime function
-ever `sstore`s. -/
+/-- A successful function run does not change a scalar slot unless the
+function stores to it. Used to freeze bound callee addresses that no
+runtime function ever writes, so Vault's asset token cannot silently
+become a different address. -/
 theorem effects_frame {Γ : ContractSchema S X E ε} {t} (c : Core t) (env : List Nat)
     (f : Nat)
     (hΓ : ∀ f₁ f₂ σ v, f₁ ≠ f₂ →
@@ -94,9 +96,9 @@ theorem effects_frame {Γ : ContractSchema S X E ε} {t} (c : Core t) (env : Lis
     Γ.st.scalar f w'.self = Γ.st.scalar f w.self :=
   Proof.effects_frame c env f hΓ hMap1 hMap2 hCall hf h
 
-/-- A successful Core run does not change mapping field `f` unless that mapping
-is written. Token bytecode theorems use this so a call that never touches
-`allowances` cannot change allowance slots in EVM storage. -/
+/-- A successful function run does not change a one-key mapping unless the
+function writes that mapping. Token uses this so a call that never
+touches allowances cannot change allowance slots in EVM storage. -/
 theorem effects_frame_map1 {Γ : ContractSchema S X E ε} {t} (c : Core t)
     (env : List Nat) (f : Nat)
     (hΓ : ∀ i σ v, f ≠ i → Γ.st.map1 f (Γ.st.scalarUpd i σ v) = Γ.st.map1 f σ)
@@ -110,9 +112,9 @@ theorem effects_frame_map1 {Γ : ContractSchema S X E ε} {t} (c : Core t)
     Γ.st.map1 f w'.self = Γ.st.map1 f w.self :=
   Proof.effects_frame_map1 c env f hΓ hMap1 hMap2 hCall hf h
 
-/-- Same as `effects_frame_map1` for a nested mapping (two keccak layers). Needed
-when a field such as Token `allowances[owner][spender]` is not in the write
-set and must be shown identical in the post-state. -/
+/-- Same as `effects_frame_map1` for a nested mapping (two hash layers).
+Needed when a field such as Token allowances is not written and must be
+shown identical after the call. -/
 theorem effects_frame_map2 {Γ : ContractSchema S X E ε} {t} (c : Core t)
     (env : List Nat) (f : Nat)
     (hΓ : ∀ i σ v, f ≠ i → Γ.st.map2 f (Γ.st.scalarUpd i σ v) = Γ.st.map2 f σ)
@@ -126,9 +128,10 @@ theorem effects_frame_map2 {Γ : ContractSchema S X E ε} {t} (c : Core t)
     Γ.st.map2 f w'.self = Γ.st.map2 f w.self :=
   Proof.effects_frame_map2 c env f hΓ hMap1 hMap2 hCall hf h
 
-/-- Revert or success: a Core run does not change projection `P` of `self` when
-field `f` is not in the write set. Bind-address stability is this lemma plus
-`coreAvoids`. -/
+/-- Whether the function reverts or succeeds, a run does not change an
+observation of a field it never stores to. Unlike `effects_frame_on`
+this covers the revert path as well — a failed CALL still leaves the
+bound token address untouched. -/
 theorem worldAfter_frame_on {α} {Γ : ContractSchema S X E ε} {t : RetTy} (c : Core t)
     (env : List Nat) (f : Nat) (P : S → α)
     (hStore : ∀ i σ v, f ≠ i → P (Γ.st.scalarUpd i σ v) = P σ)
