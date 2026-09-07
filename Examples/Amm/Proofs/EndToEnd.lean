@@ -62,7 +62,7 @@ theorem amm_shares_bound (w : World Storage Ext Event) (a : Address)
   rt := rt
   hrt := hrt
   is := is
-  hcomp := hcomp
+  hcomp := compileErased_to_compileBlock hcomp
 
 theorem amm_inv_faults (self : Address) (w : World Storage Ext Event) (fo : Nat → Bool)
     (h : Inv self w) : Inv self { w with faults := fo } := h

@@ -67,18 +67,13 @@ peak (all remain live innermost); genuine last-use splitting reshapes
 results become statement calls (17 → 15 live locals) so the current AMM
 compiles.
 
-**Status (2026-09-07):** spilled compile path implemented (`memoryguard(256)`
-on the runtime only; `compileRuntime` = erase then `spillBlock?` of the
-disambiguated block; deploy via `spillObjectWithFallback`). AMM with
-checked transfers emits hex. Theorem wiring in progress: exported
-`compileBlock` / `hcomp` is still the erase path, so AMM bytecode theorems
-are vacuous. Blockers: `GuardedRun` of
-`resolveMemoryGuardStmts r.base r.reserved (uniquifyBlock rt)`; FMP `256`
-vs `reserved` in `StateMatch`; S2 `GuardedExternals` /
-`CallsScratchInsensitive`; lift `run_none_to_any` into `EndToEndExtProof`;
-deploy `PlannedTopRun`. Raw `sourceValidB` fails only `nfWellScopedB`
-(`memoryguard` is an unbound `.call`); the erased runtime is `sourceValidB`
-true. Decision pending before that proof chain.
+**Status (2026-09-07):** S1 bytecode theorems take `hcomp : compileBlock rt = some is`
+(erase, else powdr spill). `GuardedRunOfErased` lifts an ordinary `Run` of
+`eraseMemoryGuardStmts rt` to a `GuardedRun` of the resolved raw runtime
+(`if 256 {}` → `if reserved {}`; memory builtins stay in `[0, 256)`). S2
+(`EndToEndExt*`, Vault/AMM exports) still takes `compileErased`;
+`TransportBindings.herase` stays. Remaining: S2 `GuardedExternals` /
+`CallsScratchInsensitive` / `run_none_to_any`; deploy `PlannedTopRun`.
 
 ## 2026-09-07 — Pin Yul→EVM compiler to `prevostc/yul-compiler` @ `30230e1`
 

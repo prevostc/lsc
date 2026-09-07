@@ -123,6 +123,161 @@ def staticSafeCases (base : Nat) : List (Literal × YBlock) → Bool
   | (_, b) :: rest => staticSafeStmts base b && staticSafeCases base rest
 end
 
+theorem rangeBelow_iff (base p n : Nat) :
+    rangeBelow base p n = true ↔ p + n ≤ base := by
+  simp [rangeBelow, decide_eq_true_eq]
+
+theorem rangeBelow_outside {base reserved p n : Nat} (h : p + n ≤ base) :
+    RangeOutside base reserved p n :=
+  Or.inl h
+
+@[simp] theorem staticSafeExpr_lit (base n : Nat) :
+    staticSafeExpr base (.lit (.number n)) = true := rfl
+@[simp] theorem staticSafeExpr_lit' (base n : Nat) :
+    staticSafeExpr base (lit n) = true := rfl
+@[simp] theorem staticSafeExpr_var (base : Nat) (x : YIdent) :
+    staticSafeExpr base (.var x) = true := rfl
+@[simp] theorem staticSafeExpr_var' (base : Nat) (x : YIdent) :
+    staticSafeExpr base (var x) = true := rfl
+
+@[simp] theorem staticSafeExpr_builtin (base : Nat) (op : YOp) (args : List YExpr) :
+    staticSafeExpr base (.builtin op args) =
+      (staticSafeOp base op args && staticSafeExprs base args) := rfl
+
+@[simp] theorem staticSafeExpr_call (base : Nat) (f : YIdent) (args : List YExpr) :
+    staticSafeExpr base (.call f args) = staticSafeExprs base args := rfl
+
+theorem staticSafeExpr_bop (base : Nat) (op : YOp) (args : List YExpr)
+    (hop : staticSafeOp base op args = true)
+    (ha : staticSafeExprs base args = true) :
+    staticSafeExpr base (bop op args) = true := by
+  simp [bop, hop, ha]
+
+@[simp] theorem staticSafeStmt_block (base : Nat) (b : YBlock) :
+    staticSafeStmt base (.block b) = staticSafeStmts base b := rfl
+
+@[simp] theorem staticSafeStmt_letNone (base : Nat) (xs : List YIdent) :
+    staticSafeStmt base (.letDecl xs none) = true := rfl
+
+@[simp] theorem staticSafeStmt_letSome (base : Nat) (xs : List YIdent) (e : YExpr) :
+    staticSafeStmt base (.letDecl xs (some e)) = staticSafeExpr base e := rfl
+
+@[simp] theorem staticSafeStmt_assign (base : Nat) (xs : List YIdent) (e : YExpr) :
+    staticSafeStmt base (.assign xs e) = staticSafeExpr base e := rfl
+
+@[simp] theorem staticSafeStmt_expr (base : Nat) (e : YExpr) :
+    staticSafeStmt base (.exprStmt e) = staticSafeExpr base e := rfl
+
+@[simp] theorem staticSafeStmt_cond (base : Nat) (c : YExpr) (b : YBlock) :
+    staticSafeStmt base (.cond c b) =
+      (staticSafeExpr base c && staticSafeStmts base b) := rfl
+
+@[simp] theorem staticSafeStmt_switch (base : Nat) (c : YExpr)
+    (cases : List (Literal × YBlock)) (dflt : Option YBlock) :
+    staticSafeStmt base (.switch c cases dflt) =
+      (staticSafeExpr base c && staticSafeCases base cases &&
+        match dflt with
+        | none => true
+        | some b => staticSafeStmts base b) := by
+  cases dflt <;> simp [staticSafeStmt]
+
+@[simp] theorem staticSafeStmt_funDef (base : Nat) (n : YIdent)
+    (ps rs : List YIdent) (b : YBlock) :
+    staticSafeStmt base (.funDef n ps rs b) = staticSafeStmts base b := rfl
+
+@[simp] theorem staticSafeStmt_forLoop (base : Nat) (init : YBlock) (c : YExpr)
+    (post body : YBlock) :
+    staticSafeStmt base (.forLoop init c post body) =
+      (staticSafeStmts base init && staticSafeExpr base c &&
+        staticSafeStmts base post && staticSafeStmts base body) := rfl
+
+@[simp] theorem staticSafeStmt_break (base : Nat) :
+    staticSafeStmt base .break = true := rfl
+@[simp] theorem staticSafeStmt_continue (base : Nat) :
+    staticSafeStmt base .continue = true := rfl
+@[simp] theorem staticSafeStmt_leave (base : Nat) :
+    staticSafeStmt base .leave = true := rfl
+
+
+theorem staticSafe_atomE (base : Nat) (tag : String) (d : Nat) (a : Atom) :
+    staticSafeExpr base (atomE tag d a) = true := by
+  cases a with
+  | var i =>
+    simp only [atomE]
+    split <;> simp [staticSafeExpr, var, lit]
+  | lit n => simp [atomE, staticSafeExpr, lit]
+
+@[simp] theorem staticSafeExprs_nil (base : Nat) : staticSafeExprs base [] = true := rfl
+
+@[simp] theorem staticSafeExprs_cons (base : Nat) (e : YExpr) (es : List YExpr) :
+    staticSafeExprs base (e :: es) =
+      (staticSafeExpr base e && staticSafeExprs base es) := rfl
+
+theorem staticSafeExprs_of_all (base : Nat) (args : List YExpr)
+    (h : ∀ e ∈ args, staticSafeExpr base e = true) :
+    staticSafeExprs base args = true := by
+  induction args with
+  | nil => rfl
+  | cons e es ih =>
+    rw [staticSafeExprs_cons, Bool.and_eq_true]
+    exact ⟨h e (by simp), ih (fun e' he' => h e' (by simp [he']))⟩
+
+theorem staticSafeExprs_map_atom (base : Nat) (tag : String) (d : Nat) (as : List Atom) :
+    staticSafeExprs base (as.map (atomE tag d)) = true :=
+  staticSafeExprs_of_all _ _ (fun e he => by
+    obtain ⟨a, ha, rfl⟩ := List.mem_map.mp he
+    exact staticSafe_atomE base tag d a)
+
+@[simp] theorem staticSafeStmts_nil (base : Nat) : staticSafeStmts base [] = true := rfl
+
+@[simp] theorem staticSafeStmts_cons (base : Nat) (s : YStmt) (rest : YBlock) :
+    staticSafeStmts base (s :: rest) =
+      (staticSafeStmt base s && staticSafeStmts base rest) := rfl
+
+@[simp] theorem staticSafeCases_nil (base : Nat) :
+    staticSafeCases base [] = true := rfl
+@[simp] theorem staticSafeCases_cons (base : Nat) (l : Literal) (b : YBlock)
+    (rest : List (Literal × YBlock)) :
+    staticSafeCases base ((l, b) :: rest) =
+      (staticSafeStmts base b && staticSafeCases base rest) := rfl
+
+theorem staticSafeStmts_append (base : Nat) (a b : YBlock) :
+    staticSafeStmts base (a ++ b) =
+      (staticSafeStmts base a && staticSafeStmts base b) := by
+  induction a with
+  | nil => simp [staticSafeStmts]
+  | cons s rest ih => simp [staticSafeStmts, ih, Bool.and_assoc]
+
+theorem staticSafeStmts_reverse (base : Nat) (b : YBlock) :
+    staticSafeStmts base b.reverse = staticSafeStmts base b := by
+  induction b with
+  | nil => rfl
+  | cons s rest ih =>
+    simp [List.reverse_cons, staticSafeStmts_append, staticSafeStmts, ih, Bool.and_comm]
+
+theorem staticSafe_nilEmit (base : Nat) :
+    staticSafeStmts base ({} : Emit).stmts = true := rfl
+
+theorem staticSafe_emit_push (base : Nat) (e : Emit) (s : YStmt)
+    (he : staticSafeStmts base e.stmts = true)
+    (hs : staticSafeStmt base s = true) :
+    staticSafeStmts base (e.push s).stmts = true := by
+  simp [Emit.stmts_push, staticSafeStmts_append, staticSafeStmts, he, hs]
+
+theorem staticSafe_keccak064 (base : Nat) (h : 64 ≤ base) :
+    staticSafeExpr base keccak064 = true := by
+  simp [keccak064, staticSafeExpr, staticSafeOp, staticSafeExprs, litNat?, rangeBelow,
+    lit, bop, h, decide_eq_true_eq]
+
+theorem staticSafe_revert00 (base : Nat) :
+    staticSafeStmt base revert00 = true := by
+  simp [revert00, staticSafeStmt, staticSafeExpr, staticSafeOp, staticSafeExprs, litNat?,
+    rangeBelow, lit, bop]
+
+theorem staticSafe_stopStmt (base : Nat) :
+    staticSafeStmt base stopStmt = true := by
+  simp [stopStmt, staticSafeStmt, staticSafeExpr, staticSafeOp, staticSafeExprs, bop]
+
 /-! ## Resolve vs erase on a `noYulCall` tail -/
 
 mutual
@@ -274,15 +429,5 @@ theorem exec_memoryGuardResolved {funs : FunEnv evm} {V : VEnv evm} {st : EvmSta
     ExecStmt evm funs V st (.cond (lit n) []) V st .normal := by
   simpa [lit] using
     exec_cond_lit_empty (D := evm) (reserved_ne_zero hn hlt)
-
-/-- Remaining lift into `guardedEvm`: a `Run` of `resolve … rt` in the ordinary
-dialect is a `GuardedRun` once every executed builtin satisfies `OpMemorySafe`
-(`staticSafeStmts memoryGuardK`). Not discharged here for general `emitCore`. -/
-def GuardedRunOfErased (rt : YBlock) (r : Result) (yst0 yst' : EvmState)
-    (o : Outcome) : Prop :=
-  Run (evmWithExternal ExternalCalls.none ExternalCreates.none ExternalGas.any)
-      (eraseMemoryGuardStmts rt) yst0 [] yst' o →
-    GuardedRun ExternalCalls.none ExternalCreates.none rt r.base r.reserved
-      yst0 [] yst' o
 
 end Lsc.Compiler

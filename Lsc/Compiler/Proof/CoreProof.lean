@@ -311,7 +311,9 @@ theorem core_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
       cases hem
       have hn0 : identsNodup tag env.length = true :=
         identsNodup_mono tag (by simp [coreExtraDepth]) hn
-      have hwfA : atomWF a = true := by simpa [coreWF, retWF] using hwf
+      have hwfA : atomWF a = true := by
+        simp [coreWF, retWF, Bool.and_eq_true] at hwf
+        exact hwf.1
       have hv := atom_eval_lt hinv.wf hwfA
       have he := eval_atom tag funs (st := st) hinv.venv hn0 a
       obtain ⟨st', hexec, hh, hR'⟩ := return_word_sim funs V hv he hinv.rel
@@ -322,7 +324,9 @@ theorem core_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
       cases hem
       have hn0 : identsNodup tag env.length = true :=
         identsNodup_mono tag (by simp [coreExtraDepth]) hn
-      have hwfA : atomWF a = true := by simpa [coreWF, retWF] using hwf
+      have hwfA : atomWF a = true := by
+        simp [coreWF, retWF, Bool.and_eq_true] at hwf
+        exact hwf.1
       have hv := atom_eval_lt hinv.wf hwfA
       have he := eval_atom tag funs (st := st) hinv.venv hn0 a
       obtain ⟨st', hexec, hh, hR'⟩ := return_word_sim funs V hv he hinv.rel
@@ -333,7 +337,9 @@ theorem core_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
       cases hem
       have hn0 : identsNodup tag env.length = true :=
         identsNodup_mono tag (by simp [coreExtraDepth]) hn
-      have hwfA : atomWF a = true := by simpa [coreWF, retWF] using hwf
+      have hwfA : atomWF a = true := by
+        simp [coreWF, retWF, Bool.and_eq_true] at hwf
+        exact hwf.1
       have hv := atom_eval_lt hinv.wf hwfA
       have he := eval_atom tag funs (st := st) hinv.venv hn0 a
       obtain ⟨st', hexec, hh, hR'⟩ := return_word_sim funs V hv he hinv.rel
@@ -349,7 +355,8 @@ theorem core_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
           have hn0 : identsNodup tag env.length = true :=
             identsNodup_mono tag (by simp [coreExtraDepth]) hn
           have ⟨hwfA, hwfB⟩ : atomWF a = true ∧ atomWF b = true := by
-            simpa [coreWF, retWF, Bool.and_eq_true] using hwf
+            simp [coreWF, retWF, Bool.and_eq_true] at hwf
+            exact hwf.1
           have hv0 := atom_eval_lt hinv.wf hwfA
           have hv1 := atom_eval_lt hinv.wf hwfB
           have he0 := eval_atom tag funs (st := st) hinv.venv hn0 a

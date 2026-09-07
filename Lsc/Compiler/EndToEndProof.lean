@@ -1,6 +1,7 @@
 import Lsc.Compiler.EndToEnd
 import Lsc.Compiler.Proof.SpillPath
 import Lsc.Compiler.Proof.MemFootprint
+import Lsc.Compiler.Proof.MemFootprintLift
 
 set_option linter.unusedSimpArgs false
 set_option linter.unusedVariables false
@@ -20,73 +21,8 @@ open EvmSemantics.EVM (State Steps)
 
 namespace Proof
 
-theorem bytecode_call_correct {S X E ε : Type} (c : ContractDef)
-    (Γ : ContractSchema S X E ε)
-    (hΓ : Γ.st.Lawful c.fields) (hκ : KeccakSep c evmKeccak)
-    (hcf : ∀ f ∈ c.functions, CallFree f.core)
-    (hctor : ∀ f ∈ c.functions, f.kind ≠ .constructor)
-    (hlen : c.fields.length < wordBound)
-    (hbound : ∀ f ∈ c.functions, 4 + 32 * f.params.length < wordBound)
-    (rt : YBlock) (hrt : runtimeBlock c = some rt)
-    (is : List Instr) (hcomp : compileErased rt = some is)
-    (ctx : Ctx) (w : World S X E) (yst0 : EvmState)
-    (hctx : ctxRel ctx yst0) (hR : R c Γ evmKeccak w yst0)
-    (himm0 : ∀ k, yst0.env.immutable k = 0) :
-    BytecodeCallCorrect c Γ evmKeccak ctx w yst0 is := by
-  let _model : ExternalModel := closedModel
-  simp only [BytecodeCallCorrect]
-  obtain ⟨stObs, hRC, hconcl⟩ :=
-    runtimeBlock_correct_callFree c Γ hΓ evmKeccak hκ hcf hctor hlen hbound rt hrt ctx w yst0 hctx hR
-  obtain ⟨yst', hrun, hobs⟩ := runCommitted_lift_run .none .none .any hRC
-  have himm : ∀ key, unpatchedImmutables key =
-      yst0.env.immutable (litValue (.string key)) := by
-    intro key
-    simp [unpatchedImmutables, himm0]
-  have hcompB := compileErased_to_compileBlock hcomp
-  have ⟨b, hb⟩ :=
-    compileRuntime_correct (model := closedModel) ExternalsRealized.none hcompB himm
-      (.erased hcomp hrun)
-  refine ⟨b, ?_⟩
-  intro s0 hOK hM hpc hstk hgas
-  obtain ⟨s', ystF, hSteps, hcs, hSM, hOut, hF, _⟩ := hb s0 hOK hM hpc hstk hgas
-  have hSM' : StateMatch yst' s' := by
-    simpa [hF hcomp] using hSM
-  have hOut' :
-      ((Outcome.halt = .normal ∧ s'.halt = .Success ∧ s'.hReturn = .empty) ∨
-       (Outcome.halt = .halt ∧ HaltedMatch yst' s')) := by
-    simpa [hF hcomp] using hOut
-  have hHM : HaltedMatch yst' s' := by
-    rcases hOut' with ⟨hn, _⟩ | ⟨_, hH⟩
-    · cases hn
-    · exact hH
-  have hhalted : stObs.halted = yst'.halted := by
-    rw [hobs, committedState_halted]
-  refine ⟨s', hSteps, hcs, ?_⟩
-  cases hsel : selectedFn c yst0.env.calldata with
-  | none =>
-    simp only [hsel] at hconcl ⊢
-    obtain ⟨hh, _⟩ := hconcl
-    exact reverted_of_halted (bytes := []) (hhalted ▸ hh) hHM
-  | some f =>
-    simp only [hsel] at hconcl ⊢
-    cases htx : Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse) ctx w with
-    | ok prod =>
-      rcases prod with ⟨v, w'⟩
-      simp only [htx] at hconcl ⊢
-      obtain ⟨hsucc, hR'⟩ := hconcl
-      obtain ⟨k, bs, hh, hk⟩ := haltSuccess_commits hsucc
-      have heq : stObs = yst' := obs_eq_of_commit hobs hhalted hh hk
-      rcases hR' with ⟨hs, _, _, _⟩
-      exact ⟨haltOK_of_success (heq ▸ hsucc) hHM, storageRel_account (heq ▸ hs) hSM'⟩
-    | error e =>
-      simp only [htx] at hconcl ⊢
-      obtain ⟨bytes, hh, herr, _⟩ := hconcl
-      have hr := reverted_of_halted (hhalted ▸ hh) hHM
-      exact ⟨hr.1, bytes, hr.2, herr⟩
-
-/-- Spill branch of `bytecode_call_correct`. `GuardedRun` of the resolved raw
-runtime is an explicit hypothesis (`GuardedRunOfErased`); the footprint lift
-that discharges it is the remaining Checkpoint-2 goal. -/
+/-- Spill branch of `bytecode_call_correct`. `GuardedRunOfErased` lifts the
+erased-dialect run to a `GuardedRun` of the resolved raw runtime. -/
 theorem bytecode_call_correct_spill {S X E ε : Type} (c : ContractDef)
     (Γ : ContractSchema S X E ε)
     (hΓ : Γ.st.Lawful c.fields) (hκ : KeccakSep c evmKeccak)
@@ -168,6 +104,75 @@ theorem bytecode_call_correct_spill {S X E ε : Type} (c : ContractDef)
       have hr' := reverted_of_halted (hhalted ▸ hh) hHM'
       exact ⟨hr'.1, bytes, hr'.2, herr⟩
 
+theorem bytecode_call_correct {S X E ε : Type} (c : ContractDef)
+    (Γ : ContractSchema S X E ε)
+    (hΓ : Γ.st.Lawful c.fields) (hκ : KeccakSep c evmKeccak)
+    (hcf : ∀ f ∈ c.functions, CallFree f.core)
+    (hctor : ∀ f ∈ c.functions, f.kind ≠ .constructor)
+    (hlen : c.fields.length < wordBound)
+    (hbound : ∀ f ∈ c.functions, 4 + 32 * f.params.length < wordBound)
+    (rt : YBlock) (hrt : runtimeBlock c = some rt)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
+    (ctx : Ctx) (w : World S X E) (yst0 : EvmState)
+    (hctx : ctxRel ctx yst0) (hR : R c Γ evmKeccak w yst0)
+    (himm0 : ∀ k, yst0.env.immutable k = 0) :
+    BytecodeCallCorrect c Γ evmKeccak ctx w yst0 is := by
+  cases compileBlock_elim hcomp with
+  | inl hce =>
+    let _model : ExternalModel := closedModel
+    simp only [BytecodeCallCorrect]
+    obtain ⟨stObs, hRC, hconcl⟩ :=
+      runtimeBlock_correct_callFree c Γ hΓ evmKeccak hκ hcf hctor hlen hbound rt hrt ctx w yst0 hctx hR
+    obtain ⟨yst', hrun, hobs⟩ := runCommitted_lift_run .none .none .any hRC
+    have himm : ∀ key, unpatchedImmutables key =
+        yst0.env.immutable (litValue (.string key)) := by
+      intro key
+      simp [unpatchedImmutables, himm0]
+    have ⟨b, hb⟩ :=
+      compileRuntime_correct (model := closedModel) ExternalsRealized.none hcomp himm
+        (.erased hce hrun)
+    refine ⟨b, ?_⟩
+    intro s0 hOK hM hpc hstk hgas
+    obtain ⟨s', ystF, hSteps, hcs, hSM, hOut, hF, _⟩ := hb s0 hOK hM hpc hstk hgas
+    have hSM' : StateMatch yst' s' := by
+      simpa [hF hce] using hSM
+    have hOut' :
+        ((Outcome.halt = .normal ∧ s'.halt = .Success ∧ s'.hReturn = .empty) ∨
+         (Outcome.halt = .halt ∧ HaltedMatch yst' s')) := by
+      simpa [hF hce] using hOut
+    have hHM : HaltedMatch yst' s' := by
+      rcases hOut' with ⟨hn, _⟩ | ⟨_, hH⟩
+      · cases hn
+      · exact hH
+    have hhalted : stObs.halted = yst'.halted := by
+      rw [hobs, committedState_halted]
+    refine ⟨s', hSteps, hcs, ?_⟩
+    cases hsel : selectedFn c yst0.env.calldata with
+    | none =>
+      simp only [hsel] at hconcl ⊢
+      obtain ⟨hh, _⟩ := hconcl
+      exact reverted_of_halted (bytes := []) (hhalted ▸ hh) hHM
+    | some f =>
+      simp only [hsel] at hconcl ⊢
+      cases htx : Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse) ctx w with
+      | ok prod =>
+        rcases prod with ⟨v, w'⟩
+        simp only [htx] at hconcl ⊢
+        obtain ⟨hsucc, hR'⟩ := hconcl
+        obtain ⟨k, bs, hh, hk⟩ := haltSuccess_commits hsucc
+        have heq : stObs = yst' := obs_eq_of_commit hobs hhalted hh hk
+        rcases hR' with ⟨hs, _, _, _⟩
+        exact ⟨haltOK_of_success (heq ▸ hsucc) hHM, storageRel_account (heq ▸ hs) hSM'⟩
+      | error e =>
+        simp only [htx] at hconcl ⊢
+        obtain ⟨bytes, hh, herr, _⟩ := hconcl
+        have hr := reverted_of_halted (hhalted ▸ hh) hHM
+        exact ⟨hr.1, bytes, hr.2, herr⟩
+  | inr h =>
+    obtain ⟨hne, hsp⟩ := h
+    exact bytecode_call_correct_spill c Γ hΓ hκ hcf hctor hlen hbound rt hrt is hne hsp
+      ctx w yst0 hctx hR himm0 fun hr hrun => GuardedRunOfErased hrt hr hrun
+
 theorem bytecode_trace_all {S X E ε : Type} (c : ContractDef)
     (Γ : ContractSchema S X E ε)
     (hΓ : Γ.st.Lawful c.fields) (hκ : KeccakSep c evmKeccak)
@@ -177,7 +182,7 @@ theorem bytecode_trace_all {S X E ε : Type} (c : ContractDef)
     (hbound : ∀ f ∈ c.functions, 4 + 32 * f.params.length < wordBound)
     (hnd : selectorsNodup c = true)
     (rt : YBlock) (hrt : runtimeBlock c = some rt)
-    (is : List Instr) (hcomp : compileErased rt = some is)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
     (calls : List (Ctx × FnDef × List Nat))
     (w : World S X E) (σ σ' : U256 → U256)
     (hs : storageRel c Γ evmKeccak w.self σ)

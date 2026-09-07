@@ -23,8 +23,9 @@ open EvmSemantics.EVM (State Steps)
 /-- A compiled call-free runtime, started from a matching EVM frame with
 enough gas, ends in a halt whose return data and storage are those of
 the high-level model on the selected function — or an empty revert if
-the selector is unknown. The compiler must have accepted the contract;
-there are no CALLs; constructors are excluded. This is the step that
+the selector is unknown. The compiler must have accepted the contract
+(`compileBlock`: erase or powdr spill); there are no CALLs; constructors
+are excluded. This is the step that
 carries a call-free Yul run down to bytecode; Token's anti-extraction
 theorems instantiate it. -/
 theorem bytecode_call_correct {S X E ε : Type} (c : ContractDef)
@@ -35,7 +36,7 @@ theorem bytecode_call_correct {S X E ε : Type} (c : ContractDef)
     (hlen : c.fields.length < wordBound)
     (hbound : ∀ f ∈ c.functions, 4 + 32 * f.params.length < wordBound)
     (rt : YBlock) (hrt : runtimeBlock c = some rt)
-    (is : List Instr) (hcomp : compileErased rt = some is)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
     (ctx : Ctx) (w : World S X E) (yst0 : EvmState)
     (hctx : ctxRel ctx yst0) (hR : R c Γ evmKeccak w yst0)
     (himm0 : ∀ k, yst0.env.immutable k = 0) :
@@ -60,7 +61,7 @@ theorem bytecode_trace_all {S X E ε : Type} (c : ContractDef)
     (hbound : ∀ f ∈ c.functions, 4 + 32 * f.params.length < wordBound)
     (hnd : selectorsNodup c = true)
     (rt : YBlock) (hrt : runtimeBlock c = some rt)
-    (is : List Instr) (hcomp : compileErased rt = some is)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
     (calls : List (Ctx × FnDef × List Nat))
     (w : World S X E) (σ σ' : U256 → U256)
     (hs : storageRel c Γ evmKeccak w.self σ)

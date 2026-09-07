@@ -118,6 +118,12 @@ and ABI packing starts at `abiPtr`. A 3-arg `transferFrom` ends at 228; a
 Constructor is not guarded (`datacopy(0, …)` would smash scratch). -/
 def memoryGuardK : Nat := 256
 
+/-- Aligned ABI words at `abiPtr` fit in `[0, memoryGuardK)`. Equivalent to `n ≤ 4`. -/
+def fitsGuardWords (n : Nat) : Bool := decide (abiPtr + 32 * n ≤ memoryGuardK)
+
+/-- CALL / custom-error packing (`4 + 32n` bytes from `abiPtr`) fits. Equivalent to `n ≤ 3`. -/
+def fitsGuardCall (n : Nat) : Bool := decide (abiPtr + 4 + 32 * n ≤ memoryGuardK)
+
 /-! ## AST helpers -/
 
 def lit (n : Nat) : YExpr := YulSemantics.Expr.lit (YulSemantics.Literal.number n)
@@ -173,12 +179,12 @@ def fieldKindOK (c : ContractDef) (idx : Nat) (k : FieldKind) : Bool :=
 
 def eventOK (c : ContractDef) (ev n : Nat) : Bool :=
   match c.events[ev]? with
-  | some ed => decide (ed.params.length = n)
+  | some ed => decide (ed.params.length = n) && fitsGuardWords n
   | none => false
 
 def errorOK (c : ContractDef) (err n : Nat) : Bool :=
   match c.errors[err]? with
-  | some ed => decide (ed.params.length = n)
+  | some ed => decide (ed.params.length = n) && fitsGuardCall n
   | none => false
 
 /-- Binding `b` exists and method `m` has this arity; otherwise `toYulFn` is `none`. -/
@@ -188,7 +194,8 @@ def callWF (c : ContractDef) (b m : Nat) (args : List Atom) : Bool :=
   | some bd =>
     match bd.methods[m]? with
     | none => false
-    | some (_, spec) => decide (args.length = spec.arity) && args.all atomWF
+    | some (_, spec) =>
+        decide (args.length = spec.arity) && args.all atomWF && fitsGuardCall args.length
 
 def opWF (c : ContractDef) : Lsc.Op → Bool
   | .load f => fieldKindOK c f .scalar
@@ -218,7 +225,7 @@ def retWF : {t : RetTy} → RetExpr t → Bool
   | _, .pair x y => retWF x && retWF y
 
 def coreWF (c : ContractDef) : {t : RetTy} → Core t → Bool
-  | _, .ret r => retWF r
+  | _, .ret r => retWF r && fitsGuardWords (retAtoms r).length
   | _, .opTail op => opWF c op
   | _, .opTailAddr op => opWF c op
   | _, .opTailFlag op => opWF c op
@@ -318,15 +325,39 @@ theorem fieldKindOK_iff (c : ContractDef) (idx : Nat) (k : FieldKind) :
   simp only [fieldKindOK]
   cases c.fields[idx]? <;> simp [decide_eq_true_eq]
 
+theorem fitsGuardWords_iff (n : Nat) :
+    fitsGuardWords n = true ↔ n ≤ 4 := by
+  unfold fitsGuardWords abiPtr memoryGuardK
+  rw [decide_eq_true_eq]
+  constructor <;> intro <;> omega
+
+theorem fitsGuardCall_iff (n : Nat) :
+    fitsGuardCall n = true ↔ n ≤ 3 := by
+  unfold fitsGuardCall abiPtr memoryGuardK
+  rw [decide_eq_true_eq]
+  constructor <;> intro <;> omega
+
+theorem abiWords_le {n : Nat} (h : n ≤ 4) : abiPtr + 32 * n ≤ memoryGuardK := by
+  unfold abiPtr memoryGuardK; omega
+
+theorem abiCall_le {n : Nat} (h : n ≤ 3) : abiPtr + (4 + 32 * n) ≤ memoryGuardK := by
+  unfold abiPtr memoryGuardK; omega
+
+theorem abiAfterSel_le {n : Nat} (h : n ≤ 3) : abiAfterSel + 32 * n ≤ memoryGuardK := by
+  unfold abiAfterSel memoryGuardK; omega
+
+
 theorem eventOK_iff (c : ContractDef) (ev n : Nat) :
-    eventOK c ev n = true ↔ ∃ ed, c.events[ev]? = some ed ∧ ed.params.length = n := by
+    eventOK c ev n = true ↔
+      ∃ ed, c.events[ev]? = some ed ∧ ed.params.length = n ∧ n ≤ 4 := by
   simp only [eventOK]
-  cases c.events[ev]? <;> simp [decide_eq_true_eq]
+  cases c.events[ev]? <;> simp [fitsGuardWords_iff, decide_eq_true_eq]
 
 theorem errorOK_iff (c : ContractDef) (err n : Nat) :
-    errorOK c err n = true ↔ ∃ ed, c.errors[err]? = some ed ∧ ed.params.length = n := by
+    errorOK c err n = true ↔
+      ∃ ed, c.errors[err]? = some ed ∧ ed.params.length = n ∧ n ≤ 3 := by
   simp only [errorOK]
-  cases c.errors[err]? <;> simp [decide_eq_true_eq]
+  cases c.errors[err]? <;> simp [fitsGuardCall_iff, decide_eq_true_eq]
 
 theorem identsNodup_iff (tag : String) (n : Nat) :
     identsNodup tag n = true ↔ ((List.range n).map (identV tag)).Pairwise (fun a b => a ≠ b) := by

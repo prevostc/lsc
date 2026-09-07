@@ -287,7 +287,7 @@ theorem callWF_arity_of_BindWF {I : Interface} {S X E ε : Type}
       refine ⟨p, rfl, ?_⟩
       simpa [hp] using hm
   simp [hp, hspec, Bool.and_eq_true] at hwf
-  exact hwf
+  exact hwf.1
 
 /-! ## `noExt` of P / S -/
 

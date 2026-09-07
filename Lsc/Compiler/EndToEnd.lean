@@ -9,6 +9,7 @@ import YulEvmCompiler.Correctness
 import YulEvmCompiler.LowerDefs
 import YulEvmCompiler.Optimizer.Implementation.MemorySpill
 import Lsc.Compiler.Proof.SpillPath
+import Lsc.Compiler.Proof.MemFootprintLift
 
 set_option linter.unusedSimpArgs false
 set_option linter.unusedVariables false
@@ -25,6 +26,10 @@ open Lsc
 open YulSemantics
 open YulSemantics.EVM
 open YulEvmCompiler
+open YulEvmCompiler.Optimizer
+open YulEvmCompiler.Optimizer.MemorySpill
+open YulEvmCompiler.Optimizer.MemorySpillSelect
+open YulEvmCompiler.Optimizer.MemorySpillStateSound
 open EvmSemantics.EVM (State Steps)
 
 /-- Keccak oracle forced by `EnvMatch.keccak` (`targetKeccakOracle_agrees`). -/
@@ -325,6 +330,47 @@ def BytecodeCallCorrect {S X E ε : Type} (c : ContractDef)
         | .error e =>
           s'.halt = .Reverted ∧ ∃ bytes, s'.hReturn.toList = bytes ∧ haltError c Γ e bytes
 
+/-- A `Run` of the memoryguard-erased runtime matches the successful
+`compileBlock` branch: erase, or powdr spill with `GuardedRunOfErased`. -/
+theorem runtimeSrc_of_erased {c : ContractDef} {rt : YBlock} {is : List Instr}
+    {yst0 yst' : EvmState} {o : Outcome}
+    (hrt : runtimeBlock c = some rt)
+    (hcomp : compileBlock rt = some is)
+    (hrun : Run (evmWithExternal ExternalCalls.none ExternalCreates.none ExternalGas.any)
+      (eraseMemoryGuardStmts rt) yst0 [] yst' o) :
+    RuntimeCompileSrc (model := closedModel) rt is yst0 yst' o := by
+  let _model : ExternalModel := closedModel
+  cases compileBlock_elim hcomp with
+  | inl hce => exact .erased hce hrun
+  | inr h =>
+    obtain ⟨hne, hsp⟩ := h
+    obtain ⟨r, hr, hcr⟩ := compileSpilled_inv hsp
+    exact .spilled r hne hr hcr rfl (guardedExternals_none r.base r.reserved)
+      (GuardedRunOfErased hrt hr hrun)
+
+theorem ystF_agree {b : YBlock} {is : List Instr} {yst' ystF : EvmState}
+    (hcomp : compileBlock b = some is)
+    (hFe : compileErased b = some is → ystF = yst')
+    (hFs : ∀ r, compileErased b = none → spillRuntime? b = some r →
+      ScratchRel r.base r.reserved yst' ystF) :
+    ystF.storage = yst'.storage ∧ ystF.halted = yst'.halted := by
+  cases compileBlock_elim hcomp with
+  | inl hce =>
+    have heq := hFe hce
+    exact ⟨by rw [heq], by rw [heq]⟩
+  | inr h =>
+    obtain ⟨hne, hsp⟩ := h
+    obtain ⟨r, hr, _⟩ := compileSpilled_inv hsp
+    have hrel := hFs r hne hr
+    exact ⟨(ScratchRel.storage_eq hrel).symm,
+      (congrArg Obs.halted hrel.observables_eq).symm⟩
+
+theorem HaltedMatch_of_ystF {yst' ystF : EvmState} {s' : State}
+    (hHM : HaltedMatch ystF s') (hh : ystF.halted = yst'.halted) :
+    HaltedMatch yst' s' := by
+  obtain ⟨hk, hy, hM⟩ := hHM
+  exact ⟨hk, hh ▸ hy, hM⟩
+
 theorem evmCallRun_of_correct {S X E ε : Type} (c : ContractDef)
     (Γ : ContractSchema S X E ε)
     (hΓ : Γ.st.Lawful c.fields) (hκ : KeccakSep c evmKeccak)
@@ -333,7 +379,7 @@ theorem evmCallRun_of_correct {S X E ε : Type} (c : ContractDef)
     (hlen : c.fields.length < wordBound)
     (hbound : ∀ f ∈ c.functions, 4 + 32 * f.params.length < wordBound)
     (rt : YBlock) (hrt : runtimeBlock c = some rt)
-    (is : List Instr) (hcomp : compileErased rt = some is)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
     (ctx : Ctx) (w : World S X E) (yst0 : EvmState)
     (hctx : ctxRel ctx yst0) (hR : R c Γ evmKeccak w yst0)
     (himm0 : ∀ k, yst0.env.immutable k = 0) :
@@ -352,27 +398,31 @@ theorem evmCallRun_of_correct {S X E ε : Type} (c : ContractDef)
       yst0.env.immutable (litValue (.string key)) := by
     intro key
     simp [unpatchedImmutables, himm0]
-  have hcompB := compileErased_to_compileBlock hcomp
+  have hsrc := runtimeSrc_of_erased hrt hcomp hrun
   have ⟨b, hb0⟩ :=
-    compileRuntime_correct (model := closedModel) ExternalsRealized.none hcompB himm
-      (.erased hcomp hrun)
+    compileRuntime_correct (model := closedModel) ExternalsRealized.none hcomp himm hsrc
   have hb : ∀ s0 : State,
       FrameOK (assemble is) s0 → StateMatch yst0 s0 →
       s0.pc = EvmSemantics.UInt256.ofNat 0 → s0.stack = [] →
       b ≤ s0.gasAvailable →
-      ∃ s', Steps s0 s' ∧ s'.callStack = [] ∧ StateMatch yst' s' ∧
+      ∃ s' ystF, Steps s0 s' ∧ s'.callStack = [] ∧ StateMatch ystF s' ∧
         ((Outcome.halt = .normal ∧ s'.halt = .Success ∧ s'.hReturn = .empty) ∨
-         (Outcome.halt = .halt ∧ HaltedMatch yst' s')) := by
+         (Outcome.halt = .halt ∧ HaltedMatch yst' s')) ∧
+        yst'.storage = ystF.storage := by
     intro s0 hOK hM hpc hstk hgas
-    obtain ⟨s', ystF, hSteps, hcs, hSM, hOut, hF, _⟩ := hb0 s0 hOK hM hpc hstk hgas
-    exact ⟨s', hSteps, hcs, hF hcomp ▸ hSM, hF hcomp ▸ hOut⟩
+    obtain ⟨s', ystF, hSteps, hcs, hSM, hOut, hFe, hFs⟩ := hb0 s0 hOK hM hpc hstk hgas
+    have ⟨hstor, hhalt⟩ := ystF_agree hcomp hFe hFs
+    refine ⟨s', ystF, hSteps, hcs, hSM, ?_, hstor.symm⟩
+    rcases hOut with hN | ⟨_, hH⟩
+    · exact Or.inl hN
+    · exact Or.inr ⟨rfl, HaltedMatch_of_ystF hH hhalt⟩
   have hhalted : stObs.halted = yst'.halted := by
     rw [hobs, committedState_halted]
   refine ⟨stObs.storage, ?_, ?_⟩
   · refine ⟨b, ?_⟩
     intro s0 hstart hgas
     rcases hstart with ⟨hOK, hM, hpc, hstk⟩
-    obtain ⟨s', hSteps, hcs, hSM, hOut⟩ := hb s0 hOK hM hpc hstk hgas
+    obtain ⟨s', ystF, hSteps, hcs, hSM, hOut, hstor⟩ := hb s0 hOK hM hpc hstk hgas
     have hH : Halted s' := Halted_of_compile_out hcs hOut
     have hHM : HaltedMatch yst' s' := by
       rcases hOut with ⟨hn, _⟩ | ⟨_, hH'⟩
@@ -400,7 +450,7 @@ theorem evmCallRun_of_correct {S X E ε : Type} (c : ContractDef)
             split at hOK'
             · intro h; cases (hOK'.symm.trans h)
             · intro h; cases (hOK'.1.symm.trans h)
-          rw [postStorage_commit hnr, storage_eq_account hSM, heq]
+          rw [postStorage_commit hnr, heq, hstor, storage_eq_account hSM]
         | error e =>
           simp only [htx] at hconcl
           obtain ⟨bytes, hh, _, _⟩ := hconcl
@@ -529,7 +579,7 @@ theorem evmCallRun_fnCalldata {S X E ε : Type} (c : ContractDef)
     (hbound : ∀ f ∈ c.functions, 4 + 32 * f.params.length < wordBound)
     (hnd : selectorsNodup c = true)
     (rt : YBlock) (hrt : runtimeBlock c = some rt)
-    (is : List Instr) (hcomp : compileErased rt = some is)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
     (ctx : Ctx) (f : FnDef) (args : List Nat) (w : World S X E)
     (σ : U256 → U256)
     (hf : f ∈ c.functions) (hk : f.kind ≠ .constructor)
@@ -573,7 +623,7 @@ theorem bytecode_trace_transport {S X E ε : Type} (c : ContractDef)
     (hbound : ∀ f ∈ c.functions, 4 + 32 * f.params.length < wordBound)
     (hnd : selectorsNodup c = true)
     (rt : YBlock) (hrt : runtimeBlock c = some rt)
-    (is : List Instr) (hcomp : compileErased rt = some is)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
     (calls : List (Ctx × FnDef × List Nat))
     (w : World S X E) (σ : U256 → U256)
     (hs : storageRel c Γ evmKeccak w.self σ)
