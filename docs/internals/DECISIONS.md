@@ -37,3 +37,32 @@ change to powdr's `compileSwitchCases` and its correctness proof — an
 upstream TCB change, not a fork. For exploring generated code we export the
 compiler's own artifacts instead: `out/<C>.runtime.yul`, `out/<C>.deploy.yul`
 and `out/<C>.runtime.asm` from `scripts/export_bytecode.lean`.
+
+## 2026-09-07 — Stack depth: use powdr's verified memory spilling
+
+Core's ANF keeps every `let` live to the end of a function, and powdr's raw
+`compile` rejects programs that need `DUP17`+ (`compileExpr`: `off + idx <
+16`). The AMM's later-LP `addLiquidity` branch reaches 17 live locals, so
+`compileRuntime` returned `none` and `amm_bytecode_no_unauthorized_extraction`
+was vacuous. A fee-bearing AMM is estimated at 21–23.
+
+Decision: route runtime compilation through powdr's verified guarded
+memory-spilling pass (`MemorySpillSelect.spillBlock?`, theorems
+`compile_memorySpill_correct` / `compileObject_memorySpill_correct`) instead of
+reshaping our emitter. Requirements: the runtime block declares
+`memoryguard(k)` with `k ≥ 228` (our ABI packing and keccak scratch reach
+228; `0x80` is the reserved *start*, not a valid guard); the constructor is
+not guarded (`datacopy(0, …)` would overwrite scratch) and deploy uses
+`spillObjectWithFallback`; `EndToEnd*`/`Deploy` glue transports
+`storageRel`/halt through powdr's `ScratchRel` (our simulation relation `R`
+never mentions memory). S2's open external model declares `gas = .none`
+while the spill theorem is stated for `gas = .any`; reconciling this must only
+weaken hypotheses of exported statements (our programs never call `gas()`),
+never strengthen them.
+
+Rejected: emitter-level live-range blocks. Nesting `let`s does not reduce the
+peak (all remain live innermost); genuine last-use splitting reshapes
+`Emit`, `CoreProof`, `CoreExtSimProof`, `ProgressCoreProof`, `Constructor*`
+(~6k lines). Stopgap applied first: the AMM's unused `let _ ← transferFrom`
+results become statement calls (17 → 15 live locals) so the current AMM
+compiles.
