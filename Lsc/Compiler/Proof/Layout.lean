@@ -95,6 +95,11 @@ theorem Inv_memOnly {S X E ε} {Γ : ContractSchema S X E ε} {c κ ctx w env V 
     Inv Γ c κ ctx w env V st' :=
   ⟨h.venv, h.wf, R_memOnly h.rel hm, ctxRel_memOnly h.ctxr hm⟩
 
+theorem ctxRel_address {ctx st} (h : ctxRel ctx st) :
+    st.env.address = BitVec.ofNat 256 ctx.self := by
+  rcases h with ⟨_, _, _, _, ha, _⟩
+  exact ha
+
 theorem ctxRel_static {ctx st} (h : ctxRel ctx st) : st.env.static = false := by
   rcases h with ⟨_, _, _, _, _, hs, _, _, _⟩
   exact hs

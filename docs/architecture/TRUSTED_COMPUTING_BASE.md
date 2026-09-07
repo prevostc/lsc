@@ -58,8 +58,16 @@ What an end-to-end theorem of this project relies on beyond its own proof.
   Post-call `ξ'` is taken from the halted EVM state (`postForeign` / `accountForeign`;
   `StateMatch.externalCode.storage` identifies it with Yul). Initial `hRX` at
   `mkEvmStateExt [] σ ξ (rxCtx self)` plus `RX_mkEvmStateExt_ctx` /
-  `RX_mkEvmStateExt_ne` re-establish `RX` (token `accountKey` ≠ vault). Named hyp
-  `AssetStable`: runtime Vault steps do not write `Storage.asset`.
+  `RX_mkEvmStateExt_ne` re-establish `RX` (token `accountKey` ≠ vault).
+  `Abs.ignoresLocal` is **foreign-address only**:
+  `accountKey (BitVec.ofNat 256 (a : Nat)) ≠ accountKey st.env.address → …`
+  (`RX`/`Conforms` only read the bound token; `hAssetNe` says that token is not the
+  executor). `ofState_proj` is unchanged (CallWorld copies `storageOf` for every
+  address). The non-vacuity witness `vaultAbsSolidity` reads Solidity ERC20 layout
+  from `evmForeign st (ofNat a)`: `balances[o]` at `mapSlot1 evmKeccak 0 o`,
+  `decimals` at scalar slot 1 (`IERC20.Ghost` has no allowances/`totalSupply`).
+  Runtime Vault steps do not write `Storage.asset` (field 5, `coreAvoids` +
+  `effects_frame_on`); this is proved, not a named hypothesis.
 - Fault oracle: backward `toYulFn_correct_ext` existentially chooses `fo` via
   `composeFault ncalls (¬resp.success) rest` so Core and Yul agree on each external outcome;
   security theorems remain `∀ w` and transport along the backward theorem. A failing `call`

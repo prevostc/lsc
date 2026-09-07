@@ -44,7 +44,7 @@ bytecode    ──(4) EndToEnd glue──────  bytecode-level anti-explo
      `Inv.venv` is structural). Call-free backward `toYulFn_correct_ext` (`Proof/CoreExt.lean`)
      is **proved**: invert `Run` → descend → S1 → `EVM.evm_deterministic`. Extra `hstab` /
      `haddr` close `RX` (call-free `sstore` updates `storageOf` at the executing address;
-     `ignoresLocal` only covers executing `storage`/`transient`). `Op.call`/`Stmt.call`
+     `ignoresLocal` is foreign `accountKey` only). `Op.call`/`Stmt.call`
      (`op_sim_call_bwd`, `core_sim_ext`) cover `S2Frag` including Vault `deposit`/`withdraw`.
      `RuntimeBlockCorrectExt` is in `Correctness.lean`; proof `runtimeBlock_correct_ext`
      (`Proof/DispatchExt.lean`) is **proved** (M3): invert the call-free guard/selector/`switch`
@@ -88,8 +88,11 @@ bytecode    ──(4) EndToEnd glue──────  bytecode-level anti-explo
    `vault_bytecode_no_unauthorized_extraction` is `∀ σ' ξ', EvmTraceRunExtAll →`
    `vaultClaimRead σ a ≤ vaultClaimRead σ' a` (shares schema, not a Spec∧Yul
    conjunction). Companions `*_exists` keep a predicted `EvmTraceRunExt`.
-   `vault_bytecode_solvent` is Spec `Solvent` at `run tr w` for every matching
-   halted trace (does not yet transport `storageRel (run tr w).self σ'`).
+   `vault_bytecode_solvent` is `vaultSolventRead α σ' ξ' self assetAddr`:
+   finite support of `vaultClaimRead` on `a < wordBound` from `σ'`, summed and
+   bounded by holdings `(α.ofState (mkEvmStateExt [] σ' ξ' …) assetAddr).balances self`.
+   Derived from Spec `Inv`/`Solvent` plus `storageRel`/`RX` at the last EVM-synced
+   world (trailing `env` may raise Spec holdings while `ξ'` stays at the last call).
    powdr adequacy is not used. The converse (every EVM execution is a Yul run) is
    **not** claimed. Foreign `ξ` is threaded; `α.ofState_foreign` plus initial `hRX`
    re-establish `RX` at each `mkEvmStateExt`. `ξ'` is read from the halted EVM

@@ -82,6 +82,11 @@ def IERC20 : Interface where
     | .decimals => ⟨0x313ce567, 0, .word⟩
   idx := Method.equivFin
 
+/-- Solidity-style persistent layout (`vaultAbsSolidity`): `balances[o]` at mapping
+slot 0 (`keccak(abi.encode(o, 0))`); `decimals` at scalar slot 1. -/
+def IERC20.balancesMappingSlot : Nat := 0
+def IERC20.decimalsSlot : Nat := 1
+
 /-- Field type of a bound token: definitionally `Address` so Core certificates stay `rfl`. -/
 abbrev IERC20.Ref : Type := Address
 

@@ -340,6 +340,8 @@ theorem runtimeBlock_correct_ext {I : Interface} {S X E ε : Type}
     (ctx : Ctx) (w : World S X E) (st0 : EvmState)
     (hctx : ctxRel ctx st0) (hR : R c Γ κ w st0)
     (hRX : RX α bind w st0) (hign : α.ignoresLocal)
+    (hBindNe : accountKey (BitVec.ofNat 256 (bind.addr w.self)) ≠
+      accountKey (BitVec.ofNat 256 ctx.self))
     (hconf : Conforms I ctx.self (bind.addr w.self) calls α)
     (hBind : ∀ b m args, callWF c b m args = true → ∃ meth, BindWF c Γ bind b m meth)
     (hslot : ∀ f ∈ c.functions, ∃ slot : Nat,
@@ -463,7 +465,7 @@ theorem runtimeBlock_correct_ext {I : Interface} {S X E ε : Type}
                 selectedFn_some_of hshort hfind hshortF
               have hfn := toYulFn_correct_ext (I := I) α bind c Γ hΓ κ hκ calls f
                 (hctor f hfmem) (hS2 f hfmem) hlen (hbound f hfmem) body hyF
-                ctx w st0 hctx hR hRX hign hconf hBind (hslot f hfmem)
+                ctx w st0 hctx hR hRX hign hBindNe hconf hBind (hslot f hfmem)
               obtain ⟨fo, hconcl⟩ := hfn st' o hRun
               refine ⟨fo, ?_⟩
               simp only [hsome]

@@ -88,6 +88,8 @@ theorem bytecode_call_correct_ext {I : Interface} {S X E ε : Type}
     (ctx : Ctx) (w : World S X E) (yst0 : EvmState)
     (hctx : ctxRel ctx yst0) (hR : R c Γ evmKeccak w yst0)
     (hRX : RX α bind w yst0) (hign : α.ignoresLocal)
+    (hBindNe : accountKey (BitVec.ofNat 256 (bind.addr w.self)) ≠
+      accountKey (BitVec.ofNat 256 ctx.self))
     (hconf : Conforms I ctx.self (bind.addr w.self) calls α)
     (hBind : ∀ b m args, callWF c b m args = true → ∃ meth, BindWF c Γ bind b m meth)
     (hslot : ∀ f ∈ c.functions, ∃ slot : Nat,
@@ -99,7 +101,7 @@ theorem bytecode_call_correct_ext {I : Interface} {S X E ε : Type}
   intro st' o hrun
   have hpred : EvmCallRunExt α bind c Γ evmKeccak calls ctx w yst0 st' o :=
     runtimeBlock_correct_ext (I := I) α bind c Γ hΓ evmKeccak hκ calls
-      hctor hS2 hlen hbound rt hrt ctx w yst0 hctx hR hRX hign hconf hBind hslot
+      hctor hS2 hlen hbound rt hrt ctx w yst0 hctx hR hRX hign hBindNe hconf hBind hslot
       st' o hrun
   refine ⟨hpred, ?_⟩
   let _model : ExternalModel := openModel calls
@@ -247,6 +249,8 @@ theorem evmCallRunExtAll_of_progress {I : Interface} {S X E ε : Type}
     (ctx : Ctx) (w : World S X E) (yst0 : EvmState)
     (hctx : ctxRel ctx yst0) (hR : R c Γ evmKeccak w yst0)
     (hRX : RX α bind w yst0) (hign : α.ignoresLocal)
+    (hBindNe : accountKey (BitVec.ofNat 256 (bind.addr w.self)) ≠
+      accountKey (BitVec.ofNat 256 ctx.self))
     (hconf : Conforms I ctx.self (bind.addr w.self) calls α)
     (hBind : ∀ b m args, callWF c b m args = true → ∃ meth, BindWF c Γ bind b m meth)
     (hslot : ∀ f ∈ c.functions, ∃ slot : Nat,
@@ -260,7 +264,7 @@ theorem evmCallRunExtAll_of_progress {I : Interface} {S X E ε : Type}
       rt hrt ctx w yst0 hctx hR hconf hBind hslot
   have ⟨hpred, hEvm⟩ :=
     bytecode_call_correct_ext (I := I) α bind c Γ hΓ hκ calls hCalls hctor hS2
-      hlen hbound rt hrt is hcomp ctx w yst0 hctx hR hRX hign hconf hBind hslot himm0
+      hlen hbound rt hrt is hcomp ctx w yst0 hctx hR hRX hign hBindNe hconf hBind hslot himm0
       st' o hrun
   set stObs := committedState yst0 st'
   refine ⟨stObs.storage, evmForeign stObs, ?_⟩
@@ -307,6 +311,8 @@ theorem evmCallRun_of_correct_ext {I : Interface} {S X E ε : Type}
     (ctx : Ctx) (w : World S X E) (yst0 : EvmState)
     (hctx : ctxRel ctx yst0) (hR : R c Γ evmKeccak w yst0)
     (hRX : RX α bind w yst0) (hign : α.ignoresLocal)
+    (hBindNe : accountKey (BitVec.ofNat 256 (bind.addr w.self)) ≠
+      accountKey (BitVec.ofNat 256 ctx.self))
     (hconf : Conforms I ctx.self (bind.addr w.self) calls α)
     (hBind : ∀ b m args, callWF c b m args = true → ∃ meth, BindWF c Γ bind b m meth)
     (hslot : ∀ f ∈ c.functions, ∃ slot : Nat,
@@ -331,7 +337,7 @@ theorem evmCallRun_of_correct_ext {I : Interface} {S X E ε : Type}
       rt hrt ctx w yst0 hctx hR hconf hBind hslot
   have ⟨hpred, hEvm⟩ :=
     bytecode_call_correct_ext (I := I) α bind c Γ hΓ hκ calls hCalls hctor hS2
-      hlen hbound rt hrt is hcomp ctx w yst0 hctx hR hRX hign hconf hBind hslot himm0
+      hlen hbound rt hrt is hcomp ctx w yst0 hctx hR hRX hign hBindNe hconf hBind hslot himm0
       st' o hrun
   set stObs := committedState yst0 st'
   refine ⟨stObs.storage, evmForeign stObs, hEvm, ?_⟩
@@ -432,6 +438,8 @@ theorem evmCallRun_fnCalldata_ext {I : Interface} {S X E ε : Type}
     (hlog : w.log = []) (hwf : WorldWF c Γ w)
     (hcd : (fnCalldata f args).length < wordBound)
     (hRX : RX α bind w (mkEvmStateExt (fnCalldata f args) σ ξ evmKeccak ctx))
+    (hBindNe : accountKey (BitVec.ofNat 256 (bind.addr w.self)) ≠
+      accountKey (BitVec.ofNat 256 ctx.self))
     (hconf : Conforms I ctx.self (bind.addr w.self) calls α) :
     let yst0 := mkEvmStateExt (fnCalldata f args) σ ξ evmKeccak ctx
     ∃ σ' ξ', EvmCallRunξ is yst0 σ' ξ' ∧
@@ -452,7 +460,7 @@ theorem evmCallRun_fnCalldata_ext {I : Interface} {S X E ε : Type}
   have himm0 : ∀ k, yst0.env.immutable k = 0 := fun k => mkEvmStateExt_immutable _ _ _ _ _ k
   obtain ⟨σ', ξ', hRun, fo, hpost⟩ :=
     evmCallRun_of_correct_ext (I := I) α bind c Γ hΓ hκ calls hCalls htot hctor hS2
-      hlen hbound rt hrt is hcomp ctx w yst0 hctx hR hRX hign hconf hBind hslot himm0
+      hlen hbound rt hrt is hcomp ctx w yst0 hctx hR hRX hign hBindNe hconf hBind hslot himm0
   refine ⟨σ', ξ', hRun, fo, ?_⟩
   rw [mkEvmStateExt_calldata] at hpost
   simp only [hsel] at hpost

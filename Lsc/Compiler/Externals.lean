@@ -72,10 +72,12 @@ def RX {I : Interface} {S X E} (α : Abs I.Ghost) (b : Binding I S X)
 
 /-- Foreign ghosts are read from per-address maps (`storageOf` of the callee, …), not from
 the executing account's `storage`/`transient` or `storageOf`/`transientOf` at `st.env.address`.
-Call-free `sstore` (which also updates `storageOf` at the executing address) preserves `RX`. -/
+Call-free `sstore` (which also updates `storageOf` at the executing address) preserves `RX`
+at a **foreign** `a` (`accountKey` ≠ executor; `RX`/`Conforms` only read the bound token). -/
 def Abs.ignoresLocal {G} (α : Abs G) : Prop :=
   ∀ (st : EvmState) (σ τ : U256 → U256)
       (sto : U256 → U256 → U256) (tro : U256 → U256 → U256) (a : Address),
+    accountKey (BitVec.ofNat 256 (a : Nat)) ≠ accountKey st.env.address →
     (∀ addr k, accountKey addr ≠ accountKey st.env.address →
         sto addr k = st.env.storageOf addr k) →
     (∀ addr k, accountKey addr ≠ accountKey st.env.address →

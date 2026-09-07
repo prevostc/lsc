@@ -73,6 +73,8 @@ theorem bind_addr_store {I : Interface} {S X E ε}
 
 def stmtAvoids (slot : Nat) : Lsc.Stmt → Prop
   | .store f _ => f ≠ slot
+  | .storeMap f _ _ => f ≠ slot
+  | .storeMap2 f _ _ _ => f ≠ slot
   | _ => True
 
 def coreAvoids (slot : Nat) : {t : RetTy} → Core t → Prop
@@ -82,6 +84,33 @@ def coreAvoids (slot : Nat) : {t : RetTy} → Core t → Prop
   | _, .letPure _ _ k => coreAvoids slot k
   | _, .ite _ a b => coreAvoids slot a ∧ coreAvoids slot b
   | _, _ => True
+
+theorem stmtAvoids_not_write {slot : Nat} {s : Lsc.Stmt} (h : stmtAvoids slot s) :
+    slot ∉ (Stmt.effects s).writes := by
+  cases s <;> simp [stmtAvoids, Stmt.effects] at h ⊢
+  · exact Ne.symm h
+  · exact Ne.symm h
+  · exact Ne.symm h
+
+theorem coreAvoids_not_write {slot : Nat} {t} {core : Core t} (h : coreAvoids slot core) :
+    slot ∉ (Core.effects core).writes := by
+  induction core with
+  | ret _ | revertTail _ _ => simp [Core.effects]
+  | opTail op | opTailAddr op | opTailFlag op =>
+    cases op <;> simp [Core.effects, Op.effects]
+  | stmtTail s =>
+    simpa [Core.effects] using stmtAvoids_not_write (by simpa [coreAvoids] using h)
+  | letOp _ k ih =>
+    simpa [Core.effects, Effects.append, Op.effects_writes] using ih (by simpa [coreAvoids] using h)
+  | seq s k ih =>
+    have ⟨hs, hk⟩ := h
+    simpa [Core.effects, Effects.append, List.mem_append, not_or] using
+      ⟨stmtAvoids_not_write hs, ih hk⟩
+  | letPure _ _ k ih =>
+    simpa [Core.effects] using ih (by simpa [coreAvoids] using h)
+  | ite _ a b iha ihb =>
+    have ⟨ha, hb⟩ := h
+    simpa [Core.effects, Effects.append, List.mem_append, not_or] using ⟨iha ha, ihb hb⟩
 
 theorem m1stmt_preserves_addr {I : Interface} {S X E ε}
     {Γ : ContractSchema S X E ε} {c : ContractDef} {bind : Binding I S X}
@@ -255,6 +284,8 @@ theorem core_sim_ext_callFree {I : Interface} {S X E ε} (α : Abs I.Ghost)
       (hfuns : noExtFuns funs = true) (hwf : coreWF c core = true)
       (hn : identsNodup (env.length + coreExtraDepth core) = true)
       (hinv : Inv Γ c κ ctx w env V st) (hRX : RX α bind w st)
+      (hBindNe : accountKey (BitVec.ofNat 256 (bind.addr w.self)) ≠
+        accountKey (BitVec.ofNat 256 ctx.self))
       (hconf : Conforms I ctx.self (bind.addr w.self) calls α)
       (hBind : ∀ b m args, callWF c b m args = true → ∃ meth, BindWF c Γ bind b m meth)
       {e'} (hem : emitCore c {} env.length haltUnit core = some e')
@@ -268,7 +299,7 @@ theorem core_sim_ext_callFree {I : Interface} {S X E ε} (α : Abs I.Ghost)
         | .error e =>
             ∃ bytes, o = Outcome.halt ∧ st'.halted = some (HaltKind.revert, bytes) ∧
               haltError c Γ e bytes := by
-  intro w env V st funs hfuns hwf hn hinv hRX _hconf _hBind e' hem V' st' o hexec
+  intro w env V st funs hfuns hwf hn hinv hRX hBindNe _hconf _hBind e' hem V' st' o hexec
   refine ⟨fun _ => false, ?_⟩
   intro g _hg
   have hno : noExtBlock e'.stmts = true :=
@@ -295,7 +326,8 @@ theorem core_sim_ext_callFree {I : Interface} {S X E ε} (α : Abs I.Ghost)
     subst hVeq; subst hsteq; subst hoeq
     refine ⟨rfl, hsucc, (R_faults g).mpr hR, ?_⟩
     exact RX_callFree (α := α) ((RX_faults g).mpr hRX)
-      (ofState_noExt_halt hign hfuns hno hexec (bind.addr w.self)) hg.1 haddr
+      (ofState_noExt_halt hign hfuns hno hexec (bind.addr w.self)
+        (foreign_of_ctx hinv.ctxr hBindNe)) hg.1 haddr
   | error err =>
     rw [hTx] at hS1 hmap
     simp only [except_error_prod, mapWorldFaults] at hS1 hmap ⊢
@@ -351,6 +383,8 @@ theorem core_sim_ext {I : Interface} {S X E ε} (α : Abs I.Ghost)
       (hfuns : noExtFuns funs = true) (hwf : coreWF c core = true)
       (hn : identsNodup (env.length + coreExtraDepth core) = true)
       (hinv : Inv Γ c κ ctx w env V st) (hRX : RX α bind w st)
+      (hBindNe : accountKey (BitVec.ofNat 256 (bind.addr w.self)) ≠
+        accountKey (BitVec.ofNat 256 ctx.self))
       (hconf : Conforms I ctx.self (bind.addr w.self) calls α)
       (hBind : ∀ b m args, callWF c b m args = true → ∃ meth, BindWF c Γ bind b m meth)
       {e'} (hem : emitCore c {} env.length haltUnit core = some e')
@@ -378,12 +412,12 @@ theorem core_sim_ext {I : Interface} {S X E ε} (α : Abs I.Ghost)
     exact core_sim_ext_callFree (α := α) bind hhalt hΓ hκ hlen hign _
       (by simpa [CallFree, M1Frag, S2Frag] using hS2) hslot
   | opTail op =>
-    intro hS2 hslot w env V st funs hfuns hwf hn hinv hRX hconf hBind e' hem V' st' o hexec
+    intro hS2 hslot w env V st funs hfuns hwf hn hinv hRX hBindNe hconf hBind e' hem V' st' o hexec
     cases s2op_elim (by simpa [S2Frag] using hS2) with
     | inr hM1 =>
       exact core_sim_ext_callFree (α := α) bind hhalt hΓ hκ hlen hign (.opTail op)
         (by simpa [CallFree, M1Frag] using hM1) hslot
-        funs hfuns hwf hn hinv hRX hconf hBind hem hexec
+        funs hfuns hwf hn hinv hRX hBindNe hconf hBind hem hexec
     | inl hcall =>
       obtain ⟨b, m, args, rfl⟩ := hcall
       simp only [emitCore] at hem
@@ -462,16 +496,17 @@ theorem core_sim_ext {I : Interface} {S X E ε} (α : Abs I.Ghost)
             refine ⟨trivial, haltSuccess_word hh, (R_faults g).mpr hR', ?_⟩
             have hstab := ofState_noExt_halt (α := α) hign hfuns hnoRet hrest
               (bind.addr w0.self)
+              (foreign_of_ctx hInv0.ctxr (by simpa [hself] using hBindNe))
             have hRX' : RX α bind { w0 with faults := g } st' := by
               simpa [RX, hstab] using hRXg
             exact hRX'
   | opTailAddr op =>
-    intro hS2 hslot w env V st funs hfuns hwf hn hinv hRX hconf hBind e' hem V' st' o hexec
+    intro hS2 hslot w env V st funs hfuns hwf hn hinv hRX hBindNe hconf hBind e' hem V' st' o hexec
     cases s2op_elim (by simpa [S2Frag] using hS2) with
     | inr hM1 =>
       exact core_sim_ext_callFree (α := α) bind hhalt hΓ hκ hlen hign (.opTailAddr op)
         (by simpa [CallFree, M1Frag] using hM1) hslot
-        funs hfuns hwf hn hinv hRX hconf hBind hem hexec
+        funs hfuns hwf hn hinv hRX hBindNe hconf hBind hem hexec
     | inl hcall =>
       obtain ⟨b, m, args, rfl⟩ := hcall
       simp only [emitCore] at hem
@@ -550,16 +585,17 @@ theorem core_sim_ext {I : Interface} {S X E ε} (α : Abs I.Ghost)
             refine ⟨trivial, haltSuccess_addr hh, (R_faults g).mpr hR', ?_⟩
             have hstab := ofState_noExt_halt (α := α) hign hfuns hnoRet hrest
               (bind.addr w0.self)
+              (foreign_of_ctx hInv0.ctxr (by simpa [hself] using hBindNe))
             have hRX' : RX α bind { w0 with faults := g } st' := by
               simpa [RX, hstab] using hRXg
             exact hRX'
   | opTailFlag op =>
-    intro hS2 hslot w env V st funs hfuns hwf hn hinv hRX hconf hBind e' hem V' st' o hexec
+    intro hS2 hslot w env V st funs hfuns hwf hn hinv hRX hBindNe hconf hBind e' hem V' st' o hexec
     cases s2op_elim (by simpa [S2Frag] using hS2) with
     | inr hM1 =>
       exact core_sim_ext_callFree (α := α) bind hhalt hΓ hκ hlen hign (.opTailFlag op)
         (by simpa [CallFree, M1Frag] using hM1) hslot
-        funs hfuns hwf hn hinv hRX hconf hBind hem hexec
+        funs hfuns hwf hn hinv hRX hBindNe hconf hBind hem hexec
     | inl hcall =>
       obtain ⟨b, m, args, rfl⟩ := hcall
       simp only [emitCore] at hem
@@ -638,16 +674,17 @@ theorem core_sim_ext {I : Interface} {S X E ε} (α : Abs I.Ghost)
             refine ⟨trivial, haltSuccess_flag hh, (R_faults g).mpr hR', ?_⟩
             have hstab := ofState_noExt_halt (α := α) hign hfuns hnoRet hrest
               (bind.addr w0.self)
+              (foreign_of_ctx hInv0.ctxr (by simpa [hself] using hBindNe))
             have hRX' : RX α bind { w0 with faults := g } st' := by
               simpa [RX, hstab] using hRXg
             exact hRX'
   | stmtTail s =>
-    intro hS2 hslot w env V st funs hfuns hwf hn hinv hRX hconf hBind e' hem V' st' o hexec
+    intro hS2 hslot w env V st funs hfuns hwf hn hinv hRX hBindNe hconf hBind e' hem V' st' o hexec
     cases s2stmt_elim (by simpa [S2Frag] using hS2) with
     | inr hM1 =>
       exact core_sim_ext_callFree (α := α) bind hhalt hΓ hκ hlen hign (.stmtTail s)
         (by simpa [CallFree, M1Frag] using hM1) hslot
-        funs hfuns hwf hn hinv hRX hconf hBind hem hexec
+        funs hfuns hwf hn hinv hRX hBindNe hconf hBind hem hexec
     | inl hcall =>
       obtain ⟨b, m, args, rfl⟩ := hcall
       simp only [emitCore] at hem
@@ -713,9 +750,10 @@ theorem core_sim_ext {I : Interface} {S X E ε} (α : Abs I.Ghost)
           refine ⟨trivial, haltSuccess_unit_stop rfl, (R_faults g).mpr (R_halted_update hInv0.rel _), ?_⟩
           have hstab := ofState_noExt_halt (α := α) hign hfuns hnoStop hrest
             (bind.addr w0.self)
+            (foreign_of_ctx hInv0.ctxr (by simpa [hself] using hBindNe))
           simpa [RX, hstab] using hRXg
   | letOp op k ih =>
-    intro hS2 hslot w env V st funs hfuns hwf hn hinv hRX hconf hBind e' hem V' st' o hexec
+    intro hS2 hslot w env V st funs hfuns hwf hn hinv hRX hBindNe hconf hBind e' hem V' st' o hexec
     have ⟨hop, hk⟩ := s2frag_letOp.mp hS2
     have ⟨hopWF0, hkWF⟩ := coreWF_letOp.mp hwf
     obtain ⟨e1, e0, hE, h0, hst⟩ := emitCore_letOp_split hem
@@ -789,7 +827,8 @@ theorem core_sim_ext {I : Interface} {S X E ε} (α : Abs I.Ghost)
             simpa [hself] using hconf
           obtain ⟨fo', hfo'⟩ :=
             ih hk hslotK (w := { w0 with faults := g0 }) (env := v :: env) (V := V1)
-              (st := st1) funs hfuns hkWF (by simpa using hnK) hInv0 hRX0 hconf0 hBind h0 hrest
+              (st := st1) funs hfuns hkWF (by simpa using hnK) hInv0 hRX0
+              (by simpa [hself] using hBindNe) hconf0 hBind h0 hrest
           refine ⟨composeFault w.ncalls false fo', ?_⟩
           intro g hgA
           have ⟨hgfalse, hgtail⟩ := oracleAgrees_compose_false hgA
@@ -831,13 +870,15 @@ theorem core_sim_ext {I : Interface} {S X E ε} (α : Abs I.Ghost)
         have hrest := s1_match_prefix_ok hfuns hno hexec hexecS1
         have hRX1 : RX α bind w1 st1 := by
           have hst := execStmts_normal_ofState hign hexecS1 (bind.addr w.self)
+            (foreign_of_ctx hinv.ctxr hBindNe)
           simpa [RX, hst, hw1] using hRX
         have hconf1 : Conforms I ctx.self (bind.addr w1.self) calls α := by
           simpa [hw1] using hconf
         obtain ⟨fo', hfo'⟩ :=
           ih hk hslotK (w := w1) (env := v :: env)
             (V := (identV env.length, BitVec.ofNat 256 v) :: V) (st := st1)
-            funs hfuns hkWF (by simpa using hnK) hinv1 hRX1 hconf1 hBind h0 hrest
+            funs hfuns hkWF (by simpa using hnK) hinv1 hRX1
+            (by simpa [hw1] using hBindNe) hconf1 hBind h0 hrest
         refine ⟨fo', ?_⟩
         intro g hg
         have hmap := m1op_run_faults (Γ := Γ) hM1 env ctx w g
@@ -851,7 +892,7 @@ theorem core_sim_ext {I : Interface} {S X E ε} (α : Abs I.Ghost)
         have hg' : oracleAgrees w1.ncalls fo' g := by simpa [hw1] using hg
         exact hfo' g hg'
   | seq s k ih =>
-    intro hS2 hslot w env V st funs hfuns hwf hn hinv hRX hconf hBind e' hem V' st' o hexec
+    intro hS2 hslot w env V st funs hfuns hwf hn hinv hRX hBindNe hconf hBind e' hem V' st' o hexec
     have ⟨hs, hk⟩ := s2frag_seq.mp hS2
     have ⟨hsWF, hkWF⟩ := coreWF_seq.mp hwf
     simp only [emitCore] at hem
@@ -910,7 +951,8 @@ theorem core_sim_ext {I : Interface} {S X E ε} (α : Abs I.Ghost)
             simpa [hself] using hconf
           obtain ⟨fo', hfo'⟩ :=
             ih hk hslotK (w := { w0 with faults := g0 }) (env := env) (V := V1)
-              (st := st1) funs hfuns hkWF hnK hInv0 hRX0 hconf0 hBind h0 hrest
+              (st := st1) funs hfuns hkWF hnK hInv0 hRX0
+              (by simpa [hself] using hBindNe) hconf0 hBind h0 hrest
           refine ⟨composeFault w.ncalls false fo', ?_⟩
           intro g hgA
           have ⟨hgfalse, hgtail⟩ := oracleAgrees_compose_false hgA
@@ -957,12 +999,14 @@ theorem core_sim_ext {I : Interface} {S X E ε} (α : Abs I.Ghost)
         have hghost := m1stmt_preserves_ghost (Γ := Γ) hM1 env ctx w hokd
         have hRX1 : RX α bind w1 st1 := by
           have hst := execStmts_normal_ofState hign hexecS1 (bind.addr w.self)
+            (foreign_of_ctx hinv.ctxr hBindNe)
           simpa [RX, hst, hghost.1, haddr1] using hRX
         have hconf1 : Conforms I ctx.self (bind.addr w1.self) calls α := by
           simpa [haddr1] using hconf
         obtain ⟨fo', hfo'⟩ :=
           ih hk ⟨slot, haddr, hkind, hav.2⟩ (w := w1) (env := env) (V := V)
-            (st := st1) funs hfuns hkWF hnK hinv1 hRX1 hconf1 hBind h0 hrest
+            (st := st1) funs hfuns hkWF hnK hinv1 hRX1
+            (by simpa [haddr1] using hBindNe) hconf1 hBind h0 hrest
         refine ⟨fo', ?_⟩
         intro g hg
         have hmap := m1stmt_run_faults (Γ := Γ) hM1 env ctx w g
@@ -977,7 +1021,7 @@ theorem core_sim_ext {I : Interface} {S X E ε} (α : Abs I.Ghost)
         have hg' : oracleAgrees w1.ncalls fo' g := by simpa [hnc] using hg
         simpa using hfo' g hg'
   | letPure p args k ih =>
-    intro hS2 hslot w env V st funs hfuns hwf hn hinv hRX hconf hBind e' hem V' st' o hexec
+    intro hS2 hslot w env V st funs hfuns hwf hn hinv hRX hBindNe hconf hBind e' hem V' st' o hexec
     have ⟨hp, hargs, hk⟩ := s2frag_letPure.mp hS2
     subst hp
     have ⟨a, hargs'⟩ := length_eq_one.mp hargs
@@ -1016,7 +1060,7 @@ theorem core_sim_ext {I : Interface} {S X E ε} (α : Abs I.Ghost)
         ((identV env.length, BitVec.ofNat 256 (a.eval env)) :: V) st :=
       ⟨by rw [hinv.venv, toVEnv_cons], envWF_cons hv hinv.wf, hinv.rel, hinv.ctxr⟩
     obtain ⟨fo', hfo'⟩ :=
-      ih hk hslotK funs hfuns hkWF (by simpa using hnK) hinv1 hRX hconf hBind h0 hrest
+      ih hk hslotK funs hfuns hkWF (by simpa using hnK) hinv1 hRX hBindNe hconf hBind h0 hrest
     refine ⟨fo', ?_⟩
     intro g hg
     simp only [Core.denote]
@@ -1024,7 +1068,7 @@ theorem core_sim_ext {I : Interface} {S X E ε} (α : Abs I.Ghost)
     rw [hpe]
     exact hfo' g hg
   | ite cond a b iha ihb =>
-    intro hS2 hslot w env V st funs hfuns hwf hn hinv hRX hconf hBind e' hem V' st' o hexec
+    intro hS2 hslot w env V st funs hfuns hwf hn hinv hRX hBindNe hconf hBind e' hem V' st' o hexec
     have ⟨hC, ha, hb⟩ := s2frag_ite.mp hS2
     have hwf' := hwf
     simp [coreWF, Bool.and_eq_true] at hwf'
@@ -1083,7 +1127,7 @@ theorem core_sim_ext {I : Interface} {S X E ε} (α : Abs I.Ghost)
             selectSwitch_nonzero_yulD (by simp [hc, b2w])
           rw [hsel, hhoistA] at hss
           obtain ⟨fo', hfo'⟩ :=
-            iha ha hslotA ([] :: funs) hfunsN haWF hnA hinv hRX hconf hBind hA hss
+            iha ha hslotA ([] :: funs) hfunsN haWF hnA hinv hRX hBindNe hconf hBind hA hss
           exact ⟨fo', hfo'⟩
         · have hsel :
               selectSwitch (yulD calls) (b2w (decide (cond.denote env)))
@@ -1092,7 +1136,7 @@ theorem core_sim_ext {I : Interface} {S X E ε} (α : Abs I.Ghost)
             exact selectSwitch_zero_yulD
           rw [hsel, hhoistB] at hss
           obtain ⟨fo', hfo'⟩ :=
-            ihb hb hslotB ([] :: funs) hfunsN hbWF hnB hinv hRX hconf hBind hB hss
+            ihb hb hslotB ([] :: funs) hfunsN hbWF hnB hinv hRX hBindNe hconf hBind hB hss
           exact ⟨fo', hfo'⟩
 
 /-- S2 backward `toYulFn` for `S2Frag` cores: invert `Run` → params prefix → `core_sim_ext`. -/
@@ -1107,6 +1151,8 @@ theorem toYulFn_correct_ext {I : Interface} {S X E ε : Type}
     (ctx : Ctx) (w : World S X E) (st0 : EvmState)
     (hctx : ctxRel ctx st0) (hR : R c Γ κ w st0)
     (hRX : RX α bind w st0) (hign : α.ignoresLocal)
+    (hBindNe : accountKey (BitVec.ofNat 256 (bind.addr w.self)) ≠
+      accountKey (BitVec.ofNat 256 ctx.self))
     (hconf : Conforms I ctx.self (bind.addr w.self) calls α)
     (hBind : ∀ b m args, callWF c b m args = true → ∃ meth, BindWF c Γ bind b m meth)
     (hslot : ∃ slot : Nat,
@@ -1143,7 +1189,7 @@ theorem toYulFn_correct_ext {I : Interface} {S X E ε : Type}
     simpa [args, decodeArgs_length, List.length_reverse] using h0
   have hsim :=
     core_sim_ext (α := α) bind (haltUnit := true) rfl hΓ hκ hlen hign f.core hS2 hslot
-      (funs := [[]]) hfuns hwf hn' hinv hRX hconf hBind h0' hrest
+      (funs := [[]]) hfuns hwf hn' hinv hRX hBindNe hconf hBind h0' hrest
   obtain ⟨fo, hfo⟩ := hsim
   refine ⟨fo, ?_⟩
   have hmatch := hfo fo (fun _ _ => rfl)

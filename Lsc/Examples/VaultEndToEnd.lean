@@ -1,6 +1,7 @@
 import Lsc.Compiler.EndToEndExt
 import Lsc.Compiler.Proof.Vault
 import Lsc.Examples.VaultSecurity
+import Lsc.Lang.CoreProof
 import YulEvmCompiler.Compile
 import YulEvmCompiler.LowerDefs
 
@@ -10,9 +11,12 @@ set_option linter.unusedVariables false
 /-!
 Bytecode-level Vault theorems. `CallsTotal` + `yul_progress` + EVM determinism
 give `EvmCallRunξ` / `EvmTraceRunExtAll` (S2 threads foreign storage `ξ`).
-`claim` is read through the shares schema (`vaultClaimRead`). Initial `hRX0`
-plus `ofState_foreign` re-establish `RX` at each `mkEvmStateExt`. Amount ABI
+`claim` is read through the shares schema (`vaultClaimRead`); holdings through
+`α` at the token address (`vaultHoldingsRead`). Initial `hRX0` plus
+`ofState_foreign` re-establish `RX` at each `mkEvmStateExt`. Amount ABI
 agrees with Core via `deposit.core_denote` / `withdraw.core_denote`.
+`Abs.ignoresLocal` is foreign-address only; `vaultAbsSolidity` reads Solidity
+ERC20 layout (`balances` at `mapSlot1 evmKeccak 0`, `decimals` at slot 1).
 -/
 
 open Lsc Lsc.Compiler Lsc.Security Lsc.Stdlib Vault
@@ -248,6 +252,8 @@ theorem vault_bytecode_call_correct_ext
     (ctx : Ctx) (w : World Storage Ext Event) (yst0 : EvmState)
     (hctx : ctxRel ctx yst0) (hR : R Vault.contract Vault.schema evmKeccak w yst0)
     (hRX : RX α Vault.assetB w yst0)
+    (hBindNe : accountKey (BitVec.ofNat 256 (Vault.assetB.addr w.self)) ≠
+      accountKey (BitVec.ofNat 256 ctx.self))
     (hconf : Conforms IERC20 ctx.self (Vault.assetB.addr w.self) calls α)
     (himm0 : ∀ k, yst0.env.immutable k = 0) :
     BytecodeCallCorrectExt α Vault.assetB Vault.contract Vault.schema evmKeccak
@@ -256,7 +262,7 @@ theorem vault_bytecode_call_correct_ext
     Vault.schema_lawful hκ calls hCalls
     (fun f hf => vault_fn_not_ctor hf) (fun f hf => vault_fn_s2 hf)
     vault_fields_lt (fun f hf => vault_fn_params_bound hf)
-    rt hrt is hcomp ctx w yst0 hctx hR hRX hign hconf vault_bindWF
+    rt hrt is hcomp ctx w yst0 hctx hR hRX hign hBindNe hconf vault_bindWF
     (fun f hf => vault_hslot hf) himm0
 
 theorem vault_inv_faults (self : Address) (w : World Storage Ext Event) (fo : Nat → Bool)
@@ -306,12 +312,170 @@ private def ConfFun (self : Address) (ext : ExternalCalls) (α : Abs IERC20.Ghos
   ∀ (w' : World Storage Ext Event),
     Conforms IERC20 self (Vault.assetB.addr w'.self) ext α
 
-/-- Runtime Vault steps do not write `Storage.asset` (field 5, `coreAvoids`).
-Named hypothesis: connecting `Tx.run` success to `depositPost` / `withdrawPost`
-/ `{σ with paused := _}` is not yet a lemma. -/
+/-- Holdings of `self` according to `α` at the token address, from bytecode `σ`/`ξ`. -/
+def vaultHoldingsRead (α : Abs IERC20.Ghost) (σ : U256 → U256) (ξ : Foreign)
+    (self assetAddr : Address) : Nat :=
+  (α.ofState (mkEvmStateExt ([] : List UInt8) σ ξ evmKeccak (rxCtx self))
+    assetAddr).balances self
+
+/-- Storage-level solvency: finite support of `vaultClaimRead` on addresses below
+`wordBound`, and that support's sum is ≤ holdings read through `α` from `ξ`.
+Addresses `≥ wordBound` are outside `storageRel`. Trailing `env` steps may raise
+Spec holdings while `ξ'` stays at the last EVM call; this statement tracks `ξ'`. -/
+def vaultSolventRead (α : Abs IERC20.Ghost) (σ : U256 → U256) (ξ : Foreign)
+    (self assetAddr : Address) : Prop :=
+  ∃ H : Finset Address,
+    (∀ a, Nat.lt a wordBound → a ∉ H → vaultClaimRead evmKeccak σ a = 0) ∧
+    H.sum (vaultClaimRead evmKeccak σ) ≤ vaultHoldingsRead α σ ξ self assetAddr
+
+theorem vaultSolventRead_of_inv (α : Abs IERC20.Ghost)
+    (self : Address) (w : World Storage Ext Event) (σ : U256 → U256) (ξ : Foreign)
+    (hw : Inv self w) (hs : storageRel Vault.contract Vault.schema evmKeccak w.self σ)
+    (hwf : WorldWF Vault.contract Vault.schema w)
+    (hRX : rxStart α self w σ ξ) :
+    vaultSolventRead α σ ξ self (Vault.assetB.addr w.self) := by
+  obtain ⟨H, h0, hsum⟩ := inv_solvent self w hw
+  let pred : Address → Prop := fun a => Nat.lt (a : Nat) wordBound
+  let inst : DecidablePred pred := fun a => Nat.decLt (a : Nat) wordBound
+  let H' : Finset Address := @Finset.filter Address pred inst H
+  refine ⟨H', ?_, ?_⟩
+  · intro a ha hnin
+    have hninH : a ∉ H := by
+      intro hin
+      have : a ∈ H' := (@Finset.mem_filter Address pred inst H a).mpr ⟨hin, ha⟩
+      exact hnin this
+    have hcl := vault_claim_of_rel w.self σ a hs ha
+      (vault_ta_bound w hwf) (vault_ts_bound w hwf) (vault_shares_bound w a hwf ha)
+    simpa [hcl] using h0 a hninH
+  · have hhold :
+        vaultHoldingsRead α σ ξ self (Vault.assetB.addr w.self) = holdings self w := by
+      simpa [vaultHoldingsRead, holdings, rxStart, RX, Vault.assetB] using
+        congrArg (fun g : IERC20.Ghost => g.balances self) hRX
+    have hsum' :
+        H'.sum (vaultClaimRead evmKeccak σ) = H'.sum (fun a => claim a w.self) := by
+      apply Finset.sum_congr rfl
+      intro a ha'
+      have hlt : Nat.lt (a : Nat) wordBound :=
+        ((@Finset.mem_filter Address pred inst H a).mp ha').2
+      exact vault_claim_of_rel w.self σ a hs hlt
+        (vault_ta_bound w hwf) (vault_ts_bound w hwf) (vault_shares_bound w a hwf hlt)
+    have hsub : H' ⊆ H := @Finset.filter_subset Address pred inst H
+    have hle :
+        H'.sum (fun a => claim a w.self) ≤ H.sum (fun a => claim a w.self) :=
+      Finset.sum_le_sum_of_subset_of_nonneg hsub (fun _ _ _ => Nat.zero_le _)
+    simpa [hhold, hsum'] using Nat.le_trans hle hsum
+
+private theorem vault_scalarUpd_asset (i : Nat) (σ : Storage) (v : Nat)
+    (h : 5 ≠ i) : (Vault.schema.st.scalarUpd i σ v).asset = σ.asset := by
+  cases i with
+  | zero => simp [Vault.schema]
+  | succ i =>
+    cases i with
+    | zero => simp [Vault.schema]
+    | succ i =>
+      cases i with
+      | zero => simp [Vault.schema]
+      | succ i =>
+        cases i with
+        | zero => simp [Vault.schema]
+        | succ i =>
+          cases i with
+          | zero => simp [Vault.schema]
+          | succ i =>
+            cases i with
+            | zero => cases h rfl
+            | succ i =>
+              cases i with
+              | zero => simp [Vault.schema]
+              | succ _ => simp [Vault.schema]
+
+private theorem vault_map1Upd_asset (i : Nat) (σ : Storage) (m : Nat → Nat) :
+    (Vault.schema.st.map1Upd i σ m).asset = σ.asset := by
+  cases i with
+  | zero => simp [Vault.schema]
+  | succ i =>
+    cases i with
+    | zero => simp [Vault.schema]
+    | succ i =>
+      cases i with
+      | zero => simp [Vault.schema]
+      | succ i =>
+        cases i with
+        | zero => simp [Vault.schema]
+        | succ i =>
+          cases i with
+          | zero => simp [Vault.schema]
+          | succ i =>
+            cases i with
+            | zero => simp [Vault.schema]
+            | succ i =>
+              cases i with
+              | zero => simp [Vault.schema]
+              | succ _ => simp [Vault.schema]
+
+private theorem vault_map2Upd_asset (i : Nat) (σ : Storage) (m : Nat → Nat → Nat) :
+    (Vault.schema.st.map2Upd i σ m).asset = σ.asset := by
+  cases i with
+  | zero => simp [Vault.schema]
+  | succ i =>
+    cases i with
+    | zero => simp [Vault.schema]
+    | succ i =>
+      cases i with
+      | zero => simp [Vault.schema]
+      | succ i =>
+        cases i with
+        | zero => simp [Vault.schema]
+        | succ i =>
+          cases i with
+          | zero => simp [Vault.schema]
+          | succ i =>
+            cases i with
+            | zero => simp [Vault.schema]
+            | succ i =>
+              cases i with
+              | zero => simp [Vault.schema]
+              | succ _ => simp [Vault.schema]
+
+private theorem vault_ext_call_self
+    {b m : Nat} {args : List Nat} {ctx : Ctx}
+    {w : World Storage Ext Event} {v : Nat} {w' : World Storage Ext Event}
+    (h : Tx.run (Vault.schema.ext.call b m args) ctx w = .ok (v, w')) :
+    w'.self = w.self := by
+  simp [Vault.schema] at h
+  split at h
+  · split at h
+    · exact Tx.call_self (E := Event) (ε := Error) Vault.assetB _ args h
+    · simp [Tx.run] at h
+  · simp [Tx.run] at h
+
+theorem vault_asset_stable_core (fn : Fn) (args : spec.Args fn) (ctx : Ctx)
+    (w : World Storage Ext Event) :
+    (worldAfter (Core.denote Vault.schema (vaultFnDef fn).core
+      (encodeVault fn args).reverse) ctx w).self.asset = w.self.asset := by
+  cases htx : Tx.run (Core.denote Vault.schema (vaultFnDef fn).core
+      (encodeVault fn args).reverse) ctx w with
+  | error _ => simp [worldAfter, htx]
+  | ok p =>
+    rcases p with ⟨v, w'⟩
+    simp [worldAfter, htx]
+    exact effects_frame_on (P := fun s : Storage => s.asset)
+      (vaultFnDef fn).core (encodeVault fn args).reverse 5
+      (fun i σ v hne => vault_scalarUpd_asset i σ v hne)
+      (fun i σ m _hne => vault_map1Upd_asset i σ m)
+      (fun i σ m _hne => vault_map2Upd_asset i σ m)
+      (fun b m args ctx w v w' hok => vault_ext_call_self hok)
+      (coreAvoids_not_write (vault_fn_avoids (vaultFnDef_mem fn))) htx
+
+/-- Runtime Vault steps do not write `Storage.asset` (field 5, `coreAvoids`). -/
 def AssetStable : Prop :=
   ∀ (c : Call spec) (w : World Storage Ext Event),
     (step (.call c) w).self.asset = w.self.asset
+
+theorem vault_asset_stable : AssetStable := by
+  intro c w
+  simpa [step, vault_worldAfter_core_eq] using
+    vault_asset_stable_core c.fn c.args c.toCtx w
 
 theorem vault_bytecode_no_unauthorized_extraction_exists
     (α : Abs IERC20.Ghost) (ext : ExternalCalls)
@@ -331,8 +495,7 @@ theorem vault_bytecode_no_unauthorized_extraction_exists
     (hRX : rxStart α self w σ ξ)
     (hconf : ConfFun self ext α)
     (hAssetNe : accountKey (BitVec.ofNat 256 (Vault.assetB.addr w.self)) ≠
-                accountKey (BitVec.ofNat 256 self))
-    (hAssetStable : AssetStable) :
+                accountKey (BitVec.ofNat 256 self)) :
     ∃ σ' ξ', EvmTraceRunExt is
         ((vaultCalls tr).map fun p => ⟨p.1, fnCalldata p.2.1 p.2.2⟩) σ ξ σ' ξ' ∧
       vaultClaimRead evmKeccak σ a ≤ vaultClaimRead evmKeccak σ' a := by
@@ -373,6 +536,7 @@ theorem vault_bytecode_no_unauthorized_extraction_exists
           c.toCtx (vaultFnDef c.fn) (encodeVault c.fn c.args)
           { w with log := [] } σ ξ hf hk hlenA hWargs hctxWF
           (by simpa using hs) rfl (WorldWF_log [] hwf) hcd hRXcall
+          (by simpa [Call.toCtx, htgt] using hAssetNe)
           (by
             simpa [Call.toCtx, htgt] using hconf { w with log := [] })
       let wfo : World Storage Ext Event := { w with log := [], faults := fo }
@@ -427,7 +591,7 @@ theorem vault_bytecode_no_unauthorized_extraction_exists
             accountKey (BitVec.ofNat 256 self) := by
         have : w1.self.asset = w.self.asset := by
           have hstep : (step (.call c) wfo).self.asset = wfo.self.asset :=
-            hAssetStable c wfo
+            vault_asset_stable c wfo
           have hw1s : w1.self = (step (.call c) wfo).self := by
             simp [w1, wfo, step, vault_worldAfter_core_eq]
           simpa [hw1s, wfo] using hstep
@@ -479,8 +643,7 @@ theorem vault_bytecode_no_unauthorized_extraction
     (hRX : rxStart α self w σ ξ)
     (hconf : ConfFun self ext α)
     (hAssetNe : accountKey (BitVec.ofNat 256 (Vault.assetB.addr w.self)) ≠
-                accountKey (BitVec.ofNat 256 self))
-    (hAssetStable : AssetStable) :
+                accountKey (BitVec.ofNat 256 self)) :
     ∀ σ' ξ', EvmTraceRunExtAll is
         ((vaultCalls tr).map fun p => ⟨p.1, fnCalldata p.2.1 p.2.2⟩) σ ξ σ' ξ' →
       vaultClaimRead evmKeccak σ a ≤ vaultClaimRead evmKeccak σ' a := by
@@ -529,6 +692,7 @@ theorem vault_bytecode_no_unauthorized_extraction
             c.toCtx (vaultFnDef c.fn) (encodeVault c.fn c.args)
             { w with log := [] } σ ξ hf hk hlenA hWargs hctxWF
             (by simpa using hs) rfl (WorldWF_log [] hwf) hcd hRXcall
+            (by simpa [Call.toCtx, htgt] using hAssetNe)
             (by simpa [Call.toCtx, htgt] using hconf { w with log := [] })
         have heq := evmCallRunξ_eq_of_start h1 hRun hstart
         rw [heq.1, heq.2] at htl
@@ -584,7 +748,7 @@ theorem vault_bytecode_no_unauthorized_extraction
               accountKey (BitVec.ofNat 256 self) := by
           have : w1.self.asset = w.self.asset := by
             have hstep : (step (.call c) wfo).self.asset = wfo.self.asset :=
-              hAssetStable c wfo
+              vault_asset_stable c wfo
             have hw1s : w1.self = (step (.call c) wfo).self := by
               simp [w1, wfo, step, vault_worldAfter_core_eq]
             simpa [hw1s, wfo] using hstep
@@ -624,26 +788,124 @@ theorem vault_bytecode_solvent_exists
     (hκ : KeccakSep Vault.contract evmKeccak)
     (hign : α.ignoresLocal) (hF : α.ofState_foreign)
     (self : Address) (tr : List (Step spec)) (w : World Storage Ext Event)
-    (a : Address) (σ : U256 → U256) (ξ : Foreign)
+    (σ : U256 → U256) (ξ : Foreign)
     (hw : Inv self w) (hW : Wf self tr)
     (hRely : RelyAlong (vaultRely self) tr w)
-    (hA : NoAuthAlong Auth a tr w)
     (hs : storageRel Vault.contract Vault.schema evmKeccak w.self σ)
     (hwf : WorldWF Vault.contract Vault.schema w)
-    (hb : CallsBounded tr) (ha : Nat.lt a wordBound)
+    (hb : CallsBounded tr)
     (hRX : rxStart α self w σ ξ)
     (hconf : ConfFun self ext α)
     (hAssetNe : accountKey (BitVec.ofNat 256 (Vault.assetB.addr w.self)) ≠
-                accountKey (BitVec.ofNat 256 self))
-    (hAssetStable : AssetStable) :
+                accountKey (BitVec.ofNat 256 self)) :
     ∃ σ' ξ', EvmTraceRunExt is
         ((vaultCalls tr).map fun p => ⟨p.1, fnCalldata p.2.1 p.2.2⟩) σ ξ σ' ξ' ∧
-      Solvent claim holdings self (run tr w) := by
-  have ⟨σ', ξ', hE, _⟩ :=
-    vault_bytecode_no_unauthorized_extraction_exists α ext hCalls htot rt hrt is hcomp
-      hκ hign hF self tr w a σ ξ hw hW hRely hA hs hwf hb ha hRX hconf hAssetNe
-      hAssetStable
-  exact ⟨σ', ξ', hE, vault_solvent self tr w hW hRely hw⟩
+      vaultSolventRead α σ' ξ' self (Vault.assetB.addr w.self) := by
+  have hnd : selectorsNodup Vault.contract = true := (runtimeBlock_inv hrt).1
+  clear hRely
+  induction tr generalizing w σ ξ with
+  | nil =>
+    exact ⟨σ, ξ, EvmTraceRunExt.nil σ ξ,
+      vaultSolventRead_of_inv α self w σ ξ hw hs hwf hRX⟩
+  | cons s rest ih =>
+    match s with
+    | .env x' =>
+      simpa [vaultCalls] using
+        ih (w := w) (σ := σ) (ξ := ξ) hw hW hs hwf hb hRX hAssetNe
+    | .call c =>
+      rcases hb with ⟨hctxWF, hWargs, htlB⟩
+      rcases hW with ⟨htgt, hne, hWtl⟩
+      have hf := vaultFnDef_mem c.fn
+      have hk := vault_fn_not_ctor hf
+      have hlenA := encodeVault_length c.fn c.args
+      have hcd := vault_fnCalldata_bound c.fn c.args
+      have hself : (rxCtx self).self = c.toCtx.self := by
+        simp [rxCtx, Call.toCtx, htgt]
+      have hRXcall :
+          RX α Vault.assetB { w with log := [] }
+            (mkEvmStateExt (fnCalldata (vaultFnDef c.fn) (encodeVault c.fn c.args))
+              σ ξ evmKeccak c.toCtx) :=
+        RX_mkEvmStateExt_ctx (I := IERC20) (bind := Vault.assetB) hF hself hRX
+      obtain ⟨σ₁, ξ₁, h1, fo, hpost⟩ :=
+        evmCallRun_fnCalldata_ext (I := IERC20) α Vault.assetB Vault.contract Vault.schema
+          Vault.schema_lawful hκ ext hCalls htot
+          (fun f hf => vault_fn_not_ctor hf) (fun f hf => vault_fn_s2 hf)
+          vault_fields_lt (fun f hf => vault_fn_params_bound hf) hnd rt hrt is hcomp
+          hign vault_bindWF (fun f hf => vault_hslot hf)
+          c.toCtx (vaultFnDef c.fn) (encodeVault c.fn c.args)
+          { w with log := [] } σ ξ hf hk hlenA hWargs hctxWF
+          (by simpa using hs) rfl (WorldWF_log [] hwf) hcd hRXcall
+          (by simpa [Call.toCtx, htgt] using hAssetNe)
+          (by simpa [Call.toCtx, htgt] using hconf { w with log := [] })
+      let wfo : World Storage Ext Event := { w with log := [], faults := fo }
+      let w1 : World Storage Ext Event :=
+        { worldAfter (Core.denote Vault.schema (vaultFnDef c.fn).core
+            (encodeVault c.fn c.args).reverse) c.toCtx wfo with log := [] }
+      have hs1 : storageRel Vault.contract Vault.schema evmKeccak w1.self σ₁ := by
+        dsimp [w1, wfo]
+        cases htx : Tx.run (Core.denote Vault.schema (vaultFnDef c.fn).core
+            (encodeVault c.fn c.args).reverse) c.toCtx wfo with
+        | ok prod =>
+          rcases prod with ⟨_, w'⟩
+          simp [worldAfter, htx, wfo] at hpost ⊢
+          exact hpost.1
+        | error e =>
+          simp [worldAfter, htx, wfo] at hpost ⊢
+          simpa [hpost.1] using hs
+      have hwf1 : WorldWF Vault.contract Vault.schema w1 := by
+        dsimp [w1, wfo]
+        cases htx : Tx.run (Core.denote Vault.schema (vaultFnDef c.fn).core
+            (encodeVault c.fn c.args).reverse) c.toCtx wfo with
+        | ok prod =>
+          rcases prod with ⟨_, w'⟩
+          simp [worldAfter, htx, wfo] at hpost ⊢
+          exact WorldWF_log [] hpost.2.1
+        | error e =>
+          simp [worldAfter, htx, wfo] at hpost ⊢
+          exact WorldWF_of_self (by rfl) (WorldWF_log [] hwf)
+      have hwfo : Inv self wfo := vault_inv_clear self w fo hw
+      have hw1 : Inv self w1 := by
+        have hstep : Inv self (step (.call c) wfo) :=
+          vault_preserves_inv self c wfo htgt hne hwfo
+        have hlog := vault_inv_log self (step (.call c) wfo) [] hstep
+        simpa [w1, wfo, step, vault_worldAfter_core_eq] using hlog
+      have hAssetEq : w1.self.asset = w.self.asset := by
+        have hstep : (step (.call c) wfo).self.asset = wfo.self.asset :=
+          vault_asset_stable c wfo
+        have hw1s : w1.self = (step (.call c) wfo).self := by
+          simp [w1, wfo, step, vault_worldAfter_core_eq]
+        simpa [hw1s, wfo] using hstep
+      have hAssetNe1 :
+          accountKey (BitVec.ofNat 256 (Vault.assetB.addr w1.self)) ≠
+            accountKey (BitVec.ofNat 256 self) := by
+        simpa [Vault.assetB, hAssetEq] using hAssetNe
+      have hRX1 : rxStart α self w1 σ₁ ξ₁ := by
+        dsimp [w1, wfo]
+        cases htx : Tx.run (Core.denote Vault.schema (vaultFnDef c.fn).core
+            (encodeVault c.fn c.args).reverse) c.toCtx wfo with
+        | ok prod =>
+          rcases prod with ⟨_, w'⟩
+          simp [worldAfter, htx, wfo] at hpost ⊢
+          rcases hpost with ⟨_, _, stObs, hσ, hξ, hRXobs⟩
+          have hRXw' : RX (I := IERC20) (E := Event) α Vault.assetB w' stObs := hRXobs
+          exact RX_mkEvmStateExt_ne (I := IERC20) (bind := Vault.assetB) hF hRXw'
+            (Eq.symm hξ) (by simpa [Vault.assetB, rxCtx, w1, wfo, worldAfter, htx]
+              using hAssetNe1)
+        | error e =>
+          simp [worldAfter, htx, wfo] at hpost ⊢
+          rcases hpost with ⟨hσeq, hξeq⟩
+          subst hσeq
+          refine RX_of_foreign hF ?_ hRX
+          intro k
+          have hneCtx : accountKey (BitVec.ofNat 256 (Vault.assetB.addr w.self)) ≠
+              accountKey (BitVec.ofNat 256 c.toCtx.self) := by
+            simpa [Call.toCtx, htgt] using hAssetNe
+          simp [mkEvmStateExt_foreign, rxCtx, hξeq, hAssetNe, hneCtx]
+      have ⟨σ', ξ', htl, hsol⟩ :=
+        ih (w := w1) (σ := σ₁) (ξ := ξ₁) hw1 hWtl hs1 hwf1 htlB
+          (by simpa [rxStart] using hRX1) hAssetNe1
+      refine ⟨σ', ξ', EvmTraceRunExt.cons h1 (by simpa [vaultCalls] using htl), ?_⟩
+      simpa [Vault.assetB, hAssetEq] using hsol
 
 theorem vault_bytecode_solvent
     (α : Abs IERC20.Ghost) (ext : ExternalCalls)
@@ -662,32 +924,153 @@ theorem vault_bytecode_solvent
     (hRX : rxStart α self w σ ξ)
     (hconf : ConfFun self ext α)
     (hAssetNe : accountKey (BitVec.ofNat 256 (Vault.assetB.addr w.self)) ≠
-                accountKey (BitVec.ofNat 256 self))
-    (hAssetStable : AssetStable) :
+                accountKey (BitVec.ofNat 256 self)) :
     ∀ σ' ξ', EvmTraceRunExtAll is
         ((vaultCalls tr).map fun p => ⟨p.1, fnCalldata p.2.1 p.2.2⟩) σ ξ σ' ξ' →
-      Solvent claim holdings self (run tr w) := by
-  intro σ' ξ' _hE
-  exact vault_solvent self tr w hW hRely hw
+      vaultSolventRead α σ' ξ' self (Vault.assetB.addr w.self) := by
+  intro σ' ξ' hE
+  have hnd : selectorsNodup Vault.contract = true := (runtimeBlock_inv hrt).1
+  clear hRely
+  induction tr generalizing w σ ξ σ' ξ' with
+  | nil =>
+    have hE' : EvmTraceRunExtAll is [] σ ξ σ' ξ' := by simpa [vaultCalls] using hE
+    cases hE'
+    exact vaultSolventRead_of_inv α self w σ ξ hw hs hwf hRX
+  | cons s rest ih =>
+    match s with
+    | .env x' =>
+      exact ih (w := w) (σ := σ) (ξ := ξ) (σ' := σ') (ξ' := ξ') hw hW
+        hs hwf hb hRX hAssetNe (by simpa [vaultCalls] using hE)
+    | .call c =>
+      have hE' : EvmTraceRunExtAll is
+          (⟨c.toCtx, fnCalldata (vaultFnDef c.fn) (encodeVault c.fn c.args)⟩ ::
+            (vaultCalls rest).map fun p => ⟨p.1, fnCalldata p.2.1 p.2.2⟩) σ ξ σ' ξ' := by
+        simpa [vaultCalls] using hE
+      cases hE' with
+      | cons hstart h1 htl =>
+        rcases hb with ⟨hctxWF, hWargs, htlB⟩
+        rcases hW with ⟨htgt, hne, hWtl⟩
+        have hf := vaultFnDef_mem c.fn
+        have hk := vault_fn_not_ctor hf
+        have hlenA := encodeVault_length c.fn c.args
+        have hcd := vault_fnCalldata_bound c.fn c.args
+        have hself : (rxCtx self).self = c.toCtx.self := by
+          simp [rxCtx, Call.toCtx, htgt]
+        have hRXcall :
+            RX α Vault.assetB { w with log := [] }
+              (mkEvmStateExt (fnCalldata (vaultFnDef c.fn) (encodeVault c.fn c.args))
+                σ ξ evmKeccak c.toCtx) :=
+          RX_mkEvmStateExt_ctx (I := IERC20) (bind := Vault.assetB) hF hself hRX
+        obtain ⟨σp, ξp, hRun, fo, hpost⟩ :=
+          evmCallRun_fnCalldata_ext (I := IERC20) α Vault.assetB Vault.contract Vault.schema
+            Vault.schema_lawful hκ ext hCalls htot
+            (fun f hf => vault_fn_not_ctor hf) (fun f hf => vault_fn_s2 hf)
+            vault_fields_lt (fun f hf => vault_fn_params_bound hf) hnd rt hrt is hcomp
+            hign vault_bindWF (fun f hf => vault_hslot hf)
+            c.toCtx (vaultFnDef c.fn) (encodeVault c.fn c.args)
+            { w with log := [] } σ ξ hf hk hlenA hWargs hctxWF
+            (by simpa using hs) rfl (WorldWF_log [] hwf) hcd hRXcall
+            (by simpa [Call.toCtx, htgt] using hAssetNe)
+            (by simpa [Call.toCtx, htgt] using hconf { w with log := [] })
+        have heq := evmCallRunξ_eq_of_start h1 hRun hstart
+        rw [heq.1, heq.2] at htl
+        let wfo : World Storage Ext Event := { w with log := [], faults := fo }
+        let w1 : World Storage Ext Event :=
+          { worldAfter (Core.denote Vault.schema (vaultFnDef c.fn).core
+              (encodeVault c.fn c.args).reverse) c.toCtx wfo with log := [] }
+        have hs1 : storageRel Vault.contract Vault.schema evmKeccak w1.self σp := by
+          dsimp [w1, wfo]
+          cases htx : Tx.run (Core.denote Vault.schema (vaultFnDef c.fn).core
+              (encodeVault c.fn c.args).reverse) c.toCtx wfo with
+          | ok prod =>
+            rcases prod with ⟨_, w'⟩
+            simp [worldAfter, htx, wfo] at hpost ⊢
+            exact hpost.1
+          | error e =>
+            simp [worldAfter, htx, wfo] at hpost ⊢
+            simpa [hpost.1] using hs
+        have hwf1 : WorldWF Vault.contract Vault.schema w1 := by
+          dsimp [w1, wfo]
+          cases htx : Tx.run (Core.denote Vault.schema (vaultFnDef c.fn).core
+              (encodeVault c.fn c.args).reverse) c.toCtx wfo with
+          | ok prod =>
+            rcases prod with ⟨_, w'⟩
+            simp [worldAfter, htx, wfo] at hpost ⊢
+            exact WorldWF_log [] hpost.2.1
+          | error e =>
+            simp [worldAfter, htx, wfo] at hpost ⊢
+            exact WorldWF_of_self (by rfl) (WorldWF_log [] hwf)
+        have hwfo : Inv self wfo := vault_inv_clear self w fo hw
+        have hw1 : Inv self w1 := by
+          have hstep : Inv self (step (.call c) wfo) :=
+            vault_preserves_inv self c wfo htgt hne hwfo
+          have hlog := vault_inv_log self (step (.call c) wfo) [] hstep
+          simpa [w1, wfo, step, vault_worldAfter_core_eq] using hlog
+        have hAssetEq : w1.self.asset = w.self.asset := by
+          have hstep : (step (.call c) wfo).self.asset = wfo.self.asset :=
+            vault_asset_stable c wfo
+          have hw1s : w1.self = (step (.call c) wfo).self := by
+            simp [w1, wfo, step, vault_worldAfter_core_eq]
+          simpa [hw1s, wfo] using hstep
+        have hAssetNe1 :
+            accountKey (BitVec.ofNat 256 (Vault.assetB.addr w1.self)) ≠
+              accountKey (BitVec.ofNat 256 self) := by
+          simpa [Vault.assetB, hAssetEq] using hAssetNe
+        have hRX1 : rxStart α self w1 σp ξp := by
+          dsimp [w1, wfo]
+          cases htx : Tx.run (Core.denote Vault.schema (vaultFnDef c.fn).core
+              (encodeVault c.fn c.args).reverse) c.toCtx wfo with
+          | ok prod =>
+            rcases prod with ⟨_, w'⟩
+            simp [worldAfter, htx, wfo] at hpost ⊢
+            rcases hpost with ⟨_, _, stObs, hσ, hξ, hRXobs⟩
+            have hRXw' : RX (I := IERC20) (E := Event) α Vault.assetB w' stObs := hRXobs
+            exact RX_mkEvmStateExt_ne (I := IERC20) (bind := Vault.assetB) hF hRXw'
+              (Eq.symm hξ) (by simpa [Vault.assetB, rxCtx, w1, wfo, worldAfter, htx]
+                using hAssetNe1)
+          | error e =>
+            simp [worldAfter, htx, wfo] at hpost ⊢
+            rcases hpost with ⟨hσeq, hξeq⟩
+            subst hσeq
+            refine RX_of_foreign hF ?_ hRX
+            intro k
+            have hneCtx : accountKey (BitVec.ofNat 256 (Vault.assetB.addr w.self)) ≠
+                accountKey (BitVec.ofNat 256 c.toCtx.self) := by
+              simpa [Call.toCtx, htgt] using hAssetNe
+            simp [mkEvmStateExt_foreign, rxCtx, hξeq, hAssetNe, hneCtx]
+        have hsol := ih (w := w1) (σ := σp) (ξ := ξp) (σ' := σ') (ξ' := ξ') hw1 hWtl
+          hs1 hwf1 htlB (by simpa [rxStart] using hRX1) hAssetNe1 htl
+        simpa [Vault.assetB, hAssetEq] using hsol
 
-/-- Constant ghost: inhabits `ignoresLocal ∧ ofState_foreign`. A layout that
-reads `storageOf[a]` (balances at slot `owner`, decimals at slot 0) satisfies
-`ofState_foreign` but not `ignoresLocal` for every `a` (executor alias). -/
-def vaultAbsConst : Abs IERC20.Ghost where
-  ofState := fun _ _ => ({} : IERC20.Ghost)
-  ofWorld := fun _ _ => ({} : IERC20.Ghost)
+/-- Solidity ERC20 layout: `balances[o]` at `keccak(abi(o) ‖ abi(0))`, `decimals` at slot 1.
+`Ghost` has no allowances or `totalSupply`; both are unread. Uses the fixed `evmKeccak`
+oracle (not `st.env.keccakOf`) so `ofState_foreign` holds. -/
+def vaultGhostOf (sto : U256 → U256) : IERC20.Ghost where
+  balances := fun o =>
+    (sto (mapSlot1 evmKeccak IERC20.balancesMappingSlot (o : Nat))).toNat
+  decimals := (sto (BitVec.ofNat 256 IERC20.decimalsSlot)).toNat
+
+def vaultAbsSolidity : Abs IERC20.Ghost where
+  ofState st a := vaultGhostOf (evmForeign st (BitVec.ofNat 256 (a : Nat)))
+  ofWorld w a := vaultGhostOf (w.storageOf (BitVec.ofNat 256 (a : Nat)))
   ofState_proj := fun _ _ => rfl
   ofWorld_install := fun _ _ _ => rfl
 
-theorem vaultAbsConst_ignoresLocal : vaultAbsConst.ignoresLocal := by
-  intro st σ τ sto tro a hsto htro; rfl
+theorem vaultAbsSolidity_ignoresLocal : vaultAbsSolidity.ignoresLocal := by
+  intro st σ τ sto tro a hfr hsto _htro
+  apply congrArg vaultGhostOf
+  funext k
+  exact hsto (BitVec.ofNat 256 (a : Nat)) k hfr
 
-theorem vaultAbsConst_ofState_foreign : vaultAbsConst.ofState_foreign := by
-  intro st st' a hξ; rfl
+theorem vaultAbsSolidity_ofState_foreign : vaultAbsSolidity.ofState_foreign := by
+  intro st st' a hξ
+  apply congrArg vaultGhostOf
+  funext k
+  exact hξ k
 
 theorem vault_abs_nonvacuous :
     ∃ α : Abs IERC20.Ghost, α.ignoresLocal ∧ α.ofState_foreign :=
-  ⟨vaultAbsConst, vaultAbsConst_ignoresLocal, vaultAbsConst_ofState_foreign⟩
+  ⟨vaultAbsSolidity, vaultAbsSolidity_ignoresLocal, vaultAbsSolidity_ofState_foreign⟩
 
 example : ∃ α : Abs IERC20.Ghost, α.ignoresLocal ∧ α.ofState_foreign :=
   vault_abs_nonvacuous

@@ -206,13 +206,15 @@ theorem vault_correct_ext
     (hctx : ctxRel ctx st0)
     (hR : R Vault.contract Vault.schema κ w st0)
     (hRX : RX α Vault.assetB w st0) (hign : α.ignoresLocal)
+    (hBindNe : accountKey (BitVec.ofNat 256 (Vault.assetB.addr w.self)) ≠
+      accountKey (BitVec.ofNat 256 ctx.self))
     (hconf : Conforms IERC20 ctx.self (Vault.assetB.addr w.self) calls α) :
     ToYulFnCorrectExt α Vault.assetB Vault.contract Vault.schema κ calls f yul ctx w st0 :=
   toYulFn_correct_ext (I := IERC20) (S := Vault.Storage) (X := Vault.Ext)
     (E := Vault.Event) (ε := Vault.Error)
     α Vault.assetB Vault.contract Vault.schema Vault.schema_lawful κ hκ
     calls f (vault_fn_not_ctor hf) (vault_fn_s2 hf) vault_fields_lt
-    (vault_fn_params_bound hf) yul hyul ctx w st0 hctx hR hRX hign hconf
+    (vault_fn_params_bound hf) yul hyul ctx w st0 hctx hR hRX hign hBindNe hconf
     vault_bindWF (vault_hslot hf)
 
 theorem vault_deposit_correct_ext
@@ -226,10 +228,12 @@ theorem vault_deposit_correct_ext
     (hctx : ctxRel ctx st0)
     (hR : R Vault.contract Vault.schema κ w st0)
     (hRX : RX α Vault.assetB w st0) (hign : α.ignoresLocal)
+    (hBindNe : accountKey (BitVec.ofNat 256 (Vault.assetB.addr w.self)) ≠
+      accountKey (BitVec.ofNat 256 ctx.self))
     (hconf : Conforms IERC20 ctx.self (Vault.assetB.addr w.self) calls α) :
     ToYulFnCorrectExt α Vault.assetB Vault.contract Vault.schema κ calls f yul ctx w st0 :=
   vault_correct_ext α κ hκ calls f hf (vault_fn_not_ctor hf) yul hyul
-    ctx w st0 hctx hR hRX hign hconf
+    ctx w st0 hctx hR hRX hign hBindNe hconf
 
 theorem vault_withdraw_correct_ext
     (α : Abs IERC20.Ghost)
@@ -242,9 +246,11 @@ theorem vault_withdraw_correct_ext
     (hctx : ctxRel ctx st0)
     (hR : R Vault.contract Vault.schema κ w st0)
     (hRX : RX α Vault.assetB w st0) (hign : α.ignoresLocal)
+    (hBindNe : accountKey (BitVec.ofNat 256 (Vault.assetB.addr w.self)) ≠
+      accountKey (BitVec.ofNat 256 ctx.self))
     (hconf : Conforms IERC20 ctx.self (Vault.assetB.addr w.self) calls α) :
     ToYulFnCorrectExt α Vault.assetB Vault.contract Vault.schema κ calls f yul ctx w st0 :=
   vault_correct_ext α κ hκ calls f hf (vault_fn_not_ctor hf) yul hyul
-    ctx w st0 hctx hR hRX hign hconf
+    ctx w st0 hctx hR hRX hign hBindNe hconf
 
 end Lsc.Compiler
