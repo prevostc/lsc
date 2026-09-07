@@ -469,6 +469,98 @@ def run_deploy_create(node: Anvil, contract: dict[str, Any], rows: list[Row]) ->
     rows.append(row)
 
 
+def concat_initcode(deploy: str, ctor: str | None) -> str:
+    d = norm_hex(deploy)
+    if not ctor:
+        return d
+    c = norm_hex(ctor)
+    if c in ("0x", "0X"):
+        return d
+    return "0x" + d[2:] + c[2:]
+
+
+def run_deploy_create_with_args(node: Anvil, contract: dict[str, Any], rows: list[Row]) -> None:
+    """CREATE `deploy || ctor_calldata`, then `ctor_checks` against the created account."""
+    row = Row(contract=contract["name"], case="deploy_create_args")
+    deploy = contract.get("deploy")
+    runtime = contract.get("runtime")
+    ctor = contract.get("ctor_calldata")
+    if not deploy or not runtime:
+        row.status = "-/-"
+        row.fail("missing deploy or runtime bytecode")
+        rows.append(row)
+        return
+    if not ctor:
+        row.status = "-/-"
+        row.fail("missing ctor_calldata")
+        rows.append(row)
+        return
+    initcode = concat_initcode(deploy, ctor)
+    node.impersonate(ANVIL_DEFAULT_ADDR)
+    send = node.run_cast(
+        [
+            "send",
+            "--private-key",
+            ANVIL_DEFAULT_KEY,
+            "--gas-limit",
+            GAS_LIMIT,
+            "--json",
+            "--create",
+            initcode,
+        ]
+    )
+    ok, out = parse_send_ok(send)
+    if not ok:
+        row.status = "ok/revert"
+        row.fail(f"CREATE with ctor args reverted:\n{out[-800:]}")
+        rows.append(row)
+        return
+    created = ""
+    try:
+        js = json.loads(send.stdout or "{}")
+        created = js.get("contractAddress") or js.get("contract_address") or ""
+    except json.JSONDecodeError:
+        created = ""
+    if not created:
+        m = re.search(r"contractAddress[\"': ]+(0x[0-9a-fA-F]{40})", out)
+        created = m.group(1) if m else ""
+    if not created:
+        row.fail("CREATE receipt had no contractAddress")
+        rows.append(row)
+        return
+    actual = node.code(created)
+    exp, got = norm_hex(runtime), norm_hex(actual)
+    extra = got[len(exp) :]
+    if got == exp or (got.startswith(exp) and extra and set(extra) <= {"0"}):
+        row.status = "ok/ok"
+        row.ret = "runtime" if got == exp else "runtime+STOP"
+        row.storage = "n/a"
+        row.result = "PASS"
+    else:
+        row.status = "ok/ok"
+        row.ret = "DIFF"
+        row.fail(
+            f"deployed runtime != exported runtime (with ctor args)\n"
+            f"    address  {created}\n"
+            f"    expected {runtime[:74]}… ({hex_len(runtime)} bytes)\n"
+            f"    actual   {actual[:74]}… ({hex_len(actual)} bytes)\n"
+            + hex_suffix_diff(runtime, actual)
+        )
+        rows.append(row)
+        return
+    rows.append(row)
+    for case in contract.get("ctor_checks") or []:
+        crow = Row(contract=contract["name"], case=f"deploy_create_args/{case.get('name') or '?'}")
+        try:
+            case_nc = dict(case)
+            case_nc["pre_storage"] = []
+            case_nc["post_storage"] = []
+            run_call_case(node, created, case_nc, crow)
+        except HarnessError as e:
+            crow.fail(str(e))
+        rows.append(crow)
+
+
 def print_table(rows: list[Row], evm_line: str) -> int:
     print(evm_line)
     print()
@@ -554,6 +646,13 @@ def main(argv: list[str] | None = None) -> int:
                     run_deploy_create(node, contract, rows)
                 except HarnessError as e:
                     row = Row(contract=name, case="deploy_create")
+                    row.fail(str(e))
+                    rows.append(row)
+            if name == "Token":
+                try:
+                    run_deploy_create_with_args(node, contract, rows)
+                except HarnessError as e:
+                    row = Row(contract=name, case="deploy_create_args")
                     row.fail(str(e))
                     rows.append(row)
             snap = None

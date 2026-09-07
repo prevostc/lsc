@@ -56,6 +56,11 @@ def decodeArgs (f : FnDef) (cd : List UInt8) : List Nat :=
   let off := if f.kind = .constructor then 0 else 4
   (List.range f.params.length).map fun i => (wordFrom cd (off + 32 * i)).toNat
 
+/-- Solidity CREATE: constructor args are the last `32 * n` bytes of init code. -/
+def decodeCtorArgs (n : Nat) (code : List UInt8) : List Nat :=
+  let off := code.length - 32 * n
+  (List.range n).map fun i => (wordFrom code (off + 32 * i)).toNat
+
 /-- First 4 bytes as `shr(224, calldataload(0))`. -/
 def calldataSelector (cd : List UInt8) : Nat :=
   (wordFrom cd 0).toNat >>> 224
@@ -274,5 +279,28 @@ theorem mkEvmStateExt_foreign (cd σ ξ κ ctx addr slot) :
     evmForeign (mkEvmStateExt cd σ ξ κ ctx) addr slot =
       if accountKey addr = accountKey (BitVec.ofNat 256 ctx.self) then σ slot
       else ξ addr slot := rfl
+
+/-- Init-code frame: empty calldata, `env.code` is CREATE initcode (compiled object
+plus ABI-encoded constructor args). -/
+def mkCtorState (code : List UInt8) (storage : U256 → U256)
+    (keccak : List UInt8 → U256) (ctx : Ctx) : EvmState :=
+  let st := mkEvmStateExt [] storage (fun _ _ => 0) keccak ctx
+  { st with env := { st.env with code } }
+
+/-- Per-function constructor theorem (S1). Args from `st0.env.code` suffix; unit
+`ret` falls through (`.normal`). Proof: `Proof/Constructor.lean`. -/
+@[reducible] def ConstructorCorrect {S X E ε : Type} (c : ContractDef)
+    (Γ : ContractSchema S X E ε) (κ : List UInt8 → U256) (f : FnDef)
+    (yul : YBlock) (ctx : Ctx) (w : World S X E) (st0 : EvmState) : Prop :=
+  let args := decodeCtorArgs f.params.length st0.env.code
+  match Tx.run (Core.denote Γ f.core args.reverse) ctx w with
+  | .ok (_, w') =>
+      ∃ stObs, Run evm yul st0 [] stObs .normal ∧ R c Γ κ w' stObs
+  | .error e =>
+      ∃ stObs bytes,
+        Run evm yul st0 [] stObs .halt ∧
+        stObs.halted = some (.revert, bytes) ∧
+        haltError c Γ e bytes ∧
+        R c Γ κ w st0
 
 end Lsc.Compiler

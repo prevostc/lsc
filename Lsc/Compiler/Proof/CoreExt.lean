@@ -39,6 +39,7 @@ def S2Frag : {t : RetTy} → Core t → Prop
   | .word, .ret _ => True
   | .addr, .ret _ => True
   | .flag, .ret _ => True
+  | .pair .word .word, .ret _ => True
   | .word, .opTail op => S2Op op
   | .addr, .opTailAddr op => S2Op op
   | .flag, .opTailFlag op => S2Op op
@@ -88,7 +89,16 @@ theorem s2frag_of_callFree {t} {core : Core t} (h : CallFree core) : S2Frag core
   revert h
   induction core with
   | ret r =>
-    intro h; cases r <;> simp [S2Frag, CallFree, M1Frag] at h ⊢
+    intro h
+    cases r with
+    | pair x y =>
+      cases x with
+      | word _ =>
+        cases y with
+        | word _ => simp [S2Frag]
+        | _ => simp [CallFree, M1Frag] at h
+      | _ => simp [CallFree, M1Frag] at h
+    | unit | word _ | addr _ | flag _ => simp [S2Frag]
   | opTail op | opTailAddr op | opTailFlag op =>
     intro h; simp [S2Frag, CallFree, M1Frag] at h ⊢; exact s2op_of_m1 h
   | stmtTail s =>
@@ -480,6 +490,17 @@ theorem RX_callFree {I : Interface} {S X E} {α : Abs I.Ghost}
   unfold RX at *
   rw [haddr, hstab, hext]
   exact hRX
+
+theorem RXs_callFree {I : Interface} {S X E} {bs : List (BindEnv I S X)}
+    {w w' : World S X E} {st0 st' : EvmState}
+    (hRX : RXs bs w st0)
+    (hstab : ∀ e ∈ bs,
+      e.α.ofState st' (e.bind.addr w.self) = e.α.ofState st0 (e.bind.addr w.self))
+    (hext : w'.ext = w.ext)
+    (haddr : ∀ e ∈ bs, e.bind.addr w'.self = e.bind.addr w.self) :
+    RXs bs w' st' := by
+  intro e he
+  exact RX_callFree (α := e.α) (hRX e he) (hstab e he) hext (haddr e he)
 
 /-! `toYulFn_correct_ext` (no `haddr`/`hstab`) lives in `Proof/CoreExtSim.lean`. -/
 

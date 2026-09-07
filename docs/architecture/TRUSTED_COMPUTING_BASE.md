@@ -11,8 +11,11 @@ Spec → Core → Yul → EVM bytecode. Axiom footprint of the chain is `propext
   `token_bytecode_solvent` (`Lsc/Examples/TokenEndToEnd.lean`).
 - Vault (S2, one external binding): `vault_bytecode_no_unauthorized_extraction` /
   `vault_bytecode_solvent` (`Lsc/Examples/VaultEndToEnd.lean`).
+- AMM (S2, two `IERC20` bindings): `amm_bytecode_no_unauthorized_extraction`
+  (`Lsc/Examples/AmmEndToEnd.lean`).
 - Glue: `bytecode_call_correct` (`EndToEnd.lean`), `bytecode_call_correct_ext`
-  (`EndToEndExt.lean`). AMM is spec-level only; Counter is compiler-level only.
+  (`EndToEndExt.lean`). AMM bytecode: `amm_bytecode_no_unauthorized_extraction`.
+  Counter is compiler-level only.
 
 ## Trusted foundations
 
@@ -50,7 +53,14 @@ address to `I.Ghost` (foreign layout is not proved in general). `Conforms`: ever
 emitted. `CallsRealized` (powdr inhabitation) and `CallsTotal` (EVM CALL always
 returns). `ignoresLocal` is foreign-address only. Foreign state `ξ` (`storageOf`)
 is threaded through S2 traces; post-call `ξ'` is read from the halted EVM state.
-S1 uses a closed model (`calls := .none`, `ExternalsRealized.none`) instead.
+A family `bs : List (BindEnv I S X)` carries per-package `RX`/`Conforms`/`neSelf`
+(conjunction `RXs`, `BindEnvs.conforms`, `BindEnvs.neSelf`). Extra family
+hypotheses: `sameAbs` (shared `α`, so `NoInterfere` frames other callees),
+`orthogonal` (distinct addresses have independent ghosts), `addrInj` (colliding
+addresses imply the same `α` and `get`; AMM needs `token0 ≠ token1` at `w.self`),
+`lookupWF` (each well-formed `Op.call` indexes some package), `avoids` (runtime
+does not store binding address slots). S1 uses a closed model (`calls := .none`,
+`ExternalsRealized.none`) instead.
 
 **(e) Fault oracle.** Backward S2 existentially chooses a fault oracle `fo` so
 Core and Yul agree on each external outcome. Security theorems remain `∀ w`.
@@ -85,19 +95,26 @@ Not derived from powdr:
 
 ## Not covered
 
-- Deploy / constructor: `compileObject_correct` starts from empty calldata;
-  constructor arguments are not linked. Runtime theorems exclude constructors.
-- AMM through the compiler (two bindings; needs multi-binding `toYulFn_correct_ext`).
+- Deploy / constructor: Yul `constructor_correct` (Solidity CREATE suffix args in
+  `env.code`). `compileObject_correct` / `bytecode_deploy_correct` start from
+  `L.initState` (`env.code = L.code`, empty calldata) with `FrameOK` requiring
+  that exact code — appended ABI args are **not** in the EVM theorem.
+  `FrameOK` fork = Osaka; CREATE-shaped empty call stack. Nested `"runtime"`
+  subobject offsets are compiler artifacts (`Layout.Consistent` is data segments
+  only). Runtime theorems exclude constructors (`hctor`). Vault/AMM constructors
+  with `call` are out of scope.
+
 - Bytecode-level reentrancy lock (not emitted).
-- Core outside `S2Frag` (e.g. wrapping `letPure` other than `id`, `pair` returns,
-  other `require`/`revert`/`emit` arities).
+- Core outside `S2Frag` (e.g. wrapping `letPure` other than `id`, nested pair
+  returns, `require`/`revert`/`emit` arities other than 0/1/3/4).
 - Amount-typed compiler in general: bytecode glue is `Core.denote` (Nat). Vault
   Amount ABI is identified via `deposit.core_denote` / `withdraw.core_denote`.
 
 ## Non-vacuity
 
 - `vaultAbsSolidity`: a concrete `Abs` reading Solidity ERC20 layout
-  (`balances[o]` at `mapSlot1 evmKeccak 0 o`, `decimals` at slot 1).
+  (`balances[o]` at `mapSlot1 evmKeccak 0 o`, `decimals` at slot 1). Shared by
+  Vault and both AMM token bindings (per-address via `evmForeign`).
 - `*_exists` companions keep a predicted `EvmTraceRun` / `EvmTraceRunExt`.
 - Differential harness (`scripts/difftest.sh`) is defence in depth, not a proof.
 
@@ -105,5 +122,8 @@ Not derived from powdr:
 
 Reifier certificates (`Lsc/Lang/Reify.lean`, kernel-checked `rfl`), `toYul`
 (`toYulFn_correct_callFree` / `toYulFn_correct_ext`), powdr's compiler
-(`compile_correct`; `compileObject_correct` unused by runtime theorems), and the
+(`compile_correct`; `compileObject_correct` / `bytecode_deploy_correct` for
+init code without appended args; Yul `constructor_correct` for the CREATE
+suffix convention), and the
+
 harness. A former home-grown EVM/codegen/FFI stack was removed from this TCB.

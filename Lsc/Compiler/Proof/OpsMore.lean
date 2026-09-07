@@ -449,6 +449,107 @@ theorem return_word_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E 
     simp [stM, readBytes_storeWord_wordBytes _ _ _ hv]
   · exact R_touch_halted (R_memOnly hR (by simp [MemOnly, stM, touchMemory])) abiPtr 32 _
 
+theorem emitReturnWords_two (e : Emit) (x y : YExpr) :
+    (emitReturnWords e [x, y]).stmts =
+      e.stmts ++
+        [.exprStmt (bop Op.mstore [lit abiPtr, x]),
+          .exprStmt (bop Op.mstore [lit (abiPtr + 32), y]),
+          .exprStmt (bop Op.ret [lit abiPtr, lit 64])] := by
+  simp [emitReturnWords, emitDo, Emit.push, Emit.stmts, bop]
+
+theorem toNat_64_ops : (BitVec.ofNat 256 64).toNat = 64 :=
+  toNat_ofNat_of_lt (lt_256_wordBound (by decide))
+
+theorem readBytes_abi_two (mem : Nat → UInt8) (n0 n1 : Nat)
+    (h0 : n0 < wordBound) (h1 : n1 < wordBound) :
+    readBytes
+      (storeWord (storeWord mem abiPtr (BitVec.ofNat 256 n0))
+        (abiPtr + 32) (BitVec.ofNat 256 n1))
+      abiPtr 64 = wordBytes n0 ++ wordBytes n1 := by
+  have h64 : (64 : Nat) = 32 + 32 := rfl
+  rw [h64, readBytes_split]
+  have h1' :
+      readBytes (storeWord (storeWord mem abiPtr (BitVec.ofNat 256 n0))
+          (abiPtr + 32) (BitVec.ofNat 256 n1))
+        (abiPtr + 32) 32 = wordBytes n1 := by
+    have hout0 : ∀ i ∈ List.range 32,
+        storeWord (storeWord mem abiPtr (BitVec.ofNat 256 n0))
+          (abiPtr + 32) (BitVec.ofNat 256 n1) (abiPtr + 32 + i) =
+        storeWord mem (abiPtr + 32) (BitVec.ofNat 256 n1) (abiPtr + 32 + i) := by
+      intro i hi
+      have : i < 32 := List.mem_range.mp hi
+      have hin : abiPtr + 32 ≤ abiPtr + 32 + i ∧ abiPtr + 32 + i < abiPtr + 32 + 32 := by omega
+      rw [storeWord_in (h := hin), storeWord_in (h := hin)]
+    unfold readBytes
+    refine Eq.trans (List.map_congr_left hout0) ?_
+    change readBytes (storeWord mem (abiPtr + 32) (BitVec.ofNat 256 n1))
+      (abiPtr + 32) 32 = wordBytes n1
+    exact readBytes_storeWord_wordBytes _ _ _ h1
+  have h0' :
+      readBytes (storeWord (storeWord mem abiPtr (BitVec.ofNat 256 n0))
+          (abiPtr + 32) (BitVec.ofNat 256 n1))
+        abiPtr 32 = wordBytes n0 := by
+    have hout32 : ∀ i ∈ List.range 32,
+        storeWord (storeWord mem abiPtr (BitVec.ofNat 256 n0))
+          (abiPtr + 32) (BitVec.ofNat 256 n1) (abiPtr + i) =
+        storeWord mem abiPtr (BitVec.ofNat 256 n0) (abiPtr + i) := by
+      intro i hi
+      have : i < 32 := List.mem_range.mp hi
+      exact storeWord_out _ _ _ _ (.inl (by simp only [abiPtr]; omega))
+    unfold readBytes
+    refine Eq.trans (List.map_congr_left hout32) ?_
+    change readBytes (storeWord mem abiPtr (BitVec.ofNat 256 n0)) abiPtr 32 = wordBytes n0
+    exact readBytes_storeWord_wordBytes _ _ _ h0
+  rw [h0', h1']
+
+theorem return_pair_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
+    {κ} {w : World S X E} {st : EvmState}
+    (funs : FunEnv evm) (V : VEnv evm)
+    {x y : YExpr} {v0 v1 : Nat} (hv0 : v0 < wordBound) (hv1 : v1 < wordBound)
+    (he0 : EvalExpr evm funs V st x (.vals [BitVec.ofNat 256 v0] st))
+    (he1 : ∀ st', EvalExpr evm funs V st' y (.vals [BitVec.ofNat 256 v1] st'))
+    (hR : R c Γ κ w st) :
+    ∃ st', ExecStmts evm funs V st (emitReturnWords {} [x, y]).stmts V st' .halt ∧
+      st'.halted = some (.ret, wordBytes v0 ++ wordBytes v1) ∧ R c Γ κ w st' := by
+  let stM0 : EvmState :=
+    { touchMemory st abiPtr 32 with
+      memory := storeWord st.memory abiPtr (BitVec.ofNat 256 v0) }
+  have hm0 :
+      ExecStmt evm funs V st (.exprStmt (bop Op.mstore [lit abiPtr, x])) V stM0 .normal :=
+    Step.exprStmt (Step.builtinOk (Step.argsCons (Step.argsCons Step.argsNil he0) Step.lit)
+      (by
+        simp only [evm_litValue_number, step_mstore, toNat_abiPtr]
+        rfl))
+  let stM1 : EvmState :=
+    { touchMemory stM0 (abiPtr + 32) 32 with
+      memory := storeWord stM0.memory (abiPtr + 32) (BitVec.ofNat 256 v1) }
+  have hm1 :
+      ExecStmt evm funs V stM0 (.exprStmt (bop Op.mstore [lit (abiPtr + 32), y])) V stM1 .normal :=
+    Step.exprStmt (Step.builtinOk (Step.argsCons (Step.argsCons Step.argsNil (he1 stM0)) Step.lit)
+      (by
+        simp only [evm_litValue_number, step_mstore, toNat_abiPtr32]
+        rfl))
+  let bytes := readBytes stM1.memory abiPtr 64
+  let stR : EvmState :=
+    { touchMemory stM1 abiPtr 64 with halted := some (.ret, bytes) }
+  have hret :
+      ExecStmt evm funs V stM1 (.exprStmt (bop Op.ret [lit abiPtr, lit 64])) V stR .halt :=
+    Step.exprStmtHalt (Step.builtinHalt
+      (Step.argsCons (Step.argsCons Step.argsNil Step.lit) Step.lit)
+      (by
+        simp only [evm_litValue_number, step_ret, toNat_abiPtr, toNat_64_ops]
+        rfl))
+  refine ⟨stR, ?_, ?_, ?_⟩
+  · simp only [emitReturnWords_two, Emit.stmts_nil, List.nil_append]
+    exact Step.seqCons hm0 (Step.seqCons hm1 (Step.seqStop hret halt_ne_normal))
+  · have hhalt : stR.halted = some (.ret, readBytes stM1.memory abiPtr 64) := rfl
+    rw [hhalt]
+    refine congrArg (fun b => some (HaltKind.ret, b)) ?_
+    simp [stM1, stM0, readBytes_abi_two _ _ _ hv0 hv1]
+  · have hR0 := R_memOnly hR (memOnly_mstore st (BitVec.ofNat 256 abiPtr) (BitVec.ofNat 256 v0))
+    have hR1 := R_memOnly hR0 (memOnly_mstore stM0 (BitVec.ofNat 256 (abiPtr + 32)) (BitVec.ofNat 256 v1))
+    exact R_touch_halted hR1 abiPtr 64 _
+
 theorem op_sim_pure {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx} {w : World S X E} {env V st} {a : Atom}
     (funs : FunEnv evm) (hinv : Inv Γ c κ ctx w env V st)

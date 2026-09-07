@@ -51,6 +51,12 @@ def NoInterfere {G} (α : Abs G) (st : EvmState) (world : CallWorld)
   (∀ l ∈ world.logs, l.address ≠ st.env.address) ∧
   ∀ a : Address, a ≠ callee → α.ofWorld world a = α.ofState st a
 
+theorem NoInterfere.ofWorld_ne {G} {α : Abs G}
+    {st : EvmState} {world : CallWorld} {callee a : Address}
+    (h : NoInterfere α st world callee) (hne : a ≠ callee) :
+    α.ofWorld world a = α.ofState st a :=
+  h.2.2.2.2.2 a hne
+
 /-- Decode ABI return data. `boolOpt` treats a short (1–31 byte) or ABI-false
 word as **not** a success (so Core `some 1` cannot pair with a Yul revert).
 `length < 2^256` so `returndatasize` agrees with `List.length` (`ofNat` would wrap). -/
@@ -189,5 +195,188 @@ structure BindWF {I : Interface} {S X E ε : Type}
   huniq : ∀ m', (I.abi m').selector = (I.abi meth).selector → m' = meth
   hret : (I.abi meth).ret = .word ∨ (I.abi meth).ret = .boolOpt
   harity : (I.abi meth).arity ≤ 3
+
+/-! ## Binding family (S2, one or more external contracts) -/
+
+/-- One external binding in an S2 family. `α` is typically shared (Solidity IERC20). -/
+structure BindEnv (I : Interface) (S X : Type) where
+  α : Abs I.Ghost
+  bind : Binding I S X
+
+/-- Every package's ghost agrees with `w.ext` at its bound address. -/
+def RXs {I : Interface} {S X E} (bs : List (BindEnv I S X))
+    (w : World S X E) (st : EvmState) : Prop :=
+  ∀ e ∈ bs, RX e.α e.bind w st
+
+def BindEnvs.ignoresLocal {I : Interface} {S X} (bs : List (BindEnv I S X)) : Prop :=
+  ∀ e ∈ bs, e.α.ignoresLocal
+
+def BindEnvs.ofState_foreign {I : Interface} {S X} (bs : List (BindEnv I S X)) : Prop :=
+  ∀ e ∈ bs, e.α.ofState_foreign
+
+def BindEnvs.neSelf {I : Interface} {S X} (bs : List (BindEnv I S X))
+    (self : Address) (σ : S) : Prop :=
+  ∀ e ∈ bs,
+    accountKey (BitVec.ofNat 256 (e.bind.addr σ)) ≠ accountKey (BitVec.ofNat 256 self)
+
+def BindEnvs.conforms {I : Interface} {S X} (bs : List (BindEnv I S X))
+    (self : Address) (σ : S) (calls : ExternalCalls) : Prop :=
+  ∀ e ∈ bs, Conforms I self (e.bind.addr σ) calls e.α
+
+/-- All packages use the same `Abs` (so `NoInterfere` frames other addresses). -/
+def BindEnvs.sameAbs {I : Interface} {S X} (bs : List (BindEnv I S X)) : Prop :=
+  ∀ e1 ∈ bs, ∀ e2 ∈ bs, e1.α = e2.α
+
+/-- Distinct callee addresses have independent ghosts. -/
+def BindEnvs.orthogonal {I : Interface} {S X} (bs : List (BindEnv I S X)) : Prop :=
+  ∀ e1 ∈ bs, ∀ e2 ∈ bs, ∀ σ : S,
+    e1.bind.addr σ ≠ e2.bind.addr σ →
+      ∀ x g, e2.bind.get (e1.bind.set x g) = e2.bind.get x
+
+/-- Same callee address ⇒ same `α` and same `get` (Conforms is unambiguous). -/
+def BindEnvs.addrInj {I : Interface} {S X} (bs : List (BindEnv I S X)) (σ : S) : Prop :=
+  ∀ e1 ∈ bs, ∀ e2 ∈ bs, e1.bind.addr σ = e2.bind.addr σ →
+    e1.α = e2.α ∧ e1.bind.get = e2.bind.get
+
+/-- A well-formed Core call indexes some package in `bs`. -/
+def BindEnvs.lookupWF {I : Interface} {S X E ε}
+    (c : ContractDef) (Γ : ContractSchema S X E ε)
+    (bs : List (BindEnv I S X)) : Prop :=
+  ∀ b m args, callWF c b m args = true →
+    ∃ e ∈ bs, ∃ meth : I.Method, BindWF c Γ e.bind b m meth
+
+theorem RXs_singleton {I : Interface} {S X E}
+    (e : BindEnv I S X) (w : World S X E) (st : EvmState) :
+    RXs [e] w st ↔ RX e.α e.bind w st := by
+  constructor
+  · intro h; exact h e (List.mem_singleton.mpr rfl)
+  · intro h e' he'
+    have : e' = e := List.mem_singleton.mp he'
+    subst this; exact h
+
+theorem RXs_faults {I : Interface} {S X E} {bs : List (BindEnv I S X)}
+    {w : World S X E} {st : EvmState} (g : Nat → Bool) :
+    RXs bs { w with faults := g } st ↔ RXs bs w st := Iff.rfl
+
+theorem BindEnvs.sameAbs_singleton {I S X} (e : BindEnv I S X) :
+    BindEnvs.sameAbs [e] := by
+  intro e1 h1 e2 h2
+  have h1' : e1 = e := List.mem_singleton.mp h1
+  have h2' : e2 = e := List.mem_singleton.mp h2
+  subst h1'; subst h2'; rfl
+
+theorem BindEnvs.orthogonal_singleton {I S X} (e : BindEnv I S X) :
+    BindEnvs.orthogonal [e] := by
+  intro e1 h1 e2 h2 σ hne
+  have h1' : e1 = e := List.mem_singleton.mp h1
+  have h2' : e2 = e := List.mem_singleton.mp h2
+  subst h1'; subst h2'
+  exact (hne rfl).elim
+
+theorem BindEnvs.addrInj_singleton {I S X} (e : BindEnv I S X) (σ : S) :
+    BindEnvs.addrInj [e] σ := by
+  intro e1 h1 e2 h2 _
+  have h1' : e1 = e := List.mem_singleton.mp h1
+  have h2' : e2 = e := List.mem_singleton.mp h2
+  subst h1'; subst h2'
+  exact ⟨rfl, rfl⟩
+
+theorem BindEnvs.lookupWF_singleton {I S X E ε}
+    {c : ContractDef} {Γ : ContractSchema S X E ε}
+    {α : Abs I.Ghost} {bind : Binding I S X}
+    (hBind : ∀ b m args, callWF c b m args = true →
+      ∃ meth, BindWF c Γ bind b m meth) :
+    BindEnvs.lookupWF c Γ [⟨α, bind⟩] := by
+  intro b m args h
+  obtain ⟨meth, hbd⟩ := hBind b m args h
+  exact ⟨⟨α, bind⟩, List.mem_singleton.mpr rfl, meth, hbd⟩
+
+theorem BindEnvs.ignoresLocal_singleton {I S X}
+    (e : BindEnv I S X) (h : e.α.ignoresLocal) :
+    BindEnvs.ignoresLocal [e] := by
+  intro e' he'
+  have : e' = e := List.mem_singleton.mp he'
+  subst this; exact h
+
+theorem BindEnvs.ofState_foreign_singleton {I S X}
+    (e : BindEnv I S X) (h : e.α.ofState_foreign) :
+    BindEnvs.ofState_foreign [e] := by
+  intro e' he'
+  have : e' = e := List.mem_singleton.mp he'
+  subst this; exact h
+
+theorem BindEnvs.neSelf_singleton {I S X}
+    (e : BindEnv I S X) (self : Address) (σ : S)
+    (h : accountKey (BitVec.ofNat 256 (e.bind.addr σ)) ≠
+      accountKey (BitVec.ofNat 256 self)) :
+    BindEnvs.neSelf [e] self σ := by
+  intro e' he'
+  have : e' = e := List.mem_singleton.mp he'
+  subst this; exact h
+
+theorem BindEnvs.conforms_singleton {I S X}
+    (e : BindEnv I S X) (self : Address) (σ : S) (calls : ExternalCalls)
+    (h : Conforms I self (e.bind.addr σ) calls e.α) :
+    BindEnvs.conforms [e] self σ calls := by
+  intro e' he'
+  have : e' = e := List.mem_singleton.mp he'
+  subst this; exact h
+
+theorem BindEnvs.conforms_self {I S X} {bs : List (BindEnv I S X)}
+    {self : Address} {σ σ' : S} {calls : ExternalCalls}
+    (hσ : σ' = σ) (h : BindEnvs.conforms bs self σ calls) :
+    BindEnvs.conforms bs self σ' calls := by
+  subst hσ; exact h
+
+theorem BindEnvs.neSelf_self {I S X} {bs : List (BindEnv I S X)}
+    {self : Address} {σ σ' : S} (hσ : σ' = σ)
+    (h : BindEnvs.neSelf bs self σ) : BindEnvs.neSelf bs self σ' := by
+  subst hσ; exact h
+
+theorem BindEnvs.addrInj_self {I S X} {bs : List (BindEnv I S X)} {σ σ' : S}
+    (hσ : σ' = σ) (h : BindEnvs.addrInj bs σ) : BindEnvs.addrInj bs σ' := by
+  subst hσ; exact h
+
+theorem BindEnvs.neSelf_of_addr {I S X} {bs : List (BindEnv I S X)}
+    {self : Address} {σ σ' : S}
+    (h : BindEnvs.neSelf bs self σ)
+    (ha : ∀ e ∈ bs, e.bind.addr σ' = e.bind.addr σ) :
+    BindEnvs.neSelf bs self σ' := by
+  intro e he
+  simpa [ha e he] using h e he
+
+theorem BindEnvs.addrInj_of_addr {I S X} {bs : List (BindEnv I S X)} {σ σ' : S}
+    (h : BindEnvs.addrInj bs σ)
+    (ha : ∀ e ∈ bs, e.bind.addr σ' = e.bind.addr σ) :
+    BindEnvs.addrInj bs σ' := by
+  intro e1 h1 e2 h2 heq
+  exact h e1 h1 e2 h2 (by simpa [ha e1 h1, ha e2 h2] using heq)
+
+theorem RXs_of_foreign {I : Interface} {S X E} {bs : List (BindEnv I S X)}
+    (hF : BindEnvs.ofState_foreign bs) {w : World S X E} {st st' : EvmState}
+    (hξ : ∀ e ∈ bs, ∀ k,
+      evmForeign st (BitVec.ofNat 256 (e.bind.addr w.self)) k =
+      evmForeign st' (BitVec.ofNat 256 (e.bind.addr w.self)) k)
+    (hRX : RXs bs w st) : RXs bs w st' := by
+  intro e he
+  exact RX_of_foreign (hF e he) (hξ e he) (hRX e he)
+
+theorem RXs_irrel_log_faults {I : Interface} {S X E} {bs : List (BindEnv I S X)}
+    {w : World S X E} {st : EvmState} (log' : List E) (fo : Nat → Bool)
+    (h : RXs bs w st) : RXs bs { w with log := log', faults := fo } st := h
+
+theorem RXs_pair {I : Interface} {S X E}
+    (e0 e1 : BindEnv I S X) (w : World S X E) (st : EvmState) :
+    RXs [e0, e1] w st ↔ RX e0.α e0.bind w st ∧ RX e1.α e1.bind w st := by
+  constructor
+  · intro h
+    exact ⟨h e0 (List.mem_cons.mpr (Or.inl rfl)),
+      h e1 (List.mem_cons.mpr (Or.inr (List.mem_singleton.mpr rfl)))⟩
+  · intro ⟨h0, h1⟩ e he
+    have : e = e0 ∨ e = e1 := by
+      simpa [List.mem_cons, List.mem_singleton] using he
+    rcases this with rfl | rfl
+    · exact h0
+    · exact h1
 
 end Lsc.Compiler

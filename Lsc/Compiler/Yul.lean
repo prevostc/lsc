@@ -366,6 +366,26 @@ def emitParams (e : Emit) (offset n : Nat) : Emit :=
 def abiPtr : Nat := 0x80
 def abiAfterSel : Nat := 0x84
 
+/-- Solidity CREATE convention: constructor args are the last `32n` bytes of init code.
+Copy them to memory at `abiPtr` (`0x80`), then `mload` into `v_i`. Runtime `emitParams`
+is unchanged. `n = 0` skips the copy. -/
+def emitCtorCopy (e : Emit) (n : Nat) : Emit :=
+  if n = 0 then e
+  else
+    let argsLen := 32 * n
+    emitDo e YulSemantics.EVM.Op.codecopy
+      [lit abiPtr,
+       bop YulSemantics.EVM.Op.sub [bop YulSemantics.EVM.Op.codesize [], lit argsLen],
+       lit argsLen]
+
+def emitCtorLoads (e : Emit) (n : Nat) : Emit :=
+  (List.range n).foldl (fun e i =>
+    e.push (.letDecl [identV i]
+      (some (bop YulSemantics.EVM.Op.mload [lit (abiPtr + 32 * i)])))) e
+
+def emitCtorParams (e : Emit) (n : Nat) : Emit :=
+  emitCtorLoads (emitCtorCopy e n) n
+
 def keccak064 : YExpr := bop YulSemantics.EVM.Op.keccak256 [lit 0, lit 64]
 
 def emitPanic (e : Emit) (code : Nat) : Emit :=
@@ -632,9 +652,9 @@ def emitCore (c : ContractDef) (e : Emit) (depth : Nat) (haltUnit : Bool) :
       some (e.push (.switch (emitCond depth cond)
         [(YulSemantics.Literal.number 0, eB.stmts)] (some eA.stmts)))
 
-/-- Compile one function. Parameters are ABI-decoded from calldata (`offset = 4` for
-runtime entrypoints, `0` for constructors). A constructor's `ret ()` falls through
-(no `stop()`), so `deployObject` can append `constructorCode "runtime"`. -/
+/-- Compile one **runtime** function. Parameters are ABI-decoded from calldata
+(`offset = 4`). The constructor branch of this definition is unused by `deployObject`
+(see `toYulCtor`); it is kept so existing `toYulFn_inv` unfolds are stable. -/
 def toYulFn (c : ContractDef) (f : FnDef) : Option YBlock :=
   if !coreWF c f.core then none
   else if !identsNodup (maxDepth f) then none
@@ -643,6 +663,15 @@ def toYulFn (c : ContractDef) (f : FnDef) : Option YBlock :=
     let haltUnit := f.kind ≠ .constructor
     let e := emitParams {} offset f.params.length
     (emitCore c e f.params.length haltUnit f.core).map Emit.stmts
+
+/-- Compile a constructor: args from the init-code suffix (`emitCtorParams`), unit
+`ret` falls through (no `stop()`), so `deployObject` can append `constructorCode`. -/
+def toYulCtor (c : ContractDef) (f : FnDef) : Option YBlock :=
+  if !coreWF c f.core then none
+  else if !identsNodup (maxDepth f) then none
+  else
+    (emitCore c (emitCtorParams {} f.params.length) f.params.length false f.core).map
+      Emit.stmts
 
 /-- `if lt(calldatasize(), 4+32n) { revert(0,0) }` then the function body, as two blocks
 inside the selector `switch` case. -/
@@ -672,7 +701,7 @@ def deployObject (c : ContractDef) : Option YObject := do
     match c.ctor with
     | none => some (constructorCode "runtime")
     | some f =>
-      let body ← toYulFn c f
+      let body ← toYulCtor c f
       some (body ++ constructorCode "runtime")
   some (YulSemantics.Object.mk c.name ctor [YulSemantics.Object.mk "runtime" rt [] []] [])
 

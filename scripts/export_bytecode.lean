@@ -238,15 +238,36 @@ def tokenCases : List Case :=
   , tokWord "totalSupply" "totalSupply" [] ctxOwner σ₁
       (Tx.run Token.totalSupply ctxOwner w₁) ]
 
-def contractJson (name : String) (c : ContractDef) (cases : List Case) : String :=
+def contractJson (name : String) (c : ContractDef) (cases : List Case)
+    (ctorCalldata : Option (List UInt8) := none)
+    (ctorChecks : List Case := []) : String :=
   "{" ++ String.intercalate "," [
     "\"name\":" ++ jStr name,
     "\"runtime\":" ++ hexOpt (compileRuntime c),
     "\"deploy\":" ++ hexOpt (compileDeploy c),
+    "\"ctor_calldata\":" ++ hexOpt ctorCalldata,
+    "\"ctor_checks\":[" ++ String.intercalate "," (ctorChecks.map caseJson) ++ "]",
     "\"abi\":" ++ contractAbiJson c,
     "\"selectors\":" ++ selectorsJson c,
     "\"cases\":[" ++ String.intercalate "," (cases.map caseJson) ++ "]"
   ] ++ "}"
+
+def tokenCtorOwner : Nat := 1
+def tokenCtorSupply : Nat := 1000
+def tokenW0 : World Token.Storage Unit Token.Event :=
+  { self := { owner := 0, totalSupply := 0, balances := fun _ => 0, allowances := fun _ _ => 0 }
+  , ext := () }
+def tokenCtxDeploy : Ctx := { sender := 1, self := 7 }
+def tokenW1 : World Token.Storage Unit Token.Event :=
+  match Tx.run (Token.constructor tokenCtorOwner tokenCtorSupply) tokenCtxDeploy tokenW0 with
+  | .ok (_, w) => w
+  | .error _ => tokenW0
+
+def tokenCtorChecks : List Case :=
+  [ tokWord "ctor_balanceOf" "balanceOf" [tokenCtorOwner] tokenCtxDeploy tokenW1.self
+      (Tx.run (Token.balanceOf tokenCtorOwner) tokenCtxDeploy tokenW1)
+  , tokWord "ctor_totalSupply" "totalSupply" [] tokenCtxDeploy tokenW1.self
+      (Tx.run Token.totalSupply tokenCtxDeploy tokenW1) ]
 
 /-- Fixed `anvil_setCode` address. YulTests uses `Ctx.self = 7`, but `0x07` is the
 ECMUL precompile on a real EVM; Counter/Token do not read `ADDRESS`. -/
@@ -258,6 +279,8 @@ def exportJson : String :=
     "\"contracts\":[" ++ String.intercalate "," [
       contractJson "Counter" Counter.contract counterCases,
       contractJson "Token" Token.contract tokenCases
+        (some (ctorCalldata [tokenCtorOwner, tokenCtorSupply]))
+        tokenCtorChecks
     ] ++ "]"
   ] ++ "}"
 

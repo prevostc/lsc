@@ -22,12 +22,15 @@ sound because `Conforms`/`NoInterfere` exclude reentrancy
   floors and can drop `k`). LP rounding favours the pool.
 
 Assumed, not proved here: IERC20 `model`/`Rely`/`Conforms`; `Wf` traces
-(`sender ≠ self`); no bytecode simulation. Standard axioms only
+(`sender ≠ self`). Standard axioms only
 (`propext`, `Quot.sound`, `Classical.choice`).
 
-## Compiler gaps for bytecode-level AMM theorems
+## Bytecode status
 
-`compileRuntime` is not claimed (compiler WIP). Needed: two bindings in
-`ContractDef` through Yul (already in the language model), `Op.call` arities
-3 and 2 (`transferFrom`/`transfer`), `mulDivDown`, and `min` as `Core.ite`.
-Do not treat this example as closing the bytecode proof chain.
+`amm_correct_ext` instantiates family `toYulFn_correct_ext` on
+`bs = [⟨α, token0B⟩, ⟨α, token1B⟩]`. Headline
+`amm_bytecode_no_unauthorized_extraction` transports
+`amm_no_unauthorized_extraction` (share count) to `ammClaimRead` on mapping
+slot 3, universally over halted calldata (`EvmTraceRunExtAll`). Non-vacuity:
+`Vault.vaultAbsSolidity` at both token addresses (requires `token0 ≠ token1`).
+Constructor remains out of S2 runtime (writes the token slots).

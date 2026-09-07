@@ -10,12 +10,16 @@ import Lsc.Compiler.Proof.Dispatch
 import Lsc.Compiler.Proof.CoreExt
 import Lsc.Compiler.Proof.CoreExtSim
 import Lsc.Compiler.Proof.Vault
+import Lsc.Compiler.Proof.Amm
 import Lsc.Compiler.EndToEnd
 import Lsc.Compiler.EndToEndExt
 import Lsc.Compiler.Proof.DispatchExt
 import Lsc.Examples.TokenEndToEnd
 import Lsc.Examples.VaultEndToEnd
+import Lsc.Examples.AmmEndToEnd
 import Lsc.Compiler.Proof.ProgressCore
+import Lsc.Compiler.Proof.Constructor
+import Lsc.Compiler.Deploy
 
 /-!
 # Axiom footprint checks
@@ -129,3 +133,20 @@ axioms. `#guard_msgs` turns a widened footprint into a build error (see
 
 /-- info: 'Token.token_bytecode_solvent_exists' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms Token.token_bytecode_solvent_exists
+
+/-- info: 'Lsc.Compiler.constructor_correct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms Lsc.Compiler.constructor_correct
+
+/-- info: 'Lsc.Compiler.bytecode_deploy_correct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms Lsc.Compiler.bytecode_deploy_correct
+
+/-- info: 'Token.token_deploy_then_no_unauthorized_extraction' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms Token.token_deploy_then_no_unauthorized_extraction
+
+/-! ### Multi-binding S2 / AMM bytecode (appended) -/
+
+/-- info: 'Lsc.Compiler.amm_correct_ext' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms Lsc.Compiler.amm_correct_ext
+
+/-- info: 'Amm.amm_bytecode_no_unauthorized_extraction' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms Amm.amm_bytecode_no_unauthorized_extraction

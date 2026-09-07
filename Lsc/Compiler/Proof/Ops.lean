@@ -25,7 +25,7 @@ def M1Cond : Lsc.Cond → Prop
 
 def M1Stmt : Lsc.Stmt → Prop
   | .store _ _ | .storeMap _ _ _ | .storeMap2 _ _ _ _ => True
-  | .emit _ args => args.length = 0 ∨ args.length = 1 ∨ args.length = 3
+  | .emit _ args => args.length = 0 ∨ args.length = 1 ∨ args.length = 3 ∨ args.length = 4
   | .require c _ args => M1Cond c ∧ args.length = 0
   | .revert _ args => args.length = 0
   | _ => False
@@ -91,6 +91,9 @@ theorem emitStmt_emit_one (c : ContractDef) (e : Emit) (d ev : Nat) (a : Atom)
   simp [emitStmt, h, emitLog1_one]
 
 theorem toNat_abiPtr : (BitVec.ofNat 256 abiPtr).toNat = abiPtr :=
+  toNat_ofNat_of_lt (lt_256_wordBound (by decide))
+
+theorem toNat_abiPtr32 : (BitVec.ofNat 256 (abiPtr + 32)).toNat = abiPtr + 32 :=
   toNat_ofNat_of_lt (lt_256_wordBound (by decide))
 
 theorem toNat_abiAfterSel : (BitVec.ofNat 256 abiAfterSel).toNat = abiAfterSel :=

@@ -210,7 +210,7 @@ theorem vault_correct_ext
       accountKey (BitVec.ofNat 256 ctx.self))
     (hconf : Conforms IERC20 ctx.self (Vault.assetB.addr w.self) calls α) :
     ToYulFnCorrectExt α Vault.assetB Vault.contract Vault.schema κ calls f yul ctx w st0 :=
-  toYulFn_correct_ext (I := IERC20) (S := Vault.Storage) (X := Vault.Ext)
+  toYulFn_correct_ext_one (I := IERC20) (S := Vault.Storage) (X := Vault.Ext)
     (E := Vault.Event) (ε := Vault.Error)
     α Vault.assetB Vault.contract Vault.schema Vault.schema_lawful κ hκ
     calls f (vault_fn_not_ctor hf) (vault_fn_s2 hf) vault_fields_lt

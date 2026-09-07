@@ -1,4 +1,5 @@
 import Lsc.Compiler.Proof.Progress
+import Lsc.Compiler.Proof.CoreExtSim
 
 set_option linter.unusedSimpArgs false
 set_option linter.unusedVariables false
@@ -80,24 +81,20 @@ theorem return_var0_progress {S X E ε} {c : ContractDef} {Γ : ContractSchema S
 
 /-! ## `core_progress` -/
 
-theorem core_progress {I : Interface} {S X E ε} (α : Abs I.Ghost)
-    (bind : Binding I S X) {c : ContractDef} {Γ : ContractSchema S X E ε}
+theorem core_progress {I : Interface} {S X E ε}
+    (bs : List (BindEnv I S X)) {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx haltUnit}
     (hhalt : haltUnit = true) (hΓ : Γ.st.Lawful c.fields) (hκ : KeccakSep c κ)
     (hlen : c.fields.length < wordBound)
     {calls : ExternalCalls} (htot : CallsTotal calls)
     {t} (core : Core t) (hS2 : S2Frag core)
-    (hslot : ∃ slot : Nat,
-        (∀ σ, Γ.st.scalar slot σ = bind.addr σ) ∧
-        (c.fields[slot]?).map (·.kind) = some FieldKind.scalar ∧
-        coreAvoids slot core) :
+    (hslot : BindEnvs.avoids Γ c bs core) :
     ∀ {w : World S X E} {env : List Nat} {V : VEnv evm} {st : EvmState} (n : Nat)
       (hwf : coreWF c core = true)
       (hn : identsNodup (env.length + coreExtraDepth core) = true)
       (hinv : Inv Γ c κ ctx w env V st)
-      (hconf : Conforms I ctx.self (bind.addr w.self) calls α)
-      (hBind : ∀ b m args, callWF c b m args = true →
-        ∃ meth, BindWF c Γ bind b m meth)
+      (hconf : BindEnvs.conforms bs ctx.self w.self calls)
+      (hBind : BindEnvs.lookupWF c Γ bs)
       {e' : Emit} (hem : emitCore c {} env.length haltUnit core = some e'),
       ∃ V' st',
         ExecStmts (yulD calls) (List.replicate n []) V st e'.stmts V' st' .halt := by
@@ -106,7 +103,15 @@ theorem core_progress {I : Interface} {S X E ε} (α : Abs I.Ghost)
   | ret r =>
     intro hS2 hslot w env V st n hwf hn hinv hconf hBind e' hem
     cases r with
-    | pair _ _ => cases hS2
+    | pair x y =>
+      cases x with
+      | word _ =>
+        cases y with
+        | word _ =>
+          exact core_progress_callFree hhalt hΓ hκ hlen _ (by simp [CallFree, M1Frag])
+            hwf hn hinv hem
+        | _ => cases hS2
+      | _ => cases hS2
     | unit | word _ | addr _ | flag _ =>
       exact core_progress_callFree hhalt hΓ hκ hlen _ (by simp [CallFree, M1Frag])
         hwf hn hinv hem
@@ -130,14 +135,15 @@ theorem core_progress {I : Interface} {S X E ε} (α : Abs I.Ghost)
         cases hem
         rw [emitRet_word_stmts]
         have hopWF : callWF c b m args = true := by simpa [coreWF, opWF] using hwf
-        obtain ⟨meth, hbd⟩ := hBind b m args hopWF
+        obtain ⟨eCall, heCall, meth, hbd⟩ := hBind b m args hopWF
         have hn0 : identsNodup env.length = true :=
           identsNodup_mono (by simp [coreExtraDepth]) hn
         have hn1 : identsNodup (env.length + 1) = true :=
           identsNodup_mono (by simp [coreExtraDepth]) hn
         have hinvT : Inv Γ c κ ctx w env (toVEnv env) st := by rwa [hinv.venv] at hinv
         have hcallP :=
-          op_call_progress (I := I) α bind htot (n := n) hinvT hbd hconf hopWF hn0 hn1
+          op_call_progress (I := I) eCall.α eCall.bind htot (n := n) hinvT hbd
+            (hconf eCall heCall) hopWF hn0 hn1
         obtain ⟨V1, st1, o1, hexec, ho⟩ := hcallP
         rw [hE] at hexec
         rcases ho with ho | ⟨ho, v, hVeq, hinv1⟩
@@ -167,14 +173,15 @@ theorem core_progress {I : Interface} {S X E ε} (α : Abs I.Ghost)
         cases hem
         rw [emitRet_addr_stmts]
         have hopWF : callWF c b m args = true := by simpa [coreWF, opWF] using hwf
-        obtain ⟨meth, hbd⟩ := hBind b m args hopWF
+        obtain ⟨eCall, heCall, meth, hbd⟩ := hBind b m args hopWF
         have hn0 : identsNodup env.length = true :=
           identsNodup_mono (by simp [coreExtraDepth]) hn
         have hn1 : identsNodup (env.length + 1) = true :=
           identsNodup_mono (by simp [coreExtraDepth]) hn
         have hinvT : Inv Γ c κ ctx w env (toVEnv env) st := by rwa [hinv.venv] at hinv
         have hcallP :=
-          op_call_progress (I := I) α bind htot (n := n) hinvT hbd hconf hopWF hn0 hn1
+          op_call_progress (I := I) eCall.α eCall.bind htot (n := n) hinvT hbd
+            (hconf eCall heCall) hopWF hn0 hn1
         obtain ⟨V1, st1, o1, hexec, ho⟩ := hcallP
         rw [hE] at hexec
         rcases ho with ho | ⟨ho, v, hVeq, hinv1⟩
@@ -204,14 +211,15 @@ theorem core_progress {I : Interface} {S X E ε} (α : Abs I.Ghost)
         cases hem
         rw [emitRet_flag_stmts]
         have hopWF : callWF c b m args = true := by simpa [coreWF, opWF] using hwf
-        obtain ⟨meth, hbd⟩ := hBind b m args hopWF
+        obtain ⟨eCall, heCall, meth, hbd⟩ := hBind b m args hopWF
         have hn0 : identsNodup env.length = true :=
           identsNodup_mono (by simp [coreExtraDepth]) hn
         have hn1 : identsNodup (env.length + 1) = true :=
           identsNodup_mono (by simp [coreExtraDepth]) hn
         have hinvT : Inv Γ c κ ctx w env (toVEnv env) st := by rwa [hinv.venv] at hinv
         have hcallP :=
-          op_call_progress (I := I) α bind htot (n := n) hinvT hbd hconf hopWF hn0 hn1
+          op_call_progress (I := I) eCall.α eCall.bind htot (n := n) hinvT hbd
+            (hconf eCall heCall) hopWF hn0 hn1
         obtain ⟨V1, st1, o1, hexec, ho⟩ := hcallP
         rw [hE] at hexec
         rcases ho with ho | ⟨ho, v, hVeq, hinv1⟩
@@ -237,11 +245,12 @@ theorem core_progress {I : Interface} {S X E ε} (α : Abs I.Ghost)
       cases hem
       rw [emitReturnUnit_true]
       have hopWF : callWF c b m args = true := by simpa [coreWF, stmtWF] using hwf
-      obtain ⟨meth, hbd⟩ := hBind b m args hopWF
+      obtain ⟨eCall, heCall, meth, hbd⟩ := hBind b m args hopWF
       have hn0 : identsNodup env.length = true := by simpa [coreExtraDepth] using hn
       have hinvT : Inv Γ c κ ctx w env (toVEnv env) st := by rwa [hinv.venv] at hinv
       have hcallP :=
-        stmt_call_progress (I := I) α bind htot (n := n) hinvT hbd hconf hopWF hn0
+        stmt_call_progress (I := I) eCall.α eCall.bind htot (n := n) hinvT hbd
+          (hconf eCall heCall) hopWF hn0
       obtain ⟨V1, st1, o1, hexec, ho⟩ := hcallP
       rcases ho with ho | ⟨ho, hVeq, hinv1⟩
       · subst ho
@@ -277,8 +286,8 @@ theorem core_progress {I : Interface} {S X E ε} (α : Abs I.Ghost)
         rcases p with ⟨v, w'⟩
         have hexec' := execStmts_lift_nils (calls := calls) (n := n) hexec
         have hw : w' = w := m1op_world (Γ := Γ) hM1 env ctx w (by simpa [Tx.run] using hrun)
-        have ihk := ih hkS2 hslot (env := v :: env) (n := n) hwfK hnK hinv1
-          (by simpa [hw] using hconf) hBind h0
+        have ihk := ih hkS2 (BindEnvs.avoids_letOp hslot) (env := v :: env) (n := n) hwfK hnK hinv1
+          (BindEnvs.conforms_self (congrArg World.self hw) hconf) hBind h0
         obtain ⟨V2, st2, hk⟩ := ihk
         exact ⟨V2, st2, execStmts_append_open hexec' hk⟩
       | error e =>
@@ -289,17 +298,18 @@ theorem core_progress {I : Interface} {S X E ε} (α : Abs I.Ghost)
     | inl hcall =>
       obtain ⟨b, m, args, rfl⟩ := hcall
       have hopWF : callWF c b m args = true := by simpa [opWF] using hwfOp
-      obtain ⟨meth, hbd⟩ := hBind b m args hopWF
+      obtain ⟨eCall, heCall, meth, hbd⟩ := hBind b m args hopWF
       have hinvT : Inv Γ c κ ctx w env (toVEnv env) st := by rwa [hinv.venv] at hinv
       have hcallP :=
-        op_call_progress (I := I) α bind htot (n := n) hinvT hbd hconf hopWF hn0 hn1
+        op_call_progress (I := I) eCall.α eCall.bind htot (n := n) hinvT hbd
+          (hconf eCall heCall) hopWF hn0 hn1
       obtain ⟨V1, st1, o1, hexec, ho⟩ := hcallP
       simp only [h1] at hexec
       rcases ho with ho | ⟨ho, v, hVeq, hinv1⟩
       · subst ho
         exact ⟨V1, st1, execStmts_append_halt_open (by simpa [hinv.venv] using hexec)⟩
       · subst ho
-        have ihk := ih hkS2 hslot (env := v :: env) (n := n) hwfK hnK
+        have ihk := ih hkS2 (BindEnvs.avoids_letOp hslot) (env := v :: env) (n := n) hwfK hnK
           (by simpa [hVeq] using hinv1) hconf hBind h0
         obtain ⟨V2, st2, hk⟩ := ihk
         exact ⟨V2, st2, execStmts_append_open (by simpa [hinv.venv, hVeq] using hexec) hk⟩
@@ -323,12 +333,16 @@ theorem core_progress {I : Interface} {S X E ε} (α : Abs I.Ghost)
         obtain ⟨st1, hexec, hinv1⟩ := hsim
         have hexec' := execStmts_lift_nils (calls := calls) (n := n) hexec
         rcases p with ⟨_, w'⟩
-        obtain ⟨slot, hs, hkind, hav⟩ := hslot
-        have ha :=
-          m1stmt_preserves_addr (I := I) (bind := bind) hΓ hs hkind hM1 hwfS hav.1
+        have ha : ∀ e ∈ bs, e.bind.addr w'.self = e.bind.addr w.self := by
+          intro e he
+          obtain ⟨slot, hs, hkind, hav⟩ := hslot e he
+          exact m1stmt_preserves_addr (I := I) (bind := e.bind) hΓ hs hkind hM1 hwfS hav.1
             env ctx w (by simpa [Tx.run] using hrun)
-        have ihk := ih hkS2 ⟨slot, hs, hkind, hav.2⟩ (n := n) hwfK hnK hinv1
-          (by simpa [ha] using hconf) hBind h0
+        have hconf' : BindEnvs.conforms bs ctx.self w'.self calls := by
+          intro e he
+          simpa [ha e he] using hconf e he
+        have ihk := ih hkS2 (BindEnvs.avoids_seq hslot) (n := n) hwfK hnK hinv1
+          hconf' hBind h0
         obtain ⟨V2, st2, hk⟩ := ihk
         exact ⟨V2, st2, execStmts_append_open hexec' hk⟩
       | error e =>
@@ -338,18 +352,17 @@ theorem core_progress {I : Interface} {S X E ε} (α : Abs I.Ghost)
     | inl hcall =>
       obtain ⟨b, m, args, rfl⟩ := hcall
       have hopWF : callWF c b m args = true := by simpa [stmtWF] using hwfS
-      obtain ⟨meth, hbd⟩ := hBind b m args hopWF
+      obtain ⟨eCall, heCall, meth, hbd⟩ := hBind b m args hopWF
       have hinvT : Inv Γ c κ ctx w env (toVEnv env) st := by rwa [hinv.venv] at hinv
       have hcallP :=
-        stmt_call_progress (I := I) α bind htot (n := n) hinvT hbd hconf hopWF hn0
+        stmt_call_progress (I := I) eCall.α eCall.bind htot (n := n) hinvT hbd
+          (hconf eCall heCall) hopWF hn0
       obtain ⟨V1, st1, o1, hexec, ho⟩ := hcallP
       rcases ho with ho | ⟨ho, hVeq, hinv1⟩
       · subst ho
         exact ⟨V1, st1, execStmts_append_halt_open (by simpa [hinv.venv] using hexec)⟩
       · subst ho
-        have ihk := ih hkS2 (by
-            obtain ⟨slot, hs, hkind, hav⟩ := hslot
-            exact ⟨slot, hs, hkind, hav.2⟩) (n := n) hwfK hnK
+        have ihk := ih hkS2 (BindEnvs.avoids_seq hslot) (n := n) hwfK hnK
           (by simpa [hVeq] using hinv1) hconf hBind h0
         obtain ⟨V2, st2, hk⟩ := ihk
         exact ⟨V2, st2, execStmts_append_open (by simpa [hinv.venv, hVeq] using hexec) hk⟩
@@ -377,7 +390,7 @@ theorem core_progress {I : Interface} {S X E ε} (α : Abs I.Ghost)
     have hinv1 : Inv Γ c κ ctx w (a.eval env :: env)
         ((identV env.length, BitVec.ofNat 256 (a.eval env)) :: V) st :=
       ⟨by rw [hinv.venv, toVEnv_cons], envWF_cons hv hinv.wf, hinv.rel, hinv.ctxr⟩
-    have ihk := ih hkS2 hslot (env := a.eval env :: env) (n := n) hkWF (by simpa using hnK) hinv1 hconf hBind h0
+    have ihk := ih hkS2 (BindEnvs.avoids_letPure hslot) (env := a.eval env :: env) (n := n) hkWF (by simpa using hnK) hinv1 hconf hBind h0
     obtain ⟨V2, st2, hk⟩ := ihk
     refine ⟨V2, st2, ?_⟩
     rw [hst]
@@ -413,9 +426,7 @@ theorem core_progress {I : Interface} {S X E ε} (α : Abs I.Ghost)
     · have hne : b2w (decide (cond.denote env)) ≠ 0 :=
         b2w_ne_zero.mpr (decide_eq_true hc)
       have hsel := selectSwitch_nonzero_yulD (calls := calls) (eA := eA.stmts) (eB := eB.stmts) hne
-      have ihA := iha haS2 (by
-          obtain ⟨slot, hs, hkind, hav⟩ := hslot
-          exact ⟨slot, hs, hkind, hav.1⟩) (n := n + 1) haWF hnA hinv hconf hBind hA
+      have ihA := iha haS2 (BindEnvs.avoids_ite hslot).1 (n := n + 1) haWF hnA hinv hconf hBind hA
       obtain ⟨VA, stA, hAexec⟩ := ihA
       have hfuns : List.replicate (n + 1) ([] : FScope (yulD calls)) =
           [] :: List.replicate n [] := List.replicate_succ ..
@@ -425,9 +436,7 @@ theorem core_progress {I : Interface} {S X E ε} (α : Abs I.Ghost)
         (hoist_yulD_of_evm (hoist_emitCore hA)) hAexec
     · have hsel := selectSwitch_zero_yulD (calls := calls) (eA := eA.stmts) (eB := eB.stmts)
       have : b2w (decide (cond.denote env)) = 0 := by simp [hc, b2w_false]
-      have ihB := ihb hbS2 (by
-          obtain ⟨slot, hs, hkind, hav⟩ := hslot
-          exact ⟨slot, hs, hkind, hav.2⟩) (n := n + 1) hbWF hnB hinv hconf hBind hB
+      have ihB := ihb hbS2 (BindEnvs.avoids_ite hslot).2 (n := n + 1) hbWF hnB hinv hconf hBind hB
       obtain ⟨VB, stB, hBexec⟩ := ihB
       have hfuns : List.replicate (n + 1) ([] : FScope (yulD calls)) =
           [] :: List.replicate n [] := List.replicate_succ ..
@@ -441,22 +450,19 @@ theorem core_progress {I : Interface} {S X E ε} (α : Abs I.Ghost)
 
 /-! ## Function and dispatcher progress -/
 
-theorem toYulFn_progress {I : Interface} {S X E ε : Type} (α : Abs I.Ghost)
-    (bind : Binding I S X) {c : ContractDef} {Γ : ContractSchema S X E ε}
+theorem toYulFn_progress {I : Interface} {S X E ε : Type}
+    (bs : List (BindEnv I S X)) {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx} (hΓ : Γ.st.Lawful c.fields) (hκ : KeccakSep c κ)
     (hlen : c.fields.length < wordBound)
     {calls : ExternalCalls} (htot : CallsTotal calls)
     (f : FnDef) (hf : f.kind ≠ .constructor) (hS2 : S2Frag f.core)
-    (hslot : ∃ slot : Nat,
-        (∀ σ, Γ.st.scalar slot σ = bind.addr σ) ∧
-        (c.fields[slot]?).map (·.kind) = some FieldKind.scalar ∧
-        coreAvoids slot f.core)
+    (hslot : BindEnvs.avoids Γ c bs f.core)
     (hbound : 4 + 32 * f.params.length < wordBound)
     (yul : YBlock) (hyul : toYulFn c f = some yul)
     (w : World S X E) (st0 : EvmState)
     (hctx : ctxRel ctx st0) (hR : R c Γ κ w st0)
-    (hconf : Conforms I ctx.self (bind.addr w.self) calls α)
-    (hBind : ∀ b m args, callWF c b m args = true → ∃ meth, BindWF c Γ bind b m meth)
+    (hconf : BindEnvs.conforms bs ctx.self w.self calls)
+    (hBind : BindEnvs.lookupWF c Γ bs)
     {n : Nat} :
     ∃ V' st', ExecStmts (yulD calls) (List.replicate n []) [] st0 yul V' st' .halt := by
   have ⟨hwf, hnod, e, hem, hy⟩ := toYulFn_inv hyul hf
@@ -476,7 +482,7 @@ theorem toYulFn_progress {I : Interface} {S X E ε : Type} (α : Abs I.Ghost)
   have h0' : emitCore c {} args.reverse.length true f.core = some e0 := by
     simpa [args, decodeArgs_length, List.length_reverse] using h0
   have ⟨V', st', hexec⟩ :=
-    core_progress (I := I) α bind (haltUnit := true) rfl hΓ hκ hlen htot f.core hS2 hslot
+    core_progress (I := I) bs (haltUnit := true) rfl hΓ hκ hlen htot f.core hS2 hslot
       (n := n) hwf hn' hinv hconf hBind h0'
   refine ⟨V', st', ?_⟩
   rw [hst]
@@ -486,8 +492,8 @@ theorem toYulFn_progress {I : Interface} {S X E ε : Type} (α : Abs I.Ghost)
     try simp [args, hdec]
   exact execStmts_append_open hparE hexec
 
-theorem yul_progress {I : Interface} {S X E ε : Type} (α : Abs I.Ghost)
-    (bind : Binding I S X) (c : ContractDef) (Γ : ContractSchema S X E ε)
+theorem yul_progress {I : Interface} {S X E ε : Type}
+    (bs : List (BindEnv I S X)) (c : ContractDef) (Γ : ContractSchema S X E ε)
     (hΓ : Γ.st.Lawful c.fields) (κ : List UInt8 → U256) (hκ : KeccakSep c κ)
     (calls : ExternalCalls) (htot : CallsTotal calls)
     (hctor : ∀ f ∈ c.functions, f.kind ≠ .constructor)
@@ -497,12 +503,9 @@ theorem yul_progress {I : Interface} {S X E ε : Type} (α : Abs I.Ghost)
     (yul : YBlock) (hyul : runtimeBlock c = some yul)
     (ctx : Ctx) (w : World S X E) (st0 : EvmState)
     (hctx : ctxRel ctx st0) (hR : R c Γ κ w st0)
-    (hconf : Conforms I ctx.self (bind.addr w.self) calls α)
-    (hBind : ∀ b m args, callWF c b m args = true → ∃ meth, BindWF c Γ bind b m meth)
-    (hslot : ∀ f ∈ c.functions, ∃ slot : Nat,
-        (∀ σ, Γ.st.scalar slot σ = bind.addr σ) ∧
-        (c.fields[slot]?).map (·.kind) = some FieldKind.scalar ∧
-        coreAvoids slot f.core) :
+    (hconf : BindEnvs.conforms bs ctx.self w.self calls)
+    (hBind : BindEnvs.lookupWF c Γ bs)
+    (hslot : ∀ f ∈ c.functions, BindEnvs.avoids Γ c bs f.core) :
     ∃ st' o, Run (yulD calls) yul st0 [] st' o := by
   obtain ⟨_, cases, hmap, hy⟩ := runtimeBlock_inv hyul
   subst hy
@@ -579,7 +582,7 @@ theorem yul_progress {I : Interface} {S X E ε : Type} (α : Abs I.Ghost)
           (hoist_yulD_of_evm (hoist_guardLt (4 + 32 * f.params.length))) hgF
         rw [restore_self_open] at hblkF
         have ⟨V', st', hexecB⟩ :=
-          toYulFn_progress (I := I) α bind hΓ hκ hlen htot f
+          toYulFn_progress (I := I) bs hΓ hκ hlen htot f
             (hctor f hfmem) (hS2 f hfmem) (hslot f hfmem) (hbound f hfmem)
             body hbody w st0 hctx hR hconf hBind (n := 3)
         have hfH := hoist_yulD_of_evm (calls := calls) (toYulFn_hoist hbody (hctor f hfmem))

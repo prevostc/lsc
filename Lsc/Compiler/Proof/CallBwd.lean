@@ -191,8 +191,40 @@ theorem call_suffix_fwd (funs : FunEnv evm) {d : Nat} {ok : U256}
 
 /-! ## (4) `op_sim_call_bwd` -/
 
+/-- After a successful CALL to `bind`, update that ghost and frame the rest of `bs`. -/
+theorem RXs_finishCall_success {I : Interface} {S X E}
+    {bs : List (BindEnv I S X)} {α : Abs I.Ghost} {bind : Binding I S X}
+    {w : World S X E} {st : EvmState} {resp : CallResponse}
+    {iOff iSz oOff oSz : Nat} {g' : I.Ghost}
+    (he : (⟨α, bind⟩ : BindEnv I S X) ∈ bs)
+    (hsame : BindEnvs.sameAbs bs) (horth : BindEnvs.orthogonal bs)
+    (hinj : BindEnvs.addrInj bs w.self)
+    (hgetset : ∀ x g, bind.get (bind.set x g) = g)
+    (hRX : RXs bs w st) (hs : resp.success = true)
+    (hg : α.ofWorld resp.world (bind.addr w.self) = g')
+    (hni : NoInterfere α st resp.world (bind.addr w.self)) :
+    RXs bs { w with ext := bind.set w.ext g' }
+      (finishCall .call st resp iOff iSz oOff oSz) := by
+  intro e' he'
+  unfold RX
+  rw [Abs.ofState_finishCall_success (hs := hs)]
+  by_cases haddr : e'.bind.addr w.self = bind.addr w.self
+  · obtain ⟨hαeq, hgeteq⟩ := hinj e' he' ⟨α, bind⟩ he haddr
+    have hαeq' : e'.α = α := hαeq
+    rw [haddr, hαeq', hg]
+    have hget : e'.bind.get (bind.set w.ext g') = bind.get (bind.set w.ext g') := by
+      rw [hgeteq]
+    rw [hget, hgetset]
+  · have hne : e'.bind.addr w.self ≠ bind.addr w.self := haddr
+    have hαeq : e'.α = α := hsame e' he' ⟨α, bind⟩ he
+    rw [hαeq, NoInterfere.ofWorld_ne hni hne, ← hαeq]
+    have hget := horth ⟨α, bind⟩ he e' he' w.self (Ne.symm hne) w.ext g'
+    rw [hget]
+    exact hRX e' he'
+
 /-- Shared scoped-call core: `emitExtCallBody` under `{ … }`. `assign = none` is
-`Stmt.call` (`pre = toVEnv env`); `some (identV d)` is `Op.call` after `let v := 0`. -/
+`Stmt.call` (`pre = toVEnv env`); `some (identV d)` is `Op.call` after `let v := 0`.
+The call's package is `⟨α, bind⟩ ∈ bs`; `RXs` is the family invariant. -/
 theorem extCall_block_bwd {I : Interface} {S X E ε : Type}
     {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx} {w : World S X E} {env : List Nat}
@@ -201,10 +233,13 @@ theorem extCall_block_bwd {I : Interface} {S X E ε : Type}
     {b m : Nat} {args : List Atom} {bind : Binding I S X} {meth : I.Method}
     {assign : Option YIdent}
     {V' : VEnv (yulD calls)} {st' : EvmState} {o : Outcome}
-    (α : Abs I.Ghost)
+    {bs : List (BindEnv I S X)} (α : Abs I.Ghost)
+    (he : (⟨α, bind⟩ : BindEnv I S X) ∈ bs)
+    (hsame : BindEnvs.sameAbs bs) (horth : BindEnvs.orthogonal bs)
+    (hinj : BindEnvs.addrInj bs w.self)
     (hR : R c Γ κ w st) (hctx : ctxRel ctx st) (henv : EnvWF env)
     (hbd : BindWF c Γ bind b m meth)
-    (hRX : RX α bind w st)
+    (hRX : RXs bs w st)
     (hconf : Conforms I ctx.self (bind.addr w.self) calls α)
     (hfuns : noExtFuns funs = true)
     (hwfCall : callWF c b m args = true)
@@ -231,7 +266,7 @@ theorem extCall_block_bwd {I : Interface} {S X E ε : Type}
           ∀ g : Nat → Bool, g w.ncalls = false →
             Tx.run (Op.denote Γ env (.call b m args)) ctx { w with faults := g } =
               .ok (v, { w0 with faults := g }) ∧
-            o = .normal ∧ RX α bind { w0 with faults := g } st' ∧
+            o = .normal ∧ RXs bs { w0 with faults := g } st' ∧
             (assign = none → V' = toVEnv env ∧
               Inv Γ c κ ctx { w0 with faults := g } env V' st') ∧
             (assign.isSome → V' = toVEnv (v :: env) ∧
@@ -324,7 +359,7 @@ theorem extCall_block_bwd {I : Interface} {S X E ε : Type}
           exact ha.trans had
         have hα : α.ofState stP (bind.addr w.self) = bind.get w.ext := by
           rw [α.ofState_proj, hCW, ← α.ofState_proj]
-          exact hRX
+          exact hRX ⟨α, bind⟩ he
         have ⟨m', args', retv, g', hin, harity', hbdargs, hmodel, hdec, hg, hni⟩ :=
           hconf
             { kind := .call
@@ -393,9 +428,15 @@ theorem extCall_block_bwd {I : Interface} {S X E ε : Type}
         rw [hstSeq] at hR3 hMOS hCWS
         have hctx2 := ctxRel_finishCall (ctxRel_memOnly hctx hMO) .call
           resp abiPtr (4 + 32 * args.length) abiPtr 32
-        have hRX2 := RX_finishCall_success (iOff := abiPtr)
-          (iSz := 4 + 32 * args.length) (oOff := abiPtr) (oSz := 32)
-          hα hsucc hg hni hbd.hgetset
+        have hRXsP : RXs bs w stP := by
+          intro e' he'
+          unfold RX
+          rw [e'.α.ofState_proj, hCW, ← e'.α.ofState_proj]
+          exact hRX e' he'
+        have hRX2 :=
+          RXs_finishCall_success (iOff := abiPtr) (iSz := 4 + 32 * args.length)
+            (oOff := abiPtr) (oSz := 32)
+            he hsame horth hinj hbd.hgetset hRXsP hsucc hg hni
         let w0 : World S X E :=
           { w with ext := bind.set w.ext g', ncalls := w.ncalls + 1 }
         refine ⟨retv, w0, rfl, rfl, rfl, ?_⟩
@@ -408,10 +449,13 @@ theorem extCall_block_bwd {I : Interface} {S X E ε : Type}
           simp [Tx.run_call, hf]
           have hgext : bind.get w₁.ext = bind.get w.ext := rfl
           rw [hgext, ← hα, hmodel]
-        have hRX2' : RX α bind { w0 with faults := g } st' := by
-          unfold RX at hRX2 ⊢
-          rw [α.ofState_proj, hCWS, ← α.ofState_proj]
-          exact hRX2
+        have hRX2' : RXs bs { w0 with faults := g } st' := by
+          intro e' he'
+          unfold RX
+          have h1 := hRX2 e' he'
+          unfold RX at h1
+          rw [e'.α.ofState_proj, hCWS, ← e'.α.ofState_proj]
+          exact h1
         refine ⟨hrun, hoeq.symm.trans hoS, hRX2', ?_, ?_⟩
         · intro hnone
           have hpreEq : pre = toVEnv env := by
@@ -489,10 +533,13 @@ theorem op_sim_call_bwd {I : Interface} {S X E ε : Type}
     {V : VEnv (yulD calls)} {st : EvmState}
     {b m : Nat} {args : List Atom} {bind : Binding I S X} {meth : I.Method}
     {V' : VEnv (yulD calls)} {st' : EvmState} {o : Outcome}
-    (α : Abs I.Ghost)
+    {bs : List (BindEnv I S X)} (α : Abs I.Ghost)
+    (he : (⟨α, bind⟩ : BindEnv I S X) ∈ bs)
+    (hsame : BindEnvs.sameAbs bs) (horth : BindEnvs.orthogonal bs)
+    (hinj : BindEnvs.addrInj bs w.self)
     (hinv : Inv Γ c κ ctx w env V st)
     (hbd : BindWF c Γ bind b m meth)
-    (hRX : RX α bind w st)
+    (hRX : RXs bs w st)
     (hconf : Conforms I ctx.self (bind.addr w.self) calls α)
     (hfuns : noExtFuns funs = true)
     (hwfCall : callWF c b m args = true)
@@ -513,7 +560,7 @@ theorem op_sim_call_bwd {I : Interface} {S X E ε : Type}
               .ok (v, { w0 with faults := g }) ∧
             o = .normal ∧ V' = toVEnv (v :: env) ∧
             Inv Γ c κ ctx { w0 with faults := g } (v :: env) V' st' ∧
-            RX α bind { w0 with faults := g } st') := by
+            RXs bs { w0 with faults := g } st') := by
   let d := env.length
   rcases hinv with ⟨hVeq, henv, hR, hctx⟩
   rw [hVeq, emitLetOp_call_stmts] at h
@@ -531,7 +578,8 @@ theorem op_sim_call_bwd {I : Interface} {S X E ε : Type}
       execStmts_one hblkStmts
     have hpre : (identV d, (0 : U256)) :: toVEnv env =
         (identV env.length, (0 : U256)) :: toVEnv env := rfl
-    have hbit := extCall_block_bwd (α := α) hR hctx henv hbd hRX hconf hfuns hwfCall
+    have hbit := extCall_block_bwd (α := α) he hsame horth hinj
+      hR hctx henv hbd hRX hconf hfuns hwfCall
       (.inr hpre) (.inr ⟨rfl, hpre⟩)
       (identsNodup_mono (Nat.le_succ _) hn) (fun _ => hn) hblkStmt
     rcases hbit with ⟨bit, hfail, hok⟩
@@ -551,10 +599,13 @@ theorem stmt_sim_call_bwd {I : Interface} {S X E ε : Type}
     {V : VEnv (yulD calls)} {st : EvmState}
     {b m : Nat} {args : List Atom} {bind : Binding I S X} {meth : I.Method}
     {V' : VEnv (yulD calls)} {st' : EvmState} {o : Outcome}
-    (α : Abs I.Ghost)
+    {bs : List (BindEnv I S X)} (α : Abs I.Ghost)
+    (he : (⟨α, bind⟩ : BindEnv I S X) ∈ bs)
+    (hsame : BindEnvs.sameAbs bs) (horth : BindEnvs.orthogonal bs)
+    (hinj : BindEnvs.addrInj bs w.self)
     (hinv : Inv Γ c κ ctx w env V st)
     (hbd : BindWF c Γ bind b m meth)
-    (hRX : RX α bind w st)
+    (hRX : RXs bs w st)
     (hconf : Conforms I ctx.self (bind.addr w.self) calls α)
     (hfuns : noExtFuns funs = true)
     (hwfCall : callWF c b m args = true)
@@ -575,13 +626,14 @@ theorem stmt_sim_call_bwd {I : Interface} {S X E ε : Type}
               .ok ((), { w0 with faults := g }) ∧
             o = .normal ∧ V' = toVEnv env ∧
             Inv Γ c κ ctx { w0 with faults := g } env V' st' ∧
-            RX α bind { w0 with faults := g } st') := by
+            RXs bs { w0 with faults := g } st') := by
   rcases hinv with ⟨hVeq, henv, hR, hctx⟩
   rw [hVeq, emitStmt_call_stmts] at h
   have hblkStmt : ExecStmt (yulD calls) funs (toVEnv env) st
       (.block (emitExtCallBody c env.length b m args none)) V' st' o :=
     execStmts_one h
-  have hbit := extCall_block_bwd (α := α) hR hctx henv hbd hRX hconf hfuns hwfCall
+  have hbit := extCall_block_bwd (α := α) he hsame horth hinj
+    hR hctx henv hbd hRX hconf hfuns hwfCall
     (.inl rfl) (.inl ⟨rfl, rfl⟩) hn
     (fun hpre => by
       have := congrArg List.length hpre

@@ -58,6 +58,10 @@ Decisions for `Lsc/Compiler` fixed by the study of `yul-semantics`, `evm_semanti
   so `_tok_*`/`_ok_*` do not escape. `toYulFn` returns `none` unless `coreWF` (literals `< 2^256`, field kinds, event/error
   arity) and `identV` names on `[0, maxDepth)` are pairwise distinct; `runtimeBlock` also
   requires unique selectors. Parameters are `let v_i := calldataload(4 + 32 i)` (empty `VEnv`).
+  Constructors (`toYulCtor`) copy `codesize()-32n` bytes of init code to `0x80` then
+  `let v_i := mload(0x80+32i)` (Solidity CREATE: ABI words appended after init bytecode).
+  Unit `ret` falls through so `constructorCode "runtime"` can `datacopy`/`return`.
+
 - `ret` → ABI-encode at `0x80`, `return(0x80, 32k)`; unit → `stop()`.
 - `Op.call` / `Stmt.call` → `let v_d := 0 { let tok := sload(slot); … let ok := call(…);
   if iszero(ok) { revert(0,0) }; <ret check>; v_d := <1 | mload(0x80)> }` (or `{ body }` for
@@ -86,5 +90,5 @@ Decisions for `Lsc/Compiler` fixed by the study of `yul-semantics`, `evm_semanti
 - Differential harness: `scripts/difftest.sh` — `Tx.run` vs anvil (revm) on `compileRuntime`
   bytecode for Counter and Token (same cases as `YulTests.lean`).
 - Measured bytecode (`compileRuntime` / `compileDeploy` from `YulTests.lean`): Counter 424 / 438,
-  Token 1408 / 1498. Token `stackOK2` holds (no DUP16). Nested `map2` hashes inner `keccak256(0,64)`
+  Token 1408 / 1508. Token `stackOK2` holds (no DUP16). Nested `map2` hashes inner `keccak256(0,64)`
   into `[32]` before `mstore(0, k₂)`, so the read does not see a clobbered `[0]`.

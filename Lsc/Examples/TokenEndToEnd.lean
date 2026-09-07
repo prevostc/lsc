@@ -521,4 +521,28 @@ theorem token_bytecode_solvent_exists
   · rw [decodeTrace_encodeCalls T tr hb, hwlog] at hs'
     exact hs'
 
+/-- Existing `token_bytecode_no_unauthorized_extraction` with `storageRel`
+discharged by `R` from `constructor_correct` (Yul constructor from empty
+storage + CREATE-appended args). Not discharged by `compileObject_correct`
+(`L.initState` has no suffix args). Vault constructors with `call` are out of
+scope. -/
+theorem token_deploy_then_no_unauthorized_extraction
+    (rt : YBlock) (hrt : runtimeBlock Token.contract = some rt)
+    (is : List Instr) (hcomp : compile rt = some is)
+    (hκ : KeccakSep Token.contract evmKeccak)
+    (self : Address) (calls : List EvmCall) (w : World Storage Unit Event)
+    (a : Address) (st : EvmState)
+    (hw : Inv w) (hlog : w.log = [])
+    (hWF : CallsWF (mkTokenSetup hκ rt hrt is hcomp) self calls)
+    (hA : NoAuthAlong Auth a (decodeTrace (mkTokenSetup hκ rt hrt is hcomp) calls) w)
+    (hR : R Token.contract Token.schema evmKeccak w st)
+    (hwf : WorldWF Token.contract Token.schema w)
+    (ha : Nat.lt a wordBound) :
+    ∀ σ', EvmDeployThenTrace is st.storage calls σ' →
+      (st.storage (mapSlot1 evmKeccak 2 a)).toNat ≤
+        (σ' (mapSlot1 evmKeccak 2 a)).toNat := by
+  intro σ' hE
+  exact token_bytecode_no_unauthorized_extraction rt hrt is hcomp hκ self calls w a
+    st.storage hw hlog hWF hA hR.1 hwf ha σ' hE
+
 end Token

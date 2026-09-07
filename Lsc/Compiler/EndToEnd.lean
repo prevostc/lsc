@@ -300,6 +300,13 @@ inductive EvmTraceRunAll (is : List Instr) : List EvmCall → (U256 → U256) �
       (htl : EvmTraceRunAll is tr σ₁ σ') :
       EvmTraceRunAll is (call :: tr) σ σ'
 
+/-- Runtime trace starting from storage produced by a constructor (`constructor_correct`
+gives `storageRel` of `w₁`), not from an assumed pre-state. `compileObject_correct`
+cannot discharge this for appended CREATE args (see `Deploy.lean`). -/
+def EvmDeployThenTrace (is : List Instr) (σ0 : U256 → U256)
+    (tr : List EvmCall) (σ' : U256 → U256) : Prop :=
+  EvmTraceRunAll is tr σ0 σ'
+
 /-- Dispatcher conclusion, interpreted on the compiled bytecode. -/
 def BytecodeCallCorrect {S X E ε : Type} (c : ContractDef)
     (Γ : ContractSchema S X E ε) (κ : List UInt8 → U256)

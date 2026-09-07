@@ -55,26 +55,23 @@ structure TransportSetup (S X E ε : Type) where
   is : List Instr
   hcomp : compile rt = some is
 
-/-- S2 binding package. -/
+/-- S2 binding family. One-binding contracts instantiate `bs := [⟨α, bind⟩]`. -/
 structure TransportBindings (S X E ε : Type) (I : Interface)
     (T : TransportSetup S X E ε) where
-  α : Abs I.Ghost
-  bind : Binding I S X
+  bs : List (BindEnv I S X)
   extCalls : ExternalCalls
   hCalls : CallsRealized extCalls
   htot : CallsTotal extCalls
   hS2 : ∀ f ∈ T.c.functions, S2Frag f.core
-  hign : α.ignoresLocal
-  hF : α.ofState_foreign
-  hBind : ∀ b m args, callWF T.c b m args = true →
-    ∃ meth, BindWF T.c T.Γ bind b m meth
-  hslot : ∀ f ∈ T.c.functions, ∃ slot : Nat,
-      (∀ σ, T.Γ.st.scalar slot σ = bind.addr σ) ∧
-      (T.c.fields[slot]?).map (·.kind) = some FieldKind.scalar ∧
-      coreAvoids slot f.core
+  hign : BindEnvs.ignoresLocal bs
+  hF : BindEnvs.ofState_foreign bs
+  hsame : BindEnvs.sameAbs bs
+  horth : BindEnvs.orthogonal bs
+  hBind : BindEnvs.lookupWF T.c T.Γ bs
+  hslot : ∀ f ∈ T.c.functions, BindEnvs.avoids T.Γ T.c bs f.core
   bindAddr_stable :
-    ∀ (fn : T.spec.Fn) (args : T.spec.Args fn) (ctx : Ctx) (w : World S X E),
-      bind.addr (worldAfter (T.spec.exec fn args) ctx w).self = bind.addr w.self
+    ∀ e ∈ bs, ∀ (fn : T.spec.Fn) (args : T.spec.Args fn) (ctx : Ctx) (w : World S X E),
+      e.bind.addr (worldAfter (T.spec.exec fn args) ctx w).self = e.bind.addr w.self
 
 variable {S X E ε : Type}
 
@@ -534,10 +531,10 @@ theorem transport_step_ext (T : TransportSetup S X E ε)
     (hctxWF : CtxWF ctx) (hcd : cd.length < wordBound)
     (hs : storageRel T.c T.Γ evmKeccak w.self σ)
     (hlog : w.log = []) (hwf : WorldWF T.c T.Γ w)
-    (hRX : RX Xpkg.α Xpkg.bind w (mkEvmStateExt cd σ ξ evmKeccak ctx))
-    (hBindNe : accountKey (BitVec.ofNat 256 (Xpkg.bind.addr w.self)) ≠
-      accountKey (BitVec.ofNat 256 ctx.self))
-    (hconf : Conforms I ctx.self (Xpkg.bind.addr w.self) Xpkg.extCalls Xpkg.α) :
+    (hRX : RXs Xpkg.bs w (mkEvmStateExt cd σ ξ evmKeccak ctx))
+    (hBindNe : BindEnvs.neSelf Xpkg.bs ctx.self w.self)
+    (hconf : BindEnvs.conforms Xpkg.bs ctx.self w.self Xpkg.extCalls)
+    (hinj : BindEnvs.addrInj Xpkg.bs w.self) :
     let yst0 := mkEvmStateExt cd σ ξ evmKeccak ctx
     ∃ σ' ξ', EvmCallRunξ T.is yst0 σ' ξ' ∧
       ∃ fo : Nat → Bool,
@@ -549,7 +546,7 @@ theorem transport_step_ext (T : TransportSetup S X E ε)
             storageRel T.c T.Γ evmKeccak w'.self σ' ∧ WorldWF T.c T.Γ w' ∧
               ∃ stObs : EvmState,
                 stObs.storage = σ' ∧ evmForeign stObs = ξ' ∧
-                  RX Xpkg.α Xpkg.bind w' stObs := by
+                  RXs Xpkg.bs w' stObs := by
   intro yst0
   have hctx : ctxRel ctx yst0 := ctxRel_mkEvmStateExt _ _ _ _ _ hctxWF hcd
   have hR : R T.c T.Γ evmKeccak w yst0 :=
@@ -557,10 +554,10 @@ theorem transport_step_ext (T : TransportSetup S X E ε)
   have himm0 : ∀ k, yst0.env.immutable k = 0 :=
     fun k => mkEvmStateExt_immutable _ _ _ _ _ k
   obtain ⟨σ', ξ', hRun, fo, hpost⟩ :=
-    evmCallRun_of_correct_ext (I := I) Xpkg.α Xpkg.bind T.c T.Γ T.lawful T.hκ
+    evmCallRun_of_correct_ext (I := I) Xpkg.bs T.c T.Γ T.lawful T.hκ
       Xpkg.extCalls Xpkg.hCalls Xpkg.htot T.hctor Xpkg.hS2 T.hlen T.hbound
       T.rt T.hrt T.is T.hcomp ctx w yst0 hctx hR hRX Xpkg.hign hBindNe hconf
-      Xpkg.hBind Xpkg.hslot himm0
+      Xpkg.hsame Xpkg.horth hinj Xpkg.hBind Xpkg.hslot himm0
   refine ⟨σ', ξ', hRun, fo, ?_⟩
   rw [mkEvmStateExt_calldata] at hpost
   cases hsel : selectedFn T.c cd with
@@ -595,7 +592,32 @@ theorem transport_step_ext (T : TransportSetup S X E ε)
       · simpa [yst0, mkEvmStateExt_storage, hpost] using hs
       · simpa [hpost, yst0, mkEvmStateExt_storage]
       · simpa [hpost]
-      · exact RX_irrel_log_faults (fo := fo) ([] : List E) hRX
+      · exact RXs_irrel_log_faults (fo := fo) ([] : List E) hRX
+
+theorem RXs_dummy_of_ξ {I : Interface} {S X E} {bs : List (BindEnv I S X)}
+    (hF : BindEnvs.ofState_foreign bs)
+    (self : Address) (w : World S X E)
+    (σ ξ σ₁ ξ₁ : _) (κ : List UInt8 → U256)
+    (hne : BindEnvs.neSelf bs self w.self)
+    (hξ : ∀ e ∈ bs,
+      ξ₁ (BitVec.ofNat 256 (e.bind.addr w.self)) =
+      ξ (BitVec.ofNat 256 (e.bind.addr w.self)))
+    (hRX : RXs bs w (mkEvmStateExt ([] : List UInt8) σ ξ κ (dummyCtx self))) :
+    RXs bs w (mkEvmStateExt ([] : List UInt8) σ₁ ξ₁ κ (dummyCtx self)) := by
+  refine RXs_of_foreign hF ?_ hRX
+  intro e he k
+  have hne' := hne e he
+  have hloc :
+      evmForeign (mkEvmStateExt ([] : List UInt8) σ ξ κ (dummyCtx self))
+        (BitVec.ofNat 256 (e.bind.addr w.self)) k =
+      ξ (BitVec.ofNat 256 (e.bind.addr w.self)) k := by
+    simp [dummyCtx, mkEvmStateExt_foreign, hne']
+  have hloc' :
+      evmForeign (mkEvmStateExt ([] : List UInt8) σ₁ ξ₁ κ (dummyCtx self))
+        (BitVec.ofNat 256 (e.bind.addr w.self)) k =
+      ξ₁ (BitVec.ofNat 256 (e.bind.addr w.self)) k := by
+    simp [dummyCtx, mkEvmStateExt_foreign, hne']
+  simp [hloc, hloc', hξ e he]
 
 /-- Universal S2: every halted EVM run of an arbitrary calldata list yields a
 decoded well-formed Security trace and a post-world `w'` with `R`/`RX`.
@@ -609,12 +631,12 @@ theorem transport_trace_ext (T : TransportSetup S X E ε)
     (hs : storageRel T.c T.Γ evmKeccak w.self σ)
     (hlog : w.log = []) (hwf : WorldWF T.c T.Γ w)
     (hWF : CallsWF T self calls)
-    (hRX : RX Xpkg.α Xpkg.bind w
+    (hRX : RXs Xpkg.bs w
       (mkEvmStateExt ([] : List UInt8) σ ξ evmKeccak (dummyCtx self)))
-    (hBindNe : accountKey (BitVec.ofNat 256 (Xpkg.bind.addr w.self)) ≠
-      accountKey (BitVec.ofNat 256 self))
+    (hBindNe : BindEnvs.neSelf Xpkg.bs self w.self)
     (hconf : ∀ (w' : World S X E),
-      Conforms I self (Xpkg.bind.addr w'.self) Xpkg.extCalls Xpkg.α)
+      BindEnvs.conforms Xpkg.bs self w'.self Xpkg.extCalls)
+    (hinj : BindEnvs.addrInj Xpkg.bs w.self)
     (Inv : World S X E → Prop)
     (hP : PreservesInvAt T.spec Inv self)
     (hInvF : ∀ w fo, Inv w → Inv { w with faults := fo })
@@ -626,32 +648,31 @@ theorem transport_trace_ext (T : TransportSetup S X E ε)
       ∃ w' : World S X E,
         storageRel T.c T.Γ evmKeccak w'.self σ' ∧
         WorldWF T.c T.Γ w' ∧
-        RX Xpkg.α Xpkg.bind w'
+        RXs Xpkg.bs w'
           (mkEvmStateExt ([] : List UInt8) σ' ξ' evmKeccak (dummyCtx self)) ∧
         Inv w' ∧
-        Xpkg.bind.addr w'.self = Xpkg.bind.addr w.self := by
+        (∀ e ∈ Xpkg.bs, e.bind.addr w'.self = e.bind.addr w.self) := by
   refine ⟨wf_decodeTrace T self calls hWF, ?_⟩
   induction calls generalizing w σ ξ σ' ξ' with
   | nil =>
     cases hE
-    exact ⟨{ w with log := [] }, hs, WorldWF_log [] hwf, hRX, hInvL w [] hw, rfl⟩
+    exact ⟨{ w with log := [] }, hs, WorldWF_log [] hwf, hRX, hInvL w [] hw, fun _ _ => rfl⟩
   | cons call rest ih =>
     have ⟨htgt, hne, hctxWF, hcd⟩ := CallsWF.head hWF
     have hWFtl := CallsWF.tail hWF
     cases hE with
     | cons hstart h1 htl =>
-      have hRXcall : RX Xpkg.α Xpkg.bind w
+      have hRXcall : RXs Xpkg.bs w
           (mkEvmStateExt call.calldata σ ξ evmKeccak call.ctx) :=
-        RX_mkEvmStateExt_ctx (I := I) (bind := Xpkg.bind) Xpkg.hF
+        RXs_mkEvmStateExt_ctx Xpkg.hF
           (by simpa [dummyCtx] using htgt.symm) hRX
-      have hBindNe' :
-          accountKey (BitVec.ofNat 256 (Xpkg.bind.addr w.self)) ≠
-            accountKey (BitVec.ofNat 256 call.ctx.self) := by
+      have hBindNe' : BindEnvs.neSelf Xpkg.bs call.ctx.self w.self := by
         simpa [htgt] using hBindNe
+      have hconfCall : BindEnvs.conforms Xpkg.bs call.ctx.self w.self Xpkg.extCalls := by
+        simpa [htgt] using hconf w
       obtain ⟨σ₁, ξ₁, hRun, fo, hpost⟩ :=
         transport_step_ext T Xpkg call.ctx call.calldata w σ ξ hctxWF hcd
-          hs hlog hwf hRXcall hBindNe'
-          (by simpa [htgt] using hconf w)
+          hs hlog hwf hRXcall hBindNe' hconfCall hinj
       have heq := evmCallRunξ_eq_of_start h1 hRun hstart
       rw [heq.1, heq.2] at htl
       cases hdec : decodeCall T call.ctx call.calldata with
@@ -660,28 +681,18 @@ theorem transport_trace_ext (T : TransportSetup S X E ε)
         obtain ⟨hσeq, hξ⟩ := hpost
         have hsσ : storageRel T.c T.Γ evmKeccak w.self σ₁ := by
           rw [hσeq]; exact hs
-        have hRX1 : RX Xpkg.α Xpkg.bind w
-            (mkEvmStateExt ([] : List UInt8) σ₁ ξ₁ evmKeccak (dummyCtx self)) := by
-          refine RX_of_foreign Xpkg.hF ?_ hRX
-          intro k
-          have hloc :
-              evmForeign (mkEvmStateExt ([] : List UInt8) σ ξ evmKeccak (dummyCtx self))
-                (BitVec.ofNat 256 (Xpkg.bind.addr w.self)) k =
-              ξ (BitVec.ofNat 256 (Xpkg.bind.addr w.self)) k := by
-            simp [dummyCtx, mkEvmStateExt_foreign, hBindNe]
-          have hloc' :
-              evmForeign (mkEvmStateExt ([] : List UInt8) σ₁ ξ₁ evmKeccak (dummyCtx self))
-                (BitVec.ofNat 256 (Xpkg.bind.addr w.self)) k =
-              ξ₁ (BitVec.ofNat 256 (Xpkg.bind.addr w.self)) k := by
-            simp [dummyCtx, mkEvmStateExt_foreign, hBindNe]
-          have hξb :
-              ξ₁ (BitVec.ofNat 256 (Xpkg.bind.addr w.self)) k =
-              ξ (BitVec.ofNat 256 (Xpkg.bind.addr w.self)) k := by
-            simp [hξ, mkEvmStateExt_foreign, hBindNe']
-          simp [hloc, hloc', hξb]
+        have hξeq : ∀ e ∈ Xpkg.bs,
+            ξ₁ (BitVec.ofNat 256 (e.bind.addr w.self)) =
+            ξ (BitVec.ofNat 256 (e.bind.addr w.self)) := by
+          intro e he
+          rw [hξ]
+          exact mkEvmStateExt_foreign_ne _ _ _ _ _ _ (hBindNe' e he)
+        have hRX1 : RXs Xpkg.bs w
+            (mkEvmStateExt ([] : List UInt8) σ₁ ξ₁ evmKeccak (dummyCtx self)) :=
+          RXs_dummy_of_ξ Xpkg.hF self w σ ξ σ₁ ξ₁ evmKeccak hBindNe hξeq hRX
         simpa [decodeTrace, hdec] using
           ih (w := w) (σ := σ₁) (ξ := ξ₁) (σ' := σ') (ξ' := ξ')
-            hsσ hlog hwf hWFtl hRX1 hBindNe hw htl
+            hsσ hlog hwf hWFtl hRX1 hBindNe hinj hw htl
       | some c =>
         simp only [hdec] at hpost
         rcases hpost with ⟨hs1, hwf1, stObs, hσ, hξobs, hRXobs⟩
@@ -690,21 +701,22 @@ theorem transport_trace_ext (T : TransportSetup S X E ε)
         have ⟨htgtc, hsend⟩ := decodeCall_ctx T hdec
         have hw1 : Inv w1 :=
           hInvL _ [] (hP c wfo (htgtc.trans htgt) (by simpa [hsend] using hne) (hInvF w fo hw))
-        have haddr : Xpkg.bind.addr w1.self = Xpkg.bind.addr w.self := by
+        have haddr : ∀ e ∈ Xpkg.bs, e.bind.addr w1.self = e.bind.addr w.self := by
+          intro e he
           simpa [w1, wfo, step] using
-            Xpkg.bindAddr_stable c.fn c.args c.toCtx wfo
-        have hRXw1 : RX Xpkg.α Xpkg.bind w1
+            Xpkg.bindAddr_stable e he c.fn c.args c.toCtx wfo
+        have hRXw1 : RXs Xpkg.bs w1
             (mkEvmStateExt ([] : List UInt8) σ₁ ξ₁ evmKeccak (dummyCtx self)) :=
-          RX_mkEvmStateExt_ne (I := I) (bind := Xpkg.bind) Xpkg.hF hRXobs
-            (Eq.symm hξobs) (by simpa [haddr, dummyCtx] using hBindNe)
-        have hBindNe1 :
-            accountKey (BitVec.ofNat 256 (Xpkg.bind.addr w1.self)) ≠
-              accountKey (BitVec.ofNat 256 self) := by
-          simpa [haddr] using hBindNe
+          RXs_mkEvmStateExt_ne Xpkg.hF hRXobs
+            (Eq.symm hξobs) (by simpa [dummyCtx] using BindEnvs.neSelf_of_addr hBindNe haddr)
+        have hBindNe1 : BindEnvs.neSelf Xpkg.bs self w1.self :=
+          BindEnvs.neSelf_of_addr hBindNe haddr
+        have hinj1 : BindEnvs.addrInj Xpkg.bs w1.self :=
+          BindEnvs.addrInj_of_addr hinj haddr
         have ⟨w', hs', hwf', hRX', hInv', haddr'⟩ :=
           ih (w := w1) (σ := σ₁) (ξ := ξ₁) (σ' := σ') (ξ' := ξ')
-            hs1 rfl hwf1 hWFtl hRXw1 hBindNe1 hw1 htl
-        exact ⟨w', hs', hwf', hRX', hInv', haddr'.trans haddr⟩
+            hs1 rfl hwf1 hWFtl hRXw1 hBindNe1 hinj1 hw1 htl
+        exact ⟨w', hs', hwf', hRX', hInv', fun e he => (haddr' e he).trans (haddr e he)⟩
 
 /-- S2 claim transport: `NoUnauthorizedDecrease` along the fo-adjusted fold
 (`w'` from `transport_trace_ext`), when `Auth`/`Inv` ignore log and faults. -/
@@ -723,19 +735,19 @@ theorem transport_claim_ext (T : TransportSetup S X E ε)
     (hs : storageRel T.c T.Γ evmKeccak w.self σ)
     (hlog : w.log = []) (hwf : WorldWF T.c T.Γ w)
     (hWF : CallsWF T self calls)
-    (hRX : RX Xpkg.α Xpkg.bind w
+    (hRX : RXs Xpkg.bs w
       (mkEvmStateExt ([] : List UInt8) σ ξ evmKeccak (dummyCtx self)))
-    (hBindNe : accountKey (BitVec.ofNat 256 (Xpkg.bind.addr w.self)) ≠
-      accountKey (BitVec.ofNat 256 self))
+    (hBindNe : BindEnvs.neSelf Xpkg.bs self w.self)
     (hconf : ∀ (w' : World S X E),
-      Conforms I self (Xpkg.bind.addr w'.self) Xpkg.extCalls Xpkg.α)
+      BindEnvs.conforms Xpkg.bs self w'.self Xpkg.extCalls)
+    (hinj : BindEnvs.addrInj Xpkg.bs w.self)
     (hA : NoAuthAlong Auth a (decodeTrace T calls) w)
     (hw : Inv w)
     (hE : EvmTraceRunExtAll T.is calls σ ξ σ' ξ') :
     ∃ w' : World S X E,
       storageRel T.c T.Γ evmKeccak w'.self σ' ∧
       WorldWF T.c T.Γ w' ∧
-      RX Xpkg.α Xpkg.bind w'
+      RXs Xpkg.bs w'
         (mkEvmStateExt ([] : List UInt8) σ' ξ' evmKeccak (dummyCtx self)) ∧
       Inv w' ∧
       claim a w.self ≤ claim a w'.self := by
@@ -748,18 +760,17 @@ theorem transport_claim_ext (T : TransportSetup S X E ε)
     have hWFtl := CallsWF.tail hWF
     cases hE with
     | cons hstart h1 htl =>
-      have hRXcall : RX Xpkg.α Xpkg.bind w
+      have hRXcall : RXs Xpkg.bs w
           (mkEvmStateExt call.calldata σ ξ evmKeccak call.ctx) :=
-        RX_mkEvmStateExt_ctx (I := I) (bind := Xpkg.bind) Xpkg.hF
+        RXs_mkEvmStateExt_ctx Xpkg.hF
           (by simpa [dummyCtx] using htgt.symm) hRX
-      have hBindNe' :
-          accountKey (BitVec.ofNat 256 (Xpkg.bind.addr w.self)) ≠
-            accountKey (BitVec.ofNat 256 call.ctx.self) := by
+      have hBindNe' : BindEnvs.neSelf Xpkg.bs call.ctx.self w.self := by
         simpa [htgt] using hBindNe
+      have hconfCall : BindEnvs.conforms Xpkg.bs call.ctx.self w.self Xpkg.extCalls := by
+        simpa [htgt] using hconf w
       obtain ⟨σ₁, ξ₁, hRun, fo, hpost⟩ :=
         transport_step_ext T Xpkg call.ctx call.calldata w σ ξ hctxWF hcd
-          hs hlog hwf hRXcall hBindNe'
-          (by simpa [htgt] using hconf w)
+          hs hlog hwf hRXcall hBindNe' hconfCall hinj
       have heq := evmCallRunξ_eq_of_start h1 hRun hstart
       rw [heq.1, heq.2] at htl
       cases hdec : decodeCall T call.ctx call.calldata with
@@ -768,28 +779,18 @@ theorem transport_claim_ext (T : TransportSetup S X E ε)
         obtain ⟨hσeq, hξ⟩ := hpost
         have hsσ : storageRel T.c T.Γ evmKeccak w.self σ₁ := by
           rw [hσeq]; exact hs
-        have hRX1 : RX Xpkg.α Xpkg.bind w
-            (mkEvmStateExt ([] : List UInt8) σ₁ ξ₁ evmKeccak (dummyCtx self)) := by
-          refine RX_of_foreign Xpkg.hF ?_ hRX
-          intro k
-          have hloc :
-              evmForeign (mkEvmStateExt ([] : List UInt8) σ ξ evmKeccak (dummyCtx self))
-                (BitVec.ofNat 256 (Xpkg.bind.addr w.self)) k =
-              ξ (BitVec.ofNat 256 (Xpkg.bind.addr w.self)) k := by
-            simp [dummyCtx, mkEvmStateExt_foreign, hBindNe]
-          have hloc' :
-              evmForeign (mkEvmStateExt ([] : List UInt8) σ₁ ξ₁ evmKeccak (dummyCtx self))
-                (BitVec.ofNat 256 (Xpkg.bind.addr w.self)) k =
-              ξ₁ (BitVec.ofNat 256 (Xpkg.bind.addr w.self)) k := by
-            simp [dummyCtx, mkEvmStateExt_foreign, hBindNe]
-          have hξb :
-              ξ₁ (BitVec.ofNat 256 (Xpkg.bind.addr w.self)) k =
-              ξ (BitVec.ofNat 256 (Xpkg.bind.addr w.self)) k := by
-            simp [hξ, mkEvmStateExt_foreign, hBindNe']
-          simp [hloc, hloc', hξb]
+        have hξeq : ∀ e ∈ Xpkg.bs,
+            ξ₁ (BitVec.ofNat 256 (e.bind.addr w.self)) =
+            ξ (BitVec.ofNat 256 (e.bind.addr w.self)) := by
+          intro e he
+          rw [hξ]
+          exact mkEvmStateExt_foreign_ne _ _ _ _ _ _ (hBindNe' e he)
+        have hRX1 : RXs Xpkg.bs w
+            (mkEvmStateExt ([] : List UInt8) σ₁ ξ₁ evmKeccak (dummyCtx self)) :=
+          RXs_dummy_of_ξ Xpkg.hF self w σ ξ σ₁ ξ₁ evmKeccak hBindNe hξeq hRX
         have ⟨w', hs', hwf', hRX', hInv', hle⟩ :=
           ih (w := w) (σ := σ₁) (ξ := ξ₁) (σ' := σ') (ξ' := ξ')
-            hsσ hlog hwf hWFtl hRX1 hBindNe
+            hsσ hlog hwf hWFtl hRX1 hBindNe hinj
             (by simpa [decodeTrace, hdec] using hA) hw htl
         exact ⟨w', hs', hwf', hRX', hInv', hle⟩
       | some c =>
@@ -809,23 +810,24 @@ theorem transport_claim_ext (T : TransportSetup S X E ε)
               simpa [w1, wfo] using hlt
             exact hna' (hN c wfo a hwfo hlt')
           exact Nat.le_of_not_lt hnot
-        have haddr : Xpkg.bind.addr w1.self = Xpkg.bind.addr w.self := by
+        have haddr : ∀ e ∈ Xpkg.bs, e.bind.addr w1.self = e.bind.addr w.self := by
+          intro e he
           simpa [w1, wfo, step] using
-            Xpkg.bindAddr_stable c.fn c.args c.toCtx wfo
-        have hRXw1 : RX Xpkg.α Xpkg.bind w1
+            Xpkg.bindAddr_stable e he c.fn c.args c.toCtx wfo
+        have hRXw1 : RXs Xpkg.bs w1
             (mkEvmStateExt ([] : List UInt8) σ₁ ξ₁ evmKeccak (dummyCtx self)) :=
-          RX_mkEvmStateExt_ne (I := I) (bind := Xpkg.bind) Xpkg.hF hRXobs
-            (Eq.symm hξobs) (by simpa [haddr, dummyCtx] using hBindNe)
-        have hBindNe1 :
-            accountKey (BitVec.ofNat 256 (Xpkg.bind.addr w1.self)) ≠
-              accountKey (BitVec.ofNat 256 self) := by
-          simpa [haddr] using hBindNe
+          RXs_mkEvmStateExt_ne Xpkg.hF hRXobs
+            (Eq.symm hξobs) (by simpa [dummyCtx] using BindEnvs.neSelf_of_addr hBindNe haddr)
+        have hBindNe1 : BindEnvs.neSelf Xpkg.bs self w1.self :=
+          BindEnvs.neSelf_of_addr hBindNe haddr
+        have hinj1 : BindEnvs.addrInj Xpkg.bs w1.self :=
+          BindEnvs.addrInj_of_addr hinj haddr
         have ⟨htgtc, hsend⟩ := decodeCall_ctx T hdec
         have hw1 : Inv w1 :=
           hInvL _ [] (hP c wfo (htgtc.trans htgt) (by simpa [hsend] using hne) hwfo)
         have ⟨w', hs', hwf', hRX', hInv', hle⟩ :=
           ih (w := w1) (σ := σ₁) (ξ := ξ₁) (σ' := σ') (ξ' := ξ')
-            hs1 rfl hwf1 hWFtl hRXw1 hBindNe1
+            hs1 rfl hwf1 hWFtl hRXw1 hBindNe1 hinj1
             ((hAirr (decodeTrace T rest) (step (.call c) w) w1).mp hAtl) hw1 htl
         exact ⟨w', hs', hwf', hRX', hInv', Nat.le_trans hle1 hle⟩
 
@@ -841,30 +843,30 @@ theorem transport_exists_ext (T : TransportSetup S X E ε)
     (hs : storageRel T.c T.Γ evmKeccak w.self σ)
     (hwf : WorldWF T.c T.Γ w)
     (hb : EncodeBounded T tr) (hW : Wf self tr) (hw : Inv w)
-    (hRX : RX Xpkg.α Xpkg.bind { w with log := ([] : List E) }
+    (hRX : RXs Xpkg.bs { w with log := ([] : List E) }
       (mkEvmStateExt ([] : List UInt8) σ ξ evmKeccak (dummyCtx self)))
-    (hBindNe : accountKey (BitVec.ofNat 256 (Xpkg.bind.addr w.self)) ≠
-      accountKey (BitVec.ofNat 256 self))
+    (hBindNe : BindEnvs.neSelf Xpkg.bs self w.self)
     (hconf : ∀ (w' : World S X E),
-      Conforms I self (Xpkg.bind.addr w'.self) Xpkg.extCalls Xpkg.α) :
+      BindEnvs.conforms Xpkg.bs self w'.self Xpkg.extCalls)
+    (hinj : BindEnvs.addrInj Xpkg.bs w.self) :
     ∃ σ' ξ' w',
       EvmTraceRunExt T.is (encodeCalls T tr) σ ξ σ' ξ' ∧
       storageRel T.c T.Γ evmKeccak w'.self σ' ∧
       WorldWF T.c T.Γ w' ∧
-      RX Xpkg.α Xpkg.bind w'
+      RXs Xpkg.bs w'
         (mkEvmStateExt ([] : List UInt8) σ' ξ' evmKeccak (dummyCtx self)) ∧
       Inv w' ∧
-      Xpkg.bind.addr w'.self = Xpkg.bind.addr w.self := by
+      (∀ e ∈ Xpkg.bs, e.bind.addr w'.self = e.bind.addr w.self) := by
   induction tr generalizing w σ ξ with
   | nil =>
     exact ⟨σ, ξ, { w with log := [] }, EvmTraceRunExt.nil σ ξ,
-      hs, WorldWF_log [] hwf, hRX, hInvL w [] hw, rfl⟩
+      hs, WorldWF_log [] hwf, hRX, hInvL w [] hw, fun _ _ => rfl⟩
   | cons s rest ih =>
     match s with
     | .env _ =>
       simpa [encodeCalls] using
         ih (w := w) (σ := σ) (ξ := ξ) hs hwf
-          (by simpa [EncodeBounded] using hb) hW hw hRX hBindNe
+          (by simpa [EncodeBounded] using hb) hW hw hRX hBindNe hinj
     | .call c =>
       rcases hb with ⟨hctxWF, hWargs, htlB⟩
       rcases hW with ⟨htgt, hne, hWtl⟩
@@ -874,9 +876,9 @@ theorem transport_exists_ext (T : TransportSetup S X E ε)
         rw [length_fnCalldata, T.codec.encode_length]
         exact T.hbound _ (T.codec.mem _)
       have hRXcall :
-          RX Xpkg.α Xpkg.bind { w with log := ([] : List E) }
+          RXs Xpkg.bs { w with log := ([] : List E) }
             (mkEvmStateExt (encodeCall T c).calldata σ ξ evmKeccak c.toCtx) :=
-        RX_mkEvmStateExt_ctx (I := I) (bind := Xpkg.bind) Xpkg.hF
+        RXs_mkEvmStateExt_ctx Xpkg.hF
           (by simpa [dummyCtx, Call.toCtx] using htgt.symm) hRX
       obtain ⟨σ₁, ξ₁, h1, fo, hpost⟩ :=
         transport_step_ext T Xpkg c.toCtx (encodeCall T c).calldata
@@ -884,30 +886,32 @@ theorem transport_exists_ext (T : TransportSetup S X E ε)
           (by simpa using hs) rfl (WorldWF_log [] hwf) hRXcall
           (by simpa [Call.toCtx, htgt] using hBindNe)
           (by simpa [Call.toCtx, htgt] using hconf { w with log := ([] : List E) })
+          hinj
       simp only [hdecC] at hpost
       let wfo : World S X E :=
         { { w with log := ([] : List E) } with faults := fo }
       let w1 : World S X E := { step (.call c) wfo with log := [] }
       rcases hpost with ⟨hs1, hwf1, stObs, hσ, hξobs, hRXobs⟩
-      have haddr : Xpkg.bind.addr w1.self = Xpkg.bind.addr w.self := by
-        simpa [w1, wfo, step] using Xpkg.bindAddr_stable c.fn c.args c.toCtx wfo
-      have hRXw1 : RX Xpkg.α Xpkg.bind w1
+      have haddr : ∀ e ∈ Xpkg.bs, e.bind.addr w1.self = e.bind.addr w.self := by
+        intro e he
+        simpa [w1, wfo, step] using Xpkg.bindAddr_stable e he c.fn c.args c.toCtx wfo
+      have hRXw1 : RXs Xpkg.bs w1
           (mkEvmStateExt ([] : List UInt8) σ₁ ξ₁ evmKeccak (dummyCtx self)) :=
-        RX_mkEvmStateExt_ne (I := I) (bind := Xpkg.bind) Xpkg.hF hRXobs
-          (Eq.symm hξobs) (by simpa [haddr, dummyCtx] using hBindNe)
-      have hBindNe1 :
-          accountKey (BitVec.ofNat 256 (Xpkg.bind.addr w1.self)) ≠
-            accountKey (BitVec.ofNat 256 self) := by
-        simpa [haddr] using hBindNe
+        RXs_mkEvmStateExt_ne Xpkg.hF hRXobs
+          (Eq.symm hξobs) (by simpa [dummyCtx] using BindEnvs.neSelf_of_addr hBindNe haddr)
+      have hBindNe1 : BindEnvs.neSelf Xpkg.bs self w1.self :=
+        BindEnvs.neSelf_of_addr hBindNe haddr
+      have hinj1 : BindEnvs.addrInj Xpkg.bs w1.self :=
+        BindEnvs.addrInj_of_addr hinj haddr
       have hw1 : Inv w1 :=
         hInvL _ [] (hP c wfo (by simpa [wfo] using htgt)
           (by simpa [wfo] using hne) (hInvF _ fo (hInvL w [] hw)))
       obtain ⟨σ', ξ', w', htl, hs', hwf', hRX', hInv', haddr'⟩ :=
-        ih (w := w1) (σ := σ₁) (ξ := ξ₁) hs1 hwf1 htlB hWtl hw1 hRXw1 hBindNe1
+        ih (w := w1) (σ := σ₁) (ξ := ξ₁) hs1 hwf1 htlB hWtl hw1 hRXw1 hBindNe1 hinj1
       exact ⟨σ', ξ', w',
         EvmTraceRunExt.cons (call := encodeCall T c) h1
           (by simpa [encodeCalls] using htl), hs', hwf', hRX', hInv',
-        haddr'.trans haddr⟩
+        fun e he => (haddr' e he).trans (haddr e he)⟩
 
 /-- Forward S2 with claim monotonicity along the fo-fold of `encodeCalls`. -/
 theorem transport_exists_claim_ext (T : TransportSetup S X E ε)
@@ -925,17 +929,17 @@ theorem transport_exists_claim_ext (T : TransportSetup S X E ε)
     (hwf : WorldWF T.c T.Γ w)
     (hb : EncodeBounded T tr) (hW : Wf self tr) (hw : Inv w)
     (hA : NoAuthAlong Auth a (callsOf tr) w)
-    (hRX : RX Xpkg.α Xpkg.bind { w with log := ([] : List E) }
+    (hRX : RXs Xpkg.bs { w with log := ([] : List E) }
       (mkEvmStateExt ([] : List UInt8) σ ξ evmKeccak (dummyCtx self)))
-    (hBindNe : accountKey (BitVec.ofNat 256 (Xpkg.bind.addr w.self)) ≠
-      accountKey (BitVec.ofNat 256 self))
+    (hBindNe : BindEnvs.neSelf Xpkg.bs self w.self)
     (hconf : ∀ (w' : World S X E),
-      Conforms I self (Xpkg.bind.addr w'.self) Xpkg.extCalls Xpkg.α) :
+      BindEnvs.conforms Xpkg.bs self w'.self Xpkg.extCalls)
+    (hinj : BindEnvs.addrInj Xpkg.bs w.self) :
     ∃ σ' ξ' w',
       EvmTraceRunExt T.is (encodeCalls T tr) σ ξ σ' ξ' ∧
       storageRel T.c T.Γ evmKeccak w'.self σ' ∧
       WorldWF T.c T.Γ w' ∧
-      RX Xpkg.α Xpkg.bind w'
+      RXs Xpkg.bs w'
         (mkEvmStateExt ([] : List UInt8) σ' ξ' evmKeccak (dummyCtx self)) ∧
       Inv w' ∧
       claim a w.self ≤ claim a w'.self := by
@@ -948,7 +952,7 @@ theorem transport_exists_claim_ext (T : TransportSetup S X E ε)
     | .env _ =>
       simpa [encodeCalls, callsOf] using
         ih (w := w) (σ := σ) (ξ := ξ) hs hwf
-          (by simpa [EncodeBounded] using hb) hW hw hA hRX hBindNe
+          (by simpa [EncodeBounded] using hb) hW hw hA hRX hBindNe hinj
     | .call c =>
       rcases hb with ⟨hctxWF, hWargs, htlB⟩
       rcases hW with ⟨htgt, hne, hWtl⟩
@@ -959,9 +963,9 @@ theorem transport_exists_claim_ext (T : TransportSetup S X E ε)
         rw [length_fnCalldata, T.codec.encode_length]
         exact T.hbound _ (T.codec.mem _)
       have hRXcall :
-          RX Xpkg.α Xpkg.bind { w with log := ([] : List E) }
+          RXs Xpkg.bs { w with log := ([] : List E) }
             (mkEvmStateExt (encodeCall T c).calldata σ ξ evmKeccak c.toCtx) :=
-        RX_mkEvmStateExt_ctx (I := I) (bind := Xpkg.bind) Xpkg.hF
+        RXs_mkEvmStateExt_ctx Xpkg.hF
           (by simpa [dummyCtx, Call.toCtx] using htgt.symm) hRX
       obtain ⟨σ₁, ξ₁, h1, fo, hpost⟩ :=
         transport_step_ext T Xpkg c.toCtx (encodeCall T c).calldata
@@ -969,6 +973,7 @@ theorem transport_exists_claim_ext (T : TransportSetup S X E ε)
           (by simpa using hs) rfl (WorldWF_log [] hwf) hRXcall
           (by simpa [Call.toCtx, htgt] using hBindNe)
           (by simpa [Call.toCtx, htgt] using hconf { w with log := ([] : List E) })
+          hinj
       simp only [hdecC] at hpost
       let wfo : World S X E :=
         { { w with log := ([] : List E) } with faults := fo }
@@ -983,22 +988,23 @@ theorem transport_exists_claim_ext (T : TransportSetup S X E ε)
             simpa [w1, wfo] using hlt
           exact hna' (hN c wfo a hwfo hlt')
         exact Nat.le_of_not_lt hnot
-      have haddr : Xpkg.bind.addr w1.self = Xpkg.bind.addr w.self := by
-        simpa [w1, wfo, step] using Xpkg.bindAddr_stable c.fn c.args c.toCtx wfo
-      have hRXw1 : RX Xpkg.α Xpkg.bind w1
+      have haddr : ∀ e ∈ Xpkg.bs, e.bind.addr w1.self = e.bind.addr w.self := by
+        intro e he
+        simpa [w1, wfo, step] using Xpkg.bindAddr_stable e he c.fn c.args c.toCtx wfo
+      have hRXw1 : RXs Xpkg.bs w1
           (mkEvmStateExt ([] : List UInt8) σ₁ ξ₁ evmKeccak (dummyCtx self)) :=
-        RX_mkEvmStateExt_ne (I := I) (bind := Xpkg.bind) Xpkg.hF hRXobs
-          (Eq.symm hξobs) (by simpa [haddr, dummyCtx] using hBindNe)
-      have hBindNe1 :
-          accountKey (BitVec.ofNat 256 (Xpkg.bind.addr w1.self)) ≠
-            accountKey (BitVec.ofNat 256 self) := by
-        simpa [haddr] using hBindNe
+        RXs_mkEvmStateExt_ne Xpkg.hF hRXobs
+          (Eq.symm hξobs) (by simpa [dummyCtx] using BindEnvs.neSelf_of_addr hBindNe haddr)
+      have hBindNe1 : BindEnvs.neSelf Xpkg.bs self w1.self :=
+        BindEnvs.neSelf_of_addr hBindNe haddr
+      have hinj1 : BindEnvs.addrInj Xpkg.bs w1.self :=
+        BindEnvs.addrInj_of_addr hinj haddr
       have hw1 : Inv w1 :=
         hInvL _ [] (hP c wfo (by simpa [wfo] using htgt)
           (by simpa [wfo] using hne) hwfo)
       obtain ⟨σ', ξ', w', htl, hs', hwf', hRX', hInv', hle⟩ :=
         ih (w := w1) (σ := σ₁) (ξ := ξ₁) hs1 hwf1 htlB hWtl hw1
-          ((hAirr (callsOf rest) (step (.call c) w) w1).mp hAtl) hRXw1 hBindNe1
+          ((hAirr (callsOf rest) (step (.call c) w) w1).mp hAtl) hRXw1 hBindNe1 hinj1
       exact ⟨σ', ξ', w',
         EvmTraceRunExt.cons (call := encodeCall T c) h1
           (by simpa [encodeCalls] using htl), hs', hwf', hRX', hInv',

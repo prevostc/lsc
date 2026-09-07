@@ -20,6 +20,7 @@ def M1Frag : {t : RetTy} → Core t → Prop
   | .word, .ret _ => True
   | .addr, .ret _ => True
   | .flag, .ret _ => True
+  | .pair .word .word, .ret _ => True
   | .word, .opTail op => M1Op op
   | .addr, .opTailAddr op => M1Op op
   | .flag, .opTailFlag op => M1Op op
@@ -31,10 +32,8 @@ def M1Frag : {t : RetTy} → Core t → Prop
   | _, .ite c a b => M1Cond c ∧ M1Frag a ∧ M1Frag b
   | _, _ => False
 
-/-- Call-free fragment: no `Op.call`/`Stmt.call`. Covered operators are the S1 Token/Counter
-set plus checked `mul`/`div`/`mulDiv*`, remaining ctx reads, 0-arg `emit`, and `addr`/`flag`
-(single-word) returns. Still excluded: wrapping `letPure`, `require`/`revert`/`emit` with
-other arities, `pair` returns. -/
+/-- Call-free = `M1Frag`: S1 ops plus 0/1/3/4-arg `emit` and `word × word` returns.
+Excluded: wrapping `letPure`, other emit arities, nested pairs. -/
 def CallFreeOp : Lsc.Op → Prop := M1Op
 def CallFreeStmt : Lsc.Stmt → Prop := M1Stmt
 def CallFree : {t : RetTy} → Core t → Prop := M1Frag
@@ -97,6 +96,22 @@ theorem length_eq_three {α} {l : List α} : l.length = 3 ↔ ∃ a b c, l = [a,
         | nil => simp
         | cons _ _ => simp
 
+theorem length_eq_four {α} {l : List α} : l.length = 4 ↔ ∃ a b c d, l = [a, b, c, d] := by
+  cases l with
+  | nil => simp
+  | cons a l1 =>
+    cases l1 with
+    | nil => simp
+    | cons b l2 =>
+      cases l2 with
+      | nil => simp
+      | cons c l3 =>
+        cases l3 with
+        | nil => simp
+        | cons d l4 =>
+          cases l4 with
+          | nil => simp
+          | cons _ _ => simp
 
 theorem HaltKind.stop_commits : HaltKind.stop.commits = true := rfl
 theorem HaltKind.revert_commits : HaltKind.revert.commits = false := rfl
@@ -122,6 +137,11 @@ theorem haltSuccess_flag {v : Flag} {h}
     (hh : h = some (.ret, wordBytes (v : Nat))) : haltSuccess .flag v h := by
   simp [haltSuccess, hh, retWords]
   exact (abiBytes_singleton (v : Nat)).symm
+
+theorem haltSuccess_pair_ww {v0 v1 : Nat} {h}
+    (hh : h = some (.ret, wordBytes v0 ++ wordBytes v1)) :
+    haltSuccess (.pair .word .word) (v0, v1) h := by
+  simp [haltSuccess, hh, retWords, abiBytes]
 
 theorem exec_switch_halt {funs V st V' st'} {cnd : YExpr} {eA eB body : YBlock} {cv : U256}
     (he : EvalExpr evm funs V st cnd (.vals [cv] st))
@@ -168,7 +188,8 @@ theorem stmt_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     simp [Stmt.denote, Tx.run_storeMap2]
     exact stmt_sim_storeMap2 funs hinv hΓ hκ hlen hwf hn
   | .emit ev args =>
-    rcases (hM1 : args.length = 0 ∨ args.length = 1 ∨ args.length = 3) with h0 | h1 | h3
+    rcases (hM1 : args.length = 0 ∨ args.length = 1 ∨ args.length = 3 ∨ args.length = 4)
+      with h0 | h1 | h3 | h4
     · match args with
       | [] =>
         simp [Stmt.denote, Tx.run_emit]
@@ -182,6 +203,10 @@ theorem stmt_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
       subst hargs
       simp [Stmt.denote, Tx.run_emit]
       exact stmt_sim_emit3 funs hinv hwf hn
+    · have ⟨a, b, c, d, hargs⟩ := length_eq_four.mp h4
+      subst hargs
+      simp [Stmt.denote, Tx.run_emit]
+      exact stmt_sim_emit4 funs hinv hwf hn
   | .require cond err args =>
     have ⟨hC, hlen⟩ := (hM1 : M1Cond cond ∧ args.length = 0)
     match args with
@@ -332,8 +357,27 @@ theorem core_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
       obtain ⟨st', hexec, hh, hR'⟩ := return_word_sim funs V hv he hinv.rel
       rw [Core.denote, Tx.run_pure]
       exact ⟨V, st', hexec, haltSuccess_flag hh, hR'⟩
-    | pair _ _ =>
-      simp [M1Frag] at hM1
+    | pair x y =>
+      cases x with
+      | word a =>
+        cases y with
+        | word b =>
+          simp only [emitCore, emitRet, retAtoms, List.map_cons, List.map_nil] at hem
+          cases hem
+          have hn0 : identsNodup env.length = true :=
+            identsNodup_mono (by simp [coreExtraDepth]) hn
+          have ⟨hwfA, hwfB⟩ : atomWF a = true ∧ atomWF b = true := by
+            simpa [coreWF, retWF, Bool.and_eq_true] using hwf
+          have hv0 := atom_eval_lt hinv.wf hwfA
+          have hv1 := atom_eval_lt hinv.wf hwfB
+          have he0 := eval_atom funs (st := st) hinv.venv hn0 a
+          obtain ⟨st', hexec, hh, hR'⟩ :=
+            return_pair_sim funs V hv0 hv1 he0
+              (fun st' => eval_atom funs (st := st') hinv.venv hn0 b) hinv.rel
+          rw [Core.denote, Tx.run_pure]
+          exact ⟨V, st', hexec, haltSuccess_pair_ww hh, hR'⟩
+        | _ => simp [M1Frag] at hM1
+      | _ => simp [M1Frag] at hM1
   | stmtTail s =>
     intro hM1 w env V st funs hwf hn hinv e' hem
     simp only [emitCore, hhalt, emitReturnUnit_true] at hem

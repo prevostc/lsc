@@ -32,9 +32,6 @@ theorem step_number (st : EvmState) :
 theorem toNat_96 : (BitVec.ofNat 256 96).toNat = 96 :=
   toNat_ofNat_of_lt (lt_256_wordBound (by decide))
 
-theorem toNat_abiPtr32 : (BitVec.ofNat 256 (abiPtr + 32)).toNat = abiPtr + 32 :=
-  toNat_ofNat_of_lt (lt_256_wordBound (by decide))
-
 theorem toNat_abiPtr64 : (BitVec.ofNat 256 (abiPtr + 64)).toNat = abiPtr + 64 :=
   toNat_ofNat_of_lt (lt_256_wordBound (by decide))
 
@@ -310,6 +307,181 @@ theorem stmt_sim_emit3 {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E �
         (ctxRel_memOnly hctx (by simp [MemOnly, st2, st1, st0, touchMemory]))
         [BitVec.ofNat 256 ed.topic0]
         (BitVec.ofNat 256 abiPtr) (BitVec.ofNat 256 96)⟩
+
+theorem toNat_128 : (BitVec.ofNat 256 128).toNat = 128 :=
+  toNat_ofNat_of_lt (lt_256_wordBound (by decide))
+
+theorem toNat_abiPtr96 : (BitVec.ofNat 256 (abiPtr + 96)).toNat = abiPtr + 96 :=
+  toNat_ofNat_of_lt (lt_256_wordBound (by decide))
+
+theorem emitLog1_four (e : Emit) (topic : Nat) (a b c d : YExpr) :
+    (emitLog1 e topic [a, b, c, d]).stmts =
+      e.stmts ++
+        [.exprStmt (bop Op.mstore [lit abiPtr, a]),
+          .exprStmt (bop Op.mstore [lit (abiPtr + 32), b]),
+          .exprStmt (bop Op.mstore [lit (abiPtr + 64), c]),
+          .exprStmt (bop Op.mstore [lit (abiPtr + 96), d]),
+          .exprStmt (bop Op.log1 [lit abiPtr, lit 128, lit topic])] := by
+  simp [emitLog1, emitDo, Emit.push, Emit.stmts, bop]
+
+theorem emitStmt_emit_four (c : ContractDef) (e : Emit) (d ev : Nat) (a b c' e' : Atom)
+    {ed : EventDef} (h : c.events[ev]? = some ed) :
+    (emitStmt c e d (.emit ev [a, b, c', e'])).stmts =
+      e.stmts ++
+        [.exprStmt (bop Op.mstore [lit abiPtr, atomE d a]),
+          .exprStmt (bop Op.mstore [lit (abiPtr + 32), atomE d b]),
+          .exprStmt (bop Op.mstore [lit (abiPtr + 64), atomE d c']),
+          .exprStmt (bop Op.mstore [lit (abiPtr + 96), atomE d e']),
+          .exprStmt (bop Op.log1 [lit abiPtr, lit 128, lit ed.topic0])] := by
+  simp [emitStmt, h, emitLog1_four]
+
+theorem readBytes_abi_four (mem : Nat → UInt8) (n0 n1 n2 n3 : Nat)
+    (h0 : n0 < wordBound) (h1 : n1 < wordBound) (h2 : n2 < wordBound) (h3 : n3 < wordBound) :
+    readBytes
+      (storeWord (storeWord (storeWord (storeWord mem abiPtr (BitVec.ofNat 256 n0))
+        (abiPtr + 32) (BitVec.ofNat 256 n1)) (abiPtr + 64) (BitVec.ofNat 256 n2))
+        (abiPtr + 96) (BitVec.ofNat 256 n3))
+      abiPtr 128 = wordBytes n0 ++ wordBytes n1 ++ wordBytes n2 ++ wordBytes n3 := by
+  have h128 : (128 : Nat) = 96 + 32 := rfl
+  rw [h128, readBytes_split]
+  have h3' :
+      readBytes (storeWord (storeWord (storeWord (storeWord mem abiPtr (BitVec.ofNat 256 n0))
+          (abiPtr + 32) (BitVec.ofNat 256 n1)) (abiPtr + 64) (BitVec.ofNat 256 n2))
+          (abiPtr + 96) (BitVec.ofNat 256 n3))
+        (abiPtr + 96) 32 = wordBytes n3 :=
+    readBytes_storeWord_wordBytes _ _ _ h3
+  have h012 :
+      readBytes (storeWord (storeWord (storeWord (storeWord mem abiPtr (BitVec.ofNat 256 n0))
+          (abiPtr + 32) (BitVec.ofNat 256 n1)) (abiPtr + 64) (BitVec.ofNat 256 n2))
+          (abiPtr + 96) (BitVec.ofNat 256 n3))
+        abiPtr 96 = wordBytes n0 ++ wordBytes n1 ++ wordBytes n2 := by
+    have hout96 : ∀ i ∈ List.range 96,
+        storeWord (storeWord (storeWord (storeWord mem abiPtr (BitVec.ofNat 256 n0))
+            (abiPtr + 32) (BitVec.ofNat 256 n1)) (abiPtr + 64) (BitVec.ofNat 256 n2))
+            (abiPtr + 96) (BitVec.ofNat 256 n3)
+          (abiPtr + i) =
+          storeWord (storeWord (storeWord mem abiPtr (BitVec.ofNat 256 n0))
+            (abiPtr + 32) (BitVec.ofNat 256 n1)) (abiPtr + 64) (BitVec.ofNat 256 n2)
+          (abiPtr + i) := by
+      intro i hi
+      have : i < 96 := List.mem_range.mp hi
+      exact storeWord_out _ _ _ _ (.inl (by simp only [abiPtr]; omega))
+    unfold readBytes
+    refine Eq.trans (List.map_congr_left hout96) ?_
+    change readBytes
+      (storeWord (storeWord (storeWord mem abiPtr (BitVec.ofNat 256 n0))
+        (abiPtr + 32) (BitVec.ofNat 256 n1)) (abiPtr + 64) (BitVec.ofNat 256 n2))
+      abiPtr 96 = wordBytes n0 ++ wordBytes n1 ++ wordBytes n2
+    exact readBytes_abi_three _ _ _ _ h0 h1 h2
+  rw [h012, h3']
+
+theorem stmt_sim_emit4 {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
+    {κ ctx} {w : World S X E} {env V st} {ev : Nat} {a b c' d : Atom}
+    (funs : FunEnv evm) (hinv : Inv Γ c κ ctx w env V st)
+    (hwf : stmtWF c (.emit ev [a, b, c', d]) = true)
+    (hn : identsNodup env.length = true) :
+    let args := [a.eval env, b.eval env, c'.eval env, d.eval env]
+    let w' := { w with log := w.log ++ [Γ.ev.build ev args] }
+    ∃ st',
+      ExecStmts evm funs V st (emitStmt c {} env.length (.emit ev [a, b, c', d])).stmts
+        V st' .normal ∧
+      Inv Γ c κ ctx w' env V st' := by
+  rcases hinv with ⟨hV, henv, hR, hctx⟩
+  have hwf' : eventOK c ev 4 = true ∧
+      atomWF a = true ∧ atomWF b = true ∧ atomWF c' = true ∧ atomWF d = true := by
+    simpa [stmtWF, Bool.and_eq_true, List.all_cons, List.all_nil] using hwf
+  have ⟨ed, hed, _⟩ := (eventOK_iff c ev 4).mp hwf'.1
+  have hev : ev < c.events.length := (List.getElem?_eq_some_iff.mp hed).1
+  have ha := atom_eval_lt henv hwf'.2.1
+  have hb := atom_eval_lt henv hwf'.2.2.1
+  have hc := atom_eval_lt henv hwf'.2.2.2.1
+  have hd := atom_eval_lt henv hwf'.2.2.2.2
+  have hstatic := ctxRel_static hctx
+  have hea := eval_atom funs (st := st) hV hn a
+  let st0 :=
+    { touchMemory st abiPtr 32 with
+      memory := storeWord st.memory abiPtr (BitVec.ofNat 256 (a.eval env)) }
+  have heb := eval_atom funs (st := st0) hV hn b
+  let st1 :=
+    { touchMemory st0 (abiPtr + 32) 32 with
+      memory := storeWord st0.memory (abiPtr + 32) (BitVec.ofNat 256 (b.eval env)) }
+  have hec := eval_atom funs (st := st1) hV hn c'
+  let st2 :=
+    { touchMemory st1 (abiPtr + 64) 32 with
+      memory := storeWord st1.memory (abiPtr + 64) (BitVec.ofNat 256 (c'.eval env)) }
+  have hedA := eval_atom funs (st := st2) hV hn d
+  let st3 :=
+    { touchMemory st2 (abiPtr + 96) 32 with
+      memory := storeWord st2.memory (abiPtr + 96) (BitVec.ofNat 256 (d.eval env)) }
+  have hm0 :
+      ExecStmt evm funs V st
+        (.exprStmt (bop Op.mstore [lit abiPtr, atomE env.length a])) V st0 .normal :=
+    Step.exprStmt (Step.builtinOk (Step.argsCons (Step.argsCons Step.argsNil hea) Step.lit)
+      (by simp only [evm_litValue_number, step_mstore, toNat_abiPtr]; rfl))
+  have hm1 :
+      ExecStmt evm funs V st0
+        (.exprStmt (bop Op.mstore [lit (abiPtr + 32), atomE env.length b])) V st1 .normal :=
+    Step.exprStmt (Step.builtinOk (Step.argsCons (Step.argsCons Step.argsNil heb) Step.lit)
+      (by simp only [evm_litValue_number, step_mstore, toNat_abiPtr32]; rfl))
+  have hm2 :
+      ExecStmt evm funs V st1
+        (.exprStmt (bop Op.mstore [lit (abiPtr + 64), atomE env.length c'])) V st2 .normal :=
+    Step.exprStmt (Step.builtinOk (Step.argsCons (Step.argsCons Step.argsNil hec) Step.lit)
+      (by simp only [evm_litValue_number, step_mstore, toNat_abiPtr64]; rfl))
+  have hm3 :
+      ExecStmt evm funs V st2
+        (.exprStmt (bop Op.mstore [lit (abiPtr + 96), atomE env.length d])) V st3 .normal :=
+    Step.exprStmt (Step.builtinOk (Step.argsCons (Step.argsCons Step.argsNil hedA) Step.lit)
+      (by simp only [evm_litValue_number, step_mstore, toNat_abiPtr96]; rfl))
+  let stL := appendLog st3 [BitVec.ofNat 256 ed.topic0]
+    (BitVec.ofNat 256 abiPtr) (BitVec.ofNat 256 128)
+  have hstatic3 : st3.env.static = false := by
+    simp [st3, st2, st1, st0, touchMemory, hstatic]
+  have hlog :
+      ExecStmt evm funs V st3
+        (.exprStmt (bop Op.log1 [lit abiPtr, lit 128, lit ed.topic0])) V stL .normal :=
+    Step.exprStmt (Step.builtinOk
+      (Step.argsCons (Step.argsCons (Step.argsCons Step.argsNil Step.lit) Step.lit) Step.lit)
+      (by simp only [litValue, step_log1 st3 _ _ _ hstatic3]; rfl))
+  refine ⟨stL, ?_, ?_⟩
+  · simp only [emitStmt_emit_four (h := hed), Emit.stmts_nil, List.nil_append]
+    exact Step.seqCons hm0 (Step.seqCons hm1 (Step.seqCons hm2 (Step.seqCons hm3
+      (Step.seqCons hlog Step.seqNil))))
+  · have hR' : R c Γ κ
+        { w with log := w.log ++
+          [Γ.ev.build ev [a.eval env, b.eval env, c'.eval env, d.eval env]] } stL := by
+      rcases hR with ⟨hs, hl, hk, hW⟩
+      have hl' := logsRel_emit (c := c) (Γ := Γ) (st := st3)
+        (args := [a.eval env, b.eval env, c'.eval env, d.eval env])
+        (by
+          unfold logsRel at hl ⊢
+          simp [st3, st2, st1, st0, touchMemory]
+          exact hl) hev
+      have hdata :
+          readBytes st3.memory abiPtr 128 =
+            abiBytes [a.eval env, b.eval env, c'.eval env, d.eval env] := by
+        simp [st3, st2, st1, st0, abiBytes, readBytes_abi_four _ _ _ _ _ ha hb hc hd]
+      have hptr := toNat_abiPtr
+      have hn128 := toNat_128
+      have : stL.logs = st3.logs ++
+          [LogEntry.mk st3.env.address [BitVec.ofNat 256 ed.topic0]
+            (readBytes st3.memory abiPtr 128)] := by
+        simp [stL, appendLog, hptr, hn128]
+      have haddr : stL.env.address = st3.env.address := by
+        simp [stL, appendLog, touchMemory]
+      refine ⟨?_, ?_, ?_, hW⟩
+      · simpa [stL, appendLog, touchMemory, st3, st2, st1, st0] using hs
+      · unfold logsRel selfLogs at hl' ⊢
+        simp [this, haddr, hdata, st3, st2, st1, st0, touchMemory, List.filter_append] at hl' ⊢
+        have hget : c.events[ev] = ed := (List.getElem?_eq_some_iff.mp hed).2
+        rw [hget] at hl'
+        exact hl'
+      · simpa [stL, appendLog, touchMemory, st3, st2, st1, st0] using hk
+    exact ⟨hV, henv, hR',
+      ctxRel_appendLog (st := st3)
+        (ctxRel_memOnly hctx (by simp [MemOnly, st3, st2, st1, st0, touchMemory]))
+        [BitVec.ofNat 256 ed.topic0]
+        (BitVec.ofNat 256 abiPtr) (BitVec.ofNat 256 128)⟩
 
 theorem emitStmt_revert_nil (c : ContractDef) (e : Emit) (d err : Nat) {ed : ErrorDef}
     (h : c.errors[err]? = some ed) :

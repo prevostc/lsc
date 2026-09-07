@@ -488,6 +488,9 @@ theorem vault_asset_stable_core (fn : Fn) (args : spec.Args fn) (ctx : Ctx)
       (fun b m args ctx w v w' hok => vault_ext_call_self hok)
       (coreAvoids_not_write (vault_fn_avoids (vaultFnDef_mem fn))) htx
 
+@[reducible] def vaultEnv (α : Abs IERC20.Ghost) : BindEnv IERC20 Storage Ext :=
+  ⟨α, Vault.assetB⟩
+
 @[reducible] def mkVaultBindings
     (hκ : KeccakSep Vault.contract evmKeccak)
     (rt : YBlock) (hrt : runtimeBlock Vault.contract = some rt)
@@ -497,19 +500,45 @@ theorem vault_asset_stable_core (fn : Fn) (args : spec.Args fn) (ctx : Ctx)
     (hign : α.ignoresLocal) (hF : α.ofState_foreign) :
     TransportBindings Storage Ext Event Error IERC20
       (mkVaultSetup hκ rt hrt is hcomp) where
-  α := α
-  bind := Vault.assetB
+  bs := [vaultEnv α]
   extCalls := ext
   hCalls := hCalls
   htot := htot
   hS2 := fun f hf => vault_fn_s2 hf
-  hign := hign
-  hF := hF
-  hBind := fun b m args h => vault_bindWF b m args h
-  hslot := fun f hf => vault_hslot hf
-  bindAddr_stable := fun fn args ctx w => by
-    simpa [Vault.assetB, vault_worldAfter_core_eq] using
+  hign := BindEnvs.ignoresLocal_singleton (vaultEnv α) hign
+  hF := BindEnvs.ofState_foreign_singleton (vaultEnv α) hF
+  hsame := BindEnvs.sameAbs_singleton (vaultEnv α)
+  horth := BindEnvs.orthogonal_singleton (vaultEnv α)
+  hBind := BindEnvs.lookupWF_singleton (α := α) (bind := Vault.assetB) vault_bindWF
+  hslot := fun f hf => BindEnvs.avoids_singleton (vault_hslot hf)
+  bindAddr_stable := fun e he fn args ctx w => by
+    have : e = vaultEnv α := List.mem_singleton.mp he
+    subst this
+    simpa [vaultEnv, Vault.assetB, vault_worldAfter_core_eq] using
       vault_asset_stable_core fn args ctx w
+
+theorem vault_RXs_of (α : Abs IERC20.Ghost) (w : World Storage Ext Event) (st : EvmState)
+    (h : RX α Vault.assetB w st) : RXs [vaultEnv α] w st :=
+  (RXs_singleton (vaultEnv α) w st).mpr h
+
+theorem vault_RX_of (α : Abs IERC20.Ghost) (w : World Storage Ext Event) (st : EvmState)
+    (h : RXs [vaultEnv α] w st) : RX α Vault.assetB w st :=
+  (RXs_singleton (vaultEnv α) w st).mp h
+
+theorem vault_neSelf_of (α : Abs IERC20.Ghost) (self : Address) (σ : Storage)
+    (h : accountKey (BitVec.ofNat 256 (Vault.assetB.addr σ)) ≠
+          accountKey (BitVec.ofNat 256 self)) :
+    BindEnvs.neSelf [vaultEnv α] self σ :=
+  BindEnvs.neSelf_singleton (vaultEnv α) self σ h
+
+theorem vault_confs_of (α : Abs IERC20.Ghost) (self : Address) (ext : ExternalCalls)
+    (h : ConfFun self ext α) (w' : World Storage Ext Event) :
+    BindEnvs.conforms [vaultEnv α] self w'.self ext :=
+  BindEnvs.conforms_singleton (vaultEnv α) self w'.self ext (h w')
+
+theorem vault_inj_of (α : Abs IERC20.Ghost) (σ : Storage) :
+    BindEnvs.addrInj [vaultEnv α] σ :=
+  BindEnvs.addrInj_singleton (vaultEnv α) σ
 
 theorem vault_noAuthAlong_callsOf (a : Address) (tr : List (Step spec))
     (w : World Storage Ext Event) (h : NoAuthAlong Auth a tr w) :
@@ -557,7 +586,9 @@ theorem vault_bytecode_no_unauthorized_extraction
       (fun w fo h => vault_inv_faults self w fo h)
       (fun w log h => vault_inv_log self w log h)
       (fun tr w w' => noAuthAlong_irrel a tr w w')
-      calls w σ ξ σ' ξ' hs hlog hwf hWF hRX hBindNe hconf hA hw hE
+      calls w σ ξ σ' ξ' hs hlog hwf hWF
+      (vault_RXs_of α w _ hRX) (vault_neSelf_of α self w.self hBindNe)
+      (vault_confs_of α self ext hconf) (vault_inj_of α w.self) hA hw hE
   have hpre := vault_claim_of_rel w.self σ a hs ha
     (vault_ta_bound w hwf) (vault_ts_bound w hwf) (vault_shares_bound w a hwf ha)
   have hpost := vault_claim_of_rel w'.self σ' a hs' ha
@@ -599,7 +630,9 @@ theorem vault_bytecode_no_unauthorized_extraction_exists
       (fun w log h => vault_inv_log self w log h)
       (fun tr w w' => noAuthAlong_irrel a tr w w')
       tr w σ ξ hs hwf hb hW hw (vault_noAuthAlong_callsOf a tr w hA)
-      (by dsimp [Xpkg, mkVaultBindings]; simpa [hwlog] using hRX) hBindNe hconf
+      (by simpa [hwlog] using vault_RXs_of α w _ hRX)
+      (vault_neSelf_of α self w.self hBindNe) (vault_confs_of α self ext hconf)
+      (vault_inj_of α w.self)
   refine ⟨σ', ξ', hE, ?_⟩
   have hpre := vault_claim_of_rel w.self σ a hs ha
     (vault_ta_bound w hwf) (vault_ts_bound w hwf) (vault_shares_bound w a hwf ha)
@@ -632,15 +665,16 @@ theorem vault_bytecode_solvent
   let T := mkVaultSetup hκ rt hrt is hcomp
   let Xpkg := mkVaultBindings hκ rt hrt is hcomp α ext hCalls htot hign hF
   have ⟨_, w', hs', hwf', hRX', hInv', haddr⟩ :=
-    transport_trace_ext T Xpkg self calls w σ ξ σ' ξ' hs hlog hwf hWF hRX
-      hBindNe hconf (Inv self) (vault_preserves_inv self)
+    transport_trace_ext T Xpkg self calls w σ ξ σ' ξ' hs hlog hwf hWF
+      (vault_RXs_of α w _ hRX) (vault_neSelf_of α self w.self hBindNe)
+      (vault_confs_of α self ext hconf) (vault_inj_of α w.self) (Inv self) (vault_preserves_inv self)
       (fun w fo h => vault_inv_faults self w fo h)
       (fun w log h => vault_inv_log self w log h)
       hw hE
   have hsol := vaultSolventRead_of_inv α self w' σ' ξ' hInv' hs' hwf'
-    (by dsimp [Xpkg, mkVaultBindings] at hRX'; exact hRX')
-  have haddr' : Vault.assetB.addr w'.self = Vault.assetB.addr w.self := by
-    dsimp [Xpkg, mkVaultBindings] at haddr; exact haddr
+    (vault_RX_of α w' _ hRX')
+  have haddr' : Vault.assetB.addr w'.self = Vault.assetB.addr w.self :=
+    haddr (vaultEnv α) (List.mem_singleton.mpr rfl)
   rw [← haddr']
   exact hsol
 
@@ -675,12 +709,14 @@ theorem vault_bytecode_solvent_exists
       (fun w fo h => vault_inv_faults self w fo h)
       (fun w log h => vault_inv_log self w log h)
       tr w σ ξ hs hwf hb hW hw
-      (by dsimp [Xpkg, mkVaultBindings]; simpa [hwlog] using hRX) hBindNe hconf
+      (by simpa [hwlog] using vault_RXs_of α w _ hRX)
+      (vault_neSelf_of α self w.self hBindNe) (vault_confs_of α self ext hconf)
+      (vault_inj_of α w.self)
   refine ⟨σ', ξ', hE, ?_⟩
   have hsol := vaultSolventRead_of_inv α self w' σ' ξ' hInv' hs' hwf'
-    (by dsimp [Xpkg, mkVaultBindings] at hRX'; exact hRX')
-  have haddr' : Vault.assetB.addr w'.self = Vault.assetB.addr w.self := by
-    dsimp [Xpkg, mkVaultBindings] at haddr; exact haddr
+    (vault_RX_of α w' _ hRX')
+  have haddr' : Vault.assetB.addr w'.self = Vault.assetB.addr w.self :=
+    haddr (vaultEnv α) (List.mem_singleton.mpr rfl)
   rw [← haddr']
   exact hsol
 

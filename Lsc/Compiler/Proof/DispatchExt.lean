@@ -327,8 +327,31 @@ theorem revert_obs {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
 
 /-! ### Main theorem (`RuntimeBlockCorrectExt` is in `Correctness.lean`) -/
 
+def RuntimeBlockCorrectExts {I : Interface} {S X E ε : Type}
+    (bs : List (BindEnv I S X))
+    (c : ContractDef) (Γ : ContractSchema S X E ε) (κ : List UInt8 → U256)
+    (calls : ExternalCalls) (yul : YBlock) (ctx : Ctx) (w : World S X E)
+    (st0 : EvmState) : Prop :=
+  ∀ (st' : EvmState) (o : Outcome),
+    Run (yulD calls) yul st0 [] st' o →
+      ∃ fo : Nat → Bool,
+        let wfo : World S X E := { w with faults := fo }
+        let stObs := committedState st0 st'
+        match selectedFn c st0.env.calldata with
+        | none =>
+            o = Outcome.halt ∧ stObs.halted = some (.revert, []) ∧ R c Γ κ w stObs
+        | some f =>
+            match Tx.run (Core.denote Γ f.core (decodeArgs f st0.env.calldata).reverse)
+                ctx wfo with
+            | .ok (v, w') =>
+                o = Outcome.halt ∧ haltSuccess f.ret v stObs.halted ∧
+                  R c Γ κ w' stObs ∧ RXs bs w' stObs
+            | .error e =>
+                ∃ bytes, o = Outcome.halt ∧ stObs.halted = some (.revert, bytes) ∧
+                  haltError c Γ e bytes ∧ R c Γ κ w stObs
+
 theorem runtimeBlock_correct_ext {I : Interface} {S X E ε : Type}
-    (α : Abs I.Ghost) (bind : Binding I S X)
+    (bs : List (BindEnv I S X))
     (c : ContractDef) (Γ : ContractSchema S X E ε)
     (hΓ : Γ.st.Lawful c.fields) (κ : List UInt8 → U256) (hκ : KeccakSep c κ)
     (calls : ExternalCalls)
@@ -339,16 +362,14 @@ theorem runtimeBlock_correct_ext {I : Interface} {S X E ε : Type}
     (yul : YBlock) (hyul : runtimeBlock c = some yul)
     (ctx : Ctx) (w : World S X E) (st0 : EvmState)
     (hctx : ctxRel ctx st0) (hR : R c Γ κ w st0)
-    (hRX : RX α bind w st0) (hign : α.ignoresLocal)
-    (hBindNe : accountKey (BitVec.ofNat 256 (bind.addr w.self)) ≠
-      accountKey (BitVec.ofNat 256 ctx.self))
-    (hconf : Conforms I ctx.self (bind.addr w.self) calls α)
-    (hBind : ∀ b m args, callWF c b m args = true → ∃ meth, BindWF c Γ bind b m meth)
-    (hslot : ∀ f ∈ c.functions, ∃ slot : Nat,
-        (∀ σ, Γ.st.scalar slot σ = bind.addr σ) ∧
-        (c.fields[slot]?).map (·.kind) = some FieldKind.scalar ∧
-        coreAvoids slot f.core) :
-    RuntimeBlockCorrectExt α bind c Γ κ calls yul ctx w st0 := by
+    (hRX : RXs bs w st0) (hign : BindEnvs.ignoresLocal bs)
+    (hBindNe : BindEnvs.neSelf bs ctx.self w.self)
+    (hconf : BindEnvs.conforms bs ctx.self w.self calls)
+    (hsame : BindEnvs.sameAbs bs) (horth : BindEnvs.orthogonal bs)
+    (hinj : BindEnvs.addrInj bs w.self)
+    (hBind : BindEnvs.lookupWF c Γ bs)
+    (hslot : ∀ f ∈ c.functions, BindEnvs.avoids Γ c bs f.core) :
+    RuntimeBlockCorrectExts bs c Γ κ calls yul ctx w st0 := by
   intro st' o hrun
   obtain ⟨_, cases, hmap, hy⟩ := runtimeBlock_inv hyul
   subst hy
@@ -463,12 +484,66 @@ theorem runtimeBlock_correct_ext {I : Interface} {S X E ε : Type}
                 run_of_execStmts_open hhf hss'
               have hsome : selectedFn c cd = some f :=
                 selectedFn_some_of hshort hfind hshortF
-              have hfn := toYulFn_correct_ext (I := I) α bind c Γ hΓ κ hκ calls f
+              have hfn := toYulFn_correct_ext (I := I) bs c Γ hΓ κ hκ calls f
                 (hctor f hfmem) (hS2 f hfmem) hlen (hbound f hfmem) body hyF
-                ctx w st0 hctx hR hRX hign hBindNe hconf hBind (hslot f hfmem)
+                ctx w st0 hctx hR hRX hign hBindNe hconf hsame horth hinj hBind
+                (hslot f hfmem)
               obtain ⟨fo, hconcl⟩ := hfn st' o hRun
               refine ⟨fo, ?_⟩
               simp only [hsome]
               exact hconcl
+
+theorem runtimeBlock_correct_ext_one {I : Interface} {S X E ε : Type}
+    (α : Abs I.Ghost) (bind : Binding I S X)
+    (c : ContractDef) (Γ : ContractSchema S X E ε)
+    (hΓ : Γ.st.Lawful c.fields) (κ : List UInt8 → U256) (hκ : KeccakSep c κ)
+    (calls : ExternalCalls)
+    (hctor : ∀ f ∈ c.functions, f.kind ≠ .constructor)
+    (hS2 : ∀ f ∈ c.functions, S2Frag f.core)
+    (hlen : c.fields.length < wordBound)
+    (hbound : ∀ f ∈ c.functions, 4 + 32 * f.params.length < wordBound)
+    (yul : YBlock) (hyul : runtimeBlock c = some yul)
+    (ctx : Ctx) (w : World S X E) (st0 : EvmState)
+    (hctx : ctxRel ctx st0) (hR : R c Γ κ w st0)
+    (hRX : RX α bind w st0) (hign : α.ignoresLocal)
+    (hBindNe : accountKey (BitVec.ofNat 256 (bind.addr w.self)) ≠
+      accountKey (BitVec.ofNat 256 ctx.self))
+    (hconf : Conforms I ctx.self (bind.addr w.self) calls α)
+    (hBind : ∀ b m args, callWF c b m args = true → ∃ meth, BindWF c Γ bind b m meth)
+    (hslot : ∀ f ∈ c.functions, ∃ slot : Nat,
+        (∀ σ, Γ.st.scalar slot σ = bind.addr σ) ∧
+        (c.fields[slot]?).map (·.kind) = some FieldKind.scalar ∧
+        coreAvoids slot f.core) :
+    RuntimeBlockCorrectExt α bind c Γ κ calls yul ctx w st0 := by
+  let e : BindEnv I S X := ⟨α, bind⟩
+  have hfam :=
+    runtimeBlock_correct_ext [e] c Γ hΓ κ hκ calls hctor hS2 hlen hbound yul hyul
+      ctx w st0 hctx hR (RXs_singleton e w st0 |>.mpr hRX)
+      (BindEnvs.ignoresLocal_singleton e hign)
+      (BindEnvs.neSelf_singleton e ctx.self w.self hBindNe)
+      (BindEnvs.conforms_singleton e ctx.self w.self calls hconf)
+      (BindEnvs.sameAbs_singleton e) (BindEnvs.orthogonal_singleton e)
+      (BindEnvs.addrInj_singleton e w.self)
+      (BindEnvs.lookupWF_singleton hBind)
+      (fun f hf => BindEnvs.avoids_singleton (hslot f hf))
+  intro st' o hrun
+  obtain ⟨fo, hconcl⟩ := hfam st' o hrun
+  refine ⟨fo, ?_⟩
+  cases hsel : selectedFn c st0.env.calldata with
+  | none =>
+    simp only [hsel] at hconcl ⊢
+    exact hconcl
+  | some f =>
+    simp only [hsel] at hconcl ⊢
+    cases htx : Tx.run (Core.denote Γ f.core (decodeArgs f st0.env.calldata).reverse)
+        ctx { w with faults := fo } with
+    | ok p =>
+      rcases p with ⟨v, w'⟩
+      simp only [htx] at hconcl ⊢
+      obtain ⟨ho, hsucc, hR', hRX'⟩ := hconcl
+      exact ⟨ho, hsucc, hR', (RXs_singleton e w' _).mp hRX'⟩
+    | error err =>
+      simp only [htx] at hconcl ⊢
+      exact hconcl
 
 end Lsc.Compiler

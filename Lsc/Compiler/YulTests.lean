@@ -260,6 +260,19 @@ def bytecode_token_runtime_some : Bool := (compileRuntime Token.contract).isSome
 def bytecode_counter_deploy_some : Bool := (compileDeploy Counter.contract).isSome
 def bytecode_token_deploy_some : Bool := (compileDeploy Token.contract).isSome
 
+def token_ctor_yul : Option YBlock :=
+  Option.bind Token.contract.ctor (toYulCtor Token.contract)
+
+def token_ctor_has_codecopy : Bool :=
+  match token_ctor_yul with
+  | none => false
+  | some b => decide (1 < (String.splitOn (printYul b) "codecopy").length)
+
+def token_ctor_has_codesize : Bool :=
+  match token_ctor_yul with
+  | none => false
+  | some b => decide (1 < (String.splitOn (printYul b) "codesize").length)
+
 def compileStatus (c : ContractDef) : String :=
   match runtimeBlock c with
   | none => "runtimeBlock none"
@@ -297,3 +310,5 @@ open Lsc.Compiler.YulTests
 #guard bytecode_token_runtime_some
 #guard bytecode_counter_deploy_some
 #guard bytecode_token_deploy_some
+#guard token_ctor_has_codecopy
+#guard token_ctor_has_codesize
