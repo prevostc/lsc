@@ -89,7 +89,7 @@ theorem vault_shares_bound (w : World Storage Ext Event) (a : Address)
 
 @[reducible] def mkVaultSetup (hκ : KeccakSep Vault.contract evmKeccak)
     (rt : YBlock) (hrt : runtimeBlock Vault.contract = some rt)
-    (is : List Instr) (hcomp : compileBlock rt = some is) :
+    (is : List Instr) (hcomp : compileErased rt = some is) :
     TransportSetup Storage Ext Event Error where
   c := Vault.contract
   Γ := Vault.schema
@@ -279,7 +279,7 @@ theorem vault_asset_stable_core (fn : Fn) (args : spec.Args fn) (ctx : Ctx)
 @[reducible] def mkVaultBindings
     (hκ : KeccakSep Vault.contract evmKeccak)
     (rt : YBlock) (hrt : runtimeBlock Vault.contract = some rt)
-    (is : List Instr) (hcomp : compileBlock rt = some is)
+    (is : List Instr) (hcomp : compileErased rt = some is)
     (α : Abs IERC20.Ghost) (ext : ExternalCalls)
     (hCalls : CallsRealized ext) (htot : CallsTotal ext)
     (hign : α.ignoresLocal) (hF : α.ofState_foreign) :
@@ -296,6 +296,7 @@ theorem vault_asset_stable_core (fn : Fn) (args : spec.Args fn) (ctx : Ctx)
   horth := BindEnvs.orthogonal_singleton (vaultEnv α)
   hBind := BindEnvs.lookupWF_singleton (α := α) (bind := Vault.assetB) vault_bindWF
   hslot := fun f hf => BindEnvs.avoids_singleton (vault_hslot hf)
+  herase := hcomp
   bindAddr_stable := fun e he fn args ctx w => by
     have : e = vaultEnv α := List.mem_singleton.mp he
     subst this
@@ -363,7 +364,7 @@ theorem vault_bytecode_no_unauthorized_extraction
     (α : Abs IERC20.Ghost) (ext : ExternalCalls)
     (hCalls : CallsRealized ext) (htot : CallsTotal ext)
     (rt : YBlock) (hrt : runtimeBlock Vault.contract = some rt)
-    (is : List Instr) (hcomp : compileBlock rt = some is)
+    (is : List Instr) (hcomp : compileErased rt = some is)
     (hκ : KeccakSep Vault.contract evmKeccak)
     (hign : α.ignoresLocal) (hF : α.ofState_foreign)
     (self : Address) (calls : List EvmCall) (w : World Storage Ext Event)
@@ -404,7 +405,7 @@ theorem vault_bytecode_no_unauthorized_extraction_exists
     (α : Abs IERC20.Ghost) (ext : ExternalCalls)
     (hCalls : CallsRealized ext) (htot : CallsTotal ext)
     (rt : YBlock) (hrt : runtimeBlock Vault.contract = some rt)
-    (is : List Instr) (hcomp : compileBlock rt = some is)
+    (is : List Instr) (hcomp : compileErased rt = some is)
     (hκ : KeccakSep Vault.contract evmKeccak)
     (hign : α.ignoresLocal) (hF : α.ofState_foreign)
     (self : Address) (tr : List (Step spec)) (w : World Storage Ext Event)
@@ -449,7 +450,7 @@ theorem vault_bytecode_solvent
     (α : Abs IERC20.Ghost) (ext : ExternalCalls)
     (hCalls : CallsRealized ext) (htot : CallsTotal ext)
     (rt : YBlock) (hrt : runtimeBlock Vault.contract = some rt)
-    (is : List Instr) (hcomp : compileBlock rt = some is)
+    (is : List Instr) (hcomp : compileErased rt = some is)
     (hκ : KeccakSep Vault.contract evmKeccak)
     (hign : α.ignoresLocal) (hF : α.ofState_foreign)
     (self : Address) (calls : List EvmCall) (w : World Storage Ext Event)
@@ -486,7 +487,7 @@ theorem vault_bytecode_solvent_exists
     (α : Abs IERC20.Ghost) (ext : ExternalCalls)
     (hCalls : CallsRealized ext) (htot : CallsTotal ext)
     (rt : YBlock) (hrt : runtimeBlock Vault.contract = some rt)
-    (is : List Instr) (hcomp : compileBlock rt = some is)
+    (is : List Instr) (hcomp : compileErased rt = some is)
     (hκ : KeccakSep Vault.contract evmKeccak)
     (hign : α.ignoresLocal) (hF : α.ofState_foreign)
     (self : Address) (tr : List (Step spec)) (w : World Storage Ext Event)

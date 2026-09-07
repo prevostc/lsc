@@ -50,7 +50,7 @@ structure TransportSetup (S X E ε : Type) where
   rt : YBlock
   hrt : runtimeBlock c = some rt
   is : List Instr
-  hcomp : compileBlock rt = some is
+  hcomp : compileErased rt = some is
 
 /-- S2 binding family. One-binding contracts instantiate `bs := [⟨α, bind⟩]`. -/
 structure TransportBindings (S X E ε : Type) (I : Interface)
@@ -66,6 +66,8 @@ structure TransportBindings (S X E ε : Type) (I : Interface)
   horth : BindEnvs.orthogonal bs
   hBind : BindEnvs.lookupWF T.c T.Γ bs
   hslot : ∀ f ∈ T.c.functions, BindEnvs.avoids T.Γ T.c bs f.core
+  /-- S2 bytecode glue is still the erase path (Checkpoint 3 wires spill). -/
+  herase : compileErased T.rt = some T.is
   bindAddr_stable :
     ∀ e ∈ bs, ∀ (fn : T.spec.Fn) (args : T.spec.Args fn) (ctx : Ctx) (w : World S X E),
       e.bind.addr (worldAfter (T.spec.exec fn args) ctx w).self = e.bind.addr w.self

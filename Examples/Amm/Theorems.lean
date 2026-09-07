@@ -100,7 +100,7 @@ theorem amm_bytecode_no_unauthorized_extraction
     (α : Abs IERC20.Ghost) (ext : ExternalCalls)
     (hCalls : CallsRealized ext) (htot : CallsTotal ext)
     (rt : YBlock) (hrt : runtimeBlock Amm.contract = some rt)
-    (is : List Instr) (hcomp : compileBlock rt = some is)
+    (is : List Instr) (hcomp : compileErased rt = some is)
     (hκ : KeccakSep Amm.contract evmKeccak)
     (hign : α.ignoresLocal) (hF : α.ofState_foreign)
     (self : Address) (calls : List EvmCall) (w : World Storage Ext Event)

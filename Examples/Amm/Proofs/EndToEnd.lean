@@ -48,7 +48,7 @@ theorem amm_shares_bound (w : World Storage Ext Event) (a : Address)
 
 @[reducible] def mkAmmSetup (hκ : KeccakSep Amm.contract evmKeccak)
     (rt : YBlock) (hrt : runtimeBlock Amm.contract = some rt)
-    (is : List Instr) (hcomp : compileBlock rt = some is) :
+    (is : List Instr) (hcomp : compileErased rt = some is) :
     TransportSetup Storage Ext Event Error where
   c := Amm.contract
   Γ := Amm.schema
@@ -307,7 +307,7 @@ theorem amm_token1_stable_core (fn : Fn) (args : spec.Args fn) (ctx : Ctx)
 @[reducible] def mkAmmBindings
     (hκ : KeccakSep Amm.contract evmKeccak)
     (rt : YBlock) (hrt : runtimeBlock Amm.contract = some rt)
-    (is : List Instr) (hcomp : compileBlock rt = some is)
+    (is : List Instr) (hcomp : compileErased rt = some is)
     (α : Abs IERC20.Ghost) (ext : ExternalCalls)
     (hCalls : CallsRealized ext) (htot : CallsTotal ext)
     (hign : α.ignoresLocal) (hF : α.ofState_foreign) :
@@ -324,6 +324,7 @@ theorem amm_token1_stable_core (fn : Fn) (args : spec.Args fn) (ctx : Ctx)
   horth := amm_orthogonal α
   hBind := amm_lookupWF α
   hslot := fun f hf => amm_hslot α hf
+  herase := hcomp
   bindAddr_stable := fun e he fn args ctx w => by
     have : e = ammEnv0 α ∨ e = ammEnv1 α := by
       simpa [ammBs, ammEnv0, ammEnv1, List.mem_cons, List.mem_singleton] using he
@@ -391,7 +392,7 @@ theorem amm_bytecode_no_unauthorized_extraction
     (α : Abs IERC20.Ghost) (ext : ExternalCalls)
     (hCalls : CallsRealized ext) (htot : CallsTotal ext)
     (rt : YBlock) (hrt : runtimeBlock Amm.contract = some rt)
-    (is : List Instr) (hcomp : compileBlock rt = some is)
+    (is : List Instr) (hcomp : compileErased rt = some is)
     (hκ : KeccakSep Amm.contract evmKeccak)
     (hign : α.ignoresLocal) (hF : α.ofState_foreign)
     (self : Address) (calls : List EvmCall) (w : World Storage Ext Event)

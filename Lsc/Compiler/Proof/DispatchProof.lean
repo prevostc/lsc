@@ -86,21 +86,29 @@ theorem toNat_memoryGuardK :
     (BitVec.ofNat 256 memoryGuardK).toNat = memoryGuardK :=
   toNat_ofNat_of_lt memoryGuardK_lt_wordBound
 
-def stAfterGuard (st : EvmState) : EvmState :=
-  { touchMemory st 64 32 with
-    memory := storeWord st.memory 64 (BitVec.ofNat 256 memoryGuardK) }
+/-- The discarded-guard marker does not touch memory. -/
+def stAfterGuard (st : EvmState) : EvmState := st
 
 theorem memOnly_stAfterGuard (st : EvmState) : MemOnly st (stAfterGuard st) := by
-  have h64 := toNat_64
-  simpa [stAfterGuard, h64] using
-    memOnly_mstore st (BitVec.ofNat 256 64) (BitVec.ofNat 256 memoryGuardK)
+  simp [MemOnly, stAfterGuard]
+
+theorem memoryGuardK_ne_zero :
+    evm.litValue (.number memoryGuardK) ≠ Dialect.zero evm := by
+  simp [Dialect.zero, litValue, memoryGuardK]
+
+theorem exec_empty_block (funs : FunEnv evm) (V : VEnv evm) (st : EvmState) :
+    ExecStmt evm funs V st (.block []) V st .normal := by
+  have h : ExecStmt evm funs V st (.block []) (restore V V) st .normal :=
+    Step.block (D := evm) (by
+      change ExecStmts evm (hoist evm [] :: funs) V st [] V st .normal
+      exact Step.seqNil)
+  simpa [restore_self] using h
 
 theorem exec_memoryGuardErased (funs : FunEnv evm) (V : VEnv evm) (st : EvmState) :
     ExecStmt evm funs V st memoryGuardErased V (stAfterGuard st) .normal := by
-  refine Step.exprStmt (Step.builtinOk
-      (Step.argsCons (Step.argsCons Step.argsNil Step.lit) Step.lit) ?_)
-  simp [memoryGuardErased, step_mstore, evm_litValue_number, litValue_number,
-    toNat_64, toNat_memoryGuardK, stAfterGuard]
+  simpa [memoryGuardErased, stAfterGuard, lit] using
+    Step.ifTrue (D := evm) (Step.lit (D := evm)) memoryGuardK_ne_zero
+      (exec_empty_block funs V st)
 
 theorem hoist_erased_runtime (guard : YBlock) (sel : YExpr)
     (cases : List (YulSemantics.Literal × YBlock)) :

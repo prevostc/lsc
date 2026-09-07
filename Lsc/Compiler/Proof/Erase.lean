@@ -191,7 +191,7 @@ end
 theorem eraseMemoryGuardStmt_memoryGuard :
     eraseMemoryGuardStmt memoryGuardStmt = memoryGuardErased := by
   simp [memoryGuardStmt, memoryGuardErased, eraseMemoryGuardStmt, eraseMemoryGuardExpr,
-    eraseMemoryGuardArgs, bop, lit]
+    eraseMemoryGuardArgs, eraseMemoryGuardStmts, lit]
 
 theorem eraseMemoryGuardStmts_cons (s : YStmt) (rest : YBlock) :
     eraseMemoryGuardStmts (s :: rest) =

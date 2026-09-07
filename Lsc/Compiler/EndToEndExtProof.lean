@@ -38,7 +38,7 @@ theorem bytecode_call_correct_ext {I : Interface} {S X E ε : Type}
     (hlen : c.fields.length < wordBound)
     (hbound : ∀ f ∈ c.functions, 4 + 32 * f.params.length < wordBound)
     (rt : YBlock) (hrt : runtimeBlock c = some rt)
-    (is : List Instr) (hcomp : compileBlock rt = some is)
+    (is : List Instr) (hcomp : compileErased rt = some is)
     (ctx : Ctx) (w : World S X E) (yst0 : EvmState)
     (hctx : ctxRel ctx yst0) (hR : R c Γ evmKeccak w yst0)
     (hRX : RXs bs w yst0) (hign : BindEnvs.ignoresLocal bs)
@@ -62,8 +62,7 @@ theorem bytecode_call_correct_ext {I : Interface} {S X E ε : Type}
       yst0.env.immutable (litValue (.string key)) := by
     intro key
     simp [unpatchedImmutables, himm0]
-  have hce : compileErased rt = some is := by
-    simpa [compileBlock] using hcomp
+  have hce : compileErased rt = some is := hcomp
   have ⟨b, hb⟩ :=
     compile_correct (model := openModel calls) (externalsRealized_open hCalls)
       hce himm hrun
@@ -171,7 +170,7 @@ theorem evmCallRunExtAll_of_progress {I : Interface} {S X E ε : Type}
     (hlen : c.fields.length < wordBound)
     (hbound : ∀ f ∈ c.functions, 4 + 32 * f.params.length < wordBound)
     (rt : YBlock) (hrt : runtimeBlock c = some rt)
-    (is : List Instr) (hcomp : compileBlock rt = some is)
+    (is : List Instr) (hcomp : compileErased rt = some is)
     (ctx : Ctx) (w : World S X E) (yst0 : EvmState)
     (hctx : ctxRel ctx yst0) (hR : R c Γ evmKeccak w yst0)
     (hRX : RXs bs w yst0) (hign : BindEnvs.ignoresLocal bs)

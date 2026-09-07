@@ -302,7 +302,7 @@ theorem noExt_memoryGuardErased : noExtStmt memoryGuardErased = true := by
 
 theorem CallWorld_stAfterGuard (st : EvmState) :
     CallWorld.ofState (stAfterGuard st) = CallWorld.ofState st := by
-  simp [CallWorld.ofState, stAfterGuard, touchMemory]
+  simp [CallWorld.ofState, stAfterGuard]
 
 theorem RX_stAfterGuard {I : Interface} {S X E} {α : Abs I.Ghost}
     {b : Binding I S X} {w : World S X E} {st : EvmState}
@@ -323,7 +323,7 @@ theorem CallWorld_committed_guard (st0 st' : EvmState) :
     rcases p with ⟨k, bytes⟩
     by_cases hc : k.commits = true
     · simp [committedState, hhalt, hc]
-    · simp [committedState, hhalt, hc, CallWorld.ofState, stAfterGuard, touchMemory]
+    · simp [committedState, hhalt, hc, CallWorld.ofState, stAfterGuard]
 
 theorem R_committed_guard {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ} {w : World S X E} {st0 st' : EvmState}
@@ -459,7 +459,8 @@ theorem runtimeBlock_correct_ext {I : Interface} {S X E ε : Type}
     have hGinv := exec_memoryGuardErased_inv hfuns0 hG
     obtain ⟨_, hVG, hstA⟩ := hGinv
     subst hVG
-    subst hstA
+    have hstA0 : stA = st0 := by simpa [stAfterGuard] using hstA
+    rw [hstA0] at hrest
     set cd := st0.env.calldata
     have hcd := ctxRel_calldata_lt hctx
     have hMO := memOnly_stAfterGuard st0

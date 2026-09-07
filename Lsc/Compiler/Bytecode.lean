@@ -37,13 +37,17 @@ def compileSpilled (b : YBlock) : Option (List Instr) :=
   | some r => compile r.block
   | none => none
 
-/-- Erase-compile. Theorems use this; `compileRuntime` also tries `compileSpilled`. -/
+/-- Erase-compile, then powdr spill when erasure is rejected (`DUP17+`). -/
 abbrev compileBlock (b : YBlock) : Option (List Instr) :=
-  compileErased b
+  compileErased b <|> compileSpilled b
+
+theorem compileErased_to_compileBlock {b : YBlock} {is : List Instr}
+    (h : compileErased b = some is) : compileBlock b = some is := by
+  simp [compileBlock, h]
 
 def compileRuntime (c : ContractDef) : Option (List UInt8) := do
   let b ← runtimeBlock c
-  let is ← compileErased b <|> compileSpilled b
+  let is ← compileBlock b
   return assembleBytes is
 
 /-- Labelled Asm; spill fallback matches `compileRuntime`. -/

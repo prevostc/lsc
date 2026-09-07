@@ -14,7 +14,7 @@ open Lsc
 
 /-- Dispatcher for the S1 call-free fragment: size guard, selector `switch`, then
 the selected function's Yul (or `revert(0,0)`). The `Run` is of the
-memoryguard-erased block (`mstore(64, k)` then the dispatcher): the raw AST
+memoryguard-erased block (`if k {}` then the dispatcher): the raw AST
 contains a parser-level `memoryguard` call that is not a Yul function. -/
 def RuntimeBlockCorrectCallFree {S X E ε : Type} (c : ContractDef)
     (Γ : ContractSchema S X E ε) (κ : List UInt8 → U256)

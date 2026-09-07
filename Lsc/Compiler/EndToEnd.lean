@@ -8,6 +8,7 @@ import Lsc.Security.Trace
 import YulEvmCompiler.Correctness
 import YulEvmCompiler.LowerDefs
 import YulEvmCompiler.Optimizer.Implementation.MemorySpill
+import Lsc.Compiler.Proof.SpillPath
 
 set_option linter.unusedSimpArgs false
 set_option linter.unusedVariables false
@@ -332,7 +333,7 @@ theorem evmCallRun_of_correct {S X E ε : Type} (c : ContractDef)
     (hlen : c.fields.length < wordBound)
     (hbound : ∀ f ∈ c.functions, 4 + 32 * f.params.length < wordBound)
     (rt : YBlock) (hrt : runtimeBlock c = some rt)
-    (is : List Instr) (hcomp : compileBlock rt = some is)
+    (is : List Instr) (hcomp : compileErased rt = some is)
     (ctx : Ctx) (w : World S X E) (yst0 : EvmState)
     (hctx : ctxRel ctx yst0) (hR : R c Γ evmKeccak w yst0)
     (himm0 : ∀ k, yst0.env.immutable k = 0) :
@@ -351,9 +352,20 @@ theorem evmCallRun_of_correct {S X E ε : Type} (c : ContractDef)
       yst0.env.immutable (litValue (.string key)) := by
     intro key
     simp [unpatchedImmutables, himm0]
-  have hce : compileErased rt = some is := by
-    simpa [compileBlock] using hcomp
-  have ⟨b, hb⟩ := compile_correct (model := closedModel) ExternalsRealized.none hce himm hrun
+  have hcompB := compileErased_to_compileBlock hcomp
+  have ⟨b, hb0⟩ :=
+    compileRuntime_correct (model := closedModel) ExternalsRealized.none hcompB himm
+      (.erased hcomp hrun)
+  have hb : ∀ s0 : State,
+      FrameOK (assemble is) s0 → StateMatch yst0 s0 →
+      s0.pc = EvmSemantics.UInt256.ofNat 0 → s0.stack = [] →
+      b ≤ s0.gasAvailable →
+      ∃ s', Steps s0 s' ∧ s'.callStack = [] ∧ StateMatch yst' s' ∧
+        ((Outcome.halt = .normal ∧ s'.halt = .Success ∧ s'.hReturn = .empty) ∨
+         (Outcome.halt = .halt ∧ HaltedMatch yst' s')) := by
+    intro s0 hOK hM hpc hstk hgas
+    obtain ⟨s', ystF, hSteps, hcs, hSM, hOut, hF, _⟩ := hb0 s0 hOK hM hpc hstk hgas
+    exact ⟨s', hSteps, hcs, hF hcomp ▸ hSM, hF hcomp ▸ hOut⟩
   have hhalted : stObs.halted = yst'.halted := by
     rw [hobs, committedState_halted]
   refine ⟨stObs.storage, ?_, ?_⟩
@@ -517,7 +529,7 @@ theorem evmCallRun_fnCalldata {S X E ε : Type} (c : ContractDef)
     (hbound : ∀ f ∈ c.functions, 4 + 32 * f.params.length < wordBound)
     (hnd : selectorsNodup c = true)
     (rt : YBlock) (hrt : runtimeBlock c = some rt)
-    (is : List Instr) (hcomp : compileBlock rt = some is)
+    (is : List Instr) (hcomp : compileErased rt = some is)
     (ctx : Ctx) (f : FnDef) (args : List Nat) (w : World S X E)
     (σ : U256 → U256)
     (hf : f ∈ c.functions) (hk : f.kind ≠ .constructor)
@@ -561,7 +573,7 @@ theorem bytecode_trace_transport {S X E ε : Type} (c : ContractDef)
     (hbound : ∀ f ∈ c.functions, 4 + 32 * f.params.length < wordBound)
     (hnd : selectorsNodup c = true)
     (rt : YBlock) (hrt : runtimeBlock c = some rt)
-    (is : List Instr) (hcomp : compileBlock rt = some is)
+    (is : List Instr) (hcomp : compileErased rt = some is)
     (calls : List (Ctx × FnDef × List Nat))
     (w : World S X E) (σ : U256 → U256)
     (hs : storageRel c Γ evmKeccak w.self σ)

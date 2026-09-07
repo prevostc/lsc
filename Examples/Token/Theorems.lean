@@ -122,7 +122,7 @@ balances already sum to supply. This carries the spec-level anti-extraction
 fact down to the bytecode. -/
 theorem token_bytecode_no_unauthorized_extraction
     (rt : YBlock) (hrt : runtimeBlock Token.contract = some rt)
-    (is : List Instr) (hcomp : compileBlock rt = some is)
+    (is : List Instr) (hcomp : compileErased rt = some is)
     (hκ : KeccakSep Token.contract evmKeccak)
     (self : Address) (calls : List EvmCall) (w : World Storage Unit Event)
     (a : Address) (σ : U256 → U256)
@@ -145,7 +145,7 @@ is the matching fact for every halted run of arbitrary calldata. Encoded
 arguments must fit in a word; other assumptions match that theorem. -/
 theorem token_bytecode_no_unauthorized_extraction_exists
     (rt : YBlock) (hrt : runtimeBlock Token.contract = some rt)
-    (is : List Instr) (hcomp : compileBlock rt = some is)
+    (is : List Instr) (hcomp : compileErased rt = some is)
     (hκ : KeccakSep Token.contract evmKeccak)
     (self : Address) (tr : List (Step spec)) (w : World Storage Unit Event)
     (a : Address) (σ : U256 → U256)
@@ -169,7 +169,7 @@ and a full storage match, not a single balance slot. Same compiler and
 layout assumptions. -/
 theorem token_bytecode_solvent
     (rt : YBlock) (hrt : runtimeBlock Token.contract = some rt)
-    (is : List Instr) (hcomp : compileBlock rt = some is)
+    (is : List Instr) (hcomp : compileErased rt = some is)
     (hκ : KeccakSep Token.contract evmKeccak)
     (self : Address) (calls : List EvmCall) (w : World Storage Unit Event)
     (σ : U256 → U256)
@@ -190,7 +190,7 @@ calldata ends in a solvent Token world whose storage matches. Dual of
 than raw calldata; encoded arguments must fit in a word. -/
 theorem token_bytecode_solvent_exists
     (rt : YBlock) (hrt : runtimeBlock Token.contract = some rt)
-    (is : List Instr) (hcomp : compileBlock rt = some is)
+    (is : List Instr) (hcomp : compileErased rt = some is)
     (hκ : KeccakSep Token.contract evmKeccak)
     (self : Address) (tr : List (Step spec)) (w : World Storage Unit Event)
     (σ : U256 → U256)
@@ -212,7 +212,7 @@ post-constructor EVM state, because the plain EVM deploy theorem does not
 model trailing constructor arguments. -/
 theorem token_deploy_then_no_unauthorized_extraction
     (rt : YBlock) (hrt : runtimeBlock Token.contract = some rt)
-    (is : List Instr) (hcomp : compileBlock rt = some is)
+    (is : List Instr) (hcomp : compileErased rt = some is)
     (hκ : KeccakSep Token.contract evmKeccak)
     (self : Address) (calls : List EvmCall) (w : World Storage Unit Event)
     (a : Address) (st : EvmState)

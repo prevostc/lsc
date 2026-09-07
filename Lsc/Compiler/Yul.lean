@@ -111,11 +111,11 @@ def extCallGas : Nat := 1_000_000
 def abiPtr : Nat := 0x80
 def abiAfterSel : Nat := 0x84
 
-/-- Reserved memory size declared by `memoryguard`. Keccak scratch is `[0,64)`,
-the guard word is `[64,96)`, and ABI packing starts at `abiPtr`. A 3-arg
-`transferFrom` ends at 228; a 4-word `log1` ends at 256. `0x80` is the reserved
-*start*, not a valid `k`. Constructor is not guarded (`datacopy(0, …)` would
-smash scratch). -/
+/-- Reserved memory size declared by `memoryguard`. Keccak scratch is `[0,64)`
+and ABI packing starts at `abiPtr`. A 3-arg `transferFrom` ends at 228; a
+4-word `log1` ends at 256. The marker is a discarded truthiness test
+(`if memoryguard(k) {}`), so it does not write the free-memory pointer.
+Constructor is not guarded (`datacopy(0, …)` would smash scratch). -/
 def memoryGuardK : Nat := 256
 
 /-! ## AST helpers -/
@@ -697,15 +697,16 @@ def entryCase (c : ContractDef) (f : FnDef) : Option (YulSemantics.Literal × YB
   some (YulSemantics.Literal.number f.selector,
     [YulSemantics.Stmt.block guard, YulSemantics.Stmt.block body])
 
-/-- Solidity `mstore(64, memoryguard(k))`. powdr's `spillBlock?` collects any
-`.call "memoryguard" [lit k]`; this solc form is what `MemorySpillSelect` tests. -/
+/-- Discarded `memoryguard(k)` marker (`if memoryguard(k) {}`). powdr collects
+any `.call "memoryguard" [lit k]`; the dialect has no `pop`, and a truthiness
+test of the literal does not write memory, so erase (`k`) and resolve
+(`reserved`) leave the same machine state. -/
 def memoryGuardStmt : YStmt :=
-  .exprStmt (bop YulSemantics.EVM.Op.mstore
-    [lit 64, YulSemantics.Expr.call "memoryguard" [lit memoryGuardK]])
+  .cond (YulSemantics.Expr.call "memoryguard" [lit memoryGuardK]) []
 
-/-- `memoryguard(k)` erased to the literal `k` (ordinary interp / `compile` fallback). -/
+/-- `memoryguard(k)` erased to `if k {}` (256 ≠ 0, empty body). -/
 def memoryGuardErased : YStmt :=
-  .exprStmt (bop YulSemantics.EVM.Op.mstore [lit 64, lit memoryGuardK])
+  .cond (lit memoryGuardK) []
 
 /-- Dispatcher + every non-constructor function. Size-check is its own block; the
 selector is a nested expression so it does not occupy a live stack slot in the cases.
