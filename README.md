@@ -1,5 +1,12 @@
 # Provable DeFi Agent Setup v3
 
+Token and Vault anti-exploit theorems are proved through to EVM bytecode (Token
+S1 / call-free; Vault S2 / one external IERC20 binding):
+`token_bytecode_no_unauthorized_extraction` / `_solvent` and
+`vault_bytecode_no_unauthorized_extraction` / `_solvent`. AMM is spec-level only
+(`amm_no_unauthorized_extraction`, `amm_solvent`). Details:
+`docs/architecture/PROOF_CHAIN.md`.
+
 This layout distinguishes **persistent rules**, **one-shot prompts**, **reusable skills**, and **durable project knowledge**.
 
 ```text
@@ -25,6 +32,4 @@ docs/
 - `implement-and-prove` — reusable implementation/proof workflow.
 - `simplify-and-modularize` — reusable post-milestone cleanup workflow.
 - `docs/PROJECT_GOAL.md` — stable product intent.
-- `docs/architecture/` — concise architecture contracts produced by the review.
-
-The architecture review should produce the initial language, security, proof-chain, module-map, and TCB documents rather than assuming those decisions in advance.
+- `docs/architecture/` — concise architecture contracts (language, security, proof chain, TCB).

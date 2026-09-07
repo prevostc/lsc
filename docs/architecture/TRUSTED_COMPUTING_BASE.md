@@ -2,106 +2,107 @@
 
 What an end-to-end theorem of this project relies on beyond its own proof.
 
-## Trusted
+## What is proved
 
-- Lean 4 kernel and the standard axioms `propext`, `Classical.choice`, `Quot.sound`. No
-  `native_decide`, `bv_decide`, `sorry` or project axioms in the proof chain (they may appear in
-  tests only). CI pins the axiom footprint of every end-to-end theorem.
-- **The language specification**: `Tx` semantics, `Tx.call`, and `Core.denote`
-  (`Lsc/Lang/Tx.lean`, `Interface.lean`, `Core.lean`). Reviewed, not proved. A theorem about
-  `Tx.run f` means what these files say it means.
-- **EVM ground truth**: powdr `evm-semantics` (relational, conformance-tested with zero failures
-  against `ethereum/tests` GeneralStateTests and EEST Osaka) and powdr `yul-semantics` (adequacy
-  proved by its authors). Pinned commits.
-- **Deployment interface**: the layout relation `R` (storage slots, ABI encoding, error encoding)
-  in `Lsc/Compiler/Correctness.lean` defines how bytecode state is read back as contract state.
-- **Keccak**: powdr's keccak oracle (`targetKeccakOracle` / `evmKeccak` in the glue), assumed
-  injective on the storage keys used (`KeccakSep`); KeccakEngine assumed to agree with it for
-  the selectors computed at compile time.
+Spec → Core → Yul → EVM bytecode. Axiom footprint of the chain is `propext`,
+`Classical.choice`, `Quot.sound`, pinned by `#guard_msgs` in `Checks.lean`.
+
+- Token (S1, call-free): `token_bytecode_no_unauthorized_extraction` /
+  `token_bytecode_solvent` (`Lsc/Examples/TokenEndToEnd.lean`).
+- Vault (S2, one external binding): `vault_bytecode_no_unauthorized_extraction` /
+  `vault_bytecode_solvent` (`Lsc/Examples/VaultEndToEnd.lean`).
+- Glue: `bytecode_call_correct` (`EndToEnd.lean`), `bytecode_call_correct_ext`
+  (`EndToEndExt.lean`). AMM is spec-level only; Counter is compiler-level only.
+
+## Trusted foundations
+
+- Lean 4 kernel and the standard axioms above. No `native_decide`, `bv_decide`,
+  `sorry`, or project axioms in the chain.
+- Language spec: `Tx`, `Tx.call`, `Core.denote`, `Interface`
+  (`Lsc/Lang/{Tx,Interface,Core}.lean`). Reviewed, not proved.
+- powdr `evm-semantics` (relational, conformance-tested on GeneralStateTests and
+  EEST Osaka) and powdr `yul-semantics` (adequacy proved by its authors). Pinned
+  in `lake-manifest.json`.
+- Layout relation `R` (`Lsc/Compiler/Correctness.lean`): how bytecode storage is
+  read back as contract state.
+- Keccak: powdr `targetKeccakOracle` (`evmKeccak`), injective on the storage keys
+  used (`KeccakSep`); KeccakEngine agrees on compile-time selectors.
 - Ethereum clients implement the specification.
 
-## Hypotheses stated in every end-to-end theorem
+## Hypotheses of the end-to-end theorems
 
-- Sufficient gas for each call (powdr's gas bound is existential; `EvmCallRun` quantifies `∃ b`).
-- `FrameOK` on the assembled bytecode (fork = Osaka, not a precompile, empty call stack).
-- `compile rt = some is` and `runtimeBlock c = some rt`: the compiler accepted this program.
-- `KeccakSep c evmKeccak` with `evmKeccak := YulEvmCompiler.targetKeccakOracle`.
-- `WorldWF`, `CtxWF`, ABI args `< 2^256`, and (for Token balance reads) the address `< 2^256`.
-- S1 call-free glue uses a closed external model (`calls := .none`, `creates := .none`) and
-  `ExternalsRealized.none`. Unrestricted programs still need `ExternalsRealized` / `Conforms`
-  as below.
-- `α : Abs I.Ghost` maps an EVM/`CallWorld` snapshot at a bound address to `I.Ghost`. Foreign
-  token layout is not proved; `α` is a TCB parameter.
-- `Conforms I self addr calls α`: every **successful** Yul/EVM call from `self` to `addr`
-  decodes to some method of `I`, matches `I.model`, satisfies `decodeRet` (ABI-false / short
-  `boolOpt` cannot be a success), and `NoInterfere`. Failed responses (`success = false`) are
-  unconstrained.
-- `NoInterfere`: our storage and transient are unchanged, ETH balances are unchanged
-  (`value = 0`), other addresses' `α` are unchanged, and callee logs are not attributed to
-  `self`. Reentrancy is excluded by this hypothesis, **not** by an emitted `tload`/`tstore`
-  lock. A bytecode-level lock proof is not part of S2.
-- `Realizes`: inhabitation only; used solely by a forward `_exists` companion, **not** by the
-  backward `toYulFn_correct_ext`. Glue may set `faults n := ¬resp.success`.
-- `ExternalsRealized { calls, creates := .none, gas := .none }` / `CallsRealized` is a
-  hypothesis of `bytecode_call_correct_ext` (`CreatesRealized.none` and
-  `GasCallsRealized.noneOracle` are discharged). `ExternalModel.gas` must be set to `.none`
-  (class default is `.any`) so the dialect equals `yulD`.
-- **powdr direction (S2 M4):** `compile_correct` is forward only (`Yul Run → ∃ EVM Steps`).
-  There is no `compile_complete` / adequacy. Universality over halted matching EVM runs
-  is `CallsTotal` (EVM CALL always returns) + `yul_progress` (a Yul `Run` exists) +
-  `compile_correct` + `steps_halted_unique`, packaged as `EvmCallRunExtAll` /
-  `EvmTraceRunExtAll`. powdr adequacy is still not needed. The converse (every EVM
-  execution is a Yul run) remains a modelling gap.
-- Foreign state `ξ : Foreign` (`env.storageOf`) is threaded through S2 traces
-  (`mkEvmStateExt`, `EvmTraceRunExt` / `EvmTraceRunExtAll`). `α` reads a foreign
-  account through that account's `storageOf` slice (`ofState_foreign` / `evmForeign`).
-  Post-call `ξ'` is taken from the halted EVM state (`postForeign` / `accountForeign`;
-  `StateMatch.externalCode.storage` identifies it with Yul). Initial `hRX` at
-  `mkEvmStateExt [] σ ξ (rxCtx self)` plus `RX_mkEvmStateExt_ctx` /
-  `RX_mkEvmStateExt_ne` re-establish `RX` (token `accountKey` ≠ vault).
-  `Abs.ignoresLocal` is **foreign-address only**:
-  `accountKey (BitVec.ofNat 256 (a : Nat)) ≠ accountKey st.env.address → …`
-  (`RX`/`Conforms` only read the bound token; `hAssetNe` says that token is not the
-  executor). `ofState_proj` is unchanged (CallWorld copies `storageOf` for every
-  address). The non-vacuity witness `vaultAbsSolidity` reads Solidity ERC20 layout
-  from `evmForeign st (ofNat a)`: `balances[o]` at `mapSlot1 evmKeccak 0 o`,
-  `decimals` at scalar slot 1 (`IERC20.Ghost` has no allowances/`totalSupply`).
-  Runtime Vault steps do not write `Storage.asset` (field 5, `coreAvoids` +
-  `effects_frame_on`); this is proved, not a named hypothesis.
-- Fault oracle: backward `toYulFn_correct_ext` existentially chooses `fo` via
-  `composeFault ncalls (¬resp.success) rest` so Core and Yul agree on each external outcome;
-  security theorems remain `∀ w` and transport along the backward theorem. A failing `call`
-  reverts both sides with empty data and needs no `Conforms` success clause. Core failure
-  does not bump `ncalls`; a successful call's continuation sees indices `≥ ncalls + 1`.
-- `RelyEnv`: between two of our calls, `I.Rely self (α_b st) (α_b st')`.
-- Keccak: existing `KeccakSep`; `logsRel` ignores `address ≠ self`; top-level revert rollback
-  unchanged; constructor `decimals` is deploy, not the runtime S2 theorem.
-- Fork = Osaka.
-- Adversary model scope (`SECURITY_MODEL.md`): any call sequence from any addresses, `env` steps
-  under `RelyEnv`, `sender ≠ self`; excludes private-key compromise, block-producer ordering/MEV,
-  gas griefing of our execution, and token behaviours excluded by `Conforms`/`Rely`.
-- **Top-level revert rollback** (`EvmCallRun` / `EvmTraceRun`): if the compiled call halts
-  `.Reverted`, post-storage is the pre-storage. Raw powdr `Run`/`Steps` do **not** roll back;
-  Yul `RunCommitted`/`committedState` does. The EVM trace model restores storage on revert to
-  match `Tx`'s `Except.error`. This is a modelling assumption, not a lemma about `Steps`.
-- Each `mkEvmState` used in transport starts from empty logs (`R` tracks `.self` only across
-  a trace). Token `.self` is proved independent of the log.
-- `EvmCallRun` / `EvmTraceRunAll` quantify over matching start states (`FrameOK`,
-  `StateMatch`, `pc = 0`, empty stack) with gas at least the existential bound from
-  `compile_correct`. A matching `EvmStartOK` witness is part of `EvmTraceRunAll` so
-  post-storage uniqueness is not vacuous; `*_exists` theorems keep the `∀ s0` shape of
-  `compile_correct` (no constructed `State`). The converse (every EVM calldata sequence is
-  a Security trace) remains open.
+**(a) EVM frame.** `FrameOK` on the assembled bytecode (fork = Osaka, not a
+precompile, empty call stack). Gas is existential (`∃ b` from `compile_correct`).
+`EvmStartOK` is `FrameOK`, `StateMatch`, `pc = 0`, empty stack.
 
-## Untrusted (checked or irrelevant to soundness)
+**(b) Compiler acceptance.** `runtimeBlock c = some rt` and `compile rt = some is`.
 
-- The reifier (`Lsc/Lang/Reify.lean`): every run emits a kernel-checked `rfl` certificate.
-- `toYul` codegen: covered by `toYul_correct`.
-- powdr's compiler and optimisers: covered by `compile_correct` (runtime) /
-  `compileObject_correct` (deploy).
-- The differential harness (revm/anvil): defence in depth only.
+**(c) Well-formedness.** `WorldWF`, `CtxWF`, ABI args and addresses used as keys
+`< 2^256`, `KeccakSep`, field/param length bounds.
 
-## Removed from the TCB by the September 2026 review
+**(d) External calls (S2 only).** `α : Abs I.Ghost` maps an EVM snapshot at a bound
+address to `I.Ghost` (foreign layout is not proved in general). `Conforms`: every
+**successful** call from `self` to `addr` decodes to a method of `I`, matches
+`I.model`, passes `decodeRet`, and `NoInterfere`. Failed responses unconstrained.
+`NoInterfere`: our storage and transient unchanged, ETH balances unchanged
+(`value = 0`), other addresses' `α` unchanged, callee logs not attributed to
+`self`. Reentrancy is excluded by this hypothesis; no `tload`/`tstore` lock is
+emitted. `CallsRealized` (powdr inhabitation) and `CallsTotal` (EVM CALL always
+returns). `ignoresLocal` is foreign-address only. Foreign state `ξ` (`storageOf`)
+is threaded through S2 traces; post-call `ξ'` is read from the halted EVM state.
+S1 uses a closed model (`calls := .none`, `ExternalsRealized.none`) instead.
 
-Home-grown EVM machine (~1.4k lines), home-grown codegen/encoder (~1.3k lines), EvmYulLean and
-its C FFI (keccak, sha256), the two v2 axioms in `Lsc/Compile/Bytecode/EvmYulTrust.lean`.
+**(e) Fault oracle.** Backward S2 existentially chooses a fault oracle `fo` so
+Core and Yul agree on each external outcome. Security theorems remain `∀ w`.
+A failing `call` reverts both sides with empty data.
+
+**(f) Adversary scope** (`SECURITY_MODEL.md`): any call sequence from any
+addresses, `env` steps under `RelyEnv`, `sender ≠ self`. Excludes private-key
+compromise, block-producer ordering/MEV, gas griefing of our execution, and
+token behaviours excluded by `Conforms`/`Rely`.
+
+## Modelling assumptions
+
+Not derived from powdr:
+
+- **Top-level revert rollback.** If a compiled call halts `.Reverted`,
+  post-storage is the pre-storage. Raw powdr `Run`/`Steps` do not roll back; Yul
+  `RunCommitted` does. The EVM trace model restores storage on revert to match
+  `Tx`'s `Except.error`.
+- **Fresh per-call `EvmState`.** Each `mkEvmState` / `mkEvmStateExt` starts from
+  `EvmState.init` with empty logs (`R` tracks `.self` only across a trace).
+- **Universality.** `EvmCallRun` / `EvmTraceRunAll` (S1) and `EvmCallRunExtAll` /
+  `EvmTraceRunExtAll` (S2) quantify over **every halted matching EVM run of every
+  predicted call sequence** (ABI `fnCalldata` of a well-formed Security trace),
+  with an `EvmStartOK` witness so uniqueness is not vacuous. Arbitrary-calldata
+  universality is **not** present: unknown or malformed calldata is not identified
+  with a Security trace. powdr `compile_correct` is forward (`Yul Run → ∃ EVM
+  Steps`). Progress (`CallsTotal` + `yul_progress`) supplies a Yul run and
+  `steps_halted_unique` identifies every halted matching EVM run with it, so powdr
+  adequacy (every EVM execution is a Yul run) is not needed.
+
+## Not covered
+
+- Deploy / constructor: `compileObject_correct` starts from empty calldata;
+  constructor arguments are not linked. Runtime theorems exclude constructors.
+- AMM through the compiler (two bindings; needs multi-binding `toYulFn_correct_ext`).
+- Arbitrary-calldata universality (above).
+- Bytecode-level reentrancy lock (not emitted).
+- Core outside `S2Frag` (e.g. wrapping `letPure` other than `id`, `pair` returns,
+  other `require`/`revert`/`emit` arities).
+- Amount-typed compiler in general: bytecode glue is `Core.denote` (Nat). Vault
+  Amount ABI is identified via `deposit.core_denote` / `withdraw.core_denote`.
+
+## Non-vacuity
+
+- `vaultAbsSolidity`: a concrete `Abs` reading Solidity ERC20 layout
+  (`balances[o]` at `mapSlot1 evmKeccak 0 o`, `decimals` at slot 1).
+- `*_exists` companions keep a predicted `EvmTraceRun` / `EvmTraceRunExt`.
+- Differential harness (`scripts/difftest.sh`) is defence in depth, not a proof.
+
+## Untrusted (checked)
+
+Reifier certificates (`Lsc/Lang/Reify.lean`, kernel-checked `rfl`), `toYul`
+(`toYulFn_correct_callFree` / `toYulFn_correct_ext`), powdr's compiler
+(`compile_correct`; `compileObject_correct` unused by runtime theorems), and the
+harness. A former home-grown EVM/codegen/FFI stack was removed from this TCB.

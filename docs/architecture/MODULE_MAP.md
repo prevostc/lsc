@@ -6,23 +6,21 @@ Every module exposes an API (definitions, theorem statements, assumptions) and k
 ## `Lsc/Lang` — the language
 
 - `Tx.lean` — `Tx S X E ε`, `World S X E` (`self`, `ext : X`, `log`, `faults`, `ncalls`), `Ctx`,
-  `Err` (including `callFailed`), primitives, the `run_*` simp normal form. This file is the
-  language specification.
+  `Err` (including `callFailed`), primitives, the `run_*` simp normal form. Language specification.
 - `Interface.lean` — `Interface`, `Binding`, `Tx.call` / `Tx.callUnit`, `run_call`. Bindings are
-  explicit constants (no `bind` macro yet).
+  explicit constants.
 - `Amount.lean` — `Amount τ s` (structure), `Flag`, `Price`, rounding-explicit ops, `toNat` simp
   normal form, ℚ cast pack. External scales are opaque symbols; `rescale` / `Amount.one` take
-  runtime scale words. No IERC20 shim.
+  runtime scale words.
 - `Core.lean` — `Core` (`Op.call`, `Stmt.call`), `Core.denote` (Nat, compiler), `Core.denoteAWord`
   / `Core.denoteAUnit` (Amount surface certificates), `Core.effects` (including `calls`).
   `ContractSchema.ext` supplies `call : Nat → Nat → List Nat → Tx`.
-- `CoreProof.lean` — `effects_frame` (stated; proof is a remaining structural induction).
-- `Spec.lean` — `Entry`, `Spec` (a contract as a finite family of `Tx` entrypoints with their own
-  argument/return types). Language-level so that `Reify` can generate it without depending on
-  `Lsc/Security`.
-- `Reify.lean` — `lsc_schema`, `lsc_reify`, `lsc_contract` (MetaM, untrusted). Exports
-  `f.core`, `f.core_denote`, `C.contract`, `C.Fn`/`C.entry`/`C.spec` with `spec_exec_*` simp
-  lemmas, and `#lsc_obligations C` listing the theorem statements to prove.
+- `CoreProof.lean` — `Op.effects_frame` / `Stmt.effects_frame_on` / `effects_frame_on`
+  (successful denote leaves unwritten projections of `self` unchanged).
+- `Spec.lean` — `Entry`, `Spec` (a contract as a finite family of `Tx` entrypoints). Language-level
+  so `Reify` can generate it without depending on `Lsc/Security`.
+- `Reify.lean` — `lsc_schema`, `lsc_reify`, `lsc_contract` (MetaM, untrusted). Exports `f.core`,
+  `f.core_denote`, `C.contract`, `C.Fn`/`C.entry`/`C.spec`, and `#lsc_obligations C`.
 - `Contract.lean` — `ContractDef` (including `bindings : List BindingDef`), `FnDef`, ABI
   signatures, keccak selectors.
 
@@ -38,47 +36,76 @@ Depends only on `Lsc/Lang`.
 
 ## `Lsc/Stdlib` — verified components
 
-`ERC20.lean` (`Ghost`, `Method`, `model`, `Rely`, `IERC20`, `IERC20.Ref`, `Binding.*` aliases),
-`Vault.lean`, `AMM.lean`, `Math.lean`, `AccessControl.lean`: each ships a component and its
-proved invariants/laws.
+- `ERC20.lean` — IERC20 may-model: `Ghost` (`balances` + `decimals`), `Method`, `model`, `Rely`,
+  `IERC20`, `IERC20.Ref`, `Binding.*` aliases. No allowances/`totalSupply` in the ghost.
 
-## `Lsc/Compiler` — Core → Yul
+Vault and AMM live under `Lsc/Examples/` (protocol instances, not stdlib modules).
 
-- `Layout.lean` — storage slots, keccak mapping slots, ABI encoding, the relation `R`.
+## `Lsc/Lib`
+
+`Math.lean`, `Fixed.lean`, `Wad.lean`, `Ray.lean`, `Wei.lean`: arithmetic helpers used by
+Amount-typed examples.
+
+## `Lsc/Compiler` — Core → Yul → bytecode
+
 - `Yul.lean` — `toYulFn`, `runtimeBlock`, `deployObject` (powdr yul-semantics AST), `printYul`.
-- `YulExec.lean`, `YulTests.lean` — executable harness on powdr's Yul interpreter and the
-  differential tests against `Tx.run`.
+  Does not emit `tload`/`tstore`.
+- `YulExec.lean`, `YulTests.lean` — executable harness on powdr's Yul interpreter and differential
+  tests against `Tx.run`.
 - `Bytecode.lean` — `compileRuntime`/`compileDeploy` through powdr's verified compiler.
-- `Correctness.lean` — `R`, `logsRel`/`selfLogs`, `mkEvmState` / `mkEvmStateExt` (threads
-  foreign `ξ`), `RunCommittedExt`, `ToYulFnCorrectExt`, `RuntimeBlockCorrectExt`
-  (backward S2 statements). Proofs: `toYulFn_correct_ext` in `Proof/CoreExtSim.lean`;
-  `runtimeBlock_correct_ext` in `Proof/DispatchExt.lean`.
+- `Correctness.lean` — `R`, `logsRel`/`selfLogs`, `mkEvmState` / `mkEvmStateExt` (threads foreign
+  `ξ`), `RunCommittedExt`, `ToYulFnCorrectExt`, `RuntimeBlockCorrectExt`.
 - `Externals.lean` — `yulD`, `Abs`, `ofState_foreign`, `Foreign` / `evmForeign`, `NoInterfere`,
-  `decodeRet`, `RX`, `Conforms`, `Realizes`, `CallsTotal`, `composeFault`, `ExtAgrees`, `BindWF`.
-  Bytecode glue must use `gas := .none`. Never imported by `Lsc/Lang`.
-- `Proof/DispatchExt.lean` — S2 backward dispatcher `runtimeBlock_correct_ext`.
-- `Proof/ProgressCore.lean` — `yul_progress`: a Yul `Run` of compiled S2Frag runtime exists under `CallsTotal`.
-- `EndToEndExt.lean` — S2 glue: `openModel`, `EvmCallRunExt` / `EvmCallRunExtAll` (threads
-  `(σ, ξ)`), `EvmTraceRunExt` / `EvmTraceRunExtAll`, `yul_progress` transport,
-  `bytecode_call_correct_ext`, `evmCallRun_fnCalldata_ext`. `ξ'` from halted EVM
-  (`postForeign`). Universality uses `CallsTotal` + EVM determinism (no powdr adequacy).
-- `Proof/{Words,Memory,Env,Layout,Ops,OpsMore,OpsToken,OpsArith,OpsMulDiv,OpsCtx,Emit,Core,Counter,Token,Vault,Dispatch}.lean` — `CallFree`/`M1Frag` simulation (`load`/`addChecked`/`subChecked`/`mulChecked`/`divChecked`/`mulDiv*`/`pure`, ctx reads including `selfAddress`, `store`/`emit` 0/1/3/`require`, `ite`/`opTail` word/addr/flag return, params); `counter_correct` / `token_correct` / `runtimeBlock_correct_callFree`; Vault `vault_correct_ext` for all runtime functions (`S2Frag`, binding `Vault.assetB`).
-- `Proof/Descend.lean` — `NoExternalOps`, `step_descend` (inverse of `step_lift` for call-free Yul), `execStmts_append_inv`, `execStmts_det_evm` (`EVM.evm_deterministic`).
-- `Proof/CallState.lean` — `restore` after a scoped call block; `R`/`RX` after `finishCall`.
-- `Proof/CoreExt.lean` — S2Frag defs; call-free `toYulFn_correct_ext` moved to `CoreExtSim`.
-- `Proof/CoreExtSim.lean` — `step_ofState` / `ofState_noExt_halt` / `execStmts_normal_ofState`; `core_sim_ext_callFree`; `core_sim_ext` for `S2Frag` (no extra `hCallFree`); `toYulFn_correct_ext` with `hS2 : S2Frag f.core`.
-- `Proof/CallBwd.lean` — `extCall_block_bwd` / `op_sim_call_bwd` / `stmt_sim_call_bwd` restated with `∀ g, g w.ncalls = bit` and a `g`-independent `w0` on success (`w' = {w0 with faults := g}`).
-- `Proof/AbiCall.lean` — pack/`finishCall`/`decodeRet` lemmas for S2 (`readBytes` of selector+args, `mload` after `finishCall`, `boolOpt` bit algebra).
-- `Proof/Call.lean` — CALL inversion for scoped `emitExtCall` (`eval_call_inv`, `exec_let_call_inv`, selector `mstore`, `if iszero(ok)`, word ret-check). Does not switch S1 `core_sim`.
-- `Proof/Lift.lean` — `execStmts_lift` / `evalExpr_lift` from `evm` into `yulExt calls creates gas` (3-arg); `yulD` is the 1-arg S2 dialect in `Externals.lean`.
-- `EndToEnd.lean` — glue: `bytecode_call_correct`, `EvmCallRun` (unique halted post-storage),
-  `bytecode_trace_transport` / `bytecode_trace_all`. The only
-  compiler module that imports `Security`.
-- `Proof/Calldata.lean` — `decodeArgs_fnCalldata` / `selectedFn_fnCalldata`.
-- `Proof/EvmDet.lean` — `Halted`, `steps_halted_unique`.
+  `decodeRet`, `RX`, `Conforms`, `Realizes`, `CallsTotal`, `BindWF`. Bytecode glue must use
+  `gas := .none`. Never imported by `Lsc/Lang`.
+- `EndToEnd.lean` — S1 glue: `bytecode_call_correct`, `EvmCallRun`, `bytecode_trace_transport` /
+  `bytecode_trace_all`. Directly imports `Security`.
+- `EndToEndExt.lean` — S2 glue: `openModel`, `EvmCallRunExt` / `EvmCallRunExtAll`,
+  `EvmTraceRunExt` / `EvmTraceRunExtAll`, `bytecode_call_correct_ext`. Universality uses
+  `CallsTotal` + EVM determinism (no powdr adequacy). Imports `EndToEnd`, so it sees `Security`.
 
 Depends on `Lsc/Lang` (`Core`, `Interface`) and powdr; never on `Lsc/Security` except
-`EndToEnd.lean`.
+`EndToEnd.lean` (and `EndToEndExt.lean` through it).
+
+### `Lsc/Compiler/Proof`
+
+- `Words.lean` — word / identifier lemmas (`toNat_ofNat`, `identV` injectivity).
+- `Memory.lean` — aligned `mstore` / overlapping Panic stores.
+- `Env.lean` — environment / `Step` plumbing for `toYulFn_correct`.
+- `Layout.lean` — layout / `Inv` (scalar `sstore`, one-word `log1`).
+- `Maps.lean` — mapping slots: `mstore(0,k) mstore(32,f) keccak256(0,64)`.
+- `Maps2.lean` — nested mapping slots (inner hash to `[32]`, then `mstore(0, k₂)`).
+- `Emit.lean` — accumulator homomorphism for the Yul emitter.
+- `Ops.lean` — M1 `load` / `addChecked` / `store` / one-word `emit` / `stop`.
+- `OpsMore.lean` — `subChecked`, 0-arg `require`, `eq`/`ne`, one-word `return`.
+- `OpsToken.lean` — context words, 3-word `log1`, 0-arg `revert`.
+- `OpsArith.lean` — checked `mul` / `div` and the shared mul-overflow guard.
+- `OpsMulDiv.lean` — `mulDivDown` / `mulDivUp` simulation.
+- `OpsCtx.lean` — 0-arg `log1` (Vault `Paused` / `Unpaused`).
+- `Core.lean` — `M1Frag` / `CallFree` and `toYulFn_correct_callFree`.
+- `Counter.lean` — `toYulFn_correct_callFree` for every Counter runtime entrypoint;
+  `counter_correct`.
+- `Token.lean` — `toYulFn_correct_callFree` for every Token runtime entrypoint;
+  `token_correct`.
+- `Dispatch.lean` — `runtimeBlock_correct_callFree`; `counter_dispatch_correct` /
+  `token_dispatch_correct`.
+- `Calldata.lean` — `fnCalldata` recovers `decodeArgs` / `calldataSelector`.
+- `EvmDet.lean` — `Halted`, `steps_halted_unique`.
+- `Lift.lean` — lift `Step` / `Run` from `evm` into `evmWithExternal`.
+- `Descend.lean` — inverse of `step_lift` for call-free Yul; `execStmts_det_evm`.
+- `CoreExt.lean` — `S2Frag`; call-free backward setup (`hstab` / `haddr`).
+- `CallState.lean` — `R` / `RX` after `finishCall`; `restore` after a scoped call block.
+- `AbiCall.lean` — pack / `finishCall` / `decodeRet` lemmas for S2 (`boolOpt` bit algebra).
+- `Call.lean` — CALL inversion for scoped `emitExtCall`.
+- `CallFwd.lean` — forward packing / suffix helpers for scoped `emitExtCall`.
+- `CallBwd.lean` — backward `op_sim_call_bwd` / `stmt_sim_call_bwd`.
+- `Oracle.lean` — fault-oracle agreement and M1/`CallFree` independence from `faults`.
+- `OfState.lean` — `α.ofState` preservation along local `stepOp` / `noExt` `Step`.
+- `CoreExtSim.lean` — S2 `core_sim_ext` / `toYulFn_correct_ext` (`hS2 : S2Frag f.core`).
+- `DispatchExt.lean` — S2 backward dispatcher `runtimeBlock_correct_ext`.
+- `Progress.lean` — S2 Yul progress infrastructure under `CallsTotal`.
+- `ProgressCore.lean` — `yul_progress`: a halted `Run` of compiled S2Frag runtime exists.
+- `Vault.lean` — `vault_correct_ext` for every Vault runtime function (`S2Frag`, `Vault.assetB`).
 
 ## `Lsc/Tools`
 
@@ -87,10 +114,8 @@ vs anvil/revm on `compileRuntime` / `compileDeploy` bytecode).
 
 ## `Lsc/Examples`
 
-`Token`, `Vault`, `AMM`: contract source, proofs, end-to-end instance (`TokenEndToEnd.lean`,
-`VaultEndToEnd.lean`).
-
-## Deleted in S0
-
-`Lsc/` v2 (23k lines), `examples/` (v2), `Lsc3/Compile/*`, `Lsc3/EVM/*`, Counter certificates and
-`*EndToEnd.lean` `#eval` harnesses, `evmyul` dependency, v2 CI scripts.
+- `Counter.lean` — compiler S1 instance (`counter_correct`); no Security/bytecode theorem.
+- `Token*.lean` / `TokenEndToEnd.lean` — spec Security plus S1 bytecode theorems.
+- `Vault*.lean` / `VaultEndToEnd.lean` — spec Security plus S2 bytecode theorems.
+- `Amm*.lean` — spec-level Security only (`amm_no_unauthorized_extraction`, `amm_solvent`).
+- `AmountDemo.lean` — Amount-typed surface demo.
