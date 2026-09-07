@@ -6,8 +6,12 @@ import Lsc.Compiler.CoreDefs
 set_option linter.unusedVariables false
 
 /-!
-Yul constructors: Solidity CREATE passes args as a suffix of `env.code`, not
-calldata. EVM `bytecode_deploy_correct` cannot see those extra bytes.
+Yul constructors: CREATE passes arguments as a suffix of init code, not
+as calldata. The EVM deploy theorem cannot see those extra bytes.
+
+Shared assumptions: the constructor never CALLs out, has no `if` in the
+unsupported shape, returns nothing, and the compiler accepted it.
+Vault and AMM constructors that CALL `decimals` are out of scope.
 -/
 
 namespace Lsc.Compiler
@@ -15,10 +19,11 @@ namespace Lsc.Compiler
 open YulSemantics
 open YulSemantics.EVM
 
-/-- A call-free, `ite`-free unit constructor matches `Core.denote` when
-constructor args are the last `32n` bytes of `st0.env.code` (CREATE
-convention). Success falls through without `halt`; revert agrees on error
-bytes. Vault/AMM constructors that `CALL` are out of scope. -/
+/-- A call-free constructor that returns nothing matches the high-level
+model when its arguments are the last words of init code, as CREATE
+passes them. Success falls through without halting, so the deploy
+prologue can return the runtime bytecode; a revert agrees on error
+bytes. Vault and AMM constructors that CALL are out of scope. -/
 theorem constructor_correct {S X E ε : Type} (c : ContractDef)
     (Γ : ContractSchema S X E ε)
     (hΓ : Γ.st.Lawful c.fields) (κ : List UInt8 → U256) (hκ : KeccakSep c κ)
@@ -36,10 +41,11 @@ theorem constructor_correct {S X E ε : Type} (c : ContractDef)
   Proof.constructor_correct c Γ hΓ κ hκ f hk hret hM1 hNo hlen hbound hptr
     yul hyul ctx w st0 hctx hR hle hcode
 
-/-- Init code is the constructor body followed by `constructorCode "runtime"`.
-On success the body falls through (`.normal`) and the prologue returns the
-layout's `"runtime"` bytecode slice; on revert the body halts and storage
-is the pre-state. -/
+/-- Init code is the constructor body followed by the "return the runtime
+bytecode" prologue. On success the body falls through and the prologue
+returns the layout's runtime slice; on revert the body halts and storage
+is the pre-state. Same constructor restrictions as `constructor_correct`;
+this is the whole deploy object, not just the body. -/
 theorem deployBlock_correct {S X E ε : Type} (c : ContractDef)
     (Γ : ContractSchema S X E ε)
     (hΓ : Γ.st.Lawful c.fields) (κ : List UInt8 → U256) (hκ : KeccakSep c κ)

@@ -7,6 +7,7 @@ import Lsc.Compiler.YulExec
 import Lsc.Security.Trace
 import YulEvmCompiler.Correctness
 import YulEvmCompiler.LowerDefs
+import YulEvmCompiler.Optimizer.Implementation.MemorySpill
 
 set_option linter.unusedSimpArgs false
 set_option linter.unusedVariables false
@@ -331,7 +332,7 @@ theorem evmCallRun_of_correct {S X E ε : Type} (c : ContractDef)
     (hlen : c.fields.length < wordBound)
     (hbound : ∀ f ∈ c.functions, 4 + 32 * f.params.length < wordBound)
     (rt : YBlock) (hrt : runtimeBlock c = some rt)
-    (is : List Instr) (hcomp : compile rt = some is)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
     (ctx : Ctx) (w : World S X E) (yst0 : EvmState)
     (hctx : ctxRel ctx yst0) (hR : R c Γ evmKeccak w yst0)
     (himm0 : ∀ k, yst0.env.immutable k = 0) :
@@ -350,7 +351,9 @@ theorem evmCallRun_of_correct {S X E ε : Type} (c : ContractDef)
       yst0.env.immutable (litValue (.string key)) := by
     intro key
     simp [unpatchedImmutables, himm0]
-  have ⟨b, hb⟩ := compile_correct (model := closedModel) ExternalsRealized.none hcomp himm hrun
+  have hce : compileErased rt = some is := by
+    simpa [compileBlock] using hcomp
+  have ⟨b, hb⟩ := compile_correct (model := closedModel) ExternalsRealized.none hce himm hrun
   have hhalted : stObs.halted = yst'.halted := by
     rw [hobs, committedState_halted]
   refine ⟨stObs.storage, ?_, ?_⟩
@@ -514,7 +517,7 @@ theorem evmCallRun_fnCalldata {S X E ε : Type} (c : ContractDef)
     (hbound : ∀ f ∈ c.functions, 4 + 32 * f.params.length < wordBound)
     (hnd : selectorsNodup c = true)
     (rt : YBlock) (hrt : runtimeBlock c = some rt)
-    (is : List Instr) (hcomp : compile rt = some is)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
     (ctx : Ctx) (f : FnDef) (args : List Nat) (w : World S X E)
     (σ : U256 → U256)
     (hf : f ∈ c.functions) (hk : f.kind ≠ .constructor)
@@ -558,7 +561,7 @@ theorem bytecode_trace_transport {S X E ε : Type} (c : ContractDef)
     (hbound : ∀ f ∈ c.functions, 4 + 32 * f.params.length < wordBound)
     (hnd : selectorsNodup c = true)
     (rt : YBlock) (hrt : runtimeBlock c = some rt)
-    (is : List Instr) (hcomp : compile rt = some is)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
     (calls : List (Ctx × FnDef × List Nat))
     (w : World S X E) (σ : U256 → U256)
     (hs : storageRel c Γ evmKeccak w.self σ)

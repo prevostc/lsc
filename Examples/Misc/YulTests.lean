@@ -3,7 +3,10 @@ import Lsc.Compiler.YulExec
 import Lsc.Compiler.Bytecode
 import Examples.Counter.Contract
 import Examples.Token.Contract
+import Examples.Amm.Contract
+import Examples.Vault.Contract
 import YulEvmCompiler.Compile
+import YulEvmCompiler.Optimizer.Implementation.Normalization.Disambiguate.Decide
 
 set_option maxHeartbeats 8000000
 
@@ -277,12 +280,17 @@ def compileStatus (c : ContractDef) : String :=
   match runtimeBlock c with
   | none => "runtimeBlock none"
   | some b =>
-    match YulEvmCompiler.compileProgram b with
-    | none => "compileProgram none"
-    | some asm =>
-      let opt := YulEvmCompiler.optimizeAsm asm
-      if YulEvmCompiler.stackOK2 opt then "ok"
-      else "stackOK2 failed"
+    match compileErased b with
+    | some _ => "ok"
+    | none =>
+      match compileSpilled b with
+      | some _ => "spilled ok"
+      | none => "compileBlock none"
+
+def spillWords (c : ContractDef) : Option Nat :=
+  match runtimeBlock c with
+  | none => none
+  | some b => (spillRuntime? b).map fun r => r.layout.words
 
 end Examples.Misc.YulTests
 
@@ -305,6 +313,16 @@ open Examples.Misc.YulTests
 #eval (Lsc.Compiler.compileDeploy Counter.contract).map List.length
 #eval (Lsc.Compiler.compileRuntime Token.contract).map List.length
 #eval (Lsc.Compiler.compileDeploy Token.contract).map List.length
+#eval (Lsc.Compiler.compileRuntime Vault.contract).map List.length
+#eval (Lsc.Compiler.compileDeploy Vault.contract).map List.length
+#eval (Lsc.Compiler.compileRuntime Amm.contract).map List.length
+#eval (Lsc.Compiler.compileDeploy Amm.contract).map List.length
+#eval compileStatus Amm.contract
+#eval spillWords Amm.contract
+#eval (match Lsc.Compiler.runtimeBlock Amm.contract with
+  | none => false
+  | some b =>
+      YulEvmCompiler.Optimizer.Normalize.sourceValidB b)
 
 #guard bytecode_counter_runtime_some
 #guard bytecode_token_runtime_some
@@ -312,3 +330,5 @@ open Examples.Misc.YulTests
 #guard bytecode_token_deploy_some
 #guard token_ctor_has_codecopy
 #guard token_ctor_has_codesize
+#guard (Lsc.Compiler.compileRuntime Amm.contract).isSome
+#guard (Lsc.Compiler.compileDeploy Amm.contract).isSome

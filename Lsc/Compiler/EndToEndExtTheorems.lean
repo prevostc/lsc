@@ -4,8 +4,13 @@ import Lsc.Compiler.EndToEndExtProof
 set_option linter.unusedVariables false
 
 /-!
-S2 bytecode glue: compiled runtime that may `CALL`, related to Core under a
-fault oracle and to EVM `Steps` by powdr `compile_correct`.
+Bytecode for contracts that CALL out: compiled runtime related to the
+high-level model under some choice of which external calls fail, and
+to EVM steps by the pinned Yul-to-EVM compiler.
+
+Shared assumptions: bound tokens conform to their interface, are not
+this contract, and do not alias each other; the compiler accepted the
+contract; given enough gas. Vault and AMM instantiate this.
 -/
 
 namespace Lsc.Compiler
@@ -16,13 +21,13 @@ open YulSemantics.EVM
 open YulEvmCompiler
 open EvmSemantics.EVM (State Steps)
 
-/-- Every Yul `Run` of a compiled S2 runtime is predicted by `Core.denote`
-under some fault oracle, and powdr produces matching EVM `Steps`. Every
-halted matching EVM execution agrees on post-storage and on foreign
-account storage. Assumes the binding family (`Conforms`, `RXs`, address
-separation, `lookupWF` / `avoids`), `CallsRealized`, and that the compiler
-accepted the contract. This is the S2 analogue of `bytecode_call_correct`
-used by Vault and AMM. -/
+/-- Every Yul run of a compiled runtime that may CALL out is predicted by
+the high-level model under some choice of which external calls fail, and
+the pinned compiler produces matching EVM steps. Every halted matching
+EVM execution agrees on our storage and on the bound tokens' storage.
+Bound tokens must conform, must not be this contract, and must not
+alias each other. This is the Vault/AMM analogue of
+`bytecode_call_correct`. -/
 theorem bytecode_call_correct_ext {I : Interface} {S X E ε : Type}
     (bs : List (BindEnv I S X))
     (c : ContractDef) (Γ : ContractSchema S X E ε)
@@ -33,7 +38,7 @@ theorem bytecode_call_correct_ext {I : Interface} {S X E ε : Type}
     (hlen : c.fields.length < wordBound)
     (hbound : ∀ f ∈ c.functions, 4 + 32 * f.params.length < wordBound)
     (rt : YBlock) (hrt : runtimeBlock c = some rt)
-    (is : List Instr) (hcomp : compile rt = some is)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
     (ctx : Ctx) (w : World S X E) (yst0 : EvmState)
     (hctx : ctxRel ctx yst0) (hR : R c Γ evmKeccak w yst0)
     (hRX : RXs bs w yst0) (hign : BindEnvs.ignoresLocal bs)
@@ -49,11 +54,12 @@ theorem bytecode_call_correct_ext {I : Interface} {S X E ε : Type}
     hlen hbound rt hrt is hcomp ctx w yst0 hctx hR hRX hign hBindNe hconf
     hsame horth hinj hBind hslot himm0
 
-/-- `CallsTotal` produces a Yul `Run` (`yul_progress`). Combined with
-`bytecode_call_correct_ext` and EVM uniqueness of halted frames, every
-matching EVM execution has the unique post-storage (and foreign storage)
-Core predicts. Without a total CALL oracle the universal statement could
-hold vacuously because powdr `compile_correct` is only forward. -/
+/-- Given that every CALL returns some bytes, there is a matching EVM
+execution of compiled runtime whose post-storage (and bound-token
+storage) is the unique one the high-level model predicts. Without a
+total CALL oracle, "every matching EVM execution" could hold vacuously,
+because the Yul-to-EVM compiler only goes forward from a Yul run. Same
+conformance assumptions as `bytecode_call_correct_ext`. -/
 theorem evmCallRunExtAll_of_progress {I : Interface} {S X E ε : Type}
     (bs : List (BindEnv I S X))
     (c : ContractDef) (Γ : ContractSchema S X E ε)
@@ -64,7 +70,7 @@ theorem evmCallRunExtAll_of_progress {I : Interface} {S X E ε : Type}
     (hlen : c.fields.length < wordBound)
     (hbound : ∀ f ∈ c.functions, 4 + 32 * f.params.length < wordBound)
     (rt : YBlock) (hrt : runtimeBlock c = some rt)
-    (is : List Instr) (hcomp : compile rt = some is)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
     (ctx : Ctx) (w : World S X E) (yst0 : EvmState)
     (hctx : ctxRel ctx yst0) (hR : R c Γ evmKeccak w yst0)
     (hRX : RXs bs w yst0) (hign : BindEnvs.ignoresLocal bs)

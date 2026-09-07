@@ -2,9 +2,12 @@ import Lsc.Compiler.EvmDetDefs
 import Lsc.Compiler.Proof.EvmDetProof
 
 /-!
-Determinism of halted EVM traces. The bytecode glue uses this so a security
-conclusion about "the" post-storage applies to every matching `Steps` run,
-not only the witness produced by powdr `compile_correct`.
+Halted EVM traces are deterministic. Bytecode security talks about "the"
+post-storage of a call; this theorem says every matching halted run
+agrees, not only the witness the Yul-to-EVM compiler produces.
+
+Out-of-gas is a halt, so the lemma still applies. It does not by itself
+say the program reached the Yul-predicted halt.
 -/
 
 namespace Lsc.Compiler
@@ -12,10 +15,10 @@ namespace Lsc.Compiler
 open EvmSemantics.EVM
 
 /-- Two halted EVM executions from the same start state end in the same
-state. `Step` is deterministic, and a done frame (`halt ≠ Running`, empty
-call stack) has no successor. Out-of-gas is a halt kind, so the lemma still
-applies; it does not by itself say the program reached the Yul-predicted
-halt — that direction is `compile_correct` plus progress. -/
+state. A done frame has no successor, so there is only one post-storage
+to talk about. Out-of-gas counts as a halt. This does not say the
+program reached the halt the high-level model predicted — that direction
+is the compiler theorem plus progress. -/
 theorem steps_halted_unique {s0 s1 s2 : State}
     (h1 : Steps s0 s1) (h2 : Steps s0 s2)
     (H1 : Halted s1) (H2 : Halted s2) : s1 = s2 :=

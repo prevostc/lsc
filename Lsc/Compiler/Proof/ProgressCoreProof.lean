@@ -1,5 +1,6 @@
 import Lsc.Compiler.Proof.Progress
 import Lsc.Compiler.Proof.CoreExtSimProof
+import YulEvmCompiler.Optimizer.Implementation.MemorySpill
 
 set_option linter.unusedSimpArgs false
 set_option linter.unusedVariables false
@@ -508,27 +509,41 @@ theorem yul_progress {I : Interface} {S X E ε : Type}
     (hconf : BindEnvs.conforms bs ctx.self w.self calls)
     (hBind : BindEnvs.lookupWF c Γ bs)
     (hslot : ∀ f ∈ c.functions, BindEnvs.avoids Γ c bs f.core) :
-    ∃ st' o, Run (yulD calls) yul st0 [] st' o := by
+    ∃ st' o, Run (yulD calls)
+      (YulEvmCompiler.Optimizer.MemorySpill.eraseMemoryGuardStmts yul) st0 [] st' o := by
   obtain ⟨_, cases, hmap, hy⟩ := runtimeBlock_inv hyul
+  obtain ⟨casesE, hmapE, hE⟩ := erase_runtimeBlock hyul
+  rw [show casesE = cases from Option.some.inj (hmapE.symm.trans hmap)] at hE
   subst hy
+  rw [hE]
   set cd := st0.env.calldata
   have hcd := ctxRel_calldata_lt hctx
-  have hhoist := hoist_yulD_of_evm (calls := calls)
-    (hoist_runtime (emitGuardLt {} 4).stmts
-      (bop Op.shr [lit 224, bop Op.calldataload [lit 0]]) cases)
+  set stA : EvmState := stAfterGuard st0
+  have hG : ExecStmt (yulD calls) [[]] [] st0 memoryGuardErased [] stA .normal :=
+    exec_memoryGuardErased_nils (calls := calls) (n := 1)
+  have hMO := memOnly_stAfterGuard st0
+  have hctxA := ctxRel_memOnly hctx hMO
+  have hRA := R_memOnly hR hMO
+  have hcdA : stA.env.calldata = cd := by
+    rcases hMO with ⟨_, _, _, _, _, _, _, _, _, hcd', _⟩
+    exact hcd'
+  have hhoist := hoist_erased_runtime_open (calls := calls) (emitGuardLt {} 4).stmts
+    (bop Op.shr [lit 224, bop Op.calldataload [lit 0]]) cases
   set stRev : EvmState :=
-    { touchMemory st0 0 0 with halted := some (.revert, []) }
-  have hselE := eval_selector_nils (calls := calls) (n := 1) (V := []) (st := st0)
+    { touchMemory stA 0 0 with halted := some (.revert, []) }
+  have hselE := eval_selector_nils (calls := calls) (n := 1) (V := []) (st := stA)
+  rw [hcdA] at hselE
   by_cases hshort : cd.length < 4
-  · have hguard := guardLt_halt_nils (calls := calls) (m := 2) (V := []) (st := st0)
-      hcd four_lt_wordBound hshort
+  · have hguard := guardLt_halt_nils (calls := calls) (m := 2) (V := []) (st := stA)
+      (by simpa [hcdA] using hcd) four_lt_wordBound (by simpa [hcdA] using hshort)
     have hblk := exec_block_halt_open (funs := [[]]) (V := [])
       (hoist_yulD_of_evm (hoist_guardLt 4)) hguard
     rw [restore_self_open] at hblk
-    exact ⟨stRev, .halt, run_of_execStmts_open hhoist (exec_head_halt_open hblk)⟩
+    exact ⟨stRev, .halt,
+      run_of_execStmts_open hhoist (exec_cons_normal_open hG (exec_head_halt_open hblk))⟩
   · have hge4 : 4 ≤ cd.length := Nat.le_of_not_gt hshort
-    have hguard := guardLt_ok_nils (calls := calls) (m := 2) (V := []) (st := st0)
-      hcd four_lt_wordBound hge4
+    have hguard := guardLt_ok_nils (calls := calls) (m := 2) (V := []) (st := stA)
+      (by simpa [hcdA] using hcd) four_lt_wordBound (by simpa [hcdA] using hge4)
     have hblk4 := exec_block_ok_open (funs := [[]]) (V := [])
       (hoist_yulD_of_evm (hoist_guardLt 4)) hguard
     rw [restore_self_open] at hblk4
@@ -542,8 +557,10 @@ theorem yul_progress {I : Interface} {S X E ε : Type}
         simpa [hfind] using hswM
       have hswStmt := switch_halt_nil_open (calls := calls) (funs := [[]])
         hselE hswEq (hoist_yulD_of_evm hoist_revert00)
-        (revert00_nils (calls := calls) (n := 2) (V := []) (st := st0))
-      exact ⟨stRev, .halt, run_of_execStmts_open hhoist (exec_pair_halt_open hblk4 hswStmt)⟩
+        (revert00_nils (calls := calls) (n := 2) (V := []) (st := stA))
+      exact ⟨stRev, .halt,
+        run_of_execStmts_open hhoist
+          (exec_cons_normal_open hG (exec_pair_halt_open hblk4 hswStmt))⟩
     | some f =>
       have hfmem : f ∈ c.functions := mem_of_find? hfind
       have hfb := hbound f hfmem
@@ -567,37 +584,41 @@ theorem yul_progress {I : Interface} {S X E ε : Type}
       have hcaseH : hoist (yulD calls) caseBody = [] :=
         hoist_yulD_of_evm (hoist_two_blocks _ _)
       by_cases hshortF : cd.length < 4 + 32 * f.params.length
-      · have hgF := guardLt_halt_nils (calls := calls) (m := 3) (V := []) (st := st0)
-          hcd hfb hshortF
+      · have hgF := guardLt_halt_nils (calls := calls) (m := 3) (V := []) (st := stA)
+          (by simpa [hcdA] using hcd) hfb (by simpa [hcdA] using hshortF)
         have hblkF := exec_block_halt_open (funs := [[], []]) (V := [])
           (hoist_yulD_of_evm (hoist_guardLt (4 + 32 * f.params.length))) hgF
         rw [restore_self_open] at hblkF
-        have hcase : ExecStmts (yulD calls) [[], []] [] st0 caseBody [] stRev .halt :=
+        have hcase : ExecStmts (yulD calls) [[], []] [] stA caseBody [] stRev .halt :=
           exec_head_halt_open hblkF
         have hswStmt := switch_halt_nil_open (calls := calls) (funs := [[]])
           hselE hswEq hcaseH hcase
-        exact ⟨stRev, .halt, run_of_execStmts_open hhoist (exec_pair_halt_open hblk4 hswStmt)⟩
+        exact ⟨stRev, .halt,
+          run_of_execStmts_open hhoist
+            (exec_cons_normal_open hG (exec_pair_halt_open hblk4 hswStmt))⟩
       · have hgeF : 4 + 32 * f.params.length ≤ cd.length := Nat.le_of_not_gt hshortF
-        have hgF := guardLt_ok_nils (calls := calls) (m := 3) (V := []) (st := st0)
-          hcd hfb hgeF
+        have hgF := guardLt_ok_nils (calls := calls) (m := 3) (V := []) (st := stA)
+          (by simpa [hcdA] using hcd) hfb (by simpa [hcdA] using hgeF)
         have hblkF := exec_block_ok_open (funs := [[], []]) (V := [])
           (hoist_yulD_of_evm (hoist_guardLt (4 + 32 * f.params.length))) hgF
         rw [restore_self_open] at hblkF
         have ⟨V', st', hexecB⟩ :=
           toYulFn_progress (I := I) bs hΓ hκ hlen htot f
             (hctor f hfmem) (hS2 f hfmem) (hslot f hfmem) (hbound f hfmem)
-            body hbody w st0 hctx hR hconf hBind (n := 3)
+            body hbody w stA hctxA hRA hconf hBind (n := 3)
         have hfH := hoist_yulD_of_evm (calls := calls) (toYulFn_hoist hbody (hctor f hfmem))
         have hbodyStmt :
-            ExecStmt (yulD calls) [[], []] [] st0 (.block body) [] st' .halt := by
+            ExecStmt (yulD calls) [[], []] [] stA (.block body) [] st' .halt := by
           have hb := exec_block_halt_open (funs := [[], []]) (V := []) hfH hexecB
           rw [restore_nil_any (D := yulD calls)] at hb
           exact hb
-        have hcase : ExecStmts (yulD calls) [[], []] [] st0 caseBody [] st' .halt :=
+        have hcase : ExecStmts (yulD calls) [[], []] [] stA caseBody [] st' .halt :=
           exec_pair_halt_open hblkF hbodyStmt
         have hswStmt := switch_halt_nil_open (calls := calls) (funs := [[]])
           hselE hswEq hcaseH hcase
-        exact ⟨st', .halt, run_of_execStmts_open hhoist (exec_pair_halt_open hblk4 hswStmt)⟩
+        exact ⟨st', .halt,
+          run_of_execStmts_open hhoist
+            (exec_cons_normal_open hG (exec_pair_halt_open hblk4 hswStmt))⟩
 
 end Proof
 

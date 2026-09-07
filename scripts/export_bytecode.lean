@@ -18,6 +18,7 @@ import Lsc.Compiler.Bytecode
 import Lsc.Compiler.Yul
 import YulEvmCompiler.Asm
 import YulEvmCompiler.Compile
+import YulEvmCompiler.Optimizer.Implementation.MemorySpill
 import Examples.Counter.Contract
 import Examples.Token.Contract
 import Examples.Amm.Contract
@@ -91,14 +92,15 @@ def runtimeArt (c : ContractDef) : RtArt :=
   | none => { hex := none, yul := "// runtimeBlock failed", asm := "// compileAsm failed\n" }
   | some b =>
     let yul := printYul b
-    match YulEvmCompiler.compileAsm b with
+    match compileAsmBlock b with
     | some asm =>
       { hex := (YulEvmCompiler.lowerProg YulEvmCompiler.unpatchedImmutables asm).map
           YulEvmCompiler.assembleBytes
       , yul
       , asm := Disasm.printAsmFile c asm }
     | none =>
-      match YulEvmCompiler.compileProgram b with
+      match YulEvmCompiler.compileProgram
+          (YulEvmCompiler.Optimizer.MemorySpill.eraseMemoryGuardStmts b) with
       | none =>
         { hex := none, yul
         , asm :=
@@ -318,6 +320,7 @@ def ammErr : Amm.Error → Nat
   | .InsufficientShares => 3
   | .InsufficientOutput => 4
   | .SameToken => 5
+  | .TransferFailed => 6
 
 def ammAddrs : List Nat := [0, 2]
 

@@ -1,6 +1,7 @@
 import Lsc.Compiler.EndToEnd
 import Lsc.Compiler.EvmDetDefs
 import Lsc.Compiler.Externals
+import YulEvmCompiler.Optimizer.Implementation.MemorySpill
 
 set_option linter.unusedVariables false
 
@@ -57,7 +58,8 @@ def BytecodeCallCorrectExt {I : Interface} {S X E ε : Type}
     (calls : ExternalCalls) (ctx : Ctx) (w : World S X E)
     (yst0 : EvmState) (rt : YBlock) (is : List Instr) : Prop :=
   ∀ (st' : EvmState) (o : Outcome),
-    Run (yulD calls) rt yst0 [] st' o →
+    Run (yulD calls) (YulEvmCompiler.Optimizer.MemorySpill.eraseMemoryGuardStmts rt)
+        yst0 [] st' o →
       EvmCallRunExt bs c Γ κ calls ctx w yst0 st' o ∧
       EvmCallRunξ is yst0 (committedState yst0 st').storage
         (evmForeign (committedState yst0 st'))

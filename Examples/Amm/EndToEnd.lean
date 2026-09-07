@@ -52,7 +52,7 @@ theorem amm_shares_bound (w : World Storage Ext Event) (a : Address)
 
 @[reducible] def mkAmmSetup (hκ : KeccakSep Amm.contract evmKeccak)
     (rt : YBlock) (hrt : runtimeBlock Amm.contract = some rt)
-    (is : List Instr) (hcomp : compile rt = some is) :
+    (is : List Instr) (hcomp : compileBlock rt = some is) :
     TransportSetup Storage Ext Event Error where
   c := Amm.contract
   Γ := Amm.schema
@@ -322,7 +322,7 @@ theorem amm_token1_stable_core (fn : Fn) (args : spec.Args fn) (ctx : Ctx)
 @[reducible] def mkAmmBindings
     (hκ : KeccakSep Amm.contract evmKeccak)
     (rt : YBlock) (hrt : runtimeBlock Amm.contract = some rt)
-    (is : List Instr) (hcomp : compile rt = some is)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
     (α : Abs IERC20.Ghost) (ext : ExternalCalls)
     (hCalls : CallsRealized ext) (htot : CallsTotal ext)
     (hign : α.ignoresLocal) (hF : α.ofState_foreign) :

@@ -3,9 +3,14 @@ import Lsc.Compiler.Correctness
 import Lsc.Compiler.Proof.CoreProof
 
 /-!
-S1 Core → Yul: a call-free function's compiled Yul block matches `Core.denote`
-under the layout relation `R`. This is the only compiler theorem this repo
-owns for the call-free fragment; Yul → EVM is powdr's `compile_correct`.
+Call-free Core to Yul: if the compiler accepted a runtime function that
+never CALLs out, running the emitted Yul has the same effect as the
+high-level model.
+
+This is the only Core-to-Yul theorem this repo owns for contracts like
+Counter and Token; Yul-to-EVM is the pinned compiler's theorem. Shared
+assumptions: lawful storage layout, keccak keys do not collide, and
+field and ABI lengths fit in a word. Constructors are excluded.
 -/
 
 namespace Lsc.Compiler
@@ -13,12 +18,12 @@ namespace Lsc.Compiler
 open YulSemantics
 open YulSemantics.EVM
 
-/-- If `f` is a runtime (non-constructor) call-free function and `toYulFn`
-succeeds, every `Core.denote` outcome is matched by a committed Yul `Run` of
-the emitted block: success agrees on return data and on storage/logs via `R`;
-a revert agrees on error bytes and rolls `R` back to the pre-state. Assumes
-the storage schema is lawful, keccak is injective on the keys this contract
-uses, and field/ABI lengths fit in a word. Counter and Token are instances. -/
+/-- If the compiler accepted a runtime function that never CALLs out, every
+high-level outcome is matched by a Yul run of the emitted block: a
+success agrees on return data, storage, and logs; a revert agrees on
+error bytes and rolls storage back. The function must not be a
+constructor. Counter and Token are instances; Vault and AMM need the
+external-call form. -/
 theorem toYulFn_correct_callFree {S X E ε : Type} (c : ContractDef)
     (Γ : ContractSchema S X E ε)
     (hΓ : Γ.st.Lawful c.fields) (κ : List UInt8 → U256) (hκ : KeccakSep c κ)

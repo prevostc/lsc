@@ -20,7 +20,7 @@ namespace Proof
 
 theorem token_bytecode_no_unauthorized_extraction
     (rt : YBlock) (hrt : runtimeBlock Token.contract = some rt)
-    (is : List Instr) (hcomp : compile rt = some is)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
     (hκ : KeccakSep Token.contract evmKeccak)
     (self : Address) (calls : List EvmCall) (w : World Storage Unit Event)
     (a : Address) (σ : U256 → U256)
@@ -49,7 +49,7 @@ theorem token_bytecode_no_unauthorized_extraction
 
 theorem token_bytecode_no_unauthorized_extraction_exists
     (rt : YBlock) (hrt : runtimeBlock Token.contract = some rt)
-    (is : List Instr) (hcomp : compile rt = some is)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
     (hκ : KeccakSep Token.contract evmKeccak)
     (self : Address) (tr : List (Step spec)) (w : World Storage Unit Event)
     (a : Address) (σ : U256 → U256)
@@ -82,7 +82,7 @@ theorem token_bytecode_no_unauthorized_extraction_exists
 
 theorem token_bytecode_solvent
     (rt : YBlock) (hrt : runtimeBlock Token.contract = some rt)
-    (is : List Instr) (hcomp : compile rt = some is)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
     (hκ : KeccakSep Token.contract evmKeccak)
     (self : Address) (calls : List EvmCall) (w : World Storage Unit Event)
     (σ : U256 → U256)
@@ -107,7 +107,7 @@ theorem token_bytecode_solvent
 
 theorem token_bytecode_solvent_exists
     (rt : YBlock) (hrt : runtimeBlock Token.contract = some rt)
-    (is : List Instr) (hcomp : compile rt = some is)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
     (hκ : KeccakSep Token.contract evmKeccak)
     (self : Address) (tr : List (Step spec)) (w : World Storage Unit Event)
     (σ : U256 → U256)
@@ -134,7 +134,7 @@ theorem token_bytecode_solvent_exists
 
 theorem token_deploy_then_no_unauthorized_extraction
     (rt : YBlock) (hrt : runtimeBlock Token.contract = some rt)
-    (is : List Instr) (hcomp : compile rt = some is)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
     (hκ : KeccakSep Token.contract evmKeccak)
     (self : Address) (calls : List EvmCall) (w : World Storage Unit Event)
     (a : Address) (st : EvmState)

@@ -5,12 +5,16 @@ import Lsc.Compiler.Proof.BindEnvs
 import Lsc.Compiler.Proof.CallFreeCongr
 
 /-!
-Public transport lemmas for example authors. Fill a `TransportSetup` (and
-for S2 a `TransportBindings`) from your contract, then apply these to move
-a Security fact onto compiled bytecode. `coreAvoids_not_write` and
-`BindEnvs.avoids_singleton` are imported from the binding-environment
-helpers so a bound token address that no entrypoint stores can be shown
-stable.
+Transport: move a high-level security fact onto compiled bytecode.
+Example authors fill in their contract and apply these lemmas.
+
+Call-free contracts (Token) get a full match between EVM storage and
+the high-level post-world. Contracts that CALL out (Vault, AMM) get a
+post-world under some choice of which external calls fail; bound token
+addresses that no entrypoint stores stay fixed.
+
+Shared assumptions: the compiler accepted the contract, storage keys
+do not collide, starting storage matches, callers are not the contract.
 -/
 
 namespace Lsc.Compiler
@@ -19,11 +23,13 @@ open Lsc Lsc.Security
 open YulSemantics.EVM
 open YulEvmCompiler
 
-/-- Given a `TransportSetup` for a call-free contract, every halted EVM run of
-an arbitrary calldata list decodes to a well-formed Security trace whose
-`Security.run` storage matches the final EVM storage. Dispatcher rejects
-(unknown selector / short calldata) are dropped from the trace. The starting
-world must have an empty log, matching how Yul `mkEvmState` starts. -/
+/-- Whatever sequence of calls an adversary sends to deployed call-free
+bytecode, the storage the EVM ends up with is exactly the storage the
+contract's high-level model predicts for the same calls; unknown
+selectors and short calldata are simply ignored. Callers must not be
+the contract itself; starting storage must match a high-level world
+with empty logs. This is the step that carries a Token-style security
+proof down to the bytecode. -/
 theorem transport_trace (T : TransportSetup S X E ε)
     (hcf : ∀ f ∈ T.c.functions, CallFree f.core)
     (hpc : ∀ (fn : T.spec.Fn) (args : T.spec.Args fn) (ctx : Ctx) (w w' : World S X E),
@@ -44,9 +50,10 @@ theorem transport_trace (T : TransportSetup S X E ε)
       WorldWF T.c T.Γ { run tr w with log := [] } :=
   Proof.transport_trace T hcf hpc self calls w σ σ' hs hlog hwf hWF hE
 
-/-- A call-free Core run's post-`self`/`ext` depend only on the pre-`self`/`ext`
-(not log or faults). This is `transport_trace`'s `hpc` hypothesis, free for
-every S1 contract. -/
+/-- A function that never CALLs out has post-storage and external ghosts
+that depend only on the pre-storage and pre-ghosts, not on logs or on
+which external calls would have failed. Transport uses this so it can
+ignore those extra world fields when matching EVM storage. -/
 theorem worldAfter_callFree_congr {S X E ε} {Γ : ContractSchema S X E ε} {t}
     (core : Core t) (hM1 : CallFree core) (env : List Nat) (ctx : Ctx)
     (w w' : World S X E) (hs : w.self = w'.self) (he : w.ext = w'.ext) :
@@ -61,9 +68,10 @@ theorem worldAfter_callFree_congr {S X E ε} {Γ : ContractSchema S X E ε} {t}
       (Lang.worldAfter (Core.denote Γ core env) ctx w').ext
   exact Proof.worldAfter_callFree_congr core hM1 env ctx w w' hs he
 
-/-- `hpc` for a `TransportSetup` whose every runtime function is call-free:
-Spec post-worlds agree on `self`/`ext` whenever the pre-worlds do, via
-`codec.core_exec` and `worldAfter_callFree_congr`. -/
+/-- Same independence of logs and faults as `worldAfter_callFree_congr`,
+stated at the contract's high-level entrypoints rather than the Core IR.
+Call-free contracts get this for free; it is the extra hypothesis
+`transport_trace` asks of the spec. -/
 theorem post_congr_callFree {S X E ε} (T : TransportSetup S X E ε)
     (hcf : ∀ f ∈ T.c.functions, CallFree f.core)
     (fn : T.spec.Fn) (args : T.spec.Args fn) (ctx : Ctx) (w w' : World S X E)
@@ -78,11 +86,11 @@ theorem post_congr_callFree {S X E ε} (T : TransportSetup S X E ε)
   exact worldAfter_callFree_congr (T.codec.fnDef fn).core
     (hcf _ (T.codec.mem fn)) (T.codec.encode fn args).reverse ctx w w' hs he
 
-/-- The converse direction of `transport_trace` for a call-free contract: a
-Security trace whose calls fit the ABI (`EncodeBounded`) has some EVM run of
-the encoded calldata whose final storage is `storageRel` of running that
-decoded trace. Use this when you start from a Security scenario and need a
-matching bytecode execution. -/
+/-- The converse of `transport_trace` for a call-free contract: a high-level
+call sequence whose arguments fit the ABI has some EVM execution of the
+encoded calldata whose final storage matches running that sequence.
+Use this when you start from a security scenario rather than raw
+calldata. -/
 theorem transport_exists (T : TransportSetup S X E ε)
     (hcf : ∀ f ∈ T.c.functions, CallFree f.core)
     (hpc : ∀ (fn : T.spec.Fn) (args : T.spec.Args fn) (ctx : Ctx) (w w' : World S X E),
@@ -104,11 +112,13 @@ theorem transport_exists (T : TransportSetup S X E ε)
 
 variable {I : Interface}
 
-/-- S2 analogue of `transport_trace`: each halted EVM call may `CALL` out, so
-the theorem also returns a post-world with `RXs` for the binding package and
-preserves the invariant and bound addresses. The post-world is the
-fault-oracle fold (a Core revert keeps storage) and need not equal
-`Security.run` when the EVM-chosen `fo` differs from `w.faults`. -/
+/-- Whatever sequence of calls an adversary sends to bytecode that CALLs
+out, there is a high-level post-world whose storage matches the EVM,
+whose bound-token ghosts match those accounts, and which still satisfies
+the protocol invariant; bound token addresses are unchanged. Unknown
+selectors are ignored. The post-world is chosen so Core and Yul agree on
+which external calls failed; it need not be the high-level run under the
+starting fault bits. Tokens must conform and must not be this contract. -/
 theorem transport_trace_ext (T : TransportSetup S X E ε)
     (Xpkg : TransportBindings S X E ε I T)
     (self : Address) (calls : List EvmCall)
@@ -141,11 +151,13 @@ theorem transport_trace_ext (T : TransportSetup S X E ε)
   Proof.transport_trace_ext T Xpkg self calls w σ ξ σ' ξ' hs hlog hwf hWF hRX
     hBindNe hconf hinj Inv hP hInvF hInvL hw hE
 
-/-- Lifts a Security `NoUnauthorizedDecrease` fact to EVM storage for an S2
-contract. After any halted calldata list, the claim of address `a` on the
-final bytecode state is at least the claim on the starting state, provided
-`a` was never authorised along the decoded trace and `Auth`/`Inv` ignore
-log and faults. This is the lemma Vault/AMM bytecode anti-extraction uses. -/
+/-- After any halted calldata list against bytecode that CALLs out, an
+account's protocol claim as stored on chain is no lower than it started,
+provided that account authorised no decoded call and the protocol
+never lowers a claim except when authorised. This is the lemma Vault
+and AMM bytecode anti-extraction use; unlike `transport_trace` it is
+about one account's claim, not the whole storage match. Tokens must
+conform. -/
 theorem transport_claim_ext (T : TransportSetup S X E ε)
     (Xpkg : TransportBindings S X E ε I T)
     (Inv : World S X E → Prop) (claim : Claim S) (Auth : AuthPred T.spec)
@@ -180,10 +192,12 @@ theorem transport_claim_ext (T : TransportSetup S X E ε)
   Proof.transport_claim_ext T Xpkg Inv claim Auth self a hN hP hInvF hInvL hAirr
     calls w σ ξ σ' ξ' hs hlog hwf hWF hRX hBindNe hconf hinj hA hw hE
 
-/-- Forward S2 existence: a well-formed Security trace that encodes into
-bounded calldata has some EVM run (including foreign storage `ξ`) whose
-post-world is related by `storageRel`/`RXs` and still satisfies `Inv`.
-Bound callee addresses are unchanged. -/
+/-- A well-formed high-level trace against a contract that CALLs out has
+some EVM execution of the encoded calldata whose post-storage and
+bound-token ghosts match a high-level world that still satisfies the
+invariant; bound token addresses are unchanged. Dual of
+`transport_trace_ext` when you start from a trace rather than raw
+calldata. -/
 theorem transport_exists_ext (T : TransportSetup S X E ε)
     (Xpkg : TransportBindings S X E ε I T)
     (Inv : World S X E → Prop)
@@ -213,10 +227,10 @@ theorem transport_exists_ext (T : TransportSetup S X E ε)
   Proof.transport_exists_ext T Xpkg Inv self hP hInvF hInvL tr w σ ξ hs hwf hb
     hW hw hRX hBindNe hconf hinj
 
-/-- Combines `transport_exists_ext` with claim monotonicity: encoding a
-Security trace and running it on the EVM cannot decrease `claim a` when `a`
-was unauthorised along `callsOf tr`. The `_exists` bytecode theorems for
-Vault use this. -/
+/-- Encoding a high-level trace and running it on bytecode that CALLs out
+cannot decrease an account's claim when that account authorised no call
+in the trace. Combines `transport_exists_ext` with claim monotonicity;
+Vault's `_exists` bytecode theorems use this. -/
 theorem transport_exists_claim_ext (T : TransportSetup S X E ε)
     (Xpkg : TransportBindings S X E ε I T)
     (Inv : World S X E → Prop) (claim : Claim S) (Auth : AuthPred T.spec)
@@ -249,9 +263,9 @@ theorem transport_exists_claim_ext (T : TransportSetup S X E ε)
   Proof.transport_exists_claim_ext T Xpkg Inv claim Auth self a hN hP hInvF hInvL
     hAirr tr w σ ξ hs hwf hb hW hw hA hRX hBindNe hconf hinj
 
-/-- Under `storageRel`, a scalar field's EVM word is the Lean scalar packed
-as a 256-bit word. Read a total-supply, owner, or bound-address slot off
-the bytecode state with this. -/
+/-- When EVM storage matches a high-level world, a scalar slot's EVM word
+is that world's field packed as a 256-bit word. Read total supply, owner,
+or a bound token address off the bytecode with this. -/
 theorem storageRel_scalar {S X E ε}
     {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ : List UInt8 → U256} {s : S} {σ : U256 → U256}
@@ -262,8 +276,9 @@ theorem storageRel_scalar {S X E ε}
     σ (BitVec.ofNat 256 slot) = BitVec.ofNat 256 (Γ.st.scalar slot s) :=
   Proof.storageRel_scalar hs hfd hkind
 
-/-- Same as `storageRel_scalar`, returning a `Nat` when the Lean value is
-known to fit in a word. Prefer this when comparing claims that are `Nat`. -/
+/-- Same as `storageRel_scalar`, returning a natural number when the stored
+value is known to fit in a word. Prefer this when comparing claims that
+are amounts, not raw words. -/
 theorem storageRel_scalar_toNat {S X E ε}
     {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ : List UInt8 → U256} {s : S} {σ : U256 → U256}
@@ -276,8 +291,9 @@ theorem storageRel_scalar_toNat {S X E ε}
     (σ (BitVec.ofNat 256 slot)).toNat = v :=
   Proof.storageRel_scalar_toNat hs hfd hkind hval hv
 
-/-- Under `storageRel`, a one-key mapping slot (`keccak` of slot and key) holds
-the Lean `map1` value. Token balances and Vault/AMM shares are `map1`s. -/
+/-- When EVM storage matches a high-level world, a one-key mapping slot
+(hashed slot and key) holds that world's mapping value. Token balances
+and Vault/AMM shares are this shape. -/
 theorem storageRel_map1 {S X E ε}
     {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ : List UInt8 → U256} {s : S} {σ : U256 → U256}
@@ -289,8 +305,9 @@ theorem storageRel_map1 {S X E ε}
     σ (mapSlot1 κ slot a) = BitVec.ofNat 256 (Γ.st.map1 slot s a) :=
   Proof.storageRel_map1 hs hfd hkind ha
 
-/-- `storageRel_map1` as a `Nat`, when the Lean mapping value fits in a word.
-Example authors use this to identify `claim a` with an EVM mapping slot. -/
+/-- Same as `storageRel_map1`, returning a natural number when the mapping
+value fits in a word. Example authors use this to identify an account's
+claim with an EVM mapping slot. -/
 theorem storageRel_map1_toNat {S X E ε}
     {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ : List UInt8 → U256} {s : S} {σ : U256 → U256}

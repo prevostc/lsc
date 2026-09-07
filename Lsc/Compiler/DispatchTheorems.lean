@@ -2,8 +2,13 @@ import Lsc.Compiler.DispatchDefs
 import Lsc.Compiler.Proof.DispatchProof
 
 /-!
-S1 ABI dispatcher: calldata size guard + 4-byte selector `switch`, then the
-selected function's Yul. Unknown selectors revert with empty data.
+Call-free ABI dispatcher: size guard, 4-byte selector, then the selected
+function's Yul. Unknown selectors revert with empty data and storage
+unchanged.
+
+This is the Yul-level statement that the call-free bytecode theorem
+lifts through the pinned Yul-to-EVM compiler. Every runtime function
+must never CALL out; none may be a constructor.
 -/
 
 namespace Lsc.Compiler
@@ -11,12 +16,11 @@ namespace Lsc.Compiler
 open YulSemantics
 open YulSemantics.EVM
 
-/-- A compiled call-free runtime block matches `Core.denote` of the selected
-function (or reverts like the Lean dispatcher on a bad selector / short
-calldata). Assumes every runtime function is `CallFree`, none is a
-constructor, and the usual lawful-layout / keccak-separation / word-bound
-hypotheses. This is the Yul-level statement that `bytecode_call_correct`
-lifts through powdr. -/
+/-- A compiled call-free runtime agrees with the high-level model on every
+calldata: a known selector runs the matching function; an unknown
+selector or short calldata reverts with storage unchanged. Every runtime
+function must never CALL out and must not be a constructor. This is the
+Yul dispatcher that `bytecode_call_correct` lifts to EVM bytecode. -/
 theorem runtimeBlock_correct_callFree {S X E ε : Type} (c : ContractDef)
     (Γ : ContractSchema S X E ε)
     (hΓ : Γ.st.Lawful c.fields) (κ : List UInt8 → U256) (hκ : KeccakSep c κ)

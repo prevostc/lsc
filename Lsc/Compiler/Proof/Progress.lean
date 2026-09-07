@@ -442,4 +442,29 @@ theorem stmt_call_progress {I : Interface} {S X E ε : Type}
     refine ⟨restore pre V3, st3, .normal, Step.seqCons hblk Step.seqNil,
       .inr ⟨rfl, hrest, ⟨hrest.symm ▸ rfl, henv, hR3, hctx3⟩⟩⟩
 
+/-! ## Memoryguard prefix on `yulD` -/
+
+theorem exec_memoryGuardErased_nils {calls : ExternalCalls} {n : Nat}
+    {V : VEnv evm} {st : EvmState} :
+    ExecStmt (yulD calls) (List.replicate n []) V st memoryGuardErased V
+      (stAfterGuard st) .normal := by
+  have h := execStmt_lift (calls := calls) .none .none
+    (exec_memoryGuardErased (List.replicate n []) V st)
+  rwa [funEnvCast_replicate_nil] at h
+
+theorem exec_cons_normal_open {calls : ExternalCalls}
+    {funs : FunEnv (yulD calls)} {V : VEnv (yulD calls)} {st : EvmState}
+    {s : YulSemantics.Stmt YOp} {V1 : VEnv (yulD calls)} {st1 : EvmState}
+    {rest : YBlock} {V' : VEnv (yulD calls)} {st' : EvmState} {o : Outcome}
+    (h1 : ExecStmt (yulD calls) funs V st s V1 st1 .normal)
+    (h2 : ExecStmts (yulD calls) funs V1 st1 rest V' st' o) :
+    ExecStmts (yulD calls) funs V st (s :: rest) V' st' o :=
+  Step.seqCons h1 h2
+
+theorem hoist_erased_runtime_open (calls : ExternalCalls) (guard : YBlock)
+    (sel : YExpr) (cases : List (YulSemantics.Literal × YBlock)) :
+    hoist (yulD calls) (memoryGuardErased ::
+      [.block guard, .switch sel cases (some [revert00])]) = [] :=
+  hoist_yulD_of_evm (hoist_erased_runtime guard sel cases)
+
 end Lsc.Compiler

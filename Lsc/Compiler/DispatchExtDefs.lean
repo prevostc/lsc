@@ -1,6 +1,7 @@
 import Lsc.Compiler.Correctness
 import Lsc.Compiler.Externals
 import Lsc.Compiler.Yul
+import YulEvmCompiler.Optimizer.Implementation.MemorySpill
 
 /-!
 S2 dispatcher conclusion: every Yul run of the runtime block is predicted by
@@ -19,7 +20,8 @@ def RuntimeBlockCorrectExts {I : Interface} {S X E ε : Type}
     (calls : ExternalCalls) (yul : YBlock) (ctx : Ctx) (w : World S X E)
     (st0 : EvmState) : Prop :=
   ∀ (st' : EvmState) (o : Outcome),
-    Run (yulD calls) yul st0 [] st' o →
+    Run (yulD calls) (YulEvmCompiler.Optimizer.MemorySpill.eraseMemoryGuardStmts yul)
+        st0 [] st' o →
       ∃ fo : Nat → Bool,
         let wfo : World S X E := { w with faults := fo }
         let stObs := committedState st0 st'

@@ -4,8 +4,14 @@ import Examples.Amm.EndToEndProof
 set_option linter.unusedVariables false
 
 /-!
-AMM bytecode security: LP share anti-extraction on the compiled S2 runtime
-with two IERC20 bindings.
+AMM on compiled runtime bytecode: Alice's LP share count in EVM
+storage cannot fall unless she removed liquidity.
+
+Two conforming ERC-20s at distinct addresses, neither the pool; the
+compiler accepted the contract; storage keys do not collide. Unknown
+selectors are ignored. There is no bytecode solvency theorem — coverage
+of pro-rata reserves stays at the spec. The constructor is out of
+scope.
 -/
 
 open Lsc Lsc.Compiler Lsc.Security Lsc.Stdlib Amm
@@ -16,17 +22,20 @@ open YulEvmCompiler (compile Instr)
 
 namespace Amm
 
-/-- Every halted EVM execution of a well-formed AMM call sequence, whose
-decoded Core trace never authorised `a`, does not decrease `a`'s LP share
-slot. Assumes `Inv`, `storageRel`, `Conforms` at both token addresses
-(`token0 ≠ token1`), `CallsRealized` / `CallsTotal`, and that the compiler
-accepted the contract. This is the S2 end-to-end theorem for two
-bindings. -/
+/-- Whatever sequence of calls an adversary sends to the deployed pool
+bytecode, Alice's LP share count in EVM storage never falls unless she
+herself called `removeLiquidity` in that sequence. Swaps and other users
+adding or removing liquidity cannot burn her shares; unknown selectors
+are ignored. Both tokens must behave like conforming ERC-20s, at
+distinct addresses different from the pool; the compiler must have
+accepted the contract; storage keys must not collide. This does not
+protect Alice against impermanent loss, and there is no bytecode
+solvency theorem — coverage of pro-rata reserves stays at the spec. -/
 theorem amm_bytecode_no_unauthorized_extraction
     (α : Abs IERC20.Ghost) (ext : ExternalCalls)
     (hCalls : CallsRealized ext) (htot : CallsTotal ext)
     (rt : YBlock) (hrt : runtimeBlock Amm.contract = some rt)
-    (is : List Instr) (hcomp : compile rt = some is)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
     (hκ : KeccakSep Amm.contract evmKeccak)
     (hign : α.ignoresLocal) (hF : α.ofState_foreign)
     (self : Address) (calls : List EvmCall) (w : World Storage Ext Event)

@@ -4,9 +4,13 @@ import YulEvmCompiler.ObjectCompile
 set_option linter.unusedVariables false
 
 /-!
-EVM deploy via powdr `compileObject_correct`. Init frames have
-`env.code = L.code` and empty calldata, so Solidity's appended constructor
-args are not in this model.
+EVM deploy of a compiled Yul object. Init frames have empty calldata and
+init code equal to the object's code, so Solidity's appended constructor
+arguments are not in this model.
+
+Use `constructor_correct` at Yul for CREATE with trailing args. Token's
+deploy-then-runtime theorem starts from a post-constructor state for
+that reason.
 -/
 
 namespace Lsc.Compiler
@@ -16,11 +20,12 @@ open YulSemantics.EVM
 open YulEvmCompiler
 open EvmSemantics.EVM (State Steps)
 
-/-- If the Yul object runs to `yst`/`out`, every matching EVM start state with
-enough gas has a `Steps` run to a halted frame matching `yst`. Returned bytes
-are the Yul halt payload, not `compileRuntime` (nested `"runtime"` subobjects
-are compiler artifacts). Does not cover CREATE with trailing constructor
-args — use `constructor_correct` at Yul for those. -/
+/-- If the compiled Yul object runs to a given halt, every matching EVM
+start state with enough gas has a halted run that matches it. Returned
+bytes are the Yul halt payload, not a nested "runtime" subobject.
+Does not cover CREATE with trailing constructor arguments — Token's
+constructor args live in that gap; use the Yul constructor theorem
+there. -/
 theorem bytecode_deploy_correct
     [model : ExternalModel] (hexternal : ExternalsRealized model)
     {o : Object YulSemantics.EVM.Op} {L : Layout}

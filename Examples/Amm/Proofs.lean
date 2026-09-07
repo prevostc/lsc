@@ -2,6 +2,7 @@ import Mathlib.Tactic.SplitIfs
 import Mathlib.Algebra.BigOperators.Group.Finset.Basic
 import Lsc.Security.Wealth
 import Examples.Amm.Contract
+import Stdlib.SafeERC20
 
 set_option linter.unusedSimpArgs false
 
@@ -326,7 +327,7 @@ theorem addLiquidity_ok (a0 : Amount TOKEN0 scale0) (a1 : Amount TOKEN1 scale1)
   by_cases hts : w.self.totalShares = 0
   · simp [hts, mintedShares] at haddS haddB hminted
     simp [hts, mintedShares, hadd0, hadd1, haddS, haddB]
-    unfold Tx.callUnit Tx.call
+    unfold Tx.call
     dsimp only [Tx.run]
     simp [token0B, token1B, IERC20.model_eq, hnf0, hx0, hnf1, hx1]
     simp [extAfterPull, addLiquidityPost, mintedShares, hts]
@@ -343,7 +344,7 @@ theorem addLiquidity_ok (a0 : Amount TOKEN0 scale0) (a1 : Amount TOKEN1 scale1)
           (pos_div_iff.mp hminted').2
         simp [mintedShares, hts, hle] at haddS haddB
         simp [hts, hr0, hr1, hr0n, hr1n, hm0, hm1, hle, hreq, hadd0, hadd1, haddS, haddB]
-        unfold Tx.callUnit Tx.call
+        unfold Tx.call
         dsimp only [Tx.run]
         simp [token0B, token1B, IERC20.model_eq, hnf0, hx0, hnf1, hx1]
         simp [extAfterPull, addLiquidityPost, mintedShares, hts, hle]
@@ -353,7 +354,7 @@ theorem addLiquidity_ok (a0 : Amount TOKEN0 scale0) (a1 : Amount TOKEN1 scale1)
           (pos_div_iff.mp hminted').2
         simp [mintedShares, hts, hle] at haddS haddB
         simp [hts, hr0, hr1, hr0n, hr1n, hm0, hm1, hle, hreq, hadd0, hadd1, haddS, haddB]
-        unfold Tx.callUnit Tx.call
+        unfold Tx.call
         dsimp only [Tx.run]
         simp [token0B, token1B, IERC20.model_eq, hnf0, hx0, hnf1, hx1]
         simp [extAfterPull, addLiquidityPost, mintedShares, hts, hle]
@@ -377,7 +378,7 @@ theorem addLiquidity_reverts_on_fault0 (a0 : Amount TOKEN0 scale0)
   by_cases hts : w.self.totalShares = 0
   · simp [hts, mintedShares] at haddS haddB hminted
     simp [hts, mintedShares, hadd0, hadd1, haddS, haddB]
-    unfold Tx.callUnit Tx.call; dsimp only [Tx.run]
+    unfold Tx.call; dsimp only [Tx.run]
     simp [hf0]
   · rcases hprod with h0 | ⟨hr0, hr1, hm0, hm1⟩
     · exact (hts h0).elim
@@ -392,7 +393,7 @@ theorem addLiquidity_reverts_on_fault0 (a0 : Amount TOKEN0 scale0)
           (pos_div_iff.mp hminted').2
         simp [mintedShares, hts, hle] at haddS haddB
         simp [hts, hr0, hr1, hr0n, hr1n, hm0, hm1, hle, hreq, hadd0, hadd1, haddS, haddB]
-        unfold Tx.callUnit Tx.call; dsimp only [Tx.run]
+        unfold Tx.call; dsimp only [Tx.run]
         simp [hf0]
       · have hminted' : 0 < a1.toNat * w.self.totalShares / w.self.reserve1 := by
           simpa [mintedShares, hts, hle] using hminted
@@ -400,7 +401,7 @@ theorem addLiquidity_reverts_on_fault0 (a0 : Amount TOKEN0 scale0)
           (pos_div_iff.mp hminted').2
         simp [mintedShares, hts, hle] at haddS haddB
         simp [hts, hr0, hr1, hr0n, hr1n, hm0, hm1, hle, hreq, hadd0, hadd1, haddS, haddB]
-        unfold Tx.callUnit Tx.call; dsimp only [Tx.run]
+        unfold Tx.call; dsimp only [Tx.run]
         simp [hf0]
 
 theorem addLiquidity_reverts_on_no_cover0 (a0 : Amount TOKEN0 scale0)
@@ -423,7 +424,7 @@ theorem addLiquidity_reverts_on_no_cover0 (a0 : Amount TOKEN0 scale0)
   by_cases hts : w.self.totalShares = 0
   · simp [hts, mintedShares] at haddS haddB hminted
     simp [hts, mintedShares, hadd0, hadd1, haddS, haddB]
-    unfold Tx.callUnit Tx.call; dsimp only [Tx.run]
+    unfold Tx.call; dsimp only [Tx.run]
     simp [token0B, IERC20.model_eq, hf0, model, hcov0]
   · rcases hprod with h0 | ⟨hr0, hr1, hm0, hm1⟩
     · exact (hts h0).elim
@@ -438,7 +439,7 @@ theorem addLiquidity_reverts_on_no_cover0 (a0 : Amount TOKEN0 scale0)
           (pos_div_iff.mp hminted').2
         simp [mintedShares, hts, hle] at haddS haddB
         simp [hts, hr0, hr1, hr0n, hr1n, hm0, hm1, hle, hreq, hadd0, hadd1, haddS, haddB]
-        unfold Tx.callUnit Tx.call; dsimp only [Tx.run]
+        unfold Tx.call; dsimp only [Tx.run]
         simp [token0B, IERC20.model_eq, hf0, model, hcov0]
       · have hminted' : 0 < a1.toNat * w.self.totalShares / w.self.reserve1 := by
           simpa [mintedShares, hts, hle] using hminted
@@ -446,7 +447,7 @@ theorem addLiquidity_reverts_on_no_cover0 (a0 : Amount TOKEN0 scale0)
           (pos_div_iff.mp hminted').2
         simp [mintedShares, hts, hle] at haddS haddB
         simp [hts, hr0, hr1, hr0n, hr1n, hm0, hm1, hle, hreq, hadd0, hadd1, haddS, haddB]
-        unfold Tx.callUnit Tx.call; dsimp only [Tx.run]
+        unfold Tx.call; dsimp only [Tx.run]
         simp [token0B, IERC20.model_eq, hf0, model, hcov0]
 
 theorem addLiquidity_reverts_on_fault1 (a0 : Amount TOKEN0 scale0)
@@ -472,7 +473,7 @@ theorem addLiquidity_reverts_on_fault1 (a0 : Amount TOKEN0 scale0)
   by_cases hts : w.self.totalShares = 0
   · simp [hts, mintedShares] at haddS haddB hminted
     simp [hts, mintedShares, hadd0, hadd1, haddS, haddB]
-    unfold Tx.callUnit Tx.call; dsimp only [Tx.run]
+    unfold Tx.call; dsimp only [Tx.run]
     simp [token0B, IERC20.model_eq, hf0, hx0]
     simp [hf1]
   · rcases hprod with h0 | ⟨hr0, hr1, hm0, hm1⟩
@@ -488,7 +489,7 @@ theorem addLiquidity_reverts_on_fault1 (a0 : Amount TOKEN0 scale0)
           (pos_div_iff.mp hminted').2
         simp [mintedShares, hts, hle] at haddS haddB
         simp [hts, hr0, hr1, hr0n, hr1n, hm0, hm1, hle, hreq, hadd0, hadd1, haddS, haddB]
-        unfold Tx.callUnit Tx.call; dsimp only [Tx.run]
+        unfold Tx.call; dsimp only [Tx.run]
         simp [token0B, IERC20.model_eq, hf0, hx0]
         simp [hf1]
       · have hminted' : 0 < a1.toNat * w.self.totalShares / w.self.reserve1 := by
@@ -497,7 +498,7 @@ theorem addLiquidity_reverts_on_fault1 (a0 : Amount TOKEN0 scale0)
           (pos_div_iff.mp hminted').2
         simp [mintedShares, hts, hle] at haddS haddB
         simp [hts, hr0, hr1, hr0n, hr1n, hm0, hm1, hle, hreq, hadd0, hadd1, haddS, haddB]
-        unfold Tx.callUnit Tx.call; dsimp only [Tx.run]
+        unfold Tx.call; dsimp only [Tx.run]
         simp [token0B, IERC20.model_eq, hf0, hx0]
         simp [hf1]
 
@@ -525,7 +526,7 @@ theorem addLiquidity_reverts_on_no_cover1 (a0 : Amount TOKEN0 scale0)
   by_cases hts : w.self.totalShares = 0
   · simp [hts, mintedShares] at haddS haddB hminted
     simp [hts, mintedShares, hadd0, hadd1, haddS, haddB]
-    unfold Tx.callUnit Tx.call; dsimp only [Tx.run]
+    unfold Tx.call; dsimp only [Tx.run]
     simp [token0B, IERC20.model_eq, hf0, hx0]
     simp [token1B, IERC20.model_eq, hf1, model, hcov1]
   · rcases hprod with h0 | ⟨hr0, hr1, hm0, hm1⟩
@@ -541,7 +542,7 @@ theorem addLiquidity_reverts_on_no_cover1 (a0 : Amount TOKEN0 scale0)
           (pos_div_iff.mp hminted').2
         simp [mintedShares, hts, hle] at haddS haddB
         simp [hts, hr0, hr1, hr0n, hr1n, hm0, hm1, hle, hreq, hadd0, hadd1, haddS, haddB]
-        unfold Tx.callUnit Tx.call; dsimp only [Tx.run]
+        unfold Tx.call; dsimp only [Tx.run]
         simp [token0B, IERC20.model_eq, hf0, hx0]
         simp [token1B, IERC20.model_eq, hf1, model, hcov1]
       · have hminted' : 0 < a1.toNat * w.self.totalShares / w.self.reserve1 := by
@@ -550,7 +551,7 @@ theorem addLiquidity_reverts_on_no_cover1 (a0 : Amount TOKEN0 scale0)
           (pos_div_iff.mp hminted').2
         simp [mintedShares, hts, hle] at haddS haddB
         simp [hts, hr0, hr1, hr0n, hr1n, hm0, hm1, hle, hreq, hadd0, hadd1, haddS, haddB]
-        unfold Tx.callUnit Tx.call; dsimp only [Tx.run]
+        unfold Tx.call; dsimp only [Tx.run]
         simp [token0B, IERC20.model_eq, hf0, hx0]
         simp [token1B, IERC20.model_eq, hf1, model, hcov1]
 
@@ -831,7 +832,7 @@ theorem removeLiquidity_ok (s : Amount SHARE shareScale) (h : RemoveOk w ctx s) 
   simp [removeLiquidity, hpos, hbal, Nat.ne_of_gt hts, hmul0, hmul1, redeemed]
     at hout0 hout1 hle0 hle1 hsLe hx0 hx1 ⊢
   simp [hts, hout0.2, hout1.2, hle0, hle1, hsLe]
-  unfold Tx.callUnit Tx.call
+  unfold Tx.call
   dsimp only [Tx.run]
   simp [token0B, token1B, IERC20.model_eq, hnf0, hx0]
   simp [hnf1, hx1, extAfterPush, removeLiquidityPost, redeemed]
@@ -896,7 +897,7 @@ theorem removeLiquidity_reverts_on_fault0 (s : Amount SHARE shareScale)
   simp [removeLiquidity, hpos, hbal, Nat.ne_of_gt hts, hmul0, hmul1, redeemed]
     at hout0 hout1 hle0 hle1 hsLe ⊢
   simp [hts, hout0.2, hout1.2, hle0, hle1, hsLe]
-  unfold Tx.callUnit Tx.call; dsimp only [Tx.run]
+  unfold Tx.call; dsimp only [Tx.run]
   simp [token0B, IERC20.model_eq, hf0]
 
 theorem removeLiquidity_reverts_on_no_cover0 (s : Amount SHARE shareScale)
@@ -915,7 +916,7 @@ theorem removeLiquidity_reverts_on_no_cover0 (s : Amount SHARE shareScale)
     at hout0 hout1 hle0 hle1 hsLe ⊢
   simp only [redeemed] at hcov0
   simp [hts, hout0.2, hout1.2, hle0, hle1, hsLe]
-  unfold Tx.callUnit Tx.call; dsimp only [Tx.run]
+  unfold Tx.call; dsimp only [Tx.run]
   simp [token0B, IERC20.model_eq, hf0, model, hcov0]
 
 theorem removeLiquidity_reverts_on_fault1 (s : Amount SHARE shareScale)
@@ -937,7 +938,7 @@ theorem removeLiquidity_reverts_on_fault1 (s : Amount SHARE shareScale)
   simp [removeLiquidity, hpos, hbal, Nat.ne_of_gt hts, hmul0, hmul1, redeemed]
     at hout0 hout1 hle0 hle1 hsLe hx0 ⊢
   simp [hts, hout0.2, hout1.2, hle0, hle1, hsLe]
-  unfold Tx.callUnit Tx.call; dsimp only [Tx.run]
+  unfold Tx.call; dsimp only [Tx.run]
   simp [token0B, IERC20.model_eq, hf0, hx0]
   simp [token1B, IERC20.model_eq, hf1]
 
@@ -962,7 +963,7 @@ theorem removeLiquidity_reverts_on_no_cover1 (s : Amount SHARE shareScale)
     at hout0 hout1 hle0 hle1 hsLe hx0 ⊢
   simp only [redeemed] at hcov1
   simp [hts, hout0.2, hout1.2, hle0, hle1, hsLe]
-  unfold Tx.callUnit Tx.call; dsimp only [Tx.run]
+  unfold Tx.call; dsimp only [Tx.run]
   simp [token0B, IERC20.model_eq, hf0, hx0]
   simp [token1B, IERC20.model_eq, hf1, model, hcov1]
 
@@ -1054,7 +1055,7 @@ theorem swap0for1_ok (dx : Amount TOKEN0 scale0) (minOut : Amount TOKEN1 scale1)
   simp only [amountOut] at hmin hout hout_le hxOut
   have hout' := pos_div_iff.mp hout
   simp [swap0for1, amountOut, hpos, hr0, hr1, hr0n, hden, hmul, hmin, hout'.1, hout'.2, hout_le]
-  unfold Tx.callUnit Tx.call
+  unfold Tx.call
   dsimp only [Tx.run]
   simp [token0B, token1B, IERC20.model_eq, hnf0, hxIn, hnf1, hxOut]
   simp [extAfterSwap0, swap0Post]
@@ -1086,7 +1087,7 @@ theorem swap1for0_ok (dx : Amount TOKEN1 scale1) (minOut : Amount TOKEN0 scale0)
   simp only [amountOut] at hmin hout hout_le hxOut
   have hout' := pos_div_iff.mp hout
   simp [swap1for0, amountOut, hpos, hr0, hr1, hr1n, hden, hmul, hmin, hout'.1, hout'.2, hout_le]
-  unfold Tx.callUnit Tx.call
+  unfold Tx.call
   dsimp only [Tx.run]
   simp [token0B, token1B, IERC20.model_eq, hnf0, hxIn, hnf1, hxOut]
   simp [extAfterSwap1, swap1Post]
@@ -1106,7 +1107,7 @@ theorem swap0for1_reverts_on_fault0 (dx : Amount TOKEN0 scale0)
   simp only [amountOut] at hmin hout hout_le
   have hout' := pos_div_iff.mp hout
   simp [swap0for1, amountOut, hpos, hr0, hr1, hr0n, hden, hmul, hmin, hout'.1, hout'.2, hout_le]
-  unfold Tx.callUnit Tx.call; dsimp only [Tx.run]
+  unfold Tx.call; dsimp only [Tx.run]
   simp [token0B, IERC20.model_eq, hf0]
 
 theorem swap0for1_reverts_on_no_cover_in (dx : Amount TOKEN0 scale0)
@@ -1125,7 +1126,7 @@ theorem swap0for1_reverts_on_no_cover_in (dx : Amount TOKEN0 scale0)
   simp only [amountOut] at hmin hout hout_le
   have hout' := pos_div_iff.mp hout
   simp [swap0for1, amountOut, hpos, hr0, hr1, hr0n, hden, hmul, hmin, hout'.1, hout'.2, hout_le]
-  unfold Tx.callUnit Tx.call; dsimp only [Tx.run]
+  unfold Tx.call; dsimp only [Tx.run]
   simp [token0B, IERC20.model_eq, hf0, model, hcovIn]
 
 theorem swap0for1_reverts_on_fault1 (dx : Amount TOKEN0 scale0)
@@ -1147,7 +1148,7 @@ theorem swap0for1_reverts_on_fault1 (dx : Amount TOKEN0 scale0)
   simp only [amountOut] at hmin hout hout_le
   have hout' := pos_div_iff.mp hout
   simp [swap0for1, amountOut, hpos, hr0, hr1, hr0n, hden, hmul, hmin, hout'.1, hout'.2, hout_le]
-  unfold Tx.callUnit Tx.call; dsimp only [Tx.run]
+  unfold Tx.call; dsimp only [Tx.run]
   simp [token0B, IERC20.model_eq, hf0, hxIn]
   simp [token1B, IERC20.model_eq, hf1]
 
@@ -1172,7 +1173,7 @@ theorem swap0for1_reverts_on_no_cover_out (dx : Amount TOKEN0 scale0)
   simp only [amountOut] at hmin hout hout_le hcovOut
   have hout' := pos_div_iff.mp hout
   simp [swap0for1, amountOut, hpos, hr0, hr1, hr0n, hden, hmul, hmin, hout'.1, hout'.2, hout_le]
-  unfold Tx.callUnit Tx.call; dsimp only [Tx.run]
+  unfold Tx.call; dsimp only [Tx.run]
   simp [token0B, IERC20.model_eq, hf0, hxIn]
   simp [token1B, IERC20.model_eq, hf1, model, hcovOut]
 
@@ -1191,7 +1192,7 @@ theorem swap1for0_reverts_on_fault0 (dx : Amount TOKEN1 scale1)
   simp only [amountOut] at hmin hout hout_le
   have hout' := pos_div_iff.mp hout
   simp [swap1for0, amountOut, hpos, hr0, hr1, hr1n, hden, hmul, hmin, hout'.1, hout'.2, hout_le]
-  unfold Tx.callUnit Tx.call; dsimp only [Tx.run]
+  unfold Tx.call; dsimp only [Tx.run]
   simp [token1B, IERC20.model_eq, hf0]
 
 theorem swap1for0_reverts_on_no_cover_in (dx : Amount TOKEN1 scale1)
@@ -1210,7 +1211,7 @@ theorem swap1for0_reverts_on_no_cover_in (dx : Amount TOKEN1 scale1)
   simp only [amountOut] at hmin hout hout_le
   have hout' := pos_div_iff.mp hout
   simp [swap1for0, amountOut, hpos, hr0, hr1, hr1n, hden, hmul, hmin, hout'.1, hout'.2, hout_le]
-  unfold Tx.callUnit Tx.call; dsimp only [Tx.run]
+  unfold Tx.call; dsimp only [Tx.run]
   simp [token1B, IERC20.model_eq, hf0, model, hcovIn]
 
 theorem swap1for0_reverts_on_fault1 (dx : Amount TOKEN1 scale1)
@@ -1232,7 +1233,7 @@ theorem swap1for0_reverts_on_fault1 (dx : Amount TOKEN1 scale1)
   simp only [amountOut] at hmin hout hout_le
   have hout' := pos_div_iff.mp hout
   simp [swap1for0, amountOut, hpos, hr0, hr1, hr1n, hden, hmul, hmin, hout'.1, hout'.2, hout_le]
-  unfold Tx.callUnit Tx.call; dsimp only [Tx.run]
+  unfold Tx.call; dsimp only [Tx.run]
   simp [token1B, IERC20.model_eq, hf0, hxIn]
   simp [token0B, IERC20.model_eq, hf1]
 
@@ -1257,7 +1258,7 @@ theorem swap1for0_reverts_on_no_cover_out (dx : Amount TOKEN1 scale1)
   simp only [amountOut] at hmin hout hout_le hcovOut
   have hout' := pos_div_iff.mp hout
   simp [swap1for0, amountOut, hpos, hr0, hr1, hr1n, hden, hmul, hmin, hout'.1, hout'.2, hout_le]
-  unfold Tx.callUnit Tx.call; dsimp only [Tx.run]
+  unfold Tx.call; dsimp only [Tx.run]
   simp [token1B, IERC20.model_eq, hf0, hxIn]
   simp [token0B, IERC20.model_eq, hf1, model, hcovOut]
 

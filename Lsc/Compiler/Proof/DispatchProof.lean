@@ -1,4 +1,5 @@
 import Lsc.Compiler.Proof.CoreProof
+import Lsc.Compiler.Proof.Erase
 import Lsc.Compiler.DispatchDefs
 import YulSemantics.Observation
 
@@ -76,6 +77,49 @@ theorem hoist_runtime (guard : YBlock) (sel : YExpr)
     (cases : List (YulSemantics.Literal × YBlock)) :
     hoist evm [.block guard, .switch sel cases (some [revert00])] = [] := by
   simp [hoist]
+
+theorem memoryGuardK_lt_wordBound : memoryGuardK < wordBound := by
+  unfold memoryGuardK wordBound
+  exact Nat.pow_lt_pow_right (by decide : (1 : Nat) < 2) (by decide : (8 : Nat) < 256)
+
+theorem toNat_memoryGuardK :
+    (BitVec.ofNat 256 memoryGuardK).toNat = memoryGuardK :=
+  toNat_ofNat_of_lt memoryGuardK_lt_wordBound
+
+def stAfterGuard (st : EvmState) : EvmState :=
+  { touchMemory st 64 32 with
+    memory := storeWord st.memory 64 (BitVec.ofNat 256 memoryGuardK) }
+
+theorem memOnly_stAfterGuard (st : EvmState) : MemOnly st (stAfterGuard st) := by
+  have h64 := toNat_64
+  simpa [stAfterGuard, h64] using
+    memOnly_mstore st (BitVec.ofNat 256 64) (BitVec.ofNat 256 memoryGuardK)
+
+theorem exec_memoryGuardErased (funs : FunEnv evm) (V : VEnv evm) (st : EvmState) :
+    ExecStmt evm funs V st memoryGuardErased V (stAfterGuard st) .normal := by
+  refine Step.exprStmt (Step.builtinOk
+      (Step.argsCons (Step.argsCons Step.argsNil Step.lit) Step.lit) ?_)
+  simp [memoryGuardErased, step_mstore, evm_litValue_number, litValue_number,
+    toNat_64, toNat_memoryGuardK, stAfterGuard]
+
+theorem hoist_erased_runtime (guard : YBlock) (sel : YExpr)
+    (cases : List (YulSemantics.Literal × YBlock)) :
+    hoist evm (memoryGuardErased ::
+      [.block guard, .switch sel cases (some [revert00])]) = [] := by
+  simp [hoist, memoryGuardErased]
+
+theorem exec_cons_normal {funs V st s V1 st1 rest V' st' o}
+    (h1 : ExecStmt evm funs V st s V1 st1 .normal)
+    (h2 : ExecStmts evm funs V1 st1 rest V' st' o) :
+    ExecStmts evm funs V st (s :: rest) V' st' o :=
+  Step.seqCons h1 h2
+
+def erasedRuntime (cases : List (YulSemantics.Literal × YBlock)) : YBlock :=
+  memoryGuardErased ::
+    [YulSemantics.Stmt.block (emitGuardLt {} 4).stmts,
+      YulSemantics.Stmt.switch
+        (bop Op.shr [lit 224, bop Op.calldataload [lit 0]])
+        cases (some [revert00])]
 
 theorem eval_calldatasize (funs : FunEnv evm) (V : VEnv evm) (st : EvmState) :
     EvalExpr evm funs V st (bop Op.calldatasize [])
@@ -311,38 +355,45 @@ theorem runtimeBlock_correct_callFree {S X E ε : Type} (c : ContractDef)
     RuntimeBlockCorrectCallFree c Γ κ yul ctx w st0 := by
   simp only [RuntimeBlockCorrectCallFree]
   obtain ⟨_, cases, hmap, hy⟩ := runtimeBlock_inv hyul
+  obtain ⟨casesE, hmapE, hE⟩ := erase_runtimeBlock hyul
+  rw [show casesE = cases from Option.some.inj (hmapE.symm.trans hmap)] at hE
   subst hy
+  rw [hE]
   set cd := st0.env.calldata
   have hcd := ctxRel_calldata_lt hctx
-  have hhoist := hoist_runtime (emitGuardLt {} 4).stmts
+  set stA : EvmState := stAfterGuard st0
+  have hG : ExecStmt evm [[]] [] st0 memoryGuardErased [] stA .normal :=
+    exec_memoryGuardErased [[]] [] st0
+  have hMO := memOnly_stAfterGuard st0
+  have hctxA := ctxRel_memOnly hctx hMO
+  have hRA := R_memOnly hR hMO
+  have hcdA : stA.env.calldata = cd := by
+    rcases hMO with ⟨_, _, _, _, _, _, _, _, _, hcd', _⟩
+    exact hcd'
+  have hhoist := hoist_erased_runtime (emitGuardLt {} 4).stmts
     (bop Op.shr [lit 224, bop Op.calldataload [lit 0]]) cases
   set stRev : EvmState :=
-    { touchMemory st0 0 0 with halted := some (.revert, []) }
+    { touchMemory stA 0 0 with halted := some (.revert, []) }
   have hhRev : stRev.halted = some (.revert, []) := rfl
-  have hselE := eval_selector (funs := [[]]) [] st0
+  have hselE := eval_selector (funs := [[]]) [] stA
+  rw [hcdA] at hselE
   by_cases hshort : cd.length < 4
   · have hnone : selectedFn c cd = none := selectedFn_none_of_short hshort
-    have hguard := guardLt_halt (funs := [[], []]) (V := []) (st := st0)
-      (n := 4) hcd four_lt_wordBound hshort
+    have hguard := guardLt_halt (funs := [[], []]) (V := []) (st := stA)
+      (n := 4) (by simpa [hcdA] using hcd) four_lt_wordBound (by simpa [hcdA] using hshort)
     have hblk := exec_block_halt (funs := [[]]) (V := []) (hoist_guardLt 4) hguard
     rw [restore_self] at hblk
     have hexec :
-        ExecStmts evm [[]] [] st0
-          [YulSemantics.Stmt.block (emitGuardLt {} 4).stmts,
-            YulSemantics.Stmt.switch
-              (bop Op.shr [lit 224, bop Op.calldataload [lit 0]])
-              cases (some [revert00])] [] stRev .halt :=
-      exec_head_halt hblk
-    have hRC := obs_revert (yul := [YulSemantics.Stmt.block (emitGuardLt {} 4).stmts,
-        YulSemantics.Stmt.switch
-          (bop Op.shr [lit 224, bop Op.calldataload [lit 0]])
-          cases (some [revert00])]) hR (run_of_exec hhoist hexec) hhRev
+        ExecStmts evm [[]] [] st0 (erasedRuntime cases) [] stRev .halt :=
+      exec_cons_normal hG (exec_head_halt hblk)
+    have hRC := obs_revert (yul := erasedRuntime cases) hR
+      (run_of_exec hhoist hexec) hhRev
     refine ⟨committedState st0 stRev, hRC.1, ?_⟩
     simp only [hnone]
     exact ⟨hRC.2.1, hRC.2.2⟩
   · have hge4 : 4 ≤ cd.length := Nat.le_of_not_gt hshort
-    have hguard := guardLt_ok (funs := [[], []]) (V := []) (st := st0)
-      (n := 4) hcd four_lt_wordBound hge4
+    have hguard := guardLt_ok (funs := [[], []]) (V := []) (st := stA)
+      (n := 4) (by simpa [hcdA] using hcd) four_lt_wordBound (by simpa [hcdA] using hge4)
     have hblk4 := exec_block_ok (funs := [[]]) (V := []) (hoist_guardLt 4) hguard
     rw [restore_self] at hblk4
     have hswM := selectSwitch_mapM (c := c) (sel := calldataSelector cd)
@@ -355,12 +406,10 @@ theorem runtimeBlock_correct_callFree {S X E ε : Type} (c : ContractDef)
           cases (some [revert00]) = [revert00] := by
         simpa [hfind] using hswM
       have hswStmt := switch_halt_nil hselE hswEq hoist_revert00
-        (revert00_exec [[], []] [] st0)
-      have hexec := exec_pair_halt hblk4 hswStmt
-      have hRC := obs_revert (yul := [YulSemantics.Stmt.block (emitGuardLt {} 4).stmts,
-          YulSemantics.Stmt.switch
-            (bop Op.shr [lit 224, bop Op.calldataload [lit 0]])
-            cases (some [revert00])]) hR (run_of_exec hhoist hexec) hhRev
+        (revert00_exec [[], []] [] stA)
+      have hexec := exec_cons_normal hG (exec_pair_halt hblk4 hswStmt)
+      have hRC := obs_revert (yul := erasedRuntime cases) hR
+        (run_of_exec hhoist hexec) hhRev
       refine ⟨committedState st0 stRev, hRC.1, ?_⟩
       simp only [hnone]
       exact ⟨hRC.2.1, hRC.2.2⟩
@@ -382,50 +431,50 @@ theorem runtimeBlock_correct_callFree {S X E ε : Type} (c : ContractDef)
       by_cases hshortF : cd.length < 4 + 32 * f.params.length
       · have hnone : selectedFn c cd = none := by
           simp [selectedFn, hshort, hfind, hshortF]
-        have hgF := guardLt_halt (funs := [[], [], []]) (V := []) (st := st0)
-          (n := 4 + 32 * f.params.length) hcd hfb hshortF
+        have hgF := guardLt_halt (funs := [[], [], []]) (V := []) (st := stA)
+          (n := 4 + 32 * f.params.length) (by simpa [hcdA] using hcd) hfb
+          (by simpa [hcdA] using hshortF)
         have hblkF := exec_block_halt (funs := [[], []]) (V := [])
           (hoist_guardLt (4 + 32 * f.params.length)) hgF
         rw [restore_self] at hblkF
-        have hcase : ExecStmts evm [[], []] [] st0 caseBody [] stRev .halt :=
+        have hcase : ExecStmts evm [[], []] [] stA caseBody [] stRev .halt :=
           exec_head_halt hblkF
         have hswStmt := switch_halt_nil hselE hswEq hcaseH hcase
-        have hexec := exec_pair_halt hblk4 hswStmt
-        have hRC := obs_revert (yul := [YulSemantics.Stmt.block (emitGuardLt {} 4).stmts,
-            YulSemantics.Stmt.switch
-              (bop Op.shr [lit 224, bop Op.calldataload [lit 0]])
-              cases (some [revert00])]) hR (run_of_exec hhoist hexec) hhRev
+        have hexec := exec_cons_normal hG (exec_pair_halt hblk4 hswStmt)
+        have hRC := obs_revert (yul := erasedRuntime cases) hR
+          (run_of_exec hhoist hexec) hhRev
         refine ⟨committedState st0 stRev, hRC.1, ?_⟩
         simp only [hnone]
         exact ⟨hRC.2.1, hRC.2.2⟩
       · have hsome : selectedFn c cd = some f := by
           simp [selectedFn, hshort, hfind, hshortF]
         have hgeF : 4 + 32 * f.params.length ≤ cd.length := Nat.le_of_not_gt hshortF
-        have hgF := guardLt_ok (funs := [[], [], []]) (V := []) (st := st0)
-          (n := 4 + 32 * f.params.length) hcd hfb hgeF
+        have hgF := guardLt_ok (funs := [[], [], []]) (V := []) (st := stA)
+          (n := 4 + 32 * f.params.length) (by simpa [hcdA] using hcd) hfb
+          (by simpa [hcdA] using hgeF)
         have hblkF := exec_block_ok (funs := [[], []]) (V := [])
           (hoist_guardLt (4 + 32 * f.params.length)) hgF
         rw [restore_self] at hblkF
         have hsim := toYulFn_execStmts_callFree (c := c) (Γ := Γ) hΓ κ hκ f
           (hctor f hfmem) (hcf f hfmem) hlen (hbound f hfmem) body hbody
-          ctx w st0 hctx hR [[], [], []]
+          ctx w stA hctxA hRA [[], [], []]
         have hfH := toYulFn_hoist hbody (hctor f hfmem)
         have hargs : cd = st0.env.calldata := rfl
-        simp only [cd] at hsim hsome
+        simp only [cd, hcdA] at hsim hsome
         cases hrun : Tx.run (Core.denote Γ f.core
             (decodeArgs f st0.env.calldata).reverse) ctx w with
         | ok p =>
-          simp only [hrun, except_ok_prod] at hsim
+          simp only [hrun, except_ok_prod, hcdA] at hsim
           obtain ⟨V', st', hexecB, hsucc, hR'⟩ := hsim
           have hbodyStmt :
-              ExecStmt evm [[], []] [] st0 (.block body) [] st' .halt := by
+              ExecStmt evm [[], []] [] stA (.block body) [] st' .halt := by
             have hb := exec_block_halt (funs := [[], []]) (V := []) hfH hexecB
             rw [restore_nil] at hb
             exact hb
-          have hcase : ExecStmts evm [[], []] [] st0 caseBody [] st' .halt :=
+          have hcase : ExecStmts evm [[], []] [] stA caseBody [] st' .halt :=
             exec_pair_halt hblkF hbodyStmt
           have hswStmt := switch_halt_nil hselE hswEq hcaseH hcase
-          have hexec := exec_pair_halt hblk4 hswStmt
+          have hexec := exec_cons_normal hG (exec_pair_halt hblk4 hswStmt)
           have hRun := run_of_exec hhoist hexec
           obtain ⟨k, bs, hh, hk⟩ := haltSuccess_commits hsucc
           refine ⟨st', ⟨st', hRun, (committedState_commit hh hk).symm⟩, ?_⟩
@@ -434,17 +483,17 @@ theorem runtimeBlock_correct_callFree {S X E ε : Type} (c : ContractDef)
           simp only [hrun, except_ok_prod]
           exact ⟨hsucc, hR'⟩
         | error err =>
-          simp only [hrun, except_error_prod] at hsim
+          simp only [hrun, except_error_prod, hcdA] at hsim
           obtain ⟨V', st', bytes, hexecB, hh, herr⟩ := hsim
           have hbodyStmt :
-              ExecStmt evm [[], []] [] st0 (.block body) [] st' .halt := by
+              ExecStmt evm [[], []] [] stA (.block body) [] st' .halt := by
             have hb := exec_block_halt (funs := [[], []]) (V := []) hfH hexecB
             rw [restore_nil] at hb
             exact hb
-          have hcase : ExecStmts evm [[], []] [] st0 caseBody [] st' .halt :=
+          have hcase : ExecStmts evm [[], []] [] stA caseBody [] st' .halt :=
             exec_pair_halt hblkF hbodyStmt
           have hswStmt := switch_halt_nil hselE hswEq hcaseH hcase
-          have hexec := exec_pair_halt hblk4 hswStmt
+          have hexec := exec_cons_normal hG (exec_pair_halt hblk4 hswStmt)
           have hRun := run_of_exec hhoist hexec
           refine ⟨committedState st0 st', ⟨st', hRun, rfl⟩, ?_⟩
           rw [hsome]

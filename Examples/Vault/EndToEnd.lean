@@ -97,7 +97,7 @@ theorem vault_shares_bound (w : World Storage Ext Event) (a : Address)
 
 @[reducible] def mkVaultSetup (hκ : KeccakSep Vault.contract evmKeccak)
     (rt : YBlock) (hrt : runtimeBlock Vault.contract = some rt)
-    (is : List Instr) (hcomp : compile rt = some is) :
+    (is : List Instr) (hcomp : compileBlock rt = some is) :
     TransportSetup Storage Ext Event Error where
   c := Vault.contract
   Γ := Vault.schema
@@ -310,7 +310,7 @@ theorem vault_asset_stable_core (fn : Fn) (args : spec.Args fn) (ctx : Ctx)
 @[reducible] def mkVaultBindings
     (hκ : KeccakSep Vault.contract evmKeccak)
     (rt : YBlock) (hrt : runtimeBlock Vault.contract = some rt)
-    (is : List Instr) (hcomp : compile rt = some is)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
     (α : Abs IERC20.Ghost) (ext : ExternalCalls)
     (hCalls : CallsRealized ext) (htot : CallsTotal ext)
     (hign : α.ignoresLocal) (hF : α.ofState_foreign) :

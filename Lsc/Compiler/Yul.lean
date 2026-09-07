@@ -107,6 +107,17 @@ def keccakOf (bs : List UInt8) : YulSemantics.EVM.U256 :=
 /-- Gas stipend for an external CALL (literal; never `gas()`). -/
 def extCallGas : Nat := 1_000_000
 
+/-- ABI packing / CALL in-out / panic / custom error / `log1` / returns start here. -/
+def abiPtr : Nat := 0x80
+def abiAfterSel : Nat := 0x84
+
+/-- Reserved memory size declared by `memoryguard`. Keccak scratch is `[0,64)`,
+the guard word is `[64,96)`, and ABI packing starts at `abiPtr`. A 3-arg
+`transferFrom` ends at 228; a 4-word `log1` ends at 256. `0x80` is the reserved
+*start*, not a valid `k`. Constructor is not guarded (`datacopy(0, …)` would
+smash scratch). -/
+def memoryGuardK : Nat := 256
+
 /-! ## AST helpers -/
 
 def lit (n : Nat) : YExpr := YulSemantics.Expr.lit (YulSemantics.Literal.number n)
@@ -361,10 +372,6 @@ def emitParams (e : Emit) (offset n : Nat) : Emit :=
   (List.range n).foldl (fun e i =>
     e.push (.letDecl [identV i]
       (some (bop YulSemantics.EVM.Op.calldataload [lit (offset + 32 * i)])))) e
-
-/-- `mstore(0x80 + 4, …)` packing after the selector word at `0x80`. -/
-def abiPtr : Nat := 0x80
-def abiAfterSel : Nat := 0x84
 
 /-- Solidity CREATE convention: constructor args are the last `32n` bytes of init code.
 Copy them to memory at `abiPtr` (`0x80`), then `mload` into `v_i`. Runtime `emitParams`
@@ -682,8 +689,20 @@ def entryCase (c : ContractDef) (f : FnDef) : Option (YulSemantics.Literal × YB
   some (YulSemantics.Literal.number f.selector,
     [YulSemantics.Stmt.block guard, YulSemantics.Stmt.block body])
 
+/-- Solidity `mstore(64, memoryguard(k))`. powdr's `spillBlock?` collects any
+`.call "memoryguard" [lit k]`; this solc form is what `MemorySpillSelect` tests. -/
+def memoryGuardStmt : YStmt :=
+  .exprStmt (bop YulSemantics.EVM.Op.mstore
+    [lit 64, YulSemantics.Expr.call "memoryguard" [lit memoryGuardK]])
+
+/-- `memoryguard(k)` erased to the literal `k` (ordinary interp / `compile` fallback). -/
+def memoryGuardErased : YStmt :=
+  .exprStmt (bop YulSemantics.EVM.Op.mstore [lit 64, lit memoryGuardK])
+
 /-- Dispatcher + every non-constructor function. Size-check is its own block; the
-selector is a nested expression so it does not occupy a live stack slot in the cases. -/
+selector is a nested expression so it does not occupy a live stack slot in the cases.
+The leading `memoryguard` is a compile-time marker for powdr spilling; Core→Yul
+(`toYulFn`) does not emit it. -/
 def runtimeBlock (c : ContractDef) : Option YBlock :=
   if !selectorsNodup c then none
   else do
@@ -691,8 +710,9 @@ def runtimeBlock (c : ContractDef) : Option YBlock :=
     let guard := (emitGuardLt {} 4).stmts
     let sel := bop YulSemantics.EVM.Op.shr
       [lit 224, bop YulSemantics.EVM.Op.calldataload [lit 0]]
-    some [YulSemantics.Stmt.block guard,
-      YulSemantics.Stmt.switch sel cases (some [revert00])]
+    some (memoryGuardStmt ::
+      [YulSemantics.Stmt.block guard,
+        YulSemantics.Stmt.switch sel cases (some [revert00])])
 
 /-- Deploy object: ctor body (if any) then `constructorCode "runtime"`, nested `"runtime"`. -/
 def deployObject (c : ContractDef) : Option YObject := do

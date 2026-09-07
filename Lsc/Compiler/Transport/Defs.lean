@@ -50,7 +50,7 @@ structure TransportSetup (S X E ε : Type) where
   rt : YBlock
   hrt : runtimeBlock c = some rt
   is : List Instr
-  hcomp : compile rt = some is
+  hcomp : compileBlock rt = some is
 
 /-- S2 binding family. One-binding contracts instantiate `bs := [⟨α, bind⟩]`. -/
 structure TransportBindings (S X E ε : Type) (I : Interface)

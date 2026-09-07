@@ -4,6 +4,7 @@ import Lsc.Compiler.ProgressCoreTheorems
 import Lsc.Compiler.EvmDetTheorems
 import YulEvmCompiler.Correctness
 import YulEvmCompiler.LowerDefs
+import YulEvmCompiler.Optimizer.Implementation.MemorySpill
 
 set_option linter.unusedSimpArgs false
 set_option linter.unusedVariables false
@@ -37,7 +38,7 @@ theorem bytecode_call_correct_ext {I : Interface} {S X E ε : Type}
     (hlen : c.fields.length < wordBound)
     (hbound : ∀ f ∈ c.functions, 4 + 32 * f.params.length < wordBound)
     (rt : YBlock) (hrt : runtimeBlock c = some rt)
-    (is : List Instr) (hcomp : compile rt = some is)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
     (ctx : Ctx) (w : World S X E) (yst0 : EvmState)
     (hctx : ctxRel ctx yst0) (hR : R c Γ evmKeccak w yst0)
     (hRX : RXs bs w yst0) (hign : BindEnvs.ignoresLocal bs)
@@ -61,9 +62,11 @@ theorem bytecode_call_correct_ext {I : Interface} {S X E ε : Type}
       yst0.env.immutable (litValue (.string key)) := by
     intro key
     simp [unpatchedImmutables, himm0]
+  have hce : compileErased rt = some is := by
+    simpa [compileBlock] using hcomp
   have ⟨b, hb⟩ :=
     compile_correct (model := openModel calls) (externalsRealized_open hCalls)
-      hcomp himm hrun
+      hce himm hrun
   obtain ⟨fo, hconcl⟩ := hpred
   let stObs := committedState yst0 st'
   have hobs : stObs = committedState yst0 st' := rfl
@@ -168,7 +171,7 @@ theorem evmCallRunExtAll_of_progress {I : Interface} {S X E ε : Type}
     (hlen : c.fields.length < wordBound)
     (hbound : ∀ f ∈ c.functions, 4 + 32 * f.params.length < wordBound)
     (rt : YBlock) (hrt : runtimeBlock c = some rt)
-    (is : List Instr) (hcomp : compile rt = some is)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
     (ctx : Ctx) (w : World S X E) (yst0 : EvmState)
     (hctx : ctxRel ctx yst0) (hR : R c Γ evmKeccak w yst0)
     (hRX : RXs bs w yst0) (hign : BindEnvs.ignoresLocal bs)

@@ -1,6 +1,7 @@
 import Lsc.Compiler.Yul
 import YulSemantics.Interp
 import YulSemantics.Dialect.EVMExec
+import YulEvmCompiler.Optimizer.Implementation.MemorySpill
 
 /-!
 # Executable Yul harness
@@ -57,7 +58,10 @@ def runBlock (fuel : Nat) (prog : YBlock) (st0 : EvmState) : RunOut :=
 def runContract (c : ContractDef) (calldata : List UInt8) (storage : U256 → U256)
     (ctx : Ctx) : Option RunOut := do
   let prog ← runtimeBlock c
-  some (runBlock defaultFuel prog (mkEvmState calldata storage keccakOf ctx))
+  -- `memoryguard` is not a Yul function; ordinary interp uses the identity lowering.
+  some (runBlock defaultFuel
+    (YulEvmCompiler.Optimizer.MemorySpill.eraseMemoryGuardStmts prog)
+    (mkEvmState calldata storage keccakOf ctx))
 
 /-- Overlay a finite list of (slot, value) pairs; everything else is 0. -/
 def storageOf (pairs : List (U256 × U256)) : U256 → U256 :=

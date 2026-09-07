@@ -4,8 +4,13 @@ import Lsc.Compiler.Proof.DispatchExtProof
 set_option linter.unusedVariables false
 
 /-!
-S2 ABI dispatcher: same guard/selector/`switch` as S1, but the selected
-body may `CALL`. Unknown selectors still revert with empty data.
+ABI dispatcher for contracts that CALL out: same size guard and
+selector as the call-free dispatcher, but the selected body may CALL
+a bound token. Unknown selectors still revert with empty data.
+
+Bound tokens must conform, must not be this contract, and the function
+must never store a bound address. This is the Yul dispatcher that
+`bytecode_call_correct_ext` lifts to EVM bytecode.
 -/
 
 namespace Lsc.Compiler
@@ -13,11 +18,12 @@ namespace Lsc.Compiler
 open YulSemantics
 open YulSemantics.EVM
 
-/-- A compiled S2 runtime block matches the selected function's `Core.denote`
-under some fault oracle (or reverts on a bad selector). Every runtime
-function must be `S2Frag` and not a constructor. `Conforms` / `RX` / address
-separation are as in `toYulFn_correct_ext`. This is the Yul dispatcher
-`bytecode_call_correct_ext` lifts through powdr. -/
+/-- A compiled runtime that may CALL out agrees with the high-level model
+on every calldata, under some choice of which external calls fail: a
+known selector runs the matching function; an unknown selector reverts
+with storage unchanged. Bound tokens must conform and must not be this
+contract; no runtime function may store a bound address. This is the
+Yul dispatcher that `bytecode_call_correct_ext` lifts to bytecode. -/
 theorem runtimeBlock_correct_ext {I : Interface} {S X E ε : Type}
     (bs : List (BindEnv I S X))
     (c : ContractDef) (Γ : ContractSchema S X E ε)

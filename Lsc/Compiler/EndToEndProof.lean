@@ -25,7 +25,7 @@ theorem bytecode_call_correct {S X E ε : Type} (c : ContractDef)
     (hlen : c.fields.length < wordBound)
     (hbound : ∀ f ∈ c.functions, 4 + 32 * f.params.length < wordBound)
     (rt : YBlock) (hrt : runtimeBlock c = some rt)
-    (is : List Instr) (hcomp : compile rt = some is)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
     (ctx : Ctx) (w : World S X E) (yst0 : EvmState)
     (hctx : ctxRel ctx yst0) (hR : R c Γ evmKeccak w yst0)
     (himm0 : ∀ k, yst0.env.immutable k = 0) :
@@ -39,7 +39,9 @@ theorem bytecode_call_correct {S X E ε : Type} (c : ContractDef)
       yst0.env.immutable (litValue (.string key)) := by
     intro key
     simp [unpatchedImmutables, himm0]
-  have ⟨b, hb⟩ := compile_correct (model := closedModel) ExternalsRealized.none hcomp himm hrun
+  have hce : compileErased rt = some is := by
+    simpa [compileBlock] using hcomp
+  have ⟨b, hb⟩ := compile_correct (model := closedModel) ExternalsRealized.none hce himm hrun
   refine ⟨b, ?_⟩
   intro s0 hOK hM hpc hstk hgas
   obtain ⟨s', hSteps, hcs, hSM, hOut⟩ := hb s0 hOK hM hpc hstk hgas
@@ -81,7 +83,7 @@ theorem bytecode_trace_all {S X E ε : Type} (c : ContractDef)
     (hbound : ∀ f ∈ c.functions, 4 + 32 * f.params.length < wordBound)
     (hnd : selectorsNodup c = true)
     (rt : YBlock) (hrt : runtimeBlock c = some rt)
-    (is : List Instr) (hcomp : compile rt = some is)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
     (calls : List (Ctx × FnDef × List Nat))
     (w : World S X E) (σ σ' : U256 → U256)
     (hs : storageRel c Γ evmKeccak w.self σ)

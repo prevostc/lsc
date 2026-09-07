@@ -5,10 +5,13 @@ import Lsc.Compiler.CoreDefs
 set_option linter.unusedVariables false
 
 /-!
-S2 Core → Yul: functions that may `CALL` through declared bindings. The
-fault oracle is chosen existentially so a Yul run (which sees the EVM CALL
-success bit) is predicted by `Core.denote` with `w.faults := fo`. Vault is
-one binding; AMM is two `IERC20`s.
+Core to Yul for functions that may CALL a bound token. A Yul run, which
+sees the EVM CALL success bit, is predicted by the high-level model
+under some choice of which calls fail.
+
+Vault is one binding; AMM is two. Shared assumptions: tokens conform,
+are not this contract, do not alias each other, and the function never
+stores a bound address. Constructors are excluded.
 -/
 
 namespace Lsc.Compiler
@@ -17,11 +20,11 @@ open YulSemantics
 open YulSemantics.EVM
 open Lsc hiding Op Stmt
 
-/-- Call-free cores still compile under S2's external dialect: descend the
-`yulD` run to the closed `evm` interpreter, apply S1 `core_sim`, and remap
-the fault oracle. Binding packages must ignore local storage (`ignoresLocal`)
-and the core must not store the callee address (`avoids`). This lemma is the
-call-free case of `toYulFn_correct_ext`. -/
+/-- A function that never CALLs out still compiles under the external-call
+dialect: a Yul run is predicted by the high-level model, and bound-token
+ghosts stay in sync on success. Needed because Vault views never CALL
+but live in a contract that does. Bound tokens must ignore our storage,
+and the function must not store a callee address. -/
 theorem core_sim_ext_callFree {I : Interface} {S X E ε}
     (bs : List (BindEnv I S X)) {c Γ κ ctx haltUnit}
     (hhalt : haltUnit = true) (hΓ : Γ.st.Lawful c.fields) (hκ : KeccakSep c κ)
@@ -49,13 +52,14 @@ theorem core_sim_ext_callFree {I : Interface} {S X E ε}
               haltError c Γ e bytes :=
   Proof.core_sim_ext_callFree bs hhalt hΓ hκ hlen hign core hM1 hslot
 
-/-- If `f` is an S2Frag runtime function (`CallFree` plus `Op.call`/`Stmt.call`)
-and `toYulFn` succeeds, every Yul `Run` on the external dialect is matched by
-`Core.denote` under some fault oracle, and each binding's `RX` (ghost ↔
-foreign storage) is preserved on success. Assumes `Conforms` for every
-package (successful CALLs decode as the interface model), distinct addresses
-do not alias ghosts, and the core never stores a bound address. This is the
-S2 compiler theorem PROOF_CHAIN cites; Vault/AMM are instances. -/
+/-- If the compiler accepted a runtime function that may CALL bound tokens,
+every Yul run of the emitted block is predicted by the high-level model
+under some choice of which external calls fail, and each token's ghost
+stays in sync with that account's storage on success. Tokens must
+conform, must not be this contract, and must not alias each other; the
+function must never store a bound address. Unlike
+`toYulFn_correct_callFree` this is backward (every Yul run, not every
+high-level outcome). Vault and AMM are instances. -/
 theorem toYulFn_correct_ext {I : Interface} {S X E ε : Type}
     (bs : List (BindEnv I S X))
     (c : ContractDef) (Γ : ContractSchema S X E ε)
@@ -77,9 +81,10 @@ theorem toYulFn_correct_ext {I : Interface} {S X E ε : Type}
   Proof.toYulFn_correct_ext bs c Γ hΓ κ hκ calls f hf hS2 hlen hbound yul hyul
     ctx w st0 hctx hR hRX hign hBindNe hconf hsame horth hinj hBind hslot
 
-/-- Specialisation of `toYulFn_correct_ext` to a single binding. Vault is this
-case: one IERC20 `asset` in storage, so the family is the singleton
-`[⟨α, bind⟩]` and `RX` / `Conforms` are the unpacked forms. -/
+/-- Specialisation of `toYulFn_correct_ext` to a single bound token. Vault
+is this case: one ERC-20 in storage, so conformance and ghost agreement
+are about that one address. AMM needs the family form because it has
+two. -/
 theorem toYulFn_correct_ext_one {I : Interface} {S X E ε : Type}
     (α : Abs I.Ghost) (bind : Binding I S X)
     (c : ContractDef) (Γ : ContractSchema S X E ε)

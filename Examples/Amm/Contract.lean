@@ -1,6 +1,7 @@
 import Lsc.Lang.Amount
 import Lsc.Lang.Reify
 import Stdlib.ERC20
+import Stdlib.SafeERC20
 import Stdlib.Scales
 
 /-!
@@ -66,6 +67,7 @@ inductive Error
   | InsufficientShares
   | InsufficientOutput
   | SameToken
+  | TransferFailed
   deriving DecidableEq, Repr
 
 abbrev M := Tx Storage Ext Event Error
@@ -108,8 +110,8 @@ def addLiquidity (a0 : Amount TOKEN0 scale0) (a1 : Amount TOKEN1 scale1) : M Nat
   let bal ← read shares[who]
   let bal' ← minted +? bal
   write shares[who] bal'
-  Binding.transferFromUnit token0B who me a0.toNat
-  Binding.transferFromUnit token1B who me a1.toNat
+  Binding.safeTransferFrom token0B who me a0.toNat .TransferFailed
+  Binding.safeTransferFrom token1B who me a1.toNat .TransferFailed
   Tx.emit (.AddLiquidity who a0 a1 (Amount.ofNat minted))
   pure minted
 
@@ -135,8 +137,8 @@ def removeLiquidity (s : Amount SHARE shareScale) : M (Nat × Nat) := do
   write reserve0 r0'
   let r1' ← r1 -? out1
   write reserve1 r1'
-  Binding.transferUnit token0B who out0
-  Binding.transferUnit token1B who out1
+  Binding.safeTransfer token0B who out0 .TransferFailed
+  Binding.safeTransfer token1B who out1 .TransferFailed
   Tx.emit (.RemoveLiquidity who (Amount.ofNat out0) (Amount.ofNat out1) s)
   pure (out0, out1)
 
@@ -157,8 +159,8 @@ def swap0for1 (amountIn : Amount TOKEN0 scale0) (minOut : Amount TOKEN1 scale1) 
   write reserve1 r1'
   let who ← Tx.sender
   let me ← Tx.selfAddress
-  Binding.transferFromUnit token0B who me amountIn.toNat
-  Binding.transferUnit token1B who out
+  Binding.safeTransferFrom token0B who me amountIn.toNat .TransferFailed
+  Binding.safeTransfer token1B who out .TransferFailed
   Tx.emit (.Swap0for1 who amountIn (Amount.ofNat out))
   pure out
 
@@ -179,8 +181,8 @@ def swap1for0 (amountIn : Amount TOKEN1 scale1) (minOut : Amount TOKEN0 scale0) 
   write reserve0 r0'
   let who ← Tx.sender
   let me ← Tx.selfAddress
-  Binding.transferFromUnit token1B who me amountIn.toNat
-  Binding.transferUnit token0B who out
+  Binding.safeTransferFrom token1B who me amountIn.toNat .TransferFailed
+  Binding.safeTransfer token0B who out .TransferFailed
   Tx.emit (.Swap1for0 who amountIn (Amount.ofNat out))
   pure out
 

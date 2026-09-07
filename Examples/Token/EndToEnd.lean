@@ -24,7 +24,7 @@ namespace Token
 
 def mkTokenSetup (hκ : KeccakSep Token.contract evmKeccak)
     (rt : YBlock) (hrt : runtimeBlock Token.contract = some rt)
-    (is : List Instr) (hcomp : compile rt = some is) :
+    (is : List Instr) (hcomp : compileBlock rt = some is) :
     TransportSetup Storage Unit Event Error where
   c := Token.contract
   Γ := Token.schema

@@ -1,10 +1,15 @@
 import Lsc.Compiler.Proof.ProgressCoreProof
+import YulEvmCompiler.Optimizer.Implementation.MemorySpill
 
 set_option linter.unusedVariables false
 
 /-!
-S2 Yul progress: under `CallsTotal`, compiled S2Frag runtime has a halted
-`Run`. Paired with EVM determinism this makes `EvmCallRunExtAll` non-vacuous.
+Yul progress for contracts that CALL out: given a total CALL oracle
+(every CALL returns some bytes), compiled runtime has a halted Yul run.
+
+Paired with EVM determinism this makes "every matching EVM execution"
+non-vacuous: the Yul-to-EVM compiler is only forward, so without a run
+the universal bytecode statement could hold of nothing.
 -/
 
 namespace Lsc.Compiler
@@ -12,12 +17,11 @@ namespace Lsc.Compiler
 open YulSemantics
 open YulSemantics.EVM
 
-/-- There exists a halted Yul `Run` of the compiled S2 runtime from the
-starting EVM state. The external CALL oracle is total (`CallsTotal`): every
-CALL returns some bytes. Without this, powdr `compile_correct` is only
-forward (`Yul Run → ∃ EVM Steps`) and the universal `EvmCallRunExtAll`
-quantifier could be empty. Assumes S2Frag, `Conforms`, and the usual layout
-bounds. -/
+/-- There exists a halted Yul run of the compiled runtime from the starting
+EVM state, provided every CALL returns some bytes. Without this, "every
+matching EVM execution agrees with the model" could hold vacuously,
+because the Yul-to-EVM compiler only goes forward from a Yul run. Bound
+tokens must conform; constructors are excluded. -/
 theorem yul_progress {I : Interface} {S X E ε : Type}
     (bs : List (BindEnv I S X)) (c : ContractDef) (Γ : ContractSchema S X E ε)
     (hΓ : Γ.st.Lawful c.fields) (κ : List UInt8 → U256) (hκ : KeccakSep c κ)
@@ -32,7 +36,8 @@ theorem yul_progress {I : Interface} {S X E ε : Type}
     (hconf : BindEnvs.conforms bs ctx.self w.self calls)
     (hBind : BindEnvs.lookupWF c Γ bs)
     (hslot : ∀ f ∈ c.functions, BindEnvs.avoids Γ c bs f.core) :
-    ∃ st' o, Run (yulD calls) yul st0 [] st' o :=
+    ∃ st' o, Run (yulD calls)
+      (YulEvmCompiler.Optimizer.MemorySpill.eraseMemoryGuardStmts yul) st0 [] st' o :=
   Proof.yul_progress bs c Γ hΓ κ hκ calls htot hctor hS2 hlen hbound yul hyul
     ctx w st0 hctx hR hconf hBind hslot
 

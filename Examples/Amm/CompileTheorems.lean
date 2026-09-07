@@ -4,9 +4,14 @@ import Examples.Amm.Contract
 import Stdlib.ERC20
 
 /-!
-AMM is the two-binding S2 instance: `token0` and `token1` are distinct IERC20
-addresses in storage. `toYulFn_correct_ext` is applied to the family
-`[token0B, token1B]`.
+AMM's compiler instance: every runtime function, including swaps and
+liquidity that CALL two tokens, compiles to Yul that matches the
+high-level pool model.
+
+Shared assumptions: the compiler accepted the function, both tokens
+behave like conforming ERC-20s at distinct addresses other than the
+pool, and the EVM frame matches the starting world. The constructor
+writes the token slots and is out of scope.
 -/
 
 namespace Lsc.Compiler
@@ -15,10 +20,12 @@ open YulSemantics
 open YulSemantics.EVM
 open Lsc.Stdlib
 
-/-- Every AMM runtime function matches `Core.denote` under a fault oracle, with
-`RX` for both token bindings. Requires `token0 ≠ token1` at the storage
-(`addrInj`), orthogonal ghosts, and `Conforms` for each IERC20. This is the
-multi-binding compiler theorem PROOF_CHAIN cites. -/
+/-- If the compiler accepted an AMM runtime function, every execution of
+the emitted Yul is predicted by the high-level pool model under some
+choice of which external calls fail. Both tokens must behave like
+conforming ERC-20s, at distinct addresses different from the pool.
+Unlike `vault_correct_ext` this is two callees, not one. Constructors
+are excluded. -/
 theorem amm_correct_ext
     (α : Abs IERC20.Ghost)
     (κ : List UInt8 → U256) (hκ : KeccakSep Amm.contract κ)
