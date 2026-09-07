@@ -10,6 +10,8 @@ These lemmas are **not** `simp` — rewriting `emitDo {}` with `emitDo_acc` loop
 
 namespace Lsc.Compiler
 
+variable (tag : String)
+
 open YulSemantics
 open YulSemantics.EVM
 
@@ -34,13 +36,13 @@ theorem emitIf_acc (e : Emit) (cnd : YExpr) (body : YBlock) :
 
 theorem emitExtCall_stmts (c : ContractDef) (e : Emit) (depth b m : Nat)
     (args : List Atom) (bind : Option YIdent) :
-    (emitExtCall c e depth b m args bind).stmts =
+    (emitExtCall tag c e depth b m args bind).stmts =
       e.stmts ++
         match bind with
-        | none => [.block (emitExtCallBody c depth b m args none)]
+        | none => [.block (emitExtCallBody tag c depth b m args none)]
         | some name =>
           [.letDecl [name] (some (lit 0)),
-           .block (emitExtCallBody c depth b m args (some name))] := by
+           .block (emitExtCallBody tag c depth b m args (some name))] := by
   cases bind <;> simp [emitExtCall, emitBlock, emitLet, Emit.stmts_push]
 
 theorem emitReturnUnit_acc (e : Emit) (halt : Bool) :
@@ -82,22 +84,22 @@ theorem foldl_mstore_acc (e : Emit) (base : Nat) (xs : List YExpr) (i0 : Nat) :
 
 theorem foldl_mstore_args_cat (e extra : Emit) (base depth : Nat) (args : List Atom) (i0 : Nat) :
     (args.foldl (fun p a =>
-        (emitDo p.1 Op.mstore [lit (base + 32 * p.2), atomE depth a], p.2 + 1))
+        (emitDo p.1 Op.mstore [lit (base + 32 * p.2), atomE tag depth a], p.2 + 1))
       ({ acc := extra.acc ++ e.acc }, i0)).1 =
       { acc :=
           (args.foldl (fun p a =>
-              (emitDo p.1 Op.mstore [lit (base + 32 * p.2), atomE depth a], p.2 + 1))
+              (emitDo p.1 Op.mstore [lit (base + 32 * p.2), atomE tag depth a], p.2 + 1))
             (extra, i0)).1.acc ++ e.acc } := by
   induction args generalizing extra i0 with
   | nil => simp
   | cons a args ih =>
     simp only [List.foldl_cons]
     have hdo :
-        emitDo { acc := extra.acc ++ e.acc } Op.mstore [lit (base + 32 * i0), atomE depth a] =
-          { acc := (emitDo extra Op.mstore [lit (base + 32 * i0), atomE depth a]).acc ++ e.acc } := by
+        emitDo { acc := extra.acc ++ e.acc } Op.mstore [lit (base + 32 * i0), atomE tag depth a] =
+          { acc := (emitDo extra Op.mstore [lit (base + 32 * i0), atomE tag depth a]).acc ++ e.acc } := by
       simp [emitDo, Emit.push, List.append_assoc]
     rw [hdo]
-    exact ih (emitDo extra Op.mstore [lit (base + 32 * i0), atomE depth a]) (i0 + 1)
+    exact ih (emitDo extra Op.mstore [lit (base + 32 * i0), atomE tag depth a]) (i0 + 1)
 
 theorem emitDo_cat (e extra : Emit) (op : YOp) (args : List YExpr) :
     emitDo { acc := extra.acc ++ e.acc } op args =
@@ -194,10 +196,10 @@ private theorem emitCallRetCheck_cat (e extra : Emit) (ret : AbiRet) :
       { acc := (emitCallRetCheck extra ret).acc ++ e.acc } := by
   cases ret <;> simp [emitCallRetCheck, emitIf, Emit.push, List.append_assoc]
 
-theorem emitExtCall_acc (c : ContractDef) (e : Emit) (depth b m : Nat) (args : List Atom)
+theorem emitExtCall_acc tag (c : ContractDef) (e : Emit) (depth b m : Nat) (args : List Atom)
     (bindResult : Option YIdent) :
-    emitExtCall c e depth b m args bindResult =
-      { acc := (emitExtCall c {} depth b m args bindResult).acc ++ e.acc } := by
+    emitExtCall tag c e depth b m args bindResult =
+      { acc := (emitExtCall tag c {} depth b m args bindResult).acc ++ e.acc } := by
   cases bindResult with
   | none =>
     simp [emitExtCall, emitBlock, Emit.push]
@@ -205,8 +207,8 @@ theorem emitExtCall_acc (c : ContractDef) (e : Emit) (depth b m : Nat) (args : L
     simp [emitExtCall, emitLet, emitBlock, Emit.push]
 
 theorem emitLetOp_acc (c : ContractDef) (e : Emit) (d : Nat) (op : Lsc.Op) :
-    emitLetOp c e d op =
-      (emitLetOp c {} d op).map fun e0 => { acc := e0.acc ++ e.acc } := by
+    emitLetOp tag c e d op =
+      (emitLetOp tag c {} d op).map fun e0 => { acc := e0.acc ++ e.acc } := by
   cases op with
   | load _ =>
     simp only [emitLetOp, Option.map_some]
@@ -232,14 +234,14 @@ theorem emitLetOp_acc (c : ContractDef) (e : Emit) (d : Nat) (op : Lsc.Op) :
   | mulDivUp _ _ _ =>
     simp only [emitLetOp, Option.map_some]; exact congrArg some (emitMulDivUp_acc _ _ _ _ _)
   | call b m args =>
-    simp only [emitLetOp, Option.map_some]; exact congrArg some (emitExtCall_acc _ _ _ _ _ _ _)
+    simp only [emitLetOp, Option.map_some]; exact congrArg some (emitExtCall_acc tag _ _ _ _ _ _ _)
 
-theorem emitLetOp_some (c : ContractDef) (e : Emit) (d : Nat) (op : Lsc.Op) :
-    ∃ e', emitLetOp c e d op = some e' := by
+theorem emitLetOp_some tag (c : ContractDef) (e : Emit) (d : Nat) (op : Lsc.Op) :
+    ∃ e', emitLetOp tag c e d op = some e' := by
   cases op <;> simp [emitLetOp]
 
 theorem emitStmt_acc (c : ContractDef) (e : Emit) (d : Nat) (s : Lsc.Stmt) :
-    emitStmt c e d s = { acc := (emitStmt c {} d s).acc ++ e.acc } := by
+    emitStmt tag c e d s = { acc := (emitStmt tag c {} d s).acc ++ e.acc } := by
   cases s with
   | store _ _ => simp [emitStmt, emitDo, Emit.push]
   | storeMap f k v =>
@@ -249,35 +251,35 @@ theorem emitStmt_acc (c : ContractDef) (e : Emit) (d : Nat) (s : Lsc.Stmt) :
   | require _ _ _ => simp [emitStmt, emitIf, Emit.push]
   | emit _ _ => simp only [emitStmt]; exact emitLog1_acc _ _ _
   | revert _ _ => simp only [emitStmt]; exact emitCustomError_acc _ _ _ _
-  | call b m args => simp only [emitStmt]; exact emitExtCall_acc _ _ _ _ _ _ _
+  | call b m args => simp only [emitStmt]; exact emitExtCall_acc tag _ _ _ _ _ _ _
 
-theorem emitRet_acc (e : Emit) (d : Nat) (halt : Bool) {t} (r : RetExpr t) :
-    emitRet e d halt r = { acc := (emitRet {} d halt r).acc ++ e.acc } := by
+theorem emitRet_acc tag (e : Emit) (d : Nat) (halt : Bool) {t} (r : RetExpr t) :
+    emitRet tag e d halt r = { acc := (emitRet tag {} d halt r).acc ++ e.acc } := by
   cases r with
   | unit => simp only [emitRet]; exact emitReturnUnit_acc _ _
   | word _ | addr _ | flag _ | pair _ _ => simp only [emitRet]; exact emitReturnWords_acc _ _
 
 theorem emitRet_word_stmts (e : Emit) (d : Nat) (halt : Bool) (a : Atom) :
-    (emitRet e d halt (.word a)).stmts =
-      e.stmts ++ (emitReturnWords {} [atomE d a]).stmts := by
-  rw [emitRet_acc e d halt (.word a), Emit.cat_stmts]
+    (emitRet tag e d halt (.word a)).stmts =
+      e.stmts ++ (emitReturnWords {} [atomE tag d a]).stmts := by
+  rw [emitRet_acc tag e d halt (.word a), Emit.cat_stmts]
   simp only [emitRet, retAtoms, List.map_cons, List.map_nil]
 
 theorem emitRet_addr_stmts (e : Emit) (d : Nat) (halt : Bool) (a : Atom) :
-    (emitRet e d halt (.addr a)).stmts =
-      e.stmts ++ (emitReturnWords {} [atomE d a]).stmts := by
-  rw [emitRet_acc e d halt (.addr a), Emit.cat_stmts]
+    (emitRet tag e d halt (.addr a)).stmts =
+      e.stmts ++ (emitReturnWords {} [atomE tag d a]).stmts := by
+  rw [emitRet_acc tag e d halt (.addr a), Emit.cat_stmts]
   simp only [emitRet, retAtoms, List.map_cons, List.map_nil]
 
 theorem emitRet_flag_stmts (e : Emit) (d : Nat) (halt : Bool) (a : Atom) :
-    (emitRet e d halt (.flag a)).stmts =
-      e.stmts ++ (emitReturnWords {} [atomE d a]).stmts := by
-  rw [emitRet_acc e d halt (.flag a), Emit.cat_stmts]
+    (emitRet tag e d halt (.flag a)).stmts =
+      e.stmts ++ (emitReturnWords {} [atomE tag d a]).stmts := by
+  rw [emitRet_acc tag e d halt (.flag a), Emit.cat_stmts]
   simp only [emitRet, retAtoms, List.map_cons, List.map_nil]
 
-theorem emitCore_acc {c : ContractDef} {halt : Bool} {t : RetTy} :
+theorem emitCore_acc tag {c : ContractDef} {halt : Bool} {t : RetTy} :
     ∀ (core : Core t) (e : Emit) (d : Nat),
-      emitCore c e d halt core = (emitCore c {} d halt core).map fun e0 =>
+      emitCore tag c e d halt core = (emitCore tag c {} d halt core).map fun e0 =>
         { acc := e0.acc ++ e.acc } := by
   intro core
   induction core with
@@ -286,13 +288,13 @@ theorem emitCore_acc {c : ContractDef} {halt : Bool} {t : RetTy} :
     intro e d
     simp only [emitCore]
     rw [emitLetOp_acc]
-    cases emitLetOp c {} d op with
+    cases emitLetOp tag c {} d op with
     | none => simp
     | some e0 => simp only [Option.map_some, Bind.bind, Option.bind]; rw [emitRet_acc]; rfl
   | stmtTail s =>
     intro e d
     simp only [emitCore, Option.map_some]
-    rw [emitStmt_acc, emitReturnUnit_acc, emitReturnUnit_acc (emitStmt c {} d s)]
+    rw [emitStmt_acc, emitReturnUnit_acc, emitReturnUnit_acc (emitStmt tag c {} d s)]
     simp [List.append_assoc]
   | revertTail err args =>
     intro e d; simp only [emitCore, Option.map_some]; exact congrArg some (emitCustomError_acc _ _ _ _)
@@ -300,66 +302,66 @@ theorem emitCore_acc {c : ContractDef} {halt : Bool} {t : RetTy} :
     intro e d
     simp only [emitCore]
     rw [emitLetOp_acc]
-    cases emitLetOp c {} d op with
+    cases emitLetOp tag c {} d op with
     | none => simp
     | some e0 =>
       simp only [Option.map_some, Bind.bind, Option.bind]
       rw [ih { acc := e0.acc ++ e.acc } (d + 1), ih e0 (d + 1)]
-      cases emitCore c {} (d + 1) halt k with
+      cases emitCore tag c {} (d + 1) halt k with
       | none => simp
       | some _ => simp [List.append_assoc]
   | seq s k ih =>
     intro e d
     simp only [emitCore]
     rw [emitStmt_acc]
-    rw [ih { acc := (emitStmt c {} d s).acc ++ e.acc } d, ih (emitStmt c {} d s) d]
-    cases emitCore c {} d halt k with
+    rw [ih { acc := (emitStmt tag c {} d s).acc ++ e.acc } d, ih (emitStmt tag c {} d s) d]
+    cases emitCore tag c {} d halt k with
     | none => simp
     | some _ => simp [List.append_assoc]
   | letPure p args k ih =>
     intro e d
     simp only [emitCore]
     rw [emitLet_acc]
-    rw [ih { acc := (emitLet {} (identV d) (emitPrim d p args)).acc ++ e.acc } (d + 1),
-      ih (emitLet {} (identV d) (emitPrim d p args)) (d + 1)]
-    cases emitCore c {} (d + 1) halt k with
+    rw [ih { acc := (emitLet {} (identV tag d) (emitPrim tag d p args)).acc ++ e.acc } (d + 1),
+      ih (emitLet {} (identV tag d) (emitPrim tag d p args)) (d + 1)]
+    cases emitCore tag c {} (d + 1) halt k with
     | none => simp
     | some _ => simp [List.append_assoc]
   | ite cond a b =>
     intro e d
     simp only [emitCore]
-    cases emitCore c {} d halt a with
+    cases emitCore tag c {} d halt a with
     | none => simp
     | some _ =>
-      cases emitCore c {} d halt b with
+      cases emitCore tag c {} d halt b with
       | none => simp
       | some _ => simp [Emit.push]
 
 theorem emitCore_prefix {c halt t} {core : Core t}
-    {e e' : Emit} {d : Nat} (hem : emitCore c e d halt core = some e') :
-    ∃ e0, emitCore c {} d halt core = some e0 ∧ e'.stmts = e.stmts ++ e0.stmts := by
-  have h := emitCore_acc (c := c) (halt := halt) core e d
+    {e e' : Emit} {d : Nat} (hem : emitCore tag c e d halt core = some e') :
+    ∃ e0, emitCore tag c {} d halt core = some e0 ∧ e'.stmts = e.stmts ++ e0.stmts := by
+  have h := emitCore_acc tag (c := c) (halt := halt) core e d
   rw [h] at hem
-  cases h0 : emitCore c {} d halt core with
+  cases h0 : emitCore tag c {} d halt core with
   | none => simp [h0] at hem
   | some e0 =>
     simp [h0] at hem
     exact ⟨e0, rfl, by cases hem; exact Emit.cat_stmts e e0⟩
 
-theorem emitCore_some {c halt t} (core : Core t) (e : Emit) (d : Nat) :
-    ∃ e', emitCore c e d halt core = some e' := by
+theorem emitCore_some tag {c halt t} (core : Core t) (e : Emit) (d : Nat) :
+    ∃ e', emitCore tag c e d halt core = some e' := by
   induction core generalizing e d with
   | ret _ => simp [emitCore]
   | opTail op | opTailAddr op | opTailFlag op =>
-    obtain ⟨e1, h1⟩ := emitLetOp_some c e d op
+    obtain ⟨e1, h1⟩ := emitLetOp_some tag c e d op
     simp [emitCore, h1]
   | stmtTail _ | revertTail _ _ => simp [emitCore]
   | letOp op k ih =>
-    obtain ⟨e1, h1⟩ := emitLetOp_some c e d op
+    obtain ⟨e1, h1⟩ := emitLetOp_some tag c e d op
     simp [emitCore, h1]; exact ih e1 (d + 1)
-  | seq s k ih => simp [emitCore]; exact ih (emitStmt c e d s) d
+  | seq s k ih => simp [emitCore]; exact ih (emitStmt tag c e d s) d
   | letPure p args k ih =>
-    simp [emitCore]; exact ih (emitLet e (identV d) (emitPrim d p args)) (d + 1)
+    simp [emitCore]; exact ih (emitLet e (identV tag d) (emitPrim tag d p args)) (d + 1)
   | ite _ a b iha ihb =>
     obtain ⟨eA, hA⟩ := iha ({} : Emit) d
     obtain ⟨eB, hB⟩ := ihb ({} : Emit) d
@@ -409,7 +411,7 @@ theorem noFun_foldl_mstore {e : Emit} {base i0} {xs : List YExpr} (he : e.noFun)
 
 theorem noFun_foldl_mstore_args {e : Emit} {base i0 depth} {args : List Atom} (he : e.noFun) :
     ((args.foldl (fun p a =>
-        (emitDo p.1 Op.mstore [lit (base + 32 * p.2), atomE depth a], p.2 + 1)) (e, i0)).1).noFun := by
+        (emitDo p.1 Op.mstore [lit (base + 32 * p.2), atomE tag depth a], p.2 + 1)) (e, i0)).1).noFun := by
   induction args generalizing e i0 with
   | nil => simpa using he
   | cons a args ih =>
@@ -473,9 +475,9 @@ theorem noFun_callRetCheck (e : Emit) (ret : AbiRet) (he : e.noFun) :
     (emitCallRetCheck e ret).noFun := by
   cases ret <;> simp [emitCallRetCheck] <;> first | exact he | exact noFun_if he
 
-theorem noFun_extCall (c : ContractDef) (e : Emit) (depth b m : Nat) (args : List Atom)
+theorem noFun_extCall tag (c : ContractDef) (e : Emit) (depth b m : Nat) (args : List Atom)
     (bindResult : Option YIdent) (he : e.noFun) :
-    (emitExtCall c e depth b m args bindResult).noFun := by
+    (emitExtCall tag c e depth b m args bindResult).noFun := by
   cases bindResult with
   | none =>
     simp only [emitExtCall]
@@ -485,7 +487,7 @@ theorem noFun_extCall (c : ContractDef) (e : Emit) (depth b m : Nat) (args : Lis
     exact noFun_block (noFun_let he)
 
 theorem noFun_letOp (c : ContractDef) (e : Emit) (d : Nat) (op : Lsc.Op) (he : e.noFun)
-    {e1} (h1 : emitLetOp c e d op = some e1) : e1.noFun := by
+    {e1} (h1 : emitLetOp tag c e d op = some e1) : e1.noFun := by
   cases op with
   | load _ | sender | value | timestamp | blockNumber | selfAddress | pure _ =>
     simp [emitLetOp] at h1; cases h1; exact noFun_let he
@@ -499,10 +501,10 @@ theorem noFun_letOp (c : ContractDef) (e : Emit) (d : Nat) (op : Lsc.Op) (he : e
   | divChecked _ _ => simp [emitLetOp] at h1; cases h1; exact noFun_divChecked _ _ _ _ he
   | mulDivDown _ _ _ => simp [emitLetOp] at h1; cases h1; exact noFun_mulDivDown _ _ _ _ _ he
   | mulDivUp _ _ _ => simp [emitLetOp] at h1; cases h1; exact noFun_mulDivUp _ _ _ _ _ he
-  | call b m args => simp [emitLetOp] at h1; cases h1; exact noFun_extCall _ _ _ _ _ _ _ he
+  | call b m args => simp [emitLetOp] at h1; cases h1; exact noFun_extCall tag _ _ _ _ _ _ _ he
 
-theorem noFun_stmt (c : ContractDef) (e : Emit) (d : Nat) (s : Lsc.Stmt) (he : e.noFun) :
-    (emitStmt c e d s).noFun := by
+theorem noFun_stmt tag (c : ContractDef) (e : Emit) (d : Nat) (s : Lsc.Stmt) (he : e.noFun) :
+    (emitStmt tag c e d s).noFun := by
   cases s with
   | store _ _ => simp only [emitStmt]; exact noFun_do he
   | storeMap _ _ _ => simp only [emitStmt]; exact noFun_do (noFun_mapSlotPrep _ _ _ he)
@@ -510,10 +512,10 @@ theorem noFun_stmt (c : ContractDef) (e : Emit) (d : Nat) (s : Lsc.Stmt) (he : e
   | require _ _ _ => simp only [emitStmt]; exact noFun_if he
   | emit _ _ => simp only [emitStmt]; exact noFun_log1 _ _ _ he
   | revert _ _ => simp only [emitStmt]; exact noFun_customError _ _ _ _ he
-  | call b m args => simp only [emitStmt]; exact noFun_extCall _ _ _ _ _ _ none he
+  | call b m args => simp only [emitStmt]; exact noFun_extCall tag _ _ _ _ _ _ none he
 
-theorem noFun_ret (e : Emit) (d : Nat) (halt : Bool) {t} (r : RetExpr t) (he : e.noFun) :
-    (emitRet e d halt r).noFun := by
+theorem noFun_ret tag (e : Emit) (d : Nat) (halt : Bool) {t} (r : RetExpr t) (he : e.noFun) :
+    (emitRet tag e d halt r).noFun := by
   cases r with
   | unit =>
     cases halt with
@@ -521,23 +523,23 @@ theorem noFun_ret (e : Emit) (d : Nat) (halt : Bool) {t} (r : RetExpr t) (he : e
     | true => simp only [emitRet, emitReturnUnit]; exact noFun_push he rfl
   | word _ | addr _ | flag _ | pair _ _ => simp only [emitRet]; exact noFun_returnWords _ _ he
 
-theorem noFun_core {c halt t} :
+theorem noFun_core tag {c halt t} :
     ∀ (core : Core t) (e : Emit) (d : Nat) {e' : Emit},
-      emitCore c e d halt core = some e' → e.noFun → e'.noFun := by
+      emitCore tag c e d halt core = some e' → e.noFun → e'.noFun := by
   intro core
   induction core with
   | ret r =>
-    intro e d e' hem he; simp [emitCore] at hem; cases hem; exact noFun_ret e d halt r he
+    intro e d e' hem he; simp [emitCore] at hem; cases hem; exact noFun_ret tag e d halt r he
   | opTail op | opTailAddr op | opTailFlag op =>
     intro e d e' hem he
     simp [emitCore] at hem
-    obtain ⟨e1, h1⟩ := emitLetOp_some c e d op
+    obtain ⟨e1, h1⟩ := emitLetOp_some tag c e d op
     simp [h1] at hem; cases hem
-    exact noFun_ret e1 (d + 1) halt _ (noFun_letOp c e d op he h1)
+    exact noFun_ret tag e1 (d + 1) halt _ (noFun_letOp tag c e d op he h1)
   | stmtTail s =>
     intro e d e' hem he
     simp [emitCore] at hem; cases hem
-    exact noFun_ret _ d halt .unit (noFun_stmt c e d s he)
+    exact noFun_ret tag _ d halt .unit (noFun_stmt tag c e d s he)
   | revertTail err args =>
     intro e d e' hem he
     simp [emitCore] at hem; cases hem
@@ -545,13 +547,13 @@ theorem noFun_core {c halt t} :
   | letOp op k ih =>
     intro e d e' hem he
     simp [emitCore] at hem
-    obtain ⟨e1, h1⟩ := emitLetOp_some c e d op
+    obtain ⟨e1, h1⟩ := emitLetOp_some tag c e d op
     simp [h1] at hem
-    exact ih e1 (d + 1) hem (noFun_letOp c e d op he h1)
+    exact ih e1 (d + 1) hem (noFun_letOp tag c e d op he h1)
   | seq s k ih =>
     intro e d e' hem he
     simp [emitCore] at hem
-    exact ih (emitStmt c e d s) d hem (noFun_stmt c e d s he)
+    exact ih (emitStmt tag c e d s) d hem (noFun_stmt tag c e d s he)
   | letPure p args k ih =>
     intro e d e' hem he
     simp [emitCore] at hem
@@ -559,19 +561,19 @@ theorem noFun_core {c halt t} :
   | ite cond a b =>
     intro e d e' hem he
     simp [emitCore] at hem
-    obtain ⟨eA, hA⟩ := emitCore_some (c := c) (halt := halt) a ({} : Emit) d
-    obtain ⟨eB, hB⟩ := emitCore_some (c := c) (halt := halt) b ({} : Emit) d
+    obtain ⟨eA, hA⟩ := emitCore_some tag (c := c) (halt := halt) a ({} : Emit) d
+    obtain ⟨eB, hB⟩ := emitCore_some tag (c := c) (halt := halt) b ({} : Emit) d
     simp [hA, hB] at hem; cases hem
     exact noFun_push he rfl
 
-theorem hoist_emitCore {c halt t} {core : Core t} {e' d}
-    (hem : emitCore c {} d halt core = some e') :
+theorem hoist_emitCore tag {c halt t} {core : Core t} {e' d}
+    (hem : emitCore tag c {} d halt core = some e') :
     hoist evm e'.stmts = [] :=
-  hoist_nil_of (Emit.noFun_stmts (noFun_core core {} d hem noFun_nil))
+  hoist_nil_of (Emit.noFun_stmts (noFun_core tag core {} d hem noFun_nil))
 
 theorem hoist_emitStmt (c : ContractDef) (d : Nat) (s : Lsc.Stmt) :
-    hoist evm (emitStmt c {} d s).stmts = [] :=
-  hoist_nil_of (Emit.noFun_stmts (noFun_stmt c {} d s noFun_nil))
+    hoist evm (emitStmt tag c {} d s).stmts = [] :=
+  hoist_nil_of (Emit.noFun_stmts (noFun_stmt tag c {} d s noFun_nil))
 
 theorem hoist_panic (code : Nat) : hoist evm (emitPanic {} code).stmts = [] :=
   hoist_nil_of (Emit.noFun_stmts (noFun_panic {} code noFun_nil))
@@ -581,7 +583,7 @@ theorem hoist_customError (c : ContractDef) (err : Nat) (args : List YExpr) :
   hoist_nil_of (Emit.noFun_stmts (noFun_customError c {} err args noFun_nil))
 
 theorem emitParams_acc (e : Emit) (off n : Nat) :
-    emitParams e off n = { acc := (emitParams {} off n).acc ++ e.acc } := by
+    emitParams tag e off n = { acc := (emitParams tag {} off n).acc ++ e.acc } := by
   induction n generalizing e with
   | zero => rfl
   | succ n ih =>
@@ -589,8 +591,8 @@ theorem emitParams_acc (e : Emit) (off n : Nat) :
     dsimp only [emitParams]
     rw [hrange, List.foldl_append, List.foldl_cons, List.foldl_nil]
     rw [show (List.range n).foldl (fun e i =>
-          e.push (.letDecl [identV i] (some (bop Op.calldataload [lit (off + 32 * i)])))) e =
-        emitParams e off n from rfl]
+          e.push (.letDecl [identV tag i] (some (bop Op.calldataload [lit (off + 32 * i)])))) e =
+        emitParams tag e off n from rfl]
     rw [ih]
     simp [Emit.push, emitParams]
 
@@ -605,7 +607,7 @@ theorem noExtBlock_append {a b : YBlock}
     simp [noExtBlock, noExtStmts, Bool.and_eq_true] at ha ⊢
     exact ⟨ha.1, ih ha.2⟩
 
-theorem noExt_atomE (d : Nat) (a : Atom) : noExtExpr (atomE d a) = true := by
+theorem noExt_atomE tag (d : Nat) (a : Atom) : noExtExpr (atomE tag d a) = true := by
   cases a with
   | var i =>
     simp only [atomE]
@@ -659,14 +661,14 @@ theorem noExt_block {e b} (he : noExtBlock e.stmts = true) (hb : noExtBlock b = 
   noExt_push he (by simp [noExtStmt]; exact hb)
 
 theorem noExt_params (off n : Nat) :
-    noExtBlock (emitParams {} off n).stmts = true := by
+    noExtBlock (emitParams tag {} off n).stmts = true := by
   induction n with
   | zero => simp [emitParams, Emit.stmts_nil, noExtBlock]
   | succ n ih =>
     have hrange : List.range (n + 1) = List.range n ++ [n] := List.range_succ
     simp only [emitParams]
     rw [hrange, List.foldl_append, List.foldl_cons, List.foldl_nil]
-    exact noExt_push (e := emitParams {} off n) ih
+    exact noExt_push (e := emitParams tag {} off n) ih
       (by
         simp [noExtStmt]
         exact noExt_bop (op := YulSemantics.EVM.Op.calldataload) rfl
@@ -696,26 +698,26 @@ theorem noExt_switch {e : Emit} {cnd : YExpr} {cases : List (YulSemantics.Litera
       have hb : noExtStmts b = true := by simpa [noExtBlock] using hd
       simp [noExtStmt, hc, hcs, hb])
 
-theorem noExt_emitCond (d : Nat) : ∀ c, noExtExpr (emitCond d c) = true := by
+theorem noExt_emitCond (d : Nat) : ∀ c, noExtExpr (emitCond tag d c) = true := by
   intro c
   induction c with
   | lt a b =>
     exact noExt_bop (op := YulSemantics.EVM.Op.lt) rfl
-      (noExtExprs_cons_true (noExt_atomE d a) (noExtExprs_cons_true (noExt_atomE d b) noExtExprs_nil))
+      (noExtExprs_cons_true (noExt_atomE tag d a) (noExtExprs_cons_true (noExt_atomE tag d b) noExtExprs_nil))
   | le a b =>
     exact noExt_bop (op := YulSemantics.EVM.Op.iszero) rfl
       (noExtExprs_cons_true
         (noExt_bop (op := YulSemantics.EVM.Op.lt) rfl
-          (noExtExprs_cons_true (noExt_atomE d b) (noExtExprs_cons_true (noExt_atomE d a) noExtExprs_nil)))
+          (noExtExprs_cons_true (noExt_atomE tag d b) (noExtExprs_cons_true (noExt_atomE tag d a) noExtExprs_nil)))
         noExtExprs_nil)
   | eq a b =>
     exact noExt_bop (op := YulSemantics.EVM.Op.eq) rfl
-      (noExtExprs_cons_true (noExt_atomE d a) (noExtExprs_cons_true (noExt_atomE d b) noExtExprs_nil))
+      (noExtExprs_cons_true (noExt_atomE tag d a) (noExtExprs_cons_true (noExt_atomE tag d b) noExtExprs_nil))
   | ne a b =>
     exact noExt_bop (op := YulSemantics.EVM.Op.iszero) rfl
       (noExtExprs_cons_true
         (noExt_bop (op := YulSemantics.EVM.Op.eq) rfl
-          (noExtExprs_cons_true (noExt_atomE d a) (noExtExprs_cons_true (noExt_atomE d b) noExtExprs_nil)))
+          (noExtExprs_cons_true (noExt_atomE tag d a) (noExtExprs_cons_true (noExt_atomE tag d b) noExtExprs_nil)))
         noExtExprs_nil)
   | and c1 c2 ih1 ih2 =>
     exact noExt_bop (op := YulSemantics.EVM.Op.and) rfl
@@ -729,16 +731,16 @@ theorem noExt_emitCond (d : Nat) : ∀ c, noExtExpr (emitCond d c) = true := by
   | tt | ff => exact noExt_lit _
 
 theorem noExt_emitPrim (d : Nat) (p : Prim) (args : List Atom) :
-    noExtExpr (emitPrim d p args) = true := by
+    noExtExpr (emitPrim tag d p args) = true := by
   simp only [emitPrim]
   split
-  · exact noExt_atomE d _
+  · exact noExt_atomE tag d _
   · exact noExt_bop (op := YulSemantics.EVM.Op.add) rfl
-      (noExtExprs_cons_true (noExt_atomE d _) (noExtExprs_cons_true (noExt_atomE d _) noExtExprs_nil))
+      (noExtExprs_cons_true (noExt_atomE tag d _) (noExtExprs_cons_true (noExt_atomE tag d _) noExtExprs_nil))
   · exact noExt_bop (op := YulSemantics.EVM.Op.sub) rfl
-      (noExtExprs_cons_true (noExt_atomE d _) (noExtExprs_cons_true (noExt_atomE d _) noExtExprs_nil))
+      (noExtExprs_cons_true (noExt_atomE tag d _) (noExtExprs_cons_true (noExt_atomE tag d _) noExtExprs_nil))
   · exact noExt_bop (op := YulSemantics.EVM.Op.mul) rfl
-      (noExtExprs_cons_true (noExt_atomE d _) (noExtExprs_cons_true (noExt_atomE d _) noExtExprs_nil))
+      (noExtExprs_cons_true (noExt_atomE tag d _) (noExtExprs_cons_true (noExt_atomE tag d _) noExtExprs_nil))
   · exact noExt_lit 0
 
 theorem noExt_foldl_mstore {e : Emit} {base i0 : Nat} {xs : List YExpr}
@@ -942,22 +944,22 @@ theorem noExt_mulDivUp (e : Emit) (name : YIdent) (a b c : YExpr)
           (noExtExprs_cons_true (noExt_var name) (noExtExprs_cons_true hc noExtExprs_nil)))
         (noExtExprs_cons_true (noExt_lit 1) noExtExprs_nil)))
 
-theorem noExt_atomEs (d : Nat) (as : List Atom) :
-    ∀ x ∈ as.map (atomE d), noExtExpr x = true := by
+theorem noExt_atomEs tag (d : Nat) (as : List Atom) :
+    ∀ x ∈ as.map (atomE tag d), noExtExpr x = true := by
   intro x hx
   obtain ⟨a, _, rfl⟩ := List.mem_map.mp hx
-  exact noExt_atomE d a
+  exact noExt_atomE tag d a
 
 theorem noExt_ret (e : Emit) (d : Nat) (halt : Bool) {t} (r : RetExpr t)
     (he : noExtBlock e.stmts = true) :
-    noExtBlock (emitRet e d halt r).stmts = true := by
+    noExtBlock (emitRet tag e d halt r).stmts = true := by
   cases r with
   | unit => simp only [emitRet]; exact noExt_returnUnit e halt he
   | word a | addr a | flag a =>
     simp only [emitRet]
-    exact noExt_returnWords e _ he (noExt_atomEs d _)
+    exact noExt_returnWords e _ he (noExt_atomEs tag d _)
   | pair a b =>
     simp only [emitRet]
-    exact noExt_returnWords e _ he (noExt_atomEs d _)
+    exact noExt_returnWords e _ he (noExt_atomEs tag d _)
 
 end Lsc.Compiler

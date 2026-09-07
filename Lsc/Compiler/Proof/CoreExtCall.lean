@@ -17,6 +17,8 @@ Call-head helpers for `core_sim_ext`: fail-bit, oracle composition, and
 
 namespace Lsc.Compiler
 
+variable (tag : String)
+
 open YulSemantics
 open YulSemantics.EVM
 open Lsc hiding Op Stmt
@@ -68,13 +70,13 @@ abbrev SimExt {I : Interface} {S X E ε : Type}
   ∀ {w : World S X E} {env : List Nat} {V : VEnv (yulD calls)} {st : EvmState}
     (funs : FunEnv (yulD calls))
     (hfuns : noExtFuns funs = true) (hwf : coreWF c core = true)
-    (hn : identsNodup (env.length + coreExtraDepth core) = true)
-    (hinv : Inv Γ c κ ctx w env V st) (hRX : RXs bs w st)
+    (hn : identsNodup tag (env.length + coreExtraDepth core) = true)
+    (hinv : Inv tag Γ c κ ctx w env V st) (hRX : RXs bs w st)
     (hBindNe : BindEnvs.neSelf bs ctx.self w.self)
     (hconf : BindEnvs.conforms bs ctx.self w.self calls)
     (hinj : BindEnvs.addrInj bs w.self)
     (hBind : BindEnvs.lookupWF c Γ bs)
-    {e' : Emit} (hem : emitCore c {} env.length haltUnit core = some e')
+    {e' : Emit} (hem : emitCore tag c {} env.length haltUnit core = some e')
     {V' : VEnv (yulD calls)} {st' : EvmState} {o : Outcome}
     (hexec : ExecStmts (yulD calls) funs V st e'.stmts V' st' o),
     ∃ fo, ∀ g, oracleAgrees w.ncalls fo g →
@@ -147,9 +149,9 @@ theorem sim_ext_compose {I : Interface} {S X E ε : Type} {t : RetTy}
   simpa using hfo' g hagree
 
 private theorem noExt_returnVar (d : Nat) :
-    noExtBlock (emitReturnWords {} [atomE d (.var 0)]).stmts = true :=
+    noExtBlock (emitReturnWords {} [atomE tag d (.var 0)]).stmts = true :=
   noExt_returnWords _ _ (by simp [Emit.stmts_nil]) (by
-    intro x hx; simp at hx; subst hx; exact noExt_atomE _ _)
+    intro x hx; simp at hx; subst hx; exact noExt_atomE tag _ _)
 
 /-- Call op as a tail: `op_sim_call_bwd` then `return_word_sim`. -/
 theorem sim_ext_op_call_return {I : Interface} {S X E ε : Type} {t : RetTy}
@@ -175,16 +177,16 @@ theorem sim_ext_op_call_return {I : Interface} {S X E ε : Type} {t : RetTy}
     (funs : FunEnv (yulD calls))
     (hfuns : noExtFuns funs = true)
     (hopWF : callWF c b m args = true)
-    (hn1 : identsNodup (env.length + 1) = true)
-    (hinv : Inv Γ c κ ctx w env V st) (hRX : RXs bs w st)
+    (hn1 : identsNodup tag (env.length + 1) = true)
+    (hinv : Inv tag Γ c κ ctx w env V st) (hRX : RXs bs w st)
     (hBindNe : BindEnvs.neSelf bs ctx.self w.self)
     (hconf : BindEnvs.conforms bs ctx.self w.self calls)
     (hinj : BindEnvs.addrInj bs w.self)
     (hBind : BindEnvs.lookupWF c Γ bs)
-    {e1 : Emit} (hE : emitLetOp c {} env.length (.call b m args) = some e1)
+    {e1 : Emit} (hE : emitLetOp tag c {} env.length (.call b m args) = some e1)
     {V' : VEnv (yulD calls)} {st' : EvmState} {o : Outcome}
     (hexec : ExecStmts (yulD calls) funs V st
-      (e1.stmts ++ (emitReturnWords {} [atomE (env.length + 1) (.var 0)]).stmts) V' st' o) :
+      (e1.stmts ++ (emitReturnWords {} [atomE tag (env.length + 1) (.var 0)]).stmts) V' st' o) :
     ∃ fo, ∀ g, oracleAgrees w.ncalls fo g →
       match (Tx.run (Core.denote Γ core env) ctx { w with faults := g } :
           Except (Err ε) (t.denote × World S X E)) with
@@ -198,10 +200,10 @@ theorem sim_ext_op_call_return {I : Interface} {S X E ε : Type} {t : RetTy}
   cases execStmts_append_inv hexec with
   | inr hstop =>
     have hexec1 : ExecStmts (yulD calls) funs V st
-        ((emitLetOp c {} env.length (.call b m args)).getD {}).stmts V' st' o := by
+        ((emitLetOp tag c {} env.length (.call b m args)).getD {}).stmts V' st' o := by
       simpa [hE] using hstop.2
     obtain ⟨bit, hfail, hok⟩ :=
-      op_sim_call_bwd (α := eCall.α) heCall hsame horth hinj hinv hbd hRX
+      op_sim_call_bwd tag (α := eCall.α) heCall hsame horth hinj hinv hbd hRX
         (hconf eCall heCall) hfuns hopWF hn1 hexec1
     cases bit with
     | false =>
@@ -215,10 +217,10 @@ theorem sim_ext_op_call_return {I : Interface} {S X E ε : Type} {t : RetTy}
   | inl hokPre =>
     obtain ⟨V1, st1, hcallE, hrest⟩ := hokPre
     have hexec1 : ExecStmts (yulD calls) funs V st
-        ((emitLetOp c {} env.length (.call b m args)).getD {}).stmts V1 st1 .normal := by
+        ((emitLetOp tag c {} env.length (.call b m args)).getD {}).stmts V1 st1 .normal := by
       simpa [hE] using hcallE
     obtain ⟨bit, hfail, hok⟩ :=
-      op_sim_call_bwd (α := eCall.α) heCall hsame horth hinj hinv hbd hRX
+      op_sim_call_bwd tag (α := eCall.α) heCall hsame horth hinj hinv hbd hRX
         (hconf eCall heCall) hfuns hopWF hn1 hexec1
     cases bit with
     | true =>
@@ -228,12 +230,12 @@ theorem sim_ext_op_call_return {I : Interface} {S X E ε : Type} {t : RetTy}
       obtain ⟨v, w0, hself, _hlog, hncalls, hg⟩ := hok rfl
       let g0 : Nat → Bool := fun _ => false
       obtain ⟨_hrun0, _ho0, hVeq, hInv0, _hRX0⟩ := hg g0 rfl
-      have hn0 : identsNodup (v :: env).length = true := by simpa using hn1
-      have he := eval_atom (funEnvUncast calls funs) (st := st1) hVeq hn0 (.var 0)
+      have hn0 : identsNodup tag (v :: env).length = true := by simpa using hn1
+      have he := eval_atom tag (funEnvUncast calls funs) (st := st1) hVeq hn0 (.var 0)
       have hv : v < wordBound := hInv0.wf v (by simp)
       obtain ⟨_stR, hret, hh, hR'⟩ :=
         return_word_sim (funEnvUncast calls funs) V1 hv he hInv0.rel
-      have hnoRet := noExt_returnVar (env.length + 1)
+      have hnoRet := noExt_returnVar tag (env.length + 1)
       have hdesc := execStmts_descend hfuns hnoRet hrest
       obtain ⟨hVeq', hsteq, hoeq⟩ := execStmts_det_evm hdesc hret
       subst hVeq'; subst hsteq; subst hoeq
@@ -254,23 +256,23 @@ theorem sim_ext_seq_call {I : Interface} {S X E ε : Type} {t : RetTy}
     (hsame : BindEnvs.sameAbs bs) (horth : BindEnvs.orthogonal bs)
     {k : Core t} {b m : Nat} {args : List Atom}
     (hk : S2Frag k) (hslotK : BindEnvs.avoids Γ c bs k)
-    (ih : SimExt bs c Γ κ ctx haltUnit (calls := calls) k)
+    (ih : SimExt tag bs c Γ κ ctx haltUnit (calls := calls) k)
     {w : World S X E} {env : List Nat} {V : VEnv (yulD calls)} {st : EvmState}
     (funs : FunEnv (yulD calls))
     (hfuns : noExtFuns funs = true)
     (hkWF : coreWF c k = true)
-    (hn0 : identsNodup env.length = true)
-    (hnK : identsNodup (env.length + coreExtraDepth k) = true)
-    (hinv : Inv Γ c κ ctx w env V st) (hRX : RXs bs w st)
+    (hn0 : identsNodup tag env.length = true)
+    (hnK : identsNodup tag (env.length + coreExtraDepth k) = true)
+    (hinv : Inv tag Γ c κ ctx w env V st) (hRX : RXs bs w st)
     (hBindNe : BindEnvs.neSelf bs ctx.self w.self)
     (hconf : BindEnvs.conforms bs ctx.self w.self calls)
     (hinj : BindEnvs.addrInj bs w.self)
     (hBind : BindEnvs.lookupWF c Γ bs)
     (hopWF : callWF c b m args = true)
-    {e0 : Emit} (h0 : emitCore c {} env.length haltUnit k = some e0)
+    {e0 : Emit} (h0 : emitCore tag c {} env.length haltUnit k = some e0)
     {V' : VEnv (yulD calls)} {st' : EvmState} {o : Outcome}
     (hexec : ExecStmts (yulD calls) funs V st
-      ((emitStmt c {} env.length (.call b m args)).stmts ++ e0.stmts) V' st' o) :
+      ((emitStmt tag c {} env.length (.call b m args)).stmts ++ e0.stmts) V' st' o) :
     ∃ fo, ∀ g, oracleAgrees w.ncalls fo g →
       match (Tx.run (Core.denote Γ (.seq (.call b m args) k) env) ctx { w with faults := g } :
           Except (Err ε) (t.denote × World S X E)) with
@@ -284,7 +286,7 @@ theorem sim_ext_seq_call {I : Interface} {S X E ε : Type} {t : RetTy}
   cases execStmts_append_inv hexec with
   | inr hstop =>
     obtain ⟨bit, hfail, hok⟩ :=
-      stmt_sim_call_bwd (α := eCall.α) heCall hsame horth hinj hinv hbd hRX
+      stmt_sim_call_bwd tag (α := eCall.α) heCall hsame horth hinj hinv hbd hRX
         (hconf eCall heCall) hfuns hopWF hn0 hstop.2
     cases bit with
     | false =>
@@ -300,7 +302,7 @@ theorem sim_ext_seq_call {I : Interface} {S X E ε : Type} {t : RetTy}
   | inl hokPre =>
     obtain ⟨V1, st1, hcallE, hrest⟩ := hokPre
     obtain ⟨bit, hfail, hok⟩ :=
-      stmt_sim_call_bwd (α := eCall.α) heCall hsame horth hinj hinv hbd hRX
+      stmt_sim_call_bwd tag (α := eCall.α) heCall hsame horth hinj hinv hbd hRX
         (hconf eCall heCall) hfuns hopWF hn0 hcallE
     cases bit with
     | true =>
@@ -331,22 +333,22 @@ theorem sim_ext_letOp_call {I : Interface} {S X E ε : Type} {t : RetTy}
     (hsame : BindEnvs.sameAbs bs) (horth : BindEnvs.orthogonal bs)
     {k : Core t} {b m : Nat} {args : List Atom}
     (hk : S2Frag k) (hslotK : BindEnvs.avoids Γ c bs k)
-    (ih : SimExt bs c Γ κ ctx haltUnit (calls := calls) k)
+    (ih : SimExt tag bs c Γ κ ctx haltUnit (calls := calls) k)
     {w : World S X E} {env : List Nat} {V : VEnv (yulD calls)} {st : EvmState}
     (funs : FunEnv (yulD calls))
     (hfuns : noExtFuns funs = true)
     (hkWF : coreWF c k = true)
-    (hn1 : identsNodup (env.length + 1) = true)
-    (hnK : identsNodup ((env.length + 1) + coreExtraDepth k) = true)
-    (hinv : Inv Γ c κ ctx w env V st) (hRX : RXs bs w st)
+    (hn1 : identsNodup tag (env.length + 1) = true)
+    (hnK : identsNodup tag ((env.length + 1) + coreExtraDepth k) = true)
+    (hinv : Inv tag Γ c κ ctx w env V st) (hRX : RXs bs w st)
     (hBindNe : BindEnvs.neSelf bs ctx.self w.self)
     (hconf : BindEnvs.conforms bs ctx.self w.self calls)
     (hinj : BindEnvs.addrInj bs w.self)
     (hBind : BindEnvs.lookupWF c Γ bs)
     (hopWF : callWF c b m args = true)
     {e1 e0 : Emit}
-    (hE : emitLetOp c {} env.length (.call b m args) = some e1)
-    (h0 : emitCore c {} (env.length + 1) haltUnit k = some e0)
+    (hE : emitLetOp tag c {} env.length (.call b m args) = some e1)
+    (h0 : emitCore tag c {} (env.length + 1) haltUnit k = some e0)
     {V' : VEnv (yulD calls)} {st' : EvmState} {o : Outcome}
     (hexec : ExecStmts (yulD calls) funs V st (e1.stmts ++ e0.stmts) V' st' o) :
     ∃ fo, ∀ g, oracleAgrees w.ncalls fo g →
@@ -362,10 +364,10 @@ theorem sim_ext_letOp_call {I : Interface} {S X E ε : Type} {t : RetTy}
   cases execStmts_append_inv hexec with
   | inr hstop =>
     have hexec1 : ExecStmts (yulD calls) funs V st
-        ((emitLetOp c {} env.length (.call b m args)).getD {}).stmts V' st' o := by
+        ((emitLetOp tag c {} env.length (.call b m args)).getD {}).stmts V' st' o := by
       simpa [hE] using hstop.2
     obtain ⟨bit, hfail, hok⟩ :=
-      op_sim_call_bwd (α := eCall.α) heCall hsame horth hinj hinv hbd hRX
+      op_sim_call_bwd tag (α := eCall.α) heCall hsame horth hinj hinv hbd hRX
         (hconf eCall heCall) hfuns hopWF hn1 hexec1
     cases bit with
     | false =>
@@ -381,10 +383,10 @@ theorem sim_ext_letOp_call {I : Interface} {S X E ε : Type} {t : RetTy}
   | inl hokPre =>
     obtain ⟨V1, st1, hcallE, hrest⟩ := hokPre
     have hexec1 : ExecStmts (yulD calls) funs V st
-        ((emitLetOp c {} env.length (.call b m args)).getD {}).stmts V1 st1 .normal := by
+        ((emitLetOp tag c {} env.length (.call b m args)).getD {}).stmts V1 st1 .normal := by
       simpa [hE] using hcallE
     obtain ⟨bit, hfail, hok⟩ :=
-      op_sim_call_bwd (α := eCall.α) heCall hsame horth hinj hinv hbd hRX
+      op_sim_call_bwd tag (α := eCall.α) heCall hsame horth hinj hinv hbd hRX
         (hconf eCall heCall) hfuns hopWF hn1 hexec1
     cases bit with
     | true =>
@@ -416,21 +418,21 @@ theorem sim_ext_letOp_m1 {I : Interface} {S X E ε : Type} {t : RetTy}
     (hlen : c.fields.length < wordBound) (hign : BindEnvs.ignoresLocal bs)
     {op : Lsc.Op} {k : Core t}
     (hM1 : M1Op op) (hk : S2Frag k) (hslotK : BindEnvs.avoids Γ c bs k)
-    (ih : SimExt bs c Γ κ ctx haltUnit (calls := calls) k)
+    (ih : SimExt tag bs c Γ κ ctx haltUnit (calls := calls) k)
     {w : World S X E} {env : List Nat} {V : VEnv (yulD calls)} {st : EvmState}
     (funs : FunEnv (yulD calls))
     (hfuns : noExtFuns funs = true)
     (hopWF : opWF c op = true) (hkWF : coreWF c k = true)
-    (hn1 : identsNodup (env.length + 1) = true)
-    (hnK : identsNodup ((env.length + 1) + coreExtraDepth k) = true)
-    (hinv : Inv Γ c κ ctx w env V st) (hRX : RXs bs w st)
+    (hn1 : identsNodup tag (env.length + 1) = true)
+    (hnK : identsNodup tag ((env.length + 1) + coreExtraDepth k) = true)
+    (hinv : Inv tag Γ c κ ctx w env V st) (hRX : RXs bs w st)
     (hBindNe : BindEnvs.neSelf bs ctx.self w.self)
     (hconf : BindEnvs.conforms bs ctx.self w.self calls)
     (hinj : BindEnvs.addrInj bs w.self)
     (hBind : BindEnvs.lookupWF c Γ bs)
     {e1 e0 : Emit}
-    (hE : emitLetOp c {} env.length op = some e1)
-    (h0 : emitCore c {} (env.length + 1) haltUnit k = some e0)
+    (hE : emitLetOp tag c {} env.length op = some e1)
+    (h0 : emitCore tag c {} (env.length + 1) haltUnit k = some e0)
     {V' : VEnv (yulD calls)} {st' : EvmState} {o : Outcome}
     (hexec : ExecStmts (yulD calls) funs V st (e1.stmts ++ e0.stmts) V' st' o) :
     ∃ fo, ∀ g, oracleAgrees w.ncalls fo g →
@@ -443,9 +445,9 @@ theorem sim_ext_letOp_m1 {I : Interface} {S X E ε : Type} {t : RetTy}
           ∃ bytes, o = Outcome.halt ∧ st'.halted = some (HaltKind.revert, bytes) ∧
             haltError c Γ e bytes := by
   have hno : noExtBlock e1.stmts = true :=
-    noExt_letOp_m1 hM1 (by simp [Emit.stmts_nil]) hE
+    noExt_letOp_m1 tag hM1 (by simp [Emit.stmts_nil]) hE
   have hsim :=
-    op_sim (funEnvUncast calls funs) hinv hΓ hκ hlen hM1 hopWF hn1
+    op_sim tag (funEnvUncast calls funs) hinv hΓ hκ hlen hM1 hopWF hn1
   simp only [hE] at hsim
   cases hopr : Tx.run (Op.denote Γ env op) ctx w with
   | error err =>
@@ -481,7 +483,7 @@ theorem sim_ext_letOp_m1 {I : Interface} {S X E ε : Type} {t : RetTy}
       BindEnvs.addrInj_self (congrArg World.self hw1) hinj
     obtain ⟨fo', hfo'⟩ :=
       ih (w := w1) (env := v :: env)
-        (V := (identV env.length, BitVec.ofNat 256 v) :: V) (st := st1)
+        (V := (identV tag env.length, BitVec.ofNat 256 v) :: V) (st := st1)
         funs hfuns hkWF (by simpa using hnK) hinv1 hRX1
         (BindEnvs.neSelf_self (congrArg World.self hw1) hBindNe) hconf1 hinj1 hBind h0 hrest
     refine ⟨fo', ?_⟩
@@ -506,22 +508,22 @@ theorem sim_ext_seq_m1 {I : Interface} {S X E ε : Type} {t : RetTy}
     {s : Lsc.Stmt} {k : Core t}
     (hM1 : M1Stmt s) (hk : S2Frag k)
     (hslot : BindEnvs.avoids Γ c bs (.seq s k))
-    (ih : SimExt bs c Γ κ ctx haltUnit (calls := calls) k)
+    (ih : SimExt tag bs c Γ κ ctx haltUnit (calls := calls) k)
     {w : World S X E} {env : List Nat} {V : VEnv (yulD calls)} {st : EvmState}
     (funs : FunEnv (yulD calls))
     (hfuns : noExtFuns funs = true)
     (hsWF : stmtWF c s = true) (hkWF : coreWF c k = true)
-    (hn0 : identsNodup env.length = true)
-    (hnK : identsNodup (env.length + coreExtraDepth k) = true)
-    (hinv : Inv Γ c κ ctx w env V st) (hRX : RXs bs w st)
+    (hn0 : identsNodup tag env.length = true)
+    (hnK : identsNodup tag (env.length + coreExtraDepth k) = true)
+    (hinv : Inv tag Γ c κ ctx w env V st) (hRX : RXs bs w st)
     (hBindNe : BindEnvs.neSelf bs ctx.self w.self)
     (hconf : BindEnvs.conforms bs ctx.self w.self calls)
     (hinj : BindEnvs.addrInj bs w.self)
     (hBind : BindEnvs.lookupWF c Γ bs)
-    {e0 : Emit} (h0 : emitCore c {} env.length haltUnit k = some e0)
+    {e0 : Emit} (h0 : emitCore tag c {} env.length haltUnit k = some e0)
     {V' : VEnv (yulD calls)} {st' : EvmState} {o : Outcome}
     (hexec : ExecStmts (yulD calls) funs V st
-      ((emitStmt c {} env.length s).stmts ++ e0.stmts) V' st' o) :
+      ((emitStmt tag c {} env.length s).stmts ++ e0.stmts) V' st' o) :
     ∃ fo, ∀ g, oracleAgrees w.ncalls fo g →
       match (Tx.run (Core.denote Γ (.seq s k) env) ctx { w with faults := g } :
           Except (Err ε) (t.denote × World S X E)) with
@@ -532,9 +534,9 @@ theorem sim_ext_seq_m1 {I : Interface} {S X E ε : Type} {t : RetTy}
           ∃ bytes, o = Outcome.halt ∧ st'.halted = some (HaltKind.revert, bytes) ∧
             haltError c Γ e bytes := by
   have hslotK : BindEnvs.avoids Γ c bs k := BindEnvs.avoids_seq hslot
-  have hno : noExtBlock (emitStmt c {} env.length s).stmts = true :=
-    noExt_stmt_m1 hM1 (by simp [Emit.stmts_nil])
-  have hsim := stmt_sim (funEnvUncast calls funs) hinv hΓ hκ hlen hM1 hsWF hn0
+  have hno : noExtBlock (emitStmt tag c {} env.length s).stmts = true :=
+    noExt_stmt_m1 tag hM1 (by simp [Emit.stmts_nil])
+  have hsim := stmt_sim tag (funEnvUncast calls funs) hinv hΓ hκ hlen hM1 hsWF hn0
   cases hrun : Tx.run (Stmt.denote Γ env s) ctx w with
   | error err =>
     rw [hrun] at hsim
@@ -598,15 +600,15 @@ theorem sim_ext_stmtTail_call {I : Interface} {S X E ε : Type}
     (funs : FunEnv (yulD calls))
     (hfuns : noExtFuns funs = true)
     (hopWF : callWF c b m args = true)
-    (hn0 : identsNodup env.length = true)
-    (hinv : Inv Γ c κ ctx w env V st) (hRX : RXs bs w st)
+    (hn0 : identsNodup tag env.length = true)
+    (hinv : Inv tag Γ c κ ctx w env V st) (hRX : RXs bs w st)
     (hBindNe : BindEnvs.neSelf bs ctx.self w.self)
     (hconf : BindEnvs.conforms bs ctx.self w.self calls)
     (hinj : BindEnvs.addrInj bs w.self)
     (hBind : BindEnvs.lookupWF c Γ bs)
     {V' : VEnv (yulD calls)} {st' : (yulD calls).State} {o : Outcome}
     (hexec : ExecStmts (yulD calls) funs V st
-      ((emitStmt c {} env.length (.call b m args)).stmts ++ [stopStmt]) V' st' o) :
+      ((emitStmt tag c {} env.length (.call b m args)).stmts ++ [stopStmt]) V' st' o) :
     ∃ fo, ∀ g, oracleAgrees w.ncalls fo g →
       match (Tx.run (Core.denote Γ (.stmtTail (.call b m args)) env) ctx { w with faults := g } :
           Except (Err ε) (RetTy.unit.denote × World S X E)) with
@@ -620,7 +622,7 @@ theorem sim_ext_stmtTail_call {I : Interface} {S X E ε : Type}
   cases execStmts_append_inv hexec with
   | inr hstop =>
     obtain ⟨bit, hfail, hok⟩ :=
-      stmt_sim_call_bwd (α := eCall.α) heCall hsame horth hinj hinv hbd hRX
+      stmt_sim_call_bwd tag (α := eCall.α) heCall hsame horth hinj hinv hbd hRX
         (hconf eCall heCall) hfuns hopWF hn0 hstop.2
     cases bit with
     | false =>
@@ -642,7 +644,7 @@ theorem sim_ext_stmtTail_call {I : Interface} {S X E ε : Type}
   | inl hokPre =>
     obtain ⟨V1, st1, hcallE, hrest⟩ := hokPre
     obtain ⟨bit, hfail, hok⟩ :=
-      stmt_sim_call_bwd (α := eCall.α) heCall hsame horth hinj hinv hbd hRX
+      stmt_sim_call_bwd tag (α := eCall.α) heCall hsame horth hinj hinv hbd hRX
         (hconf eCall heCall) hfuns hopWF hn0 hcallE
     cases bit with
     | true =>

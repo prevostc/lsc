@@ -10,14 +10,16 @@ Layout / `Inv` lemmas for `toYulFn_correct` (M1: scalar `sstore`, one-word `log1
 
 namespace Lsc.Compiler
 
+variable (tag : String)
+
 open YulSemantics
 open YulSemantics.EVM
 
-/-- Simulation invariant: Yul `VEnv` is `toVEnv env`, locals are words, `R` and `ctxRel` hold. -/
+/-- Simulation invariant: Yul `VEnv` is `toVEnv tag env`, locals are words, `R` and `ctxRel` hold. -/
 structure Inv {S X E ε} (Γ : ContractSchema S X E ε) (c : ContractDef)
     (κ : List UInt8 → U256) (ctx : Ctx) (w : World S X E)
     (env : List Nat) (V : VEnv evm) (st : EvmState) : Prop where
-  venv : V = toVEnv env
+  venv : V = toVEnv tag env
   wf : EnvWF env
   rel : R c Γ κ w st
   ctxr : ctxRel ctx st
@@ -91,8 +93,8 @@ theorem R_memOnly {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
   · rw [hκ, hk]
 
 theorem Inv_memOnly {S X E ε} {Γ : ContractSchema S X E ε} {c κ ctx w env V st st'}
-    (h : Inv Γ c κ ctx w env V st) (hm : MemOnly st st') :
-    Inv Γ c κ ctx w env V st' :=
+    (h : Inv tag Γ c κ ctx w env V st) (hm : MemOnly st st') :
+    Inv tag Γ c κ ctx w env V st' :=
   ⟨h.venv, h.wf, R_memOnly h.rel hm, ctxRel_memOnly h.ctxr hm⟩
 
 theorem ctxRel_address {ctx st} (h : ctxRel ctx st) :

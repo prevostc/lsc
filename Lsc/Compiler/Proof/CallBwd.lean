@@ -13,6 +13,8 @@ Backward simulation of scoped `emitExtCall`:
 
 namespace Lsc.Compiler
 
+variable (tag : String)
+
 open YulSemantics
 open Lsc hiding Op Stmt
 open YulSemantics.EVM
@@ -24,30 +26,30 @@ theorem call_prefix_fwd {I : Interface} {S X E ε : Type}
     (funs : FunEnv evm) (pre : VEnv evm)
     (hR : R c Γ κ w st) (hbd : BindWF c Γ bind b m meth)
     (hctx : ctxRel ctx st) (hwf : EnvWF env)
-    (htail : pre = toVEnv env ∨
-      pre = (identV env.length, (0 : U256)) :: toVEnv env)
-    (hn : identsNodup env.length = true)
-    (hn1 : pre = (identV env.length, (0 : U256)) :: toVEnv env →
-        identsNodup (env.length + 1) = true)
+    (htail : pre = toVEnv tag env ∨
+      pre = (identV tag env.length, (0 : U256)) :: toVEnv tag env)
+    (hn : identsNodup tag env.length = true)
+    (hn1 : pre = (identV tag env.length, (0 : U256)) :: toVEnv tag env →
+        identsNodup tag (env.length + 1) = true)
     (hn3 : args.length ≤ 3)
     (hvals : ∀ x ∈ args, atomWF x = true) :
     ∃ st',
       ExecStmts evm funs
         pre st
-        (callPrefix c env.length b m args)
-        ((extTok env.length, BitVec.ofNat 256 (bind.addr w.self)) :: pre) st' .normal ∧
+        (callPrefix tag c env.length b m args)
+        ((extTok tag env.length, BitVec.ofNat 256 (bind.addr w.self)) :: pre) st' .normal ∧
       readBytes st'.memory abiPtr (4 + 32 * args.length) =
         abiInput (I.abi meth) (args.map (·.eval env)) ∧
       MemOnly st st' ∧
       st'.env.static = false ∧
       CallWorld.ofState st' = CallWorld.ofState st := by
   obtain ⟨stSel, hP, _, hMO0, hstatic, hmem, hCW0⟩ :=
-    call_prefix_fwd_nil (I := I) funs pre hR hbd hctx
+    call_prefix_fwd_nil tag (I := I) funs pre hR hbd hctx
   have hselLt := hbd.hsel meth
   have hbm := bindingMethod_of_BindWF hbd
   let tokv := BitVec.ofNat 256 (bind.addr w.self)
   obtain ⟨st', hM, hpack, hMO, hCW⟩ :=
-    mstoreArgs_exec (env := env) (V := (extTok env.length, tokv) :: pre) (tail := pre)
+    mstoreArgs_exec tag (env := env) (V := (extTok tag env.length, tokv) :: pre) (tail := pre)
       funs stSel st.memory tokv
       (I.abi meth).selector args rfl htail hn hn1 hn3 hvals hwf hselLt hmem
   refine ⟨st', ?_, ?_, MemOnly.trans hMO0 hMO, ?_, hCW.trans hCW0⟩
@@ -63,11 +65,11 @@ theorem call_step_inv {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
     {V : VEnv (yulD calls)} {st : EvmState}
     {d : Nat} {args : List Atom} {target : U256}
     {V' : VEnv (yulD calls)} {st' : EvmState} {o : Outcome}
-    (hget : VEnv.get V (extTok d) = some target)
+    (hget : VEnv.get V (extTok tag d) = some target)
     (hstatic : st.env.static = false)
     (hn3 : args.length ≤ 3)
-    (h : ExecStmt (yulD calls) funs V st (callLetOk d args) V' st' o) :
-    ∃ resp, o = .normal ∧ V' = (extOk d, resp.flag) :: V ∧
+    (h : ExecStmt (yulD calls) funs V st (callLetOk tag d args) V' st' o) :
+    ∃ resp, o = .normal ∧ V' = (extOk tag d, resp.flag) :: V ∧
       st' = finishCall .call st resp abiPtr (4 + 32 * args.length) abiPtr 32 ∧
       calls.Call
         { kind := .call
@@ -78,7 +80,7 @@ theorem call_step_inv {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
         st resp := by
   unfold callLetOk at h
   obtain ⟨resp, ho, hV, hst, hCall⟩ :=
-    exec_let_call_inv (tok := extTok d) (ok := extOk d) (gas := extCallGas)
+    exec_let_call_inv (tok := extTok tag d) (ok := extOk tag d) (gas := extCallGas)
       (insize := 4 + 32 * args.length) hget hstatic h
   rw [toNat_abiPtr, toNat_insize hn3, toNat_32] at hst
   rw [toNat_abiPtr, toNat_insize hn3] at hCall
@@ -89,9 +91,9 @@ theorem call_step_inv {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
 theorem call_suffix_fwd (funs : FunEnv evm) {d : Nat} {ok : U256}
     {ret : AbiRet} {assign : Option YIdent}
     {V : VEnv evm} {st : EvmState}
-    (hget : VEnv.get V (extOk d) = some ok) :
+    (hget : VEnv.get V (extOk tag d) = some ok) :
     ∃ V' st' o,
-      ExecStmts evm funs V st (callSuffix d ret assign) V' st' o ∧
+      ExecStmts evm funs V st (callSuffix tag d ret assign) V' st' o ∧
       (suffixOk ok ret st →
         o = .normal ∧ MemOnly st st' ∧
           V' = match assign with
@@ -104,11 +106,11 @@ theorem call_suffix_fwd (funs : FunEnv evm) {d : Nat} {ok : U256}
   by_cases hok : ok = 0
   · subst hok
     refine ⟨V, { touchMemory st 0 0 with halted := some (.revert, []) }, .halt, ?_, ?_, ?_, ?_⟩
-    · exact Step.seqStop (call_guard_fail funs hget) halt_ne_normal
+    · exact Step.seqStop (call_guard_fail tag funs hget) halt_ne_normal
     · intro hS; exact (hS.1 rfl).elim
     · intro; exact ⟨rfl, rfl, rfl⟩
     · simp [CallWorld.ofState, touchMemory]
-  · have hguard := call_guard_pass (st := st) funs hget hok
+  · have hguard := call_guard_pass (tag := tag) (st := st) funs hget hok
     cases ret with
     | none =>
       cases assign with
@@ -223,7 +225,7 @@ theorem RXs_finishCall_success {I : Interface} {S X E}
     exact hRX e' he'
 
 /-- Shared scoped-call core: `emitExtCallBody` under `{ … }`. `assign = none` is
-`Stmt.call` (`pre = toVEnv env`); `some (identV d)` is `Op.call` after `let v := 0`.
+`Stmt.call` (`pre = toVEnv tag env`); `some (identV tag d)` is `Op.call` after `let v := 0`.
 The call's package is `⟨α, bind⟩ ∈ bs`; `RXs` is the family invariant. -/
 theorem extCall_block_bwd {I : Interface} {S X E ε : Type}
     {c : ContractDef} {Γ : ContractSchema S X E ε}
@@ -243,17 +245,17 @@ theorem extCall_block_bwd {I : Interface} {S X E ε : Type}
     (hconf : Conforms I ctx.self (bind.addr w.self) calls α)
     (hfuns : noExtFuns funs = true)
     (hwfCall : callWF c b m args = true)
-    (htail : pre = toVEnv env ∨
-      pre = (identV env.length, (0 : U256)) :: toVEnv env)
+    (htail : pre = toVEnv tag env ∨
+      pre = (identV tag env.length, (0 : U256)) :: toVEnv tag env)
     (hassign :
-      (assign = none ∧ pre = toVEnv env) ∨
-      (assign = some (identV env.length) ∧
-        pre = (identV env.length, (0 : U256)) :: toVEnv env))
-    (hn : identsNodup env.length = true)
-    (hn1 : pre = (identV env.length, (0 : U256)) :: toVEnv env →
-        identsNodup (env.length + 1) = true)
+      (assign = none ∧ pre = toVEnv tag env) ∨
+      (assign = some (identV tag env.length) ∧
+        pre = (identV tag env.length, (0 : U256)) :: toVEnv tag env))
+    (hn : identsNodup tag env.length = true)
+    (hn1 : pre = (identV tag env.length, (0 : U256)) :: toVEnv tag env →
+        identsNodup tag (env.length + 1) = true)
     (h : ExecStmt (yulD calls) funs pre st
-      (.block (emitExtCallBody c env.length b m args assign)) V' st' o) :
+      (.block (emitExtCallBody tag c env.length b m args assign)) V' st' o) :
     ∃ bit : Bool,
       (bit = true →
         ∀ g : Nat → Bool, g w.ncalls = true →
@@ -267,16 +269,16 @@ theorem extCall_block_bwd {I : Interface} {S X E ε : Type}
             Tx.run (Op.denote Γ env (.call b m args)) ctx { w with faults := g } =
               .ok (v, { w0 with faults := g }) ∧
             o = .normal ∧ RXs bs { w0 with faults := g } st' ∧
-            (assign = none → V' = toVEnv env ∧
-              Inv Γ c κ ctx { w0 with faults := g } env V' st') ∧
-            (assign.isSome → V' = toVEnv (v :: env) ∧
-              Inv Γ c κ ctx { w0 with faults := g } (v :: env) V' st')) := by
+            (assign = none → V' = toVEnv tag env ∧
+              Inv tag Γ c κ ctx { w0 with faults := g } env V' st') ∧
+            (assign.isSome → V' = toVEnv tag (v :: env) ∧
+              Inv tag Γ c κ ctx { w0 with faults := g } (v :: env) V' st')) := by
   let d := env.length
   have ⟨harity, hvals⟩ := callWF_arity_of_BindWF hwfCall hbd
   have hn3 : args.length ≤ 3 := by rw [harity]; exact hbd.harity
   have hret := bindingMethod_of_BindWF hbd
   obtain ⟨Vb, hbody, hrestore⟩ := exec_block_inv h
-  have hhoist := hoist_emitExtCallBody (calls := calls) c d b m args assign
+  have hhoist := hoist_emitExtCallBody tag (calls := calls) c d b m args assign
   rw [hhoist] at hbody
   rw [emitExtCallBody_split] at hbody
   rw [List.append_assoc] at hbody
@@ -285,46 +287,46 @@ theorem extCall_block_bwd {I : Interface} {S X E ε : Type}
   let funsE := funEnvUncast calls ([] :: funs)
   cases execStmts_append_inv hbody with
   | inr hPstop =>
-    have hdesc := execStmts_descend hfunsB (noExt_callPrefix c d b m args) hPstop.2
+    have hdesc := execStmts_descend hfunsB (noExt_callPrefix tag c d b m args) hPstop.2
     obtain ⟨stP, hfwd, _, _, _, _⟩ :=
-      call_prefix_fwd (I := I) funsE pre hR hbd hctx henv htail hn hn1 hn3 hvals
+      call_prefix_fwd tag (I := I) funsE pre hR hbd hctx henv htail hn hn1 hn3 hvals
     have ⟨_, _, ho⟩ := execStmts_det_evm hfwd hdesc
     exact (hPstop.1 ho.symm).elim
   | inl hPok =>
     obtain ⟨_, _, hP, hrest⟩ := hPok
-    have hPdesc := execStmts_descend hfunsB (noExt_callPrefix c d b m args) hP
+    have hPdesc := execStmts_descend hfunsB (noExt_callPrefix tag c d b m args) hP
     obtain ⟨stP, hPfwd, hpack, hMO, hstaticP, hCW⟩ :=
-      call_prefix_fwd (I := I) funsE pre hR hbd hctx henv htail hn hn1 hn3 hvals
+      call_prefix_fwd tag (I := I) funsE pre hR hbd hctx henv htail hn hn1 hn3 hvals
     have ⟨hVPeq, hstPeq, _⟩ := execStmts_det_evm hPfwd hPdesc
     rw [← hVPeq, ← hstPeq] at hrest
     have hgetTok :
         VEnv.get
-          ((extTok d, BitVec.ofNat 256 (bind.addr w.self)) :: pre)
-          (extTok d) = some (BitVec.ofNat 256 (bind.addr w.self)) := by
+          ((extTok tag d, BitVec.ofNat 256 (bind.addr w.self)) :: pre)
+          (extTok tag d) = some (BitVec.ofNat 256 (bind.addr w.self)) := by
       simp [VEnv.get]
     cases execStmts_cons_inv hrest with
     | inr hCstop =>
       have ⟨resp, ho, _, _, _⟩ :=
-        call_step_inv hgetTok hstaticP hn3 hCstop.2
+        call_step_inv tag hgetTok hstaticP hn3 hCstop.2
       exact (hCstop.1 ho).elim
     | inl hCok =>
       obtain ⟨_, _, hCall, hS⟩ := hCok
       obtain ⟨resp, _, hV2, hst2, hCallR⟩ :=
-        call_step_inv hgetTok hstaticP hn3 hCall
+        call_step_inv tag hgetTok hstaticP hn3 hCall
       rw [hV2, hst2] at hS
       have hgetOk :
           VEnv.get
-            ((extOk d, resp.flag) ::
-              (extTok d, BitVec.ofNat 256 (bind.addr w.self)) :: pre)
-            (extOk d) = some resp.flag := by
+            ((extOk tag d, resp.flag) ::
+              (extTok tag d, BitVec.ofNat 256 (bind.addr w.self)) :: pre)
+            (extOk tag d) = some resp.flag := by
         simp [VEnv.get]
       rw [show (bindingMethod c b m).2 = (I.abi meth).ret from
         congrArg Prod.snd hret] at hS
       have hSdesc := execStmts_descend hfunsB
-        (noExt_callSuffix d (I.abi meth).ret assign) hS
+        (noExt_callSuffix tag d (I.abi meth).ret assign) hS
       obtain ⟨VS, stS, oS, hSfwd, hSok, hSfail, hCWS⟩ :=
         call_suffix_fwd
-          (st := finishCall .call stP resp abiPtr (4 + 32 * args.length) abiPtr 32)
+          tag (st := finishCall .call stP resp abiPtr (4 + 32 * args.length) abiPtr 32)
           (ret := (I.abi meth).ret)
           (assign := assign) funsE hgetOk
       have ⟨hVSeq, hstSeq, hoeq⟩ := execStmts_det_evm hSfwd hSdesc
@@ -458,18 +460,18 @@ theorem extCall_block_bwd {I : Interface} {S X E ε : Type}
           exact h1
         refine ⟨hrun, hoeq.symm.trans hoS, hRX2', ?_, ?_⟩
         · intro hnone
-          have hpreEq : pre = toVEnv env := by
+          have hpreEq : pre = toVEnv tag env := by
             cases hassign with
             | inl h => exact h.2
             | inr h =>
               rw [hnone] at h
               cases h.1
           have hVS : VS =
-              (extOk d, resp.flag) ::
-                (extTok d, BitVec.ofNat 256 (bind.addr w.self)) :: pre := by
+              (extOk tag d, resp.flag) ::
+                (extTok tag d, BitVec.ofNat 256 (bind.addr w.self)) :: pre := by
             rw [hnone] at hVeq
             simpa using hVeq
-          have hVeq' : V' = toVEnv env := by
+          have hVeq' : V' = toVEnv tag env := by
             rw [hrestore, ← hVSeq, hVS, hpreEq]
             exact restore_drop2
           exact ⟨hVeq', hVeq', henv,
@@ -477,13 +479,13 @@ theorem extCall_block_bwd {I : Interface} {S X E ε : Type}
             ctxRel_memOnly hctx2 hMOS⟩
         · intro hsome
           have ⟨name, hname⟩ : ∃ n, assign = some n := Option.isSome_iff_exists.mp hsome
-          have hpreEq : pre = (identV d, (0 : U256)) :: toVEnv env := by
+          have hpreEq : pre = (identV tag d, (0 : U256)) :: toVEnv tag env := by
             cases hassign with
             | inl h => exact nomatch (h.1.symm.trans hname)
             | inr h =>
               cases hname
               exact h.2
-          have hname' : name = identV d := by
+          have hname' : name = identV tag d := by
             cases hassign with
             | inl h =>
               rw [h.1] at hname
@@ -494,32 +496,32 @@ theorem extCall_block_bwd {I : Interface} {S X E ε : Type}
               rfl
           subst hname'
           have hset :
-              VEnv.set ((extOk d, resp.flag) :: (extTok d,
+              VEnv.set ((extOk tag d, resp.flag) :: (extTok tag d,
                   BitVec.ofNat 256 (bind.addr w.self)) ::
-                (identV d, (0 : U256)) :: toVEnv env)
-                (identV d)
+                (identV tag d, (0 : U256)) :: toVEnv tag env)
+                (identV tag d)
                 (suffixVal (I.abi meth).ret
                   (finishCall .call stP resp abiPtr (4 + 32 * args.length) abiPtr 32)) =
-              (extOk d, resp.flag) :: (extTok d,
+              (extOk tag d, resp.flag) :: (extTok tag d,
                   BitVec.ofNat 256 (bind.addr w.self)) ::
-                (identV d,
+                (identV tag d,
                   suffixVal (I.abi meth).ret
                     (finishCall .call stP resp abiPtr (4 + 32 * args.length)
-                      abiPtr 32)) :: toVEnv env := by
-            rw [VEnv.set_cons_ne (identV_ne_extOk d d).symm,
-              VEnv.set_cons_ne (identV_ne_extTok d d).symm, VEnv.set_head]
+                      abiPtr 32)) :: toVEnv tag env := by
+            rw [VEnv.set_cons_ne (identV_ne_extOk tag d d).symm,
+              VEnv.set_cons_ne (identV_ne_extTok tag d d).symm, VEnv.set_head]
           have hVS :
               VS = VEnv.set
-                ((extOk d, resp.flag) :: (extTok d,
+                ((extOk tag d, resp.flag) :: (extTok tag d,
                     BitVec.ofNat 256 (bind.addr w.self)) ::
-                  (identV d, (0 : U256)) :: toVEnv env)
-                (identV d)
+                  (identV tag d, (0 : U256)) :: toVEnv tag env)
+                (identV tag d)
                 (suffixVal (I.abi meth).ret
                   (finishCall .call stP resp abiPtr (4 + 32 * args.length) abiPtr 32)) := by
             rw [hname] at hVeq
             rw [hpreEq] at hVeq
             simpa using hVeq
-          have hVeq' : V' = toVEnv (retv :: env) := by
+          have hVeq' : V' = toVEnv tag (retv :: env) := by
             rw [hrestore, ← hVSeq, hVS, hset, hval, hpreEq, toVEnv_cons]
             exact restore_call_result
           exact ⟨hVeq', hVeq', envWF_cons hvlt henv,
@@ -537,15 +539,15 @@ theorem op_sim_call_bwd {I : Interface} {S X E ε : Type}
     (he : (⟨α, bind⟩ : BindEnv I S X) ∈ bs)
     (hsame : BindEnvs.sameAbs bs) (horth : BindEnvs.orthogonal bs)
     (hinj : BindEnvs.addrInj bs w.self)
-    (hinv : Inv Γ c κ ctx w env V st)
+    (hinv : Inv tag Γ c κ ctx w env V st)
     (hbd : BindWF c Γ bind b m meth)
     (hRX : RXs bs w st)
     (hconf : Conforms I ctx.self (bind.addr w.self) calls α)
     (hfuns : noExtFuns funs = true)
     (hwfCall : callWF c b m args = true)
-    (hn : identsNodup (env.length + 1) = true)
+    (hn : identsNodup tag (env.length + 1) = true)
     (h : ExecStmts (yulD calls) funs V st
-      ((emitLetOp c {} env.length (.call b m args)).getD {}).stmts V' st' o) :
+      ((emitLetOp tag c {} env.length (.call b m args)).getD {}).stmts V' st' o) :
     ∃ bit : Bool,
       (bit = true →
         ∀ g : Nat → Bool, g w.ncalls = true →
@@ -558,8 +560,8 @@ theorem op_sim_call_bwd {I : Interface} {S X E ε : Type}
           ∀ g : Nat → Bool, g w.ncalls = false →
             Tx.run (Op.denote Γ env (.call b m args)) ctx { w with faults := g } =
               .ok (v, { w0 with faults := g }) ∧
-            o = .normal ∧ V' = toVEnv (v :: env) ∧
-            Inv Γ c κ ctx { w0 with faults := g } (v :: env) V' st' ∧
+            o = .normal ∧ V' = toVEnv tag (v :: env) ∧
+            Inv tag Γ c κ ctx { w0 with faults := g } (v :: env) V' st' ∧
             RXs bs { w0 with faults := g } st') := by
   let d := env.length
   rcases hinv with ⟨hVeq, henv, hR, hctx⟩
@@ -573,15 +575,15 @@ theorem op_sim_call_bwd {I : Interface} {S X E ε : Type}
     have ⟨_, hst1, hV1⟩ := exec_let_lit_inv hdoLet
     rw [hst1, hV1] at hblkStmts
     have hblkStmt : ExecStmt (yulD calls) funs
-        ((identV d, (0 : U256)) :: toVEnv env) st
-        (.block (emitExtCallBody c d b m args (some (identV d)))) V' st' o :=
+        ((identV tag d, (0 : U256)) :: toVEnv tag env) st
+        (.block (emitExtCallBody tag c d b m args (some (identV tag d)))) V' st' o :=
       execStmts_one hblkStmts
-    have hpre : (identV d, (0 : U256)) :: toVEnv env =
-        (identV env.length, (0 : U256)) :: toVEnv env := rfl
-    have hbit := extCall_block_bwd (α := α) he hsame horth hinj
+    have hpre : (identV tag d, (0 : U256)) :: toVEnv tag env =
+        (identV tag env.length, (0 : U256)) :: toVEnv tag env := rfl
+    have hbit := extCall_block_bwd tag (α := α) he hsame horth hinj
       hR hctx henv hbd hRX hconf hfuns hwfCall
       (.inr hpre) (.inr ⟨rfl, hpre⟩)
-      (identsNodup_mono (Nat.le_succ _) hn) (fun _ => hn) hblkStmt
+      (identsNodup_mono tag (Nat.le_succ _) hn) (fun _ => hn) hblkStmt
     rcases hbit with ⟨bit, hfail, hok⟩
     refine ⟨bit, hfail, ?_⟩
     intro hb
@@ -603,15 +605,15 @@ theorem stmt_sim_call_bwd {I : Interface} {S X E ε : Type}
     (he : (⟨α, bind⟩ : BindEnv I S X) ∈ bs)
     (hsame : BindEnvs.sameAbs bs) (horth : BindEnvs.orthogonal bs)
     (hinj : BindEnvs.addrInj bs w.self)
-    (hinv : Inv Γ c κ ctx w env V st)
+    (hinv : Inv tag Γ c κ ctx w env V st)
     (hbd : BindWF c Γ bind b m meth)
     (hRX : RXs bs w st)
     (hconf : Conforms I ctx.self (bind.addr w.self) calls α)
     (hfuns : noExtFuns funs = true)
     (hwfCall : callWF c b m args = true)
-    (hn : identsNodup env.length = true)
+    (hn : identsNodup tag env.length = true)
     (h : ExecStmts (yulD calls) funs V st
-      (emitStmt c {} env.length (.call b m args)).stmts V' st' o) :
+      (emitStmt tag c {} env.length (.call b m args)).stmts V' st' o) :
     ∃ bit : Bool,
       (bit = true →
         ∀ g : Nat → Bool, g w.ncalls = true →
@@ -624,15 +626,15 @@ theorem stmt_sim_call_bwd {I : Interface} {S X E ε : Type}
           ∀ g : Nat → Bool, g w.ncalls = false →
             Tx.run (Stmt.denote Γ env (.call b m args)) ctx { w with faults := g } =
               .ok ((), { w0 with faults := g }) ∧
-            o = .normal ∧ V' = toVEnv env ∧
-            Inv Γ c κ ctx { w0 with faults := g } env V' st' ∧
+            o = .normal ∧ V' = toVEnv tag env ∧
+            Inv tag Γ c κ ctx { w0 with faults := g } env V' st' ∧
             RXs bs { w0 with faults := g } st') := by
   rcases hinv with ⟨hVeq, henv, hR, hctx⟩
   rw [hVeq, emitStmt_call_stmts] at h
-  have hblkStmt : ExecStmt (yulD calls) funs (toVEnv env) st
-      (.block (emitExtCallBody c env.length b m args none)) V' st' o :=
+  have hblkStmt : ExecStmt (yulD calls) funs (toVEnv tag env) st
+      (.block (emitExtCallBody tag c env.length b m args none)) V' st' o :=
     execStmts_one h
-  have hbit := extCall_block_bwd (α := α) he hsame horth hinj
+  have hbit := extCall_block_bwd tag (α := α) he hsame horth hinj
     hR hctx henv hbd hRX hconf hfuns hwfCall
     (.inl rfl) (.inl ⟨rfl, rfl⟩) hn
     (fun hpre => by

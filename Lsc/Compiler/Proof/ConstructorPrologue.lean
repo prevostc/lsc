@@ -12,6 +12,8 @@ Constructor prologue: `codecopy` / `mload` of CREATE args from `env.code`.
 
 namespace Lsc.Compiler
 
+variable (tag : String)
+
 open YulSemantics
 open YulSemantics.EVM
 open Lsc
@@ -43,12 +45,12 @@ theorem step_datacopy (st : EvmState) (d s0 nn : U256) :
 
 theorem emitCtorCopy_zero (e : Emit) : emitCtorCopy e 0 = e := rfl
 
-theorem emitCtorLoads_zero (e : Emit) : emitCtorLoads e 0 = e := rfl
+theorem emitCtorLoads_zero (e : Emit) : emitCtorLoads tag e 0 = e := rfl
 
 theorem emitCtorLoads_succ (e : Emit) (n : Nat) :
-    emitCtorLoads e (n + 1) =
-      (emitCtorLoads e n).push
-        (.letDecl [identV n]
+    emitCtorLoads tag e (n + 1) =
+      (emitCtorLoads tag e n).push
+        (.letDecl [identV tag n]
           (some (bop Op.mload [lit (abiPtr + 32 * n)]))) := by
   have hrange : List.range (n + 1) = List.range n ++ [n] := List.range_succ
   dsimp only [emitCtorLoads]
@@ -196,8 +198,8 @@ theorem ctorLoads_from (funs : FunEnv evm) (st0 st : EvmState) (n k : Nat)
     (hle : 32 * n ≤ st0.env.code.length)
     (hptr : abiPtr + 32 * n < wordBound) :
     ∃ st', st'.memory = st.memory ∧ MemOnly st st' ∧
-      ExecStmts evm funs [] st (emitCtorLoads {} k).stmts
-        (toVEnv ((List.range k).map (fun i =>
+      ExecStmts evm funs [] st (emitCtorLoads tag {} k).stmts
+        (toVEnv tag ((List.range k).map (fun i =>
           (wordFrom st0.env.code (st0.env.code.length - 32 * n + 32 * i)).toNat)).reverse)
         st' .normal := by
   induction k generalizing st with
@@ -224,7 +226,7 @@ theorem ctorLoads_from (funs : FunEnv evm) (st0 st : EvmState) (n k : Nat)
       simp
     have heval :
         EvalExpr evm funs
-          (toVEnv ((List.range k).map (fun i =>
+          (toVEnv tag ((List.range k).map (fun i =>
             (wordFrom st0.env.code (st0.env.code.length - 32 * n + 32 * i)).toNat)).reverse)
           st1 (bop Op.mload [lit (abiPtr + 32 * k)])
           (.vals [wordFrom st0.env.code (st0.env.code.length - 32 * n + 32 * k)]
@@ -233,18 +235,18 @@ theorem ctorLoads_from (funs : FunEnv evm) (st0 st : EvmState) (n k : Nat)
         (by simp only [litValue_number, step_mload', hlit]; rw [hloadW])
     have hlet :
         ExecStmt evm funs
-          (toVEnv ((List.range k).map (fun i =>
+          (toVEnv tag ((List.range k).map (fun i =>
             (wordFrom st0.env.code (st0.env.code.length - 32 * n + 32 * i)).toNat)).reverse)
           st1
-          (.letDecl [identV k]
+          (.letDecl [identV tag k]
             (some (bop Op.mload [lit (abiPtr + 32 * k)])))
-          ((identV k,
+          ((identV tag k,
               BitVec.ofNat 256
                 (wordFrom st0.env.code (st0.env.code.length - 32 * n + 32 * k)).toNat) ::
-            toVEnv ((List.range k).map (fun i =>
+            toVEnv tag ((List.range k).map (fun i =>
               (wordFrom st0.env.code (st0.env.code.length - 32 * n + 32 * i)).toNat)).reverse)
           (touchMemory st1 (abiPtr + 32 * k) 32) .normal := by
-      have h0 := Step.letVal (vars := [identV k]) heval (by simp)
+      have h0 := Step.letVal (vars := [identV tag k]) heval (by simp)
       convert h0 using 1
       simp [List.zip_cons_cons]
     refine ⟨touchMemory st1 (abiPtr + 32 * k) 32, by simp [touchMemory, hmem1],
@@ -267,21 +269,21 @@ theorem ctorLoads_sim (funs : FunEnv evm) (st0 : EvmState) (n : Nat)
     (hle : 32 * n ≤ st0.env.code.length)
     (hptr : abiPtr + 32 * n < wordBound) :
     ∃ st', st'.memory = (ctorCopied st0 n).memory ∧ MemOnly (ctorCopied st0 n) st' ∧
-      ExecStmts evm funs [] (ctorCopied st0 n) (emitCtorLoads {} n).stmts
-        (toVEnv (decodeCtorArgs n st0.env.code).reverse) st' .normal := by
+      ExecStmts evm funs [] (ctorCopied st0 n) (emitCtorLoads tag {} n).stmts
+        (toVEnv tag (decodeCtorArgs n st0.env.code).reverse) st' .normal := by
   have hdec : decodeCtorArgs n st0.env.code =
       (List.range n).map (fun i =>
         (wordFrom st0.env.code ((st0.env.code.length - 32 * n) + 32 * i)).toNat) :=
     rfl
   have ⟨st', hm, hMO, hexec⟩ :=
-    ctorLoads_from funs st0 (ctorCopied st0 n) n n (Nat.le_refl _)
+    ctorLoads_from tag funs st0 (ctorCopied st0 n) n n (Nat.le_refl _)
       (by simp [ctorCopied]) (ctorCopied_code st0 n) hle hptr
   refine ⟨st', hm, hMO, ?_⟩
   convert hexec using 1
   simp [hdec]
 
 theorem hoist_ctorLoads (e : Emit) (n : Nat) :
-    hoist evm (emitCtorLoads e n).stmts = hoist evm e.stmts := by
+    hoist evm (emitCtorLoads tag e n).stmts = hoist evm e.stmts := by
   induction n generalizing e with
   | zero => simp [emitCtorLoads_zero]
   | succ n ih =>
@@ -295,25 +297,25 @@ theorem hoist_ctorCopy (n : Nat) : hoist evm (emitCtorCopy {} n).stmts = [] := b
     rw [emitCtorCopy_succ, emitDo_stmts, Emit.stmts_nil]
     simp [hoist]
 
-theorem hoist_ctorParams (n : Nat) : hoist evm (emitCtorParams {} n).stmts = [] := by
+theorem hoist_ctorParams tag (n : Nat) : hoist evm (emitCtorParams tag {} n).stmts = [] := by
   simp only [emitCtorParams]
   cases n with
   | zero =>
     simp [emitCtorCopy_zero, emitCtorLoads_zero, Emit.stmts_nil, hoist]
   | succ n =>
-    have h := hoist_ctorLoads (emitCtorCopy {} (n + 1)) (n + 1)
+    have h := hoist_ctorLoads tag (emitCtorCopy {} (n + 1)) (n + 1)
     simpa [hoist_ctorCopy] using h
 
 theorem emitCtorParams_stmts (n : Nat) :
-    (emitCtorParams {} n).stmts =
-      (emitCtorCopy {} n).stmts ++ (emitCtorLoads {} n).stmts := by
+    (emitCtorParams tag {} n).stmts =
+      (emitCtorCopy {} n).stmts ++ (emitCtorLoads tag {} n).stmts := by
   cases n with
   | zero => simp [emitCtorParams, emitCtorCopy_zero, emitCtorLoads_zero, Emit.stmts_nil]
   | succ n =>
     simp only [emitCtorParams]
-    -- `emitCtorLoads (emitCtorCopy {} (n+1)) (n+1)`: loads fold onto the copy emitter
-    have hacc : ∀ k, emitCtorLoads (emitCtorCopy {} (n + 1)) k =
-        { acc := (emitCtorLoads {} k).acc ++ (emitCtorCopy {} (n + 1)).acc } := by
+    -- `emitCtorLoads tag (emitCtorCopy {} (n+1)) (n+1)`: loads fold onto the copy emitter
+    have hacc : ∀ k, emitCtorLoads tag (emitCtorCopy {} (n + 1)) k =
+        { acc := (emitCtorLoads tag {} k).acc ++ (emitCtorCopy {} (n + 1)).acc } := by
       intro k
       induction k with
       | zero => simp [emitCtorLoads_zero]
@@ -328,8 +330,8 @@ theorem params_sim_ctor (funs : FunEnv evm) (st : EvmState) (n : Nat)
     (hcode : st.env.code.length < wordBound)
     (hptr : abiPtr + 32 * n < wordBound) :
     ∃ st', MemOnly st st' ∧
-      ExecStmts evm funs [] st (emitCtorParams {} n).stmts
-        (toVEnv (decodeCtorArgs n st.env.code).reverse) st' .normal := by
+      ExecStmts evm funs [] st (emitCtorParams tag {} n).stmts
+        (toVEnv tag (decodeCtorArgs n st.env.code).reverse) st' .normal := by
   cases n with
   | zero =>
     refine ⟨st, ?_, ?_⟩
@@ -340,7 +342,7 @@ theorem params_sim_ctor (funs : FunEnv evm) (st : EvmState) (n : Nat)
   | succ n =>
     have hn : 0 < n + 1 := Nat.succ_pos _
     have hcopy := codecopy_sim funs [] st (n + 1) hn hle hcode hptr
-    obtain ⟨st', hm, hMO, hloads⟩ := ctorLoads_sim funs st (n + 1) hle hptr
+    obtain ⟨st', hm, hMO, hloads⟩ := ctorLoads_sim tag funs st (n + 1) hle hptr
     refine ⟨st', (memOnly_ctorCopied st (n + 1)).trans hMO, ?_⟩
     rw [emitCtorParams_stmts]
     exact execStmts_append hcopy hloads

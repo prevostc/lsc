@@ -6,6 +6,7 @@ import Examples.Token.Contract
 import Examples.Amm.Contract
 import Examples.Vault.Contract
 import YulEvmCompiler.Compile
+import YulEvmCompiler.Optimizer.Implementation.MemorySpillSelect
 import YulEvmCompiler.Optimizer.Implementation.Normalization.Disambiguate.Decide
 
 set_option maxHeartbeats 8000000
@@ -292,6 +293,30 @@ def spillWords (c : ContractDef) : Option Nat :=
   | none => none
   | some b => (spillRuntime? b).map fun r => r.layout.words
 
+open YulEvmCompiler.Optimizer.MemorySpillSelect
+
+/-- Names that appear more than once in any raw-runtime frame. -/
+def rawDupNames (c : ContractDef) : List String :=
+  match runtimeBlock c with
+  | none => ["runtimeBlock none"]
+  | some b =>
+    (frames b).flatMap fun fr =>
+      (frameNames fr).filter fun n => (frameNames fr).count n ≠ 1
+
+/-- `selectedWF` on the raw runtime, as `spillBlock?` checks it. Empty
+selection (no DUP17 pressure) is vacuously well-formed. `ite` branches
+re-bind the same `{f.name}_{i}` in one frame — those names are not selected. -/
+def rawSelectedWF (c : ContractDef) : Bool :=
+  match runtimeBlock c with
+  | none => false
+  | some b =>
+    match spillRuntime? b with
+    | some _ => true
+    | none =>
+      match selectSpills b with
+      | none => selectedWF (frames b) []
+      | some sel => selectedWF (frames b) sel
+
 end Examples.Misc.YulTests
 
 open Examples.Misc.YulTests
@@ -332,3 +357,7 @@ open Examples.Misc.YulTests
 #guard token_ctor_has_codesize
 #guard (Lsc.Compiler.compileRuntime Amm.contract).isSome
 #guard (Lsc.Compiler.compileDeploy Amm.contract).isSome
+#guard rawSelectedWF Counter.contract
+#guard rawSelectedWF Token.contract
+#guard rawSelectedWF Vault.contract
+#guard rawSelectedWF Amm.contract

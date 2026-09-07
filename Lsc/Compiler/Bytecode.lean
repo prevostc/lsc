@@ -5,17 +5,15 @@ import YulEvmCompiler.ObjectCompile
 import YulEvmCompiler.Optimizer.Implementation.MemorySpill
 import YulEvmCompiler.Optimizer.Implementation.MemorySpillSelect
 import YulEvmCompiler.Optimizer.Implementation.Pipeline
-import YulEvmCompiler.Optimizer.Implementation.Normalization.Disambiguate
 
 /-!
 # Yul → EVM bytecode via powdr
 
 `compileRuntime` compiles the memoryguard-erased dispatcher, or — when that
-needs `DUP17+` — powdr's verified spill of the disambiguated runtime
-(inlined switch cases reuse `v_i`, and `spillBlock?` requires unique names
-per frame). `compileDeploy` uses `spillObjectWithFallback` after the same
-disambiguation (constructor stays unguarded; the nested `"runtime"` object
-carries the guard).
+needs `DUP17+` — powdr's verified spill of the raw guarded runtime. Locals are
+`{f.name}_{i}`, so `spillBlock?` `selectedWF` holds without `disambiguate`.
+`compileDeploy` uses `spillObjectWithFallback` on the raw object (constructor
+stays unguarded; the nested `"runtime"` object carries the guard).
 -/
 
 namespace Lsc.Compiler
@@ -26,16 +24,10 @@ open YulEvmCompiler
 open YulEvmCompiler.Optimizer
 open YulEvmCompiler.Optimizer.MemorySpill
 open YulEvmCompiler.Optimizer.MemorySpillSelect
-open YulEvmCompiler.Optimizer.Normalize
 
-/-- Unique names so `spillBlock?` `selectedWF` can accept inlined cases. -/
-def uniquifyBlock (b : YBlock) : YBlock := disambiguate b
-
-def uniquifyObject (o : YObject) : YObject := disambiguateObject o
-
-/-- Spill the disambiguated runtime; `none` if nothing needs spilling. -/
+/-- Spill the raw runtime; `none` if nothing needs spilling. -/
 def spillRuntime? (b : YBlock) : Option Result :=
-  spillBlock? (uniquifyBlock b)
+  spillBlock? b
 
 def compileErased (b : YBlock) : Option (List Instr) :=
   compile (eraseMemoryGuardStmts b)
@@ -70,8 +62,7 @@ def deployFallback (o : YObject) : YObject :=
 
 def compileDeploy (c : ContractDef) : Option (List UInt8) := do
   let o ← deployObject c
-  let raw := uniquifyObject o
-  let spilled ← spillObjectWithFallback raw (deployFallback raw)
+  let spilled ← spillObjectWithFallback o (deployFallback o)
   let L ← compileObject spilled.object
   return L.code
 

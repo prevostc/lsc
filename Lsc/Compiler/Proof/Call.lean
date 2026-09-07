@@ -17,6 +17,8 @@ continuation sees indices `≥ ncalls + 1`.
 
 namespace Lsc.Compiler
 
+variable (tag : String)
+
 open YulSemantics
 open Lsc hiding Op Stmt
 open YulSemantics.EVM
@@ -534,21 +536,77 @@ theorem emitCallRetCheck_boolOpt_stmts (e : Emit) :
   emitIf_stmts _ _ _
 
 theorem emitLetOp_call (c : ContractDef) (e : Emit) (d b m : Nat) (args : List Atom) :
-    emitLetOp c e d (.call b m args) =
-      some (emitExtCall c e d b m args (some (identV d))) := rfl
+    emitLetOp tag c e d (.call b m args) =
+      some (emitExtCall tag c e d b m args (some (identV tag d))) := rfl
 
 theorem emitStmt_call (c : ContractDef) (e : Emit) (d b m : Nat) (args : List Atom) :
-    emitStmt c e d (.call b m args) = emitExtCall c e d b m args none := rfl
+    emitStmt tag c e d (.call b m args) = emitExtCall tag c e d b m args none := rfl
 
-theorem identV_ne_extTok (i d : Nat) : identV i ≠ extTok d := by
-  intro h
-  have h' := congrArg String.toList h
-  simp [identV, extTok, toString, String.toList_append] at h'
+theorem extTok_string tag (d : Nat) : extTok tag d = tag ++ "__tok_" ++ toString d := rfl
 
-theorem identV_ne_extOk (i d : Nat) : identV i ≠ extOk d := by
+theorem extOk_string tag (d : Nat) : extOk tag d = tag ++ "__ok_" ++ toString d := rfl
+
+private theorem toDigits10_isDigit {n : Nat} {c : Char}
+    (h : c ∈ Nat.toDigits 10 n) : c.isDigit := by
+  induction n using Nat.strongRecOn with
+  | _ n ih =>
+    rw [Nat.toDigits_eq_if (by decide : (1 : Nat) < 10)] at h
+    split at h
+    · simp only [List.mem_singleton] at h
+      subst h
+      simp [Nat.isDigit_digitChar]
+      omega
+    · simp only [List.mem_append, List.mem_singleton] at h
+      rcases h with h | rfl
+      · exact ih (n / 10) (Nat.div_lt_self (by omega) (by decide)) h
+      · simp [Nat.isDigit_digitChar]
+        exact Nat.mod_lt n (by decide)
+
+private theorem toString_nat_head_ne_underscore (n : Nat) :
+    (toString n).toList.head? ≠ some '_' := by
+  have hlist : (toString n).toList = Nat.toDigits 10 n := by
+    rw [Nat.toString_eq_repr, Nat.toList_repr]
   intro h
-  have h' := congrArg String.toList h
-  simp [identV, extOk, toString, String.toList_append] at h'
+  have hmem : '_' ∈ Nat.toDigits 10 n := by
+    rw [← hlist]
+    exact List.mem_of_mem_head? h
+  have hdig := toDigits10_isDigit hmem
+  simp at hdig
+
+private theorem string_append_cancel_left {a s t : String}
+    (h : a ++ s = a ++ t) : s = t := by
+  apply String.ext
+  simpa [String.toList_append] using congrArg String.toList h
+
+theorem identV_ne_extTok tag (i d : Nat) : identV tag i ≠ extTok tag d := by
+  intro h
+  have h' : tag ++ ("_" ++ toString i) = tag ++ ("__tok_" ++ toString d) := by
+    simpa [identV_string, extTok_string, String.append_assoc] using h
+  have h2 : "_" ++ toString i = "__tok_" ++ toString d :=
+    string_append_cancel_left h'
+  have h2' : "_" ++ toString i = "_" ++ ("_tok_" ++ toString d) := by
+    rw [show "__tok_" = "_" ++ "_tok_" from rfl, String.append_assoc] at h2
+    exact h2
+  have h3 : toString i = "_tok_" ++ toString d :=
+    string_append_cancel_left h2'
+  have hhead : (toString i).toList.head? = some '_' := by
+    simp [h3, String.toList_append]
+  exact toString_nat_head_ne_underscore i hhead
+
+theorem identV_ne_extOk tag (i d : Nat) : identV tag i ≠ extOk tag d := by
+  intro h
+  have h' : tag ++ ("_" ++ toString i) = tag ++ ("__ok_" ++ toString d) := by
+    simpa [identV_string, extOk_string, String.append_assoc] using h
+  have h2 : "_" ++ toString i = "__ok_" ++ toString d :=
+    string_append_cancel_left h'
+  have h2' : "_" ++ toString i = "_" ++ ("_ok_" ++ toString d) := by
+    rw [show "__ok_" = "_" ++ "_ok_" from rfl, String.append_assoc] at h2
+    exact h2
+  have h3 : toString i = "_ok_" ++ toString d :=
+    string_append_cancel_left h2'
+  have hhead : (toString i).toList.head? = some '_' := by
+    simp [h3, String.toList_append]
+  exact toString_nat_head_ne_underscore i hhead
 
 end Lsc.Compiler
 

@@ -18,8 +18,8 @@ Not emitted in this slice: `tload`/`tstore` (reentrancy lock), `gas()`, `for`, `
 `selfdestruct`, `create`. `ite` is `switch` (Yul `if` has no else). Dispatcher is
 `switch shr(224, calldataload(0))`. Sub-expressions are nested Yul builtins (no flatten /
 `t_i` temps); `{ … }` wraps `if` bodies, `switch` cases, and external-call temps.
-`toYulFn` requires `coreWF` and `Nodup` `identV` names; `runtimeBlock` requires unique
-selectors.
+`toYulFn` requires `coreWF` and `Nodup` `identV` names (`{f.name}_{i}`, unique across
+the dispatcher `switch`); `runtimeBlock` requires unique selectors.
 -/
 
 namespace Lsc.Compiler
@@ -125,12 +125,16 @@ def var (x : YIdent) : YExpr := YulSemantics.Expr.var x
 def bop (op : YulSemantics.EVM.Op) (args : List YExpr) : YExpr :=
   YulSemantics.Expr.builtin (Op := YulSemantics.EVM.Op) op args
 
-def identV (i : Nat) : YIdent := s!"v_{i}"
+section IdentV
 
-/-- De Bruijn `i` at environment length `depth` is `v_{depth-1-i}`.
-Parameters occupy `v_0 … v_{n-1}` in ABI order (first parameter first). -/
-def atomE (depth : Nat) : Atom → YExpr
-  | .var i => if i < depth then var (identV (depth - 1 - i)) else lit 0
+/-- Per-function locals. `tag` is `f.name` at `toYulFn` / `toYulCtor`, so inlined
+switch cases do not reuse names (`addLiquidity_0` vs `swap0for1_0`). -/
+def identV (tag : String) (i : Nat) : YIdent := s!"{tag}_{i}"
+
+/-- De Bruijn `i` at environment length `depth` is `{tag}_{depth-1-i}`.
+Parameters occupy `{tag}_0 … {tag}_{n-1}` in ABI order (first parameter first). -/
+def atomE (tag : String) (depth : Nat) : Atom → YExpr
+  | .var i => if i < depth then var (identV tag (depth - 1 - i)) else lit 0
   | .lit n => lit n
 
 def revert00 : YStmt :=
@@ -240,8 +244,8 @@ def coreExtraDepth : {t : RetTy} → Core t → Nat
 
 def maxDepth (f : FnDef) : Nat := f.params.length + coreExtraDepth f.core
 
-def identsNodup (n : Nat) : Bool :=
-  decide (((List.range n).map identV).Pairwise (fun a b => a ≠ b))
+def identsNodup (tag : String) (n : Nat) : Bool :=
+  decide (((List.range n).map (identV tag)).Pairwise (fun a b => a ≠ b))
 
 def selectorsNodup (c : ContractDef) : Bool :=
   decide ((c.functions.map (fun f => f.selector)).Pairwise (fun a b => a ≠ b))
@@ -324,8 +328,8 @@ theorem errorOK_iff (c : ContractDef) (err n : Nat) :
   simp only [errorOK]
   cases c.errors[err]? <;> simp [decide_eq_true_eq]
 
-theorem identsNodup_iff (n : Nat) :
-    identsNodup n = true ↔ ((List.range n).map identV).Pairwise (fun a b => a ≠ b) := by
+theorem identsNodup_iff (tag : String) (n : Nat) :
+    identsNodup tag n = true ↔ ((List.range n).map (identV tag)).Pairwise (fun a b => a ≠ b) := by
   simp [identsNodup, decide_eq_true_eq]
 
 theorem selectorsNodup_iff (c : ContractDef) :
@@ -358,23 +362,23 @@ def emitBlock (e : Emit) (body : YBlock) : Emit :=
 def emitIf (e : Emit) (cnd : YExpr) (body : YBlock) : Emit :=
   e.push (.cond cnd body)
 
-/-- Call temporaries; distinct from `identV`. -/
-def extTok (d : Nat) : YIdent := s!"_tok_{d}"
-def extOk (d : Nat) : YIdent := s!"_ok_{d}"
+/-- Call temporaries; distinct from `identV` (`{tag}_i` vs `{tag}__tok_{d}`). -/
+def extTok (tag : String) (d : Nat) : YIdent := s!"{tag}__tok_{d}"
+def extOk (tag : String) (d : Nat) : YIdent := s!"{tag}__ok_{d}"
 
 /-- `if lt(calldatasize(), n) { revert(0,0) }`. -/
 def emitGuardLt (e : Emit) (n : Nat) : Emit :=
   e.push (.cond (bop YulSemantics.EVM.Op.lt [bop YulSemantics.EVM.Op.calldatasize [], lit n])
     [revert00])
 
-/-- ABI-decode word `i` from calldata; one live `v_i`, no extra temp. -/
-def emitParams (e : Emit) (offset n : Nat) : Emit :=
+/-- ABI-decode word `i` from calldata; one live `{tag}_i`, no extra temp. -/
+def emitParams (tag : String) (e : Emit) (offset n : Nat) : Emit :=
   (List.range n).foldl (fun e i =>
-    e.push (.letDecl [identV i]
+    e.push (.letDecl [identV tag i]
       (some (bop YulSemantics.EVM.Op.calldataload [lit (offset + 32 * i)])))) e
 
 /-- Solidity CREATE convention: constructor args are the last `32n` bytes of init code.
-Copy them to memory at `abiPtr` (`0x80`), then `mload` into `v_i`. Runtime `emitParams`
+Copy them to memory at `abiPtr` (`0x80`), then `mload` into `{tag}_i`. Runtime `emitParams`
 is unchanged. `n = 0` skips the copy. -/
 def emitCtorCopy (e : Emit) (n : Nat) : Emit :=
   if n = 0 then e
@@ -385,13 +389,13 @@ def emitCtorCopy (e : Emit) (n : Nat) : Emit :=
        bop YulSemantics.EVM.Op.sub [bop YulSemantics.EVM.Op.codesize [], lit argsLen],
        lit argsLen]
 
-def emitCtorLoads (e : Emit) (n : Nat) : Emit :=
+def emitCtorLoads (tag : String) (e : Emit) (n : Nat) : Emit :=
   (List.range n).foldl (fun e i =>
-    e.push (.letDecl [identV i]
+    e.push (.letDecl [identV tag i]
       (some (bop YulSemantics.EVM.Op.mload [lit (abiPtr + 32 * i)])))) e
 
-def emitCtorParams (e : Emit) (n : Nat) : Emit :=
-  emitCtorLoads (emitCtorCopy e n) n
+def emitCtorParams (tag : String) (e : Emit) (n : Nat) : Emit :=
+  emitCtorLoads tag (emitCtorCopy e n) n
 
 def keccak064 : YExpr := bop YulSemantics.EVM.Op.keccak256 [lit 0, lit 64]
 
@@ -523,20 +527,20 @@ def emitCallRetCheck (e : Emit) (ret : AbiRet) : Emit :=
       [bop YulSemantics.EVM.Op.returndatasize [], lit 32]) [revert00]
   | .none => e
 
-/-- Body of an external CALL. Temps `_tok_*` / `_ok_*` are intended to live inside a
+/-- Body of an external CALL. Temps `{tag}__tok_*` / `{tag}__ok_*` live inside a
 Yul block so `restore` drops them. When `assignResult` is set, that outer variable is
 assigned the ABI result (`boolOpt` / `.none` yield `1`). -/
-def emitExtCallBody (c : ContractDef) (depth : Nat) (b m : Nat) (args : List Atom)
+def emitExtCallBody (tag : String) (c : ContractDef) (depth : Nat) (b m : Nat) (args : List Atom)
     (assignResult : Option YIdent) : YBlock :=
   let slot := bindingSlot c b
   let (sel, ret) := bindingMethod c b m
-  let tok := extTok depth
-  let ok := extOk depth
+  let tok := extTok tag depth
+  let ok := extOk tag depth
   let e := emitLet {} tok (bop YulSemantics.EVM.Op.sload [lit slot])
   let e := emitDo e YulSemantics.EVM.Op.mstore
     [lit abiPtr, bop YulSemantics.EVM.Op.shl [lit 224, lit sel]]
   let (e, _) := args.foldl (fun (e, i) a =>
-    (emitDo e YulSemantics.EVM.Op.mstore [lit (abiAfterSel + 32 * i), atomE depth a], i + 1)) (e, 0)
+    (emitDo e YulSemantics.EVM.Op.mstore [lit (abiAfterSel + 32 * i), atomE tag depth a], i + 1)) (e, 0)
   let insize := 4 + 32 * args.length
   let e := emitLet e ok (bop YulSemantics.EVM.Op.call
     [lit extCallGas, var tok, lit 0, lit abiPtr, lit insize, lit abiPtr, lit 32])
@@ -551,133 +555,137 @@ def emitExtCallBody (c : ContractDef) (depth : Nat) (b m : Nat) (args : List Ato
 
 /-- `sload` bound address, ABI-pack at `0x80`, `call(extCallGas, tok, 0, …)`, revert on
 failure. Temps are scoped in `{ … }`. When `bindResult` is set: `let v := 0 { … v := r }`. -/
-def emitExtCall (c : ContractDef) (e : Emit) (depth : Nat) (b m : Nat) (args : List Atom)
+def emitExtCall (tag : String) (c : ContractDef) (e : Emit) (depth : Nat) (b m : Nat) (args : List Atom)
     (bindResult : Option YIdent) : Emit :=
   match bindResult with
-  | none => emitBlock e (emitExtCallBody c depth b m args none)
+  | none => emitBlock e (emitExtCallBody tag c depth b m args none)
   | some name =>
-    emitBlock (emitLet e name (lit 0)) (emitExtCallBody c depth b m args (some name))
+    emitBlock (emitLet e name (lit 0)) (emitExtCallBody tag c depth b m args (some name))
 
-def emitLetOp (c : ContractDef) (e : Emit) (depth : Nat) : Lsc.Op → Option Emit
-  | .load f => some (emitLet e (identV depth) (bop YulSemantics.EVM.Op.sload [lit f]))
+def emitLetOp (tag : String) (c : ContractDef) (e : Emit) (depth : Nat) : Lsc.Op → Option Emit
+  | .load f => some (emitLet e (identV tag depth) (bop YulSemantics.EVM.Op.sload [lit f]))
   | .loadMap f k =>
-    let e := emitMapSlotPrep e f (atomE depth k)
-    some (emitLet e (identV depth) (bop YulSemantics.EVM.Op.sload [keccak064]))
+    let e := emitMapSlotPrep e f (atomE tag depth k)
+    some (emitLet e (identV tag depth) (bop YulSemantics.EVM.Op.sload [keccak064]))
   | .loadMap2 f k₁ k₂ =>
-    let e := emitMap2SlotPrep e f (atomE depth k₁) (atomE depth k₂)
-    some (emitLet e (identV depth) (bop YulSemantics.EVM.Op.sload [keccak064]))
-  | .sender => some (emitLet e (identV depth) (bop YulSemantics.EVM.Op.caller []))
-  | .value => some (emitLet e (identV depth) (bop YulSemantics.EVM.Op.callvalue []))
-  | .timestamp => some (emitLet e (identV depth) (bop YulSemantics.EVM.Op.timestamp []))
-  | .blockNumber => some (emitLet e (identV depth) (bop YulSemantics.EVM.Op.number []))
-  | .selfAddress => some (emitLet e (identV depth) (bop YulSemantics.EVM.Op.address []))
+    let e := emitMap2SlotPrep e f (atomE tag depth k₁) (atomE tag depth k₂)
+    some (emitLet e (identV tag depth) (bop YulSemantics.EVM.Op.sload [keccak064]))
+  | .sender => some (emitLet e (identV tag depth) (bop YulSemantics.EVM.Op.caller []))
+  | .value => some (emitLet e (identV tag depth) (bop YulSemantics.EVM.Op.callvalue []))
+  | .timestamp => some (emitLet e (identV tag depth) (bop YulSemantics.EVM.Op.timestamp []))
+  | .blockNumber => some (emitLet e (identV tag depth) (bop YulSemantics.EVM.Op.number []))
+  | .selfAddress => some (emitLet e (identV tag depth) (bop YulSemantics.EVM.Op.address []))
   | .addChecked a b =>
-      some (emitAddChecked e (identV depth) (atomE depth a) (atomE depth b))
+      some (emitAddChecked e (identV tag depth) (atomE tag depth a) (atomE tag depth b))
   | .subChecked a b =>
-      some (emitSubChecked e (identV depth) (atomE depth a) (atomE depth b))
+      some (emitSubChecked e (identV tag depth) (atomE tag depth a) (atomE tag depth b))
   | .mulChecked a b =>
-      some (emitMulChecked e (identV depth) (atomE depth a) (atomE depth b))
+      some (emitMulChecked e (identV tag depth) (atomE tag depth a) (atomE tag depth b))
   | .divChecked a b =>
-      some (emitDivChecked e (identV depth) (atomE depth a) (atomE depth b))
+      some (emitDivChecked e (identV tag depth) (atomE tag depth a) (atomE tag depth b))
   | .mulDivDown a b d =>
-      some (emitMulDivDown e (identV depth) (atomE depth a) (atomE depth b) (atomE depth d))
+      some (emitMulDivDown e (identV tag depth) (atomE tag depth a) (atomE tag depth b) (atomE tag depth d))
   | .mulDivUp a b d =>
-      some (emitMulDivUp e (identV depth) (atomE depth a) (atomE depth b) (atomE depth d))
-  | .pure a => some (emitLet e (identV depth) (atomE depth a))
-  | .call b m args => some (emitExtCall c e depth b m args (some (identV depth)))
+      some (emitMulDivUp e (identV tag depth) (atomE tag depth a) (atomE tag depth b) (atomE tag depth d))
+  | .pure a => some (emitLet e (identV tag depth) (atomE tag depth a))
+  | .call b m args => some (emitExtCall tag c e depth b m args (some (identV tag depth)))
 
-def emitPrim (depth : Nat) (p : Prim) (args : List Atom) : YExpr :=
+def emitPrim (tag : String) (depth : Nat) (p : Prim) (args : List Atom) : YExpr :=
   match p, args with
-  | .id, [a] => atomE depth a
-  | .addWrap, [a, b] => bop YulSemantics.EVM.Op.add [atomE depth a, atomE depth b]
-  | .subWrap, [a, b] => bop YulSemantics.EVM.Op.sub [atomE depth a, atomE depth b]
-  | .mulWrap, [a, b] => bop YulSemantics.EVM.Op.mul [atomE depth a, atomE depth b]
+  | .id, [a] => atomE tag depth a
+  | .addWrap, [a, b] => bop YulSemantics.EVM.Op.add [atomE tag depth a, atomE tag depth b]
+  | .subWrap, [a, b] => bop YulSemantics.EVM.Op.sub [atomE tag depth a, atomE tag depth b]
+  | .mulWrap, [a, b] => bop YulSemantics.EVM.Op.mul [atomE tag depth a, atomE tag depth b]
   | _, _ => lit 0
 
-def emitCond (depth : Nat) : Cond → YExpr
-  | .lt a b => bop YulSemantics.EVM.Op.lt [atomE depth a, atomE depth b]
+def emitCond (tag : String) (depth : Nat) : Cond → YExpr
+  | .lt a b => bop YulSemantics.EVM.Op.lt [atomE tag depth a, atomE tag depth b]
   | .le a b =>
-    bop YulSemantics.EVM.Op.iszero [bop YulSemantics.EVM.Op.lt [atomE depth b, atomE depth a]]
-  | .eq a b => bop YulSemantics.EVM.Op.eq [atomE depth a, atomE depth b]
+    bop YulSemantics.EVM.Op.iszero [bop YulSemantics.EVM.Op.lt [atomE tag depth b, atomE tag depth a]]
+  | .eq a b => bop YulSemantics.EVM.Op.eq [atomE tag depth a, atomE tag depth b]
   | .ne a b =>
-    bop YulSemantics.EVM.Op.iszero [bop YulSemantics.EVM.Op.eq [atomE depth a, atomE depth b]]
-  | .and c d => bop YulSemantics.EVM.Op.and [emitCond depth c, emitCond depth d]
-  | .or c d => bop YulSemantics.EVM.Op.or [emitCond depth c, emitCond depth d]
-  | .not c => bop YulSemantics.EVM.Op.iszero [emitCond depth c]
+    bop YulSemantics.EVM.Op.iszero [bop YulSemantics.EVM.Op.eq [atomE tag depth a, atomE tag depth b]]
+  | .and c d => bop YulSemantics.EVM.Op.and [emitCond tag depth c, emitCond tag depth d]
+  | .or c d => bop YulSemantics.EVM.Op.or [emitCond tag depth c, emitCond tag depth d]
+  | .not c => bop YulSemantics.EVM.Op.iszero [emitCond tag depth c]
   | .tt => lit 1
   | .ff => lit 0
 
-def emitStmt (c : ContractDef) (e : Emit) (depth : Nat) : Lsc.Stmt → Emit
-  | .store f v => emitDo e YulSemantics.EVM.Op.sstore [lit f, atomE depth v]
+def emitStmt (tag : String) (c : ContractDef) (e : Emit) (depth : Nat) : Lsc.Stmt → Emit
+  | .store f v => emitDo e YulSemantics.EVM.Op.sstore [lit f, atomE tag depth v]
   | .storeMap f k v =>
-    let e := emitMapSlotPrep e f (atomE depth k)
-    emitDo e YulSemantics.EVM.Op.sstore [keccak064, atomE depth v]
+    let e := emitMapSlotPrep e f (atomE tag depth k)
+    emitDo e YulSemantics.EVM.Op.sstore [keccak064, atomE tag depth v]
   | .storeMap2 f k₁ k₂ v =>
-    let e := emitMap2SlotPrep e f (atomE depth k₁) (atomE depth k₂)
-    emitDo e YulSemantics.EVM.Op.sstore [keccak064, atomE depth v]
+    let e := emitMap2SlotPrep e f (atomE tag depth k₁) (atomE tag depth k₂)
+    emitDo e YulSemantics.EVM.Op.sstore [keccak064, atomE tag depth v]
   | .require cond err args =>
-    emitIf e (bop YulSemantics.EVM.Op.iszero [emitCond depth cond])
-      (emitCustomError c {} err (args.map (atomE depth))).stmts
+    emitIf e (bop YulSemantics.EVM.Op.iszero [emitCond tag depth cond])
+      (emitCustomError c {} err (args.map (atomE tag depth))).stmts
   | .emit ev args =>
     let topic :=
       match c.events[ev]? with
       | some ed => ed.topic0
       | none => 0
-    emitLog1 e topic (args.map (atomE depth))
+    emitLog1 e topic (args.map (atomE tag depth))
   | .revert err args =>
-    emitCustomError c e err (args.map (atomE depth))
+    emitCustomError c e err (args.map (atomE tag depth))
   | .call b m args =>
-    emitExtCall c e depth b m args none
+    emitExtCall tag c e depth b m args none
 
-def emitRet (e : Emit) (depth : Nat) (haltUnit : Bool) : {t : RetTy} → RetExpr t → Emit
+def emitRet (tag : String) (e : Emit) (depth : Nat) (haltUnit : Bool) : {t : RetTy} → RetExpr t → Emit
   | _, .unit => emitReturnUnit e haltUnit
-  | _, r => emitReturnWords e ((retAtoms r).map (atomE depth))
+  | _, r => emitReturnWords e ((retAtoms r).map (atomE tag depth))
 
-def emitCore (c : ContractDef) (e : Emit) (depth : Nat) (haltUnit : Bool) :
+def emitCore (tag : String) (c : ContractDef) (e : Emit) (depth : Nat) (haltUnit : Bool) :
     {t : RetTy} → Core t → Option Emit
-  | _, .ret r => some (emitRet e depth haltUnit r)
+  | _, .ret r => some (emitRet tag e depth haltUnit r)
   | _, .opTail op => do
-      let e ← emitLetOp c e depth op
-      some (emitRet e (depth + 1) haltUnit (.word (.var 0)))
+      let e ← emitLetOp tag c e depth op
+      some (emitRet tag e (depth + 1) haltUnit (.word (.var 0)))
   | _, .opTailAddr op => do
-      let e ← emitLetOp c e depth op
-      some (emitRet e (depth + 1) haltUnit (.addr (.var 0)))
+      let e ← emitLetOp tag c e depth op
+      some (emitRet tag e (depth + 1) haltUnit (.addr (.var 0)))
   | _, .opTailFlag op => do
-      let e ← emitLetOp c e depth op
-      some (emitRet e (depth + 1) haltUnit (.flag (.var 0)))
-  | _, .stmtTail s => some (emitReturnUnit (emitStmt c e depth s) haltUnit)
-  | _, .revertTail err args => some (emitCustomError c e err (args.map (atomE depth)))
+      let e ← emitLetOp tag c e depth op
+      some (emitRet tag e (depth + 1) haltUnit (.flag (.var 0)))
+  | _, .stmtTail s => some (emitReturnUnit (emitStmt tag c e depth s) haltUnit)
+  | _, .revertTail err args => some (emitCustomError c e err (args.map (atomE tag depth)))
   | _, .letOp op k => do
-      let e ← emitLetOp c e depth op
-      emitCore c e (depth + 1) haltUnit k
-  | _, .seq s k => emitCore c (emitStmt c e depth s) depth haltUnit k
+      let e ← emitLetOp tag c e depth op
+      emitCore tag c e (depth + 1) haltUnit k
+  | _, .seq s k => emitCore tag c (emitStmt tag c e depth s) depth haltUnit k
   | _, .letPure p args k =>
-      emitCore c (emitLet e (identV depth) (emitPrim depth p args)) (depth + 1) haltUnit k
+      emitCore tag c (emitLet e (identV tag depth) (emitPrim tag depth p args)) (depth + 1) haltUnit k
   | _, .ite cond a b => do
-      let eA ← emitCore c {} depth haltUnit a
-      let eB ← emitCore c {} depth haltUnit b
-      some (e.push (.switch (emitCond depth cond)
+      let eA ← emitCore tag c {} depth haltUnit a
+      let eB ← emitCore tag c {} depth haltUnit b
+      some (e.push (.switch (emitCond tag depth cond)
         [(YulSemantics.Literal.number 0, eB.stmts)] (some eA.stmts)))
 
+end IdentV
+
 /-- Compile one **runtime** function. Parameters are ABI-decoded from calldata
-(`offset = 4`). The constructor branch of this definition is unused by `deployObject`
-(see `toYulCtor`); it is kept so existing `toYulFn_inv` unfolds are stable. -/
+(`offset = 4`). Locals are `{f.name}_{i}`. The constructor branch of this
+definition is unused by `deployObject` (see `toYulCtor`); it is kept so existing
+`toYulFn_inv` unfolds are stable. -/
 def toYulFn (c : ContractDef) (f : FnDef) : Option YBlock :=
   if !coreWF c f.core then none
-  else if !identsNodup (maxDepth f) then none
+  else if !identsNodup f.name (maxDepth f) then none
   else
     let offset := if f.kind = .constructor then 0 else 4
     let haltUnit := f.kind ≠ .constructor
-    let e := emitParams {} offset f.params.length
-    (emitCore c e f.params.length haltUnit f.core).map Emit.stmts
+    let e := emitParams f.name {} offset f.params.length
+    (emitCore f.name c e f.params.length haltUnit f.core).map Emit.stmts
 
 /-- Compile a constructor: args from the init-code suffix (`emitCtorParams`), unit
 `ret` falls through (no `stop()`), so `deployObject` can append `constructorCode`. -/
 def toYulCtor (c : ContractDef) (f : FnDef) : Option YBlock :=
   if !coreWF c f.core then none
-  else if !identsNodup (maxDepth f) then none
+  else if !identsNodup f.name (maxDepth f) then none
   else
-    (emitCore c (emitCtorParams {} f.params.length) f.params.length false f.core).map
+    (emitCore f.name c (emitCtorParams f.name {} f.params.length)
+      f.params.length false f.core).map
       Emit.stmts
 
 /-- `if lt(calldatasize(), 4+32n) { revert(0,0) }` then the function body, as two blocks

@@ -9,6 +9,8 @@ set_option linter.unusedVariables false
 
 namespace Lsc.Compiler
 
+variable (tag : String)
+
 open YulSemantics
 open YulSemantics.EVM
 open Lsc
@@ -23,7 +25,7 @@ theorem emitLog1_nil (e : Emit) (topic : Nat) :
 
 theorem emitStmt_emit_nil (c : ContractDef) (e : Emit) (d ev : Nat)
     {ed : EventDef} (h : c.events[ev]? = some ed) :
-    (emitStmt c e d (.emit ev [])).stmts =
+    (emitStmt tag c e d (.emit ev [])).stmts =
       e.stmts ++ [.exprStmt (bop Op.log1 [lit abiPtr, lit 0, lit ed.topic0])] := by
   simp [emitStmt, h, emitLog1_nil]
 
@@ -32,13 +34,13 @@ theorem readBytes_zero' (mem : Nat → UInt8) (p : Nat) : readBytes mem p 0 = []
 
 theorem stmt_sim_emit0 {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx} {w : World S X E} {env V st} {ev : Nat}
-    (funs : FunEnv evm) (hinv : Inv Γ c κ ctx w env V st)
+    (funs : FunEnv evm) (hinv : Inv tag Γ c κ ctx w env V st)
     (hwf : stmtWF c (.emit ev []) = true) :
     let w' := { w with log := w.log ++ [Γ.ev.build ev []] }
     ∃ st',
-      ExecStmts evm funs V st (emitStmt c {} env.length (.emit ev [])).stmts
+      ExecStmts evm funs V st (emitStmt tag c {} env.length (.emit ev [])).stmts
         V st' .normal ∧
-      Inv Γ c κ ctx w' env V st' := by
+      Inv tag Γ c κ ctx w' env V st' := by
   rcases hinv with ⟨hV, henv, hR, hctx⟩
   have ⟨ed, hed, _⟩ := (eventOK_iff c ev 0).mp (by simpa [stmtWF] using hwf)
   have hev : ev < c.events.length := (List.getElem?_eq_some_iff.mp hed).1

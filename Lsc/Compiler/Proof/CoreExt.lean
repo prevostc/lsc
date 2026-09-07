@@ -20,6 +20,8 @@ Success uses `composeFault ncalls false rest`; a continuation sees indices `≥ 
 
 namespace Lsc.Compiler
 
+variable (tag : String)
+
 open YulSemantics
 open YulSemantics.EVM
 open Lsc hiding Op Stmt
@@ -197,7 +199,7 @@ theorem s2frag_of_callFree {t} {core : Core t} (h : CallFree core) : S2Frag core
 
 theorem noExt_letOp_m1 {c : ContractDef} {e : Emit} {d : Nat} {op : Lsc.Op} {e' : Emit}
     (hM1 : M1Op op) (he : noExtBlock e.stmts = true)
-    (h1 : emitLetOp c e d op = some e') : noExtBlock e'.stmts = true := by
+    (h1 : emitLetOp tag c e d op = some e') : noExtBlock e'.stmts = true := by
   cases op with
   | load _ =>
     simp [emitLetOp] at h1; cases h1
@@ -205,12 +207,12 @@ theorem noExt_letOp_m1 {c : ContractDef} {e : Emit} {d : Nat} {op : Lsc.Op} {e' 
       (noExtExprs_cons_true (noExt_lit _) noExtExprs_nil))
   | loadMap _ k =>
     simp [emitLetOp] at h1; cases h1
-    exact noExt_let (noExt_mapSlotPrep e _ (atomE d k) he (noExt_atomE d k))
+    exact noExt_let (noExt_mapSlotPrep e _ (atomE tag d k) he (noExt_atomE tag d k))
       (noExt_bop (op := YulSemantics.EVM.Op.sload) rfl (noExtExprs_cons_true noExt_keccak064 noExtExprs_nil))
   | loadMap2 _ k₁ k₂ =>
     simp [emitLetOp] at h1; cases h1
-    exact noExt_let (noExt_map2SlotPrep e _ (atomE d k₁) (atomE d k₂) he
-        (noExt_atomE d k₁) (noExt_atomE d k₂))
+    exact noExt_let (noExt_map2SlotPrep e _ (atomE tag d k₁) (atomE tag d k₂) he
+        (noExt_atomE tag d k₁) (noExt_atomE tag d k₂))
       (noExt_bop (op := YulSemantics.EVM.Op.sload) rfl (noExtExprs_cons_true noExt_keccak064 noExtExprs_nil))
   | sender =>
     simp [emitLetOp] at h1; cases h1
@@ -229,48 +231,48 @@ theorem noExt_letOp_m1 {c : ContractDef} {e : Emit} {d : Nat} {op : Lsc.Op} {e' 
     exact noExt_let he (noExt_bop (op := YulSemantics.EVM.Op.address) rfl noExtExprs_nil)
   | addChecked a b =>
     simp [emitLetOp] at h1; cases h1
-    exact noExt_addChecked e _ (atomE d a) (atomE d b) he (noExt_atomE d a) (noExt_atomE d b)
+    exact noExt_addChecked e _ (atomE tag d a) (atomE tag d b) he (noExt_atomE tag d a) (noExt_atomE tag d b)
   | subChecked a b =>
     simp [emitLetOp] at h1; cases h1
-    exact noExt_subChecked e _ (atomE d a) (atomE d b) he (noExt_atomE d a) (noExt_atomE d b)
+    exact noExt_subChecked e _ (atomE tag d a) (atomE tag d b) he (noExt_atomE tag d a) (noExt_atomE tag d b)
   | mulChecked a b =>
     simp [emitLetOp] at h1; cases h1
-    exact noExt_mulChecked e _ (atomE d a) (atomE d b) he (noExt_atomE d a) (noExt_atomE d b)
+    exact noExt_mulChecked e _ (atomE tag d a) (atomE tag d b) he (noExt_atomE tag d a) (noExt_atomE tag d b)
   | divChecked a b =>
     simp [emitLetOp] at h1; cases h1
-    exact noExt_divChecked e _ (atomE d a) (atomE d b) he (noExt_atomE d a) (noExt_atomE d b)
+    exact noExt_divChecked e _ (atomE tag d a) (atomE tag d b) he (noExt_atomE tag d a) (noExt_atomE tag d b)
   | mulDivDown a b c =>
     simp [emitLetOp] at h1; cases h1
-    exact noExt_mulDivDown e _ (atomE d a) (atomE d b) (atomE d c) he
-      (noExt_atomE d a) (noExt_atomE d b) (noExt_atomE d c)
+    exact noExt_mulDivDown e _ (atomE tag d a) (atomE tag d b) (atomE tag d c) he
+      (noExt_atomE tag d a) (noExt_atomE tag d b) (noExt_atomE tag d c)
   | mulDivUp a b c =>
     simp [emitLetOp] at h1; cases h1
-    exact noExt_mulDivUp e _ (atomE d a) (atomE d b) (atomE d c) he
-      (noExt_atomE d a) (noExt_atomE d b) (noExt_atomE d c)
+    exact noExt_mulDivUp e _ (atomE tag d a) (atomE tag d b) (atomE tag d c) he
+      (noExt_atomE tag d a) (noExt_atomE tag d b) (noExt_atomE tag d c)
   | pure a =>
     simp [emitLetOp] at h1; cases h1
-    exact noExt_let he (noExt_atomE d a)
+    exact noExt_let he (noExt_atomE tag d a)
   | call _ _ _ => exact (show False from hM1).elim
 
 theorem noExt_stmt_m1 {c : ContractDef} {e : Emit} {d : Nat} {s : Lsc.Stmt}
     (hM1 : M1Stmt s) (he : noExtBlock e.stmts = true) :
-    noExtBlock (emitStmt c e d s).stmts = true := by
+    noExtBlock (emitStmt tag c e d s).stmts = true := by
   cases s with
   | store _ v =>
     simp only [emitStmt]
     exact noExt_do he (op := YulSemantics.EVM.Op.sstore) rfl
-      (noExtExprs_cons_true (noExt_lit _) (noExtExprs_cons_true (noExt_atomE d v) noExtExprs_nil))
+      (noExtExprs_cons_true (noExt_lit _) (noExtExprs_cons_true (noExt_atomE tag d v) noExtExprs_nil))
   | storeMap _ k v =>
     simp only [emitStmt]
-    exact noExt_do (noExt_mapSlotPrep e _ (atomE d k) he (noExt_atomE d k))
+    exact noExt_do (noExt_mapSlotPrep e _ (atomE tag d k) he (noExt_atomE tag d k))
       (op := YulSemantics.EVM.Op.sstore) rfl
-      (noExtExprs_cons_true noExt_keccak064 (noExtExprs_cons_true (noExt_atomE d v) noExtExprs_nil))
+      (noExtExprs_cons_true noExt_keccak064 (noExtExprs_cons_true (noExt_atomE tag d v) noExtExprs_nil))
   | storeMap2 _ k₁ k₂ v =>
     simp only [emitStmt]
-    exact noExt_do (noExt_map2SlotPrep e _ (atomE d k₁) (atomE d k₂) he
-        (noExt_atomE d k₁) (noExt_atomE d k₂))
+    exact noExt_do (noExt_map2SlotPrep e _ (atomE tag d k₁) (atomE tag d k₂) he
+        (noExt_atomE tag d k₁) (noExt_atomE tag d k₂))
       (op := YulSemantics.EVM.Op.sstore) rfl
-      (noExtExprs_cons_true noExt_keccak064 (noExtExprs_cons_true (noExt_atomE d v) noExtExprs_nil))
+      (noExtExprs_cons_true noExt_keccak064 (noExtExprs_cons_true (noExt_atomE tag d v) noExtExprs_nil))
   | require cond err args =>
     have ⟨_, hlen⟩ : M1Cond cond ∧ args.length = 0 := hM1
     match args with
@@ -279,11 +281,11 @@ theorem noExt_stmt_m1 {c : ContractDef} {e : Emit} {d : Nat} {s : Lsc.Stmt}
       simp only [emitStmt, List.map_nil]
       exact noExt_if he
         (noExt_bop (op := YulSemantics.EVM.Op.iszero) rfl
-          (noExtExprs_cons_true (noExt_emitCond d cond) noExtExprs_nil))
+          (noExtExprs_cons_true (noExt_emitCond tag d cond) noExtExprs_nil))
         (noExt_customError c {} err [] noExt_nil (fun _ hx => by cases hx))
   | emit _ args =>
     simp only [emitStmt]
-    exact noExt_log1 e _ _ he (noExt_atomEs d args)
+    exact noExt_log1 e _ _ he (noExt_atomEs tag d args)
   | revert err args =>
     have hlen : args.length = 0 := hM1
     match args with
@@ -295,25 +297,25 @@ theorem noExt_stmt_m1 {c : ContractDef} {e : Emit} {d : Nat} {s : Lsc.Stmt}
 
 theorem noExt_core_callFree {c halt t} {core : Core t} (hM1 : CallFree core) :
     ∀ (e : Emit) (d : Nat) {e' : Emit},
-      emitCore c e d halt core = some e' →
+      emitCore tag c e d halt core = some e' →
       noExtBlock e.stmts = true → noExtBlock e'.stmts = true := by
   revert hM1
   induction core with
   | ret r =>
     intro hM1 e d e' hem he
     simp [emitCore] at hem; cases hem
-    exact noExt_ret e d halt r he
+    exact noExt_ret tag e d halt r he
   | opTail op | opTailAddr op | opTailFlag op =>
     intro hM1 e d e' hem he
     simp [emitCore] at hem
-    obtain ⟨e1, h1⟩ := emitLetOp_some c e d op
+    obtain ⟨e1, h1⟩ := emitLetOp_some tag c e d op
     simp [h1] at hem; cases hem
     have hop : M1Op op := by simpa [CallFree, M1Frag] using hM1
-    exact noExt_ret e1 (d + 1) halt _ (noExt_letOp_m1 hop he h1)
+    exact noExt_ret tag e1 (d + 1) halt _ (noExt_letOp_m1 tag hop he h1)
   | stmtTail s =>
     intro hM1 e d e' hem he
     simp [emitCore] at hem; cases hem
-    exact noExt_ret _ d halt .unit (noExt_stmt_m1 (by simpa [CallFree, M1Frag] using hM1) he)
+    exact noExt_ret tag _ d halt .unit (noExt_stmt_m1 tag (by simpa [CallFree, M1Frag] using hM1) he)
   | revertTail err args =>
     intro hM1 e d e' hem he
     have hnil : args.length = 0 := by simpa [CallFree, M1Frag] using hM1
@@ -326,27 +328,27 @@ theorem noExt_core_callFree {c halt t} {core : Core t} (hM1 : CallFree core) :
     intro hM1 e d e' hem he
     have ⟨hop, hk⟩ := m1frag_letOp.mp hM1
     simp [emitCore] at hem
-    obtain ⟨e1, h1⟩ := emitLetOp_some c e d op
+    obtain ⟨e1, h1⟩ := emitLetOp_some tag c e d op
     simp [h1] at hem
-    exact ih hk e1 (d + 1) hem (noExt_letOp_m1 hop he h1)
+    exact ih hk e1 (d + 1) hem (noExt_letOp_m1 tag hop he h1)
   | seq s k ih =>
     intro hM1 e d e' hem he
     have ⟨hs, hk⟩ := m1frag_seq.mp hM1
     simp [emitCore] at hem
-    exact ih hk (emitStmt c e d s) d hem (noExt_stmt_m1 hs he)
+    exact ih hk (emitStmt tag c e d s) d hem (noExt_stmt_m1 tag hs he)
   | letPure p args k ih =>
     intro hM1 e d e' hem he
     have ⟨_, _, hk⟩ := m1frag_letPure.mp hM1
     simp [emitCore] at hem
-    exact ih hk _ (d + 1) hem (noExt_let he (noExt_emitPrim d p args))
+    exact ih hk _ (d + 1) hem (noExt_let he (noExt_emitPrim tag d p args))
   | ite cond a b iha ihb =>
     intro hM1 e d e' hem he
     have ⟨_, ha, hb⟩ := m1frag_ite.mp hM1
     simp [emitCore] at hem
-    obtain ⟨eA, hA⟩ := emitCore_some (c := c) (halt := halt) a ({} : Emit) d
-    obtain ⟨eB, hB⟩ := emitCore_some (c := c) (halt := halt) b ({} : Emit) d
+    obtain ⟨eA, hA⟩ := emitCore_some tag (c := c) (halt := halt) a ({} : Emit) d
+    obtain ⟨eB, hB⟩ := emitCore_some tag (c := c) (halt := halt) b ({} : Emit) d
     simp [hA, hB] at hem; cases hem
-    exact noExt_switch he (noExt_emitCond d cond)
+    exact noExt_switch he (noExt_emitCond tag d cond)
       (by
         change (noExtStmts eB.stmts && noExtCases []) = true
         simpa [noExtBlock] using ihb hb {} d hB noExt_nil)

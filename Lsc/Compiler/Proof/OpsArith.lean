@@ -9,6 +9,8 @@ Checked `mul` / `div` simulation, plus the shared mul-overflow guard.
 
 namespace Lsc.Compiler
 
+variable (tag : String)
+
 open YulSemantics
 open YulSemantics.EVM
 open Lsc
@@ -37,12 +39,12 @@ theorem emitMulOverflowGuard_stmts (e : Emit) (a b p : YExpr) :
   emitIf_stmts _ _ _
 
 theorem emitLetOp_mulChecked (c : ContractDef) (e : Emit) (d : Nat) (a b : Atom) :
-    emitLetOp c e d (.mulChecked a b) =
-      some (emitMulChecked e (identV d) (atomE d a) (atomE d b)) := rfl
+    emitLetOp tag c e d (.mulChecked a b) =
+      some (emitMulChecked e (identV tag d) (atomE tag d a) (atomE tag d b)) := rfl
 
 theorem emitLetOp_divChecked (c : ContractDef) (e : Emit) (d : Nat) (a b : Atom) :
-    emitLetOp c e d (.divChecked a b) =
-      some (emitDivChecked e (identV d) (atomE d a) (atomE d b)) := rfl
+    emitLetOp tag c e d (.divChecked a b) =
+      some (emitDivChecked e (identV tag d) (atomE tag d a) (atomE tag d b)) := rfl
 
 theorem emitMulChecked_stmts (e : Emit) (name : YIdent) (a b : YExpr) :
     (emitMulChecked e name a b).stmts =
@@ -183,21 +185,21 @@ theorem panic_ifTrue (funs : FunEnv evm) (V : VEnv evm) (st : EvmState)
 
 theorem op_sim_mulChecked {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx} {w : World S X E} {env V st} {a b : Atom}
-    (funs : FunEnv evm) (hinv : Inv Γ c κ ctx w env V st)
+    (funs : FunEnv evm) (hinv : Inv tag Γ c κ ctx w env V st)
     (hwf : opWF c (.mulChecked a b) = true)
-    (hn : identsNodup (env.length + 1) = true) :
+    (hn : identsNodup tag (env.length + 1) = true) :
     match Tx.run (Op.denote Γ env (.mulChecked a b)) ctx w with
     | .ok (v, w') =>
         ∃ st',
           ExecStmts evm funs V st
-            (emitMulChecked {} (identV env.length) (atomE env.length a) (atomE env.length b)).stmts
-            ((identV env.length, BitVec.ofNat 256 v) :: V) st' .normal ∧
-          Inv Γ c κ ctx w' (v :: env)
-            ((identV env.length, BitVec.ofNat 256 v) :: V) st'
+            (emitMulChecked {} (identV tag env.length) (atomE tag env.length a) (atomE tag env.length b)).stmts
+            ((identV tag env.length, BitVec.ofNat 256 v) :: V) st' .normal ∧
+          Inv tag Γ c κ ctx w' (v :: env)
+            ((identV tag env.length, BitVec.ofNat 256 v) :: V) st'
     | .error e =>
         ∃ V' st' bytes,
           ExecStmts evm funs V st
-            (emitMulChecked {} (identV env.length) (atomE env.length a) (atomE env.length b)).stmts
+            (emitMulChecked {} (identV tag env.length) (atomE tag env.length a) (atomE tag env.length b)).stmts
             V' st' .halt ∧
           st'.halted = some (.revert, bytes) ∧
           haltError c Γ e bytes := by
@@ -206,24 +208,24 @@ theorem op_sim_mulChecked {S X E ε} {c : ContractDef} {Γ : ContractSchema S X 
     simpa [opWF, Bool.and_eq_true] using hwf
   have ha := atom_eval_lt henv hwf'.1
   have hb := atom_eval_lt henv hwf'.2
-  have hn0 : identsNodup env.length = true := identsNodup_mono (by omega) hn
-  have hea := eval_atom funs (st := st) hV hn0 a
-  have heb := eval_atom funs (st := st) hV hn0 b
+  have hn0 : identsNodup tag env.length = true := identsNodup_mono tag (by omega) hn
+  have hea := eval_atom tag funs (st := st) hV hn0 a
+  have heb := eval_atom tag funs (st := st) hV hn0 b
   have hmul :
-      EvalExpr evm funs V st (bop Op.mul [atomE env.length a, atomE env.length b])
+      EvalExpr evm funs V st (bop Op.mul [atomE tag env.length a, atomE tag env.length b])
         (.vals [BitVec.ofNat 256 (a.eval env) * BitVec.ofNat 256 (b.eval env)] st) :=
     Step.builtinOk (Step.argsCons (Step.argsCons Step.argsNil heb) hea) (step_mul _ _ _)
   rw [ofNat_mul] at hmul
-  let V₁ := (identV env.length, BitVec.ofNat 256 (a.eval env * b.eval env)) :: V
+  let V₁ := (identV tag env.length, BitVec.ofNat 256 (a.eval env * b.eval env)) :: V
   have hlet : ExecStmt evm funs V st
-      (.letDecl [identV env.length]
-        (some (bop Op.mul [atomE env.length a, atomE env.length b])))
+      (.letDecl [identV tag env.length]
+        (some (bop Op.mul [atomE tag env.length a, atomE tag env.length b])))
       V₁ st .normal :=
     Step.letVal hmul rfl
-  have hea1 := eval_atom_cons funs st (BitVec.ofNat 256 (a.eval env * b.eval env)) hV hn a
-  have heb1 := eval_atom_cons funs st (BitVec.ofNat 256 (a.eval env * b.eval env)) hV hn b
+  have hea1 := eval_atom_cons tag funs st (BitVec.ofNat 256 (a.eval env * b.eval env)) hV hn a
+  have heb1 := eval_atom_cons tag funs st (BitVec.ofNat 256 (a.eval env * b.eval env)) hV hn b
   have hep :
-      EvalExpr evm funs V₁ st (var (identV env.length))
+      EvalExpr evm funs V₁ st (var (identV tag env.length))
         (.vals [BitVec.ofNat 256 (a.eval env * b.eval env)] st) :=
     Step.var (by
       simp only [V₁]
@@ -250,21 +252,21 @@ theorem op_sim_mulChecked {S X E ε} {c : ContractDef} {Γ : ContractSchema S X 
 
 theorem op_sim_divChecked {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx} {w : World S X E} {env V st} {a b : Atom}
-    (funs : FunEnv evm) (hinv : Inv Γ c κ ctx w env V st)
+    (funs : FunEnv evm) (hinv : Inv tag Γ c κ ctx w env V st)
     (hwf : opWF c (.divChecked a b) = true)
-    (hn : identsNodup (env.length + 1) = true) :
+    (hn : identsNodup tag (env.length + 1) = true) :
     match Tx.run (Op.denote Γ env (.divChecked a b)) ctx w with
     | .ok (v, w') =>
         ∃ st',
           ExecStmts evm funs V st
-            (emitDivChecked {} (identV env.length) (atomE env.length a) (atomE env.length b)).stmts
-            ((identV env.length, BitVec.ofNat 256 v) :: V) st' .normal ∧
-          Inv Γ c κ ctx w' (v :: env)
-            ((identV env.length, BitVec.ofNat 256 v) :: V) st'
+            (emitDivChecked {} (identV tag env.length) (atomE tag env.length a) (atomE tag env.length b)).stmts
+            ((identV tag env.length, BitVec.ofNat 256 v) :: V) st' .normal ∧
+          Inv tag Γ c κ ctx w' (v :: env)
+            ((identV tag env.length, BitVec.ofNat 256 v) :: V) st'
     | .error e =>
         ∃ V' st' bytes,
           ExecStmts evm funs V st
-            (emitDivChecked {} (identV env.length) (atomE env.length a) (atomE env.length b)).stmts
+            (emitDivChecked {} (identV tag env.length) (atomE tag env.length a) (atomE tag env.length b)).stmts
             V' st' .halt ∧
           st'.halted = some (.revert, bytes) ∧
           haltError c Γ e bytes := by
@@ -273,9 +275,9 @@ theorem op_sim_divChecked {S X E ε} {c : ContractDef} {Γ : ContractSchema S X 
     simpa [opWF, Bool.and_eq_true] using hwf
   have ha := atom_eval_lt henv hwf'.1
   have hb := atom_eval_lt henv hwf'.2
-  have hn0 : identsNodup env.length = true := identsNodup_mono (by omega) hn
-  have hea := eval_atom funs (st := st) hV hn0 a
-  have heb := eval_atom funs (st := st) hV hn0 b
+  have hn0 : identsNodup tag env.length = true := identsNodup_mono tag (by omega) hn
+  have hea := eval_atom tag funs (st := st) hV hn0 a
+  have heb := eval_atom tag funs (st := st) hV hn0 b
   have hisz := eval_iszero_ofNat hb heb
   simp only [Op.denote, Tx.run_divChecked]
   by_cases hb0 : b.eval env = 0
@@ -288,15 +290,15 @@ theorem op_sim_divChecked {S X E ε} {c : ContractDef} {Γ : ContractSchema S X 
     exact Step.seqStop hp halt_ne_normal
   · simp [hb0]
     have hdiv :
-        EvalExpr evm funs V st (bop Op.div [atomE env.length a, atomE env.length b])
+        EvalExpr evm funs V st (bop Op.div [atomE tag env.length a, atomE tag env.length b])
           (.vals [if BitVec.ofNat 256 (b.eval env) = 0 then 0
             else BitVec.ofNat 256 (a.eval env) / BitVec.ofNat 256 (b.eval env)] st) :=
       Step.builtinOk (Step.argsCons (Step.argsCons Step.argsNil heb) hea) (step_div _ _ _)
     rw [evm_div_ofNat ha hb hb0] at hdiv
-    let V₁ := (identV env.length, BitVec.ofNat 256 (a.eval env / b.eval env)) :: V
+    let V₁ := (identV tag env.length, BitVec.ofNat 256 (a.eval env / b.eval env)) :: V
     have hlet : ExecStmt evm funs V st
-        (.letDecl [identV env.length]
-          (some (bop Op.div [atomE env.length a, atomE env.length b])))
+        (.letDecl [identV tag env.length]
+          (some (bop Op.div [atomE tag env.length a, atomE tag env.length b])))
         V₁ st .normal :=
       Step.letVal hdiv rfl
     have hcv : b2w (decide (b.eval env = 0)) = 0 := by simp [hb0, b2w]

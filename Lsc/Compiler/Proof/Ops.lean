@@ -10,6 +10,8 @@ M1 operator / statement simulation: `load`, `addChecked`, `store`, `emit` (one w
 
 namespace Lsc.Compiler
 
+variable (tag : String)
+
 open YulSemantics
 open YulSemantics.EVM
 
@@ -48,19 +50,19 @@ theorem emitIf_stmts (e : Emit) (cnd : YExpr) (body : YBlock) :
   Emit.stmts_push _ _
 
 theorem emitLetOp_load (c : ContractDef) (e : Emit) (d f : Nat) :
-    emitLetOp c e d (.load f) =
-      some (emitLet e (identV d) (bop Op.sload [lit f])) := rfl
+    emitLetOp tag c e d (.load f) =
+      some (emitLet e (identV tag d) (bop Op.sload [lit f])) := rfl
 
 theorem emitLetOp_addChecked (c : ContractDef) (e : Emit) (d : Nat) (a b : Atom) :
-    emitLetOp c e d (.addChecked a b) =
-      some (emitAddChecked e (identV d) (atomE d a) (atomE d b)) := rfl
+    emitLetOp tag c e d (.addChecked a b) =
+      some (emitAddChecked e (identV tag d) (atomE tag d a) (atomE tag d b)) := rfl
 
 theorem emitLetOp_subChecked (c : ContractDef) (e : Emit) (d : Nat) (a b : Atom) :
-    emitLetOp c e d (.subChecked a b) =
-      some (emitSubChecked e (identV d) (atomE d a) (atomE d b)) := rfl
+    emitLetOp tag c e d (.subChecked a b) =
+      some (emitSubChecked e (identV tag d) (atomE tag d a) (atomE tag d b)) := rfl
 
 theorem emitLetOp_pure (c : ContractDef) (e : Emit) (d : Nat) (a : Atom) :
-    emitLetOp c e d (.pure a) = some (emitLet e (identV d) (atomE d a)) := rfl
+    emitLetOp tag c e d (.pure a) = some (emitLet e (identV tag d) (atomE tag d a)) := rfl
 
 theorem emitAddChecked_stmts (e : Emit) (name : YIdent) (a b : YExpr) :
     (emitAddChecked e name a b).stmts =
@@ -70,8 +72,8 @@ theorem emitAddChecked_stmts (e : Emit) (name : YIdent) (a b : YExpr) :
   simp [emitAddChecked, emitLet_stmts, emitIf_stmts]
 
 theorem emitStmt_store (c : ContractDef) (e : Emit) (d f : Nat) (v : Atom) :
-    (emitStmt c e d (.store f v)).stmts =
-      e.stmts ++ [.exprStmt (bop Op.sstore [lit f, atomE d v])] :=
+    (emitStmt tag c e d (.store f v)).stmts =
+      e.stmts ++ [.exprStmt (bop Op.sstore [lit f, atomE tag d v])] :=
   emitDo_stmts _ _ _
 
 theorem emitLog1_one (e : Emit) (topic : Nat) (a : YExpr) :
@@ -84,9 +86,9 @@ theorem emitLog1_one (e : Emit) (topic : Nat) (a : YExpr) :
 
 theorem emitStmt_emit_one (c : ContractDef) (e : Emit) (d ev : Nat) (a : Atom)
     {ed : EventDef} (h : c.events[ev]? = some ed) :
-    (emitStmt c e d (.emit ev [a])).stmts =
+    (emitStmt tag c e d (.emit ev [a])).stmts =
       e.stmts ++
-        [.exprStmt (bop Op.mstore [lit abiPtr, atomE d a]),
+        [.exprStmt (bop Op.mstore [lit abiPtr, atomE tag d a]),
           .exprStmt (bop Op.log1 [lit abiPtr, lit 32, lit ed.topic0])] := by
   simp [emitStmt, h, emitLog1_one]
 
@@ -215,14 +217,14 @@ theorem panic_sim (funs : FunEnv evm) (V : VEnv evm) (st : EvmState) (code : Nat
 
 theorem op_sim_load {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx} {w : World S X E} {env V st} {f : Nat}
-    (funs : FunEnv evm) (hinv : Inv Γ c κ ctx w env V st)
+    (funs : FunEnv evm) (hinv : Inv tag Γ c κ ctx w env V st)
     (hwf : opWF c (.load f) = true) :
     let v := Γ.st.scalar f w.self
     ∃ st',
       ExecStmts evm funs V st
-        (emitLet {} (identV env.length) (bop Op.sload [lit f])).stmts
-        ((identV env.length, BitVec.ofNat 256 v) :: V) st' .normal ∧
-      Inv Γ c κ ctx w (v :: env) ((identV env.length, BitVec.ofNat 256 v) :: V) st' := by
+        (emitLet {} (identV tag env.length) (bop Op.sload [lit f])).stmts
+        ((identV tag env.length, BitVec.ofNat 256 v) :: V) st' .normal ∧
+      Inv tag Γ c κ ctx w (v :: env) ((identV tag env.length, BitVec.ofNat 256 v) :: V) st' := by
   rcases hinv with ⟨hV, henv, ⟨hs, hl, hκe, hW⟩, hctx⟩
   have ⟨fd, hfd, hk⟩ := (fieldKindOK_iff c f FieldKind.scalar).mp (by simpa [opWF] using hwf)
   have hslot : st.storage (BitVec.ofNat 256 f) = BitVec.ofNat 256 (Γ.st.scalar f w.self) := by
@@ -242,9 +244,9 @@ theorem op_sim_load {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
           rw [litValue_number])
     have hlet :
         ExecStmt evm funs V st
-          (.letDecl [identV env.length]
+          (.letDecl [identV tag env.length]
             (some (bop Op.sload [lit f])))
-          ((identV env.length, st.storage (BitVec.ofNat 256 f)) :: V) st .normal :=
+          ((identV tag env.length, st.storage (BitVec.ofNat 256 f)) :: V) st .normal :=
       Step.letVal hsload rfl
     rw [hslot] at hlet
     exact Step.seqCons hlet Step.seqNil
@@ -253,21 +255,21 @@ theorem op_sim_load {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
 
 theorem op_sim_addChecked {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx} {w : World S X E} {env V st} {a b : Atom}
-    (funs : FunEnv evm) (hinv : Inv Γ c κ ctx w env V st)
+    (funs : FunEnv evm) (hinv : Inv tag Γ c κ ctx w env V st)
     (hwf : opWF c (.addChecked a b) = true)
-    (hn : identsNodup (env.length + 1) = true) :
+    (hn : identsNodup tag (env.length + 1) = true) :
     match Tx.run (Op.denote Γ env (.addChecked a b)) ctx w with
     | .ok (v, w') =>
         ∃ st',
           ExecStmts evm funs V st
-            (emitAddChecked {} (identV env.length) (atomE env.length a) (atomE env.length b)).stmts
-            ((identV env.length, BitVec.ofNat 256 v) :: V) st' .normal ∧
-          Inv Γ c κ ctx w' (v :: env)
-            ((identV env.length, BitVec.ofNat 256 v) :: V) st'
+            (emitAddChecked {} (identV tag env.length) (atomE tag env.length a) (atomE tag env.length b)).stmts
+            ((identV tag env.length, BitVec.ofNat 256 v) :: V) st' .normal ∧
+          Inv tag Γ c κ ctx w' (v :: env)
+            ((identV tag env.length, BitVec.ofNat 256 v) :: V) st'
     | .error e =>
         ∃ V' st' bytes,
           ExecStmts evm funs V st
-            (emitAddChecked {} (identV env.length) (atomE env.length a) (atomE env.length b)).stmts
+            (emitAddChecked {} (identV tag env.length) (atomE tag env.length a) (atomE tag env.length b)).stmts
             V' st' .halt ∧
           st'.halted = some (.revert, bytes) ∧
           haltError c Γ e bytes := by
@@ -276,29 +278,29 @@ theorem op_sim_addChecked {S X E ε} {c : ContractDef} {Γ : ContractSchema S X 
     simpa [opWF, Bool.and_eq_true] using hwf
   have ha := atom_eval_lt henv hwf'.1
   have hb := atom_eval_lt henv hwf'.2
-  have hn0 : identsNodup env.length = true := identsNodup_mono (by omega) hn
-  have hea := eval_atom funs (st := st) hV hn0 a
-  have heb := eval_atom funs (st := st) hV hn0 b
+  have hn0 : identsNodup tag env.length = true := identsNodup_mono tag (by omega) hn
+  have hea := eval_atom tag funs (st := st) hV hn0 a
+  have heb := eval_atom tag funs (st := st) hV hn0 b
   have hadd :
       EvalExpr evm funs V st
-        (bop Op.add [atomE env.length a, atomE env.length b])
+        (bop Op.add [atomE tag env.length a, atomE tag env.length b])
         (.vals [BitVec.ofNat 256 (a.eval env) + BitVec.ofNat 256 (b.eval env)] st) :=
     Step.builtinOk (Step.argsCons (Step.argsCons Step.argsNil heb) hea) (step_add _ _ _)
   rw [ofNat_add] at hadd
-  let V₁ := (identV env.length, BitVec.ofNat 256 (a.eval env + b.eval env)) :: V
+  let V₁ := (identV tag env.length, BitVec.ofNat 256 (a.eval env + b.eval env)) :: V
   have hlet : ExecStmt evm funs V st
-      (.letDecl [identV env.length]
-        (some (bop Op.add [atomE env.length a, atomE env.length b])))
+      (.letDecl [identV tag env.length]
+        (some (bop Op.add [atomE tag env.length a, atomE tag env.length b])))
       V₁ st .normal :=
     Step.letVal hadd rfl
   have hlt :
       EvalExpr evm funs V₁ st
-        (bop Op.lt [var (identV env.length), atomE env.length a])
+        (bop Op.lt [var (identV tag env.length), atomE tag env.length a])
         (.vals [b2w ((BitVec.ofNat 256 (a.eval env + b.eval env)).ult
           (BitVec.ofNat 256 (a.eval env)))] st) :=
     Step.builtinOk
       (Step.argsCons (Step.argsCons Step.argsNil
-          (eval_atom_cons funs st (BitVec.ofNat 256 (a.eval env + b.eval env)) hV hn a))
+          (eval_atom_cons tag funs st (BitVec.ofNat 256 (a.eval env + b.eval env)) hV hn a))
         (Step.var (by
           simp only [V₁]
           rw [VEnv.get_cons, if_pos rfl])))
@@ -327,7 +329,7 @@ theorem op_sim_addChecked {S X E ε} {c : ContractDef} {Γ : ContractSchema S X 
     obtain ⟨st', hp, hh⟩ := panic_sim ([] :: funs) V₁ st 0x11 hcode
     have hif :
         ExecStmt evm funs V₁ st
-          (.cond (bop Op.lt [var (identV env.length), atomE env.length a])
+          (.cond (bop Op.lt [var (identV tag env.length), atomE tag env.length a])
             (emitPanic {} 0x11).stmts) V₁ st' .halt := by
       refine Step.ifTrue (D := evm) hlt ?_ ?_
       · simp [hult, b2w, Dialect.zero, litValue]
@@ -339,7 +341,7 @@ theorem op_sim_addChecked {S X E ε} {c : ContractDef} {Γ : ContractSchema S X 
         simpa [restore_self] using Step.block (D := evm) inner
     have hexec :
         ExecStmts evm funs V st
-          (emitAddChecked {} (identV env.length) (atomE env.length a) (atomE env.length b)).stmts
+          (emitAddChecked {} (identV tag env.length) (atomE tag env.length a) (atomE tag env.length b)).stmts
           V₁ st' .halt := by
       simp only [emitAddChecked_stmts, Emit.stmts_nil, List.nil_append]
       exact Step.seqCons hlet (Step.seqStop hif halt_ne_normal)
@@ -347,22 +349,22 @@ theorem op_sim_addChecked {S X E ε} {c : ContractDef} {Γ : ContractSchema S X 
 
 theorem stmt_sim_store {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx} {w : World S X E} {env V st} {f : Nat} {val : Atom}
-    (funs : FunEnv evm) (hinv : Inv Γ c κ ctx w env V st)
+    (funs : FunEnv evm) (hinv : Inv tag Γ c κ ctx w env V st)
     (hΓ : Γ.st.Lawful c.fields) (hκ : KeccakSep c κ)
     (hlen : c.fields.length < wordBound)
     (hwf : stmtWF c (.store f val) = true)
-    (hn : identsNodup env.length = true) :
+    (hn : identsNodup tag env.length = true) :
     let v := val.eval env
     let w' := { w with self := Γ.st.scalarUpd f w.self v }
     ∃ st',
-      ExecStmts evm funs V st (emitStmt c {} env.length (.store f val)).stmts V st' .normal ∧
-      Inv Γ c κ ctx w' env V st' := by
+      ExecStmts evm funs V st (emitStmt tag c {} env.length (.store f val)).stmts V st' .normal ∧
+      Inv tag Γ c κ ctx w' env V st' := by
   rcases hinv with ⟨hV, henv, hR, hctx⟩
   have hwf' : fieldKindOK c f .scalar = true ∧ atomWF val = true := by
     simpa [stmtWF, Bool.and_eq_true] using hwf
   have hv := atom_eval_lt henv hwf'.2
   have hstatic := ctxRel_static hctx
-  have hev := eval_atom funs (st := st) hV hn val
+  have hev := eval_atom tag funs (st := st) hV hn val
   let st' :=
     { st with
       storage := upd st.storage (BitVec.ofNat 256 f) (BitVec.ofNat 256 (val.eval env))
@@ -380,14 +382,14 @@ theorem stmt_sim_store {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E �
 
 theorem stmt_sim_emit {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx} {w : World S X E} {env V st} {ev : Nat} {a : Atom}
-    (funs : FunEnv evm) (hinv : Inv Γ c κ ctx w env V st)
+    (funs : FunEnv evm) (hinv : Inv tag Γ c κ ctx w env V st)
     (hwf : stmtWF c (.emit ev [a]) = true)
-    (hn : identsNodup env.length = true) :
+    (hn : identsNodup tag env.length = true) :
     let args := [a.eval env]
     let w' := { w with log := w.log ++ [Γ.ev.build ev args] }
     ∃ st',
-      ExecStmts evm funs V st (emitStmt c {} env.length (.emit ev [a])).stmts V st' .normal ∧
-      Inv Γ c κ ctx w' env V st' := by
+      ExecStmts evm funs V st (emitStmt tag c {} env.length (.emit ev [a])).stmts V st' .normal ∧
+      Inv tag Γ c κ ctx w' env V st' := by
   rcases hinv with ⟨hV, henv, hR, hctx⟩
   have hwf' : eventOK c ev 1 = true ∧ atomWF a = true := by
     simpa [stmtWF, Bool.and_eq_true] using hwf
@@ -395,7 +397,7 @@ theorem stmt_sim_emit {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε
   have hev : ev < c.events.length := (List.getElem?_eq_some_iff.mp hed).1
   have hv := atom_eval_lt henv hwf'.2
   have hstatic := ctxRel_static hctx
-  have hea := eval_atom funs (st := st) hV hn a
+  have hea := eval_atom tag funs (st := st) hV hn a
   have hptr := toNat_abiPtr
   have hn32 := toNat_32
   let stM :=
@@ -403,7 +405,7 @@ theorem stmt_sim_emit {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε
       memory := storeWord st.memory abiPtr (BitVec.ofNat 256 (a.eval env)) }
   have hmstore :
       ExecStmt evm funs V st
-        (.exprStmt (bop Op.mstore [lit abiPtr, atomE env.length a])) V stM .normal := by
+        (.exprStmt (bop Op.mstore [lit abiPtr, atomE tag env.length a])) V stM .normal := by
     refine Step.exprStmt (Step.builtinOk
       (Step.argsCons (Step.argsCons Step.argsNil hea) Step.lit) ?_)
     simp only [evm_litValue_number, step_mstore, toNat_abiPtr]

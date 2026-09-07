@@ -46,10 +46,10 @@ def ctxRel (ctx : Ctx) (st : EvmState) : Prop :=
 /-- Every Core local is a word. -/
 def EnvWF (env : List Nat) : Prop := ∀ v ∈ env, v < wordBound
 
-/-- `env[i] ↔ v_{d-1-i}`, innermost first. -/
-def toVEnv (env : List Nat) : VEnv evm :=
+/-- `env[i] ↔ {tag}_{d-1-i}`, innermost first. `tag` is `f.name` at `toYulFn`. -/
+def toVEnv (tag : String) (env : List Nat) : VEnv evm :=
   (List.zip env (List.range env.length)).map fun (x, i) =>
-    (identV (env.length - 1 - i), BitVec.ofNat 256 x)
+    (identV tag (env.length - 1 - i), BitVec.ofNat 256 x)
 
 /-- ABI-decode `f`'s arguments from calldata (zero-padded, like `calldataload`). -/
 def decodeArgs (f : FnDef) (cd : List UInt8) : List Nat :=

@@ -10,6 +10,8 @@ Token-fragment simulation: context words, 3-word `log1`, 0-arg `revert`.
 
 namespace Lsc.Compiler
 
+variable (tag : String)
+
 open YulSemantics
 open YulSemantics.EVM
 open Lsc (Stmt Tx Core Err RetTy Atom)
@@ -37,15 +39,15 @@ theorem toNat_abiPtr64 : (BitVec.ofNat 256 (abiPtr + 64)).toNat = abiPtr + 64 :=
 
 theorem op_sim_nullary {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx} {w : World S X E} {env V st}
-    (funs : FunEnv evm) (hinv : Inv Γ c κ ctx w env V st)
+    (funs : FunEnv evm) (hinv : Inv tag Γ c κ ctx w env V st)
     (op : YOp) (v : Nat) (hv : v < wordBound)
     (he : EvalExpr evm funs V st (bop op []) (.vals [BitVec.ofNat 256 v] st)) :
     ∃ st',
       ExecStmts evm funs V st
-        (emitLet {} (identV env.length) (bop op [])).stmts
-        ((identV env.length, BitVec.ofNat 256 v) :: V) st' .normal ∧
-      Inv Γ c κ ctx w (v :: env)
-        ((identV env.length, BitVec.ofNat 256 v) :: V) st' := by
+        (emitLet {} (identV tag env.length) (bop op [])).stmts
+        ((identV tag env.length, BitVec.ofNat 256 v) :: V) st' .normal ∧
+      Inv tag Γ c κ ctx w (v :: env)
+        ((identV tag env.length, BitVec.ofNat 256 v) :: V) st' := by
   rcases hinv with ⟨hV, henv, hR, hctx⟩
   refine ⟨st, ?_, ⟨by rw [hV, toVEnv_cons], envWF_cons hv henv, hR, hctx⟩⟩
   simp only [emitLet_stmts, Emit.stmts_nil, List.nil_append]
@@ -53,76 +55,76 @@ theorem op_sim_nullary {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E �
 
 theorem op_sim_sender {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx} {w : World S X E} {env V st}
-    (funs : FunEnv evm) (hinv : Inv Γ c κ ctx w env V st) :
+    (funs : FunEnv evm) (hinv : Inv tag Γ c κ ctx w env V st) :
     let v := ctx.sender
     ∃ st',
       ExecStmts evm funs V st
-        (emitLet {} (identV env.length) (bop Op.caller [])).stmts
-        ((identV env.length, BitVec.ofNat 256 v) :: V) st' .normal ∧
-      Inv Γ c κ ctx w (v :: env)
-        ((identV env.length, BitVec.ofNat 256 v) :: V) st' := by
+        (emitLet {} (identV tag env.length) (bop Op.caller [])).stmts
+        ((identV tag env.length, BitVec.ofNat 256 v) :: V) st' .normal ∧
+      Inv tag Γ c κ ctx w (v :: env)
+        ((identV tag env.length, BitVec.ofNat 256 v) :: V) st' := by
   rcases hinv.ctxr with ⟨hc, _, _, _, _, _, _, _, ⟨hs, _⟩⟩
-  refine op_sim_nullary funs hinv Op.caller ctx.sender hs ?_
+  refine op_sim_nullary tag funs hinv Op.caller ctx.sender hs ?_
   refine Step.builtinOk Step.argsNil ?_
   simp only [step_caller, hc]
 
 theorem op_sim_value {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx} {w : World S X E} {env V st}
-    (funs : FunEnv evm) (hinv : Inv Γ c κ ctx w env V st) :
+    (funs : FunEnv evm) (hinv : Inv tag Γ c κ ctx w env V st) :
     let v := ctx.value
     ∃ st',
       ExecStmts evm funs V st
-        (emitLet {} (identV env.length) (bop Op.callvalue [])).stmts
-        ((identV env.length, BitVec.ofNat 256 v) :: V) st' .normal ∧
-      Inv Γ c κ ctx w (v :: env)
-        ((identV env.length, BitVec.ofNat 256 v) :: V) st' := by
+        (emitLet {} (identV tag env.length) (bop Op.callvalue [])).stmts
+        ((identV tag env.length, BitVec.ofNat 256 v) :: V) st' .normal ∧
+      Inv tag Γ c κ ctx w (v :: env)
+        ((identV tag env.length, BitVec.ofNat 256 v) :: V) st' := by
   rcases hinv.ctxr with ⟨_, hv, _, _, _, _, _, _, ⟨_, hval, _⟩⟩
-  refine op_sim_nullary funs hinv Op.callvalue ctx.value hval ?_
+  refine op_sim_nullary tag funs hinv Op.callvalue ctx.value hval ?_
   refine Step.builtinOk Step.argsNil ?_
   simp only [step_callvalue, hv]
 
 theorem op_sim_timestamp {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx} {w : World S X E} {env V st}
-    (funs : FunEnv evm) (hinv : Inv Γ c κ ctx w env V st) :
+    (funs : FunEnv evm) (hinv : Inv tag Γ c κ ctx w env V st) :
     let v := ctx.timestamp
     ∃ st',
       ExecStmts evm funs V st
-        (emitLet {} (identV env.length) (bop YulSemantics.EVM.Op.timestamp [])).stmts
-        ((identV env.length, BitVec.ofNat 256 v) :: V) st' .normal ∧
-      Inv Γ c κ ctx w (v :: env)
-        ((identV env.length, BitVec.ofNat 256 v) :: V) st' := by
+        (emitLet {} (identV tag env.length) (bop YulSemantics.EVM.Op.timestamp [])).stmts
+        ((identV tag env.length, BitVec.ofNat 256 v) :: V) st' .normal ∧
+      Inv tag Γ c κ ctx w (v :: env)
+        ((identV tag env.length, BitVec.ofNat 256 v) :: V) st' := by
   rcases hinv.ctxr with ⟨_, _, ht, _, _, _, _, _, ⟨_, _, hts, _⟩⟩
-  refine op_sim_nullary funs hinv YulSemantics.EVM.Op.timestamp ctx.timestamp hts ?_
+  refine op_sim_nullary tag funs hinv YulSemantics.EVM.Op.timestamp ctx.timestamp hts ?_
   refine Step.builtinOk Step.argsNil ?_
   simp only [step_timestamp, ht]
 
 theorem op_sim_blockNumber {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx} {w : World S X E} {env V st}
-    (funs : FunEnv evm) (hinv : Inv Γ c κ ctx w env V st) :
+    (funs : FunEnv evm) (hinv : Inv tag Γ c κ ctx w env V st) :
     let v := ctx.blockNumber
     ∃ st',
       ExecStmts evm funs V st
-        (emitLet {} (identV env.length) (bop Op.number [])).stmts
-        ((identV env.length, BitVec.ofNat 256 v) :: V) st' .normal ∧
-      Inv Γ c κ ctx w (v :: env)
-        ((identV env.length, BitVec.ofNat 256 v) :: V) st' := by
+        (emitLet {} (identV tag env.length) (bop Op.number [])).stmts
+        ((identV tag env.length, BitVec.ofNat 256 v) :: V) st' .normal ∧
+      Inv tag Γ c κ ctx w (v :: env)
+        ((identV tag env.length, BitVec.ofNat 256 v) :: V) st' := by
   rcases hinv.ctxr with ⟨_, _, _, hn, _, _, _, _, ⟨_, _, _, hbn, _⟩⟩
-  refine op_sim_nullary funs hinv Op.number ctx.blockNumber hbn ?_
+  refine op_sim_nullary tag funs hinv Op.number ctx.blockNumber hbn ?_
   refine Step.builtinOk Step.argsNil ?_
   simp only [step_number, hn]
 
 theorem op_sim_selfAddress {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx} {w : World S X E} {env V st}
-    (funs : FunEnv evm) (hinv : Inv Γ c κ ctx w env V st) :
+    (funs : FunEnv evm) (hinv : Inv tag Γ c κ ctx w env V st) :
     let v := ctx.self
     ∃ st',
       ExecStmts evm funs V st
-        (emitLet {} (identV env.length) (bop Op.address [])).stmts
-        ((identV env.length, BitVec.ofNat 256 v) :: V) st' .normal ∧
-      Inv Γ c κ ctx w (v :: env)
-        ((identV env.length, BitVec.ofNat 256 v) :: V) st' := by
+        (emitLet {} (identV tag env.length) (bop Op.address [])).stmts
+        ((identV tag env.length, BitVec.ofNat 256 v) :: V) st' .normal ∧
+      Inv tag Γ c κ ctx w (v :: env)
+        ((identV tag env.length, BitVec.ofNat 256 v) :: V) st' := by
   rcases hinv.ctxr with ⟨_, _, _, _, ha, _, _, _, ⟨_, _, _, _, hs⟩⟩
-  refine op_sim_nullary funs hinv Op.address ctx.self hs ?_
+  refine op_sim_nullary tag funs hinv Op.address ctx.self hs ?_
   refine Step.builtinOk Step.argsNil ?_
   simp only [step_address, ha]
 
@@ -137,11 +139,11 @@ theorem emitLog1_three (e : Emit) (topic : Nat) (a b c : YExpr) :
 
 theorem emitStmt_emit_three (c : ContractDef) (e : Emit) (d ev : Nat) (a b c' : Atom)
     {ed : EventDef} (h : c.events[ev]? = some ed) :
-    (emitStmt c e d (.emit ev [a, b, c'])).stmts =
+    (emitStmt tag c e d (.emit ev [a, b, c'])).stmts =
       e.stmts ++
-        [.exprStmt (bop Op.mstore [lit abiPtr, atomE d a]),
-          .exprStmt (bop Op.mstore [lit (abiPtr + 32), atomE d b]),
-          .exprStmt (bop Op.mstore [lit (abiPtr + 64), atomE d c']),
+        [.exprStmt (bop Op.mstore [lit abiPtr, atomE tag d a]),
+          .exprStmt (bop Op.mstore [lit (abiPtr + 32), atomE tag d b]),
+          .exprStmt (bop Op.mstore [lit (abiPtr + 64), atomE tag d c']),
           .exprStmt (bop Op.log1 [lit abiPtr, lit 96, lit ed.topic0])] := by
   simp [emitStmt, h, emitLog1_three]
 
@@ -214,15 +216,15 @@ theorem readBytes_abi_three (mem : Nat → UInt8) (n0 n1 n2 : Nat)
 
 theorem stmt_sim_emit3 {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx} {w : World S X E} {env V st} {ev : Nat} {a b c' : Atom}
-    (funs : FunEnv evm) (hinv : Inv Γ c κ ctx w env V st)
+    (funs : FunEnv evm) (hinv : Inv tag Γ c κ ctx w env V st)
     (hwf : stmtWF c (.emit ev [a, b, c']) = true)
-    (hn : identsNodup env.length = true) :
+    (hn : identsNodup tag env.length = true) :
     let args := [a.eval env, b.eval env, c'.eval env]
     let w' := { w with log := w.log ++ [Γ.ev.build ev args] }
     ∃ st',
-      ExecStmts evm funs V st (emitStmt c {} env.length (.emit ev [a, b, c'])).stmts
+      ExecStmts evm funs V st (emitStmt tag c {} env.length (.emit ev [a, b, c'])).stmts
         V st' .normal ∧
-      Inv Γ c κ ctx w' env V st' := by
+      Inv tag Γ c κ ctx w' env V st' := by
   rcases hinv with ⟨hV, henv, hR, hctx⟩
   have hwf' : eventOK c ev 3 = true ∧
       atomWF a = true ∧ atomWF b = true ∧ atomWF c' = true := by
@@ -233,31 +235,31 @@ theorem stmt_sim_emit3 {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E �
   have hb := atom_eval_lt henv hwf'.2.2.1
   have hc := atom_eval_lt henv hwf'.2.2.2
   have hstatic := ctxRel_static hctx
-  have hea := eval_atom funs (st := st) hV hn a
+  have hea := eval_atom tag funs (st := st) hV hn a
   let st0 :=
     { touchMemory st abiPtr 32 with
       memory := storeWord st.memory abiPtr (BitVec.ofNat 256 (a.eval env)) }
-  have heb := eval_atom funs (st := st0) hV hn b
+  have heb := eval_atom tag funs (st := st0) hV hn b
   let st1 :=
     { touchMemory st0 (abiPtr + 32) 32 with
       memory := storeWord st0.memory (abiPtr + 32) (BitVec.ofNat 256 (b.eval env)) }
-  have hec := eval_atom funs (st := st1) hV hn c'
+  have hec := eval_atom tag funs (st := st1) hV hn c'
   let st2 :=
     { touchMemory st1 (abiPtr + 64) 32 with
       memory := storeWord st1.memory (abiPtr + 64) (BitVec.ofNat 256 (c'.eval env)) }
   have hm0 :
       ExecStmt evm funs V st
-        (.exprStmt (bop Op.mstore [lit abiPtr, atomE env.length a])) V st0 .normal :=
+        (.exprStmt (bop Op.mstore [lit abiPtr, atomE tag env.length a])) V st0 .normal :=
     Step.exprStmt (Step.builtinOk (Step.argsCons (Step.argsCons Step.argsNil hea) Step.lit)
       (by simp only [evm_litValue_number, step_mstore, toNat_abiPtr]; rfl))
   have hm1 :
       ExecStmt evm funs V st0
-        (.exprStmt (bop Op.mstore [lit (abiPtr + 32), atomE env.length b])) V st1 .normal :=
+        (.exprStmt (bop Op.mstore [lit (abiPtr + 32), atomE tag env.length b])) V st1 .normal :=
     Step.exprStmt (Step.builtinOk (Step.argsCons (Step.argsCons Step.argsNil heb) Step.lit)
       (by simp only [evm_litValue_number, step_mstore, toNat_abiPtr32]; rfl))
   have hm2 :
       ExecStmt evm funs V st1
-        (.exprStmt (bop Op.mstore [lit (abiPtr + 64), atomE env.length c'])) V st2 .normal :=
+        (.exprStmt (bop Op.mstore [lit (abiPtr + 64), atomE tag env.length c'])) V st2 .normal :=
     Step.exprStmt (Step.builtinOk (Step.argsCons (Step.argsCons Step.argsNil hec) Step.lit)
       (by simp only [evm_litValue_number, step_mstore, toNat_abiPtr64]; rfl))
   let stL := appendLog st2 [BitVec.ofNat 256 ed.topic0]
@@ -326,12 +328,12 @@ theorem emitLog1_four (e : Emit) (topic : Nat) (a b c d : YExpr) :
 
 theorem emitStmt_emit_four (c : ContractDef) (e : Emit) (d ev : Nat) (a b c' e' : Atom)
     {ed : EventDef} (h : c.events[ev]? = some ed) :
-    (emitStmt c e d (.emit ev [a, b, c', e'])).stmts =
+    (emitStmt tag c e d (.emit ev [a, b, c', e'])).stmts =
       e.stmts ++
-        [.exprStmt (bop Op.mstore [lit abiPtr, atomE d a]),
-          .exprStmt (bop Op.mstore [lit (abiPtr + 32), atomE d b]),
-          .exprStmt (bop Op.mstore [lit (abiPtr + 64), atomE d c']),
-          .exprStmt (bop Op.mstore [lit (abiPtr + 96), atomE d e']),
+        [.exprStmt (bop Op.mstore [lit abiPtr, atomE tag d a]),
+          .exprStmt (bop Op.mstore [lit (abiPtr + 32), atomE tag d b]),
+          .exprStmt (bop Op.mstore [lit (abiPtr + 64), atomE tag d c']),
+          .exprStmt (bop Op.mstore [lit (abiPtr + 96), atomE tag d e']),
           .exprStmt (bop Op.log1 [lit abiPtr, lit 128, lit ed.topic0])] := by
   simp [emitStmt, h, emitLog1_four]
 
@@ -377,15 +379,15 @@ theorem readBytes_abi_four (mem : Nat → UInt8) (n0 n1 n2 n3 : Nat)
 
 theorem stmt_sim_emit4 {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx} {w : World S X E} {env V st} {ev : Nat} {a b c' d : Atom}
-    (funs : FunEnv evm) (hinv : Inv Γ c κ ctx w env V st)
+    (funs : FunEnv evm) (hinv : Inv tag Γ c κ ctx w env V st)
     (hwf : stmtWF c (.emit ev [a, b, c', d]) = true)
-    (hn : identsNodup env.length = true) :
+    (hn : identsNodup tag env.length = true) :
     let args := [a.eval env, b.eval env, c'.eval env, d.eval env]
     let w' := { w with log := w.log ++ [Γ.ev.build ev args] }
     ∃ st',
-      ExecStmts evm funs V st (emitStmt c {} env.length (.emit ev [a, b, c', d])).stmts
+      ExecStmts evm funs V st (emitStmt tag c {} env.length (.emit ev [a, b, c', d])).stmts
         V st' .normal ∧
-      Inv Γ c κ ctx w' env V st' := by
+      Inv tag Γ c κ ctx w' env V st' := by
   rcases hinv with ⟨hV, henv, hR, hctx⟩
   have hwf' : eventOK c ev 4 = true ∧
       atomWF a = true ∧ atomWF b = true ∧ atomWF c' = true ∧ atomWF d = true := by
@@ -397,40 +399,40 @@ theorem stmt_sim_emit4 {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E �
   have hc := atom_eval_lt henv hwf'.2.2.2.1
   have hd := atom_eval_lt henv hwf'.2.2.2.2
   have hstatic := ctxRel_static hctx
-  have hea := eval_atom funs (st := st) hV hn a
+  have hea := eval_atom tag funs (st := st) hV hn a
   let st0 :=
     { touchMemory st abiPtr 32 with
       memory := storeWord st.memory abiPtr (BitVec.ofNat 256 (a.eval env)) }
-  have heb := eval_atom funs (st := st0) hV hn b
+  have heb := eval_atom tag funs (st := st0) hV hn b
   let st1 :=
     { touchMemory st0 (abiPtr + 32) 32 with
       memory := storeWord st0.memory (abiPtr + 32) (BitVec.ofNat 256 (b.eval env)) }
-  have hec := eval_atom funs (st := st1) hV hn c'
+  have hec := eval_atom tag funs (st := st1) hV hn c'
   let st2 :=
     { touchMemory st1 (abiPtr + 64) 32 with
       memory := storeWord st1.memory (abiPtr + 64) (BitVec.ofNat 256 (c'.eval env)) }
-  have hedA := eval_atom funs (st := st2) hV hn d
+  have hedA := eval_atom tag funs (st := st2) hV hn d
   let st3 :=
     { touchMemory st2 (abiPtr + 96) 32 with
       memory := storeWord st2.memory (abiPtr + 96) (BitVec.ofNat 256 (d.eval env)) }
   have hm0 :
       ExecStmt evm funs V st
-        (.exprStmt (bop Op.mstore [lit abiPtr, atomE env.length a])) V st0 .normal :=
+        (.exprStmt (bop Op.mstore [lit abiPtr, atomE tag env.length a])) V st0 .normal :=
     Step.exprStmt (Step.builtinOk (Step.argsCons (Step.argsCons Step.argsNil hea) Step.lit)
       (by simp only [evm_litValue_number, step_mstore, toNat_abiPtr]; rfl))
   have hm1 :
       ExecStmt evm funs V st0
-        (.exprStmt (bop Op.mstore [lit (abiPtr + 32), atomE env.length b])) V st1 .normal :=
+        (.exprStmt (bop Op.mstore [lit (abiPtr + 32), atomE tag env.length b])) V st1 .normal :=
     Step.exprStmt (Step.builtinOk (Step.argsCons (Step.argsCons Step.argsNil heb) Step.lit)
       (by simp only [evm_litValue_number, step_mstore, toNat_abiPtr32]; rfl))
   have hm2 :
       ExecStmt evm funs V st1
-        (.exprStmt (bop Op.mstore [lit (abiPtr + 64), atomE env.length c'])) V st2 .normal :=
+        (.exprStmt (bop Op.mstore [lit (abiPtr + 64), atomE tag env.length c'])) V st2 .normal :=
     Step.exprStmt (Step.builtinOk (Step.argsCons (Step.argsCons Step.argsNil hec) Step.lit)
       (by simp only [evm_litValue_number, step_mstore, toNat_abiPtr64]; rfl))
   have hm3 :
       ExecStmt evm funs V st2
-        (.exprStmt (bop Op.mstore [lit (abiPtr + 96), atomE env.length d])) V st3 .normal :=
+        (.exprStmt (bop Op.mstore [lit (abiPtr + 96), atomE tag env.length d])) V st3 .normal :=
     Step.exprStmt (Step.builtinOk (Step.argsCons (Step.argsCons Step.argsNil hedA) Step.lit)
       (by simp only [evm_litValue_number, step_mstore, toNat_abiPtr96]; rfl))
   let stL := appendLog st3 [BitVec.ofNat 256 ed.topic0]
@@ -485,22 +487,22 @@ theorem stmt_sim_emit4 {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E �
 
 theorem emitStmt_revert_nil (c : ContractDef) (e : Emit) (d err : Nat) {ed : ErrorDef}
     (h : c.errors[err]? = some ed) :
-    (emitStmt c e d (.revert err [])).stmts =
+    (emitStmt tag c e d (.revert err [])).stmts =
       e.stmts ++ (emitCustomError c {} err []).stmts := by
-  rw [show emitStmt c e d (.revert err []) = emitCustomError c e err [] from rfl]
+  rw [show emitStmt tag c e d (.revert err []) = emitCustomError c e err [] from rfl]
   rw [emitCustomError_acc, Emit.cat_stmts]
 
 theorem stmt_sim_revert {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx} {w : World S X E} {env V st} {err : Nat}
-    (funs : FunEnv evm) (hinv : Inv Γ c κ ctx w env V st)
+    (funs : FunEnv evm) (hinv : Inv tag Γ c κ ctx w env V st)
     (hwf : stmtWF c (.revert err []) = true) :
     match Tx.run (Stmt.denote Γ env (.revert err [])) ctx w with
     | .ok (_, w') =>
-        ∃ st', ExecStmts evm funs V st (emitStmt c {} env.length (.revert err [])).stmts
-          V st' .normal ∧ Inv Γ c κ ctx w' env V st'
+        ∃ st', ExecStmts evm funs V st (emitStmt tag c {} env.length (.revert err [])).stmts
+          V st' .normal ∧ Inv tag Γ c κ ctx w' env V st'
     | .error e =>
         ∃ V' st' bytes,
-          ExecStmts evm funs V st (emitStmt c {} env.length (.revert err [])).stmts
+          ExecStmts evm funs V st (emitStmt tag c {} env.length (.revert err [])).stmts
             V' st' .halt ∧
           st'.halted = some (.revert, bytes) ∧ haltError c Γ e bytes := by
   rcases hinv with ⟨hV, henv, hR, hctx⟩
@@ -513,7 +515,7 @@ theorem stmt_sim_revert {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E 
 
 theorem revertTail_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx} {w : World S X E} {env V st} {err : Nat} {t : RetTy}
-    (funs : FunEnv evm) (hinv : Inv Γ c κ ctx w env V st)
+    (funs : FunEnv evm) (hinv : Inv tag Γ c κ ctx w env V st)
     (hwf : coreWF c (Core.revertTail (t := t) err []) = true) :
     ∃ V' st' bytes,
       ExecStmts evm funs V st (emitCustomError c {} err []).stmts V' st' .halt ∧

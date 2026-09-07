@@ -15,6 +15,8 @@ Statements live in `CoreExtSimTheorems`. Helpers stay in this module under
 
 namespace Lsc.Compiler.Proof
 
+variable (tag : String)
+
 open YulSemantics
 open YulSemantics.EVM
 open Lsc hiding Op Stmt
@@ -29,13 +31,13 @@ theorem core_sim_ext_callFree {I : Interface} {S X E ε}
     (hslot : BindEnvs.avoids Γ c bs core) :
     ∀ {w : World S X E} {env V st} (funs : FunEnv (yulD calls))
       (hfuns : noExtFuns funs = true) (hwf : coreWF c core = true)
-      (hn : identsNodup (env.length + coreExtraDepth core) = true)
-      (hinv : Inv Γ c κ ctx w env V st) (hRX : RXs bs w st)
+      (hn : identsNodup tag (env.length + coreExtraDepth core) = true)
+      (hinv : Inv tag Γ c κ ctx w env V st) (hRX : RXs bs w st)
       (hBindNe : BindEnvs.neSelf bs ctx.self w.self)
       (hconf : BindEnvs.conforms bs ctx.self w.self calls)
       (hinj : BindEnvs.addrInj bs w.self)
       (hBind : BindEnvs.lookupWF c Γ bs)
-      {e'} (hem : emitCore c {} env.length haltUnit core = some e')
+      {e'} (hem : emitCore tag c {} env.length haltUnit core = some e')
       {V' st' o} (hexec : ExecStmts (yulD calls) funs V st e'.stmts V' st' o),
       ∃ fo, ∀ g, oracleAgrees w.ncalls fo g →
         match (Tx.run (Core.denote Γ core env) ctx { w with faults := g } :
@@ -50,10 +52,10 @@ theorem core_sim_ext_callFree {I : Interface} {S X E ε}
   refine ⟨fun _ => false, ?_⟩
   intro g _hg
   have hno : noExtBlock e'.stmts = true :=
-    noExt_core_callFree hM1 {} env.length hem (by simp [Emit.stmts_nil])
+    noExt_core_callFree tag hM1 {} env.length hem (by simp [Emit.stmts_nil])
   have hdesc := execStmts_descend hfuns hno hexec
   have hS1 :=
-    core_sim (c := c) (Γ := Γ) (κ := κ) (ctx := ctx) hhalt hΓ hκ hlen core hM1
+    core_sim (tag := tag) (c := c) (Γ := Γ) (κ := κ) (ctx := ctx) hhalt hΓ hκ hlen core hM1
       (funEnvUncast calls funs) hwf hn hinv hem
   have hmap := callFree_run_faults (Γ := Γ) hM1 env ctx w g
   cases hTx : Tx.run (Core.denote Γ core env) ctx w with
@@ -87,16 +89,16 @@ theorem core_sim_ext_callFree {I : Interface} {S X E ε}
 
 theorem emitCore_letOp_split {c : ContractDef} {halt : Bool} {t : RetTy}
     {op : Lsc.Op} {k : Core t} {e' : Emit} {d : Nat}
-    (hem : emitCore c {} d halt (.letOp op k) = some e') :
-    ∃ e1 e0, emitLetOp c {} d op = some e1 ∧
-      emitCore c {} (d + 1) halt k = some e0 ∧
+    (hem : emitCore tag c {} d halt (.letOp op k) = some e') :
+    ∃ e1 e0, emitLetOp tag c {} d op = some e1 ∧
+      emitCore tag c {} (d + 1) halt k = some e0 ∧
       e'.stmts = e1.stmts ++ e0.stmts := by
   simp only [emitCore] at hem
-  cases hE : emitLetOp c {} d op with
+  cases hE : emitLetOp tag c {} d op with
   | none => simp [hE] at hem
   | some e1 =>
     simp only [hE] at hem
-    obtain ⟨e0, h0, hst⟩ := emitCore_prefix hem
+    obtain ⟨e0, h0, hst⟩ := emitCore_prefix tag hem
     exact ⟨e1, e0, rfl, h0, hst⟩
 
 theorem selectSwitch_zero_yulD {calls : ExternalCalls} {eA eB : YBlock} :
@@ -127,13 +129,13 @@ theorem core_sim_ext {I : Interface} {S X E ε}
     (hslot : BindEnvs.avoids Γ c bs core) :
     ∀ {w : World S X E} {env V st} (funs : FunEnv (yulD calls))
       (hfuns : noExtFuns funs = true) (hwf : coreWF c core = true)
-      (hn : identsNodup (env.length + coreExtraDepth core) = true)
-      (hinv : Inv Γ c κ ctx w env V st) (hRX : RXs bs w st)
+      (hn : identsNodup tag (env.length + coreExtraDepth core) = true)
+      (hinv : Inv tag Γ c κ ctx w env V st) (hRX : RXs bs w st)
       (hBindNe : BindEnvs.neSelf bs ctx.self w.self)
       (hconf : BindEnvs.conforms bs ctx.self w.self calls)
       (hinj : BindEnvs.addrInj bs w.self)
       (hBind : BindEnvs.lookupWF c Γ bs)
-      {e'} (hem : emitCore c {} env.length haltUnit core = some e')
+      {e'} (hem : emitCore tag c {} env.length haltUnit core = some e')
       {V' st' o} (hexec : ExecStmts (yulD calls) funs V st e'.stmts V' st' o),
       ∃ fo, ∀ g, oracleAgrees w.ncalls fo g →
         match (Tx.run (Core.denote Γ core env) ctx { w with faults := g } :
@@ -154,38 +156,38 @@ theorem core_sim_ext {I : Interface} {S X E ε}
       | word _ =>
         cases y with
         | word _ =>
-          exact core_sim_ext_callFree bs hhalt hΓ hκ hlen hign _
+          exact core_sim_ext_callFree tag bs hhalt hΓ hκ hlen hign _
             (by simp [CallFree, M1Frag]) hslot
         | _ => cases hS2
       | _ => cases hS2
     | unit | word _ | addr _ | flag _ =>
-      exact core_sim_ext_callFree bs hhalt hΓ hκ hlen hign _
+      exact core_sim_ext_callFree tag bs hhalt hΓ hκ hlen hign _
         (by simp [CallFree, M1Frag]) hslot
   | revertTail err args =>
     intro hS2 hslot
-    exact core_sim_ext_callFree bs hhalt hΓ hκ hlen hign _
+    exact core_sim_ext_callFree tag bs hhalt hΓ hκ hlen hign _
       (by simpa [CallFree, M1Frag, S2Frag] using hS2) hslot
   | opTail op =>
     intro hS2 hslot w env V st funs hfuns hwf hn hinv hRX hBindNe hconf hinj hBind e' hem V' st' o hexec
     cases s2op_elim (by simpa [S2Frag] using hS2) with
     | inr hM1 =>
-      exact core_sim_ext_callFree bs hhalt hΓ hκ hlen hign (.opTail op)
+      exact core_sim_ext_callFree tag bs hhalt hΓ hκ hlen hign (.opTail op)
         (by simpa [CallFree, M1Frag] using hM1) hslot
         funs hfuns hwf hn hinv hRX hBindNe hconf hinj hBind hem hexec
     | inl hcall =>
       obtain ⟨b, m, args, rfl⟩ := hcall
       simp only [emitCore] at hem
-      cases hE : emitLetOp c {} env.length (.call b m args) with
+      cases hE : emitLetOp tag c {} env.length (.call b m args) with
       | none => simp [hE] at hem
       | some e1 =>
         simp only [hE] at hem
         cases hem
-        have hretE := emitRet_word_stmts e1 (env.length + 1) haltUnit (.var 0)
+        have hretE := emitRet_word_stmts tag e1 (env.length + 1) haltUnit (.var 0)
         rw [hretE] at hexec
         have hopWF : callWF c b m args = true := by simpa [coreWF, opWF] using hwf
-        have hn1 : identsNodup (env.length + 1) = true :=
-          identsNodup_mono (by simp [coreExtraDepth]) hn
-        exact sim_ext_op_call_return hsame horth hign
+        have hn1 : identsNodup tag (env.length + 1) = true :=
+          identsNodup_mono tag (by simp [coreExtraDepth]) hn
+        exact sim_ext_op_call_return tag hsame horth hign
           (core := .opTail (.call b m args)) id haltSuccess_word
           (fun h => by simpa [Core.denote, RetTy.denote] using h)
           (fun h => by simpa [Core.denote, RetTy.denote] using h)
@@ -194,23 +196,23 @@ theorem core_sim_ext {I : Interface} {S X E ε}
     intro hS2 hslot w env V st funs hfuns hwf hn hinv hRX hBindNe hconf hinj hBind e' hem V' st' o hexec
     cases s2op_elim (by simpa [S2Frag] using hS2) with
     | inr hM1 =>
-      exact core_sim_ext_callFree bs hhalt hΓ hκ hlen hign (.opTailAddr op)
+      exact core_sim_ext_callFree tag bs hhalt hΓ hκ hlen hign (.opTailAddr op)
         (by simpa [CallFree, M1Frag] using hM1) hslot
         funs hfuns hwf hn hinv hRX hBindNe hconf hinj hBind hem hexec
     | inl hcall =>
       obtain ⟨b, m, args, rfl⟩ := hcall
       simp only [emitCore] at hem
-      cases hE : emitLetOp c {} env.length (.call b m args) with
+      cases hE : emitLetOp tag c {} env.length (.call b m args) with
       | none => simp [hE] at hem
       | some e1 =>
         simp only [hE] at hem
         cases hem
-        have hretE := emitRet_addr_stmts e1 (env.length + 1) haltUnit (.var 0)
+        have hretE := emitRet_addr_stmts tag e1 (env.length + 1) haltUnit (.var 0)
         rw [hretE] at hexec
         have hopWF : callWF c b m args = true := by simpa [coreWF, opWF] using hwf
-        have hn1 : identsNodup (env.length + 1) = true :=
-          identsNodup_mono (by simp [coreExtraDepth]) hn
-        exact sim_ext_op_call_return hsame horth hign
+        have hn1 : identsNodup tag (env.length + 1) = true :=
+          identsNodup_mono tag (by simp [coreExtraDepth]) hn
+        exact sim_ext_op_call_return tag hsame horth hign
           (core := .opTailAddr (.call b m args)) (fun n => (n : Address)) haltSuccess_addr
           (fun h => by simpa [Core.denote, RetTy.denote, Address] using h)
           (fun h => by simpa [Core.denote, RetTy.denote, Address] using h)
@@ -219,23 +221,23 @@ theorem core_sim_ext {I : Interface} {S X E ε}
     intro hS2 hslot w env V st funs hfuns hwf hn hinv hRX hBindNe hconf hinj hBind e' hem V' st' o hexec
     cases s2op_elim (by simpa [S2Frag] using hS2) with
     | inr hM1 =>
-      exact core_sim_ext_callFree bs hhalt hΓ hκ hlen hign (.opTailFlag op)
+      exact core_sim_ext_callFree tag bs hhalt hΓ hκ hlen hign (.opTailFlag op)
         (by simpa [CallFree, M1Frag] using hM1) hslot
         funs hfuns hwf hn hinv hRX hBindNe hconf hinj hBind hem hexec
     | inl hcall =>
       obtain ⟨b, m, args, rfl⟩ := hcall
       simp only [emitCore] at hem
-      cases hE : emitLetOp c {} env.length (.call b m args) with
+      cases hE : emitLetOp tag c {} env.length (.call b m args) with
       | none => simp [hE] at hem
       | some e1 =>
         simp only [hE] at hem
         cases hem
-        have hretE := emitRet_flag_stmts e1 (env.length + 1) haltUnit (.var 0)
+        have hretE := emitRet_flag_stmts tag e1 (env.length + 1) haltUnit (.var 0)
         rw [hretE] at hexec
         have hopWF : callWF c b m args = true := by simpa [coreWF, opWF] using hwf
-        have hn1 : identsNodup (env.length + 1) = true :=
-          identsNodup_mono (by simp [coreExtraDepth]) hn
-        exact sim_ext_op_call_return hsame horth hign
+        have hn1 : identsNodup tag (env.length + 1) = true :=
+          identsNodup_mono tag (by simp [coreExtraDepth]) hn
+        exact sim_ext_op_call_return tag hsame horth hign
           (core := .opTailFlag (.call b m args)) (fun n => (n : Flag)) haltSuccess_flag
           (fun h => by simpa [Core.denote, RetTy.denote, Flag] using h)
           (fun h => by simpa [Core.denote, RetTy.denote, Flag] using h)
@@ -244,7 +246,7 @@ theorem core_sim_ext {I : Interface} {S X E ε}
     intro hS2 hslot w env V st funs hfuns hwf hn hinv hRX hBindNe hconf hinj hBind e' hem V' st' o hexec
     cases s2stmt_elim (by simpa [S2Frag] using hS2) with
     | inr hM1 =>
-      exact core_sim_ext_callFree bs hhalt hΓ hκ hlen hign (.stmtTail s)
+      exact core_sim_ext_callFree tag bs hhalt hΓ hκ hlen hign (.stmtTail s)
         (by simpa [CallFree, M1Frag] using hM1) hslot
         funs hfuns hwf hn hinv hRX hBindNe hconf hinj hBind hem hexec
     | inl hcall =>
@@ -255,14 +257,14 @@ theorem core_sim_ext {I : Interface} {S X E ε}
       rw [emitReturnUnit_true] at hexec
       have hopWF : callWF c b m args = true := by simpa [coreWF, stmtWF] using hwf
       obtain ⟨eCall, heCall, meth, hbd⟩ := hBind b m args hopWF
-      have hn0 : identsNodup env.length = true :=
-        identsNodup_mono (by simp [coreExtraDepth]) hn
+      have hn0 : identsNodup tag env.length = true :=
+        identsNodup_mono tag (by simp [coreExtraDepth]) hn
       cases execStmts_append_inv hexec with
       | inr hstop =>
         have hexec1 : ExecStmts (yulD calls) funs V st
-            (emitStmt c {} env.length (.call b m args)).stmts V' st' o := hstop.2
+            (emitStmt tag c {} env.length (.call b m args)).stmts V' st' o := hstop.2
         obtain ⟨bit, hfail, hok⟩ :=
-          stmt_sim_call_bwd (α := eCall.α) heCall hsame horth hinj hinv hbd hRX
+          stmt_sim_call_bwd tag (α := eCall.α) heCall hsame horth hinj hinv hbd hRX
             (hconf eCall heCall) hfuns hopWF hn0 hexec1
         cases bit with
         | false =>
@@ -285,7 +287,7 @@ theorem core_sim_ext {I : Interface} {S X E ε}
       | inl hokPre =>
         obtain ⟨V1, st1, hcallE, hrest⟩ := hokPre
         obtain ⟨bit, hfail, hok⟩ :=
-          stmt_sim_call_bwd (α := eCall.α) heCall hsame horth hinj hinv hbd hRX
+          stmt_sim_call_bwd tag (α := eCall.α) heCall hsame horth hinj hinv hbd hRX
             (hconf eCall heCall) hfuns hopWF hn0 hcallE
         cases bit with
         | true =>
@@ -323,42 +325,42 @@ theorem core_sim_ext {I : Interface} {S X E ε}
     intro hS2 hslot w env V st funs hfuns hwf hn hinv hRX hBindNe hconf hinj hBind e' hem V' st' o hexec
     have ⟨hop, hk⟩ := s2frag_letOp.mp hS2
     have ⟨hopWF0, hkWF⟩ := coreWF_letOp.mp hwf
-    obtain ⟨e1, e0, hE, h0, hst⟩ := emitCore_letOp_split hem
+    obtain ⟨e1, e0, hE, h0, hst⟩ := emitCore_letOp_split tag hem
     rw [hst] at hexec
-    have hn1 : identsNodup (env.length + 1) = true :=
-      identsNodup_mono (by simp [coreExtraDepth]; try omega) hn
-    have hnK : identsNodup ((env.length + 1) + coreExtraDepth k) = true := by
+    have hn1 : identsNodup tag (env.length + 1) = true :=
+      identsNodup_mono tag (by simp [coreExtraDepth]; try omega) hn
+    have hnK : identsNodup tag ((env.length + 1) + coreExtraDepth k) = true := by
       simpa [coreExtraDepth, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using hn
     have hslotK : BindEnvs.avoids Γ c bs k := BindEnvs.avoids_letOp hslot
     cases s2op_elim hop with
     | inl hcall =>
       obtain ⟨b, m, args, rfl⟩ := hcall
       have hopWF : callWF c b m args = true := by simpa [opWF] using hopWF0
-      exact sim_ext_letOp_call hsame horth hk hslotK (ih hk hslotK)
+      exact sim_ext_letOp_call tag hsame horth hk hslotK (ih hk hslotK)
         funs hfuns hkWF hn1 hnK hinv hRX hBindNe hconf hinj hBind hopWF hE h0 hexec
     | inr hM1 =>
-      exact sim_ext_letOp_m1 hΓ hκ hlen hign hM1 hk hslotK (ih hk hslotK)
+      exact sim_ext_letOp_m1 tag hΓ hκ hlen hign hM1 hk hslotK (ih hk hslotK)
         funs hfuns hopWF0 hkWF hn1 hnK hinv hRX hBindNe hconf hinj hBind hE h0 hexec
   | seq s k ih =>
     intro hS2 hslot w env V st funs hfuns hwf hn hinv hRX hBindNe hconf hinj hBind e' hem V' st' o hexec
     have ⟨hs, hk⟩ := s2frag_seq.mp hS2
     have ⟨hsWF, hkWF⟩ := coreWF_seq.mp hwf
     simp only [emitCore] at hem
-    obtain ⟨e0, h0, hst⟩ := emitCore_prefix hem
+    obtain ⟨e0, h0, hst⟩ := emitCore_prefix tag hem
     rw [hst] at hexec
-    have hn0 : identsNodup env.length = true :=
-      identsNodup_mono (by simp [coreExtraDepth]) hn
-    have hnK : identsNodup (env.length + coreExtraDepth k) = true := by
+    have hn0 : identsNodup tag env.length = true :=
+      identsNodup_mono tag (by simp [coreExtraDepth]) hn
+    have hnK : identsNodup tag (env.length + coreExtraDepth k) = true := by
       simpa [coreExtraDepth] using hn
     have hslotK : BindEnvs.avoids Γ c bs k := BindEnvs.avoids_seq hslot
     cases s2stmt_elim hs with
     | inl hcall =>
       obtain ⟨b, m, args, rfl⟩ := hcall
       have hopWF : callWF c b m args = true := by simpa [stmtWF] using hsWF
-      exact sim_ext_seq_call hsame horth hk hslotK (ih hk hslotK)
+      exact sim_ext_seq_call tag hsame horth hk hslotK (ih hk hslotK)
         funs hfuns hkWF hn0 hnK hinv hRX hBindNe hconf hinj hBind hopWF h0 hexec
     | inr hM1 =>
-      exact sim_ext_seq_m1 hΓ hκ hlen hign hM1 hk hslot (ih hk hslotK)
+      exact sim_ext_seq_m1 tag hΓ hκ hlen hign hM1 hk hslot (ih hk hslotK)
         funs hfuns hsWF hkWF hn0 hnK hinv hRX hBindNe hconf hinj hBind h0 hexec
   | letPure p args k ih =>
     intro hS2 hslot w env V st funs hfuns hwf hn hinv hRX hBindNe hconf hinj hBind e' hem V' st' o hexec
@@ -369,30 +371,30 @@ theorem core_sim_ext {I : Interface} {S X E ε}
     have ⟨hwfA, hkWF⟩ : atomWF a = true ∧ coreWF c k = true := by
       simpa [coreWF, Bool.and_eq_true] using hwf
     simp only [emitCore, emitPrim] at hem
-    obtain ⟨e0, h0, hst⟩ := emitCore_prefix hem
+    obtain ⟨e0, h0, hst⟩ := emitCore_prefix tag hem
     rw [hst] at hexec
-    have hn0 : identsNodup env.length = true :=
-      identsNodup_mono (by simp [coreExtraDepth]; try omega) hn
-    have hnK : identsNodup ((env.length + 1) + coreExtraDepth k) = true := by
+    have hn0 : identsNodup tag env.length = true :=
+      identsNodup_mono tag (by simp [coreExtraDepth]; try omega) hn
+    have hnK : identsNodup tag ((env.length + 1) + coreExtraDepth k) = true := by
       simpa [coreExtraDepth, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using hn
     have hslotK : BindEnvs.avoids Γ c bs k := BindEnvs.avoids_letPure hslot
-    have he := eval_atom (funEnvUncast calls funs) (st := st) hinv.venv hn0 a
+    have he := eval_atom tag (funEnvUncast calls funs) (st := st) hinv.venv hn0 a
     have hv := atom_eval_lt hinv.wf hwfA
     have hlet :
         ExecStmt evm (funEnvUncast calls funs) V st
-          (.letDecl [identV env.length] (some (atomE env.length a)))
-          ((identV env.length, BitVec.ofNat 256 (a.eval env)) :: V) st .normal :=
+          (.letDecl [identV tag env.length] (some (atomE tag env.length a)))
+          ((identV tag env.length, BitVec.ofNat 256 (a.eval env)) :: V) st .normal :=
       Step.letVal he rfl
     have hpre : ExecStmts evm (funEnvUncast calls funs) V st
-        [.letDecl [identV env.length] (some (atomE env.length a))]
-        ((identV env.length, BitVec.ofNat 256 (a.eval env)) :: V) st .normal :=
+        [.letDecl [identV tag env.length] (some (atomE tag env.length a))]
+        ((identV tag env.length, BitVec.ofNat 256 (a.eval env)) :: V) st .normal :=
       Step.seqCons hlet Step.seqNil
-    have hnoLet : noExtBlock [.letDecl [identV env.length] (some (atomE env.length a))] = true :=
-      noExt_let (e := {}) (by simp [Emit.stmts_nil]) (noExt_atomE _ _)
+    have hnoLet : noExtBlock [.letDecl [identV tag env.length] (some (atomE tag env.length a))] = true :=
+      noExt_let (e := {}) (by simp [Emit.stmts_nil]) (noExt_atomE tag _ _)
     simp only [emitLet, Emit.stmts_push, Emit.stmts_nil, List.nil_append] at hexec hnoLet
     have hrest := s1_match_prefix_ok hfuns hnoLet hexec hpre
-    have hinv1 : Inv Γ c κ ctx w (a.eval env :: env)
-        ((identV env.length, BitVec.ofNat 256 (a.eval env)) :: V) st :=
+    have hinv1 : Inv tag Γ c κ ctx w (a.eval env :: env)
+        ((identV tag env.length, BitVec.ofNat 256 (a.eval env)) :: V) st :=
       ⟨by rw [hinv.venv, toVEnv_cons], envWF_cons hv hinv.wf, hinv.rel, hinv.ctxr⟩
     obtain ⟨fo', hfo'⟩ :=
       ih hk hslotK funs hfuns hkWF (by simpa using hnK) hinv1 hRX hBindNe hconf hinj hBind h0 hrest
@@ -409,43 +411,43 @@ theorem core_sim_ext {I : Interface} {S X E ε}
     simp [coreWF, Bool.and_eq_true] at hwf'
     obtain ⟨⟨hcWF, haWF⟩, hbWF⟩ := hwf'
     simp only [emitCore] at hem
-    obtain ⟨eA, hA⟩ := emitCore_some (c := c) (halt := haltUnit) a ({} : Emit) env.length
-    obtain ⟨eB, hB⟩ := emitCore_some (c := c) (halt := haltUnit) b ({} : Emit) env.length
+    obtain ⟨eA, hA⟩ := emitCore_some tag (c := c) (halt := haltUnit) a ({} : Emit) env.length
+    obtain ⟨eB, hB⟩ := emitCore_some tag (c := c) (halt := haltUnit) b ({} : Emit) env.length
     simp [hA, hB] at hem
     cases hem
-    have hn0 : identsNodup env.length = true :=
-      identsNodup_mono (Nat.le_add_right _ _) hn
-    have hnA : identsNodup (env.length + coreExtraDepth a) = true :=
-      identsNodup_mono (Nat.add_le_add_left (Nat.le_max_left _ _) _) hn
-    have hnB : identsNodup (env.length + coreExtraDepth b) = true :=
-      identsNodup_mono (Nat.add_le_add_left (Nat.le_max_right _ _) _) hn
+    have hn0 : identsNodup tag env.length = true :=
+      identsNodup_mono tag (Nat.le_add_right _ _) hn
+    have hnA : identsNodup tag (env.length + coreExtraDepth a) = true :=
+      identsNodup_mono tag (Nat.add_le_add_left (Nat.le_max_left _ _) _) hn
+    have hnB : identsNodup tag (env.length + coreExtraDepth b) = true :=
+      identsNodup_mono tag (Nat.add_le_add_left (Nat.le_max_right _ _) _) hn
     have ⟨hslotA, hslotB⟩ := BindEnvs.avoids_ite hslot
     have hpush :
-        (Emit.push ({} : Emit) (.switch (emitCond env.length cond)
+        (Emit.push ({} : Emit) (.switch (emitCond tag env.length cond)
           [(YulSemantics.Literal.number 0, eB.stmts)] (some eA.stmts))).stmts =
-          [.switch (emitCond env.length cond)
+          [.switch (emitCond tag env.length cond)
             [(YulSemantics.Literal.number 0, eB.stmts)] (some eA.stmts)] := by
       simp [Emit.stmts_push, Emit.stmts_nil]
     rw [hpush] at hexec
     have hsw := execStmts_one hexec
-    have hcond := eval_cond (st := st) (funEnvUncast calls funs) hinv.venv hinv.wf hn0 hC hcWF
+    have hcond := eval_cond tag (st := st) (funEnvUncast calls funs) hinv.venv hinv.wf hn0 hC hcWF
     have hfunsN := noExtFuns_cons_nil (calls := calls) hfuns
     cases hsw with
     | switchHalt he =>
-      have hdesc := evalExpr_descend hfuns (noExt_emitCond env.length cond) he
+      have hdesc := evalExpr_descend hfuns (noExt_emitCond tag env.length cond) he
       have := evalExpr_det_evm hcond hdesc
       cases this
     | switchExec he hbody =>
-      have hdesc := evalExpr_descend hfuns (noExt_emitCond env.length cond) he
+      have hdesc := evalExpr_descend hfuns (noExt_emitCond tag env.length cond) he
       have heq := evalExpr_det_evm hcond hdesc
       simp [eresUncast] at heq
       obtain ⟨rfl, rfl⟩ := heq
       cases hbody with
       | block hss =>
         have hhoistA : hoist (yulD calls) eA.stmts = [] :=
-          hoist_yulD_of_evm (hoist_emitCore hA)
+          hoist_yulD_of_evm (hoist_emitCore tag hA)
         have hhoistB : hoist (yulD calls) eB.stmts = [] :=
-          hoist_yulD_of_evm (hoist_emitCore hB)
+          hoist_yulD_of_evm (hoist_emitCore tag hB)
         simp only [Core.denote]
         split_ifs with hc
         · have hsel :
@@ -488,7 +490,7 @@ theorem toYulFn_correct_ext {I : Interface} {S X E ε : Type}
     ToYulFnCorrectExts bs c Γ κ calls f yul ctx w st0 := by
   intro st' o hrun
   have ⟨hwf, hnod, e, hem, hy⟩ := toYulFn_inv hyul hf
-  obtain ⟨e0, h0, hst⟩ := emitCore_prefix hem
+  obtain ⟨e0, h0, hst⟩ := emitCore_prefix (tag := f.name) hem
   obtain ⟨Vb, hbody, _hV⟩ := run_block_inv hrun
   have hhoist_evm := toYulFn_hoist hyul hf
   have hhoist : hoist (yulD calls) yul = [] := hoist_yulD_of_evm hhoist_evm
@@ -498,23 +500,23 @@ theorem toYulFn_correct_ext {I : Interface} {S X E ε : Type}
   set args := decodeArgs f st0.env.calldata
   have henv : EnvWF args.reverse := decodeArgs_wf f st0.env.calldata
   have hdec := decodeArgs_runtime (f := f) (cd := st0.env.calldata) hf
-  have hpar := params_sim (funEnvUncast calls [[]]) st0 4 f.params.length hbound
+  have hpar := params_sim (tag := f.name) (funEnvUncast calls [[]]) st0 4 f.params.length hbound
   have hpar' : ExecStmts evm (funEnvUncast calls [[]]) [] st0
-      (emitParams {} 4 f.params.length).stmts (toVEnv args.reverse) st0 .normal := by
+      (emitParams f.name {} 4 f.params.length).stmts (toVEnv f.name args.reverse) st0 .normal := by
     convert hpar
     try simp [args, hdec]
   have hrest :=
-    s1_match_prefix_ok (calls := calls) hfuns (noExt_params 4 f.params.length) hbody hpar'
-  have hinv : Inv Γ c κ ctx w args.reverse (toVEnv args.reverse) st0 :=
+    s1_match_prefix_ok (calls := calls) hfuns (noExt_params (tag := f.name) 4 f.params.length) hbody hpar'
+  have hinv : Inv f.name Γ c κ ctx w args.reverse (toVEnv f.name args.reverse) st0 :=
     ⟨rfl, henv, hR, hctx⟩
-  have hn : identsNodup (f.params.length + coreExtraDepth f.core) = true := by
+  have hn : identsNodup f.name (f.params.length + coreExtraDepth f.core) = true := by
     simpa [maxDepth] using hnod
-  have hn' : identsNodup (args.reverse.length + coreExtraDepth f.core) = true := by
+  have hn' : identsNodup f.name (args.reverse.length + coreExtraDepth f.core) = true := by
     simpa [args, decodeArgs_length, List.length_reverse] using hn
-  have h0' : emitCore c {} args.reverse.length true f.core = some e0 := by
+  have h0' : emitCore f.name c {} args.reverse.length true f.core = some e0 := by
     simpa [args, decodeArgs_length, List.length_reverse] using h0
   have hsim :=
-    core_sim_ext bs (haltUnit := true) rfl hΓ hκ hlen hign hsame horth f.core hS2 hslot
+    core_sim_ext (tag := f.name) bs (haltUnit := true) rfl hΓ hκ hlen hign hsame horth f.core hS2 hslot
       (funs := [[]]) hfuns hwf hn' hinv hRX hBindNe hconf hinj hBind h0' hrest
   obtain ⟨fo, hfo⟩ := hsim
   refine ⟨fo, ?_⟩

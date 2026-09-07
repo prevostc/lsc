@@ -16,6 +16,8 @@ stores a bound address. Constructors are excluded.
 
 namespace Lsc.Compiler
 
+variable (tag : String)
+
 open YulSemantics
 open YulSemantics.EVM
 open Lsc hiding Op Stmt
@@ -33,13 +35,13 @@ theorem core_sim_ext_callFree {I : Interface} {S X E ε}
     (hslot : BindEnvs.avoids Γ c bs core) :
     ∀ {w : World S X E} {env V st} (funs : FunEnv (yulD calls))
       (hfuns : noExtFuns funs = true) (hwf : coreWF c core = true)
-      (hn : identsNodup (env.length + coreExtraDepth core) = true)
-      (hinv : Inv Γ c κ ctx w env V st) (hRX : RXs bs w st)
+      (hn : identsNodup tag (env.length + coreExtraDepth core) = true)
+      (hinv : Inv tag Γ c κ ctx w env V st) (hRX : RXs bs w st)
       (hBindNe : BindEnvs.neSelf bs ctx.self w.self)
       (hconf : BindEnvs.conforms bs ctx.self w.self calls)
       (hinj : BindEnvs.addrInj bs w.self)
       (hBind : BindEnvs.lookupWF c Γ bs)
-      {e'} (hem : emitCore c {} env.length haltUnit core = some e')
+      {e'} (hem : emitCore tag c {} env.length haltUnit core = some e')
       {V' st' o} (hexec : ExecStmts (yulD calls) funs V st e'.stmts V' st' o),
       ∃ fo, ∀ g, oracleAgrees w.ncalls fo g →
         match (Tx.run (Core.denote Γ core env) ctx { w with faults := g } :
@@ -50,7 +52,7 @@ theorem core_sim_ext_callFree {I : Interface} {S X E ε}
         | .error e =>
             ∃ bytes, o = Outcome.halt ∧ st'.halted = some (HaltKind.revert, bytes) ∧
               haltError c Γ e bytes :=
-  Proof.core_sim_ext_callFree bs hhalt hΓ hκ hlen hign core hM1 hslot
+  Proof.core_sim_ext_callFree tag bs hhalt hΓ hκ hlen hign core hM1 hslot
 
 /-- If the compiler accepted a runtime function that may CALL bound tokens,
 every Yul run of the emitted block is predicted by the high-level model

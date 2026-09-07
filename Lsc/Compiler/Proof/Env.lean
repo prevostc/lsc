@@ -9,6 +9,8 @@ Environment / `Step` plumbing for `toYulFn_correct` (M1).
 
 namespace Lsc.Compiler
 
+variable (tag : String)
+
 open YulSemantics
 open YulSemantics.EVM
 
@@ -22,11 +24,11 @@ theorem envWF_cons {v env} (hv : v < wordBound) (h : EnvWF env) : EnvWF (v :: en
   · exact hv
   · exact h x hx
 
-theorem toVEnv_nil : toVEnv ([] : List Nat) = [] := rfl
+theorem toVEnv_nil : toVEnv tag ([] : List Nat) = [] := rfl
 
 theorem toVEnv_cons (v : Nat) (env : List Nat) :
-    toVEnv (v :: env) =
-      (identV env.length, BitVec.ofNat 256 v) :: toVEnv env := by
+    toVEnv tag (v :: env) =
+      (identV tag env.length, BitVec.ofNat 256 v) :: toVEnv tag env := by
   unfold toVEnv
   rw [List.length_cons, List.range_succ_eq_map, List.zip_cons_cons, List.map_cons]
   have hhead : env.length + 1 - 1 - 0 = env.length := by omega
@@ -47,9 +49,9 @@ theorem VEnv.get_cons {x : Ident} {v : U256} {V : VEnv evm} {y : Ident} :
   · simp [h]
   · simp [h]
 
-theorem get_toVEnv (env : List Nat) (hn : identsNodup env.length = true)
+theorem get_toVEnv tag (env : List Nat) (hn : identsNodup tag env.length = true)
     {i : Nat} (hi : i < env.length) :
-    VEnv.get (toVEnv env) (identV (env.length - 1 - i)) =
+    VEnv.get (toVEnv tag env) (identV tag (env.length - 1 - i)) =
       some (BitVec.ofNat 256 env[i]) := by
   induction env generalizing i with
   | nil => cases hi
@@ -65,15 +67,15 @@ theorem get_toVEnv (env : List Nat) (hn : identsNodup env.length = true)
       have hi' : i < env.length := Nat.succ_lt_succ_iff.mp hi
       have hidx : env.length - (i + 1) = env.length - 1 - i := by omega
       rw [hidx]
-      have hn' : identsNodup (env.length + 1) = true := by simpa using hn
-      have hne : identV env.length ≠ identV (env.length - 1 - i) := by
+      have hn' : identsNodup tag (env.length + 1) = true := by simpa using hn
+      have hne : identV tag env.length ≠ identV tag (env.length - 1 - i) := by
         intro heq
         have hlt : env.length - 1 - i < env.length + 1 :=
           Nat.lt_succ_of_le (Nat.le_trans (Nat.sub_le _ _) (Nat.sub_le _ _))
-        have := identV_inj_of_nodup (env.length + 1) hn' (Nat.lt_succ_self _) hlt heq
+        have := identV_inj_of_nodup tag (env.length + 1) hn' (Nat.lt_succ_self _) hlt heq
         omega
       simp only [hne, ↓reduceIte]
-      exact ih (identsNodup_mono (by omega) hn') hi'
+      exact ih (identsNodup_mono tag (by omega) hn') hi'
 
 theorem restore_nil (Vb : VEnv evm) : restore ([] : VEnv evm) Vb = [] := by
   simp [restore]
@@ -85,9 +87,9 @@ theorem eval_lit (funs : FunEnv evm) (V : VEnv evm) (st : EvmState) (n : Nat) :
     EvalExpr evm funs V st (lit n) (.vals [BitVec.ofNat 256 n] st) :=
   Step.lit
 
-theorem eval_atom (funs : FunEnv evm) {env : List Nat} {V : VEnv evm} (st : EvmState)
-    (hV : V = toVEnv env) (hn : identsNodup env.length = true) :
-    ∀ a, EvalExpr evm funs V st (atomE env.length a)
+theorem eval_atom tag (funs : FunEnv evm) {env : List Nat} {V : VEnv evm} (st : EvmState)
+    (hV : V = toVEnv tag env) (hn : identsNodup tag env.length = true) :
+    ∀ a, EvalExpr evm funs V st (atomE tag env.length a)
       (.vals [BitVec.ofNat 256 (a.eval env)] st) := by
   intro a
   cases a with
@@ -98,7 +100,7 @@ theorem eval_atom (funs : FunEnv evm) {env : List Nat} {V : VEnv evm} (st : EvmS
     simp only [atomE, Atom.eval]
     split_ifs with hi
     · subst hV
-      have hget := get_toVEnv env hn hi
+      have hget := get_toVEnv tag env hn hi
       rw [← List.getElem_eq_getD (h := hi) 0]
       exact Step.var hget
     · have : env.getD i 0 = 0 := by
@@ -106,10 +108,10 @@ theorem eval_atom (funs : FunEnv evm) {env : List Nat} {V : VEnv evm} (st : EvmS
       rw [this]
       exact Step.lit
 
-/-- Evaluating `atomE d a` after binding `v_d` — the new name is not among `a`'s lookups. -/
-theorem eval_atom_cons (funs : FunEnv evm) {env : List Nat} {V : VEnv evm} (st : EvmState)
-    (v : U256) (hV : V = toVEnv env) (hn : identsNodup (env.length + 1) = true) :
-    ∀ a, EvalExpr evm funs ((identV env.length, v) :: V) st (atomE env.length a)
+/-- Evaluating `atomE tag d a` after binding `v_d` — the new name is not among `a`'s lookups. -/
+theorem eval_atom_cons tag (funs : FunEnv evm) {env : List Nat} {V : VEnv evm} (st : EvmState)
+    (v : U256) (hV : V = toVEnv tag env) (hn : identsNodup tag (env.length + 1) = true) :
+    ∀ a, EvalExpr evm funs ((identV tag env.length, v) :: V) st (atomE tag env.length a)
       (.vals [BitVec.ofNat 256 (a.eval env)] st) := by
   intro a
   cases a with
@@ -120,16 +122,16 @@ theorem eval_atom_cons (funs : FunEnv evm) {env : List Nat} {V : VEnv evm} (st :
     simp only [atomE, Atom.eval]
     split_ifs with hi
     · have hget :
-          VEnv.get ((identV env.length, v) :: V) (identV (env.length - 1 - i)) =
+          VEnv.get ((identV tag env.length, v) :: V) (identV tag (env.length - 1 - i)) =
             some (BitVec.ofNat 256 env[i]) := by
         rw [VEnv.get_cons]
-        have hne : identV env.length ≠ identV (env.length - 1 - i) := by
+        have hne : identV tag env.length ≠ identV tag (env.length - 1 - i) := by
           intro heq
-          have := identV_inj_of_nodup (env.length + 1) hn (by omega) (by omega) heq
+          have := identV_inj_of_nodup tag (env.length + 1) hn (by omega) (by omega) heq
           omega
         simp only [hne, ↓reduceIte]
         subst hV
-        exact get_toVEnv env (identsNodup_mono (by omega) hn) hi
+        exact get_toVEnv tag env (identsNodup_mono tag (by omega) hn) hi
       rw [← List.getElem_eq_getD (h := hi) 0]
       exact Step.var hget
     · have : env.getD i 0 = 0 := by
@@ -186,12 +188,12 @@ theorem Emit.stmts_push (e : Emit) (s : YStmt) :
     (e.push s).stmts = e.stmts ++ [s] := by
   simp [Emit.push, Emit.stmts, List.reverse_cons]
 
-theorem emitParams_zero (e : Emit) (off : Nat) : emitParams e off 0 = e := rfl
+theorem emitParams_zero tag (e : Emit) (off : Nat) : emitParams tag e off 0 = e := rfl
 
 theorem emitParams_succ (e : Emit) (off n : Nat) :
-    emitParams e off (n + 1) =
-      (emitParams e off n).push
-        (.letDecl [identV n]
+    emitParams tag e off (n + 1) =
+      (emitParams tag e off n).push
+        (.letDecl [identV tag n]
           (some (bop Op.calldataload [lit (off + 32 * n)]))) := by
   have hrange : List.range (n + 1) = List.range n ++ [n] := List.range_succ
   dsimp only [emitParams]
@@ -227,8 +229,8 @@ theorem decodeArgs_runtime {f : FnDef} {cd : List UInt8} (hk : f.kind ≠ .const
 
 theorem params_sim (funs : FunEnv evm) (st : EvmState) (off n : Nat)
     (hbound : off + 32 * n < wordBound) :
-    ExecStmts evm funs [] st (emitParams {} off n).stmts
-      (toVEnv ((List.range n).map (fun i =>
+    ExecStmts evm funs [] st (emitParams tag {} off n).stmts
+      (toVEnv tag ((List.range n).map (fun i =>
         (wordFrom st.env.calldata (off + 32 * i)).toNat)).reverse) st .normal := by
   induction n with
   | zero =>
@@ -252,7 +254,7 @@ theorem params_sim (funs : FunEnv evm) (st : EvmState) (off n : Nat)
       toNat_ofNat_of_lt hbound'
     have hload :
         EvalExpr evm funs
-          (toVEnv ((List.range n).map (fun i =>
+          (toVEnv tag ((List.range n).map (fun i =>
             (wordFrom st.env.calldata (off + 32 * i)).toNat)).reverse) st
           (bop Op.calldataload [lit (off + 32 * n)])
           (.vals [wordFrom st.env.calldata (off + 32 * n)] st) :=
@@ -261,24 +263,24 @@ theorem params_sim (funs : FunEnv evm) (st : EvmState) (off n : Nat)
           simp only [litValue_number, step_calldataload, hlit])
     have hlet :
         ExecStmt evm funs
-          (toVEnv ((List.range n).map (fun i =>
+          (toVEnv tag ((List.range n).map (fun i =>
             (wordFrom st.env.calldata (off + 32 * i)).toNat)).reverse) st
-          (.letDecl [identV n]
+          (.letDecl [identV tag n]
             (some (bop Op.calldataload [lit (off + 32 * n)])))
-          ((identV n, wordFrom st.env.calldata (off + 32 * n)) ::
-            toVEnv ((List.range n).map (fun i =>
+          ((identV tag n, wordFrom st.env.calldata (off + 32 * n)) ::
+            toVEnv tag ((List.range n).map (fun i =>
               (wordFrom st.env.calldata (off + 32 * i)).toNat)).reverse)
           st .normal :=
       Step.letVal hload rfl
     have hlet' :
         ExecStmt evm funs
-          (toVEnv ((List.range n).map (fun i =>
+          (toVEnv tag ((List.range n).map (fun i =>
             (wordFrom st.env.calldata (off + 32 * i)).toNat)).reverse) st
-          (.letDecl [identV n]
+          (.letDecl [identV tag n]
             (some (bop Op.calldataload [lit (off + 32 * n)])))
-          ((identV n,
+          ((identV tag n,
               BitVec.ofNat 256 (wordFrom st.env.calldata (off + 32 * n)).toNat) ::
-            toVEnv ((List.range n).map (fun i =>
+            toVEnv tag ((List.range n).map (fun i =>
               (wordFrom st.env.calldata (off + 32 * i)).toNat)).reverse)
           st .normal := by
       convert hlet using 1
@@ -292,7 +294,7 @@ theorem hoist_append (a b : YBlock) :
     hoist evm (a ++ b) = hoist evm a ++ hoist evm b := by
   simp [hoist, List.filterMap_append]
 
-theorem hoist_params (off n : Nat) : hoist evm (emitParams {} off n).stmts = [] := by
+theorem hoist_params (off n : Nat) : hoist evm (emitParams tag {} off n).stmts = [] := by
   induction n with
   | zero => simp [emitParams_zero, Emit.stmts_nil, hoist]
   | succ n ih =>

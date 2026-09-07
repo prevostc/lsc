@@ -10,6 +10,8 @@ Mapping slots: `mstore(0,k) mstore(32,f) keccak256(0,64)`, plus the nested `map2
 
 namespace Lsc.Compiler
 
+variable (tag : String)
+
 open YulSemantics
 open YulSemantics.EVM
 open Function
@@ -32,25 +34,25 @@ theorem emitMapSlotPrep_stmts (slot : Nat) (k : YExpr) :
   simp [emitMapSlotPrep, emitDo, Emit.push, Emit.stmts, bop]
 
 theorem emitLetOp_loadMap (c : ContractDef) (e : Emit) (d f : Nat) (k : Atom) :
-    emitLetOp c e d (.loadMap f k) =
-      some (emitLet (emitMapSlotPrep e f (atomE d k)) (identV d)
+    emitLetOp tag c e d (.loadMap f k) =
+      some (emitLet (emitMapSlotPrep e f (atomE tag d k)) (identV tag d)
         (bop Op.sload [keccak064])) := rfl
 
 theorem emitStmt_storeMap (c : ContractDef) (e : Emit) (d f : Nat) (k v : Atom) :
-    (emitStmt c e d (.storeMap f k v)).stmts =
-      (emitMapSlotPrep e f (atomE d k)).stmts ++
-        [.exprStmt (bop Op.sstore [keccak064, atomE d v])] := by
+    (emitStmt tag c e d (.storeMap f k v)).stmts =
+      (emitMapSlotPrep e f (atomE tag d k)).stmts ++
+        [.exprStmt (bop Op.sstore [keccak064, atomE tag d v])] := by
   simp [emitStmt, emitMapSlotPrep, emitDo, Emit.push, Emit.stmts, List.append_assoc, bop]
 
 theorem emitLetOp_loadMap2 (c : ContractDef) (e : Emit) (d f : Nat) (k₁ k₂ : Atom) :
-    emitLetOp c e d (.loadMap2 f k₁ k₂) =
-      some (emitLet (emitMap2SlotPrep e f (atomE d k₁) (atomE d k₂)) (identV d)
+    emitLetOp tag c e d (.loadMap2 f k₁ k₂) =
+      some (emitLet (emitMap2SlotPrep e f (atomE tag d k₁) (atomE tag d k₂)) (identV tag d)
         (bop Op.sload [keccak064])) := rfl
 
 theorem emitStmt_storeMap2 (c : ContractDef) (e : Emit) (d f : Nat) (k₁ k₂ v : Atom) :
-    (emitStmt c e d (.storeMap2 f k₁ k₂ v)).stmts =
-      (emitMap2SlotPrep e f (atomE d k₁) (atomE d k₂)).stmts ++
-        [.exprStmt (bop Op.sstore [keccak064, atomE d v])] := by
+    (emitStmt tag c e d (.storeMap2 f k₁ k₂ v)).stmts =
+      (emitMap2SlotPrep e f (atomE tag d k₁) (atomE tag d k₂)).stmts ++
+        [.exprStmt (bop Op.sstore [keccak064, atomE tag d v])] := by
   simp [emitStmt, emitMap2SlotPrep, emitMapSlotPrep, emitDo, Emit.push, Emit.stmts,
     List.append_assoc, bop]
 
@@ -210,28 +212,28 @@ theorem emitLet_mapSlot_stmts (slot : Nat) (k : YExpr) (name : YIdent) (x : YExp
 
 theorem op_sim_loadMap {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx} {w : World S X E} {env V st} {f : Nat} {k : Atom}
-    (funs : FunEnv evm) (hinv : Inv Γ c κ ctx w env V st)
+    (funs : FunEnv evm) (hinv : Inv tag Γ c κ ctx w env V st)
     (hlen : c.fields.length < wordBound)
     (hwf : opWF c (.loadMap f k) = true)
-    (hn : identsNodup (env.length + 1) = true) :
+    (hn : identsNodup tag (env.length + 1) = true) :
     let kn := k.eval env
     let v := Γ.st.map1 f w.self kn
     ∃ st',
       ExecStmts evm funs V st
-        (emitLet (emitMapSlotPrep {} f (atomE env.length k)) (identV env.length)
+        (emitLet (emitMapSlotPrep {} f (atomE tag env.length k)) (identV tag env.length)
           (bop Op.sload [keccak064])).stmts
-        ((identV env.length, BitVec.ofNat 256 v) :: V) st' .normal ∧
-      Inv Γ c κ ctx w (v :: env)
-        ((identV env.length, BitVec.ofNat 256 v) :: V) st' := by
+        ((identV tag env.length, BitVec.ofNat 256 v) :: V) st' .normal ∧
+      Inv tag Γ c κ ctx w (v :: env)
+        ((identV tag env.length, BitVec.ofNat 256 v) :: V) st' := by
   rcases hinv with ⟨hV, henv, hR, hctx⟩
   rcases hR with ⟨hs, hl, hκe, hW⟩
   have hwf' : fieldKindOK c f .map1 = true ∧ atomWF k = true := by
     simpa [opWF, Bool.and_eq_true] using hwf
   have ⟨fd, hfd, hknd⟩ := (fieldKindOK_iff c f FieldKind.map1).mp hwf'.1
-  have hn0 : identsNodup env.length = true := identsNodup_mono (by omega) hn
+  have hn0 : identsNodup tag env.length = true := identsNodup_mono tag (by omega) hn
   have hk := atom_eval_lt henv hwf'.2
   have hfB := field_lt_wordBound hlen hfd
-  have hek := eval_atom funs (st := st) hV hn0 k
+  have hek := eval_atom tag funs (st := st) hV hn0 k
   obtain ⟨stP, hexecP, hmem, hmP⟩ := mapSlotPrep_exec funs V st f hek hfB
   have hhash :
       stP.env.keccakOf (readBytes stP.memory 0 64) = mapSlot1 κ f (k.eval env) :=
@@ -258,8 +260,8 @@ theorem op_sim_loadMap {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E �
   rw [hslot] at hsload
   have hlet :
       ExecStmt evm funs V stP
-        (.letDecl [identV env.length] (some (bop Op.sload [keccak064])))
-        ((identV env.length, BitVec.ofNat 256 (Γ.st.map1 f w.self (k.eval env))) :: V)
+        (.letDecl [identV tag env.length] (some (bop Op.sload [keccak064])))
+        ((identV tag env.length, BitVec.ofNat 256 (Γ.st.map1 f w.self (k.eval env))) :: V)
         stK .normal :=
     Step.letVal hsload rfl
   refine ⟨stK, ?_, ?_⟩
@@ -271,17 +273,17 @@ theorem op_sim_loadMap {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E �
 
 theorem stmt_sim_storeMap {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx} {w : World S X E} {env V st} {f : Nat} {k val : Atom}
-    (funs : FunEnv evm) (hinv : Inv Γ c κ ctx w env V st)
+    (funs : FunEnv evm) (hinv : Inv tag Γ c κ ctx w env V st)
     (hΓ : Γ.st.Lawful c.fields) (hκ : KeccakSep c κ)
     (hlen : c.fields.length < wordBound)
     (hwf : stmtWF c (.storeMap f k val) = true)
-    (hn : identsNodup env.length = true) :
+    (hn : identsNodup tag env.length = true) :
     let kn := k.eval env
     let v := val.eval env
     let w' := { w with self := Γ.st.map1Upd f w.self (update (Γ.st.map1 f w.self) kn v) }
     ∃ st',
-      ExecStmts evm funs V st (emitStmt c {} env.length (.storeMap f k val)).stmts V st' .normal ∧
-      Inv Γ c κ ctx w' env V st' := by
+      ExecStmts evm funs V st (emitStmt tag c {} env.length (.storeMap f k val)).stmts V st' .normal ∧
+      Inv tag Γ c κ ctx w' env V st' := by
   rcases hinv with ⟨hV, henv, hR, hctx⟩
   rcases hR with ⟨hs, hl, hκe, hW⟩
   have hwf' : (fieldKindOK c f .map1 = true ∧ atomWF k = true) ∧ atomWF val = true := by
@@ -290,20 +292,20 @@ theorem stmt_sim_storeMap {S X E ε} {c : ContractDef} {Γ : ContractSchema S X 
   have hk := atom_eval_lt henv hwf'.1.2
   have hv := atom_eval_lt henv hwf'.2
   have hfB := field_lt_wordBound hlen hfd
-  have hek := eval_atom funs (st := st) hV hn k
+  have hek := eval_atom tag funs (st := st) hV hn k
   obtain ⟨stP, hexecP, hmem, hmP⟩ := mapSlotPrep_exec funs V st f hek hfB
   have hhash :
       stP.env.keccakOf (readBytes stP.memory 0 64) = mapSlot1 κ f (k.eval env) :=
     mapSlotPrep_hash (st := st) κ (k.eval env) f hk hfB hκe rfl hmem
       (by rcases hmP with ⟨_, _, _, _, _, _, _, _, hκeq, _, _⟩; exact hκeq)
-  have hev := eval_atom funs (st := stP) hV hn val
+  have hev := eval_atom tag funs (st := stP) hV hn val
   have hctxP := ctxRel_memOnly hctx hmP
   have hstatic := ctxRel_static hctxP
   let stK := touchMemory stP 0 64
   have hekecc := eval_keccak064 funs V stP
   rw [hhash] at hekecc
   have hsstore :
-      EvalExpr evm funs V stP (bop Op.sstore [keccak064, atomE env.length val])
+      EvalExpr evm funs V stP (bop Op.sstore [keccak064, atomE tag env.length val])
         (.vals []
           { stK with
             storage := upd stK.storage (mapSlot1 κ f (k.eval env))
@@ -324,7 +326,7 @@ theorem stmt_sim_storeMap {S X E ε} {c : ContractDef} {Γ : ContractSchema S X 
           (mapSlot1 κ f (k.eval env)) (BitVec.ofNat 256 (val.eval env)) } }
   have hexpr :
       ExecStmt evm funs V stP
-        (.exprStmt (bop Op.sstore [keccak064, atomE env.length val])) V st' .normal :=
+        (.exprStmt (bop Op.sstore [keccak064, atomE tag env.length val])) V st' .normal :=
     Step.exprStmt hsstore
   refine ⟨st', ?_, ?_⟩
   · rw [emitStmt_storeMap]

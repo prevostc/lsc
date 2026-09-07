@@ -8,6 +8,8 @@ Word / identifier lemmas for `toYulFn_correct` (M1: add / ult / `identV` injecti
 
 namespace Lsc.Compiler
 
+variable (tag : String)
+
 open YulSemantics.EVM
 
 theorem toNat_ofNat_of_lt {n : Nat} (h : n < wordBound) :
@@ -100,16 +102,18 @@ theorem litValue_number (n : Nat) :
 theorem b2w_false : b2w false = 0 := rfl
 theorem b2w_true : b2w true = 1 := rfl
 
-theorem identV_inj_of_nodup (n : Nat) (h : identsNodup n = true)
-    {i j : Nat} (hi : i < n) (hj : j < n) (heq : identV i = identV j) : i = j := by
-  have hnd : ((List.range n).map identV).Nodup := (identsNodup_iff n).mp h
+theorem identV_string tag (i : Nat) : identV tag i = tag ++ "_" ++ toString i := rfl
+
+theorem identV_inj_of_nodup tag (n : Nat) (h : identsNodup tag n = true)
+    {i j : Nat} (hi : i < n) (hj : j < n) (heq : identV tag i = identV tag j) : i = j := by
+  have hnd : ((List.range n).map (identV tag)).Nodup := (identsNodup_iff tag n).mp h
   exact List.inj_on_of_nodup_map hnd (List.mem_range.mpr hi) (List.mem_range.mpr hj) heq
 
-theorem identsNodup_mono {m n : Nat} (hmn : m ≤ n) (h : identsNodup n = true) :
-    identsNodup m = true := by
-  rw [identsNodup_iff] at h ⊢
+theorem identsNodup_mono tag {m n : Nat} (hmn : m ≤ n) (h : identsNodup tag n = true) :
+    identsNodup tag m = true := by
+  rw [identsNodup_iff tag] at h ⊢
   have hsub : (List.range m).Sublist (List.range n) := List.range_sublist.mpr hmn
-  exact List.Pairwise.sublist (hsub.map identV) h
+  exact List.Pairwise.sublist (hsub.map (identV tag)) h
 
 theorem one_lt_wordBound : (1 : Nat) < wordBound := by
   unfold wordBound

@@ -12,6 +12,8 @@ Fault oracle agreement and M1/`CallFree` independence from `faults`.
 
 namespace Lsc.Compiler
 
+variable (tag : String)
+
 open YulSemantics
 open YulSemantics.EVM
 open Lsc hiding Op Stmt
@@ -249,7 +251,7 @@ theorem R_faults {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
 
 theorem Inv_faults {S X E ε} {Γ : ContractSchema S X E ε} {c : ContractDef}
     {κ ctx} {w : World S X E} {env V st} (g : Nat → Bool) :
-    Inv Γ c κ ctx { w with faults := g } env V st ↔ Inv Γ c κ ctx w env V st := by
+    Inv tag Γ c κ ctx { w with faults := g } env V st ↔ Inv tag Γ c κ ctx w env V st := by
   constructor
   · intro h; exact ⟨h.venv, h.wf, (R_faults g).mp h.rel, h.ctxr⟩
   · intro h; exact ⟨h.venv, h.wf, (R_faults g).mpr h.rel, h.ctxr⟩

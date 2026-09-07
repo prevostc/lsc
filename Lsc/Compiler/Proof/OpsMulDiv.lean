@@ -9,17 +9,19 @@ set_option linter.unusedVariables false
 
 namespace Lsc.Compiler
 
+variable (tag : String)
+
 open YulSemantics
 open YulSemantics.EVM
 open Lsc
 
 theorem emitLetOp_mulDivDown (c : ContractDef) (e : Emit) (d : Nat) (a b c' : Atom) :
-    emitLetOp c e d (.mulDivDown a b c') =
-      some (emitMulDivDown e (identV d) (atomE d a) (atomE d b) (atomE d c')) := rfl
+    emitLetOp tag c e d (.mulDivDown a b c') =
+      some (emitMulDivDown e (identV tag d) (atomE tag d a) (atomE tag d b) (atomE tag d c')) := rfl
 
 theorem emitLetOp_mulDivUp (c : ContractDef) (e : Emit) (d : Nat) (a b c' : Atom) :
-    emitLetOp c e d (.mulDivUp a b c') =
-      some (emitMulDivUp e (identV d) (atomE d a) (atomE d b) (atomE d c')) := rfl
+    emitLetOp tag c e d (.mulDivUp a b c') =
+      some (emitMulDivUp e (identV tag d) (atomE tag d a) (atomE tag d b) (atomE tag d c')) := rfl
 
 theorem emitMulDivDown_stmts (e : Emit) (name : YIdent) (a b c : YExpr) :
     (emitMulDivDown e name a b c).stmts =
@@ -64,23 +66,23 @@ private theorem eval_mul_ofNat {funs : FunEnv evm} {V : VEnv evm} {st : EvmState
 
 theorem op_sim_mulDivDown {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx} {w : World S X E} {env V st} {a b d : Atom}
-    (funs : FunEnv evm) (hinv : Inv Γ c κ ctx w env V st)
+    (funs : FunEnv evm) (hinv : Inv tag Γ c κ ctx w env V st)
     (hwf : opWF c (.mulDivDown a b d) = true)
-    (hn : identsNodup (env.length + 1) = true) :
+    (hn : identsNodup tag (env.length + 1) = true) :
     match Tx.run (Op.denote Γ env (.mulDivDown a b d)) ctx w with
     | .ok (v, w') =>
         ∃ st',
           ExecStmts evm funs V st
-            (emitMulDivDown {} (identV env.length)
-              (atomE env.length a) (atomE env.length b) (atomE env.length d)).stmts
-            ((identV env.length, BitVec.ofNat 256 v) :: V) st' .normal ∧
-          Inv Γ c κ ctx w' (v :: env)
-            ((identV env.length, BitVec.ofNat 256 v) :: V) st'
+            (emitMulDivDown {} (identV tag env.length)
+              (atomE tag env.length a) (atomE tag env.length b) (atomE tag env.length d)).stmts
+            ((identV tag env.length, BitVec.ofNat 256 v) :: V) st' .normal ∧
+          Inv tag Γ c κ ctx w' (v :: env)
+            ((identV tag env.length, BitVec.ofNat 256 v) :: V) st'
     | .error e =>
         ∃ V' st' bytes,
           ExecStmts evm funs V st
-            (emitMulDivDown {} (identV env.length)
-              (atomE env.length a) (atomE env.length b) (atomE env.length d)).stmts
+            (emitMulDivDown {} (identV tag env.length)
+              (atomE tag env.length a) (atomE tag env.length b) (atomE tag env.length d)).stmts
             V' st' .halt ∧
           st'.halted = some (.revert, bytes) ∧
           haltError c Γ e bytes := by
@@ -90,12 +92,12 @@ theorem op_sim_mulDivDown {S X E ε} {c : ContractDef} {Γ : ContractSchema S X 
   have ha := atom_eval_lt henv hwf'.1.1
   have hb := atom_eval_lt henv hwf'.1.2
   have hd := atom_eval_lt henv hwf'.2
-  have hn0 : identsNodup env.length = true := identsNodup_mono (by omega) hn
-  have hea := eval_atom funs (st := st) hV hn0 a
-  have heb := eval_atom funs (st := st) hV hn0 b
-  have hed := eval_atom funs (st := st) hV hn0 d
+  have hn0 : identsNodup tag env.length = true := identsNodup_mono tag (by omega) hn
+  have hea := eval_atom tag funs (st := st) hV hn0 a
+  have heb := eval_atom tag funs (st := st) hV hn0 b
+  have hed := eval_atom tag funs (st := st) hV hn0 d
   have hisz := eval_iszero_ofNat hd hed
-  let name := identV env.length
+  let name := identV tag env.length
   simp only [Op.denote, Tx.run_mulDivDown]
   by_cases hc0 : d.eval env = 0
   · rw [if_pos hc0]; simp
@@ -109,12 +111,12 @@ theorem op_sim_mulDivDown {S X E ε} {c : ContractDef} {Γ : ContractSchema S X 
     have hmul := eval_mul_ofNat hea heb
     let V₁ : VEnv evm := (name, BitVec.ofNat 256 (a.eval env * b.eval env)) :: V
     have hlet : ExecStmt evm funs V st
-        (.letDecl [name] (some (bop Op.mul [atomE env.length a, atomE env.length b])))
+        (.letDecl [name] (some (bop Op.mul [atomE tag env.length a, atomE tag env.length b])))
         V₁ st .normal :=
       Step.letVal hmul rfl
-    have hea1 := eval_atom_cons funs st (BitVec.ofNat 256 (a.eval env * b.eval env)) hV hn a
-    have heb1 := eval_atom_cons funs st (BitVec.ofNat 256 (a.eval env * b.eval env)) hV hn b
-    have hed1 := eval_atom_cons funs st (BitVec.ofNat 256 (a.eval env * b.eval env)) hV hn d
+    have hea1 := eval_atom_cons tag funs st (BitVec.ofNat 256 (a.eval env * b.eval env)) hV hn a
+    have heb1 := eval_atom_cons tag funs st (BitVec.ofNat 256 (a.eval env * b.eval env)) hV hn b
+    have hed1 := eval_atom_cons tag funs st (BitVec.ofNat 256 (a.eval env * b.eval env)) hV hn d
     have hep : EvalExpr evm funs V₁ st (var name)
         (.vals [BitVec.ofNat 256 (a.eval env * b.eval env)] st) :=
       Step.var (by
@@ -126,7 +128,7 @@ theorem op_sim_mulDivDown {S X E ε} {c : ContractDef} {Γ : ContractSchema S X 
       have hcvG : b2w (decide (wordBound ≤ a.eval env * b.eval env)) = 0 := by
         simp [Nat.not_le.mpr hfit, b2w]
       have hdiv :
-          EvalExpr evm funs V₁ st (bop Op.div [var name, atomE env.length d])
+          EvalExpr evm funs V₁ st (bop Op.div [var name, atomE tag env.length d])
             (.vals [if BitVec.ofNat 256 (d.eval env) = 0 then 0
               else BitVec.ofNat 256 (a.eval env * b.eval env) /
                 BitVec.ofNat 256 (d.eval env)] st) :=
@@ -138,7 +140,7 @@ theorem op_sim_mulDivDown {S X E ε} {c : ContractDef} {Γ : ContractSchema S X 
         simp only [V₁]
         rw [VEnv.setMany_one, VEnv.set_head]
       have hassign : ExecStmt evm funs V₁ st
-          (.assign [name] (bop Op.div [var name, atomE env.length d]))
+          (.assign [name] (bop Op.div [var name, atomE tag env.length d]))
           ((name, BitVec.ofNat 256 (a.eval env * b.eval env / d.eval env)) :: V) st .normal := by
         rw [← hset]
         exact Step.assignVal (D := evm) hdiv rfl
@@ -160,23 +162,23 @@ theorem op_sim_mulDivDown {S X E ε} {c : ContractDef} {Γ : ContractSchema S X 
 
 theorem op_sim_mulDivUp {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx} {w : World S X E} {env V st} {a b d : Atom}
-    (funs : FunEnv evm) (hinv : Inv Γ c κ ctx w env V st)
+    (funs : FunEnv evm) (hinv : Inv tag Γ c κ ctx w env V st)
     (hwf : opWF c (.mulDivUp a b d) = true)
-    (hn : identsNodup (env.length + 1) = true) :
+    (hn : identsNodup tag (env.length + 1) = true) :
     match Tx.run (Op.denote Γ env (.mulDivUp a b d)) ctx w with
     | .ok (v, w') =>
         ∃ st',
           ExecStmts evm funs V st
-            (emitMulDivUp {} (identV env.length)
-              (atomE env.length a) (atomE env.length b) (atomE env.length d)).stmts
-            ((identV env.length, BitVec.ofNat 256 v) :: V) st' .normal ∧
-          Inv Γ c κ ctx w' (v :: env)
-            ((identV env.length, BitVec.ofNat 256 v) :: V) st'
+            (emitMulDivUp {} (identV tag env.length)
+              (atomE tag env.length a) (atomE tag env.length b) (atomE tag env.length d)).stmts
+            ((identV tag env.length, BitVec.ofNat 256 v) :: V) st' .normal ∧
+          Inv tag Γ c κ ctx w' (v :: env)
+            ((identV tag env.length, BitVec.ofNat 256 v) :: V) st'
     | .error e =>
         ∃ V' st' bytes,
           ExecStmts evm funs V st
-            (emitMulDivUp {} (identV env.length)
-              (atomE env.length a) (atomE env.length b) (atomE env.length d)).stmts
+            (emitMulDivUp {} (identV tag env.length)
+              (atomE tag env.length a) (atomE tag env.length b) (atomE tag env.length d)).stmts
             V' st' .halt ∧
           st'.halted = some (.revert, bytes) ∧
           haltError c Γ e bytes := by
@@ -186,12 +188,12 @@ theorem op_sim_mulDivUp {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E 
   have ha := atom_eval_lt henv hwf'.1.1
   have hb := atom_eval_lt henv hwf'.1.2
   have hd := atom_eval_lt henv hwf'.2
-  have hn0 : identsNodup env.length = true := identsNodup_mono (by omega) hn
-  have hea := eval_atom funs (st := st) hV hn0 a
-  have heb := eval_atom funs (st := st) hV hn0 b
-  have hed := eval_atom funs (st := st) hV hn0 d
+  have hn0 : identsNodup tag env.length = true := identsNodup_mono tag (by omega) hn
+  have hea := eval_atom tag funs (st := st) hV hn0 a
+  have heb := eval_atom tag funs (st := st) hV hn0 b
+  have hed := eval_atom tag funs (st := st) hV hn0 d
   have hisz := eval_iszero_ofNat hd hed
-  let name := identV env.length
+  let name := identV tag env.length
   simp only [Op.denote, Tx.run_mulDivUp]
   by_cases hc0 : d.eval env = 0
   · rw [if_pos hc0]; simp
@@ -205,12 +207,12 @@ theorem op_sim_mulDivUp {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E 
     have hmul := eval_mul_ofNat hea heb
     let V₁ : VEnv evm := (name, BitVec.ofNat 256 (a.eval env * b.eval env)) :: V
     have hlet : ExecStmt evm funs V st
-        (.letDecl [name] (some (bop Op.mul [atomE env.length a, atomE env.length b])))
+        (.letDecl [name] (some (bop Op.mul [atomE tag env.length a, atomE tag env.length b])))
         V₁ st .normal :=
       Step.letVal hmul rfl
-    have hea1 := eval_atom_cons funs st (BitVec.ofNat 256 (a.eval env * b.eval env)) hV hn a
-    have heb1 := eval_atom_cons funs st (BitVec.ofNat 256 (a.eval env * b.eval env)) hV hn b
-    have hed1 := eval_atom_cons funs st (BitVec.ofNat 256 (a.eval env * b.eval env)) hV hn d
+    have hea1 := eval_atom_cons tag funs st (BitVec.ofNat 256 (a.eval env * b.eval env)) hV hn a
+    have heb1 := eval_atom_cons tag funs st (BitVec.ofNat 256 (a.eval env * b.eval env)) hV hn b
+    have hed1 := eval_atom_cons tag funs st (BitVec.ofNat 256 (a.eval env * b.eval env)) hV hn d
     have hep : EvalExpr evm funs V₁ st (var name)
         (.vals [BitVec.ofNat 256 (a.eval env * b.eval env)] st) :=
       Step.var (by
@@ -222,21 +224,21 @@ theorem op_sim_mulDivUp {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E 
       have hcvG : b2w (decide (wordBound ≤ a.eval env * b.eval env)) = 0 := by
         simp [Nat.not_le.mpr hfit, b2w]
       let funsB : FunEnv evm := [] :: funs
-      have hed1B := eval_atom_cons funsB st (BitVec.ofNat 256 (a.eval env * b.eval env)) hV hn d
+      have hed1B := eval_atom_cons tag funsB st (BitVec.ofNat 256 (a.eval env * b.eval env)) hV hn d
       have hepB : EvalExpr evm funsB V₁ st (var name)
           (.vals [BitVec.ofNat 256 (a.eval env * b.eval env)] st) :=
         Step.var (by
           simp only [V₁, name]
           rw [VEnv.get_cons, if_pos rfl])
       have hmod :
-          EvalExpr evm funs V₁ st (bop Op.mod [var name, atomE env.length d])
+          EvalExpr evm funs V₁ st (bop Op.mod [var name, atomE tag env.length d])
             (.vals [if BitVec.ofNat 256 (d.eval env) = 0 then 0
               else BitVec.ofNat 256 (a.eval env * b.eval env) %
                 BitVec.ofNat 256 (d.eval env)] st) :=
         Step.builtinOk (Step.argsCons (Step.argsCons Step.argsNil hed1) hep) (step_mod _ _ _)
       rw [evm_mod_ofNat hfit hd hc0] at hmod
       have hdivB :
-          EvalExpr evm funsB V₁ st (bop Op.div [var name, atomE env.length d])
+          EvalExpr evm funsB V₁ st (bop Op.div [var name, atomE tag env.length d])
             (.vals [if BitVec.ofNat 256 (d.eval env) = 0 then 0
               else BitVec.ofNat 256 (a.eval env * b.eval env) /
                 BitVec.ofNat 256 (d.eval env)] st) :=
@@ -248,25 +250,25 @@ theorem op_sim_mulDivUp {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E 
       by_cases hrem : a.eval env * b.eval env % d.eval env = 0
       · have hsel :
             selectSwitch evm (BitVec.ofNat 256 r)
-              [(YulSemantics.Literal.number 0, mulDivUpZero name (atomE env.length d))]
-              (some (mulDivUpDefault name (atomE env.length d))) =
-              mulDivUpZero name (atomE env.length d) := by
+              [(YulSemantics.Literal.number 0, mulDivUpZero name (atomE tag env.length d))]
+              (some (mulDivUpDefault name (atomE tag env.length d))) =
+              mulDivUpZero name (atomE tag env.length d) := by
           have : BitVec.ofNat 256 r = 0 := (ofNat_eq_zero hrlt).mpr (by simp [r, hrem])
           simpa [this] using
-            selectSwitch_zero (eA := mulDivUpDefault name (atomE env.length d))
-              (eB := mulDivUpZero name (atomE env.length d))
+            selectSwitch_zero (eA := mulDivUpDefault name (atomE tag env.length d))
+              (eB := mulDivUpZero name (atomE tag env.length d))
         have hset :
             VEnv.setMany V₁ [name] [BitVec.ofNat 256 q] =
               (name, BitVec.ofNat 256 q) :: V := by
           simp only [V₁]
           rw [VEnv.setMany_one, VEnv.set_head]
         have hassign : ExecStmt evm funsB V₁ st
-            (.assign [name] (bop Op.div [var name, atomE env.length d]))
+            (.assign [name] (bop Op.div [var name, atomE tag env.length d]))
             ((name, BitVec.ofNat 256 q) :: V) st .normal := by
           rw [← hset]
           exact Step.assignVal (D := evm) hdivB rfl
         have hexec :
-            ExecStmts evm funsB V₁ st (mulDivUpZero name (atomE env.length d))
+            ExecStmts evm funsB V₁ st (mulDivUpZero name (atomE tag env.length d))
               ((name, BitVec.ofNat 256 q) :: V) st .normal := by
           simp only [mulDivUpZero]
           exact Step.seqCons hassign Step.seqNil
@@ -290,17 +292,17 @@ theorem op_sim_mulDivUp {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E 
             envWF_cons (Nat.lt_of_le_of_lt (Nat.div_le_self _ _) hfit) henv, hR, hctx⟩
       · have hsel :
             selectSwitch evm (BitVec.ofNat 256 r)
-              [(YulSemantics.Literal.number 0, mulDivUpZero name (atomE env.length d))]
-              (some (mulDivUpDefault name (atomE env.length d))) =
-              mulDivUpDefault name (atomE env.length d) :=
-          selectSwitch_nonzero (eA := mulDivUpDefault name (atomE env.length d))
-            (eB := mulDivUpZero name (atomE env.length d))
+              [(YulSemantics.Literal.number 0, mulDivUpZero name (atomE tag env.length d))]
+              (some (mulDivUpDefault name (atomE tag env.length d))) =
+              mulDivUpDefault name (atomE tag env.length d) :=
+          selectSwitch_nonzero (eA := mulDivUpDefault name (atomE tag env.length d))
+            (eB := mulDivUpZero name (atomE tag env.length d))
             (mt (ofNat_eq_zero hrlt).mp (by simp [r, hrem]))
         have h1 : EvalExpr evm funsB V₁ st (lit 1)
             (.vals [evm.litValue (.number 1)] st) := Step.lit (D := evm)
         have hadd :
             EvalExpr evm funsB V₁ st
-              (bop Op.add [bop Op.div [var name, atomE env.length d], lit 1])
+              (bop Op.add [bop Op.div [var name, atomE tag env.length d], lit 1])
               (.vals [BitVec.ofNat 256 q + BitVec.ofNat 256 1] st) := by
           rw [evm_litValue_number] at h1
           exact Step.builtinOk (Step.argsCons (Step.argsCons Step.argsNil h1) hdivB)
@@ -313,12 +315,12 @@ theorem op_sim_mulDivUp {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E 
           rw [VEnv.setMany_one, VEnv.set_head]
         have hassign : ExecStmt evm funsB V₁ st
             (.assign [name]
-              (bop Op.add [bop Op.div [var name, atomE env.length d], lit 1]))
+              (bop Op.add [bop Op.div [var name, atomE tag env.length d], lit 1]))
             ((name, BitVec.ofNat 256 (q + 1)) :: V) st .normal := by
           rw [← hset]
           exact Step.assignVal (D := evm) hadd rfl
         have hexec :
-            ExecStmts evm funsB V₁ st (mulDivUpDefault name (atomE env.length d))
+            ExecStmts evm funsB V₁ st (mulDivUpDefault name (atomE tag env.length d))
               ((name, BitVec.ofNat 256 (q + 1)) :: V) st .normal := by
           simp only [mulDivUpDefault]
           exact Step.seqCons hassign Step.seqNil

@@ -12,6 +12,8 @@ Forward packing / suffix helpers for scoped `emitExtCall`.
 
 namespace Lsc.Compiler
 
+variable (tag : String)
+
 open YulSemantics
 open Lsc hiding Op Stmt
 open YulSemantics.EVM
@@ -21,15 +23,15 @@ open YulSemantics.EVM
 def mstoreArgs (d : Nat) : Nat → List Atom → List YStmt
   | _, [] => []
   | i, a :: as =>
-    .exprStmt (bop YulSemantics.EVM.Op.mstore [lit (abiAfterSel + 32 * i), atomE d a]) ::
+    .exprStmt (bop YulSemantics.EVM.Op.mstore [lit (abiAfterSel + 32 * i), atomE tag d a]) ::
       mstoreArgs d (i + 1) as
 
 theorem foldl_mstore_stmts (d : Nat) (args : List Atom) (e : Emit) (off : Nat) :
     (args.foldl (fun (e, i) a =>
         (emitDo e YulSemantics.EVM.Op.mstore
-          [lit (abiAfterSel + 32 * i), atomE d a], i + 1))
+          [lit (abiAfterSel + 32 * i), atomE tag d a], i + 1))
       (e, off)).1.stmts =
-      e.stmts ++ mstoreArgs d off args := by
+      e.stmts ++ mstoreArgs tag d off args := by
   induction args generalizing e off with
   | nil => simp [List.foldl, mstoreArgs]
   | cons a as ih =>
@@ -37,31 +39,31 @@ theorem foldl_mstore_stmts (d : Nat) (args : List Atom) (e : Emit) (off : Nat) :
 
 private theorem emitExtCallBody_core_stmts (c : ContractDef) (d b m : Nat)
     (args : List Atom) :
-    let tok := extTok d; let ok := extOk d
+    let tok := extTok tag d; let ok := extOk tag d
     let e0 := emitLet ({} : Emit) tok
       (bop YulSemantics.EVM.Op.sload [lit (bindingSlot c b)])
     let e1 := emitDo e0 YulSemantics.EVM.Op.mstore
       [lit abiPtr, bop YulSemantics.EVM.Op.shl [lit 224, lit (bindingMethod c b m).1]]
     (args.foldl (fun (e, i) a =>
         (emitDo e YulSemantics.EVM.Op.mstore
-          [lit (abiAfterSel + 32 * i), atomE d a], i + 1)) (e1, 0)).1.stmts =
+          [lit (abiAfterSel + 32 * i), atomE tag d a], i + 1)) (e1, 0)).1.stmts =
       [.letDecl [tok] (some (bop YulSemantics.EVM.Op.sload [lit (bindingSlot c b)])),
         .exprStmt (bop YulSemantics.EVM.Op.mstore
           [lit abiPtr, bop YulSemantics.EVM.Op.shl [lit 224, lit (bindingMethod c b m).1]])] ++
-      mstoreArgs d 0 args := by
+      mstoreArgs tag d 0 args := by
   simp [foldl_mstore_stmts, emitDo_stmts, emitLet_stmts, Emit.stmts_nil, bop]
 
 theorem emitExtCallBody_stmts (c : ContractDef) (d b m : Nat)
     (args : List Atom) (assign : Option YIdent) :
-    emitExtCallBody c d b m args assign =
-      [.letDecl [extTok d] (some (bop YulSemantics.EVM.Op.sload [lit (bindingSlot c b)])),
+    emitExtCallBody tag c d b m args assign =
+      [.letDecl [extTok tag d] (some (bop YulSemantics.EVM.Op.sload [lit (bindingSlot c b)])),
         .exprStmt (bop YulSemantics.EVM.Op.mstore
           [lit abiPtr, bop YulSemantics.EVM.Op.shl [lit 224, lit (bindingMethod c b m).1]])] ++
-      mstoreArgs d 0 args ++
-      [.letDecl [extOk d] (some (bop YulSemantics.EVM.Op.call
-          [lit extCallGas, var (extTok d), lit 0, lit abiPtr,
+      mstoreArgs tag d 0 args ++
+      [.letDecl [extOk tag d] (some (bop YulSemantics.EVM.Op.call
+          [lit extCallGas, var (extTok tag d), lit 0, lit abiPtr,
             lit (4 + 32 * args.length), lit abiPtr, lit 32])),
-        .cond (bop YulSemantics.EVM.Op.iszero [var (extOk d)]) [revert00]] ++
+        .cond (bop YulSemantics.EVM.Op.iszero [var (extOk tag d)]) [revert00]] ++
       (match (bindingMethod c b m).2 with
         | .boolOpt =>
           [.cond
@@ -112,13 +114,13 @@ theorem emitExtCallBody_stmts (c : ContractDef) (d b m : Nat)
         emitExtCallBody_core_stmts]
 
 def callPrefix (c : ContractDef) (d b m : Nat) (args : List Atom) : List YStmt :=
-  [.letDecl [extTok d] (some (bop EVM.Op.sload [lit (bindingSlot c b)])),
+  [.letDecl [extTok tag d] (some (bop EVM.Op.sload [lit (bindingSlot c b)])),
     .exprStmt (bop EVM.Op.mstore [lit abiPtr, bop EVM.Op.shl [lit 224, lit (bindingMethod c b m).1]])] ++
-  mstoreArgs d 0 args
+  mstoreArgs tag d 0 args
 
 def callLetOk (d : Nat) (args : List Atom) : YStmt :=
-  .letDecl [extOk d] (some (bop EVM.Op.call
-    [lit extCallGas, var (extTok d), lit 0, lit abiPtr,
+  .letDecl [extOk tag d] (some (bop EVM.Op.call
+    [lit extCallGas, var (extTok tag d), lit 0, lit abiPtr,
       lit (4 + 32 * args.length), lit abiPtr, lit 32]))
 
 def callRetCheck (ret : AbiRet) : List YStmt :=
@@ -143,7 +145,7 @@ def callAssign (ret : AbiRet) (name : YIdent) : List YStmt :=
   | .boolOpt | .none => [.assign [name] (lit 1)]
 
 def callSuffix (d : Nat) (ret : AbiRet) (assign : Option YIdent) : List YStmt :=
-  [.cond (bop EVM.Op.iszero [var (extOk d)]) [revert00]] ++
+  [.cond (bop EVM.Op.iszero [var (extOk tag d)]) [revert00]] ++
     callRetCheck ret ++
     match assign with
     | none => []
@@ -151,23 +153,23 @@ def callSuffix (d : Nat) (ret : AbiRet) (assign : Option YIdent) : List YStmt :=
 
 theorem emitExtCallBody_split (c : ContractDef) (d b m : Nat)
     (args : List Atom) (assign : Option YIdent) :
-    emitExtCallBody c d b m args assign =
-      callPrefix c d b m args ++ [callLetOk d args] ++
-        callSuffix d (bindingMethod c b m).2 assign := by
+    emitExtCallBody tag c d b m args assign =
+      callPrefix tag c d b m args ++ [callLetOk tag d args] ++
+        callSuffix tag d (bindingMethod c b m).2 assign := by
   simp [emitExtCallBody_stmts, callPrefix, callLetOk, callSuffix, callRetCheck,
     callAssign, List.append_assoc]
 
 theorem mstoreArgs_all_notFunDef (d off : Nat) (args : List Atom) :
-    (mstoreArgs d off args).all notFunDef = true := by
+    (mstoreArgs tag d off args).all notFunDef = true := by
   induction args generalizing off with
   | nil => rfl
   | cons _ as ih => simp [mstoreArgs, notFunDef, ih]
 
 theorem notFunDef_emitExtCallBody (c : ContractDef) (d b m : Nat) (args : List Atom)
     (assign : Option YIdent) :
-    ∀ s ∈ emitExtCallBody c d b m args assign, notFunDef s = true := by
+    ∀ s ∈ emitExtCallBody tag c d b m args assign, notFunDef s = true := by
   intro s hs
-  have hall : (emitExtCallBody c d b m args assign).all notFunDef = true := by
+  have hall : (emitExtCallBody tag c d b m args assign).all notFunDef = true := by
     rw [emitExtCallBody_stmts]
     cases assign <;> cases (bindingMethod c b m).2 <;>
       simp [notFunDef, mstoreArgs_all_notFunDef]
@@ -175,18 +177,18 @@ theorem notFunDef_emitExtCallBody (c : ContractDef) (d b m : Nat) (args : List A
 
 theorem hoist_emitExtCallBody {calls : ExternalCalls} (c : ContractDef)
     (d b m : Nat) (args : List Atom) (assign : Option YIdent) :
-    hoist (yulD calls) (emitExtCallBody c d b m args assign) = [] :=
-  hoist_nil_open (notFunDef_emitExtCallBody c d b m args assign)
+    hoist (yulD calls) (emitExtCallBody tag c d b m args assign) = [] :=
+  hoist_nil_open (notFunDef_emitExtCallBody tag c d b m args assign)
 
 theorem emitLetOp_call_stmts (c : ContractDef) (d b m : Nat) (args : List Atom) :
-    ((emitLetOp c {} d (.call b m args)).getD {}).stmts =
-      [.letDecl [identV d] (some (lit 0)),
-        .block (emitExtCallBody c d b m args (some (identV d)))] := by
+    ((emitLetOp tag c {} d (.call b m args)).getD {}).stmts =
+      [.letDecl [identV tag d] (some (lit 0)),
+        .block (emitExtCallBody tag c d b m args (some (identV tag d)))] := by
   simp [emitLetOp_call, emitExtCall_stmts, Emit.stmts_nil]
 
 theorem emitStmt_call_stmts (c : ContractDef) (d b m : Nat) (args : List Atom) :
-    (emitStmt c {} d (.call b m args)).stmts =
-      [.block (emitExtCallBody c d b m args none)] := by
+    (emitStmt tag c {} d (.call b m args)).stmts =
+      [.block (emitExtCallBody tag c d b m args none)] := by
   simp [emitStmt_call, emitExtCall_stmts, Emit.stmts_nil]
 
 /-! ## Binding / packing facts -/
@@ -290,7 +292,7 @@ theorem callWF_arity_of_BindWF {I : Interface} {S X E ε : Type}
 /-! ## `noExt` of P / S -/
 
 theorem noExt_mstoreArgs (d off : Nat) (args : List Atom) :
-    noExtBlock (mstoreArgs d off args) = true := by
+    noExtBlock (mstoreArgs tag d off args) = true := by
   induction args generalizing off with
   | nil => simp [mstoreArgs]
   | cons a as ih =>
@@ -299,9 +301,9 @@ theorem noExt_mstoreArgs (d off : Nat) (args : List Atom) :
     simpa [noExtBlock] using ih (off + 1)
 
 theorem noExt_callPrefix (c : ContractDef) (d b m : Nat) (args : List Atom) :
-    noExtBlock (callPrefix c d b m args) = true := by
+    noExtBlock (callPrefix tag c d b m args) = true := by
   unfold callPrefix
-  refine noExtBlock_append ?_ (noExt_mstoreArgs d 0 args)
+  refine noExtBlock_append ?_ (noExt_mstoreArgs tag d 0 args)
   simp [noExtBlock, noExtStmt]
   constructor
   · exact noExt_bop rfl (by simp [noExtExprs, noExt_lit])
@@ -345,7 +347,7 @@ theorem noExt_callAssign (ret : AbiRet) (name : YIdent) :
     simp [callAssign, noExtBlock, noExtStmt, noExt_lit]
 
 theorem noExt_callSuffix (d : Nat) (ret : AbiRet) (assign : Option YIdent) :
-    noExtBlock (callSuffix d ret assign) = true := by
+    noExtBlock (callSuffix tag d ret assign) = true := by
   unfold callSuffix
   refine noExtBlock_append (noExtBlock_append ?_ (noExt_callRetCheck ret)) ?_
   · simp [noExtBlock, noExtStmt]
@@ -356,18 +358,18 @@ theorem noExt_callSuffix (d : Nat) (ret : AbiRet) (assign : Option YIdent) :
 
 /-! ## Prefix evaluation -/
 
-/-- `tail` is the Yul env under `_tok`: either `toVEnv env` (`Stmt.call`) or
-`identV d :: toVEnv env` (`Op.call` after `let v := 0`). -/
+/-- `tail` is the Yul env under `_tok`: either `toVEnv tag env` (`Stmt.call`) or
+`identV tag d :: toVEnv tag env` (`Op.call` after `let v := 0`). -/
 theorem eval_atom_tok (funs : FunEnv evm) {env : List Nat} {V tail : VEnv evm}
     (st : EvmState) (tokv : U256)
-    (hV : V = (extTok env.length, tokv) :: tail)
-    (htail : tail = toVEnv env ∨
-      tail = (identV env.length, (0 : U256)) :: toVEnv env)
-    (hn : identsNodup env.length = true)
-    (hn1 : tail = (identV env.length, (0 : U256)) :: toVEnv env →
-        identsNodup (env.length + 1) = true)
+    (hV : V = (extTok tag env.length, tokv) :: tail)
+    (htail : tail = toVEnv tag env ∨
+      tail = (identV tag env.length, (0 : U256)) :: toVEnv tag env)
+    (hn : identsNodup tag env.length = true)
+    (hn1 : tail = (identV tag env.length, (0 : U256)) :: toVEnv tag env →
+        identsNodup tag (env.length + 1) = true)
     (a : Atom) :
-    EvalExpr evm funs V st (atomE env.length a)
+    EvalExpr evm funs V st (atomE tag env.length a)
       (.vals [BitVec.ofNat 256 (a.eval env)] st) := by
   cases a with
   | lit n =>
@@ -376,22 +378,22 @@ theorem eval_atom_tok (funs : FunEnv evm) {env : List Nat} {V tail : VEnv evm}
   | var i =>
     simp only [atomE, Atom.eval]
     split_ifs with hi
-    · have hneTok : extTok env.length ≠ identV (env.length - 1 - i) :=
-        (identV_ne_extTok (env.length - 1 - i) env.length).symm
-      have hget := get_toVEnv env hn hi
+    · have hneTok : extTok tag env.length ≠ identV tag (env.length - 1 - i) :=
+        (identV_ne_extTok tag (env.length - 1 - i) env.length).symm
+      have hget := get_toVEnv tag env hn hi
       have hlookup :
-          VEnv.get V (identV (env.length - 1 - i)) =
+          VEnv.get V (identV tag (env.length - 1 - i)) =
             some (BitVec.ofNat 256 env[i]) := by
         rw [hV, VEnv.get_cons, if_neg hneTok]
         cases htail with
         | inl h => rw [h]; exact hget
         | inr h =>
-          have hneV : identV env.length ≠ identV (env.length - 1 - i) := by
+          have hneV : identV tag env.length ≠ identV tag (env.length - 1 - i) := by
             intro heq
             have hi' : env.length < env.length + 1 := Nat.lt_succ_self _
             have hj : env.length - 1 - i < env.length + 1 := by omega
             have : env.length = env.length - 1 - i :=
-              identV_inj_of_nodup (env.length + 1) (hn1 h) hi' hj heq
+              identV_inj_of_nodup tag (env.length + 1) (hn1 h) hi' hj heq
             omega
           rw [h, VEnv.get_cons, if_neg hneV]
           exact hget
@@ -428,20 +430,20 @@ theorem eval_mstore_sel_fwd (funs : FunEnv evm) (V : VEnv evm) (st : EvmState)
 
 theorem eval_mstore_atom_fwd (funs : FunEnv evm) {env : List Nat} {V tail : VEnv evm}
     (st : EvmState) (tokv : U256) (i : Nat) (a : Atom)
-    (hV : V = (extTok env.length, tokv) :: tail)
-    (htail : tail = toVEnv env ∨
-      tail = (identV env.length, (0 : U256)) :: toVEnv env)
-    (hn : identsNodup env.length = true)
-    (hn1 : tail = (identV env.length, (0 : U256)) :: toVEnv env →
-        identsNodup (env.length + 1) = true)
+    (hV : V = (extTok tag env.length, tokv) :: tail)
+    (htail : tail = toVEnv tag env ∨
+      tail = (identV tag env.length, (0 : U256)) :: toVEnv tag env)
+    (hn : identsNodup tag env.length = true)
+    (hn1 : tail = (identV tag env.length, (0 : U256)) :: toVEnv tag env →
+        identsNodup tag (env.length + 1) = true)
     (hi : i ≤ 3) :
     EvalExpr evm funs V st
-      (bop EVM.Op.mstore [lit (abiAfterSel + 32 * i), atomE env.length a])
+      (bop EVM.Op.mstore [lit (abiAfterSel + 32 * i), atomE tag env.length a])
       (.vals []
         { touchMemory st (abiAfterSel + 32 * i) 32 with
           memory := storeWord st.memory (abiAfterSel + 32 * i)
             (BitVec.ofNat 256 (a.eval env)) }) := by
-  have ha := eval_atom_tok funs st tokv hV htail hn hn1 a
+  have ha := eval_atom_tok tag funs st tokv hV htail hn hn1 a
   refine Step.builtinOk (Step.argsCons (Step.argsCons Step.argsNil ha) Step.lit) ?_
   simp only [litValue_number, step_mstore, toNat_abiAfterSel_off hi]
 
@@ -458,8 +460,8 @@ theorem call_prefix_fwd_nil {I : Interface} {S X E ε : Type}
     ∃ st',
       ExecStmts evm funs
         pre st
-        (callPrefix c env.length b m [])
-        ((extTok env.length, BitVec.ofNat 256 (bind.addr w.self)) :: pre) st' .normal ∧
+        (callPrefix tag c env.length b m [])
+        ((extTok tag env.length, BitVec.ofNat 256 (bind.addr w.self)) :: pre) st' .normal ∧
       readBytes st'.memory abiPtr 4 = selectorBytes (I.abi meth).selector ∧
       MemOnly st st' ∧
       st'.env.static = false ∧
@@ -467,7 +469,7 @@ theorem call_prefix_fwd_nil {I : Interface} {S X E ε : Type}
         (BitVec.ofNat 256 (I.abi meth).selector <<< 224) ∧
       CallWorld.ofState st' = CallWorld.ofState st := by
   let d := env.length
-  let tok := extTok d
+  let tok := extTok tag d
   let tokv := BitVec.ofNat 256 (bind.addr w.self)
   let V : VEnv evm := pre
   have hbm := bindingMethod_of_BindWF hbd
@@ -515,25 +517,25 @@ theorem call_prefix_fwd_nil {I : Interface} {S X E ε : Type}
   · simp [stSel, CallWorld.ofState, touchMemory]
 
 theorem callPrefix_append (c : ContractDef) (d b m : Nat) (args : List Atom) :
-    callPrefix c d b m args = callPrefix c d b m [] ++ mstoreArgs d 0 args := by
+    callPrefix tag c d b m args = callPrefix tag c d b m [] ++ mstoreArgs tag d 0 args := by
   simp [callPrefix, mstoreArgs]
 
 /-- Pack remaining `args` at ABI offset `off` into a memory that already holds `pre`. -/
 theorem mstoreArgs_exec_from {env : List Nat} {V tail : VEnv evm}
     (funs : FunEnv evm) (st : EvmState)
     (tokv : U256) (off : Nat) (args : List Atom)
-    (hV : V = (extTok env.length, tokv) :: tail)
-    (htail : tail = toVEnv env ∨
-      tail = (identV env.length, (0 : U256)) :: toVEnv env)
-    (hn : identsNodup env.length = true)
-    (hn1 : tail = (identV env.length, (0 : U256)) :: toVEnv env →
-        identsNodup (env.length + 1) = true)
+    (hV : V = (extTok tag env.length, tokv) :: tail)
+    (htail : tail = toVEnv tag env ∨
+      tail = (identV tag env.length, (0 : U256)) :: toVEnv tag env)
+    (hn : identsNodup tag env.length = true)
+    (hn1 : tail = (identV tag env.length, (0 : U256)) :: toVEnv tag env →
+        identsNodup tag (env.length + 1) = true)
     (hoff : off + args.length ≤ 3)
     (hvals : ∀ x ∈ args, atomWF x = true) (hwf : EnvWF env)
     {pre : List UInt8}
     (hpre : readBytes st.memory abiPtr (4 + 32 * off) = pre) :
     ∃ st',
-      ExecStmts evm funs V st (mstoreArgs env.length off args) V st' .normal ∧
+      ExecStmts evm funs V st (mstoreArgs tag env.length off args) V st' .normal ∧
       readBytes st'.memory abiPtr (4 + 32 * (off + args.length)) =
         pre ++ args.flatMap (fun a => wordBytes (a.eval env)) ∧
       MemOnly st st' ∧
@@ -547,14 +549,14 @@ theorem mstoreArgs_exec_from {env : List Nat} {V tail : VEnv evm}
   | cons a rest ih =>
     have hi : off ≤ 3 := Nat.le_trans (Nat.le_add_right off (a :: rest).length) hoff
     have haLt := atom_eval_lt hwf (hvals a (by simp))
-    have hmA := eval_mstore_atom_fwd (env := env) funs st tokv off a hV htail hn hn1 hi
+    have hmA := eval_mstore_atom_fwd tag (env := env) funs st tokv off a hV htail hn hn1 hi
     let stA : EvmState :=
       { touchMemory st (abiAfterSel + 32 * off) 32 with
         memory := storeWord st.memory (abiAfterSel + 32 * off)
           (BitVec.ofNat 256 (a.eval env)) }
     have hdoA : ExecStmt evm funs V st
         (.exprStmt (bop EVM.Op.mstore
-          [lit (abiAfterSel + 32 * off), atomE env.length a]))
+          [lit (abiAfterSel + 32 * off), atomE tag env.length a]))
         V stA .normal :=
       Step.exprStmt hmA
     have hpreA : readBytes stA.memory abiPtr (4 + 32 * (off + 1)) =
@@ -583,18 +585,18 @@ theorem mstoreArgs_exec_from {env : List Nat} {V tail : VEnv evm}
 theorem mstoreArgs_exec {env : List Nat} {V tail : VEnv evm}
     (funs : FunEnv evm) (st : EvmState) (orig : Nat → UInt8)
     (tokv : U256) (sel : Nat) (args : List Atom)
-    (hV : V = (extTok env.length, tokv) :: tail)
-    (htail : tail = toVEnv env ∨
-      tail = (identV env.length, (0 : U256)) :: toVEnv env)
-    (hn : identsNodup env.length = true)
-    (hn1 : tail = (identV env.length, (0 : U256)) :: toVEnv env →
-        identsNodup (env.length + 1) = true)
+    (hV : V = (extTok tag env.length, tokv) :: tail)
+    (htail : tail = toVEnv tag env ∨
+      tail = (identV tag env.length, (0 : U256)) :: toVEnv tag env)
+    (hn : identsNodup tag env.length = true)
+    (hn1 : tail = (identV tag env.length, (0 : U256)) :: toVEnv tag env →
+        identsNodup tag (env.length + 1) = true)
     (hn3 : args.length ≤ 3)
     (hvals : ∀ x ∈ args, atomWF x = true) (hwf : EnvWF env)
     (hsel : sel < 2 ^ 32)
     (hmem : st.memory = storeWord orig abiPtr (BitVec.ofNat 256 sel <<< 224)) :
     ∃ st',
-      ExecStmts evm funs V st (mstoreArgs env.length 0 args) V st' .normal ∧
+      ExecStmts evm funs V st (mstoreArgs tag env.length 0 args) V st' .normal ∧
       readBytes st'.memory abiPtr (4 + 32 * args.length) =
         selectorBytes sel ++ args.flatMap (fun a => wordBytes (a.eval env)) ∧
       MemOnly st st' ∧
@@ -603,7 +605,7 @@ theorem mstoreArgs_exec {env : List Nat} {V tail : VEnv evm}
     simp [hmem]
     exact readBytes_pack0 orig sel hsel
   simpa using
-    mstoreArgs_exec_from (env := env) (V := V) (tail := tail)
+    mstoreArgs_exec_from tag (env := env) (V := V) (tail := tail)
       funs st tokv 0 args hV htail hn hn1 (by simpa using hn3) hvals hwf hpre
 
 def suffixVal (ret : AbiRet) (st : EvmState) : U256 :=
@@ -765,19 +767,19 @@ theorem eval_boolOpt_cond_fwd (funs : FunEnv evm) (V : VEnv evm) (st : EvmState)
   rw [boolOpt_orVal, b2w_iszero]
 
 theorem call_guard_fail (funs : FunEnv evm) {V : VEnv evm} {st : EvmState}
-    {d : Nat} (hget : VEnv.get V (extOk d) = some 0) :
+    {d : Nat} (hget : VEnv.get V (extOk tag d) = some 0) :
     ExecStmt evm funs V st
-      (.cond (bop EVM.Op.iszero [var (extOk d)]) [revert00])
+      (.cond (bop EVM.Op.iszero [var (extOk tag d)]) [revert00])
       V { touchMemory st 0 0 with halted := some (.revert, []) } .halt := by
   refine Step.ifTrue (D := evm) (eval_iszero_var_fwd funs hget) ?_
     (exec_revert00_block funs V st)
   simp [b2w, Dialect.zero, litValue, litValue_number]
 
 theorem call_guard_pass (funs : FunEnv evm) {V : VEnv evm} {st : EvmState}
-    {d : Nat} {ok : U256} (hget : VEnv.get V (extOk d) = some ok)
+    {d : Nat} {ok : U256} (hget : VEnv.get V (extOk tag d) = some ok)
     (hok : ok ≠ 0) :
     ExecStmt evm funs V st
-      (.cond (bop EVM.Op.iszero [var (extOk d)]) [revert00])
+      (.cond (bop EVM.Op.iszero [var (extOk tag d)]) [revert00])
       V st .normal := by
   refine Step.ifFalse (eval_iszero_var_fwd funs hget) ?_
   simp [hok, b2w, Dialect.zero, litValue, litValue_number]
