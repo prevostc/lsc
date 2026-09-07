@@ -1,12 +1,11 @@
 import Lsc.Lang.Core
 
 /-!
-Frame theorem for `Core.effects`. Extra hypotheses beyond the blueprint's `hΓ`:
-mapping updates (`hMap1`/`hMap2`) and `ext.call` not mutating `self` (`hCall`).
-Generated schemas satisfy the mapping facts via `StorageSchema.Lawful`.
+Proofs of the `Core.effects` frame theorems. Statements and documentation live
+in `Lsc.Lang.CoreTheorems`.
 -/
 
-namespace Lsc
+namespace Lsc.Proof
 
 variable {S X E ε : Type}
 
@@ -219,4 +218,23 @@ theorem effects_frame_map2 {Γ : ContractSchema S X E ε} {t} (c : Core t)
     Γ.st.map2 f w'.self = Γ.st.map2 f w.self :=
   effects_frame_on c env f (Γ.st.map2 f) hΓ hMap1 hMap2 hCall hf h
 
-end Lsc
+/-- `effects_frame_on` on `worldAfter`: reverts keep `self`, so an unwritten
+projection is unchanged whether the Core run succeeds or reverts. -/
+theorem worldAfter_frame_on {α} {Γ : ContractSchema S X E ε} {t : RetTy} (c : Core t)
+    (env : List Nat) (f : Nat) (P : S → α)
+    (hStore : ∀ i σ v, f ≠ i → P (Γ.st.scalarUpd i σ v) = P σ)
+    (hStoreMap : ∀ i σ m, f ≠ i → P (Γ.st.map1Upd i σ m) = P σ)
+    (hStoreMap2 : ∀ i σ m, f ≠ i → P (Γ.st.map2Upd i σ m) = P σ)
+    (hCall : ∀ b m args ctx w v w',
+      Tx.run (Γ.ext.call b m args) ctx w = .ok (v, w') → w'.self = w.self)
+    (hf : f ∉ (Core.effects c).writes)
+    (ctx : Ctx) (w : World S X E) :
+    P (worldAfter (Core.denote Γ c env) ctx w).self = P w.self := by
+  cases h : Tx.run (Core.denote Γ c env) ctx w with
+  | error _ => simp [worldAfter, h]
+  | ok p =>
+    rcases p with ⟨v, w'⟩
+    simp [worldAfter, h]
+    exact effects_frame_on c env f P hStore hStoreMap hStoreMap2 hCall hf h
+
+end Lsc.Proof

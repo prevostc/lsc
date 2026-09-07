@@ -41,22 +41,6 @@ def PreservesInvEnv (_C : Spec S X E ε) (Inv : World S X E → Prop)
     (rely : X → X → Prop) : Prop :=
   ∀ (w : World S X E) (x' : X), Inv w → rely w.ext x' → Inv { w with ext := x' }
 
-theorem inv_run {C : Spec S X E ε} {Inv : World S X E → Prop} {rely : X → X → Prop}
-    (hC : PreservesInv C Inv) (hE : PreservesInvEnv C Inv rely)
-    {w : World S X E} (hw : Inv w) {self : Address} (tr : List (Step C))
-    (hW : Wf self tr) (hR : RelyAlong rely tr w) :
-    Inv (run tr w) := by
-  induction tr generalizing w with
-  | nil => simpa using hw
-  | cons s tr ih =>
-    match s with
-    | .call c =>
-      have htl : Wf self tr := hW.2.2
-      exact ih (hC c w hw) htl hR
-    | .env x' =>
-      have ⟨hr, htl⟩ := hR
-      exact ih (hE w x' hw hr) hW htl
-
 /-- Like `PreservesInvFn`, but only for well-formed calls at `self` (`ctx.self = self`,
 `ctx.sender ≠ self`). Needed when `Inv` mentions `holdings self`. -/
 def PreservesInvFnAt (C : Spec S X E ε) (Inv : World S X E → Prop) (self : Address)
@@ -86,22 +70,5 @@ theorem PreservesInvFnAt_of_ok {C : Spec S X E ε} {Inv : World S X E → Prop}
   intro args ctx w hself hsne hInv
   exact worldAfter_preserves hInv
     (fun a w' h => hok args ctx w a w' hself hsne hInv h)
-
-theorem inv_run_at {C : Spec S X E ε} {Inv : World S X E → Prop} {rely : X → X → Prop}
-    {self : Address}
-    (hC : PreservesInvAt C Inv self) (hE : PreservesInvEnv C Inv rely)
-    {w : World S X E} (hw : Inv w) (tr : List (Step C))
-    (hW : Wf self tr) (hR : RelyAlong rely tr w) :
-    Inv (run tr w) := by
-  induction tr generalizing w with
-  | nil => simpa using hw
-  | cons s tr ih =>
-    match s with
-    | .call c =>
-      have ⟨ht, hs, htl⟩ := hW
-      exact ih (hC c w ht hs hw) htl hR
-    | .env x' =>
-      have ⟨hr, htl⟩ := hR
-      exact ih (hE w x' hw hr) hW htl
 
 end Lsc.Security

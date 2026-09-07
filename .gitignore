@@ -4,4 +4,5 @@ foundry-lean-erc20-demo
 .lake
 external/EVMYulLean/
 
+# Generated compiler artifacts (hex, yul, asm, abi). Nothing under out/ is tracked.
 out/

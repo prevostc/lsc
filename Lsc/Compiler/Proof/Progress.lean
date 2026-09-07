@@ -1,5 +1,5 @@
 import Lsc.Compiler.Proof.CallBwd
-import Lsc.Compiler.Proof.DispatchExt
+import Lsc.Compiler.Proof.DispatchExtProof
 
 set_option linter.unusedSimpArgs false
 set_option linter.unusedVariables false

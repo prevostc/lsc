@@ -45,19 +45,20 @@ def Call.ofCtx (ctx : Ctx) (fn : C.Fn) (args : C.Args fn) : Call C where
 @[simp] theorem Call.ofCtx_toCtx (c : Call C) :
     Call.ofCtx c.toCtx c.fn c.args = c := rfl
 
-/-- Post-world of `x`: success keeps the returned world, revert keeps `w`. -/
-def worldAfter (x : Tx S X E ε α) (ctx : Ctx) (w : World S X E) : World S X E :=
-  match Tx.run x ctx w with
-  | .ok (_, w') => w'
-  | .error _ => w
+/-- Post-world of `x`: success keeps the returned world, revert keeps `w`.
+Same function as `Lsc.worldAfter`; kept in this namespace so existing
+Security proofs keep their qualified names. -/
+abbrev worldAfter {α} (x : Tx S X E ε α) (ctx : Ctx) (w : World S X E) :
+    World S X E :=
+  Lsc.worldAfter x ctx w
 
 @[simp] theorem worldAfter_ok {x : Tx S X E ε α} {ctx w a w'}
-    (h : Tx.run x ctx w = .ok (a, w')) : worldAfter x ctx w = w' := by
-  simp [worldAfter, h]
+    (h : Tx.run x ctx w = .ok (a, w')) : worldAfter x ctx w = w' :=
+  Lsc.worldAfter_ok h
 
 @[simp] theorem worldAfter_error {x : Tx S X E ε α} {ctx w e}
-    (h : Tx.run x ctx w = .error e) : worldAfter x ctx w = w := by
-  simp [worldAfter, h]
+    (h : Tx.run x ctx w = .error e) : worldAfter x ctx w = w :=
+  Lsc.worldAfter_error h
 
 /-- `P` holds after `x` if it holds of the pre-world and of every successful post-world.
 Reverts are a no-op, so the error branch is `hw`. -/

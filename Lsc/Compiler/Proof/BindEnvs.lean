@@ -1,6 +1,6 @@
 import Lsc.Compiler.Proof.Oracle
 import Lsc.Compiler.Proof.OfState
-import Lsc.Lang.CoreProof
+import Lsc.Lang.CoreTheorems
 
 set_option linter.unusedSimpArgs false
 set_option linter.unusedVariables false
@@ -43,6 +43,46 @@ def coreAvoids (slot : Nat) : {t : RetTy} → Core t → Prop
   | _, .letPure _ _ k => coreAvoids slot k
   | _, .ite _ a b => coreAvoids slot a ∧ coreAvoids slot b
   | _, _ => True
+
+def stmtAvoidsB (slot : Nat) : Lsc.Stmt → Bool
+  | .store f _ => !decide (f = slot)
+  | .storeMap f _ _ => !decide (f = slot)
+  | .storeMap2 f _ _ _ => !decide (f = slot)
+  | _ => true
+
+def coreAvoidsB (slot : Nat) : {t : RetTy} → Core t → Bool
+  | _, .seq s k => stmtAvoidsB slot s && coreAvoidsB slot k
+  | _, .stmtTail s => stmtAvoidsB slot s
+  | _, .letOp _ k => coreAvoidsB slot k
+  | _, .letPure _ _ k => coreAvoidsB slot k
+  | _, .ite _ a b => coreAvoidsB slot a && coreAvoidsB slot b
+  | _, _ => true
+
+theorem stmtAvoidsB_eq (slot : Nat) (s : Lsc.Stmt) :
+    stmtAvoidsB slot s = true ↔ stmtAvoids slot s := by
+  cases s <;> simp [stmtAvoidsB, stmtAvoids]
+
+theorem coreAvoidsB_eq (slot : Nat) {t} (core : Core t) :
+    coreAvoidsB slot core = true ↔ coreAvoids slot core := by
+  induction core with
+  | ret _ | revertTail _ _ | opTail _ | opTailAddr _ | opTailFlag _ =>
+    simp [coreAvoidsB, coreAvoids]
+  | stmtTail s => simp [coreAvoidsB, coreAvoids, stmtAvoidsB_eq]
+  | letOp _ k ih => simp [coreAvoidsB, coreAvoids, ih]
+  | seq s k ih => simp [coreAvoidsB, coreAvoids, stmtAvoidsB_eq, ih]
+  | letPure _ _ k ih => simp [coreAvoidsB, coreAvoids, ih]
+  | ite _ a b iha ihb => simp [coreAvoidsB, coreAvoids, iha, ihb]
+
+instance (slot : Nat) (s : Lsc.Stmt) : Decidable (stmtAvoids slot s) :=
+  decidable_of_iff (stmtAvoidsB slot s = true) (stmtAvoidsB_eq slot s)
+
+instance (slot : Nat) {t} (core : Core t) : Decidable (coreAvoids slot core) :=
+  decidable_of_iff (coreAvoidsB slot core = true) (coreAvoidsB_eq slot core)
+
+theorem coreAvoids_of_all {c : ContractDef} (slot : Nat)
+    (h : c.functions.all (fun f => coreAvoidsB slot f.core) = true) :
+    ∀ f ∈ c.functions, coreAvoids slot f.core :=
+  fun f hf => (coreAvoidsB_eq slot f.core).mp ((List.all_eq_true.mp h) f hf)
 
 theorem stmtAvoids_not_write {slot : Nat} {s : Lsc.Stmt} (h : stmtAvoids slot s) :
     slot ∉ (Stmt.effects s).writes := by

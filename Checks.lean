@@ -1,25 +1,25 @@
-import Lsc.Examples.Counter
-import Lsc.Examples.Token
-import Lsc.Examples.TokenProofs
-import Lsc.Examples.TokenSecurity
-import Lsc.Examples.VaultSecurity
-import Lsc.Security.Wealth
-import Lsc.Compiler.Proof.Counter
-import Lsc.Compiler.Proof.Token
-import Lsc.Compiler.Proof.Dispatch
-import Lsc.Compiler.Proof.CoreExt
-import Lsc.Compiler.Proof.CoreExtSim
-import Lsc.Compiler.Proof.Vault
-import Lsc.Compiler.Proof.Amm
-import Lsc.Compiler.EndToEnd
-import Lsc.Compiler.EndToEndExt
-import Lsc.Compiler.Proof.DispatchExt
-import Lsc.Examples.TokenEndToEnd
-import Lsc.Examples.VaultEndToEnd
-import Lsc.Examples.AmmEndToEnd
-import Lsc.Compiler.Proof.ProgressCore
-import Lsc.Compiler.Proof.Constructor
-import Lsc.Compiler.Deploy
+import Examples.Counter
+import Examples.Token
+import Examples.TokenProofsTheorems
+import Examples.TokenSecurityTheorems
+import Examples.VaultSecurityTheorems
+import Lsc.Security.WealthTheorems
+import Examples.CounterCompileTheorems
+import Examples.TokenCompileTheorems
+import Lsc.Compiler.DispatchTheorems
+import Lsc.Compiler.CoreTheorems
+import Lsc.Compiler.CoreExtSimTheorems
+import Examples.VaultCompileTheorems
+import Examples.AmmCompileTheorems
+import Lsc.Compiler.EndToEndTheorems
+import Lsc.Compiler.EndToEndExtTheorems
+import Lsc.Compiler.DispatchExtTheorems
+import Examples.TokenEndToEndTheorems
+import Examples.VaultEndToEndTheorems
+import Examples.AmmEndToEndTheorems
+import Lsc.Compiler.ProgressCoreTheorems
+import Lsc.Compiler.ConstructorTheorems
+import Lsc.Compiler.DeployTheorems
 
 /-!
 # Axiom footprint checks

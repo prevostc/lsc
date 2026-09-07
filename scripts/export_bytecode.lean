@@ -1,25 +1,31 @@
 /-
-Export compiled EVM bytecode and Tx.run expectations as JSON (stdout).
+Export compiled EVM bytecode, Yul, labelled Asm, and Tx.run expectations.
 
   scripts/export_bytecode.sh
   scripts/lean lake env lean scripts/export_bytecode.lean
 
-The shell wrapper writes `out/*.hex`, `out/*.abi.json`, and
-`out/heimdall/<Contract>/{sol,yul,*-disassembled.asm}`.
+Writes `out/<C>.{runtime,deploy}.{hex,yul}`, `out/<C>.runtime.asm`,
+`out/<C>.abi.json`, `out/<C>.selectors.json`, and prints JSON on stdout
+(BEGIN_LSC_EXPORT … END_LSC_EXPORT) for `scripts/difftest.sh`.
 
-Does not import `Lsc.Compiler.YulTests` (that file's `#eval`/`#guard` would re-run the
+Does not import `Examples.YulTests` (that file's `#eval`/`#guard` would re-run the
 Yul interpreter). Case lists, senders, and mapping slots follow YulTests.
 Amm cases are view-only (`getReserves` / `sharesOf` / `quote0for1`); constructor and
 swaps CALL out and are not expected to match anvil without token fixtures.
+Vault is exported for artifacts only (no Tx.run cases); its constructor CALLs out.
 -/
 import Lsc.Compiler.Bytecode
 import Lsc.Compiler.Yul
-import Lsc.Examples.Counter
-import Lsc.Examples.Token
-import Lsc.Examples.Amm
+import YulEvmCompiler.Asm
+import YulEvmCompiler.Compile
+import Examples.Counter
+import Examples.Token
+import Examples.Amm
+import Examples.Vault
 import Lsc.Tools.AbiJson
+import Lsc.Tools.Disasm
 
-set_option maxHeartbeats 8000000
+set_option maxHeartbeats 16000000
 
 open Lsc
 open Lsc.Compiler
@@ -72,6 +78,53 @@ def selectorsJson (c : ContractDef) : String :=
     jStr e.name ++ ":" ++ jStr (bytesHex (selectorBytes e.selector))
   "{\"functions\":{" ++ String.intercalate "," fns ++
     "},\"errors\":{" ++ String.intercalate "," errs ++ "}}"
+
+structure RtArt where
+  hex : Option (List UInt8)
+  yul : String
+  asm : String
+
+/-- One `compileAsm` + `lowerProg` (same pipeline as `compileRuntime`).
+If the verified gate rejects the program, still list `compileProgram` Asm. -/
+def runtimeArt (c : ContractDef) : RtArt :=
+  match runtimeBlock c with
+  | none => { hex := none, yul := "// runtimeBlock failed", asm := "// compileAsm failed\n" }
+  | some b =>
+    let yul := printYul b
+    match YulEvmCompiler.compileAsm b with
+    | some asm =>
+      { hex := (YulEvmCompiler.lowerProg YulEvmCompiler.unpatchedImmutables asm).map
+          YulEvmCompiler.assembleBytes
+      , yul
+      , asm := Disasm.printAsmFile c asm }
+    | none =>
+      match YulEvmCompiler.compileProgram b with
+      | none =>
+        { hex := none, yul
+        , asm :=
+            "// compileProgram failed (powdr rejected this Yul; no bytecode).\n" ++
+            "// Read the sibling .runtime.yul for the dispatcher and bodies.\n" }
+      | some asm =>
+        { hex := none, yul
+        , asm := "// compileAsm rejected (stackOK2/wfCheck); hex not emitted.\n" ++
+            Disasm.printAsmFile c asm }
+
+def writeContract (name : String) (c : ContractDef) (art : RtArt) : IO Unit := do
+  let dyul :=
+    match deployObject c with
+    | none => "// deployObject failed\n"
+    | some o => Disasm.printYulFile c (printYulObject o)
+  IO.FS.writeFile s!"out/{name}.runtime.yul" (Disasm.printYulFile c art.yul)
+  IO.FS.writeFile s!"out/{name}.deploy.yul" dyul
+  IO.FS.writeFile s!"out/{name}.runtime.asm" art.asm
+  IO.FS.writeFile s!"out/{name}.abi.json" (contractAbiJson c ++ "\n")
+  IO.FS.writeFile s!"out/{name}.selectors.json" (selectorsJson c ++ "\n")
+  match art.hex with
+  | none => IO.eprintln s!"{name}: compileRuntime failed"
+  | some bs => IO.FS.writeFile s!"out/{name}.runtime.hex" (bytesHex bs ++ "\n")
+  match compileDeploy c with
+  | none => IO.eprintln s!"{name}: compileDeploy failed"
+  | some bs => IO.FS.writeFile s!"out/{name}.deploy.hex" (bytesHex bs ++ "\n")
 
 structure Case where
   name : String
@@ -294,12 +347,12 @@ def ammCases : List Case :=
   , ammWord "quote0for1_zero" "quote0for1" [0]
       (Tx.run (Amm.quote0for1 (Amount.ofNat 0)) Amm.smokeCtx Amm.smokePool) ]
 
-def contractJson (name : String) (c : ContractDef) (cases : List Case)
+def contractJson (name : String) (c : ContractDef) (art : RtArt) (cases : List Case)
     (ctorCalldata : Option (List UInt8) := none)
     (ctorChecks : List Case := []) : String :=
   "{" ++ String.intercalate "," [
     "\"name\":" ++ jStr name,
-    "\"runtime\":" ++ hexOpt (compileRuntime c),
+    "\"runtime\":" ++ hexOpt art.hex,
     "\"deploy\":" ++ hexOpt (compileDeploy c),
     "\"ctor_calldata\":" ++ hexOpt ctorCalldata,
     "\"ctor_checks\":[" ++ String.intercalate "," (ctorChecks.map caseJson) ++ "]",
@@ -329,20 +382,32 @@ def tokenCtorChecks : List Case :=
 ECMUL precompile on a real EVM; Counter/Token do not read `ADDRESS`. -/
 def runtimeAddress : String := addrHex 0xC0DE
 
+def counterArt := runtimeArt Counter.contract
+def tokenArt := runtimeArt Token.contract
+def ammArt := runtimeArt Amm.contract
+def vaultArt := runtimeArt Vault.contract
+
 def exportJson : String :=
   "{" ++ String.intercalate "," [
     "\"runtime_address\":" ++ jStr runtimeAddress,
     "\"contracts\":[" ++ String.intercalate "," [
-      contractJson "Counter" Counter.contract counterCases,
-      contractJson "Token" Token.contract tokenCases
+      contractJson "Counter" Counter.contract counterArt counterCases,
+      contractJson "Token" Token.contract tokenArt tokenCases
         (some (ctorCalldata [tokenCtorOwner, tokenCtorSupply]))
         tokenCtorChecks,
-      contractJson "Amm" Amm.contract ammCases
-        (some (ctorCalldata [10, 11]))
+      contractJson "Amm" Amm.contract ammArt ammCases
+        (some (ctorCalldata [10, 11])),
+      contractJson "Vault" Vault.contract vaultArt []
+        (some (ctorCalldata [1, 10]))
     ] ++ "]"
   ] ++ "}"
 
 def main : IO Unit := do
+  IO.FS.createDirAll "out"
+  writeContract "Counter" Counter.contract counterArt
+  writeContract "Token" Token.contract tokenArt
+  writeContract "Amm" Amm.contract ammArt
+  writeContract "Vault" Vault.contract vaultArt
   IO.println "BEGIN_LSC_EXPORT"
   IO.println exportJson
   IO.println "END_LSC_EXPORT"

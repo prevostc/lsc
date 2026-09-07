@@ -14,7 +14,8 @@ fi
 python3 tests/difftest.py --check-tools
 
 echo "==> lake build (bytecode exporter deps)"
-scripts/lean lake build Lsc.Compiler.Bytecode Lsc.Examples.Counter Lsc.Examples.Token Lsc.Tools.AbiJson
+scripts/lean lake build Lsc.Compiler.Bytecode Examples.Counter Examples.Token Examples.Amm \
+  Examples.Vault Lsc.Tools.AbiJson Lsc.Tools.Disasm
 
 echo "==> export bytecode + Tx.run expectations"
 EXPORT_OUT="${LSC_EXPORT_JSON:-$(mktemp "${TMPDIR:-/tmp}/lsc-export.XXXXXX")}"

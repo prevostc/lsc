@@ -1,4 +1,4 @@
-import Lsc.Compiler.Proof.Core
+import Lsc.Compiler.Proof.CoreProof
 import Lsc.Compiler.Proof.Call
 import Lsc.Compiler.Proof.Descend
 
@@ -50,6 +50,77 @@ def S2Frag : {t : RetTy} → Core t → Prop
   | _, .letPure p args k => p = .id ∧ args.length = 1 ∧ S2Frag k
   | _, .ite c a b => M1Cond c ∧ S2Frag a ∧ S2Frag b
   | _, _ => False
+
+def s2OpB : Lsc.Op → Bool
+  | .call _ _ _ => true
+  | op => m1OpB op
+
+def s2StmtB : Lsc.Stmt → Bool
+  | .call _ _ _ => true
+  | s => m1StmtB s
+
+def s2FragB : {t : RetTy} → Core t → Bool
+  | .unit, .ret _ => true
+  | .word, .ret _ => true
+  | .addr, .ret _ => true
+  | .flag, .ret _ => true
+  | .pair .word .word, .ret _ => true
+  | .word, .opTail op => s2OpB op
+  | .addr, .opTailAddr op => s2OpB op
+  | .flag, .opTailFlag op => s2OpB op
+  | _, .stmtTail s => s2StmtB s
+  | _, .revertTail _ args => args.length == 0
+  | _, .letOp op k => s2OpB op && s2FragB k
+  | _, .seq s k => s2StmtB s && s2FragB k
+  | _, .letPure p args k => decide (p = .id) && args.length == 1 && s2FragB k
+  | _, .ite _ a b => s2FragB a && s2FragB b
+  | _, _ => false
+
+theorem s2OpB_eq (op : Lsc.Op) : s2OpB op = true ↔ S2Op op := by
+  cases op with
+  | call _ _ _ => simp [s2OpB, S2Op]
+  | _ => simp [s2OpB, S2Op, m1OpB_eq, M1Op]
+
+theorem s2StmtB_eq (s : Lsc.Stmt) : s2StmtB s = true ↔ S2Stmt s := by
+  cases s with
+  | call _ _ _ => simp [s2StmtB, S2Stmt]
+  | _ => simp [s2StmtB, S2Stmt, m1StmtB_eq, M1Stmt]
+
+theorem s2FragB_eq {t} (core : Core t) : s2FragB core = true ↔ S2Frag core := by
+  induction core with
+  | ret r =>
+    cases r with
+    | unit | word _ | addr _ | flag _ => simp [s2FragB, S2Frag]
+    | pair x y =>
+      cases x with
+      | word _ =>
+        cases y with
+        | word _ => simp [s2FragB, S2Frag]
+        | unit | addr _ | flag _ | pair _ _ => simp [s2FragB, S2Frag]
+      | unit | addr _ | flag _ | pair _ _ => simp [s2FragB, S2Frag]
+  | opTail op => simp [s2FragB, S2Frag, s2OpB_eq]
+  | opTailAddr op => simp [s2FragB, S2Frag, s2OpB_eq]
+  | opTailFlag op => simp [s2FragB, S2Frag, s2OpB_eq]
+  | stmtTail s => simp [s2FragB, S2Frag, s2StmtB_eq]
+  | revertTail _ args => simp [s2FragB, S2Frag]
+  | letOp op k ih => simp [s2FragB, S2Frag, s2OpB_eq, ih]
+  | seq s k ih => simp [s2FragB, S2Frag, s2StmtB_eq, ih]
+  | letPure p args k ih => simp [s2FragB, S2Frag, ih]
+  | ite _ a b iha ihb => simp [s2FragB, S2Frag, M1Cond, iha, ihb]
+
+instance (op : Lsc.Op) : Decidable (S2Op op) :=
+  decidable_of_iff (s2OpB op = true) (s2OpB_eq op)
+
+instance (s : Lsc.Stmt) : Decidable (S2Stmt s) :=
+  decidable_of_iff (s2StmtB s = true) (s2StmtB_eq s)
+
+instance {t} (core : Core t) : Decidable (S2Frag core) :=
+  decidable_of_iff (s2FragB core = true) (s2FragB_eq core)
+
+theorem s2frag_of_all {c : ContractDef}
+    (h : c.functions.all (fun f => s2FragB f.core) = true) :
+    ∀ f ∈ c.functions, S2Frag f.core :=
+  fun f hf => (s2FragB_eq f.core).mp ((List.all_eq_true.mp h) f hf)
 
 theorem s2op_of_m1 {op} (h : M1Op op) : S2Op op := by
   cases op <;> first | exact h | simp [S2Op, M1Op] at h

@@ -169,4 +169,78 @@ structure StorageSchema.Lawful {S : Type} (st : StorageSchema S) (fields : List 
     (fields[j]?).map (·.kind) = some FieldKind.map2 →
       st.map2 i (st.map2Upd j σ m) = if i = j then m else st.map2 i σ
 
+/-- A non-scalar `scalarUpd` is the identity, so a scalar slot frames every
+other-index scalar store. Generated `schema_scalarUpd_id` lemmas discharge `hId`. -/
+theorem StorageSchema.Lawful.scalar_upd_frame {S} {st : StorageSchema S}
+    {fields : List FieldDef} (hΓ : st.Lawful fields)
+    (hId : ∀ i σ v, (fields[i]?).map (·.kind) ≠ some FieldKind.scalar →
+      st.scalarUpd i σ v = σ)
+    (slot i : Nat) (σ : S) (v : Nat)
+    (_hslot : (fields[slot]?).map (·.kind) = some FieldKind.scalar)
+    (hne : slot ≠ i) :
+    st.scalar slot (st.scalarUpd i σ v) = st.scalar slot σ := by
+  by_cases hk : (fields[i]?).map (·.kind) = some FieldKind.scalar
+  · have := hΓ.scalar_scalar slot i σ v hk
+    rw [this, if_neg hne]
+  · rw [hId i σ v hk]
+
+/-- Mapping stores do not change a scalar slot. `hId` is identity on non-`map1`
+indices (generated `schema_map1Upd_id`). -/
+theorem StorageSchema.Lawful.scalar_map1_frame {S} {st : StorageSchema S}
+    {fields : List FieldDef} (hΓ : st.Lawful fields)
+    (hId : ∀ i σ m, (fields[i]?).map (·.kind) ≠ some FieldKind.map1 →
+      st.map1Upd i σ m = σ)
+    (slot i : Nat) (σ : S) (m : Nat → Nat)
+    (_hslot : (fields[slot]?).map (·.kind) = some FieldKind.scalar) :
+    st.scalar slot (st.map1Upd i σ m) = st.scalar slot σ := by
+  by_cases hk : (fields[i]?).map (·.kind) = some FieldKind.map1
+  · exact hΓ.map1_scalar slot i σ m hk
+  · rw [hId i σ m hk]
+
+theorem StorageSchema.Lawful.scalar_map2_frame {S} {st : StorageSchema S}
+    {fields : List FieldDef} (hΓ : st.Lawful fields)
+    (hId : ∀ i σ m, (fields[i]?).map (·.kind) ≠ some FieldKind.map2 →
+      st.map2Upd i σ m = σ)
+    (slot i : Nat) (σ : S) (m : Nat → Nat → Nat)
+    (_hslot : (fields[slot]?).map (·.kind) = some FieldKind.scalar) :
+    st.scalar slot (st.map2Upd i σ m) = st.scalar slot σ := by
+  by_cases hk : (fields[i]?).map (·.kind) = some FieldKind.map2
+  · exact hΓ.map2_scalar slot i σ m hk
+  · rw [hId i σ m hk]
+
+/-! ## List-length helpers for generated ABI codecs -/
+
+theorem length_eq_one {α} {l : List α} : l.length = 1 ↔ ∃ a, l = [a] := by
+  cases l with
+  | nil => simp
+  | cons a rest =>
+    cases rest with
+    | nil => simp
+    | cons _ _ => simp
+
+theorem length_eq_two {α} {l : List α} : l.length = 2 ↔ ∃ a b, l = [a, b] := by
+  cases l with
+  | nil => simp
+  | cons a rest =>
+    cases rest with
+    | nil => simp
+    | cons b rest =>
+      cases rest with
+      | nil => simp
+      | cons _ _ => simp
+
+theorem length_eq_three {α} {l : List α} : l.length = 3 ↔ ∃ a b c, l = [a, b, c] := by
+  cases l with
+  | nil => simp
+  | cons a l1 =>
+    cases l1 with
+    | nil => simp
+    | cons b l2 =>
+      cases l2 with
+      | nil => simp
+      | cons c l3 =>
+        cases l3 with
+        | nil => simp
+        | cons _ _ => simp
+
 end Lsc

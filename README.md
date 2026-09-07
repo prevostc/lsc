@@ -1,35 +1,37 @@
-# Provable DeFi Agent Setup v3
+# Lsc
 
-Token and Vault anti-exploit theorems are proved through to EVM bytecode (Token
-S1 / call-free; Vault S2 / one external IERC20 binding):
-`token_bytecode_no_unauthorized_extraction` / `_solvent` and
-`vault_bytecode_no_unauthorized_extraction` / `_solvent`. AMM is spec-level only
-(`amm_no_unauthorized_extraction`, `amm_solvent`). Details:
-`docs/architecture/PROOF_CHAIN.md`.
+Lsc is a DeFi smart-contract language hosted in Lean 4 and compiled to EVM
+bytecode. You write ordinary Lean functions; the compiler emits bytecode. The
+product goal is a checked anti-exploit claim under explicit assumptions, not
+exhaustive functional correctness. See `docs/PROJECT_GOAL.md`.
 
-This layout distinguishes **persistent rules**, **one-shot prompts**, **reusable skills**, and **durable project knowledge**.
+## What you get
+
+Under the assumptions in `docs/guide/TRUST.md` and `docs/guide/EXTERNAL_CALLS.md`,
+compiled **runtime** bytecode cannot reduce an account's protocol claim unless
+that account authorised the call, and the contract stays solvent relative to
+the assets it controls. Token and Vault have both facts at bytecode. AMM has
+unauthorised-extraction at bytecode and solvency at the spec. Counter is a
+compiler demo. Constructors that call out, and CREATE with appended constructor
+arguments, are outside the EVM deploy theorem.
+
+## Writing a contract
+
+A contract is a storage structure, events, errors, and `do` blocks using
+`read` / `write`, checked arithmetic (`+?`, `-?`, …), and `Binding` calls to a
+declared `IERC20` when the contract talks to an external token. `lsc_schema`,
+`lsc_reify`, and `lsc_contract` assemble the schema and the contract object.
+Start from `Examples/Counter.lean`, then Token, Vault, Amm.
+
+## Build
+
+One Lean process at a time, always through the lock:
 
 ```text
-AGENTS.md
-
-.agents/
-└── skills/
-    ├── implement-and-prove/
-    │   └── SKILL.md
-    └── simplify-and-modularize/
-        └── SKILL.md
-
-docs/
-├── PROJECT_GOAL.md
-└── architecture/
-    └── README.md
+scripts/lean lake build Checks
 ```
 
-## Classification
+## Docs
 
-- `AGENTS.md` — always-on operating rules.
-- `prompts/architecture-review-2026-09.md` — the one-shot architecture investigation to run now.
-- `implement-and-prove` — reusable implementation/proof workflow.
-- `simplify-and-modularize` — reusable post-milestone cleanup workflow.
-- `docs/PROJECT_GOAL.md` — stable product intent.
-- `docs/architecture/` — concise architecture contracts (language, security, proof chain, TCB).
+- Language users (write, audit, assumptions): [`docs/guide/`](docs/guide/)
+- Language developers (proof chain, modules, TCB): [`docs/internals/`](docs/internals/)

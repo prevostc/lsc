@@ -43,13 +43,32 @@ Parallel reasoning is fine; parallel Lean builds are not.
 
 ## Theorem organization
 
-Preferred default:
+A **guarantee module** is any module that exports a theorem referenced by
+`Checks.lean`, by `docs/internals/*.md` or `docs/guide/*.md`, or by another module's *statement*
+(not just its proof). Every guarantee module `Foo.lean` is split as follows:
 
-- `xxTheorems.lean`: concise natural-language meaning + clean theorem statement.
-- `xxProof.lean`: detailed proof implementation.
-- `xxTheorems.lean` should ideally close the theorem with a one-line reference to the proof implementation.
+- `FooTheorems.lean`: for each exported theorem, a docstring in plain language
+  (what it guarantees, under which hypotheses, in one to four sentences, no
+  proof talk), the statement verbatim, and the body `:= Foo.Proof.thm_name`
+  (or `:= by exact Foo.Proof.thm_name` if elaboration needs it). Definitions
+  the statement needs (`structure`s, `def`s, `abbrev`s such as `EvmTraceRunAll`,
+  `TransportSetup`, `R`, `Inv`) stay in a `FooDefs.lean` (or the existing defs
+  module) imported by both files; the Theorems file must **not** contain proof
+  code beyond the one-line reference.
+- `FooProof.lean`: the actual proof (`theorem thm_name … := by …`) in namespace
+  `<orig>.Proof`, plus all private helpers. Imports whatever it needs.
+- Downstream modules import `FooTheorems` (never `FooProof`).
+- Fully-qualified theorem names used by `Checks.lean` must not change — the
+  Theorems-file theorem keeps the original namespace and name.
+- Placement: Theorems/Defs of a `Proof/*` guarantee module go **up** to
+  `Lsc/Compiler/<Name>Theorems.lean` (and `…Defs.lean` if needed); the proof
+  stays `Lsc/Compiler/Proof/<Name>Proof.lean`.
+- Internal lemma libraries under `Lsc/Compiler/Proof/` (helpers nobody outside
+  the proof tree references) stay there, with a 2–5-line module docstring.
 
-If Lean dependencies make this exact layout awkward, preserve the principle: theorem intent and proof implementation should be independently understandable and loadable.
+If Lean dependencies make the exact layout awkward, preserve the principle:
+theorem intent and proof implementation should be independently understandable
+and loadable.
 
 ## Implementation + proof
 

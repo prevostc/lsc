@@ -1,4 +1,4 @@
-import Lsc.Compiler.Proof.Core
+import Lsc.Compiler.Proof.CoreProof
 import Lsc.Compiler.Proof.Calldata
 import Lsc.Compiler.Proof.OpsToken
 import YulSemantics.ObjectRun

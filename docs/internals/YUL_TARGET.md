@@ -1,0 +1,95 @@
+# Yul Target Contract (powdr)
+
+Decisions for `Lsc/Compiler` fixed by the study of `yul-semantics`, `evm_semantics`,
+`yul-evm-compiler` (pinned in `lake-manifest.json`). File references are into `.lake/packages/`.
+
+## Which powdr theorems we consume
+
+- **Deploy**: `YulEvmCompiler.compileObject_correct` (`ObjectCompile.lean`) — relates the
+  resolved object run from `L.initState` (empty calldata/storage) to the compiled creation code.
+  Object shape: `object C { code { <constructor body>; datacopy(0, dataoffset("runtime"),
+  datasize("runtime")) return(0, datasize("runtime")) } object "runtime" { code { dispatcher } } }`
+  (`YulSemantics.EVM.constructorCode`, in `ObjectRun.lean`). Constructor-time `call` in the
+  constructor body is subject to verification against this theorem.
+- **Runtime calls**: `compile_correct` / `compile_runContract` (`Correctness.lean`,
+  `ContractCorrectness.lean`) on the *resolved runtime block* from a custom `EvmState`
+  (calldata, storage, `keccakOf`, caller, …). There is no `compileObject_runContract`.
+- Preconditions we discharge or assume: `ExternalsRealized model`, `FrameOK` (fork = Osaka,
+  not a precompile, empty call stack), `StateMatch yst0 s0`, `pc = 0`, empty stack, gas ≥ `b`.
+
+## Source semantics we prove against
+
+- `Run (EVM.evmWithExternal calls creates gas)` for entrypoints that call out;
+  `Run EVM.evm` (closed) for the call-free fragment. Values are `BitVec 256`
+  (`YulSemantics.EVM.U256`); literals are `Literal.number n` interpreted mod `2^256`.
+- **Revert atomicity**: raw `Run` does not roll back storage/logs on `revert`.
+  `toYulFn_correct_callFree` / `toYulFn_correct_ext` are stated against `RunCommitted`
+  (`Observation.lean`), whose `committedState` restores
+  storage, transient storage and logs on non-committing halts. This matches `Tx`'s
+  `Except.error` discarding the world.
+- Halts: `EvmState.halted : Option (HaltKind × List UInt8)` with `.ret`/`.revert` carrying the
+  memory slice; `stop` carries `[]`. Logs: ordered `List LogEntry { address, topics, data }`.
+
+## Keccak
+
+- The dialect reads `st.env.keccakOf : List UInt8 → U256` (default `opaque keccakBytes`).
+  Under `StateMatch`, `keccakOf` is pinned to `EvmSemantics.keccak256`.
+- Assumptions (TCB): injectivity of `keccak256` on the finite set of 64-byte mapping keys we form
+  and distinctness from scalar slots; `KeccakEngine` agrees with `EvmSemantics.keccak256` on
+  the ABI signatures used for selectors/topics.
+
+## Core → Yul mapping
+
+- de Bruijn local `i` → `let v_i`; `letOp`/`letPure` → `let`; `seq` → sequence.
+- Scalar field `f` → slot `f`; `loadMap f k` → `mstore(0,k) mstore(32,f) sload(keccak256(0,64))`.
+  `map2` nests, but `keccak256(0,64)` reads `[0,64)` and **touches memory**, so the inner hash is written to `[32]`
+  *before* `mstore(0, k₂)` (`mstore(32, keccak256(0,64)); mstore(0, k₂); sload(keccak256(0,64))`).
+  Ctx reads → `caller/callvalue/timestamp/number/address`.
+- Checked arithmetic → guard + `revert` with `Panic(uint256)` selector and code `0x11`/`0x12`;
+  `mulDivDown` → `if iszero(c) { panic 0x12 }; let v := mul(a,b); overflow guard; v := div(v,c)`;
+  `mulDivUp` → same product/guard then `switch mod(v,c)` (`case 0` floor, default `div+1`).
+  Guard is `iszero(or(iszero(a), eq(div(v,a), b)))` (`a=0 ∨ (a*b)/a = b` iff the product fits).
+- `require c err args` → `if iszero(c) { <custom error ABI at 0x80> revert(0x80, 4+32n) }`.
+- `emit` → ABI-pack at `0x80`, `log1(0x80, 32n, topic0)`.
+- `ite` → `switch c case 0 {…} default {…}` (Yul `if` has no `else`). Core's `ite` carries two
+  full tail continuations, so no result variables need to be joined.
+- Nested Yul expressions (no flatten / `t_i` temps). `Cond`, map-slot `keccak256(0,64)`, and
+  pure primitives are expression trees; checked ops reuse the result variable as scratch
+- `{ … }` wraps `if` bodies, `switch` cases, **and** the external-call body (`emitExtCall`)
+  so `_tok_*`/`_ok_*` do not escape. `toYulFn` returns `none` unless `coreWF` (literals `< 2^256`, field kinds, event/error
+  arity) and `identV` names on `[0, maxDepth)` are pairwise distinct; `runtimeBlock` also
+  requires unique selectors. Parameters are `let v_i := calldataload(4 + 32 i)` (empty `VEnv`).
+  Constructors (`toYulCtor`) copy `codesize()-32n` bytes of init code to `0x80` then
+  `let v_i := mload(0x80+32i)` (Solidity CREATE: ABI words appended after init bytecode).
+  Unit `ret` falls through so `constructorCode "runtime"` can `datacopy`/`return`.
+
+- `ret` → ABI-encode at `0x80`, `return(0x80, 32k)`; unit → `stop()`.
+- `Op.call` / `Stmt.call` → `let v_d := 0 { let tok := sload(slot); … let ok := call(…);
+  if iszero(ok) { revert(0,0) }; <ret check>; v_d := <1 | mload(0x80)> }` (or `{ body }` for
+  `Stmt.call`). Temps `_tok_*` / `_ok_*` are scoped so `restore` drops them and `Inv.venv` is
+  `toVEnv` again. `call(<gas literal>, tok, 0, …)` (**never `gas()`**; powdr rejects it).
+  Return handling: `boolOpt` — success ⇔ call ok ∧ (`returndatasize() = 0` ∨ returned word
+  `= 1`); `word` — require `returndatasize() ≥ 32`. Call-free Core → Yul is
+  `toYulFn_correct_callFree`; S2 including `Op.call`/`Stmt.call` is `toYulFn_correct_ext`
+  (`PROOF_CHAIN.md`).
+- Constructor-time `call` (e.g. caching `decimals`) is subject to verification against powdr's
+  deploy theorem (`compileObject_correct` / `evmWithExternal` in init code). If that theorem
+  cannot take external calls in creation code, `decimals` is a constructor argument.
+- Dispatcher → `if lt(calldatasize(), 4) { revert(0,0) }` then
+  `switch shr(224, calldataload(0))` with one `case <selector>` per entrypoint and `default { revert(0,0) }`.
+- Reentrancy: **no lock is emitted** (no `tload`/`tstore`). Reentrancy is excluded by the
+  `NoInterfere` clause of `Conforms` on bound interfaces (`TRUSTED_COMPUTING_BASE.md`). An
+  emitted transient-slot lock with a bytecode-level proof is future work.
+- Never emitted: `for`, `delegatecall`, `selfdestruct`, `create`, `gas`, `datasize`/`dataoffset`
+  outside the constructor.
+
+## Executable checks
+
+- Yul: `Interp.run EVM.exec fuel prog st0` with `EVM.run_adequacy` (call-free only; `call`
+  and `gas` are stuck in the executable dialect).
+- EVM: `EvmSemantics.stepF` iterated until halt; calldata in `executionEnv.calldata`, storage in
+  `accountMap`.
+- Differential harness: `scripts/difftest.sh` — `Tx.run` vs anvil (revm) on `compileRuntime`
+  bytecode for Counter and Token (same cases as `Examples/YulTests.lean`).
+- Nested `map2` hashes inner `keccak256(0,64)`
+  into `[32]` before `mstore(0, k₂)`, so the read does not see a clobbered `[0]`.

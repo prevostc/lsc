@@ -30,6 +30,9 @@ instance : OfNat Address n := ⟨(n : Nat)⟩
 instance : Repr Address := inferInstanceAs (Repr Nat)
 instance : Inhabited Address := ⟨(0 : Nat)⟩
 instance : ToString Address := inferInstanceAs (ToString Nat)
+/-- Unfolds to the underlying word. Used so ABI `List Nat` encodes without
+getting stuck under `rw` (`Address` is a `def` newtype). -/
+@[reducible] def toWord (a : Address) : Nat := a
 end Address
 
 /-- Storage mappings are plain functions with default zero. -/
@@ -277,6 +280,23 @@ theorem run_ok_error {x : Tx S X E ε α} {ctx : Ctx} {w : World S X E}
 end RunLemmas
 
 end Tx
+
+/-- Post-world of a `Tx`: success keeps the returned world, revert keeps `w`.
+Language-level so `lsc_contract` can certify Core vs Spec without importing
+`Security`. -/
+def worldAfter {S X E ε α} (x : Tx S X E ε α) (ctx : Ctx) (w : World S X E) :
+    World S X E :=
+  match Tx.run x ctx w with
+  | .ok (_, w') => w'
+  | .error _ => w
+
+@[simp] theorem worldAfter_ok {S X E ε α} {x : Tx S X E ε α} {ctx w a w'}
+    (h : Tx.run x ctx w = .ok (a, w')) : worldAfter x ctx w = w' := by
+  simp [worldAfter, h]
+
+@[simp] theorem worldAfter_error {S X E ε α} {x : Tx S X E ε α} {ctx w e}
+    (h : Tx.run x ctx w = .error e) : worldAfter x ctx w = w := by
+  simp [worldAfter, h]
 
 /-! ### Surface sugar
 

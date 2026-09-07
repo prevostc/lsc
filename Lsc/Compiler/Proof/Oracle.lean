@@ -1,5 +1,5 @@
 import Lsc.Compiler.Proof.CoreExt
-import Lsc.Lang.CoreProof
+import Lsc.Lang.CoreTheorems
 
 set_option linter.unusedSimpArgs false
 set_option linter.unusedVariables false

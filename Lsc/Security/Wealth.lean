@@ -77,55 +77,7 @@ def NoAuthAlong (Auth : AuthPred C) (a : Address) : List (Step C) → World S X 
   | .call c :: tr, w => ¬ Auth a c w.self ∧ NoAuthAlong Auth a tr (step (.call c) w)
   | .env x' :: tr, w => NoAuthAlong Auth a tr { w with ext := x' }
 
-/-- Victim-side: if `Inv` holds initially and is preserved, and `a` never authorised a
-call along `tr`, then `claim a` is non-decreasing. `Inv` is threaded like `inv_run`. -/
-theorem no_unauthorized_extraction {Inv : World S X E → Prop} {claim : Claim S}
-    {Auth : AuthPred C} {rely : X → X → Prop}
-    (hN : NoUnauthorizedDecrease C Inv claim Auth)
-    (hP : PreservesInv C Inv) (hE : PreservesInvEnv C Inv rely)
-    (self : Address) (tr : List (Step C)) (w : World S X E) (a : Address)
-    (hw : Inv w) (_hW : Wf self tr) (hR : RelyAlong rely tr w)
-    (hA : NoAuthAlong Auth a tr w) :
-    claim a w.self ≤ claim a (run tr w).self := by
-  induction tr generalizing w with
-  | nil => simp [run]
-  | cons s tr ih =>
-    match s with
-    | .call c =>
-      obtain ⟨hna, htl⟩ := hA
-      have hw' : Inv (step (.call c) w) := hP c w hw
-      have hle : claim a w.self ≤ claim a (step (.call c) w).self :=
-        Nat.le_of_not_lt fun hlt => hna (hN c w a hw hlt)
-      exact Nat.le_trans hle (ih (step (.call c) w) hw' _hW.2.2 hR htl)
-    | .env x' =>
-      obtain ⟨hr, htl⟩ := hR
-      have hw' : Inv { w with ext := x' } := hE w x' hw hr
-      simpa [step] using ih { w with ext := x' } hw' _hW htl hA
-
-/-- Like `no_unauthorized_extraction`, when `Inv` is only preserved at `self`. -/
-theorem no_unauthorized_extraction_at {Inv : World S X E → Prop} {claim : Claim S}
-    {Auth : AuthPred C} {rely : X → X → Prop} {self : Address}
-    (hN : NoUnauthorizedDecrease C Inv claim Auth)
-    (hP : PreservesInvAt C Inv self) (hE : PreservesInvEnv C Inv rely)
-    (tr : List (Step C)) (w : World S X E) (a : Address)
-    (hw : Inv w) (hW : Wf self tr) (hR : RelyAlong rely tr w)
-    (hA : NoAuthAlong Auth a tr w) :
-    claim a w.self ≤ claim a (run tr w).self := by
-  induction tr generalizing w with
-  | nil => simp [run]
-  | cons s tr ih =>
-    match s with
-    | .call c =>
-      obtain ⟨hna, htl⟩ := hA
-      have ⟨ht, hs, hWtl⟩ := hW
-      have hw' : Inv (step (.call c) w) := hP c w ht hs hw
-      have hle : claim a w.self ≤ claim a (step (.call c) w).self :=
-        Nat.le_of_not_lt fun hlt => hna (hN c w a hw hlt)
-      exact Nat.le_trans hle (ih (step (.call c) w) hw' hWtl hR htl)
-    | .env x' =>
-      obtain ⟨hr, htl⟩ := hR
-      have hw' : Inv { w with ext := x' } := hE w x' hw hr
-      simpa [step] using ih { w with ext := x' } hw' hW htl hA
+/-! Trace theorems `no_unauthorized_extraction` / `_at` live in `WealthTheorems`. -/
 
 /-! ### Conservation (local) and solvency -/
 
@@ -189,25 +141,7 @@ def Solvent (claim : Claim S) (holdings : Holdings S X E) (self : Address)
     (∀ a, a ∉ H → claim a w.self = 0) ∧
     H.sum (fun a => claim a w.self) ≤ holdings self w
 
-/-- `Inv ⇒ Solvent`, transported by `inv_run`. No extra conservation needed. -/
-theorem solvent_run {Inv : World S X E → Prop} {claim : Claim S}
-    {holdings : Holdings S X E} {rely : X → X → Prop}
-    (hP : PreservesInv C Inv) (hE : PreservesInvEnv C Inv rely)
-    (hS : ∀ self w, Inv w → Solvent claim holdings self w)
-    {self : Address} {w : World S X E} (hw : Inv w) (tr : List (Step C))
-    (hW : Wf self tr) (hR : RelyAlong rely tr w) :
-    Solvent claim holdings self (run tr w) :=
-  hS self _ (inv_run hP hE hw tr hW hR)
-
-/-- `Inv self ⇒ Solvent` along well-formed traces, when `Inv` is only preserved at `self`. -/
-theorem solvent_run_at {Inv : World S X E → Prop} {claim : Claim S}
-    {holdings : Holdings S X E} {rely : X → X → Prop} {self : Address}
-    (hP : PreservesInvAt C Inv self) (hE : PreservesInvEnv C Inv rely)
-    (hS : ∀ w, Inv w → Solvent claim holdings self w)
-    {w : World S X E} (hw : Inv w) (tr : List (Step C))
-    (hW : Wf self tr) (hR : RelyAlong rely tr w) :
-    Solvent claim holdings self (run tr w) :=
-  hS _ (inv_run_at hP hE hw tr hW hR)
+/-! `solvent_run` / `solvent_run_at` live in `WealthTheorems`. -/
 
 /-- `Σ ⌊f a * num / den⌋ ≤ num` when `Σ f = den` and `den > 0`. -/
 theorem sum_mul_div_le {α : Type} [DecidableEq α] (H : Finset α) (f : α → Nat) (num den : Nat)

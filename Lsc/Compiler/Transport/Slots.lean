@@ -12,6 +12,8 @@ namespace Lsc.Compiler
 
 open YulSemantics.EVM
 
+namespace Proof
+
 theorem storageRel_scalar {S X E ε}
     {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ : List UInt8 → U256} {s : S} {σ : U256 → U256}
@@ -64,5 +66,7 @@ theorem storageRel_map1_toNat {S X E ε}
   have h := storageRel_map1 hs hfd hkind ha
   rw [hval] at h
   simpa [h] using toNat_ofNat_of_lt hv
+
+end Proof
 
 end Lsc.Compiler

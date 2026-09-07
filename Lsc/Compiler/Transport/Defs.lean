@@ -1,5 +1,6 @@
 import Lsc.Compiler.EndToEndExt
 import Lsc.Security.Wealth
+import Lsc.Security.WealthTheorems
 
 set_option linter.unusedSimpArgs false
 set_option linter.unusedVariables false

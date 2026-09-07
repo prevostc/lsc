@@ -2,8 +2,8 @@ import Lsc.Compiler.Proof.BindEnvs
 import Lsc.Compiler.Proof.Oracle
 import Lsc.Compiler.Proof.OfState
 import Lsc.Compiler.Proof.CallBwd
-import Lsc.Compiler.Proof.Core
-import Lsc.Lang.CoreProof
+import Lsc.Compiler.Proof.CoreProof
+import Lsc.Lang.CoreTheorems
 
 set_option linter.unusedSimpArgs false
 set_option linter.unusedVariables false

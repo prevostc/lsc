@@ -4,7 +4,7 @@ open Lake DSL
 package lsc where
   version := v!"0.2.0"
 
--- Toolchain and Mathlib pin follow powdr's yul-compiler (see docs/architecture/LANGUAGE_ARCHITECTURE.md).
+-- Toolchain and Mathlib pin follow powdr's yul-compiler (see docs/internals/LANGUAGE_ARCHITECTURE.md).
 require mathlib from git
   "https://github.com/leanprover-community/mathlib4" @ "v4.33.0"
 
@@ -33,20 +33,14 @@ lean_lib Lsc where
     Glob.submodules `Lsc.Compiler.Proof,
     Glob.submodules `Lsc.Compiler.Transport,
     Glob.submodules `Lsc.Tools,
-    Glob.one `Lsc.Examples.Counter,
-    Glob.one `Lsc.Examples.AmountDemo,
-    Glob.one `Lsc.Examples.Token,
-    Glob.one `Lsc.Examples.TokenProofs,
-    Glob.one `Lsc.Examples.TokenSecurity,
-    Glob.one `Lsc.Examples.TokenEndToEnd,
-    Glob.one `Lsc.Examples.Vault,
-    Glob.one `Lsc.Examples.VaultProofs,
-    Glob.one `Lsc.Examples.VaultSecurity,
-    Glob.one `Lsc.Examples.VaultEndToEnd,
-    Glob.one `Lsc.Examples.Amm,
-    Glob.one `Lsc.Examples.AmmProofs,
-    Glob.one `Lsc.Examples.AmmSecurity,
+    Glob.submodules `Lsc.Util,
     Glob.one `Lsc
+  ]
+
+lean_lib Examples where
+  -- `Glob.submodules` because there is no `Examples.lean` barrel.
+  globs := #[
+    Glob.submodules `Examples
   ]
 
 /-- Pinned axiom footprint of the certificates and end-to-end theorems (built by `lake build`). -/

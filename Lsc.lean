@@ -7,28 +7,15 @@ import Lsc.Lang.Spec
 import Lsc.Lang.Reify
 import Lsc.Lang.Contract
 import Lsc.Tools.AbiJson
-import Lsc.Examples.Counter
-import Lsc.Examples.AmountDemo
-import Lsc.Examples.Token
-import Lsc.Examples.TokenProofs
-import Lsc.Examples.TokenSecurity
-import Lsc.Examples.TokenEndToEnd
-import Lsc.Examples.Vault
-import Lsc.Examples.VaultProofs
-import Lsc.Examples.VaultSecurity
-import Lsc.Examples.VaultEndToEnd
-import Lsc.Examples.Amm
-import Lsc.Examples.AmmProofs
-import Lsc.Examples.AmmSecurity
-import Lsc.Examples.AmmEndToEnd
 import Lsc.Compiler.Yul
 import Lsc.Compiler.YulExec
 import Lsc.Compiler.Bytecode
-import Lsc.Compiler.YulTests
 import Lsc.Compiler.Transport
 import Lsc.Security.Trace
 import Lsc.Security.Invariant
+import Lsc.Security.InvariantTheorems
 import Lsc.Security.Wealth
+import Lsc.Security.WealthTheorems
 
 /-!
 # LSC — a provable DeFi language compiling to EVM
@@ -37,5 +24,5 @@ Shallow Lean surface (`Lsc.Lang.Tx`), certified reification to a tiny ANF core
 (`Lsc.Lang.Core`, `Lsc.Lang.Reify`), a security model over traces (`Lsc.Security`), and a
 Core → Yul compiler (`Lsc.Compiler`) composed with powdr's verified Yul → EVM compiler.
 
-See `docs/architecture/` for the decision records.
+See `docs/internals/` for architecture notes and decision records.
 -/
