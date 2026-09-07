@@ -16,6 +16,7 @@ import Lsc.Examples.TokenEndToEnd
 import Lsc.Examples.Vault
 import Lsc.Examples.VaultProofs
 import Lsc.Examples.VaultSecurity
+import Lsc.Examples.VaultEndToEnd
 import Lsc.Examples.Amm
 import Lsc.Examples.AmmProofs
 import Lsc.Examples.AmmSecurity

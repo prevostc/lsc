@@ -49,11 +49,14 @@ proved invariants/laws.
 - `YulExec.lean`, `YulTests.lean` — executable harness on powdr's Yul interpreter and the
   differential tests against `Tx.run`.
 - `Bytecode.lean` — `compileRuntime`/`compileDeploy` through powdr's verified compiler.
-- `Correctness.lean` — `R`, `logsRel`/`selfLogs`, `RunCommittedExt`, `ToYulFnCorrectExt`
-  (backward S2); S1 `toYulFn_correct_callFree`; call-free S2 `toYulFn_correct_ext` in
-  `Proof/CoreExt.lean`; `runtimeBlock_correct` is the backward `yulD` dispatcher target (`sorry`, M3).
+- `Correctness.lean` — `R`, `logsRel`/`selfLogs`, `RunCommittedExt`, `ToYulFnCorrectExt`,
+  `RuntimeBlockCorrectExt` (backward S2 statements). Proofs: `toYulFn_correct_ext` in
+  `Proof/CoreExtSim.lean`; `runtimeBlock_correct_ext` in `Proof/DispatchExt.lean`.
 - `Externals.lean` — `yulD`, `Abs`, `NoInterfere`, `decodeRet`, `RX`, `Conforms`, `Realizes`,
-  `composeFault`, `ExtAgrees`. Never imported by `Lsc/Lang`.
+  `composeFault`, `ExtAgrees`, `BindWF`. Bytecode glue must use `gas := .none`. Never imported by `Lsc/Lang`.
+- `Proof/DispatchExt.lean` — S2 backward dispatcher `runtimeBlock_correct_ext`.
+- `EndToEndExt.lean` — S2 glue: `openModel`, `EvmCallRunExt`, `bytecode_call_correct_ext`
+  (Yul-level; no powdr adequacy).
 - `Proof/{Words,Memory,Env,Layout,Ops,OpsMore,OpsToken,OpsArith,OpsMulDiv,OpsCtx,Emit,Core,Counter,Token,Vault,Dispatch}.lean` — `CallFree`/`M1Frag` simulation (`load`/`addChecked`/`subChecked`/`mulChecked`/`divChecked`/`mulDiv*`/`pure`, ctx reads including `selfAddress`, `store`/`emit` 0/1/3/`require`, `ite`/`opTail` word/addr/flag return, params); `counter_correct` / `token_correct` / `runtimeBlock_correct_callFree`; Vault `vault_correct_ext` for all runtime functions (`S2Frag`, binding `Vault.assetB`).
 - `Proof/Descend.lean` — `NoExternalOps`, `step_descend` (inverse of `step_lift` for call-free Yul), `execStmts_append_inv`, `execStmts_det_evm` (`EVM.evm_deterministic`).
 - `Proof/CallState.lean` — `restore` after a scoped call block; `R`/`RX` after `finishCall`.
@@ -79,7 +82,8 @@ vs anvil/revm on `compileRuntime` / `compileDeploy` bytecode).
 
 ## `Lsc/Examples`
 
-`Token`, `Vault`, `AMM`: contract source, proofs, end-to-end instance (`TokenEndToEnd.lean`).
+`Token`, `Vault`, `AMM`: contract source, proofs, end-to-end instance (`TokenEndToEnd.lean`,
+`VaultEndToEnd.lean`).
 
 ## Deleted in S0
 

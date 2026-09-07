@@ -17,7 +17,9 @@ open Lsc
 open YulSemantics
 open YulSemantics.EVM
 
-/-- S2 dialect: relational `ExternalCalls`, no creates, no `gas()`. -/
+/-- S2 dialect: relational `ExternalCalls`, no creates, no `gas()`.
+Bytecode glue must instantiate powdr `ExternalModel` with `gas := .none`
+(the class default is `.any`) so the dialect equals `yulD`. -/
 @[reducible] def yulD (calls : ExternalCalls) : Dialect :=
   evmWithExternal calls .none .none
 

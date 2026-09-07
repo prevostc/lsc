@@ -42,8 +42,16 @@ What an end-to-end theorem of this project relies on beyond its own proof.
   lock. A bytecode-level lock proof is not part of S2.
 - `Realizes`: inhabitation only; used solely by a forward `_exists` companion, **not** by the
   backward `toYulFn_correct_ext`. Glue may set `faults n := ¬resp.success`.
-- `ExternalsRealized { calls, creates := .none, gas := .none }` / `CallsRealized` stays TCB
-  for later bytecode glue; M0 has no `compile_correct` over `yulD`.
+- `ExternalsRealized { calls, creates := .none, gas := .none }` / `CallsRealized` is a
+  hypothesis of `bytecode_call_correct_ext` (`CreatesRealized.none` and
+  `GasCallsRealized.noneOracle` are discharged). `ExternalModel.gas` must be set to `.none`
+  (class default is `.any`) so the dialect equals `yulD`.
+- **powdr direction gap (S2 M3):** `compile_correct` is forward only (`Yul Run → ∃ EVM Steps`).
+  There is no `compile_complete` / adequacy. S2 therefore states `EvmCallRunExt` at the Yul
+  level: every admitted `Run` is predicted and has matching `Steps`; uniqueness of halted
+  `Steps` is per start state (`steps_halted_unique`). The converse (every EVM execution is
+  a Yul run) remains a modelling gap, unlike S1's `EvmTraceRunAll` which uses a constructed
+  forward Yul run from call-free simulation.
 - Fault oracle: backward `toYulFn_correct_ext` existentially chooses `fo` via
   `composeFault ncalls (¬resp.success) rest` so Core and Yul agree on each external outcome;
   security theorems remain `∀ w` and transport along the backward theorem. A failing `call`
