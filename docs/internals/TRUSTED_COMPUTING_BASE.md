@@ -26,6 +26,10 @@ Spec → Core → Yul → EVM bytecode. Axiom footprint of the chain is `propext
 - powdr `evm-semantics` (relational, conformance-tested on GeneralStateTests and
   EEST Osaka) and powdr `yul-semantics` (adequacy proved by its authors). Pinned
   in `lake-manifest.json`.
+- Yul→EVM compiler: fork `prevostc/yul-compiler` at `30230e1`, which differs from
+  upstream powdr `330923e0` only by the classic `switch` lowering (jump-on-match,
+  out-of-line bodies). Verified in the fork's own `Checks.lean` with the same
+  axiom footprint. Pinned in `lake-manifest.json`.
 - Layout relation `R` (`Lsc/Compiler/Correctness.lean`): how bytecode storage is
   read back as contract state.
 - Keccak: powdr `targetKeccakOracle` (`evmKeccak`), injective on the storage keys
@@ -121,7 +125,7 @@ Not derived from powdr:
 ## Untrusted (checked)
 
 Reifier certificates (`Lsc/Lang/Reify.lean`, kernel-checked `rfl`), `toYul`
-(`toYulFn_correct_callFree` / `toYulFn_correct_ext`), powdr's compiler
+(`toYulFn_correct_callFree` / `toYulFn_correct_ext`), the forked Yul→EVM compiler
 (`compile_correct`; `compileObject_correct` / `bytecode_deploy_correct` for
 init code without appended args; Yul `constructor_correct` for the CREATE
 suffix convention), and the

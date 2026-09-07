@@ -13,15 +13,19 @@ repo.
 - The language spec (`Tx`, external call, the core interpreter, the
   `IERC20` may-model). Reviewed, not proved.
 - powdr's EVM semantics (relational, conformance-tested) and Yul
-  semantics (adequacy proved by its authors), plus powdr's Yul-to-EVM
-  compiler. Pinned in `lake-manifest.json`.
+  semantics (adequacy proved by its authors), plus the Yul-to-EVM
+  compiler: fork `prevostc/yul-compiler` at `30230e1`, which differs
+  from upstream powdr `330923e0` only by the classic `switch` lowering
+  (jump-on-match, out-of-line bodies), verified in the fork's own
+  `Checks.lean` with the same axiom footprint. Pinned in
+  `lake-manifest.json`.
 - How bytecode storage is read back as contract state (the layout
   relation).
 - Keccak: injective on the storage keys we form; the compile-time
   selector engine agrees with the EVM keccak.
 - That Ethereum clients implement the specification.
 
-The reifier, the Core-to-Yul compiler, and powdr's compiler are
+The reifier, the Core-to-Yul compiler, and the Yul-to-EVM compiler are
 **checked**, not trusted: each has a theorem. A former home-grown
 EVM/codegen stack is gone.
 

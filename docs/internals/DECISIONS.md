@@ -66,3 +66,20 @@ peak (all remain live innermost); genuine last-use splitting reshapes
 (~6k lines). Stopgap applied first: the AMM's unused `let _ ← transferFrom`
 results become statement calls (17 → 15 live locals) so the current AMM
 compiles.
+
+## 2026-09-07 — Pin Yul→EVM compiler to `prevostc/yul-compiler` @ `30230e1`
+
+Move the `yul-evm-compiler` Lake pin from upstream powdr `330923e0` to the
+user's fork `https://github.com/prevostc/yul-compiler` at
+`30230e1c08d990cf454b62b7c566259de71a1397`. The fork differs only in classic
+`switch` lowering: solc-style jump-on-match with out-of-line bodies, instead of
+`EQ; ISZERO; JUMPI` (jump on mismatch). The fork's own `Checks.lean` keeps the
+same axiom footprint (`propext`, `Classical.choice`, `Quot.sound`).
+
+Motivation: heimdall expects solc's `EQ; PUSH dest; JUMPI` dispatcher and
+recovers none of our selectors against the old lowering. With this pin it
+recovers every selector except those whose top byte is `0x00` (emitted as
+`PUSH3`, which heimdall does not treat as a 4-byte selector). The Lsc
+dispatcher Yul is unchanged; this is a TCB pin move, not a change to our
+emitter. Lsc theorems are expected to keep their names; a break in a
+transported goal should be reported, not patched around.

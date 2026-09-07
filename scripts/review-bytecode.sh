@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
-# Review compiler-generated Yul and labelled Asm under out/.
-# Heimdall does not recover selectors for powdr-emitted EQ; ISZERO; JUMPI dispatch.
-# Prefer out/<C>.runtime.yul and out/<C>.runtime.asm over heimdall decompilation.
+# Review compiler-generated Yul, labelled Asm, and heimdall Solidity under out/.
+# Prefer out/<C>.runtime.yul / .runtime.asm for the compiler view; out/<C>.sol
+# is heimdall's recovered Solidity (selectors with a 0x00 high byte stay missing).
 #
 # Usage: scripts/review-bytecode.sh [Counter|Token|Vault|Amm|all]
 set -euo pipefail
 cd "$(dirname "$0")/.."
-export PATH="${HOME}/.foundry/bin:${PATH}"
+export PATH="${HOME}/.foundry/bin:${HOME}/.bifrost/bin:${PATH}"
 
 CONTRACTS=(Counter Token Vault Amm)
 TARGET="${1:-all}"
+# shellcheck source=heimdall_decompile.sh
+source scripts/heimdall_decompile.sh
 
 if [[ ! -f out/Token.runtime.yul ]]; then
   echo "==> artifacts missing; running export"
@@ -17,28 +19,22 @@ if [[ ! -f out/Token.runtime.yul ]]; then
 fi
 
 run_heimdall() {
-  local name="$1"
-  local hex="out/${name}.runtime.hex"
-  local abi="out/${name}.abi.json"
-  local out="out/heimdall/${name}"
-  if ! command -v heimdall >/dev/null 2>&1; then
-    echo "  skip heimdall (not installed)"
-    return 0
+  HEIMDALL_NOTICE_PREFIX="  " lsc_heimdall_decompile "$1"
+  local heimdall="${HEIMDALL:-${HOME}/.bifrost/bin/heimdall}"
+  if [[ ! -x "$heimdall" ]]; then
+    heimdall="$(command -v heimdall 2>/dev/null || true)"
   fi
-  if [[ ! -f "$hex" ]]; then
-    return 0
+  if [[ -n "$heimdall" && -x "$heimdall" && -f "out/${1}.runtime.hex" ]]; then
+    mkdir -p "out/heimdall/${1}"
+    "$heimdall" disassemble "out/${1}.runtime.hex" -o print \
+      > "out/heimdall/${1}/disasm.txt" 2>/dev/null || true
   fi
-  mkdir -p "$out"
-  # Heimdall does not recover selectors for powdr-emitted EQ; ISZERO; JUMPI dispatch.
-  heimdall decompile "$(cat "$hex")" -o "$out" --include-yul -a "$abi" -d 2>/dev/null || true
-  heimdall disassemble "$(cat "$hex")" -o print > "$out/disasm.txt" 2>/dev/null || true
-  echo "  heimdall → $out (selectors not recovered; see ${name}.runtime.asm)"
 }
 
 review_one() {
   local name="$1"
   echo "==> $name"
-  for f in runtime.yul deploy.yul runtime.asm runtime.hex; do
+  for f in runtime.yul deploy.yul runtime.asm runtime.hex sol decompiled.yul; do
     local p="out/${name}.${f}"
     if [[ -f "$p" ]]; then
       echo "  $p  $(wc -l < "$p") lines"
@@ -55,6 +51,10 @@ review_one() {
     head -n 20 "out/${name}.runtime.asm"
   fi
   run_heimdall "$name"
+  if [[ -f "out/${name}.sol" ]]; then
+    echo "  --- ${name}.sol (head) ---"
+    head -n 30 "out/${name}.sol"
+  fi
 }
 
 case "$TARGET" in

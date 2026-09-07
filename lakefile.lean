@@ -17,7 +17,7 @@ require evm_semantics from git
   "https://github.com/powdr-labs/evm-semantics" @ "2f8714d6ba960a3de67720019b54513f5bc1a2e3"
 
 require «yul-evm-compiler» from git
-  "https://github.com/powdr-labs/yul-compiler" @ "330923e0be35fc02c6cdb325e737003bb79230a8"
+  "https://github.com/prevostc/yul-compiler" @ "30230e1c08d990cf454b62b7c566259de71a1397"
 
 -- Concrete keccak for ABI selectors and executable tests.
 require KeccakEngine from git
