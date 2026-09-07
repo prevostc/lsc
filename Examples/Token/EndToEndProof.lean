@@ -39,8 +39,8 @@ theorem token_bytecode_no_unauthorized_extraction
       hs hlog hwf hWF hE
   have hR : RelyAlong (fun _ _ => True) (decodeTrace T calls) w :=
     relyAlong_calls (decodeTrace T calls) w (decodeTrace_are_calls T calls)
-  have hclaim := token_no_unauthorized_extraction self (decodeTrace T calls) w a
-    hw (wf_decodeTrace T self calls hWF) hR hA
+  have hclaim := token_no_unauthorized_extraction (decodeTrace T calls) w a
+    hw hR hA
   have hpre := token_claim_slot w.self σ a hs ha (token_map1_bound w a hwf ha)
   have hpost := token_claim_slot (run (decodeTrace T calls) w).self σ' a hs' ha
     (token_map1_bound { run (decodeTrace T calls) w with log := [] } a hwf' ha)
@@ -72,8 +72,8 @@ theorem token_bytecode_no_unauthorized_extraction_exists
   rw [hwlog] at hs' hwf'
   have hR : RelyAlong (fun _ _ => True) (callsOf tr) w :=
     relyAlong_calls (callsOf tr) w (callsOf_are_calls tr)
-  have hclaim := token_no_unauthorized_extraction self (callsOf tr) w a
-    hw (wf_callsOf self tr hW) hR (token_noAuthAlong_callsOf a tr w hA)
+  have hclaim := token_no_unauthorized_extraction (callsOf tr) w a
+    hw hR (token_noAuthAlong_callsOf a tr w hA)
   have hpre := token_claim_slot w.self σ a hs ha (token_map1_bound w a hwf ha)
   have hpost := token_claim_slot (run (callsOf tr) w).self σ' a hs' ha
     (token_map1_bound { run (callsOf tr) w with log := [] } a hwf' ha)
@@ -102,8 +102,8 @@ theorem token_bytecode_solvent
       hs hlog hwf hWF hE
   have hR : RelyAlong (fun _ _ => True) (decodeTrace T calls) w :=
     relyAlong_calls (decodeTrace T calls) w (decodeTrace_are_calls T calls)
-  exact ⟨token_solvent self (decodeTrace T calls) w
-    (wf_decodeTrace T self calls hWF) hR hw, hs'⟩
+  exact ⟨inv_solvent self _ (token_solvent self (decodeTrace T calls) w
+    (wf_decodeTrace T self calls hWF) hR hw), hs'⟩
 
 theorem token_bytecode_solvent_exists
     (rt : YBlock) (hrt : runtimeBlock Token.contract = some rt)
@@ -127,7 +127,8 @@ theorem token_bytecode_solvent_exists
   refine ⟨σ', hE, ?_, ?_⟩
   · have hR : RelyAlong (fun _ _ => True) (callsOf tr) w :=
       relyAlong_calls (callsOf tr) w (callsOf_are_calls tr)
-    exact token_solvent self (callsOf tr) w (wf_callsOf self tr hW) hR hw
+    exact inv_solvent self _ (token_solvent self (callsOf tr) w
+      (wf_callsOf self tr hW) hR hw)
   · rw [decodeTrace_encodeCalls T tr hb, hwlog] at hs'
     exact hs'
 

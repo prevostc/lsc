@@ -24,25 +24,27 @@ account that authorised nothing never sees its claim fall. "Authorised" is
 whatever the contract declared: typically the victim sent the call, or an
 allowance they granted covers it. Reverted calls leave the world unchanged.
 The protocol invariant must hold at the start and survive every entrypoint
-and those environment steps; unlike `no_unauthorized_extraction_at`, this
-form does not restrict to calls that target this contract. -/
+and those environment steps. Unlike `no_unauthorized_extraction_at`, this
+form does not require the caller to differ from the contract, and does not
+restrict to calls that target this contract. -/
 theorem no_unauthorized_extraction {Inv : World S X E → Prop} {claim : Claim S}
     {Auth : AuthPred C} {rely : X → X → Prop}
     (hN : NoUnauthorizedDecrease C Inv claim Auth)
     (hP : PreservesInv C Inv) (hE : PreservesInvEnv C Inv rely)
-    (self : Address) (tr : List (Step C)) (w : World S X E) (a : Address)
-    (hw : Inv w) (_hW : Wf self tr) (hR : RelyAlong rely tr w)
+    (tr : List (Step C)) (w : World S X E) (a : Address)
+    (hw : Inv w) (hR : RelyAlong rely tr w)
     (hA : NoAuthAlong Auth a tr w) :
     claim a w.self ≤ claim a (run tr w).self :=
-  Proof.no_unauthorized_extraction hN hP hE self tr w a hw _hW hR hA
+  Proof.no_unauthorized_extraction hN hP hE tr w a hw hR hA
 
 /-- Same victim-side guarantee as `no_unauthorized_extraction`, but the
 invariant is only assumed to survive calls that actually target this
 contract with a distinct sender. Vault and AMM need this form because
 their invariant talks about "our" token balance, which would be
-meaningless for a call to some other address. Authorisation is still
-judged in the pre-state of each call, so allowances can change along the
-trace. -/
+meaningless for a call to some other address; well-formedness (caller ≠
+contract) is required here, not on `no_unauthorized_extraction`.
+Authorisation is still judged in the pre-state of each call, so allowances
+can change along the trace. -/
 theorem no_unauthorized_extraction_at {Inv : World S X E → Prop} {claim : Claim S}
     {Auth : AuthPred C} {rely : X → X → Prop} {self : Address}
     (hN : NoUnauthorizedDecrease C Inv claim Auth)

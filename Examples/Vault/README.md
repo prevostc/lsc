@@ -4,10 +4,15 @@ Single-asset vault: binds one `IERC20`, mints shares on `deposit`, burns on
 `withdraw`. Pause flag. First mint is 1:1; later mints/redeems floor
 (`mulDivDown`). Token pull/push after accounting.
 
-**Proved:** an address's share count never falls unless that address called
-`withdraw`. The vault stays solvent vs the token ghost. Both facts at
-`Tx.run` and on compiled S2 runtime bytecode (one binding). Constructor
-calls `decimals` and is outside the EVM deploy theorem.
+**Proved:** an address's redeemable assets — floor-rounded pro-rata
+`shares × totalAssets / totalShares` — never fall unless that address
+called `withdraw`. Other depositors, pause/unpause, and views cannot
+debit it. Assumed, not proved: the asset token behaves like a conforming
+ERC-20 (no fee-on-transfer, no down-rebase, no reentrancy into the vault);
+between our calls the vault's token balance does not fall. The vault stays
+solvent vs that token balance (sum of redeemable claims ≤ holdings). Both
+facts at `Tx.run` and on compiled S2 runtime bytecode (one binding).
+Constructor calls `decimals` and is outside the EVM deploy theorem.
 
 | File | Role | Depends on |
 |------|------|------------|

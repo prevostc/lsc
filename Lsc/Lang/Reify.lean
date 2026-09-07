@@ -1752,15 +1752,15 @@ def obligationsText (ns : Name) (ctors : List Name) (extName : String) : String 
     s!"theorem {C}.inv_rely : Lsc.Security.PreservesInvEnv {C}.spec {C}.Inv ({rely}) := by sorry"
   let extraction :=
     "theorem " ++ C ++ ".no_unauthorized_extraction\n" ++
-    "    (self : Lsc.Address) (tr : List (Lsc.Security.Step " ++ C ++ ".spec))\n" ++
+    "    (tr : List (Lsc.Security.Step " ++ C ++ ".spec))\n" ++
     "    (w : " ++ world ++ ") (a : Lsc.Address)\n" ++
-    "    (hw : " ++ C ++ ".Inv w) (hW : Lsc.Security.Wf self tr)\n" ++
+    "    (hw : " ++ C ++ ".Inv w)\n" ++
     "    (hR : Lsc.Security.RelyAlong (" ++ rely ++ ") tr w)\n" ++
     "    (hA : Lsc.Security.NoAuthAlong " ++ C ++ ".Auth a tr w) :\n" ++
     "    " ++ C ++ ".claim a w.self ≤ " ++ C ++
     ".claim a (Lsc.Security.run tr w).self :=\n" ++
     "  Lsc.Security.no_unauthorized_extraction " ++ C ++ ".no_unauth " ++
-    C ++ ".preserves_inv " ++ C ++ ".inv_rely self tr w a hw hW hR hA"
+    C ++ ".preserves_inv " ++ C ++ ".inv_rely tr w a hw hR hA"
   let body :=
     (preserves ++
       [assembler "preserves_inv" s!"Lsc.Security.PreservesInv {C}.spec {C}.Inv"

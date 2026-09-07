@@ -3,14 +3,16 @@ import Examples.Token.SecurityProof
 
 /-!
 Token at the spec: nobody can reduce your ERC-20 balance without your
-authorisation, and recorded balances never exceed total supply.
+authorisation, and recorded balances always sum to total supply.
 
 Authorisation means you sent `transfer` or `burn`, or a `transferFrom`
 spent an allowance you had granted. Any address may call any entrypoint
 with any arguments. Token never calls another contract.
 
-Traces must be well-formed (the token is not calling itself). Starting
-balances must already sum to supply. Bytecode theorems lift these facts.
+Anti-extraction does not need the token to avoid calling itself; solvency
+does, because it reuses invariant preservation along a well-formed trace.
+Starting balances must already sum to supply. Bytecode theorems lift these
+facts.
 -/
 
 open Lsc Lsc.Security Token
@@ -23,23 +25,23 @@ an allowance she had granted, judged against the allowance stored at that
 moment. Other users may transfer, mint, approve, or burn their own tokens in
 any order; those actions cannot debit Alice. Views, `approve`, and `mint`
 never decrease an existing balance, and a reverted call leaves every balance
-unchanged. The starting balances must already sum to total supply, and the
-token must not be calling itself. -/
+unchanged. The starting balances must already sum to total supply. -/
 theorem token_no_unauthorized_extraction
-    (self : Address) (tr : List (Step spec)) (w : World Storage Unit Event) (a : Address)
-    (hw : Inv w) (hW : Wf self tr) (hR : RelyAlong (fun _ _ => True) tr w)
+    (tr : List (Step spec)) (w : World Storage Unit Event) (a : Address)
+    (hw : Inv w) (hR : RelyAlong (fun _ _ => True) tr w)
     (hA : NoAuthAlong Auth a tr w) :
     claim a w.self ≤ claim a (run tr w).self :=
-  Proof.token_no_unauthorized_extraction self tr w a hw hW hR hA
+  Proof.token_no_unauthorized_extraction tr w a hw hR hA
 
-/-- After any well-formed sequence of Token calls, the sum of balances still
-does not exceed total supply: the contract never owes more tokens than it
-has recorded. The starting world must already be solvent in that sense.
-Mint raises both sides together; burn lowers both; Token has no external
-asset that could drift. -/
+/-- After any well-formed sequence of Token calls, recorded balances still
+sum to total supply on a finite support: every token is accounted for.
+The starting world must already satisfy that equality. Mint raises both
+sides together; burn lowers both; Token has no external asset that could
+drift. The generic solvency bound (sum of balances ≤ supply) is then
+immediate. -/
 theorem token_solvent (self : Address) (tr : List (Step spec)) (w : World Storage Unit Event)
     (hW : Wf self tr) (hR : RelyAlong (fun _ _ => True) tr w) (h : Inv w) :
-    Solvent claim holdings self (run tr w) :=
+    Inv (run tr w) :=
   Proof.token_solvent self tr w hW hR h
 
 end Token

@@ -2,7 +2,7 @@
 
 The headline guarantee is victim-side: **nobody can reduce your protocol
 claim without your authorisation**, and **the contract does not owe more
-than it holds**, along any well-formed sequence of calls.
+than it holds**.
 
 ## What you declare
 
@@ -31,11 +31,16 @@ token `Rely`.
 
 ## What the generic theorems say
 
-If those local facts hold, then on every well-formed trace:
+If those local facts hold, then:
 
-- An account that authorised no call never sees its claim fall.
-- If the invariant implies solvency, solvency still holds after the trace.
-- The invariant itself still holds.
+- An account that authorised no call never sees its claim fall. The
+  unrestricted theorem does not require the caller to differ from the
+  contract.
+- If the invariant implies solvency, solvency still holds after any
+  well-formed trace. Vault and AMM use the `_at` variants, which do
+  require well-formedness (caller ≠ contract), because their invariant
+  talks about this contract's token balance.
+- The invariant itself still holds along a well-formed trace.
 
 A reverted call leaves the world unchanged. Constructors are not trace
 steps; deployment from empty storage is a separate `init` fact when proved.
@@ -45,12 +50,16 @@ steps; deployment from empty storage is a separate `init` fact when proved.
 Any addresses may call any entrypoint with any arguments, in any order,
 interleaved with honest calls. Between our calls, the environment may
 update external ghosts only in ways the token `Rely` allows (our token
-balance does not fall; `decimals` stay put). Traces are well-formed:
-callers are not the contract itself.
+balance does not fall; `decimals` stay put). Well-formedness — callers
+are not the contract itself — is required for invariant and solvency
+preservation and for the `_at` extraction theorems (Vault, AMM), not for
+Token-style unrestricted extraction.
 
 Token, Vault, and AMM instantiate this at the spec. Token and Vault also
 have it on compiled runtime bytecode. AMM has unauthorised-extraction on
-bytecode; solvency stays at the spec.
+bytecode; solvency stays at the spec. Vault's bytecode solvency is read
+from EVM storage after a fault-oracle fold of the external calls, not
+from the high-level `Security.run` post-world.
 
 ## Out of scope
 
