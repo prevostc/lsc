@@ -30,8 +30,8 @@ bytecode    ──(4) EndToEnd glue──────  bytecode-level anti-explo
      `calldata.length < 2^256` so `calldatasize` agrees with `List.length`.
      `token_correct` / `counter_correct` instantiate the function theorem;
      `token_dispatch_correct` / `counter_dispatch_correct` instantiate the dispatcher. Axioms
-     `propext` / `Classical.choice` / `Quot.sound`. Vault `deposit`/`withdraw` remain outside
-     `CallFree` because they `Stmt.call`; `constructor` is excluded by `f.kind ≠ .constructor`.
+     `propext` / `Classical.choice` / `Quot.sound`. Vault `deposit`/`withdraw` are `S2Frag`
+     (they `Stmt.call`); `constructor` is excluded by `f.kind ≠ .constructor`.
    - **S2 (external calls, backward):** dialect `yulD calls := evmWithExternal calls .none .none`.
      Glue (`Conforms`, `NoInterfere`, `RX`, `Realizes`) is `Lsc/Compiler/Externals.lean`.
      `ToYulFnCorrectExt` / `RunCommittedExt` are in `Correctness.lean`. The main theorem is
@@ -45,12 +45,12 @@ bytecode    ──(4) EndToEnd glue──────  bytecode-level anti-explo
      is **proved**: invert `Run` → descend → S1 → `EVM.evm_deterministic`. Extra `hstab` /
      `haddr` close `RX` (call-free `sstore` updates `storageOf` at the executing address;
      `ignoresLocal` only covers executing `storage`/`transient`). `Op.call`/`Stmt.call`
-     (`op_sim_call_bwd`, `core_sim_ext`) and Vault `deposit`/`withdraw` remain **M1**.
+     (`op_sim_call_bwd`, `core_sim_ext`) cover `S2Frag` including Vault `deposit`/`withdraw`.
      `runtimeBlock_correct` is now stated backward over `yulD` / `RunCommittedExt` shape
      and stays `sorry` (M3). Axioms of the call-free theorem: `propext` / `Classical.choice` /
      `Quot.sound`. Hypotheses: `Γ.st.Lawful`, `KeccakSep`, `ctxRel`, `R`, `RX`, `ignoresLocal`,
      `haddr`, `hstab`. Args are `decodeArgs f st0.env.calldata`.
-     **S2 step (this session):** `step_ofState` / `ofState_noExt_halt` / `execStmts_normal_ofState` close `hstab` for `noExt` Yul (`selfdestruct` excluded). `core_sim_ext_callFree` is proved (S1 `core_sim` + descend + `callFree_run_faults` + `RX_callFree`). `toYulFn_correct_ext` dropped global `haddr`/`hstab` in favor of `hslot` (`callFree_preserves_addr` / BindWF scalar) + `ofState_noExt_halt`. `core_sim_ext` still has named remaining `hCallFree` (`S2Frag` ⇏ `CallFree` on `.call`). Vault `deposit`/`withdraw` and `vault_correct_ext` are **not done**. `runtimeBlock_correct` stays `sorry` (M3).
+     **S2 step (this session):** `step_ofState` / `ofState_noExt_halt` / `execStmts_normal_ofState` close `hstab` for `noExt` Yul (`selfdestruct` excluded). `core_sim_ext_callFree` is proved (S1 `core_sim` + descend + `callFree_run_faults` + `RX_callFree`). `toYulFn_correct_ext` dropped global `haddr`/`hstab` in favor of `hslot` (`callFree_preserves_addr` / BindWF scalar) + `ofState_noExt_halt`. S2 per-function backward theorem proved for `S2Frag`; Vault runtime functions all covered (`vault_correct_ext` / `vault_deposit_correct_ext` / `vault_withdraw_correct_ext`). `core_sim_ext` has no extra `hCallFree`. `runtimeBlock_correct` stays `sorry` (M3).
    Emitter: temp-free nested Yul, gated by `coreWF` / `Nodup`. Tested for Counter and Token by
    `Lsc/Compiler/YulTests.lean`.
 3. **Yul → bytecode.** Runtime: powdr `YulEvmCompiler.compile_correct` (consumed by
