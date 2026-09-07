@@ -36,29 +36,10 @@ theorem selectorBytes_length (n : Nat) : (selectorBytes n).length = 4 := by
 theorem wordBytes_length (n : Nat) : (wordBytes n).length = 32 := by
   simp [wordBytes]
 
-theorem abiInput_length (spec : AbiSpec) (args : List Nat) :
-    (abiInput spec args).length = 4 + 32 * args.length := by
-  simp [abiInput, selectorBytes_length, List.length_append, List.length_flatMap,
-    wordBytes_length]
-  induction args with
-  | nil => simp
-  | cons _ args ih =>
-    simp [ih]
-    omega
-
-theorem Abs.ofState_mstore {G} (α : Abs G) (st : EvmState) (p v : U256) (a : Address) :
-    α.ofState { touchMemory st p.toNat 32 with memory := storeWord st.memory p.toNat v } a =
-      α.ofState st a := by
-  simp [α.ofState_proj, CallWorld.ofState, touchMemory]
-
 theorem extCallGas_lt_wordBound : extCallGas < wordBound := by
   unfold extCallGas wordBound
   exact Nat.lt_trans (by decide : 1000000 < 2 ^ 20)
     (Nat.pow_lt_pow_right (by decide : (1 : Nat) < 2) (by decide : (20 : Nat) < 256))
-
-theorem toNat_extCallGas :
-    (BitVec.ofNat 256 extCallGas).toNat = extCallGas :=
-  toNat_ofNat_of_lt extCallGas_lt_wordBound
 
 theorem finishCall_storage_fail_eq (kind : CallKind) (st : EvmState)
     (resp : CallResponse) (iOff iSz oOff oSz : Nat) (h : resp.success = false) :
@@ -71,10 +52,6 @@ theorem finishCall_returndata (kind st resp iOff iSz oOff oSz) :
 
 theorem CallResponse.flag_of (resp : CallResponse) :
     resp.flag = if resp.success then (1 : U256) else (0 : U256) := rfl
-
-theorem Abs.ofState_touch {G} (α : Abs G) (st : EvmState) (p n : Nat) (a : Address) :
-    α.ofState (touchMemory st p n) a = α.ofState st a := by
-  simp [α.ofState_proj, CallWorld.ofState, touchMemory]
 
 theorem finishCall_address (kind st resp iOff iSz oOff oSz) :
     (finishCall kind st resp iOff iSz oOff oSz).env.address = st.env.address := by
@@ -182,35 +159,10 @@ theorem readBytes_pack0 (mem : Nat → UInt8) (sel : Nat) (hsel : sel < 2 ^ 32) 
       selectorBytes sel :=
   selectorBytes_mem mem sel hsel
 
-theorem readBytes_pack1 (mem : Nat → UInt8) (sel a : Nat)
-    (hsel : sel < 2 ^ 32) (ha : a < wordBound) :
-    readBytes
-      (storeWord (storeWord mem abiPtr (BitVec.ofNat 256 sel <<< 224))
-        abiAfterSel (BitVec.ofNat 256 a))
-      abiPtr 36 = selectorBytes sel ++ wordBytes a := by
-  have h36 : (36 : Nat) = 4 + 32 := rfl
-  have hptr : abiPtr + 4 = abiAfterSel := rfl
-  rw [h36, readBytes_split, hptr, readBytes_storeWord_wordBytes (hn := ha)]
-  refine congrArg (fun l => l ++ wordBytes a) ?_
-  apply List.map_congr_left
-  intro i hi
-  have hi' : i < 4 := List.mem_range.mp hi
-  have hlo : abiPtr + i < abiAfterSel := by simp only [abiPtr, abiAfterSel]; omega
-  have hidx : abiPtr + i - abiPtr = i := Nat.add_sub_cancel_left abiPtr i
-  rw [storeWord_out (h := .inl hlo), storeWord_in (h := by simp only [abiPtr]; omega),
-    hidx, byteAt_shl_selector sel i hsel hi']
-
 theorem boolOpt_or_b2w (rds mload : U256) :
     b2w (rds = 0) ||| (b2w (rds.ult 32 = false) &&& b2w (mload = 1)) =
       b2w (decide (rds = 0) || (rds.ult 32 = false && decide (mload = 1))) := by
   simp [b2w_or, b2w_and]
-
-theorem boolOpt_iszero (rds mload : U256) :
-    b2w ((b2w (rds = 0) ||| (b2w (rds.ult 32 = false) &&& b2w (mload = 1))) = 0) =
-      b2w (!(decide (rds = 0) || (rds.ult 32 = false && decide (mload = 1)))) := by
-  rw [boolOpt_or_b2w]
-  cases h : (decide (rds = 0) || (rds.ult 32 = false && decide (mload = 1))) <;>
-    simp [h, b2w]
 
 theorem Abs.ofState_finishCall_fail {G} (α : Abs G) (kind st resp a iOff iSz oOff oSz)
     (h : resp.success = false) :
@@ -248,35 +200,20 @@ private theorem storeWord_out_prefix (mem : Nat → UInt8) (dst : Nat) (v : U256
   have hi' : i < n := List.mem_range.mp hi
   exact storeWord_out mem dst v (p + i) (.inl (by omega))
 
-theorem readBytes_pack2 (mem : Nat → UInt8) (sel a b : Nat)
-    (hsel : sel < 2 ^ 32) (ha : a < wordBound) (hb : b < wordBound) :
-    readBytes
-      (storeWord (storeWord (storeWord mem abiPtr (BitVec.ofNat 256 sel <<< 224))
-        abiAfterSel (BitVec.ofNat 256 a)) (abiAfterSel + 32) (BitVec.ofNat 256 b))
-      abiPtr 68 = selectorBytes sel ++ wordBytes a ++ wordBytes b := by
-  have h68 : (68 : Nat) = 36 + 32 := rfl
-  rw [h68, readBytes_split]
-  have hptr : abiPtr + 36 = abiAfterSel + 32 := by simp [abiPtr, abiAfterSel]
-  rw [hptr, readBytes_storeWord_wordBytes (hn := hb)]
-  refine congrArg (fun l => l ++ wordBytes b) ?_
-  have hle : abiPtr + 36 ≤ abiAfterSel + 32 := by simp only [abiPtr, abiAfterSel]; omega
-  rw [storeWord_out_prefix (h := hle)]
-  exact readBytes_pack1 mem sel a hsel ha
-
-theorem readBytes_pack3 (mem : Nat → UInt8) (sel a b c : Nat)
-    (hsel : sel < 2 ^ 32) (ha : a < wordBound) (hb : b < wordBound) (hc : c < wordBound) :
-    readBytes
-      (storeWord (storeWord (storeWord (storeWord mem abiPtr (BitVec.ofNat 256 sel <<< 224))
-        abiAfterSel (BitVec.ofNat 256 a)) (abiAfterSel + 32) (BitVec.ofNat 256 b))
-        (abiAfterSel + 64) (BitVec.ofNat 256 c))
-      abiPtr 100 = selectorBytes sel ++ wordBytes a ++ wordBytes b ++ wordBytes c := by
-  have h100 : (100 : Nat) = 68 + 32 := rfl
-  rw [h100, readBytes_split]
-  have hptr : abiPtr + 68 = abiAfterSel + 64 := by simp [abiPtr, abiAfterSel]
-  rw [hptr, readBytes_storeWord_wordBytes (hn := hc)]
-  refine congrArg (fun l => l ++ wordBytes c) ?_
-  have hle : abiPtr + 68 ≤ abiAfterSel + 64 := by simp only [abiPtr, abiAfterSel]; omega
-  rw [storeWord_out_prefix (h := hle)]
-  exact readBytes_pack2 mem sel a b hsel ha hb
+/-- Store one ABI word at offset `off` and extend a packed prefix. -/
+theorem readBytes_pack_snoc (mem : Nat → UInt8) (off v : Nat)
+    (hv : v < wordBound) {pre : List UInt8}
+    (hpre : readBytes mem abiPtr (4 + 32 * off) = pre) :
+    readBytes (storeWord mem (abiAfterSel + 32 * off) (BitVec.ofNat 256 v))
+      abiPtr (4 + 32 * (off + 1)) = pre ++ wordBytes v := by
+  have hlen : 4 + 32 * (off + 1) = (4 + 32 * off) + 32 := by omega
+  rw [hlen, readBytes_split]
+  have hptr : abiPtr + (4 + 32 * off) = abiAfterSel + 32 * off := by
+    simp [abiPtr, abiAfterSel]; omega
+  rw [hptr, readBytes_storeWord_wordBytes (hn := hv)]
+  refine congrArg (fun l => l ++ wordBytes v) ?_
+  have hle : abiPtr + (4 + 32 * off) ≤ abiAfterSel + 32 * off := by
+    simp [abiPtr, abiAfterSel]; omega
+  rw [storeWord_out_prefix (h := hle), hpre]
 
 end Lsc.Compiler

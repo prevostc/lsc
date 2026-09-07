@@ -31,7 +31,6 @@ theorem hoist_nil_open {calls : ExternalCalls} {ss : YBlock}
   have hs' := h s hs
   cases s <;> simp [notFunDef] at hs' ⊢
 
-
 theorem eval_lit_unique {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
     {V : VEnv (yulD calls)} {st : EvmState} {n : Nat} {r}
     (h : EvalExpr (yulD calls) funs V st (lit n) r) :
@@ -175,32 +174,6 @@ theorem eval_call_inv {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
       · next hhead => cases hhead
     exact this.elim
 
-theorem decodeRet_word_ult {bs : List UInt8} {v : Nat} (h : decodeRet .word bs v) :
-    (BitVec.ofNat 256 bs.length).ult 32 = false := by
-  rcases h with ⟨h32, hwb, _⟩
-  have hult := ult_ofNat hwb (by decide : (32 : Nat) < wordBound)
-  have : ¬ bs.length < 32 := Nat.not_lt.mpr h32
-  simpa [hult, decide_eq_false_iff_not] using this
-
-theorem decodeRet_boolOpt_ok {bs : List UInt8} {v : Nat} (h : decodeRet .boolOpt bs v) :
-    BitVec.ofNat 256 bs.length = 0 ∨
-      ((BitVec.ofNat 256 bs.length).ult 32 = false ∧ wordFrom bs 0 = (1 : U256)) := by
-  rcases h with ⟨_, hwb, hbody⟩
-  cases hbody with
-  | inl h0 =>
-    refine .inl ?_
-    simp [h0]
-  | inr hge =>
-    rcases hge with ⟨h32, hw⟩
-    refine .inr ⟨?_, hw⟩
-    have hult := ult_ofNat hwb (by decide : (32 : Nat) < wordBound)
-    have : ¬ bs.length < 32 := Nat.not_lt.mpr h32
-    simpa [hult, decide_eq_false_iff_not] using this
-
-theorem haltSuccess_word_bytes {v : Nat} {h}
-    (hh : h = some (.ret, wordBytes v)) : haltSuccess .word v h := by
-  simp [haltSuccess, hh, retWords, abiBytes_singleton]
-
 theorem haltSuccess_unit_stop {h} (hh : h = some (.stop, ([] : List UInt8))) :
     haltSuccess .unit () h := by
   simp [haltSuccess, hh]
@@ -243,22 +216,6 @@ theorem selectorBytes_inj {a b : Nat} (ha : a < 2 ^ 32) (hb : b < 2 ^ 32)
   have := congrArg (fun l => l.foldl (fun acc b => acc * 256 + b.toNat) 0) h
   simpa [selectorBytes_beFold a ha, selectorBytes_beFold b hb] using this
 
-theorem exec_let_sload_inv {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
-    {V : VEnv (yulD calls)} {st : EvmState} {n : YIdent} {slot : Nat}
-    {V' : VEnv (yulD calls)} {st' : EvmState} {o : Outcome}
-    (h : ExecStmt (yulD calls) funs V st
-      (.letDecl [n] (some (bop Op.sload [lit slot]))) V' st' o) :
-    o = .normal ∧ st' = st ∧ V' = (n, st.storage (BitVec.ofNat 256 slot)) :: V := by
-  cases h with
-  | letVal he hlen =>
-    have hr := eval_sload_unique he
-    injection hr with hvs hst
-    subst hvs; subst hst
-    exact ⟨rfl, rfl, rfl⟩
-  | letHalt he =>
-    have hr := eval_sload_unique he
-    injection hr
-
 theorem exec_let_call_inv {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
     {V : VEnv (yulD calls)} {st : EvmState}
     {tok ok : YIdent} {target : U256} {gas insize : Nat}
@@ -291,10 +248,6 @@ theorem exec_let_call_inv {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
     obtain ⟨resp, hr, _⟩ := eval_call_inv hget hstatic he
     injection hr
 
-theorem names0_distinct :
-    identV 0 ≠ extTok 0 ∧ identV 0 ≠ extOk 0 ∧ extTok 0 ≠ extOk 0 := by
-  decide
-
 theorem evalArgs_cons_vals_inv {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
     {V : VEnv (yulD calls)} {st : EvmState} {e : YExpr} {es : List YExpr}
     {vs : List U256} {st' : EvmState}
@@ -304,38 +257,6 @@ theorem evalArgs_cons_vals_inv {calls : ExternalCalls} {funs : FunEnv (yulD call
       EvalExpr (yulD calls) funs V st1 e (.vals [v] st') := by
   cases h
   · next hrest hhead => exact ⟨_, _, _, rfl, hrest, hhead⟩
-
-theorem eval_bop1_vals_inv {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
-    {V : VEnv (yulD calls)} {st : EvmState} {op : YOp} {e : YExpr}
-    {vs : List U256} {st' : EvmState}
-    (h : EvalExpr (yulD calls) funs V st (bop op [e]) (.vals vs st')) :
-    ∃ v st1, EvalExpr (yulD calls) funs V st e (.vals [v] st1) ∧
-      (yulD calls).Builtin op [v] st1 (.ok vs st') := by
-  cases h with
-  | builtinOk hargs hbu =>
-    obtain ⟨v, vs', stMid, heq, hrest, hhead⟩ := evalArgs_cons_vals_inv hargs
-    subst heq
-    obtain ⟨hnil, hstMid⟩ := evalArgs_nil_inv hrest
-    subst hnil; subst hstMid
-    exact ⟨v, _, hhead, hbu⟩
-
-theorem eval_bop2_vals_inv {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
-    {V : VEnv (yulD calls)} {st : EvmState} {op : YOp} {e1 e2 : YExpr}
-    {vs : List U256} {st' : EvmState}
-    (h : EvalExpr (yulD calls) funs V st (bop op [e1, e2]) (.vals vs st')) :
-    ∃ v1 v2 stA stB,
-      EvalExpr (yulD calls) funs V st e2 (.vals [v2] stA) ∧
-      EvalExpr (yulD calls) funs V stA e1 (.vals [v1] stB) ∧
-      (yulD calls).Builtin op [v1, v2] stB (.ok vs st') := by
-  cases h with
-  | builtinOk hargs hbu =>
-    obtain ⟨v1, vs1, stA, e1eq, hrest, h1⟩ := evalArgs_cons_vals_inv hargs
-    subst e1eq
-    obtain ⟨v2, vs2, st0, e2eq, hnilA, h2⟩ := evalArgs_cons_vals_inv hrest
-    subst e2eq
-    obtain ⟨hnil, hst0⟩ := evalArgs_nil_inv hnilA
-    subst hnil; subst hst0
-    exact ⟨v1, v2, stA, _, h2, h1, hbu⟩
 
 theorem eval_shl_unique {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
     {V : VEnv (yulD calls)} {st : EvmState} {sel : Nat} {r}
@@ -416,24 +337,6 @@ theorem eval_mstore_sel_unique {calls : ExternalCalls} {funs : FunEnv (yulD call
         injection hr
     | argsHeadHalt _ hlit =>
       cases hlit
-
-theorem exec_mstore_sel_inv {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
-    {V : VEnv (yulD calls)} {st : EvmState} {sel : Nat}
-    {V' : VEnv (yulD calls)} {st' : EvmState} {o : Outcome}
-    (h : ExecStmt (yulD calls) funs V st
-      (.exprStmt (bop Op.mstore [lit abiPtr, bop Op.shl [lit 224, lit sel]]))
-      V' st' o) :
-    o = .normal ∧ V' = V ∧
-      st' = { touchMemory st abiPtr 32 with
-        memory := storeWord st.memory abiPtr (BitVec.ofNat 256 sel <<< 224) } := by
-  cases h with
-  | exprStmt he =>
-    have hr := eval_mstore_sel_unique he
-    injection hr with _ hst
-    exact ⟨rfl, rfl, hst⟩
-  | exprStmtHalt he =>
-    have hr := eval_mstore_sel_unique he
-    injection hr
 
 theorem eval_iszero_var_unique {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
     {V : VEnv (yulD calls)} {st : EvmState} {ok : YIdent} {v : U256} {r}
@@ -530,44 +433,6 @@ theorem exec_revert00_block_inv {calls : ExternalCalls} {funs : FunEnv (yulD cal
       rw [restore_self_open]
       exact ⟨rfl, rfl, hst⟩
 
-theorem exec_if_ok_inv {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
-    {V : VEnv (yulD calls)} {st : EvmState} {ok : YIdent} {flag : U256}
-    {V' : VEnv (yulD calls)} {st' : EvmState} {o : Outcome}
-    (hget : VEnv.get V ok = some flag)
-    (h : ExecStmt (yulD calls) funs V st
-      (.cond (bop Op.iszero [var ok]) [revert00]) V' st' o) :
-    (flag = 0 ∧ o = .halt ∧ V' = V ∧
-      st' = { touchMemory st 0 0 with halted := some (.revert, []) }) ∨
-    (flag ≠ 0 ∧ o = .normal ∧ V' = V ∧ st' = st) := by
-  cases h with
-  | ifTrue he hne hbody =>
-    have hr := eval_iszero_var_unique hget he
-    injection hr with hvs hst
-    subst hst
-    injection hvs with hcv
-    have hflag : flag = 0 := by
-      cases hdec : decide (flag = 0)
-      · have hb : b2w (decide (flag = 0)) = (0 : U256) := by rw [hdec]; rfl
-        exact (hne (hcv.trans (hb.trans (yulD_zero calls).symm))).elim
-      · exact of_decide_eq_true hdec
-    obtain ⟨rfl, rfl, hst⟩ := exec_revert00_block_inv hbody
-    exact .inl ⟨hflag, rfl, rfl, hst⟩
-  | ifFalse he hz =>
-    have hr := eval_iszero_var_unique hget he
-    injection hr with hvs hst
-    subst hst
-    injection hvs with hcv
-    have hflag : flag ≠ 0 := by
-      intro hf
-      have hb : b2w (decide (flag = 0)) = (1 : U256) := by simp [hf]; rfl
-      have : (1 : U256) = (0 : U256) :=
-        (hcv.trans hb).symm.trans (hz.trans (yulD_zero calls))
-      cases this
-    exact .inr ⟨hflag, rfl, rfl, rfl⟩
-  | ifHalt he =>
-    have hr := eval_iszero_var_unique hget he
-    injection hr
-
 theorem eval_rds_unique {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
     {V : VEnv (yulD calls)} {st : EvmState} {r}
     (h : EvalExpr (yulD calls) funs V st (bop Op.returndatasize []) r) :
@@ -633,51 +498,6 @@ theorem eval_lt_rds32_unique {calls : ExternalCalls} {funs : FunEnv (yulD calls)
       have hr := eval_rds_unique hrds
       injection hr
 
-theorem exec_word_check_inv {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
-    {V : VEnv (yulD calls)} {st : EvmState}
-    {V' : VEnv (yulD calls)} {st' : EvmState} {o : Outcome}
-    (h : ExecStmt (yulD calls) funs V st
-      (.cond (bop Op.lt [bop Op.returndatasize [], lit 32]) [revert00]) V' st' o) :
-    ((BitVec.ofNat 256 st.returndata.length).ult 32 = true ∧
-      o = .halt ∧ V' = V ∧
-      st' = { touchMemory st 0 0 with halted := some (.revert, []) }) ∨
-    ((BitVec.ofNat 256 st.returndata.length).ult 32 = false ∧
-      o = .normal ∧ V' = V ∧ st' = st) := by
-  have h32 : YulSemantics.EVM.litValue (.number 32) = (32 : U256) := rfl
-  cases h with
-  | ifTrue he hne hbody =>
-    have hr := eval_lt_rds32_unique he
-    injection hr with hvs hstSt
-    injection hvs with hcv
-    cases hstSt
-    have hult : (BitVec.ofNat 256 st.returndata.length).ult 32 = true := by
-      cases hbit : (BitVec.ofNat 256 st.returndata.length).ult 32
-      · have hb : b2w ((BitVec.ofNat 256 st.returndata.length).ult
-            (YulSemantics.EVM.litValue (.number 32))) = (0 : U256) := by
-          rw [h32, hbit]; rfl
-        exact (hne (hcv.trans (hb.trans (yulD_zero calls).symm))).elim
-      · rfl
-    obtain ⟨rfl, rfl, hst⟩ := exec_revert00_block_inv hbody
-    exact .inl ⟨hult, rfl, rfl, hst⟩
-  | ifFalse he hz =>
-    have hr := eval_lt_rds32_unique he
-    injection hr with hvs hstSt
-    injection hvs with hcv
-    cases hstSt
-    have hult : (BitVec.ofNat 256 st.returndata.length).ult 32 = false := by
-      cases hbit : (BitVec.ofNat 256 st.returndata.length).ult 32
-      · rfl
-      · have hb : b2w ((BitVec.ofNat 256 st.returndata.length).ult
-            (YulSemantics.EVM.litValue (.number 32))) = (1 : U256) := by
-          rw [h32, hbit]; rfl
-        have : (1 : U256) = (0 : U256) :=
-          (hcv.trans hb).symm.trans (hz.trans (yulD_zero calls))
-        cases this
-    exact .inr ⟨hult, rfl, rfl, rfl⟩
-  | ifHalt he =>
-    have hr := eval_lt_rds32_unique he
-    injection hr
-
 theorem bindingSlot_eq {c : ContractDef} {b : Nat} {bd : BindingDef}
     (h : c.bindings[b]? = some bd) : bindingSlot c b = bd.fieldSlot := by
   simp [bindingSlot, h]
@@ -730,21 +550,5 @@ theorem identV_ne_extOk (i d : Nat) : identV i ≠ extOk d := by
   have h' := congrArg String.toList h
   simp [identV, extOk, toString, String.toList_append] at h'
 
-theorem extTok_ne_extOk (d : Nat) : extTok d ≠ extOk d := by
-  intro h
-  have h' := congrArg String.toList h
-  simp [extTok, extOk, toString, String.toList_append] at h'
-
-/-- `let name := 0 { body }` or `{ body }` as produced by `emitExtCall`. -/
-theorem emitExtCall_stmts' (c : ContractDef) (e : Emit) (d b m : Nat)
-    (args : List Atom) (bind : Option YIdent) :
-    (emitExtCall c e d b m args bind).stmts =
-      e.stmts ++
-        match bind with
-        | none => [.block (emitExtCallBody c d b m args none)]
-        | some name =>
-          [.letDecl [name] (some (lit 0)),
-           .block (emitExtCallBody c d b m args (some name))] :=
-  emitExtCall_stmts c e d b m args bind
-
 end Lsc.Compiler
+

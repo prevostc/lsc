@@ -271,18 +271,6 @@ theorem noExt_core_callFree {c halt t} {core : Core t} (hM1 : CallFree core) :
         simpa [noExtBlock] using ihb hb {} d hB noExt_nil)
       (iha ha {} d hA noExt_nil)
 
-theorem noExt_toYulFn_callFree {c f yul} (hM1 : CallFree f.core)
-    (hy : toYulFn c f = some yul) (hk : f.kind ≠ .constructor) :
-    noExtBlock yul = true := by
-  have ⟨_, _, e, hem, hy'⟩ := toYulFn_inv hy hk
-  subst hy'
-  obtain ⟨e0, h0, hst⟩ := emitCore_prefix hem
-  rw [hst]
-  exact noExtBlock_append (noExt_params 4 f.params.length)
-    (noExt_core_callFree hM1 {} _ h0 noExt_nil)
-
-/-! ## Descend glue -/
-
 theorem hoist_yulD_of_evm {calls : ExternalCalls} {ss : YBlock}
     (h : hoist evm ss = []) : hoist (yulD calls) ss = [] := by
   have hcast := hoist_uncast calls ss
@@ -296,11 +284,6 @@ theorem hoist_yulD_of_evm {calls : ExternalCalls} {ss : YBlock}
 theorem noExtFuns_nilScope {calls : ExternalCalls} :
     noExtFuns ([] :: [] : FunEnv (yulD calls)) = true :=
   noExtFuns_cons_nil noExtFuns_nil
-
-theorem funEnvUncast_nilScope (calls : ExternalCalls) :
-    funEnvUncast calls [[]] = [[]] := by
-  delta funEnvUncast funEnvCast fscopeCast
-  rfl
 
 theorem run_block_inv {calls : ExternalCalls} {yul : YBlock} {st0 : EvmState}
     {V' : VEnv (yulD calls)} {st' : EvmState} {o : Outcome}
