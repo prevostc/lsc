@@ -71,8 +71,9 @@ Decisions for `Lsc/Compiler` fixed by the study of `yul-semantics`, `evm_semanti
   cannot take external calls in creation code, `decimals` is a constructor argument.
 - Dispatcher → `if lt(calldatasize(), 4) { revert(0,0) }` then
   `switch shr(224, calldataload(0))` with one `case <selector>` per entrypoint and `default { revert(0,0) }`.
-- Reentrancy lock → `tload`/`tstore` of a fixed transient slot around every `tx` entrypoint;
-  views revert while locked.
+- Reentrancy: **no lock is emitted** (no `tload`/`tstore`). Reentrancy is excluded by the
+  `NoInterfere` clause of `Conforms` on bound interfaces (`TRUSTED_COMPUTING_BASE.md`). An
+  emitted transient-slot lock with a bytecode-level proof is future work.
 - Never emitted: `for`, `delegatecall`, `selfdestruct`, `create`, `gas`, `datasize`/`dataoffset`
   outside the constructor.
 

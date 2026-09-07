@@ -98,8 +98,9 @@ pause, revert-on-zero, callee OOG, and allowance shortfall are in scope via the 
 
 ## Language-level guarantees (free, by construction)
 
-No silent overflow; unit safety; reentrancy lock by default and read-only reentrancy check on
-views; revert atomicity; frame theorems from `Core.effects`; no inline assembly, `delegatecall`,
+No silent overflow; unit safety; revert atomicity; reentrancy excluded by the `NoInterfere`
+clause of `Conforms` on bound interfaces (no lock is emitted today — see
+`TRUSTED_COMPUTING_BASE.md`); frame theorems from `Core.effects`; no inline assembly, `delegatecall`,
 `selfdestruct` or untyped calls; ABI/dispatcher correctness. External calls go only through a
 `Binding`.
 
