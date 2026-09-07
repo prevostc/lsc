@@ -3,3 +3,5 @@ foundry-lean-erc20-demo
 
 .lake
 external/EVMYulLean/
+
+out/

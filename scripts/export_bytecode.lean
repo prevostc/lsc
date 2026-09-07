@@ -1,15 +1,22 @@
 /-
 Export compiled EVM bytecode and Tx.run expectations as JSON (stdout).
 
+  scripts/export_bytecode.sh
   scripts/lean lake env lean scripts/export_bytecode.lean
+
+The shell wrapper writes `out/*.hex`, `out/*.abi.json`, and
+`out/heimdall/<Contract>/{sol,yul,*-disassembled.asm}`.
 
 Does not import `Lsc.Compiler.YulTests` (that file's `#eval`/`#guard` would re-run the
 Yul interpreter). Case lists, senders, and mapping slots follow YulTests.
+Amm cases are view-only (`getReserves` / `sharesOf` / `quote0for1`); constructor and
+swaps CALL out and are not expected to match anvil without token fixtures.
 -/
 import Lsc.Compiler.Bytecode
 import Lsc.Compiler.Yul
 import Lsc.Examples.Counter
 import Lsc.Examples.Token
+import Lsc.Examples.Amm
 import Lsc.Tools.AbiJson
 
 set_option maxHeartbeats 8000000
@@ -104,6 +111,17 @@ def wordOutcome {S X E ε : Type}
     String × List UInt8 × List (BitVec 256 × BitVec 256) :=
   match tx with
   | .ok (v, _) => ("ok", abiBytes [v], postOk)
+  | .error (.user e) => ("revert", customErrorBytes c (errIdx e) [], pre)
+  | .error (.arith a) => ("revert", panicBytes (arithPanicCode a), pre)
+  | .error .callFailed => ("revert", [], pre)
+
+def pairOutcome {S X E ε : Type}
+    (c : ContractDef) (errIdx : ε → Nat)
+    (tx : Except (Err ε) ((Nat × Nat) × World S X E))
+    (pre postOk : List (BitVec 256 × BitVec 256)) :
+    String × List UInt8 × List (BitVec 256 × BitVec 256) :=
+  match tx with
+  | .ok ((a, b), _) => ("ok", abiBytes [a, b], postOk)
   | .error (.user e) => ("revert", customErrorBytes c (errIdx e) [], pre)
   | .error (.arith a) => ("revert", panicBytes (arithPanicCode a), pre)
   | .error .callFailed => ("revert", [], pre)
@@ -238,6 +256,44 @@ def tokenCases : List Case :=
   , tokWord "totalSupply" "totalSupply" [] ctxOwner σ₁
       (Tx.run Token.totalSupply ctxOwner w₁) ]
 
+/-! ## Amm (view-only cases; swaps/ctor CALL out) -/
+
+def ammErr : Amm.Error → Nat
+  | .Zero => 0
+  | .ZeroShares => 1
+  | .ZeroOut => 2
+  | .InsufficientShares => 3
+  | .InsufficientOutput => 4
+  | .SameToken => 5
+
+def ammAddrs : List Nat := [0, 2]
+
+def ammSlots (σ : Amm.Storage) : List (BitVec 256 × BitVec 256) :=
+  [(u256 0, u256 σ.reserve0), (u256 1, u256 σ.reserve1), (u256 2, u256 σ.totalShares),
+    (u256 4, u256 σ.token0), (u256 5, u256 σ.token1),
+    (u256 6, u256 σ.decimals0), (u256 7, u256 σ.decimals1)] ++
+    ammAddrs.map (fun a => (mapSlot1 keccakOf 3 a, u256 (σ.shares a)))
+
+def ammWord (name fname : String) (args : List Nat)
+    (tx : Except (Err Amm.Error) (Nat × World Amm.Storage Amm.Ext Amm.Event)) : Case :=
+  let pre := ammSlots Amm.smokePool.self
+  mkCase Amm.contract name fname args Amm.smokeCtx.sender
+    (wordOutcome Amm.contract ammErr tx pre pre) pre
+
+def ammPair (name fname : String) (args : List Nat)
+    (tx : Except (Err Amm.Error) ((Nat × Nat) × World Amm.Storage Amm.Ext Amm.Event)) : Case :=
+  let pre := ammSlots Amm.smokePool.self
+  mkCase Amm.contract name fname args Amm.smokeCtx.sender
+    (pairOutcome Amm.contract ammErr tx pre pre) pre
+
+def ammCases : List Case :=
+  [ ammPair "getReserves" "getReserves" [] (Tx.run Amm.getReserves Amm.smokeCtx Amm.smokePool)
+  , ammWord "sharesOf" "sharesOf" [2] (Tx.run (Amm.sharesOf 2) Amm.smokeCtx Amm.smokePool)
+  , ammWord "quote0for1_ok" "quote0for1" [100]
+      (Tx.run (Amm.quote0for1 (Amount.ofNat 100)) Amm.smokeCtx Amm.smokePool)
+  , ammWord "quote0for1_zero" "quote0for1" [0]
+      (Tx.run (Amm.quote0for1 (Amount.ofNat 0)) Amm.smokeCtx Amm.smokePool) ]
+
 def contractJson (name : String) (c : ContractDef) (cases : List Case)
     (ctorCalldata : Option (List UInt8) := none)
     (ctorChecks : List Case := []) : String :=
@@ -280,7 +336,9 @@ def exportJson : String :=
       contractJson "Counter" Counter.contract counterCases,
       contractJson "Token" Token.contract tokenCases
         (some (ctorCalldata [tokenCtorOwner, tokenCtorSupply]))
-        tokenCtorChecks
+        tokenCtorChecks,
+      contractJson "Amm" Amm.contract ammCases
+        (some (ctorCalldata [10, 11]))
     ] ++ "]"
   ] ++ "}"
 
