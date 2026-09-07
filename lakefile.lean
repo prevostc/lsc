@@ -31,6 +31,7 @@ lean_lib Lsc where
     Glob.submodules `Lsc.Security,
     Glob.submodules `Lsc.Compiler,
     Glob.submodules `Lsc.Compiler.Proof,
+    Glob.submodules `Lsc.Compiler.Transport,
     Glob.submodules `Lsc.Tools,
     Glob.one `Lsc.Examples.Counter,
     Glob.one `Lsc.Examples.AmountDemo,

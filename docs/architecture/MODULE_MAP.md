@@ -61,8 +61,13 @@ Amount-typed examples.
 - `EndToEnd.lean` — S1 glue: `bytecode_call_correct`, `EvmCallRun`, `bytecode_trace_transport` /
   `bytecode_trace_all`. Directly imports `Security`.
 - `EndToEndExt.lean` — S2 glue: `openModel`, `EvmCallRunExt` / `EvmCallRunExtAll`,
-  `EvmTraceRunExt` / `EvmTraceRunExtAll`, `bytecode_call_correct_ext`. Universality uses
+  `EvmTraceRunExt` / `EvmTraceRunExtAll`, `EvmTraceRunExt_of_ExtAll`,
+  `bytecode_call_correct_ext`. Universality uses
   `CallsTotal` + EVM determinism (no powdr adequacy). Imports `EndToEnd`, so it sees `Security`.
+- `Transport/Defs.lean` — `TransportCodec` / `TransportSetup` / `TransportBindings`,
+  `decodeTrace` / `CallsWF`.
+- `Transport/Step.lean` — per-call `transport_step` / `transport_step_ext`.
+- `Transport.lean` — `transport_trace` / `_exists` and S2 `_ext` / `_claim_ext` variants.
 
 Depends on `Lsc/Lang` (`Core`, `Interface`) and powdr; never on `Lsc/Security` except
 `EndToEnd.lean` (and `EndToEndExt.lean` through it).
@@ -101,11 +106,16 @@ Depends on `Lsc/Lang` (`Core`, `Interface`) and powdr; never on `Lsc/Security` e
 - `CallBwd.lean` — backward `op_sim_call_bwd` / `stmt_sim_call_bwd`.
 - `Oracle.lean` — fault-oracle agreement and M1/`CallFree` independence from `faults`.
 - `OfState.lean` — `α.ofState` preservation along local `stepOp` / `noExt` `Step`.
+- `BindEnvs.lean` — `BindEnvs.avoids` and address/`RXs` preservation along M1/`CallFree` steps.
+- `CoreExtCall.lean` — call-head helpers for `core_sim_ext` (`sim_ext_letOp_call`, `sim_ext_seq_call`, `sim_ext_op_call_return`).
 - `CoreExtSim.lean` — S2 `core_sim_ext` / `toYulFn_correct_ext` (`hS2 : S2Frag f.core`).
 - `DispatchExt.lean` — S2 backward dispatcher `runtimeBlock_correct_ext`.
 - `Progress.lean` — S2 Yul progress infrastructure under `CallsTotal`.
 - `ProgressCore.lean` — `yul_progress`: a halted `Run` of compiled S2Frag runtime exists.
-- `Vault.lean` — `vault_correct_ext` for every Vault runtime function (`S2Frag`, `Vault.assetB`).
+- `Transport/Abi.lean` — generic ABI word-list length lemmas (`length_eq_zero` / `_two`).
+- `Transport/Slots.lean` — `storageRel_scalar_toNat` / `storageRel_map1_toNat`.
+- `ConstructorPrologue.lean` — CREATE `codecopy` / `mload` prologue.
+- `Constructor.lean` — `constructor_correct` / `deployBlock_correct`.
 
 ## `Lsc/Tools`
 

@@ -352,6 +352,14 @@ theorem BindEnvs.addrInj_of_addr {I S X} {bs : List (BindEnv I S X)} {σ σ' : S
   intro e1 h1 e2 h2 heq
   exact h e1 h1 e2 h2 (by simpa [ha e1 h1, ha e2 h2] using heq)
 
+theorem BindEnvs.conforms_of_addr {I S X} {bs : List (BindEnv I S X)}
+    {self : Address} {σ σ' : S} {calls : ExternalCalls}
+    (h : BindEnvs.conforms bs self σ calls)
+    (ha : ∀ e ∈ bs, e.bind.addr σ' = e.bind.addr σ) :
+    BindEnvs.conforms bs self σ' calls := by
+  intro e he
+  simpa [ha e he] using h e he
+
 theorem RXs_of_foreign {I : Interface} {S X E} {bs : List (BindEnv I S X)}
     (hF : BindEnvs.ofState_foreign bs) {w : World S X E} {st st' : EvmState}
     (hξ : ∀ e ∈ bs, ∀ k,

@@ -38,9 +38,8 @@ theorem amm_claim_of_rel (s : Storage) (σ : U256 → U256) (a : Address)
     (hs : storageRel Amm.contract Amm.schema evmKeccak s σ)
     (ha : Nat.lt a wordBound) (hsh : s.shares a < wordBound) :
     ammClaimRead evmKeccak σ a = claim a s := by
-  have h3 : σ (mapSlot1 evmKeccak 3 a) = BitVec.ofNat 256 (s.shares a) := by
-    simpa [amm_schema_shares] using hs 3 _ amm_field_shares a ha
-  simp [ammClaimRead, claim, h3, Lsc.Compiler.toNat_ofNat_of_lt hsh]
+  simpa [ammClaimRead, claim, amm_schema_shares] using
+    storageRel_map1_toNat hs amm_field_shares rfl (by rw [amm_schema_shares]) ha hsh
 
 theorem amm_shares_bound (w : World Storage Ext Event) (a : Address)
     (hwf : WorldWF Amm.contract Amm.schema w) (ha : Nat.lt a wordBound) :
@@ -190,32 +189,17 @@ def decodeAmm : (fn : Fn) → List Nat → spec.Args fn
   | .quote0for1, n :: _ => Amount.ofNat n
   | .quote0for1, _ => Amount.ofNat 0
 
-private theorem length_eq_one {α} {l : List α} (h : l.length = 1) : ∃ a, l = [a] := by
-  cases l with
-  | nil => cases h
-  | cons a l =>
-    cases l with
-    | nil => exact ⟨a, rfl⟩
-    | cons _ _ => simp at h
-
-private theorem length_eq_two {α} {l : List α} (h : l.length = 2) : ∃ a b, l = [a, b] := by
-  cases l with
-  | nil => cases h
-  | cons a l =>
-    obtain ⟨b, rfl⟩ := length_eq_one (by simpa using h)
-    exact ⟨a, b, rfl⟩
-
 theorem encodeAmm_decode (fn : Fn) (ns : List Nat)
     (h : ns.length = (ammFnDef fn).params.length) :
     encodeAmm fn (decodeAmm fn ns) = ns := by
   cases fn <;> simp [ammFnDef] at h
-  · obtain ⟨a0, a1, rfl⟩ := length_eq_two h; rfl
-  · obtain ⟨n, rfl⟩ := length_eq_one h; rfl
-  · obtain ⟨a, b, rfl⟩ := length_eq_two h; rfl
-  · obtain ⟨a, b, rfl⟩ := length_eq_two h; rfl
+  · obtain ⟨a0, a1, rfl⟩ := length_eq_two.mp h; rfl
+  · obtain ⟨n, rfl⟩ := length_eq_one.mp h; rfl
+  · obtain ⟨a, b, rfl⟩ := length_eq_two.mp h; rfl
+  · obtain ⟨a, b, rfl⟩ := length_eq_two.mp h; rfl
   · cases ns <;> simp at h; rfl
-  · obtain ⟨who, rfl⟩ := length_eq_one h; rfl
-  · obtain ⟨n, rfl⟩ := length_eq_one h; rfl
+  · obtain ⟨who, rfl⟩ := length_eq_one.mp h; rfl
+  · obtain ⟨n, rfl⟩ := length_eq_one.mp h; rfl
 
 theorem decodeAmm_encode (fn : Fn) (args : spec.Args fn) :
     decodeAmm fn (encodeAmm fn args) = args := by

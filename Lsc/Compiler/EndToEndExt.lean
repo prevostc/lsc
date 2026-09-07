@@ -425,6 +425,16 @@ inductive EvmTraceRunExtAll (is : List Instr) :
       (htl : EvmTraceRunExtAll is tr σ₁ ξ₁ σ' ξ') :
       EvmTraceRunExtAll is (call :: tr) σ ξ σ' ξ'
 
+/-- Drop the `EvmStartOK` witness; `ExtAll` is a stricter `EvmTraceRunExt`.
+The converse needs a start state for every call, which `EvmTraceRunExt` does not store. -/
+theorem EvmTraceRunExt_of_ExtAll {is : List Instr}
+    {tr : List EvmCall} {σ ξ σ' ξ'}
+    (h : EvmTraceRunExtAll is tr σ ξ σ' ξ') :
+    EvmTraceRunExt is tr σ ξ σ' ξ' := by
+  induction h with
+  | nil => exact .nil _ _
+  | cons hstart h1 htl ih => exact .cons h1 ih
+
 theorem evmCallRun_fnCalldata_ext {I : Interface} {S X E ε : Type}
     (bs : List (BindEnv I S X))
     (c : ContractDef) (Γ : ContractSchema S X E ε)

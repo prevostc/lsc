@@ -59,15 +59,13 @@ theorem vault_claim_of_rel (s : Storage) (σ : U256 → U256) (a : Address)
     (hta : s.totalAssets < wordBound) (hts : s.totalShares < wordBound)
     (hsh : s.shares a < wordBound) :
     vaultClaimRead evmKeccak σ a = claim a s := by
-  have h0 : σ (BitVec.ofNat 256 0) = BitVec.ofNat 256 s.totalAssets := by
-    simpa [vault_schema_totalAssets] using hs 0 _ vault_field_totalAssets
-  have h1 : σ (BitVec.ofNat 256 1) = BitVec.ofNat 256 s.totalShares := by
-    simpa [vault_schema_totalShares] using hs 1 _ vault_field_totalShares
-  have h2 : σ (mapSlot1 evmKeccak 2 a) = BitVec.ofNat 256 (s.shares a) := by
-    simpa [vault_schema_shares] using hs 2 _ vault_field_shares a ha
-  simp [vaultClaimRead, claim, h0, h1, h2,
-    Lsc.Compiler.toNat_ofNat_of_lt hta, Lsc.Compiler.toNat_ofNat_of_lt hts,
-    Lsc.Compiler.toNat_ofNat_of_lt hsh]
+  have h0 := storageRel_scalar_toNat hs vault_field_totalAssets rfl
+    (by rw [vault_schema_totalAssets]) hta
+  have h1 := storageRel_scalar_toNat hs vault_field_totalShares rfl
+    (by rw [vault_schema_totalShares]) hts
+  have h2 := storageRel_map1_toNat hs vault_field_shares rfl
+    (by rw [vault_schema_shares]) ha hsh
+  simp [vaultClaimRead, claim, h0, h1, h2]
 
 theorem vault_wf_scalar (w : World Storage Ext Event) (i : Nat) (fd : FieldDef)
     (hwf : WorldWF Vault.contract Vault.schema w)
@@ -241,22 +239,14 @@ def decodeVault : (fn : Fn) → List Nat → spec.Args fn
   | .paused?, _ => ()
   | .decimals, _ => ()
 
-private theorem length_eq_one {α} {l : List α} (h : l.length = 1) : ∃ a, l = [a] := by
-  cases l with
-  | nil => cases h
-  | cons a l =>
-    cases l with
-    | nil => exact ⟨a, rfl⟩
-    | cons _ _ => simp at h
-
 theorem encodeVault_decode (fn : Fn) (ns : List Nat)
     (h : ns.length = (vaultFnDef fn).params.length) :
     encodeVault fn (decodeVault fn ns) = ns := by
   cases fn <;> simp [vaultFnDef] at h
-  · obtain ⟨n, rfl⟩ := length_eq_one h; rfl
-  · obtain ⟨n, rfl⟩ := length_eq_one h; rfl
-  · obtain ⟨n, rfl⟩ := length_eq_one h; rfl
-  · obtain ⟨n, rfl⟩ := length_eq_one h; rfl
+  · obtain ⟨n, rfl⟩ := length_eq_one.mp h; rfl
+  · obtain ⟨n, rfl⟩ := length_eq_one.mp h; rfl
+  · obtain ⟨n, rfl⟩ := length_eq_one.mp h; rfl
+  · obtain ⟨n, rfl⟩ := length_eq_one.mp h; rfl
   · cases ns <;> simp at h; rfl
   · cases ns <;> simp at h; rfl
   · cases ns <;> simp at h; rfl

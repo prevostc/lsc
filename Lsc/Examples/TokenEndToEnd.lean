@@ -176,47 +176,17 @@ def decodeToken : (fn : Fn) → List Nat → spec.Args fn
   | .allowance, _ => (0, 0)
   | .totalSupply, _ => ()
 
-private theorem length_eq_zero {α} {l : List α} (h : l.length = 0) : l = [] :=
-  List.eq_nil_of_length_eq_zero h
-
-private theorem length_eq_one {α} {l : List α} (h : l.length = 1) : ∃ a, l = [a] := by
-  cases l with
-  | nil => cases h
-  | cons a l =>
-    cases l with
-    | nil => exact ⟨a, rfl⟩
-    | cons _ _ => simp at h
-
-private theorem length_eq_two {α} {l : List α} (h : l.length = 2) : ∃ a b, l = [a, b] := by
-  cases l with
-  | nil => cases h
-  | cons a l =>
-    cases l with
-    | nil => simp at h
-    | cons b l =>
-      cases l with
-      | nil => exact ⟨a, b, rfl⟩
-      | cons _ _ => simp at h
-
-private theorem length_eq_three {α} {l : List α} (h : l.length = 3) :
-    ∃ a b c, l = [a, b, c] := by
-  cases l with
-  | nil => cases h
-  | cons a l =>
-    obtain ⟨b, c, rfl⟩ := length_eq_two (by simpa using h)
-    exact ⟨a, b, c, rfl⟩
-
 theorem encodeToken_decode (fn : Fn) (ns : List Nat)
     (h : ns.length = (tokenFnDef fn).params.length) :
     encodeToken fn (decodeToken fn ns) = ns := by
   cases fn <;> simp [tokenFnDef] at h
-  · obtain ⟨dst, n, rfl⟩ := length_eq_two h; rfl
-  · obtain ⟨sp, n, rfl⟩ := length_eq_two h; rfl
-  · obtain ⟨src, dst, n, rfl⟩ := length_eq_three h; rfl
-  · obtain ⟨dst, n, rfl⟩ := length_eq_two h; rfl
-  · obtain ⟨n, rfl⟩ := length_eq_one h; rfl
-  · obtain ⟨who, rfl⟩ := length_eq_one h; rfl
-  · obtain ⟨o, s, rfl⟩ := length_eq_two h; rfl
+  · obtain ⟨dst, n, rfl⟩ := length_eq_two.mp h; rfl
+  · obtain ⟨sp, n, rfl⟩ := length_eq_two.mp h; rfl
+  · obtain ⟨src, dst, n, rfl⟩ := length_eq_three.mp h; rfl
+  · obtain ⟨dst, n, rfl⟩ := length_eq_two.mp h; rfl
+  · obtain ⟨n, rfl⟩ := length_eq_one.mp h; rfl
+  · obtain ⟨who, rfl⟩ := length_eq_one.mp h; rfl
+  · obtain ⟨o, s, rfl⟩ := length_eq_two.mp h; rfl
   · subst h; rfl
 
 theorem decodeToken_encode (fn : Fn) (args : spec.Args fn) :
@@ -396,9 +366,8 @@ theorem token_claim_slot (s : Storage) (σ : U256 → U256) (a : Address)
     (hs : storageRel Token.contract Token.schema evmKeccak s σ)
     (ha : Nat.lt a wordBound) (hb : s.balances a < wordBound) :
     (σ (mapSlot1 evmKeccak 2 a)).toNat = claim a s := by
-  have h := hs 2 _ token_balances_fd a ha
-  rw [token_schema_balances] at h
-  simpa [claim, Lsc.Compiler.toNat_ofNat_of_lt hb] using congrArg BitVec.toNat h
+  simpa [claim, token_schema_balances] using
+    storageRel_map1_toNat hs token_balances_fd rfl (by rw [token_schema_balances]) ha hb
 
 theorem token_map1_bound (w : World Storage Unit Event) (a : Address)
     (hwf : WorldWF Token.contract Token.schema w) (ha : Nat.lt a wordBound) :
