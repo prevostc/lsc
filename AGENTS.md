@@ -82,6 +82,69 @@ If Lean dependencies make the exact layout awkward, preserve the principle:
 theorem intent and proof implementation should be independently understandable
 and loadable.
 
+### Theorem statements
+
+Safety theorems take *success* as the hypothesis — `Tx.run f ctx w = .ok (r, w')`,
+or at trace level "the call was accepted" — and conclude about `w'`. Anything the
+program checks itself (`require`, overflow, balance, authorisation checks) is
+implied by success and must not appear as a hypothesis.
+
+No edge-case exclusions (self-transfer, zero amount, sender = owner, …) unless
+the property is genuinely false there; then the docstring states the limitation
+explicitly.
+
+Every hypothesis must be necessary: if removing it does not make the theorem
+false, remove it. Unused hypotheses (`_h…`) are a bug.
+
+Liveness ("under which conditions does the call succeed") is a separate theorem
+(`foo_succeeds_of …`), written only when a user needs it; never fused into a
+safety theorem.
+
+Prefer statements over all `ctx`/`w`; avoid hypotheses that merely restate an
+invariant already carried by the trace framework (`Inv`) unless the theorem is
+stated outside that framework.
+
+Before (`Examples/Token/ProofsTheorems.lean`):
+
+```
+theorem transfer_conserves (to : Address) (amount : Nat) (hne : ctx.sender ≠ to)
+    (hsub : amount ≤ w.self.balances ctx.sender)
+    (hadd : w.self.balances to + amount < wordBound) :
+    ∃ w', Tx.run (transfer to amount) ctx w = .ok ((), w') ∧
+      w'.self.balances ctx.sender + w'.self.balances to =
+        w.self.balances ctx.sender + w.self.balances to
+```
+
+After:
+
+```
+Tx.run (transfer to amount) ctx w = .ok ((), w') →
+  w'.self.balances ctx.sender + w'.self.balances to =
+    w.self.balances ctx.sender + w.self.balances to
+```
+
+`hne` is unnecessary: sender = receiver makes the sum trivially unchanged.
+
+## Example layout
+
+Each `Examples/<Name>/` contains exactly:
+
+- `Contract.lean` (the contract)
+- `Spec.lean` (the invariant, claim, authorisation predicates and any
+  binding/`TransportSetup` definitions — what we claim, no theorems)
+- `Theorems.lean` (every exposed theorem for this contract — Tx-level, security,
+  compiler instance, bytecode — each with a plain-language docstring and a
+  one-line body referencing `Proofs/…`)
+- `Proofs/` (`Tx.lean`, `Security.lean`, `Compile.lean`, `EndToEnd.lean`, plus
+  any helper files; nothing outside `Proofs/` contains proof code beyond
+  one-line references)
+- `README.md` (what the contract does, what is proved in prose, one line per
+  file)
+
+`Checks.lean` imports `Examples.<Name>.Theorems` only. This layout is the
+example-level instance of the Theorems/Proof rule; the docstring checker treats
+`Theorems.lean` as a Theorems file (its glob is `*Theorems.lean`, which matches).
+
 ## Implementation + proof
 
 Plan implementation and proof jointly before substantial work.
