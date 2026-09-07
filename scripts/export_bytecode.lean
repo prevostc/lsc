@@ -8,7 +8,7 @@ Writes `out/<C>.{runtime,deploy}.{hex,yul}`, `out/<C>.runtime.asm`,
 `out/<C>.abi.json`, `out/<C>.selectors.json`, and prints JSON on stdout
 (BEGIN_LSC_EXPORT … END_LSC_EXPORT) for `scripts/difftest.sh`.
 
-Does not import `Examples.YulTests` (that file's `#eval`/`#guard` would re-run the
+Does not import `Examples.Misc.YulTests` (that file's `#eval`/`#guard` would re-run the
 Yul interpreter). Case lists, senders, and mapping slots follow YulTests.
 Amm cases are view-only (`getReserves` / `sharesOf` / `quote0for1`); constructor and
 swaps CALL out and are not expected to match anvil without token fixtures.
@@ -18,10 +18,10 @@ import Lsc.Compiler.Bytecode
 import Lsc.Compiler.Yul
 import YulEvmCompiler.Asm
 import YulEvmCompiler.Compile
-import Examples.Counter
-import Examples.Token
-import Examples.Amm
-import Examples.Vault
+import Examples.Counter.Contract
+import Examples.Token.Contract
+import Examples.Amm.Contract
+import Examples.Vault.Contract
 import Lsc.Tools.AbiJson
 import Lsc.Tools.Disasm
 

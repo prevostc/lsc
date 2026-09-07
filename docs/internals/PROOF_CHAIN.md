@@ -14,14 +14,14 @@ bytecode    ──(4) EndToEnd glue──────  bytecode-level anti-explo
 | Link | Theorem(s) | File | Status | Fragment | Examples |
 |------|------------|------|--------|----------|----------|
 | 1 Spec→Core | `f.core_denote` | `Lsc/Lang/Reify.lean` | proved | both | Counter, Token, Vault, AMM |
-| 2 Core→Yul | `toYulFn_correct_callFree`, `runtimeBlock_correct_callFree`; instances `counter_correct`, `token_correct`, `counter_dispatch_correct`, `token_dispatch_correct` | `CoreTheorems.lean`, `DispatchTheorems.lean`, `Examples/CounterCompileTheorems.lean`, `Examples/TokenCompileTheorems.lean` | proved | S1 | Counter, Token |
-| 2 Core→Yul | `toYulFn_correct_ext`, `runtimeBlock_correct_ext`; instances `vault_correct_ext`, `amm_correct_ext` | `CoreExtSimTheorems.lean`, `DispatchExtTheorems.lean`, `Examples/VaultCompileTheorems.lean`, `Examples/AmmCompileTheorems.lean` | proved | S2 | Vault (one binding); AMM (two `IERC20`) |
+| 2 Core→Yul | `toYulFn_correct_callFree`, `runtimeBlock_correct_callFree`; instances `counter_correct`, `token_correct`, `counter_dispatch_correct`, `token_dispatch_correct` | `CoreTheorems.lean`, `DispatchTheorems.lean`, `Examples/Counter/CompileTheorems.lean`, `Examples/Token/CompileTheorems.lean` | proved | S1 | Counter, Token |
+| 2 Core→Yul | `toYulFn_correct_ext`, `runtimeBlock_correct_ext`; instances `vault_correct_ext`, `amm_correct_ext` | `CoreExtSimTheorems.lean`, `DispatchExtTheorems.lean`, `Examples/Vault/CompileTheorems.lean`, `Examples/Amm/CompileTheorems.lean` | proved | S2 | Vault (one binding); AMM (two `IERC20`) |
 | 3 Yul→EVM | `compile_correct`, `steps_halted_unique` | powdr `YulEvmCompiler`, `EvmDetTheorems.lean` | proved | both | runtime of the above |
 | 4 Glue | `bytecode_call_correct`, `bytecode_trace_all` | `EndToEndTheorems.lean` | proved | S1 | Token |
 | 4 Glue | `bytecode_call_correct_ext`, `yul_progress` | `EndToEndExtTheorems.lean`, `ProgressCoreTheorems.lean` | proved | S2 | Vault, AMM |
-| Security | `token_bytecode_no_unauthorized_extraction`, `token_bytecode_solvent` | `Examples/TokenEndToEndTheorems.lean` | proved | S1 | Token |
-| Security | `vault_bytecode_no_unauthorized_extraction`, `vault_bytecode_solvent` | `Examples/VaultEndToEndTheorems.lean` | proved | S2 | Vault |
-| Security | `amm_bytecode_no_unauthorized_extraction` | `Examples/AmmEndToEndTheorems.lean` | proved | S2 | AMM |
+| Security | `token_bytecode_no_unauthorized_extraction`, `token_bytecode_solvent` | `Examples/Token/EndToEndTheorems.lean` | proved | S1 | Token |
+| Security | `vault_bytecode_no_unauthorized_extraction`, `vault_bytecode_solvent` | `Examples/Vault/EndToEndTheorems.lean` | proved | S2 | Vault |
+| Security | `amm_bytecode_no_unauthorized_extraction` | `Examples/Amm/EndToEndTheorems.lean` | proved | S2 | AMM |
 | Deploy | `compileObject_correct` / `bytecode_deploy_correct` | powdr + `DeployTheorems.lean` | Yul ctor proved; EVM args gap | S1 | Token constructor (call-free); Counter has no ctor args |
 
 

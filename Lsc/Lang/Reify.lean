@@ -547,7 +547,8 @@ partial def unfoldToTx (x : Expr) (fuel : Nat := 8) : MetaM Expr := do
     return x
   if fuel = 0 then return x
   if n.any isSurfaceOp then
-    if n == some ``Lsc.Amount.rescale || n == some ``Lsc.Amount.convert then
+    if n == some (.str (.str `Lsc "Amount") "rescale")
+        || n == some (.str (.str `Lsc "Amount") "convert") then
       let args := x.getAppArgs
       if args.size > 0 then
         let _ ← roundingOf args[args.size - 2]!

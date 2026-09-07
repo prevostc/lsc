@@ -90,6 +90,6 @@ Decisions for `Lsc/Compiler` fixed by the study of `yul-semantics`, `evm_semanti
 - EVM: `EvmSemantics.stepF` iterated until halt; calldata in `executionEnv.calldata`, storage in
   `accountMap`.
 - Differential harness: `scripts/difftest.sh` — `Tx.run` vs anvil (revm) on `compileRuntime`
-  bytecode for Counter and Token (same cases as `Examples/YulTests.lean`).
+  bytecode for Counter and Token (same cases as `Examples/Misc/YulTests.lean`).
 - Nested `map2` hashes inner `keccak256(0,64)`
   into `[32]` before `mstore(0, k₂)`, so the read does not see a clobbered `[0]`.

@@ -27,7 +27,6 @@ lean_lib Lsc where
   -- `Glob.submodules` (not `andSubmodules`) because there is no `Lsc/Lang.lean` etc.
   globs := #[
     Glob.submodules `Lsc.Lang,
-    Glob.submodules `Lsc.Stdlib,
     Glob.submodules `Lsc.Security,
     Glob.submodules `Lsc.Compiler,
     Glob.submodules `Lsc.Compiler.Proof,
@@ -37,10 +36,19 @@ lean_lib Lsc where
     Glob.one `Lsc
   ]
 
-lean_lib Examples where
-  -- `Glob.submodules` because there is no `Examples.lean` barrel.
+lean_lib Stdlib where
   globs := #[
-    Glob.submodules `Examples
+    Glob.one `Stdlib,
+    Glob.submodules `Stdlib
+  ]
+
+lean_lib Examples where
+  globs := #[
+    Glob.submodules `Examples.Counter,
+    Glob.submodules `Examples.Token,
+    Glob.submodules `Examples.Vault,
+    Glob.submodules `Examples.Amm,
+    Glob.submodules `Examples.Misc
   ]
 
 /-- Pinned axiom footprint of the certificates and end-to-end theorems (built by `lake build`). -/

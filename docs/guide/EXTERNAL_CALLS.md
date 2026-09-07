@@ -8,7 +8,7 @@ compiler `sload`s the bound slot.
 
 ## Binding a token
 
-Vault binds one asset (`Examples/Vault.lean`):
+Vault binds one asset (`Examples/Vault/Contract.lean`):
 
 ```lean
 def assetB : Binding IERC20 Storage Ext :=

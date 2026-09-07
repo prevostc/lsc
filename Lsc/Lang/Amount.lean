@@ -8,34 +8,19 @@ to 18-decimal DAI, multiplying two WAD numbers without dividing by WAD, rounding
 protocol's disfavour. This module makes those type errors at zero runtime cost.
 
 * `Amount τ s` is a `structure` over `Nat` tagged with a *token marker* `τ` (any type, used
-  only as a phantom) and a *scale* `s` (the denominator: `WAD = 10^18`, `USDC = 10^6`).
-  Same-unit arithmetic only. A `def` newtype would unify with `Nat` and across units.
+  only as a phantom) and a *scale* `s` (the denominator). Same-unit arithmetic only.
+  Named scales (`WAD`, `RAY`, …) and derived ops (`mulDown`, `rescale`, `convert`, …) live
+  in `Stdlib.Scales`.
 * `Fixed s := Amount Unit s` is a dimensionless fixed-point number (rates, ratios, prices).
-  `Amount τ s * Fixed s → Amount τ s`; two amounts divide to a `Fixed s`.
-* Every operation that can lose precision names its rounding direction (`mulDown`/`mulUp`,
-  `divDown`/`divUp`, `rescale … .down/.up`). There is no unrounded `*`/`/` on amounts.
 * `Flag` is the storage-level boolean: a `def` newtype over `Nat` with values `0`/`1`, so that
-  `Core` stays a language of words and the certificate stays `rfl`. (A `Bool`-typed `Core`
-  would need typed environments; deferred.)
+  `Core` stays a language of words and the certificate stays `rfl`.
 
 The compiler denotation is still `Core.denote` into `Nat`. Amount-typed certificates use
 `Core.denoteAWord` / `Core.denoteAUnit` (`toNat` on parameters; `ofNat` at each word op).
+`denoteA` uses `Amount.add` / `sub` / `shareDown` / `shareUp` and `Tx.mulDivDown` / `Up`.
 -/
 
 namespace Lsc
-
-/-! ## Scales -/
-
-/-- 18 decimals (DAI, WETH, most ERC20s). -/
-def WAD : Nat := 10 ^ 18
-/-- 27 decimals (Aave/MakerDAO rates). -/
-def RAY : Nat := 10 ^ 27
-/-- 6 decimals (USDC, USDT). -/
-def USDC_SCALE : Nat := 10 ^ 6
-/-- Uniswap v3 Q64.96 fixed point. -/
-def Q96 : Nat := 2 ^ 96
-/-- 8 decimals (WBTC, Chainlink USD feeds). -/
-def E8 : Nat := 10 ^ 8
 
 /-- Rounding direction. Every lossy operation on amounts takes one explicitly. -/
 inductive Rounding
@@ -142,30 +127,6 @@ def sub (a b : Amount τ s) : Tx S X E ε (Amount τ s) :=
     if b.toNat ≤ a.toNat then .ok (ofNat (a.toNat - b.toNat), w)
     else .error (.arith .underflow)
 
-/-! ### Scaling by a dimensionless factor (`Amount τ s * Fixed s → Amount τ s`) -/
-
-/-- `⌊a * x / s⌋`. `s` is passed as a runtime word. -/
-def mulDown (a : Amount τ s) (x : Fixed s) : Tx S X E ε (Amount τ s) :=
-  (fun n => ofNat n) <$> Tx.mulDivDown a.toNat x.toNat s
-/-- `⌈a * x / s⌉`. -/
-def mulUp (a : Amount τ s) (x : Fixed s) : Tx S X E ε (Amount τ s) :=
-  (fun n => ofNat n) <$> Tx.mulDivUp a.toNat x.toNat s
-/-- `⌊a * s / x⌋`. -/
-def divDown (a : Amount τ s) (x : Fixed s) : Tx S X E ε (Amount τ s) :=
-  (fun n => ofNat n) <$> Tx.mulDivDown a.toNat s x.toNat
-/-- `⌈a * s / x⌉`. -/
-def divUp (a : Amount τ s) (x : Fixed s) : Tx S X E ε (Amount τ s) :=
-  (fun n => ofNat n) <$> Tx.mulDivUp a.toNat s x.toNat
-
-/-! ### Ratios of two same-unit amounts (dimensionless) -/
-
-/-- `⌊a * s / b⌋ : Fixed s`. -/
-def ratioDown (a b : Amount τ s) : Tx S X E ε (Fixed s) :=
-  (fun n => ofNat n) <$> Tx.mulDivDown a.toNat s b.toNat
-/-- `⌈a * s / b⌉ : Fixed s`. -/
-def ratioUp (a b : Amount τ s) : Tx S X E ε (Fixed s) :=
-  (fun n => ofNat n) <$> Tx.mulDivUp a.toNat s b.toNat
-
 /-! ### Proportional shares (`a * b / c` with `b`, `c` in the same unit; vault/share math) -/
 
 /-- `⌊a * b / c⌋`, `b` and `c` of one unit, result in `a`'s unit. -/
@@ -183,23 +144,6 @@ def shareUp (a : Amount τ s) (b c : Amount τ' s') : Tx S X E ε (Amount τ s) 
       .ok (ofNat (a.toNat * b.toNat / c.toNat +
         (if a.toNat * b.toNat % c.toNat = 0 then 0 else 1)), w)
     else .error (.arith .overflow)
-
-/-! ### Changing scale and unit -/
-
-/-- Re-express an amount at another scale (`a * tgtScale / srcScale`), rounding as requested.
-Both scales are runtime words. -/
-def rescale (srcScale tgtScale : Nat) (r : Rounding) (a : Amount τ s) :
-    Tx S X E ε (Amount τ s') :=
-  match r with
-  | .down => (fun n => ofNat n) <$> Tx.mulDivDown a.toNat tgtScale srcScale
-  | .up => (fun n => ofNat n) <$> Tx.mulDivUp a.toNat tgtScale srcScale
-
-/-- Convert `τ₁` into `τ₂` at price `p` (`a * p / s`). `s` is a runtime word. -/
-def convert {τ₁ τ₂ : Type} (p : Price τ₁ τ₂ s) (scale : Nat) (r : Rounding)
-    (a : Amount τ₁ s) : Tx S X E ε (Amount τ₂ s) :=
-  match r with
-  | .down => (fun n => ofNat n) <$> Tx.mulDivDown a.toNat p.toNat scale
-  | .up => (fun n => ofNat n) <$> Tx.mulDivUp a.toNat p.toNat scale
 
 /-! ### Run lemmas (Amount ops wrap `Tx` prims with `toNat`/`ofNat`) -/
 

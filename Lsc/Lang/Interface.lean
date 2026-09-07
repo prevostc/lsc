@@ -56,12 +56,9 @@ def call (b : Binding I S X) (m : I.Method) (args : List Nat) : Tx S X E ε Nat 
       | some (ret, g') =>
           .ok (ret, { w with ext := b.set w.ext g', ncalls := w.ncalls + 1 })
 
-/-- Statement-position CALL (discard the returned word). -/
+/-- Statement-position CALL (discard the returned word). Same bind as `Stmt.denote (.call …)`. -/
 def callUnit (b : Binding I S X) (m : I.Method) (args : List Nat) : Tx S X E ε Unit :=
-  fun ctx w =>
-    match Tx.run (Tx.call b m args) ctx w with
-    | .ok (_, w') => .ok ((), w')
-    | .error e => .error e
+  Tx.call b m args >>= fun _ => pure ()
 
 @[simp] theorem run_call (b : Binding I S X) (m : I.Method) (args : List Nat)
     (ctx : Ctx) (w : World S X E) :
@@ -91,8 +88,21 @@ def callUnit (b : Binding I S X) (m : I.Method) (args : List Nat) : Tx S X E ε 
     Tx.run (Tx.callUnit (E := E) (ε := ε) b m args) ctx w =
       match Tx.run (Tx.call (E := E) (ε := ε) b m args) ctx w with
       | .ok (_, w') => .ok ((), w')
+      | .error e => .error e := by
+  simp only [callUnit]
+  rw [run_bind]
+  cases Tx.run (Tx.call (E := E) (ε := ε) b m args) ctx w with
+  | ok _ => simp [run_pure]
+  | error _ => rfl
+
+/-- `simp` after a `do` block leaves `ReaderT.run` (`.run`), which does not match `Tx.run_callUnit`. -/
+@[simp] theorem callUnit_run (b : Binding I S X) (m : I.Method) (args : List Nat)
+    (ctx : Ctx) (w : World S X E) :
+    (Tx.callUnit (E := E) (ε := ε) b m args).run ctx w =
+      match (Tx.call (E := E) (ε := ε) b m args).run ctx w with
+      | .ok (_, w') => .ok ((), w')
       | .error e => .error e :=
-  rfl
+  run_callUnit (E := E) (ε := ε) b m args ctx w
 
 theorem call_self (b : Binding I S X) (m : I.Method) (args : List Nat)
     {ctx : Ctx} {w : World S X E} {v : Nat} {w' : World S X E} :

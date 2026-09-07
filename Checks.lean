@@ -1,22 +1,22 @@
-import Examples.Counter
-import Examples.Token
-import Examples.TokenProofsTheorems
-import Examples.TokenSecurityTheorems
-import Examples.VaultSecurityTheorems
+import Examples.Counter.Contract
+import Examples.Token.Contract
+import Examples.Token.ProofsTheorems
+import Examples.Token.SecurityTheorems
+import Examples.Vault.SecurityTheorems
 import Lsc.Security.WealthTheorems
-import Examples.CounterCompileTheorems
-import Examples.TokenCompileTheorems
+import Examples.Counter.CompileTheorems
+import Examples.Token.CompileTheorems
 import Lsc.Compiler.DispatchTheorems
 import Lsc.Compiler.CoreTheorems
 import Lsc.Compiler.CoreExtSimTheorems
-import Examples.VaultCompileTheorems
-import Examples.AmmCompileTheorems
+import Examples.Vault.CompileTheorems
+import Examples.Amm.CompileTheorems
 import Lsc.Compiler.EndToEndTheorems
 import Lsc.Compiler.EndToEndExtTheorems
 import Lsc.Compiler.DispatchExtTheorems
-import Examples.TokenEndToEndTheorems
-import Examples.VaultEndToEndTheorems
-import Examples.AmmEndToEndTheorems
+import Examples.Token.EndToEndTheorems
+import Examples.Vault.EndToEndTheorems
+import Examples.Amm.EndToEndTheorems
 import Lsc.Compiler.ProgressCoreTheorems
 import Lsc.Compiler.ConstructorTheorems
 import Lsc.Compiler.DeployTheorems
@@ -26,7 +26,7 @@ import Lsc.Compiler.DeployTheorems
 
 Every certificate and end-to-end theorem must depend on nothing beyond the three standard
 axioms. `#guard_msgs` turns a widened footprint into a build error (see
-`docs/architecture/TRUSTED_COMPUTING_BASE.md`).
+`docs/internals/TRUSTED_COMPUTING_BASE.md`).
 -/
 
 /-- info: 'Counter.increment.core_denote' depends on axioms: [propext] -/

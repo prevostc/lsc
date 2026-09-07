@@ -1,6 +1,6 @@
 # AMM walkthrough
 
-`Examples/Amm.lean` is a constant-product pool with two `IERC20` bindings
+`Examples/Amm/Contract.lean` is a constant-product pool with two `IERC20` bindings
 and no fee. It is the multi-token example: same security story as Vault,
 two callees instead of one.
 
@@ -21,8 +21,8 @@ External calls run after requires and storage updates:
 ```lean
 write shares[who] bal'
 -- …
-let _ ← Binding.transferFrom token0B who me a0.toNat
-let _ ← Binding.transferFrom token1B who me a1.toNat
+Binding.transferFromUnit token0B who me a0.toNat
+Binding.transferFromUnit token1B who me a1.toNat
 ```
 
 That CEI order is sound here because conforming tokens are assumed not to

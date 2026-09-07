@@ -6,11 +6,12 @@ the statement needs structures). Downstream modules import `*Theorems`,
 never `*Proof`. `Checks.lean` pins exported theorems and the axiom
 footprint. Tasks should read APIs, not proofs.
 
-Lake libraries (`lakefile.lean`): `Lsc` (`Lsc.Lang`, `Lsc.Stdlib`,
-`Lsc.Security`, `Lsc.Compiler`, `Lsc.Compiler.Proof`,
-`Lsc.Compiler.Transport`, `Lsc.Tools`, `Lsc.Util`, barrel `Lsc.lean`) and
-`Examples`. Directories under `Lsc/` that are not in those globs are not
-part of this map.
+Lake libraries (`lakefile.lean`): `Lsc` (language, compiler, security — `Lsc.Lang`,
+`Lsc.Security`, `Lsc.Compiler`, `Lsc.Compiler.Proof`, `Lsc.Compiler.Transport`,
+`Lsc.Tools`, `Lsc.Util`, barrel `Lsc.lean`) → `Stdlib` (`Stdlib.ERC20`,
+`Stdlib.Scales`, `Stdlib.SafeERC20`, barrel `Stdlib.lean`) → `Examples`
+(`Examples.Counter.*`, `Examples.Token.*`, `Examples.Vault.*`, `Examples.Amm.*`,
+`Examples.Misc.*`). Import direction is strictly downward.
 
 ## `Lsc/Lang` — the language
 
@@ -18,8 +19,9 @@ part of this map.
   primitives, the `run_*` simp normal form. Language specification.
 - `Interface.lean` — `Interface`, `Binding`, `Tx.call` / `Tx.callUnit`, `run_call`.
   Bindings are explicit constants.
-- `Amount.lean` — `Amount τ s`, `Flag`, `Price`, rounding-explicit ops, `WAD`.
-  External scales are opaque; `rescale` / `Amount.one` take runtime scale words.
+- `Amount.lean` — `Amount τ s`, `Flag`, `Price`, `Fixed`, `Rounding`,
+  `add` / `sub` / `shareDown` / `shareUp`, `Tx.mulDivDown` / `Up`. Named scales
+  and derived ops (`mulDown`, `rescale`, `convert`) are in `Stdlib/Scales.lean`.
 - `Core.lean` — `Core` (`Op.call`, `Stmt.call`), `Core.denote` (Nat, compiler),
   `Core.denoteAWord` / `Core.denoteAUnit` (Amount certificates), `Core.effects`.
   `ContractSchema.ext` supplies `call : Nat → Nat → List Nat → Tx`.
@@ -50,11 +52,17 @@ part of this map.
 
 Depends only on `Lsc/Lang`.
 
-## `Lsc/Stdlib` — verified components
+## `Stdlib/` — user-importable features
+
+Does not import `Examples`. `Lsc` does not import `Stdlib`.
 
 - `ERC20.lean` — IERC20 may-model: `Ghost` (`balances` + `decimals`), `Method`,
-  `model`, `Rely`, `IERC20`, `IERC20.Ref`, `Binding.*` aliases. No allowances /
-  `totalSupply` in the ghost.
+  `model`, `Rely`, `IERC20`, `IERC20.Ref`, `Binding.*` aliases. Namespace stays
+  `Lsc.Stdlib` / `Lsc.Binding`. No allowances / `totalSupply` in the ghost.
+- `Scales.lean` — `WAD`, `RAY`, `USDC_SCALE`, `Q96`, `E8`; derived `Amount`
+  ops (`mulDown` / `rescale` / `convert`, …) still named `Lsc.Amount.*`.
+- `SafeERC20.lean` — spec-level `safeTransfer` / `safeTransferFrom` /
+  `safeApprove` (`checkOk`); not reifiable until library inlining exists.
 
 Protocol instances (Token, Vault, AMM, Counter) live under `Examples/`, not
 stdlib.
@@ -130,7 +138,7 @@ Helpers nobody outside the proof tree should import. Grouped by role:
 - `Util/OpenPrivate.lean` — test/util helper.
 - EVM differential harness: `scripts/difftest.sh` (Lean `Tx.run` vs anvil/revm
   on `compileRuntime` / `compileDeploy` bytecode). Interpreter tests:
-  `Examples/YulTests.lean`.
+  `Examples/Misc/YulTests.lean`.
 
 ## `Examples` — separate Lake library
 
@@ -138,28 +146,28 @@ Example contracts, Tx-level proofs, security theorems, compiler instances,
 and bytecode-level theorems. Do not treat `Lsc/Examples/` (if present on
 disk) as this library.
 
-Naming:
+Naming (each protocol is a directory; modules are `Examples.C.Role`):
 
 | Role | Files |
 |------|--------|
-| Contract | `C.lean` |
-| Tx-level lemmas | `CProofs.lean`, optionally `CProofsTheorems.lean` / `CProofsProof.lean` |
-| Security spec + theorems | `CSecurity.lean`, `CSecurityTheorems.lean`, `CSecurityProof.lean` |
-| Compiler instance | `CCompileTheorems.lean`, `CCompileProof.lean`, optional `CCompileDefs.lean` |
-| Bytecode theorems | `CEndToEndTheorems.lean`, `CEndToEndProof.lean`, `CEndToEnd.lean` (glue) |
+| Contract | `Examples/C/Contract.lean` |
+| Tx-level lemmas | `Proofs.lean`, optionally `ProofsTheorems.lean` / `ProofsProof.lean` |
+| Security spec + theorems | `Security.lean`, `SecurityTheorems.lean`, `SecurityProof.lean` |
+| Compiler instance | `CompileTheorems.lean`, `CompileProof.lean`, optional `CompileDefs.lean` |
+| Bytecode theorems | `EndToEndTheorems.lean`, `EndToEndProof.lean`, `EndToEnd.lean` (glue) |
 
-- **Counter** — `Counter.lean`, `CounterCompile{Defs,Proof,Theorems}.lean`.
-  `counter_correct`, `counter_dispatch_correct`; no Security / bytecode theorem.
-- **Token** — S1. `token_no_unauthorized_extraction`, `token_solvent`;
+- **Counter** — `Examples/Counter/`. `counter_correct`, `counter_dispatch_correct`;
+  no Security / bytecode theorem.
+- **Token** — `Examples/Token/`. S1. `token_no_unauthorized_extraction`, `token_solvent`;
   `token_correct`, `token_dispatch_correct`;
   `token_bytecode_no_unauthorized_extraction`, `token_bytecode_solvent`,
   `token_deploy_then_no_unauthorized_extraction`.
-- **Vault** — S2, one `IERC20`. `vault_no_unauthorized_extraction`,
+- **Vault** — `Examples/Vault/`. S2, one `IERC20`. `vault_no_unauthorized_extraction`,
   `vault_solvent`; `vault_correct_ext`;
   `vault_bytecode_no_unauthorized_extraction`, `vault_bytecode_solvent`,
   `vault_abs_nonvacuous`.
-- **AMM** — S2, two `IERC20`. `amm_no_unauthorized_extraction`, `amm_solvent`;
+- **AMM** — `Examples/Amm/`. S2, two `IERC20`. `amm_no_unauthorized_extraction`, `amm_solvent`;
   `amm_correct_ext`; `amm_bytecode_no_unauthorized_extraction` (no bytecode
   solvency theorem).
-- `AmountDemo.lean` — Amount-typed surface demo.
-- `YulTests.lean` — Yul interpreter differential tests for Counter and Token.
+- `Examples/Misc/AmountDemo.lean` — Amount-typed surface demo.
+- `Examples/Misc/YulTests.lean` — interpreter harness.

@@ -1,7 +1,6 @@
 import Lsc.Lang.Tx
 import Lsc.Lang.Amount
 import Lsc.Lang.Interface
-import Lsc.Stdlib.ERC20
 import Lsc.Lang.Core
 import Lsc.Lang.Spec
 import Lsc.Lang.Reify

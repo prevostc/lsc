@@ -1,8 +1,8 @@
 # Lsc guide
 
 For people who write or audit contracts in Lsc. The sources of truth for
-syntax are `Examples/Counter.lean`, `Examples/Token.lean`,
-`Examples/Vault.lean`, and `Examples/Amm.lean`.
+syntax are `Examples/Counter/Contract.lean`, `Examples/Token/Contract.lean`,
+`Examples/Vault/Contract.lean`, and `Examples/Amm/Contract.lean`.
 
 - [Writing a contract](CONTRACTS.md) — `lsc_schema`, `lsc_reify`, `lsc_contract`
 - [Security model](SECURITY.md) — unauthorised extraction, solvency, the adversary

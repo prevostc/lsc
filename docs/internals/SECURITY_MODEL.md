@@ -109,7 +109,7 @@ ABI/dispatcher `runtimeBlock_correct_callFree` / `runtimeBlock_correct_ext`.
 
 ## Stdlib vs examples
 
-Proved once in `Lsc/Stdlib`: IERC20 may-model (`Ghost`, `model`, `Rely`). Token, Vault,
+Proved once in `Stdlib/`: IERC20 may-model (`Ghost`, `model`, `Rely`). Token, Vault,
 and AMM are `Examples/` protocol instances, not stdlib modules.
 
 ## Protocol-specific

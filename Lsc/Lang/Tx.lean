@@ -266,6 +266,14 @@ section RunLemmas
     change ((fun (p : α × World S X E) => (f p.1, p.2)) <$> x ctx w) = _
     simp [run, h, Functor.map, Except.map]
 
+/-- `simp` after a `do` block may leave `(f <$> x) ctx w` rather than `Tx.run`. -/
+@[simp] theorem map_apply {β : Type} (f : α → β) (x : Tx S X E ε α) (ctx : Ctx) (w : World S X E) :
+    (f <$> x) ctx w =
+      match x ctx w with
+      | .ok (a, w') => .ok (f a, w')
+      | .error e => .error e :=
+  run_map f x ctx w
+
 /-- `if` inside a program: push `run` into the branches. -/
 @[simp] theorem run_ite (c : Prop) [Decidable c] (x y : Tx S X E ε α) (ctx : Ctx)
     (w : World S X E) :

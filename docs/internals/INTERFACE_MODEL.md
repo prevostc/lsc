@@ -29,7 +29,7 @@ Bindings are explicit constants (`def assetB : Binding IERC20 Storage Ext := ⟨
 command is sugar to add later.
 
 Files: `Lsc/Lang/Interface.lean` (`Interface`, `Binding`, `Tx.call`, `run_call`);
-`Lsc/Stdlib/ERC20.lean` (ghost, model, `Rely`, `IERC20`, `IERC20.Ref`, `Binding.*` aliases).
+`Stdlib/ERC20.lean` (ghost, model, `Rely`, `IERC20`, `IERC20.Ref`, `Binding.*` aliases).
 
 ## ERC20
 

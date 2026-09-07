@@ -7,7 +7,7 @@ underflow, or division by zero; control flow is Lean `do` / `let` / `if`.
 
 ## A minimal contract
 
-`Examples/Counter.lean` is the smallest stateful example:
+`Examples/Counter/Contract.lean` is the smallest stateful example:
 
 ```lean
 structure Storage where
@@ -35,7 +35,7 @@ object and the language-level spec used by security proofs.
 
 ## Token, vault, pool
 
-Token (`Examples/Token.lean`) is a closed ERC-20-style contract: no external
+Token (`Examples/Token/Contract.lean`) is a closed ERC-20-style contract: no external
 calls. Transfers use checked arithmetic and `require`:
 
 ```lean
@@ -49,8 +49,8 @@ def transfer (to : Address) (amount : Nat) : M Unit := do
   Tx.emit (.Transfer src to amount)
 ```
 
-Vault (`Examples/Vault.lean`) binds one external token and pulls it on
-deposit. AMM (`Examples/Amm.lean`) binds two. See
+Vault (`Examples/Vault/Contract.lean`) binds one external token and pulls it on
+deposit. AMM (`Examples/Amm/Contract.lean`) binds two. See
 [External calls](EXTERNAL_CALLS.md).
 
 A function named `constructor` is deployment only; it is not a trace

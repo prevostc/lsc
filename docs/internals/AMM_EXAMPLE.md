@@ -1,6 +1,6 @@
 # AMM example
 
-Constant-product pool in LSC (`Examples/Amm.lean`), two `IERC20` bindings, no fee.
+Constant-product pool in LSC (`Examples/Amm/Contract.lean`), two `IERC20` bindings, no fee.
 
 ## Design
 
