@@ -392,5 +392,26 @@ theorem selectedFn_fnCalldata (c : ContractDef) (f : FnDef) (args : List Nat)
     rw [length_fnCalldata, hlen]; omega
   simp [selectedFn, hlen', hfind, hlong]
 
+/-- A selected function is always a member of `c.functions`. -/
+theorem selectedFn_mem {c : ContractDef} {cd : List UInt8} {f : FnDef}
+    (h : selectedFn c cd = some f) : f ∈ c.functions := by
+  unfold selectedFn at h
+  split at h
+  · cases h
+  · cases hfind : c.functions.find? (fun g => decide (g.selector = calldataSelector cd)) with
+    | none => simp [hfind] at h
+    | some f' =>
+      simp [hfind] at h
+      obtain ⟨_, rfl⟩ := h
+      revert hfind
+      induction c.functions with
+      | nil => intro hfind; simp [List.find?] at hfind
+      | cons x xs ih =>
+        intro hfind
+        simp [List.find?] at hfind
+        split at hfind
+        · cases hfind; simp
+        · exact List.mem_cons_of_mem _ (ih hfind)
+
 end Lsc.Compiler
 

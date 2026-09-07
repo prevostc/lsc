@@ -1,4 +1,4 @@
-import Lsc.Compiler.EndToEnd
+import Lsc.Compiler.Transport
 import Lsc.Compiler.Proof.Token
 import Lsc.Examples.TokenSecurity
 import YulEvmCompiler.Compile
@@ -8,9 +8,9 @@ set_option linter.unusedVariables false
 set_option linter.unnecessarySimpa false
 
 /-!
-Bytecode-level Token theorems: Security traces transported onto compiled runtime
-bytecode. `token_bytecode_*_exists` is the predicted run; the main theorems are
-universal over halted matching executions (`EvmTraceRunAll`).
+Bytecode-level Token theorems via `Transport`. Main theorems are universal over
+arbitrary halted calldata (`EvmTraceRunAll`); `_exists` encodes a Security trace.
+Trace-predicted-calldata forms are dropped.
 -/
 
 open Lsc Lsc.Compiler Lsc.Security Token
@@ -132,43 +132,96 @@ theorem token_worldAfter_core_eq (fn : Fn) (args : spec.Args fn) (ctx : Ctx)
     dsimp [tokenFnDef, encodeToken]
     rfl
 
-def tokenCalls : List (Step spec) → List (Ctx × FnDef × List Nat)
-  | [] => []
-  | .call c :: tr => (c.toCtx, tokenFnDef c.fn, encodeToken c.fn c.args) :: tokenCalls tr
-  | .env _ :: tr => tokenCalls tr
+def decodeTokenFn (f : FnDef) : Option Fn :=
+  if f.name = "transfer" then some .transfer
+  else if f.name = "approve" then some .approve
+  else if f.name = "transferFrom" then some .transferFrom
+  else if f.name = "mint" then some .mint
+  else if f.name = "burn" then some .burn
+  else if f.name = "balanceOf" then some .balanceOf
+  else if f.name = "allowance" then some .allowance
+  else if f.name = "totalSupply" then some .totalSupply
+  else none
 
-/-- Per-call well-formedness the dispatcher/`fnCalldata` lemmas need. -/
-def CallsBounded : List (Step spec) → Prop
-  | [] => True
-  | .call c :: tr =>
-    CtxWF c.toCtx ∧ (∀ n ∈ encodeToken c.fn c.args, n < wordBound) ∧ CallsBounded tr
-  | .env _ :: tr => CallsBounded tr
+theorem decodeTokenFn_fnDef (fn : Fn) : decodeTokenFn (tokenFnDef fn) = some fn := by
+  cases fn <;> simp [decodeTokenFn, tokenFnDef]
 
-theorem token_fnCalldata_bound (fn : Fn) (args : spec.Args fn) :
-    (fnCalldata (tokenFnDef fn) (encodeToken fn args)).length < wordBound := by
-  rw [length_fnCalldata, encodeToken_length]
-  exact token_fn_params_bound (tokenFnDef_mem fn)
+theorem decodeTokenFn_of_mem (f : FnDef) (hf : f ∈ Token.contract.functions) :
+    ∃ fn, decodeTokenFn f = some fn ∧ f = tokenFnDef fn := by
+  simp [Token.contract] at hf
+  rcases hf with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl
+  · exact ⟨.transfer, by simp [decodeTokenFn, tokenFnDef], rfl⟩
+  · exact ⟨.approve, by simp [decodeTokenFn, tokenFnDef], rfl⟩
+  · exact ⟨.transferFrom, by simp [decodeTokenFn, tokenFnDef], rfl⟩
+  · exact ⟨.mint, by simp [decodeTokenFn, tokenFnDef], rfl⟩
+  · exact ⟨.burn, by simp [decodeTokenFn, tokenFnDef], rfl⟩
+  · exact ⟨.balanceOf, by simp [decodeTokenFn, tokenFnDef], rfl⟩
+  · exact ⟨.allowance, by simp [decodeTokenFn, tokenFnDef], rfl⟩
+  · exact ⟨.totalSupply, by simp [decodeTokenFn, tokenFnDef], rfl⟩
 
-theorem tokenCalls_spec (tr : List (Step spec)) (hb : CallsBounded tr) :
-    ∀ p ∈ tokenCalls tr,
-      p.2.1 ∈ Token.contract.functions ∧ p.2.1.kind ≠ .constructor ∧
-      p.2.2.length = p.2.1.params.length ∧ (∀ n ∈ p.2.2, n < wordBound) ∧
-      CtxWF p.1 ∧ (fnCalldata p.2.1 p.2.2).length < wordBound := by
-  induction tr with
-  | nil => intro p hp; cases hp
-  | cons s rest ih =>
-    match s with
-    | .env _ =>
-      intro p hp
-      exact ih (by simpa [CallsBounded] using hb) p hp
-    | .call c =>
-      intro p hp
-      rcases hb with ⟨hctx, hW, htl⟩
-      simp [tokenCalls] at hp
-      rcases hp with rfl | hp
-      · exact ⟨tokenFnDef_mem c.fn, token_fn_not_ctor (tokenFnDef_mem c.fn),
-          encodeToken_length c.fn c.args, hW, hctx, token_fnCalldata_bound c.fn c.args⟩
-      · exact ih htl p hp
+def decodeToken : (fn : Fn) → List Nat → spec.Args fn
+  | .transfer, dst :: n :: _ => (dst, n)
+  | .transfer, _ => (0, 0)
+  | .approve, sp :: n :: _ => (sp, n)
+  | .approve, _ => (0, 0)
+  | .transferFrom, src :: dst :: n :: _ => (src, dst, n)
+  | .transferFrom, _ => (0, 0, 0)
+  | .mint, dst :: n :: _ => (dst, n)
+  | .mint, _ => (0, 0)
+  | .burn, n :: _ => n
+  | .burn, _ => 0
+  | .balanceOf, who :: _ => who
+  | .balanceOf, _ => 0
+  | .allowance, o :: s :: _ => (o, s)
+  | .allowance, _ => (0, 0)
+  | .totalSupply, _ => ()
+
+private theorem length_eq_zero {α} {l : List α} (h : l.length = 0) : l = [] :=
+  List.eq_nil_of_length_eq_zero h
+
+private theorem length_eq_one {α} {l : List α} (h : l.length = 1) : ∃ a, l = [a] := by
+  cases l with
+  | nil => cases h
+  | cons a l =>
+    cases l with
+    | nil => exact ⟨a, rfl⟩
+    | cons _ _ => simp at h
+
+private theorem length_eq_two {α} {l : List α} (h : l.length = 2) : ∃ a b, l = [a, b] := by
+  cases l with
+  | nil => cases h
+  | cons a l =>
+    cases l with
+    | nil => simp at h
+    | cons b l =>
+      cases l with
+      | nil => exact ⟨a, b, rfl⟩
+      | cons _ _ => simp at h
+
+private theorem length_eq_three {α} {l : List α} (h : l.length = 3) :
+    ∃ a b c, l = [a, b, c] := by
+  cases l with
+  | nil => cases h
+  | cons a l =>
+    obtain ⟨b, c, rfl⟩ := length_eq_two (by simpa using h)
+    exact ⟨a, b, c, rfl⟩
+
+theorem encodeToken_decode (fn : Fn) (ns : List Nat)
+    (h : ns.length = (tokenFnDef fn).params.length) :
+    encodeToken fn (decodeToken fn ns) = ns := by
+  cases fn <;> simp [tokenFnDef] at h
+  · obtain ⟨dst, n, rfl⟩ := length_eq_two h; rfl
+  · obtain ⟨sp, n, rfl⟩ := length_eq_two h; rfl
+  · obtain ⟨src, dst, n, rfl⟩ := length_eq_three h; rfl
+  · obtain ⟨dst, n, rfl⟩ := length_eq_two h; rfl
+  · obtain ⟨n, rfl⟩ := length_eq_one h; rfl
+  · obtain ⟨who, rfl⟩ := length_eq_one h; rfl
+  · obtain ⟨o, s, rfl⟩ := length_eq_two h; rfl
+  · subst h; rfl
+
+theorem decodeToken_encode (fn : Fn) (args : spec.Args fn) :
+    decodeToken fn (encodeToken fn args) = args := by
+  cases fn <;> simp [decodeToken, encodeToken, asWord]
 
 /-- `worldAfter.self` of a Token entrypoint depends only on `ctx` and `w.self`. -/
 theorem token_worldAfter_self_of_self (fn : Fn) (args : spec.Args fn) (ctx : Ctx)
@@ -274,47 +327,62 @@ theorem token_worldAfter_self_of_self (fn : Fn) (args : spec.Args fn) (ctx : Ctx
       totalSupply_returns_stored ctx w, totalSupply_returns_stored ctx w']
     exact hs
 
-theorem token_step_self_of_self (s : Step spec) (w w' : World Storage Unit Event)
-    (h : w.self = w'.self) : (step s w).self = (step s w').self := by
-  cases s with
-  | env _ => simpa [step] using h
-  | call c =>
-    simpa [step] using token_worldAfter_self_of_self c.fn c.args c.toCtx w w' h
+theorem token_post_congr (fn : Fn) (args : spec.Args fn) (ctx : Ctx)
+    (w w' : World Storage Unit Event)
+    (hs : w.self = w'.self) (_he : w.ext = w'.ext) :
+    (worldAfter (Spec.exec spec fn args) ctx w).self =
+      (worldAfter (Spec.exec spec fn args) ctx w').self ∧
+    (worldAfter (Spec.exec spec fn args) ctx w).ext =
+      (worldAfter (Spec.exec spec fn args) ctx w').ext := by
+  refine ⟨token_worldAfter_self_of_self fn args ctx w w' hs, ?_⟩
+  cases (worldAfter (Spec.exec spec fn args) ctx w).ext
+  cases (worldAfter (Spec.exec spec fn args) ctx w').ext
+  rfl
 
-theorem token_run_self_of_self (tr : List (Step spec)) (w w' : World Storage Unit Event)
-    (h : w.self = w'.self) : (run tr w).self = (run tr w').self := by
-  induction tr generalizing w w' with
-  | nil => simpa [run] using h
-  | cons s rest ih =>
-    rw [run_cons, run_cons]
-    exact ih (step s w) (step s w') (token_step_self_of_self s w w' h)
+def tokenCodec : TransportCodec Token.contract Token.schema Token.spec where
+  fnDef := tokenFnDef
+  encode := encodeToken
+  decodeFn := decodeTokenFn
+  decode := decodeToken
+  mem := tokenFnDef_mem
+  encode_length := encodeToken_length
+  decodeFn_fnDef := decodeTokenFn_fnDef
+  decodeFn_of_mem := decodeTokenFn_of_mem
+  encode_decode := encodeToken_decode
+  decode_encode := decodeToken_encode
+  core_exec := token_worldAfter_core_eq
 
-theorem token_run_self_eq_coreRun (tr : List (Step spec)) (w : World Storage Unit Event) :
-    (run tr w).self = (coreRun Token.schema (tokenCalls tr) { w with log := [] }).self := by
+def mkTokenSetup (hκ : KeccakSep Token.contract evmKeccak)
+    (rt : YBlock) (hrt : runtimeBlock Token.contract = some rt)
+    (is : List Instr) (hcomp : compile rt = some is) :
+    TransportSetup Storage Unit Event Error where
+  c := Token.contract
+  Γ := Token.schema
+  spec := Token.spec
+  codec := tokenCodec
+  lawful := Token.schema_lawful
+  hκ := hκ
+  hctor := fun f hf => token_fn_not_ctor hf
+  hlen := token_fields_lt
+  hbound := fun f hf => token_fn_params_bound hf
+  rt := rt
+  hrt := hrt
+  is := is
+  hcomp := hcomp
+
+theorem token_noAuthAlong_callsOf (a : Address) (tr : List (Step spec))
+    (w : World Storage Unit Event) (h : NoAuthAlong Auth a tr w) :
+    NoAuthAlong Auth a (callsOf tr) w := by
   induction tr generalizing w with
-  | nil => simp [tokenCalls, coreRun]
+  | nil => trivial
   | cons s rest ih =>
     match s with
     | .env x' =>
-      rw [run_cons, show step (.env x') w = { w with ext := x' } from rfl]
-      simp only [tokenCalls]
-      have hself : ({ w with ext := x' } : World Storage Unit Event).self = w.self := rfl
-      rw [token_run_self_of_self rest { w with ext := x' } w hself]
-      exact ih w
+      have hw : { w with ext := x' } = w := by cases w.ext; cases x'; rfl
+      simpa [callsOf, hw] using ih (w := { w with ext := x' }) (by simpa [NoAuthAlong] using h)
     | .call c =>
-      rw [run_cons, show step (.call c) w =
-        worldAfter (Spec.exec spec c.fn c.args) c.toCtx w from rfl]
-      simp only [tokenCalls, coreRun]
-      rw [token_worldAfter_core_eq]
-      let wSec := worldAfter (Spec.exec spec c.fn c.args) c.toCtx w
-      let wCore : World Storage Unit Event :=
-        { worldAfter (Spec.exec spec c.fn c.args) c.toCtx { w with log := [] } with log := [] }
-      have hs : wSec.self = wCore.self := by
-        simpa [wSec, wCore] using
-          token_worldAfter_self_of_self c.fn c.args c.toCtx w { w with log := [] } rfl
-      rw [token_run_self_of_self rest wSec wCore hs]
-      have ih' := ih wCore
-      simpa [wCore] using ih'
+      rcases h with ⟨hAc, hAtl⟩
+      exact ⟨hAc, ih (w := step (.call c) w) hAtl⟩
 
 theorem token_balances_fd :
     Token.contract.fields[2]? =
@@ -338,143 +406,119 @@ theorem token_map1_bound (w : World Storage Unit Event) (a : Address)
   have h := hwf 2 _ token_balances_fd a ha
   simpa [token_schema_balances] using h
 
-theorem token_transport
-    (rt : YBlock) (hrt : runtimeBlock Token.contract = some rt)
-    (is : List Instr) (hcomp : compile rt = some is)
-    (hκ : KeccakSep Token.contract evmKeccak)
-    (tr : List (Step spec)) (w : World Storage Unit Event) (σ : U256 → U256)
-    (hs : storageRel Token.contract Token.schema evmKeccak w.self σ)
-    (hwf : WorldWF Token.contract Token.schema w)
-    (hb : CallsBounded tr) :
-    ∃ σ', EvmTraceRun is
-        ((tokenCalls tr).map fun p => ⟨p.1, fnCalldata p.2.1 p.2.2⟩) σ σ' ∧
-      storageRel Token.contract Token.schema evmKeccak (run tr w).self σ' ∧
-      WorldWF Token.contract Token.schema (run tr w) := by
-  have hnd : selectorsNodup Token.contract = true := (runtimeBlock_inv hrt).1
-  obtain ⟨σ', hE, hs', hwf'⟩ :=
-    bytecode_trace_transport Token.contract Token.schema Token.schema_lawful hκ
-      (fun f hf => token_fn_callFree hf) (fun f hf => token_fn_not_ctor hf)
-      token_fields_lt (fun f hf => token_fn_params_bound hf) hnd rt hrt is hcomp
-      (tokenCalls tr) { w with log := [] } σ (by simpa using hs) rfl (WorldWF_log [] hwf)
-      (tokenCalls_spec tr hb)
-  have hself :
-      (coreRun Token.schema (tokenCalls tr) { w with log := [] }).self = (run tr w).self :=
-    (token_run_self_eq_coreRun tr w).symm
-  refine ⟨σ', hE, ?_, ?_⟩
-  · simpa [hself] using hs'
-  · exact WorldWF_of_self hself hwf'
-
-/-- Compiled Token runtime: a well-formed, no-auth-for-`a` Security trace, executed as
-EVM calls predicted by that trace, does not decrease `a`'s balance as read through `R`.
-Non-vacuity: `token_bytecode_no_unauthorized_extraction_exists`. -/
-theorem token_bytecode_no_unauthorized_extraction_exists
-    (rt : YBlock) (hrt : runtimeBlock Token.contract = some rt)
-    (is : List Instr) (hcomp : compile rt = some is)
-    (hκ : KeccakSep Token.contract evmKeccak)
-    (self : Address) (tr : List (Step spec)) (w : World Storage Unit Event) (a : Address)
-    (σ : U256 → U256)
-    (hw : Inv w) (hW : Wf self tr) (hR : RelyAlong (fun _ _ => True) tr w)
-    (hA : NoAuthAlong Auth a tr w)
-    (hs : storageRel Token.contract Token.schema evmKeccak w.self σ)
-    (hwf : WorldWF Token.contract Token.schema w)
-    (hb : CallsBounded tr) (ha : Nat.lt a wordBound) :
-    ∃ σ', EvmTraceRun is
-        ((tokenCalls tr).map fun p => ⟨p.1, fnCalldata p.2.1 p.2.2⟩) σ σ' ∧
-      (σ (mapSlot1 evmKeccak 2 a)).toNat ≤ (σ' (mapSlot1 evmKeccak 2 a)).toNat := by
-  obtain ⟨σ', hE, hs', hwf'⟩ := token_transport rt hrt is hcomp hκ tr w σ hs hwf hb
-  refine ⟨σ', hE, ?_⟩
-  have hclaim := token_no_unauthorized_extraction self tr w a hw hW hR hA
-  have hpre := token_claim_slot w.self σ a hs ha (token_map1_bound w a hwf ha)
-  have hpost := token_claim_slot (run tr w).self σ' a hs' ha
-    (token_map1_bound (run tr w) a hwf' ha)
-  simpa [hpre, hpost] using hclaim
-
-theorem token_all_rel
-    (rt : YBlock) (hrt : runtimeBlock Token.contract = some rt)
-    (is : List Instr) (hcomp : compile rt = some is)
-    (hκ : KeccakSep Token.contract evmKeccak)
-    (tr : List (Step spec)) (w : World Storage Unit Event) (σ σ' : U256 → U256)
-    (hs : storageRel Token.contract Token.schema evmKeccak w.self σ)
-    (hwf : WorldWF Token.contract Token.schema w)
-    (hb : CallsBounded tr)
-    (hE : EvmTraceRunAll is
-        ((tokenCalls tr).map fun p => ⟨p.1, fnCalldata p.2.1 p.2.2⟩) σ σ') :
-    storageRel Token.contract Token.schema evmKeccak (run tr w).self σ' ∧
-    WorldWF Token.contract Token.schema (run tr w) := by
-  have hnd : selectorsNodup Token.contract = true := (runtimeBlock_inv hrt).1
-  obtain ⟨hs', hwf'⟩ :=
-    bytecode_trace_all Token.contract Token.schema Token.schema_lawful hκ
-      (fun f hf => token_fn_callFree hf) (fun f hf => token_fn_not_ctor hf)
-      token_fields_lt (fun f hf => token_fn_params_bound hf) hnd rt hrt is hcomp
-      (tokenCalls tr) { w with log := [] } σ σ' (by simpa using hs) rfl (WorldWF_log [] hwf)
-      (tokenCalls_spec tr hb) hE
-  have hself :
-      (coreRun Token.schema (tokenCalls tr) { w with log := [] }).self = (run tr w).self :=
-    (token_run_self_eq_coreRun tr w).symm
-  refine ⟨?_, ?_⟩
-  · simpa [hself] using hs'
-  · exact WorldWF_of_self hself hwf'
-
-/-- Compiled Token runtime: every halted matching execution of a well-formed,
-no-auth-for-`a` Security trace does not decrease `a`'s balance as read through `R`. -/
+/-- Arbitrary calldata: every halted EVM run of `calls` whose `Ctx`s are well-formed
+for `self` does not decrease `a`'s balance, if the decoded trace is `NoAuthAlong`. -/
 theorem token_bytecode_no_unauthorized_extraction
     (rt : YBlock) (hrt : runtimeBlock Token.contract = some rt)
     (is : List Instr) (hcomp : compile rt = some is)
     (hκ : KeccakSep Token.contract evmKeccak)
-    (self : Address) (tr : List (Step spec)) (w : World Storage Unit Event) (a : Address)
-    (σ : U256 → U256)
-    (hw : Inv w) (hW : Wf self tr) (hR : RelyAlong (fun _ _ => True) tr w)
+    (self : Address) (calls : List EvmCall) (w : World Storage Unit Event)
+    (a : Address) (σ : U256 → U256)
+    (hw : Inv w) (hlog : w.log = [])
+    (hWF : CallsWF (mkTokenSetup hκ rt hrt is hcomp) self calls)
+    (hA : NoAuthAlong Auth a (decodeTrace (mkTokenSetup hκ rt hrt is hcomp) calls) w)
+    (hs : storageRel Token.contract Token.schema evmKeccak w.self σ)
+    (hwf : WorldWF Token.contract Token.schema w)
+    (ha : Nat.lt a wordBound) :
+    ∀ σ', EvmTraceRunAll is calls σ σ' →
+      (σ (mapSlot1 evmKeccak 2 a)).toNat ≤ (σ' (mapSlot1 evmKeccak 2 a)).toNat := by
+  intro σ' hE
+  let T := mkTokenSetup hκ rt hrt is hcomp
+  have ⟨_, hs', hwf'⟩ :=
+    transport_trace T (fun f hf => token_fn_callFree hf) token_post_congr self calls w σ σ'
+      hs hlog hwf hWF hE
+  have hR : RelyAlong (fun _ _ => True) (decodeTrace T calls) w :=
+    relyAlong_calls (decodeTrace T calls) w (decodeTrace_are_calls T calls)
+  have hclaim := token_no_unauthorized_extraction self (decodeTrace T calls) w a
+    hw (wf_decodeTrace T self calls hWF) hR hA
+  have hpre := token_claim_slot w.self σ a hs ha (token_map1_bound w a hwf ha)
+  have hpost := token_claim_slot (run (decodeTrace T calls) w).self σ' a hs' ha
+    (token_map1_bound { run (decodeTrace T calls) w with log := [] } a hwf' ha)
+  rw [hpre, hpost]
+  exact hclaim
+
+theorem token_bytecode_no_unauthorized_extraction_exists
+    (rt : YBlock) (hrt : runtimeBlock Token.contract = some rt)
+    (is : List Instr) (hcomp : compile rt = some is)
+    (hκ : KeccakSep Token.contract evmKeccak)
+    (self : Address) (tr : List (Step spec)) (w : World Storage Unit Event)
+    (a : Address) (σ : U256 → U256)
+    (hw : Inv w) (hW : Wf self tr) (hlog : w.log = [])
     (hA : NoAuthAlong Auth a tr w)
     (hs : storageRel Token.contract Token.schema evmKeccak w.self σ)
     (hwf : WorldWF Token.contract Token.schema w)
-    (hb : CallsBounded tr) (ha : Nat.lt a wordBound) :
-    ∀ σ', EvmTraceRunAll is
-        ((tokenCalls tr).map fun p => ⟨p.1, fnCalldata p.2.1 p.2.2⟩) σ σ' →
+    (hb : EncodeBounded (mkTokenSetup hκ rt hrt is hcomp) tr)
+    (ha : Nat.lt a wordBound) :
+    ∃ σ', EvmTraceRun is
+        (encodeCalls (mkTokenSetup hκ rt hrt is hcomp) tr) σ σ' ∧
       (σ (mapSlot1 evmKeccak 2 a)).toNat ≤ (σ' (mapSlot1 evmKeccak 2 a)).toNat := by
-  intro σ' hE
-  obtain ⟨hs', hwf'⟩ := token_all_rel rt hrt is hcomp hκ tr w σ σ' hs hwf hb hE
-  have hclaim := token_no_unauthorized_extraction self tr w a hw hW hR hA
+  let T := mkTokenSetup hκ rt hrt is hcomp
+  obtain ⟨σ', hE, hs', hwf'⟩ :=
+    transport_exists T (fun f hf => token_fn_callFree hf) token_post_congr tr w σ hs hwf hb
+  refine ⟨σ', hE, ?_⟩
+  rw [decodeTrace_encodeCalls T tr hb] at hs' hwf'
+  have hwlog : { w with log := [] } = w := by
+    cases w; simp at hlog; subst hlog; rfl
+  rw [hwlog] at hs' hwf'
+  have hR : RelyAlong (fun _ _ => True) (callsOf tr) w :=
+    relyAlong_calls (callsOf tr) w (callsOf_are_calls tr)
+  have hclaim := token_no_unauthorized_extraction self (callsOf tr) w a
+    hw (wf_callsOf self tr hW) hR (token_noAuthAlong_callsOf a tr w hA)
   have hpre := token_claim_slot w.self σ a hs ha (token_map1_bound w a hwf ha)
-  have hpost := token_claim_slot (run tr w).self σ' a hs' ha
-    (token_map1_bound (run tr w) a hwf' ha)
-  simpa [hpre, hpost] using hclaim
+  have hpost := token_claim_slot (run (callsOf tr) w).self σ' a hs' ha
+    (token_map1_bound { run (callsOf tr) w with log := [] } a hwf' ha)
+  rw [hpre, hpost]
+  exact hclaim
 
-/-- Non-vacuity: some predicted `EvmTraceRun` stays solvent. -/
+theorem token_bytecode_solvent
+    (rt : YBlock) (hrt : runtimeBlock Token.contract = some rt)
+    (is : List Instr) (hcomp : compile rt = some is)
+    (hκ : KeccakSep Token.contract evmKeccak)
+    (self : Address) (calls : List EvmCall) (w : World Storage Unit Event)
+    (σ : U256 → U256)
+    (hw : Inv w) (hlog : w.log = [])
+    (hWF : CallsWF (mkTokenSetup hκ rt hrt is hcomp) self calls)
+    (hs : storageRel Token.contract Token.schema evmKeccak w.self σ)
+    (hwf : WorldWF Token.contract Token.schema w) :
+    ∀ σ', EvmTraceRunAll is calls σ σ' →
+      Solvent claim holdings self
+        (run (decodeTrace (mkTokenSetup hκ rt hrt is hcomp) calls) w) ∧
+      storageRel Token.contract Token.schema evmKeccak
+        (run (decodeTrace (mkTokenSetup hκ rt hrt is hcomp) calls) w).self σ' := by
+  intro σ' hE
+  let T := mkTokenSetup hκ rt hrt is hcomp
+  have ⟨_, hs', _⟩ :=
+    transport_trace T (fun f hf => token_fn_callFree hf) token_post_congr self calls w σ σ'
+      hs hlog hwf hWF hE
+  have hR : RelyAlong (fun _ _ => True) (decodeTrace T calls) w :=
+    relyAlong_calls (decodeTrace T calls) w (decodeTrace_are_calls T calls)
+  exact ⟨token_solvent self (decodeTrace T calls) w
+    (wf_decodeTrace T self calls hWF) hR hw, hs'⟩
+
 theorem token_bytecode_solvent_exists
     (rt : YBlock) (hrt : runtimeBlock Token.contract = some rt)
     (is : List Instr) (hcomp : compile rt = some is)
     (hκ : KeccakSep Token.contract evmKeccak)
     (self : Address) (tr : List (Step spec)) (w : World Storage Unit Event)
     (σ : U256 → U256)
-    (hw : Inv w) (hW : Wf self tr) (hR : RelyAlong (fun _ _ => True) tr w)
+    (hw : Inv w) (hW : Wf self tr) (hlog : w.log = [])
     (hs : storageRel Token.contract Token.schema evmKeccak w.self σ)
     (hwf : WorldWF Token.contract Token.schema w)
-    (hb : CallsBounded tr) :
-    ∃ σ', EvmTraceRun is
-        ((tokenCalls tr).map fun p => ⟨p.1, fnCalldata p.2.1 p.2.2⟩) σ σ' ∧
-      Solvent claim holdings self (run tr w) ∧
-      storageRel Token.contract Token.schema evmKeccak (run tr w).self σ' := by
-  obtain ⟨σ', hE, hs', _⟩ := token_transport rt hrt is hcomp hκ tr w σ hs hwf hb
-  exact ⟨σ', hE, token_solvent self tr w hW hR hw, hs'⟩
-
-/-- Compiled Token runtime: every halted matching execution of a well-formed
-Security trace stays solvent in EVM storage. -/
-theorem token_bytecode_solvent
-    (rt : YBlock) (hrt : runtimeBlock Token.contract = some rt)
-    (is : List Instr) (hcomp : compile rt = some is)
-    (hκ : KeccakSep Token.contract evmKeccak)
-    (self : Address) (tr : List (Step spec)) (w : World Storage Unit Event)
-    (σ : U256 → U256)
-    (hw : Inv w) (hW : Wf self tr) (hR : RelyAlong (fun _ _ => True) tr w)
-    (hs : storageRel Token.contract Token.schema evmKeccak w.self σ)
-    (hwf : WorldWF Token.contract Token.schema w)
-    (hb : CallsBounded tr) :
-    ∀ σ', EvmTraceRunAll is
-        ((tokenCalls tr).map fun p => ⟨p.1, fnCalldata p.2.1 p.2.2⟩) σ σ' →
-      Solvent claim holdings self (run tr w) ∧
-      storageRel Token.contract Token.schema evmKeccak (run tr w).self σ' := by
-  intro σ' hE
-  obtain ⟨hs', _⟩ := token_all_rel rt hrt is hcomp hκ tr w σ σ' hs hwf hb hE
-  exact ⟨token_solvent self tr w hW hR hw, hs'⟩
+    (hb : EncodeBounded (mkTokenSetup hκ rt hrt is hcomp) tr) :
+    ∃ σ', EvmTraceRun is (encodeCalls (mkTokenSetup hκ rt hrt is hcomp) tr) σ σ' ∧
+      Solvent claim holdings self (run (callsOf tr) w) ∧
+      storageRel Token.contract Token.schema evmKeccak
+        (run (callsOf tr) w).self σ' := by
+  let T := mkTokenSetup hκ rt hrt is hcomp
+  obtain ⟨σ', hE, hs', _⟩ :=
+    transport_exists T (fun f hf => token_fn_callFree hf) token_post_congr tr w σ hs hwf hb
+  have hwlog : { w with log := [] } = w := by
+    cases w; simp at hlog; subst hlog; rfl
+  refine ⟨σ', hE, ?_, ?_⟩
+  · have hR : RelyAlong (fun _ _ => True) (callsOf tr) w :=
+      relyAlong_calls (callsOf tr) w (callsOf_are_calls tr)
+    exact token_solvent self (callsOf tr) w (wf_callsOf self tr hW) hR hw
+  · rw [decodeTrace_encodeCalls T tr hb, hwlog] at hs'
+    exact hs'
 
 end Token

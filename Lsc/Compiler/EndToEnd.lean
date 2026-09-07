@@ -388,7 +388,7 @@ theorem evmCallRun_of_correct {S X E ε : Type} (c : ContractDef)
       | none => σ' = yst0.storage
       | some f =>
         match Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse) ctx w with
-        | .ok (_, w') => storageRel c Γ evmKeccak w'.self σ'
+        | .ok (_, w') => storageRel c Γ evmKeccak w'.self σ' ∧ WorldWF c Γ w'
         | .error _ => σ' = yst0.storage := by
   let _model : ExternalModel := closedModel
   obtain ⟨stObs, hRC, hconcl⟩ :=
@@ -457,8 +457,8 @@ theorem evmCallRun_of_correct {S X E ε : Type} (c : ContractDef)
         obtain ⟨hsucc, hR'⟩ := hconcl
         obtain ⟨k, bs, hh, hk⟩ := haltSuccess_commits hsucc
         have heq : stObs = yst' := obs_eq_of_commit hobs hhalted hh hk
-        rcases hR' with ⟨hs, _, _, _⟩
-        simpa [heq] using hs
+        rcases hR' with ⟨hs, _, _, hwf'⟩
+        exact ⟨by simpa [heq] using hs, hwf'⟩
       | error e =>
         simp only [htx] at hconcl ⊢
         obtain ⟨bytes, hh, _, _⟩ := hconcl
@@ -575,7 +575,7 @@ theorem evmCallRun_fnCalldata {S X E ε : Type} (c : ContractDef)
     let yst0 := mkEvmState (fnCalldata f args) σ evmKeccak ctx
     ∃ σ', EvmCallRun is yst0 σ' ∧
       (match Tx.run (Core.denote Γ f.core args.reverse) ctx w with
-        | .ok (_, w') => storageRel c Γ evmKeccak w'.self σ'
+        | .ok (_, w') => storageRel c Γ evmKeccak w'.self σ' ∧ WorldWF c Γ w'
         | .error _ => σ' = σ) := by
   intro yst0
   have hsel : selectedFn c (fnCalldata f args) = some f :=
@@ -643,35 +643,20 @@ theorem bytecode_trace_transport {S X E ε : Type} (c : ContractDef)
       | ok prod =>
         rcases prod with ⟨_, w'⟩
         simp [Security.worldAfter, htx] at hpost ⊢
-        exact hpost
+        exact hpost.1
       | error e =>
         simp [Security.worldAfter, htx] at hpost ⊢
         simpa [hpost] using hs
     have hwf1 : WorldWF c Γ w1 := by
-      have hctx : ctxRel ctx yst0 := ctxRel_mkEvmState _ _ _ _ hctxWF hcd
-      have hR : R c Γ evmKeccak { w with log := [] } yst0 :=
-        R_mkEvmState evmKeccak _ _ σ ctx (by simpa using hs) rfl (WorldWF_log [] hwf)
-      obtain ⟨stObs, _, hconcl⟩ :=
-        runtimeBlock_correct_callFree c Γ hΓ evmKeccak hκ hcf hctor hlen hbound
-          rt hrt ctx { w with log := [] } yst0 hctx hR
-      have hsel : selectedFn c yst0.env.calldata = some f := by
-        simpa [yst0, mkEvmState_calldata] using
-          selectedFn_fnCalldata c f args hf hnd hlenA
-      have hdec : decodeArgs f yst0.env.calldata = args := by
-        simpa [yst0, mkEvmState_calldata] using decodeArgs_fnCalldata f args hk hlenA hW
-      simp only [hsel, hdec] at hconcl
+      dsimp [w1]
       cases htx : Tx.run (Core.denote Γ f.core args.reverse) ctx { w with log := [] } with
       | ok prod =>
         rcases prod with ⟨_, w'⟩
-        simp only [htx] at hconcl
-        rcases hconcl with ⟨_, hR'⟩
-        rcases hR' with ⟨_, _, _, hwf'⟩
-        simpa [w1, Security.worldAfter, htx] using WorldWF_log [] hwf'
+        simp [Security.worldAfter, htx] at hpost ⊢
+        exact WorldWF_log [] hpost.2
       | error e =>
-        simp only [htx] at hconcl
-        rcases hconcl with ⟨_, _, _, hR'⟩
-        rcases hR' with ⟨_, _, _, hwf'⟩
-        simpa [w1, Security.worldAfter, htx] using hwf'
+        simp [Security.worldAfter, htx] at hpost ⊢
+        exact WorldWF_log [] hwf
     obtain ⟨σ', htl, hs', hwf'⟩ := ih w1 σ₁ hs1 rfl hwf1 hrest
     refine ⟨σ', EvmTraceRun.cons (yst0 := yst0)
         (mkEvmState_calldata _ _ _ _) (mkEvmState_storage _ _ _ _) h1 htl, ?_, ?_⟩
@@ -734,35 +719,20 @@ theorem bytecode_trace_all {S X E ε : Type} (c : ContractDef)
         | ok prod =>
           rcases prod with ⟨_, w'⟩
           simp [Security.worldAfter, htx] at hpost ⊢
-          exact hpost
+          exact hpost.1
         | error e =>
           simp [Security.worldAfter, htx] at hpost ⊢
           simpa [hpost] using hs
       have hwf1 : WorldWF c Γ w1 := by
-        have hctx : ctxRel ctx yst0 := ctxRel_mkEvmState _ _ _ _ hctxWF hcd
-        have hR : R c Γ evmKeccak { w with log := [] } yst0 :=
-          R_mkEvmState evmKeccak _ _ σ ctx (by simpa using hs) rfl (WorldWF_log [] hwf)
-        obtain ⟨stObs, _, hconcl⟩ :=
-          runtimeBlock_correct_callFree c Γ hΓ evmKeccak hκ hcf hctor hlen hbound
-            rt hrt ctx { w with log := [] } yst0 hctx hR
-        have hsel : selectedFn c yst0.env.calldata = some f := by
-          simpa [yst0, mkEvmState_calldata] using
-            selectedFn_fnCalldata c f args hf hnd hlenA
-        have hdec : decodeArgs f yst0.env.calldata = args := by
-          simpa [yst0, mkEvmState_calldata] using decodeArgs_fnCalldata f args hk hlenA hW
-        simp only [hsel, hdec] at hconcl
+        dsimp [w1]
         cases htx : Tx.run (Core.denote Γ f.core args.reverse) ctx { w with log := [] } with
         | ok prod =>
           rcases prod with ⟨_, w'⟩
-          simp only [htx] at hconcl
-          rcases hconcl with ⟨_, hR'⟩
-          rcases hR' with ⟨_, _, _, hwf'⟩
-          simpa [w1, Security.worldAfter, htx] using WorldWF_log [] hwf'
+          simp [Security.worldAfter, htx] at hpost ⊢
+          exact WorldWF_log [] hpost.2
         | error e =>
-          simp only [htx] at hconcl
-          rcases hconcl with ⟨_, _, _, hR'⟩
-          rcases hR' with ⟨_, _, _, hwf'⟩
-          simpa [w1, Security.worldAfter, htx] using hwf'
+          simp [Security.worldAfter, htx] at hpost ⊢
+          exact WorldWF_log [] hwf
       obtain ⟨hs', hwf'⟩ := ih w1 σp σ' hs1 rfl hwf1 hrest htl
       refine ⟨?_, ?_⟩
       · simpa [coreRun, w1] using hs'
