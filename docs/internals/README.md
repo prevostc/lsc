@@ -22,3 +22,9 @@ AMM has `amm_bytecode_no_unauthorized_extraction`; solvency is spec-level
 Keep them concise and decision-oriented. Changes to semantics, compilation,
 trusted assumptions, or proof boundaries must update `PROOF_CHAIN.md` and
 `TRUSTED_COMPUTING_BASE.md`.
+
+Guarantee modules put theorem intent in `*Theorems.lean`: every theorem there
+must have a natural-language docstring (what it guarantees, under which
+hypotheses) immediately above the statement. `scripts/check-theorem-docs.sh`
+enforces that in CI. Read those files, not the proof modules, when using a
+theorem.

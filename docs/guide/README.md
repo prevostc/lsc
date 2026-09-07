@@ -10,5 +10,8 @@ syntax are `Examples/Counter/Contract.lean`, `Examples/Token/Contract.lean`,
 - [What is trusted](TRUST.md) — foundations and hypotheses, in words
 - [AMM walkthrough](AMM.md) — a constant-product pool with two tokens
 
+Every guarantee's `*Theorems.lean` file is readable top to bottom because each
+theorem is explained in prose first.
+
 Language developers: [`docs/internals/`](../internals/). Product intent:
 [`docs/PROJECT_GOAL.md`](../PROJECT_GOAL.md).

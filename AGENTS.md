@@ -66,6 +66,18 @@ A **guarantee module** is any module that exports a theorem referenced by
 - Internal lemma libraries under `Lsc/Compiler/Proof/` (helpers nobody outside
   the proof tree references) stay there, with a 2–5-line module docstring.
 
+Every theorem in a `*Theorems.lean` file must have a `/-- … -/` docstring
+immediately above it (`@[simp]` and similar attributes may sit between). That
+is a rule: `scripts/check-theorem-docs.sh` enforces it and runs in CI. State
+the guarantee and its hypotheses in plain language — no proof talk, no
+boilerplate.
+
+```
+/-- If `Inv` holds initially and is preserved, `claim a` does not fall. -/
+theorem no_unauthorized_extraction …
+-- rejected: /-- `foo` holds under the hypotheses in its type. -/
+```
+
 If Lean dependencies make the exact layout awkward, preserve the principle:
 theorem intent and proof implementation should be independently understandable
 and loadable.

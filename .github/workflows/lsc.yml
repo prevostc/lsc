@@ -12,6 +12,10 @@ jobs:
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
+      - name: Check theorem docstrings
+        run: |
+          scripts/check-theorem-docs.sh --self-test
+          scripts/check-theorem-docs.sh
       - name: Install elan
         run: |
           curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf \
