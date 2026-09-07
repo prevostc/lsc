@@ -92,6 +92,14 @@ arbitrarily with honest calls; between our calls, `env` steps constrained by `Re
 well-formed traces have `sender ≠ self` (`Call.sender ≠ target`). External contracts behave per
 their declared `Conforms` / `Rely`. Other contracts are modelled as unable to see this
 contract's private memory or `msize`, which is true of the EVM (`ExtOracle`).
+They are also modelled as deterministic functions of the call and the on-chain
+state they can see: the same request against the same observable world always
+yields the same response. The EVM is deterministic given world state and the
+block environment, and every callee's storage, balance, and code are already
+part of that world. What is excluded is an adversary with hidden state outside
+the modelled world, which no real deployment can exhibit. The previous extra
+hypothesis that the CALL oracle always returns a result is now a fact of this
+model rather than an assumption.
 
 Out of scope (stated in `TRUSTED_COMPUTING_BASE.md`): private-key compromise, block-producer
 ordering/MEV, gas griefing of *our* execution, and token behaviours excluded by

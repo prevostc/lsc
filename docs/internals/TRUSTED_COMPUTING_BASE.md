@@ -53,7 +53,20 @@ precompile, empty call stack). Gas is existential (`∃ b` from `compile_correct
 Other contracts cannot see this contract's private memory or `msize`,
 which is true of the EVM. Wrapping with `toCalls` yields `ExternalCalls`
 that is scratch-insensitive on every reservation interval (needed by
-powdr's spill theorem) and total (`toCalls_total`). `α : Abs I.Ghost`
+powdr's spill theorem) and total (`toCalls_total`).
+
+A second, distinct modelling consequence of the function type: the CALL
+oracle is deterministic. Previously `ExternalCalls.Call` was an arbitrary
+relation, so a callee could depend on hidden state outside the caller's
+observable world or answer differently on two identical (request, world)
+pairs. The EVM is deterministic given world state and the block
+environment, and every callee's storage, balance, and code are already in
+`Obs`, so a real callee is a function of exactly (request, world). What is
+excluded is an adversary with state outside the modelled world — nothing
+a real deployment can exhibit. `CallsTotal` is discharged once
+(`toCalls_total`) instead of being assumed.
+
+`α : Abs I.Ghost`
 maps an EVM snapshot at a bound address to `I.Ghost` (foreign layout is
 not proved in general). `Conforms`: every **successful** call from `self`
 to `addr` decodes to a method of `I`, matches `I.model`, passes

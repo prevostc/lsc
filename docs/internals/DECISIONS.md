@@ -26,6 +26,19 @@ with `ExtView := Obs` (every `EvmState` field except byte memory and
 `ExternalCalls`. `CreatesScratchInsensitive ExternalCreates.none` is
 trivial. `CallsTotal` is implied by `toCalls_total`.
 
+A second, distinct modelling consequence: the oracle is a **function** of
+the request and the observable world, so it is deterministic. Previously
+`ExternalCalls.Call` was an arbitrary relation, which allowed a callee
+whose response depended on hidden state outside the caller's observable
+world, or that answered differently on two calls with the same request
+and the same observable world. The EVM is deterministic given the world
+state and the block environment, and every callee's own storage, balance,
+and code sit in `Obs`, so a real callee is a function of exactly
+(request, world). What is excluded is an adversary with state outside the
+modelled world — nothing a real deployment can exhibit. The previous
+`CallsTotal` hypothesis is discharged once (`toCalls_total`) instead of
+being assumed.
+
 Fallback not taken: keep a raw `Call` plus `hblind : CallsMemoryBlind Call`.
 The type-level wrapper did not force a rewrite of `Conforms` /
 `CallsRealized` / transport glue.

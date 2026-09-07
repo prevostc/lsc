@@ -47,6 +47,16 @@ powdr spill. The bytecode proof existentially picks a fault oracle so
 core and Yul agree on each external outcome. Security statements remain
 "for every starting world".
 
+Other contracts are modelled as deterministic functions of the call and
+the on-chain state they can see: the same call against the same
+observable world always yields the same response. That is how the EVM
+behaves, given the world state and the block environment; every other
+contract's storage, balance, and code are already part of that world.
+What is excluded is an adversary with hidden state outside the modelled
+chain, which no real deployment can exhibit. The previous extra
+hypothesis that the CALL oracle always returns a result is now a fact of
+this model rather than an assumption.
+
 The adversary is the one in [Security model](SECURITY.md).
 
 ## Modelling choices that are not powdr
