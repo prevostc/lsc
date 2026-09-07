@@ -21,8 +21,8 @@ External calls run after requires and storage updates:
 ```lean
 write shares[who] bal'
 -- …
-Binding.transferFromUnit token0B who me a0.toNat
-Binding.transferFromUnit token1B who me a1.toNat
+Binding.safeTransferFrom token0B who me a0.toNat .TransferFailed
+Binding.safeTransferFrom token1B who me a1.toNat .TransferFailed
 ```
 
 That CEI order is sound here because conforming tokens are assumed not to
@@ -36,9 +36,12 @@ and share balances sum to `totalShares`.
 Solvency (spec): every LP's pro-rata `⌊s·r_i/S⌋` is covered by the
 corresponding ghost balance.
 
-Unauthorised extraction (spec and bytecode): an address's **share count**
+Unauthorised extraction (spec and Yul): an address's **share count**
 never falls unless that address called `removeLiquidity`. Swaps and
-adding liquidity do not decrease another LP's share count.
+adding liquidity do not decrease another LP's share count. The compiled
+runtime is produced by the memory-spilling path; `amm_bytecode_no_unauthorized_extraction`
+still assumes the non-spilled compile, so it is not yet a bytecode
+guarantee.
 
 Assumed, not proved in the AMM file: the `IERC20` model, `Rely`, and
 conformance of both tokens; well-formed traces (`sender ≠ self`); the two

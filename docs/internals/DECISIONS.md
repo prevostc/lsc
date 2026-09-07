@@ -67,6 +67,19 @@ peak (all remain live innermost); genuine last-use splitting reshapes
 results become statement calls (17 → 15 live locals) so the current AMM
 compiles.
 
+**Status (2026-09-07):** spilled compile path implemented (`memoryguard(256)`
+on the runtime only; `compileRuntime` = erase then `spillBlock?` of the
+disambiguated block; deploy via `spillObjectWithFallback`). AMM with
+checked transfers emits hex. Theorem wiring in progress: exported
+`compileBlock` / `hcomp` is still the erase path, so AMM bytecode theorems
+are vacuous. Blockers: `GuardedRun` of
+`resolveMemoryGuardStmts r.base r.reserved (uniquifyBlock rt)`; FMP `256`
+vs `reserved` in `StateMatch`; S2 `GuardedExternals` /
+`CallsScratchInsensitive`; lift `run_none_to_any` into `EndToEndExtProof`;
+deploy `PlannedTopRun`. Raw `sourceValidB` fails only `nfWellScopedB`
+(`memoryguard` is an unbound `.call`); the erased runtime is `sourceValidB`
+true. Decision pending before that proof chain.
+
 ## 2026-09-07 — Pin Yul→EVM compiler to `prevostc/yul-compiler` @ `30230e1`
 
 Move the `yul-evm-compiler` Lake pin from upstream powdr `330923e0` to the

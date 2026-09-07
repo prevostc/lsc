@@ -76,6 +76,11 @@ require/revert/emit arities) is not compiled. Bytecode glue talks about
 word-level core; Vault's Amount ABI is identified with the reifier
 certificate.
 
+The AMM runtime hex is produced by powdr's memory-spilling path. Its
+bytecode theorem still assumes the non-spilled compile, so that theorem
+is not yet a bytecode guarantee for the AMM (Tx-level and Yul-level
+theorems stand).
+
 The differential harness (`scripts/difftest.sh`) is defence in depth, not
 a proof.
 

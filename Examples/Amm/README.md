@@ -2,14 +2,16 @@
 
 Constant-product pool, two `IERC20` bindings, no fee. First LP mint is `a0`;
 later `min(⌊a0·S/r0⌋, ⌊a1·S/r1⌋)`. Swaps use Uniswap floor output. External
-transfers are statement calls (`transferFromUnit` / `transferUnit`) after
-storage writes, so compiled Yul stays under the DUP16 live-local limit.
+transfers are checked (`safeTransferFrom` / `safeTransfer`) after storage
+writes.
 
 **Proved:** each reserve is ≤ the pool's ghost balance of that token; share
 balances sum to `totalShares`. An address's **share count** never falls unless
-they called `removeLiquidity` (spec and bytecode). Solvency of each reserve
-vs pro-rata LP claims is at the spec only. Constructor writes token slots
-(outside S2 runtime).
+they called `removeLiquidity` (Tx-level and Yul-level). The runtime hex is
+emitted by powdr's memory-spilling path (`DUP17+`); the bytecode theorem still
+assumes the non-spilled compile, so it is not yet a bytecode guarantee for
+this contract. Solvency of each reserve vs pro-rata LP claims is at the spec
+only. Constructor writes token slots (outside S2 runtime).
 
 | File | Role | Depends on |
 |------|------|------------|
