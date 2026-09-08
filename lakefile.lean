@@ -52,6 +52,8 @@ lean_lib Examples where
     Glob.submodules `Examples.Vault.Proofs,
     Glob.submodules `Examples.Amm,
     Glob.submodules `Examples.Amm.Proofs,
+    Glob.submodules `Examples.FeeAmm,
+    Glob.submodules `Examples.FeeAmm.Proofs,
     Glob.submodules `Examples.Misc
   ]
 
