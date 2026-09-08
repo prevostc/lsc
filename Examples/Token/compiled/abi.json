@@ -1,0 +1,15 @@
+[{"type":"constructor","inputs":[{"name":"owner","type":"address"},{"name":"supply","type":"uint256"}],"stateMutability":"nonpayable"},
+{"type":"function","name":"transfer","inputs":[{"name":"to","type":"address"},{"name":"amount","type":"uint256"}],"outputs":[],"stateMutability":"nonpayable"},
+{"type":"function","name":"approve","inputs":[{"name":"spender","type":"address"},{"name":"amount","type":"uint256"}],"outputs":[],"stateMutability":"nonpayable"},
+{"type":"function","name":"transferFrom","inputs":[{"name":"src","type":"address"},{"name":"to","type":"address"},{"name":"amount","type":"uint256"}],"outputs":[],"stateMutability":"nonpayable"},
+{"type":"function","name":"mint","inputs":[{"name":"to","type":"address"},{"name":"amount","type":"uint256"}],"outputs":[],"stateMutability":"nonpayable"},
+{"type":"function","name":"burn","inputs":[{"name":"amount","type":"uint256"}],"outputs":[],"stateMutability":"nonpayable"},
+{"type":"function","name":"balanceOf","inputs":[{"name":"who","type":"address"}],"outputs":[{"name":"","type":"uint256"}],"stateMutability":"view"},
+{"type":"function","name":"allowance","inputs":[{"name":"owner","type":"address"},{"name":"spender","type":"address"}],"outputs":[{"name":"","type":"uint256"}],"stateMutability":"view"},
+{"type":"function","name":"totalSupply","inputs":[],"outputs":[{"name":"","type":"uint256"}],"stateMutability":"view"},
+{"type":"event","name":"Transfer","inputs":[{"name":"src","type":"address","indexed":false},{"name":"to","type":"address","indexed":false},{"name":"amount","type":"uint256","indexed":false}],"anonymous":false},
+{"type":"event","name":"Approval","inputs":[{"name":"owner","type":"address","indexed":false},{"name":"spender","type":"address","indexed":false},{"name":"amount","type":"uint256","indexed":false}],"anonymous":false},
+{"type":"error","name":"InsufficientBalance","inputs":[]},
+{"type":"error","name":"InsufficientAllowance","inputs":[]},
+{"type":"error","name":"NotOwner","inputs":[]}
+]

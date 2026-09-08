@@ -19,3 +19,4 @@ Deploy-then-runtime anti-extraction is proved for Token's constructor.
 | `Proofs/Security.lean` | Auth/conservation/invariant instances |
 | `Proofs/Compile.lean` | Call-free compiler instance |
 | `Proofs/EndToEnd.lean` | Bytecode transport glue and proofs |
+| `compiled/` | Yul, labelled Asm, bytecode, ABI, heimdall decompile |

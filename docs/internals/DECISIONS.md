@@ -76,8 +76,8 @@ rewritten the whole dispatcher proof chain (`runtimeBlock_inv`,
 `runtimeBlock_correct_*`, `yul_progress`). A solc-shaped dispatcher needs a
 change to powdr's `compileSwitchCases` and its correctness proof — an
 upstream TCB change, not a fork. For exploring generated code we export the
-compiler's own artifacts instead: `out/<C>.runtime.yul`, `out/<C>.deploy.yul`
-and `out/<C>.runtime.asm` from `scripts/export_bytecode.lean`.
+compiler's own artifacts instead: `Examples/<C>/compiled/runtime.yul`,
+`deploy.yul` and `runtime.asm` from `scripts/export_bytecode.lean`.
 
 ## 2026-09-07 — Stack depth: use powdr's verified memory spilling
 

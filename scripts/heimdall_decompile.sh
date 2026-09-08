@@ -1,14 +1,20 @@
 #!/usr/bin/env bash
 # Sourced by export_bytecode.sh and review-bytecode.sh.
-# Decompile out/<C>.runtime.hex with heimdall. Non-fatal if missing or failing.
-# `--include-sol` and `--include-yul` are mutually exclusive, so two runs.
-# Writes out/<C>.sol and, when produced, out/<C>.decompiled.yul.
+# Decompile Examples/<C>/compiled/runtime.hex with heimdall. Non-fatal if missing
+# or failing. `--include-sol` and `--include-yul` are mutually exclusive, so two
+# runs. Writes compiled/decompiled.sol and, when produced, compiled/decompiled.yul.
 # If --abi is rejected (e.g. Lean names like `paused?`), retries without it.
+
+lsc_compiled_dir() {
+  echo "Examples/${1}/compiled"
+}
 
 lsc_heimdall_decompile() {
   local name="$1"
-  local hex="out/${name}.runtime.hex"
-  local abi="out/${name}.abi.json"
+  local dir
+  dir="$(lsc_compiled_dir "$name")"
+  local hex="${dir}/runtime.hex"
+  local abi="${dir}/abi.json"
   local prefix="${HEIMDALL_NOTICE_PREFIX:-}"
   local heimdall="${HEIMDALL:-${HOME}/.bifrost/bin/heimdall}"
   if [[ ! -x "$heimdall" ]]; then
@@ -22,8 +28,8 @@ lsc_heimdall_decompile() {
     echo "${prefix}notice: $hex missing; skip heimdall for $name"
     return 0
   fi
-  local work="out/.heimdall-tmp/${name}"
-  rm -rf "$work"
+  local work
+  work="$(mktemp -d "${TMPDIR:-/tmp}/lsc-heimdall-${name}.XXXXXX")"
   mkdir -p "$work/sol" "$work/yul"
 
   lsc_heimdall_one() {
@@ -54,15 +60,16 @@ lsc_heimdall_decompile() {
     local found
     found="$(find "$outdir" -name "*.${label}" -print -quit 2>/dev/null || true)"
     if [[ -n "$found" ]]; then
-      cp "$found" "$dest"
+      # Heimdall only writes under --output; place the recovered file in compiled/.
+      cat "$found" > "$dest"
       echo "${prefix}heimdall → $dest"
     elif [[ "$label" == sol ]]; then
       echo "${prefix}notice: heimdall produced no .sol for $name"
     fi
   }
 
-  lsc_heimdall_one --include-sol "$work/sol" "out/${name}.sol" sol
-  lsc_heimdall_one --include-yul "$work/yul" "out/${name}.decompiled.yul" yul
+  lsc_heimdall_one --include-sol "$work/sol" "${dir}/decompiled.sol" sol
+  lsc_heimdall_one --include-yul "$work/yul" "${dir}/decompiled.yul" yul
   rm -rf "$work"
   return 0
 }

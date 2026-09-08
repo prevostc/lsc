@@ -140,6 +140,8 @@ Each `Examples/<Name>/` contains exactly:
   one-line references)
 - `README.md` (what the contract does, what is proved in prose, one line per
   file)
+- `compiled/` (Yul, labelled Asm, bytecode, ABI, heimdall decompile; written
+  in place by `scripts/export_bytecode.sh`, not copied from `out/`)
 
 `Checks.lean` imports `Examples.<Name>.Theorems` only. This layout is the
 example-level instance of the Theorems/Proof rule; the docstring checker treats

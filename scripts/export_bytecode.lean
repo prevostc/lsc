@@ -4,15 +4,15 @@ Export compiled EVM bytecode, Yul, labelled Asm, and Tx.run expectations.
   scripts/export_bytecode.sh
   scripts/lean lake env lean scripts/export_bytecode.lean
 
-Writes `out/<C>.{runtime,deploy}.{hex,yul}`, `out/<C>.runtime.asm`,
-`out/<C>.abi.json`, `out/<C>.selectors.json`, and prints JSON on stdout
-(BEGIN_LSC_EXPORT … END_LSC_EXPORT) for `scripts/difftest.sh`.
+Writes `Examples/<C>/compiled/{runtime,deploy}.{hex,yul}`, `runtime.asm`,
+`abi.json`, `selectors.json` (heimdall decompile is the shell wrapper), and
+prints JSON on stdout (BEGIN_LSC_EXPORT … END_LSC_EXPORT) for `scripts/difftest.sh`.
 
 Does not import `Examples.Misc.YulTests` (that file's `#eval`/`#guard` would re-run the
 Yul interpreter). Case lists, senders, and mapping slots follow YulTests.
 Amm cases are view-only (`getReserves` / `sharesOf` / `quote0for1`); constructor and
 swaps CALL out and are not expected to match anvil without token fixtures.
-Vault is exported for artifacts only (no Tx.run cases); its constructor CALLs out.
+Vault and FeeAmm are exported for artifacts only (no Tx.run cases); constructors CALL out.
 -/
 import Lsc.Compiler.Bytecode
 import Lsc.Compiler.Yul
@@ -23,6 +23,7 @@ import Examples.Counter.Contract
 import Examples.Token.Contract
 import Examples.Amm.Contract
 import Examples.Vault.Contract
+import Examples.FeeAmm.Contract
 import Lsc.Tools.AbiJson
 import Lsc.Tools.Disasm
 
@@ -111,22 +112,27 @@ def runtimeArt (c : ContractDef) : RtArt :=
         , asm := "// compileAsm rejected (stackOK2/wfCheck); hex not emitted.\n" ++
             Disasm.printAsmFile c asm }
 
+/-- Per-example artifact directory. The exporter writes here directly. -/
+def compiledDir (name : String) : String := s!"Examples/{name}/compiled"
+
 def writeContract (name : String) (c : ContractDef) (art : RtArt) : IO Unit := do
+  let dir := compiledDir name
+  IO.FS.createDirAll dir
   let dyul :=
     match deployObject c with
     | none => "// deployObject failed\n"
     | some o => Disasm.printYulFile c (printYulObject o)
-  IO.FS.writeFile s!"out/{name}.runtime.yul" (Disasm.printYulFile c art.yul)
-  IO.FS.writeFile s!"out/{name}.deploy.yul" dyul
-  IO.FS.writeFile s!"out/{name}.runtime.asm" art.asm
-  IO.FS.writeFile s!"out/{name}.abi.json" (contractAbiJson c ++ "\n")
-  IO.FS.writeFile s!"out/{name}.selectors.json" (selectorsJson c ++ "\n")
+  IO.FS.writeFile s!"{dir}/runtime.yul" (Disasm.printYulFile c art.yul)
+  IO.FS.writeFile s!"{dir}/deploy.yul" dyul
+  IO.FS.writeFile s!"{dir}/runtime.asm" art.asm
+  IO.FS.writeFile s!"{dir}/abi.json" (contractAbiJson c ++ "\n")
+  IO.FS.writeFile s!"{dir}/selectors.json" (selectorsJson c ++ "\n")
   match art.hex with
   | none => IO.eprintln s!"{name}: compileRuntime failed"
-  | some bs => IO.FS.writeFile s!"out/{name}.runtime.hex" (bytesHex bs ++ "\n")
+  | some bs => IO.FS.writeFile s!"{dir}/runtime.hex" (bytesHex bs ++ "\n")
   match compileDeploy c with
   | none => IO.eprintln s!"{name}: compileDeploy failed"
-  | some bs => IO.FS.writeFile s!"out/{name}.deploy.hex" (bytesHex bs ++ "\n")
+  | some bs => IO.FS.writeFile s!"{dir}/deploy.hex" (bytesHex bs ++ "\n")
 
 structure Case where
   name : String
@@ -389,6 +395,7 @@ def counterArt := runtimeArt Counter.contract
 def tokenArt := runtimeArt Token.contract
 def ammArt := runtimeArt Amm.contract
 def vaultArt := runtimeArt Vault.contract
+def feeAmmArt := runtimeArt FeeAmm.contract
 
 def exportJson : String :=
   "{" ++ String.intercalate "," [
@@ -401,16 +408,18 @@ def exportJson : String :=
       contractJson "Amm" Amm.contract ammArt ammCases
         (some (ctorCalldata [10, 11])),
       contractJson "Vault" Vault.contract vaultArt []
-        (some (ctorCalldata [1, 10]))
+        (some (ctorCalldata [1, 10])),
+      contractJson "FeeAmm" FeeAmm.contract feeAmmArt []
+        (some (ctorCalldata [1, 10, 11]))
     ] ++ "]"
   ] ++ "}"
 
 def main : IO Unit := do
-  IO.FS.createDirAll "out"
   writeContract "Counter" Counter.contract counterArt
   writeContract "Token" Token.contract tokenArt
   writeContract "Amm" Amm.contract ammArt
   writeContract "Vault" Vault.contract vaultArt
+  writeContract "FeeAmm" FeeAmm.contract feeAmmArt
   IO.println "BEGIN_LSC_EXPORT"
   IO.println exportJson
   IO.println "END_LSC_EXPORT"

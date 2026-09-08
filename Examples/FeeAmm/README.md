@@ -26,3 +26,4 @@ future fees via `setFeeTo`, fee-on-transfer/rebasing tokens, reentrancy
 | `Proofs/Security.lean` | Invariant and authorisation (checkpoint B) |
 | `Proofs/Compile.lean` | S2 compile check / compiler proofs |
 | `Proofs/EndToEnd.lean` | Bytecode glue (checkpoint C) |
+| `compiled/` | Yul, labelled Asm, bytecode, ABI, heimdall decompile |

@@ -20,3 +20,4 @@ cannot see the pool's private memory, which is true of the EVM.
 | `Proofs/Security.lean` | Invariant and authorisation instances |
 | `Proofs/Compile.lean` | S2 multi-binding compiler proofs |
 | `Proofs/EndToEnd.lean` | Bytecode glue and anti-extraction proof |
+| `compiled/` | Yul, labelled Asm, bytecode, ABI, heimdall decompile |

@@ -21,3 +21,4 @@ deploy theorem.
 | `Proofs/Security.lean` | Invariant and authorisation instances |
 | `Proofs/Compile.lean` | S2 `toYulFn_correct_ext` proofs |
 | `Proofs/EndToEnd.lean` | Bytecode transport glue and proofs |
+| `compiled/` | Yul, labelled Asm, bytecode, ABI, heimdall decompile |

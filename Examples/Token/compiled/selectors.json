@@ -1,0 +1,1 @@
+{"functions":{"transfer":"0xa9059cbb","approve":"0x095ea7b3","transferFrom":"0x23b872dd","mint":"0x40c10f19","burn":"0x42966c68","balanceOf":"0x70a08231","allowance":"0xdd62ed3e","totalSupply":"0x18160ddd"},"errors":{"InsufficientBalance":"0xf4d678b8","InsufficientAllowance":"0x13be252b","NotOwner":"0x30cd7471"}}

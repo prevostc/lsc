@@ -15,3 +15,4 @@ model (`counter_correct`, `counter_dispatch_correct`). No wealth theorem.
 | `Proofs/Security.lean` | No security theorems |
 | `Proofs/Compile.lean` | Call-free `toYulFn` proofs |
 | `Proofs/EndToEnd.lean` | No bytecode wealth theorems |
+| `compiled/` | Yul, labelled Asm, bytecode, ABI, heimdall decompile |
