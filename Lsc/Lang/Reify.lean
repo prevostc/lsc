@@ -111,6 +111,10 @@ def isRefTy (ty : Expr) : MetaM Bool := do
   let ty ← whnfD ty
   return ty.isAppOf ``Lsc.Ref
 
+def isProdTy (ty : Expr) : MetaM Bool := do
+  let ty ← whnfD ty
+  return ty.isAppOfArity ``Prod 2
+
 def findBindings (ns storage ext : Name) : MetaM (Array BindingInfo) := do
   let env ← getEnv
   let mut out : Array BindingInfo := #[]
@@ -1095,12 +1099,26 @@ def certifyDenote (fn schema : Name) (lhs lhsRaw rhs coreE : Expr) : TermElabM E
     mkIdent ``Lsc.Tx.pure_bind,
     mkIdent ``Lsc.Tx.bind_pure,
     mkIdent ``Lsc.Tx.map_eq_pure_bind,
+    mkIdent ``Lsc.Tx.map_pure,
+    mkIdent ``Lsc.Tx.map_ite,
+    mkIdent ``Lsc.Tx.bind_ite,
     mkIdent ``Lsc.Address.toWord,
     mkIdent ``Lsc.Amount.ofWord,
     mkIdent ``Lsc.Amount.raw,
+    mkIdent ``Lsc.Amount.eq_iff,
+    mkIdent ``Lsc.Amount.ne_iff,
+    mkIdent ``Lsc.Amount.lt_iff,
+    mkIdent ``Lsc.Amount.le_iff,
     mkIdent schema,
     mkIdent fn]
   let mut idsAmount : Array Ident := #[
+    mkIdent ``Lsc.Tx.bind_assoc,
+    mkIdent ``Lsc.Tx.pure_bind,
+    mkIdent ``Lsc.Tx.bind_pure,
+    mkIdent ``Lsc.Tx.map_eq_pure_bind,
+    mkIdent ``Lsc.Tx.map_pure,
+    mkIdent ``Lsc.Tx.map_ite,
+    mkIdent ``Lsc.Tx.bind_ite,
     mkIdent ``Lsc.Tx.map_bind,
     mkIdent ``Lsc.Tx.bind_map,
     mkIdent ``Lsc.Core.denote,
@@ -1116,6 +1134,10 @@ def certifyDenote (fn schema : Name) (lhs lhsRaw rhs coreE : Expr) : TermElabM E
     mkIdent ``Lsc.Amount.divScalar,
     mkIdent ``Lsc.Amount.mulDivDown,
     mkIdent ``Lsc.Amount.mulDivUp,
+    mkIdent ``Lsc.Amount.eq_iff,
+    mkIdent ``Lsc.Amount.ne_iff,
+    mkIdent ``Lsc.Amount.lt_iff,
+    mkIdent ``Lsc.Amount.le_iff,
     mkIdent ``Lsc.Tx.HAddChecked.hAdd,
     mkIdent ``Lsc.Tx.HSubChecked.hSub,
     mkIdent ``Lsc.Tx.HMulChecked.hMul,
@@ -1676,6 +1698,18 @@ def mkCoreEqAlt (ns fn : Name) : MetaM (TSyntax ``Lean.Parser.Tactic.inductionAl
     else if ← isRefTy surf.ρ then
       `(Lean.Parser.Tactic.tacticSeq|
           conv => lhs; erw [Lsc.Lang.worldAfter_refMk]
+          erw [$coreDenote:ident, $specExec:ident]
+          try rfl)
+    else if ← isProdTy surf.ρ then
+      let ρ ← whnfD surf.ρ
+      let α ← whnfD (ρ.getArg! 0)
+      let β ← whnfD (ρ.getArg! 1)
+      unless α.isAppOf ``Lsc.Amount && β.isAppOf ``Lsc.Amount do
+        throwError "lsc_contract: pair return must be Amount × Amount"
+      let aT ← exprToTerm (α.getArg! 0)
+      let bT ← exprToTerm (β.getArg! 0)
+      `(Lean.Parser.Tactic.tacticSeq|
+          conv => lhs; erw [Lsc.Lang.worldAfter_amountProd (a := $aT) (b := $bT)]
           erw [$coreDenote:ident, $specExec:ident]
           try rfl)
     else

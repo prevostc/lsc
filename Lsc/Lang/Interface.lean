@@ -151,7 +151,7 @@ end Lang
 the same `ofWord` / `.raw` (and `{ addr := · }` / `.addr`) wrappers the schema
 uses, so `lsc_reify` certificates close. -/
 namespace Syntax
-open Lean Elab Term Meta
+open Lean Elab Term Meta PrettyPrinter
 
 private def isAmount : Expr → Bool := fun ty => ty.isAppOf ``Lsc.Amount
 private def isRef : Expr → Bool := fun ty => ty.isAppOf ``Lsc.Ref
@@ -258,11 +258,13 @@ where
     let α ← whnfD α
     let σ := sigma
     if isAmount α then
+      let tyStx ← delab α
       `(Lsc.Tx.store (fun $σ m => { $σ with $f:ident := Lsc.Amount.ofWord m })
-          (Lsc.Amount.raw $v))
+          (Lsc.Amount.raw ($v : $tyStx)))
     else if isRef α then
+      let tyStx ← delab α
       `(Lsc.Tx.store (fun $σ m => { $σ with $f:ident := { addr := m } })
-          (Lsc.Ref.addr $v))
+          (Lsc.Ref.addr ($v : $tyStx)))
     else
       `(Lsc.Tx.store (fun $σ m => { $σ with $f:ident := m }) $v)
   storeMap1 (f : Ident) (α : Expr) (k v : Term) : TermElabM Term := do

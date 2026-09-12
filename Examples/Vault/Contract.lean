@@ -1,39 +1,31 @@
-import Lsc.Lang.Amount
+import Lsc.Lang.Word
 import Lsc.Lang.Reify
 import Stdlib.ERC20
 import Stdlib.SafeERC20
-import Stdlib.Scales
 
 /-!
 # Vault — single-asset ERC4626-style vault
 
-`ASSET` and `SHARE` are phantom markers. The underlying token is a bound `IERC20`
-(`assetB`); its scale is an opaque type index, not a Core literal. Share issuance
-and redemption always round **down** (`shareDown`), so leftover wei stays in the vault.
+The underlying token is a bound `IERC20` (`assetB`). Share issuance and
+redemption always round **down**, so leftover wei stays in the vault.
 -/
 
-open Lsc Lsc.Syntax Lsc.Stdlib Stdlib
+open Lsc Lsc.Syntax Lsc.Stdlib
 
 namespace Vault
 
-/-- Phantom marker for the underlying asset. -/
-structure ASSET where
-/-- Phantom marker for vault shares. -/
-structure SHARE where
-
-/-- Opaque scale of the underlying asset (not `WAD` by unfolding). -/
-opaque assetScale : Nat
-/-- Share scale; ERC-4626 convention is 18 decimals. -/
-def shareScale : Nat := WAD
+/-- Underlying ERC20. Decimals are only known on chain. -/
+def vaultAsset : Asset := ⟨`vaultAsset, none⟩
+/-- Vault share unit. Static 18 decimals. -/
+def vShare : Asset := ⟨`vShare, some 18⟩
 
 structure Storage where
-  totalAssets : Nat
-  totalShares : Nat
-  shares : Mapping Address Nat
+  totalAssets : Amount vaultAsset
+  totalShares : Amount vShare
+  shares : Mapping Address (Amount vShare)
   paused : Flag
   owner : Address
-  asset : IERC20.Ref
-  assetDecimals : Nat
+  assetRef : Ref IERC20 vaultAsset
 
 structure Ext where
   asset : Ghost
@@ -42,13 +34,13 @@ instance : Inhabited Ext := ⟨⟨{}⟩⟩
 
 /-- Binding of the underlying token: address in storage, ghost in `Ext`. -/
 def assetB : Binding IERC20 Storage Ext :=
-  ⟨(·.asset), (·.asset), fun x g => { x with asset := g }⟩
+  ⟨(·.assetRef.addr), (·.asset), fun x g => { x with asset := g }⟩
 
 inductive Event
-  | Deposit (who : Address) (assets : Amount ASSET assetScale)
-      (sharesOut : Amount SHARE shareScale)
-  | Withdraw (who : Address) (assets : Amount ASSET assetScale)
-      (sharesIn : Amount SHARE shareScale)
+  | Deposit (who : Address) (assets : Amount vaultAsset)
+      (sharesOut : Amount vShare)
+  | Withdraw (who : Address) (assets : Amount vaultAsset)
+      (sharesIn : Amount vShare)
   | Paused
   | Unpaused
   deriving DecidableEq, Repr
@@ -65,81 +57,79 @@ inductive Error
 
 abbrev M := Tx Storage Ext Event Error
 
-/-- Deployment: set owner, bind the asset, cache `decimals`, start unpaused. -/
+/-- Deployment: set owner, bind the asset, start unpaused. -/
 def constructor (owner tok : Address) : M Unit := do
   write owner owner
-  write asset tok
+  write assetRef { addr := tok }
   write paused Flag.off
-  let d ← Binding.decimals assetB
-  write assetDecimals d
 
-/-- Deposit `assets`; mint shares 1:1 if empty, otherwise `⌊supply * assets / totalAssets⌋`.
-Computes minted from pre-state `TA`/`TS` and reverts with `ZeroShares` if that floor is 0,
-then pulls the asset via `safeTransferFrom`, then updates accounting. Storage words are `Nat`
-(`Amount` fields make multi-step `rfl` certificates time out). -/
-def deposit (assets : Amount ASSET assetScale) : M Nat := do
+/-- Deposit `assets`; mint shares 1:1 if empty, otherwise
+`⌊supply · assets / totalAssets⌋`. Computes minted from pre-state `TA`/`TS`
+and reverts with `ZeroShares` if that floor is 0, then pulls the asset via
+`safeTransferFrom`, then updates accounting. -/
+def deposit (assets : Amount vaultAsset) : M (Amount vShare) := do
   let p ← read paused
   Tx.require (p = Flag.off) .Paused
-  Tx.require (0 < assets.toNat) .Zero
+  Tx.require (0 < assets) .Zero
   let who ← Tx.sender
   let me ← Tx.selfAddress
   let ta ← read totalAssets
   let ts ← read totalShares
   let minted ←
     if ts = 0 then
-      pure assets.toNat
+      pure (Amount.ofWord assets.raw)
     else
-      Tx.mulDivDown ts assets.toNat ta
+      Amount.mulDivDown ts assets ta
   Tx.require (0 < minted) .ZeroShares
-  Binding.safeTransferFrom assetB who me assets.toNat .TransferFailed
-  let ta' ← ta +? assets.toNat
+  Binding.safeTransferFrom assetB who me assets .TransferFailed
+  let ta' ← ta +? assets
   write totalAssets ta'
   let ts' ← minted +? ts
   write totalShares ts'
   let bal ← read shares[who]
   let bal' ← minted +? bal
   write shares[who] bal'
-  Tx.emit (.Deposit who assets (Amount.ofNat minted))
+  Tx.emit (.Deposit who assets minted)
   pure minted
 
-/-- Burn `sharesIn` and return `⌊totalAssets * sharesIn / totalShares⌋` as a word.
-Reverts with `ZeroAssets` if that floor is 0 (burning shares for nothing is a caller loss).
-Pushes the asset via `safeTransfer` after updating accounting. -/
-def withdraw (sharesIn : Amount SHARE shareScale) : M Nat := do
+/-- Burn `sharesIn` and return `⌊totalAssets · sharesIn / totalShares⌋`.
+Reverts with `ZeroAssets` if that floor is 0. Pushes the asset via
+`safeTransfer` after updating accounting. -/
+def withdraw (sharesIn : Amount vShare) : M (Amount vaultAsset) := do
   let p ← read paused
   Tx.require (p = Flag.off) .Paused
-  Tx.require (0 < sharesIn.toNat) .Zero
+  Tx.require (0 < sharesIn) .Zero
   let who ← Tx.sender
   let bal ← read shares[who]
-  Tx.require (sharesIn.toNat ≤ bal) .InsufficientShares
+  Tx.require (sharesIn ≤ bal) .InsufficientShares
   let ta ← read totalAssets
   let ts ← read totalShares
-  let assetsOut ← Tx.mulDivDown ta sharesIn.toNat ts
+  let assetsOut ← Amount.mulDivDown ta sharesIn ts
   Tx.require (0 < assetsOut) .ZeroAssets
-  let bal' ← bal -? sharesIn.toNat
+  let bal' ← bal -? sharesIn
   write shares[who] bal'
-  let ts' ← ts -? sharesIn.toNat
+  let ts' ← ts -? sharesIn
   write totalShares ts'
   let ta' ← ta -? assetsOut
   write totalAssets ta'
   Binding.safeTransfer assetB who assetsOut .TransferFailed
-  Tx.emit (.Withdraw who (Amount.ofNat assetsOut) sharesIn)
+  Tx.emit (.Withdraw who assetsOut sharesIn)
   pure assetsOut
 
 /-- View: shares `deposit` would mint (no state change, no pause check, no token pull). -/
-def previewDeposit (assets : Amount ASSET assetScale) : M Nat := do
+def previewDeposit (assets : Amount vaultAsset) : M (Amount vShare) := do
   let ta ← read totalAssets
   let ts ← read totalShares
   if ts = 0 then
-    pure assets.toNat
+    pure (Amount.ofWord assets.raw)
   else
-    Tx.mulDivDown ts assets.toNat ta
+    Amount.mulDivDown ts assets ta
 
 /-- View: assets `withdraw` would return. -/
-def previewRedeem (sharesIn : Amount SHARE shareScale) : M Nat := do
+def previewRedeem (sharesIn : Amount vShare) : M (Amount vaultAsset) := do
   let ta ← read totalAssets
   let ts ← read totalShares
-  Tx.mulDivDown ta sharesIn.toNat ts
+  Amount.mulDivDown ta sharesIn ts
 
 /-- Owner-only: set the pause flag. -/
 def pause : M Unit := do
@@ -160,12 +150,9 @@ def unpause : M Unit := do
 /-- Current pause flag. -/
 def paused? : M Flag := read paused
 
-/-- Cached asset `decimals` (set at construction). -/
-def decimals : M Nat := read assetDecimals
-
 /-- Out-of-fragment: `Rounding` is a parameter, not a literal. Used by `#guard_msgs` below. -/
-def badRescale (r : Rounding) (a : Amount ASSET assetScale) : M (Amount ASSET USDC_SCALE) :=
-  Amount.rescale assetScale USDC_SCALE r a
+def badRescale (r : Rounding) (a : Word) : M Word :=
+  Tx.rescale 18 6 r a
 
 /-- Out-of-fragment: pure `Nat` addition is not an atom. -/
 def badAtom (n : Nat) : M Nat := do
@@ -174,12 +161,12 @@ def badAtom (n : Nat) : M Nat := do
 
 end Vault
 
-set_option maxHeartbeats 800000
+set_option maxHeartbeats 4000000
 
 lsc_schema Vault
 lsc_reify Vault.constructor Vault.deposit Vault.withdraw Vault.previewDeposit Vault.previewRedeem
-lsc_reify Vault.pause Vault.unpause Vault.paused? Vault.decimals
-lsc_contract Vault constructor deposit withdraw previewDeposit previewRedeem pause unpause paused? decimals
+lsc_reify Vault.pause Vault.unpause Vault.paused?
+lsc_contract Vault constructor deposit withdraw previewDeposit previewRedeem pause unpause paused?
 
 /--
 error: reify: rounding `r` must be a literal `.down` or `.up`

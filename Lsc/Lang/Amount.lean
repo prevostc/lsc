@@ -87,6 +87,10 @@ theorem raw_sub_add {x y : Amount a} (h : y.raw ≤ x.raw) : (x - y + y).raw = x
   Nat.sub_add_cancel h
 @[simp] theorem lt_iff (x y : Amount a) : x < y ↔ x.raw < y.raw := Iff.rfl
 @[simp] theorem le_iff (x y : Amount a) : x ≤ y ↔ x.raw ≤ y.raw := Iff.rfl
+theorem eq_iff (x y : Amount a) : x = y ↔ x.raw = y.raw :=
+  ⟨fun h => h ▸ rfl, ext⟩
+theorem ne_iff (x y : Amount a) : x ≠ y ↔ x.raw ≠ y.raw :=
+  not_congr (eq_iff x y)
 
 theorem not_le_of_gt {x y : Amount a} (h : y < x) : ¬ x ≤ y :=
   Nat.not_le_of_gt h
@@ -249,6 +253,15 @@ theorem worldAfter_ofWord {a : Asset} (x : Tx S X E ε Nat)
     (ctx : Ctx) (w : World S X E) :
     worldAfter x ctx w = worldAfter (Amount.ofWord (a := a) <$> x) ctx w :=
   (worldAfter_map (Amount.ofWord (a := a)) x ctx w).symm
+
+/-- Same for a pair of amounts (`getReserves`, `removeLiquidity`). -/
+theorem worldAfter_amountProd {a b : Asset} (x : Tx S X E ε (Nat × Nat))
+    (ctx : Ctx) (w : World S X E) :
+    worldAfter x ctx w =
+      worldAfter ((fun v =>
+        (Amount.ofWord (a := a) v.1, Amount.ofWord (a := b) v.2)) <$> x) ctx w :=
+  (worldAfter_map (fun v =>
+    (Amount.ofWord (a := a) v.1, Amount.ofWord (a := b) v.2)) x ctx w).symm
 
 end Lang
 

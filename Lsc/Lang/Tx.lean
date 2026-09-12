@@ -379,6 +379,25 @@ theorem bind_map {β γ : Type} (f : α → β) (x : Tx S X E ε α) (k : β →
   simp only [run_map, run_bind]
   cases run x ctx w <;> rfl
 
+/-- `f <$> pure a` is `pure (f a)`. First-mint `pure (Amount.ofWord n)` vs
+`ofWord <$>` Core `pure n`. -/
+theorem map_pure {β : Type} (f : α → β) (a : α) :
+    f <$> (pure a : Tx S X E ε α) = pure (f a) := by
+  rw [map_eq_pure_bind, pure_bind]
+
+/-- `map` distributes over `if`. -/
+theorem map_ite {β : Type} (c : Prop) [Decidable c] (f : α → β)
+    (t e : Tx S X E ε α) :
+    f <$> (if c then t else e) = if c then (f <$> t) else (f <$> e) := by
+  split <;> rfl
+
+/-- `bind` distributes over `if`. Core.ite duplicates the continuation;
+Lean `let x ← if …` is `bind` of an `ite`. -/
+theorem bind_ite {β : Type} (c : Prop) [Decidable c] (t e : Tx S X E ε α)
+    (k : α → Tx S X E ε β) :
+    (if c then t else e) >>= k = if c then (t >>= k) else (e >>= k) := by
+  split <;> rfl
+
 end Tx
 
 /-! Post-world of a `Tx`: success keeps the returned world, revert keeps `w`.
@@ -408,6 +427,13 @@ theorem worldAfter_map {S X E ε α β} (f : α → β) (x : Tx S X E ε α)
     worldAfter (f <$> x) ctx w = worldAfter x ctx w := by
   simp [worldAfter, Tx.run_map]
   cases Tx.run x ctx w <;> rfl
+
+/-- Reverse `worldAfter_map` so `rw` can wrap a Core denotation (`ofWord <$>`,
+pair reconstruction, `Ref.mk <$>`). -/
+theorem worldAfter_wrap {S X E ε α β} (f : α → β) (x : Tx S X E ε α)
+    (ctx : Ctx) (w : World S X E) :
+    worldAfter x ctx w = worldAfter (f <$> x) ctx w :=
+  (worldAfter_map f x ctx w).symm
 
 end Lang
 
