@@ -28,6 +28,7 @@ this and Fable only review the draft? If yes, do that. The main (Fable) context 
 delegate, decide, record; do not read implementation files or long reports itself.
 
 Do not let execution agents make major architectural decisions implicitly through code.
+See **Human confirmation before large work**.
 
 ## Lean execution
 
@@ -156,6 +157,28 @@ example-level instance of the Theorems/Proof rule; the docstring checker treats
 Plan implementation and proof jointly before substantial work.
 
 Do not design code first and discover later that it is hostile to proof.
+
+## Human confirmation before large work
+
+Before any large change (new language feature, interface/security/compiler
+architecture, example rewrite, numeric/type-system change, or anything that
+touches more than one example or a public theorem family), the main agent MUST
+show the owner a preview of what the user-facing code will look like: the
+storage struct, one representative function body, and one or two theorem
+statements as a Solidity developer would read them. Wait for an explicit go.
+
+Do not spawn implementation/proof subagents for that work until the owner
+confirms the preview (or a revised one).
+
+Do not deep-dive (read large internals, start proofs, rewrite trees) to
+"figure out" a large design in code. Draft the surface, ask, then implement.
+
+Mechanical / clearly-scoped follow-ups are exempt: build/lint fixes, renames,
+docs, theorem-docstring quality, one-file bugfixes that do not change a public
+API or theorem statement.
+
+Subagents inherit this: their brief must say "preview already approved" or they
+must stop and return a preview instead of editing.
 
 ## Simplification
 

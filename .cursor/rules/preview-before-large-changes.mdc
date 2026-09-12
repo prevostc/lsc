@@ -1,0 +1,33 @@
+---
+description: Show user-facing code first; wait for explicit owner confirmation before large work.
+alwaysApply: true
+---
+
+# Preview before large changes
+
+Before a large change (new language feature, interface/security/compiler architecture, example rewrite, numeric/type-system change, or anything that touches more than one example or a public theorem family):
+
+1. Show the owner a preview of the user-facing code: storage struct, one representative function body, one or two theorem statements as a Solidity developer would read them.
+2. Wait for an explicit go. Do not spawn implementation/proof subagents until then.
+3. Do not deep-dive internals, start proofs, or rewrite trees to figure out the design. Draft the surface, ask, then implement.
+
+Exempt: build/lint, renames, docs, theorem-docstring quality, one-file bugfixes that do not change a public API or theorem statement.
+
+Subagent briefs must say "preview already approved", or the subagent stops and returns a preview instead of editing.
+
+Template — Amount redesign (what "show the code first" means):
+
+```lean
+structure Storage where
+  reserve0 : Amount token0
+  reserve1 : Amount token1
+  -- …
+
+def swap0for1 (amountIn : Amount token0) (minOut : Amount token1) : M (Amount token1) := do
+  -- …
+
+-- delta form: success ⇒ reserve product does not fall
+Tx.run (swap0for1 dx minOut) ctx w = .ok (out, w') →
+  w'.self.reserve0.raw * w'.self.reserve1.raw ≥
+    w.self.reserve0.raw * w.self.reserve1.raw
+```
