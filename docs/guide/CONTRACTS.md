@@ -57,8 +57,9 @@ See [External calls](EXTERNAL_CALLS.md).
 
 A function named `constructor` is deployment only; it is not a trace
 entrypoint. Token's constructor mints the initial supply to the owner.
-Vault and AMM constructors that call `decimals` on the bound token are
-outside the EVM deploy theorem ([What is trusted](TRUST.md)).
+Vault and AMM constructors bind token addresses; they do not cache
+decimals. Constructors are outside the EVM deploy theorem
+([What is trusted](TRUST.md)).
 
 ## What authors write vs what is generated
 

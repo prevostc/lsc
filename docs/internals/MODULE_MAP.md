@@ -20,11 +20,13 @@ Lake libraries (`lakefile.lean`): `LscSemantics` (`Lsc.Lang`, `Lsc.Security`,
   for reifier certificates. Language specification.
 - `Interface.lean` — `Interface`, `Binding`, `Tx.call` / `Tx.callUnit`, `run_call`.
   Bindings are explicit constants.
-- `Amount.lean` — `Amount τ s`, `Flag`, `Price`, `Fixed`, `Rounding`,
-  `add` / `sub` / `shareDown` / `shareUp`, `Tx.mulDivDown` / `Up`. Named scales
-  and derived ops (`mulDown`, `rescale`, `convert`) are in `Stdlib/Scales.lean`.
-- `Core.lean` — `Core` (`Op.call`, `Stmt.call`), `Core.denote` (Nat, compiler),
-  `Core.denoteAWord` / `Core.denoteAUnit` (Amount certificates), `Core.effects`.
+- `Word.lean` — `Word`, checked `+? -? *? /?`, `mulDivDown` / `Up` / `pow10`.
+- `Amount.lean` — `Asset`, `Amount a` (one-field; not an abbrev), `Fixed d`,
+  same-asset `+? -?`, scalar `*? /?`, dimensional `mulDivDown` / `Up`.
+  `Ref I a` lives with bindings. Named scales (`mulDown`, `rescale`) are in
+  `Stdlib/Scales.lean`.
+- `Core.lean` — `Core` (`Op.call`, `Stmt.call`), `Core.denote` (words;
+  Reify erases `Amount` / `Fixed`), `Core.effects`.
   `ContractSchema.ext` supplies `call : Nat → Nat → List Nat → Tx`.
 - `CoreTheorems.lean` / `CoreProof.lean` — `Op.effects_frame`,
   `Stmt.effects_frame_on`, `effects_frame_on` / `effects_frame` /

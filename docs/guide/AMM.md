@@ -6,9 +6,11 @@ two callees instead of one.
 
 ## Design
 
-Storage holds `reserve0` / `reserve1`, `totalShares`, `shares`, and cached
-token addresses and decimals. The constructor requires the two tokens to
-differ, then caches `decimals`.
+Storage holds `token0Ref` / `token1Ref`, `reserve0` / `reserve1`,
+`totalShares`, and `shares`. Amounts are indexed by the asset they
+denominate (`Amount token0`, `Amount lpShare`). The constructor requires
+the two tokens to differ and stores the binding addresses; it does not
+cache decimals (this pool never converts between assets).
 
 The first LP mint is `a0` (no square root, no loop). Later mints are
 `min(⌊a0·S/r0⌋, ⌊a1·S/r1⌋)`. Swaps use the Uniswap floor
@@ -21,8 +23,8 @@ External calls run after requires and storage updates:
 ```lean
 write shares[who] bal'
 -- …
-Binding.safeTransferFrom token0B who me a0.toNat .TransferFailed
-Binding.safeTransferFrom token1B who me a1.toNat .TransferFailed
+Binding.safeTransferFrom token0B who me a0 .TransferFailed
+Binding.safeTransferFrom token1B who me a1 .TransferFailed
 ```
 
 That CEI order is sound here because conforming tokens are assumed not to

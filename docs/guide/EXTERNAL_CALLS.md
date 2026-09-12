@@ -18,7 +18,7 @@ def assetB : Binding IERC20 Storage Ext :=
 Deposit pulls after it has computed a positive mint:
 
 ```lean
-let _ ← Binding.transferFrom assetB who me assets.toNat
+let _ ← Binding.transferFrom assetB who me assets
 ```
 
 AMM binds two tokens, `token0B` and `token1B`, and requires `t0 ≠ t1` in

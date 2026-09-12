@@ -133,23 +133,20 @@ dispatcher Yul is unchanged; this is a TCB pin move, not a change to our
 emitter. Lsc theorems are expected to keep their names; a break in a
 transported goal should be reported, not patched around.
 
-## 2026-09-12 — Numbers: Word and Fixed replace Amount
+## 2026-09-12 — Numbers: asset-indexed Amount, typed Ref, typed storage
 
-`Word` is the plain checked 256-bit amount type: `+? -? *? /?` revert on
-overflow, underflow, or zero-division, and `mulDivDown` / `mulDivUp` stay
-the only lossy word operations. `Fixed d` is definitionally `Word` with
-one optional type-level decimals parameter for WAD/RAY-style math
-(`mulDown` / `mulUp` / `divDown` / `divUp` / `rescale`). There is no token
-phantom — token identity is carried by the binding a value flows through,
-not by its type. An opt-in `Tagged τ` wrapper exists for events/ABI only
-and never appears in `Tx` signatures. Runtime-only ERC20 decimals are
-cached as a `Word` at construction and converted with `rescale` / `pow10`.
-The `Amount TOKEN scale` machinery (`denoteAWord` / `denoteAUnit`, `+ₐ`,
-`whnfAmount?`, `amountAnnot`, opaque `assetScale` / `scale0` / `scale1`)
-is deleted.
-
-Rationale: the phantom parameters infected every signature and proof for a
-guarantee (no cross-token mixing) that bindings already provide.
+`Word` is the plain checked 256-bit type for parameters and counts. `Amount a`
+is a **one-field structure** (`raw : Word`) indexed by a contract-level closed
+`Asset` (an abbrev would unify every amount back to `Word`). `Fixed d` is
+`Amount (Asset.fixed d)`. Same-asset `+? -?`; `*? /?` only against a `Word`
+scalar; `mulDivDown`/`Up` are dimensional (`Amount b → Amount a → Amount a →
+Tx (Amount b)`). `Ref I a` types a binding by interface and asset; storage
+fields are `Amount a` / `Mapping Address (Amount a)` (schema slot `uint256`).
+Reify erases `Amount.mk`/`.raw` and the class ops. A rejected Word-only design
+lost the `Fixed 6 +? Fixed 18` and cross-token type errors; the real pains of
+the old `Amount TOKEN scale` were the second phantom, `opaque scaleN`, and
+`Nat` storage. Static decimals and asset identity are elaborator-checked
+because the indices are closed terms; runtime decimals are hypotheses.
 
 ## 2026-09-12 — Interfaces: typed Ref bindings, Implements, Rely in the interface
 

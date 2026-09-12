@@ -31,9 +31,8 @@ How a `ContractDef` becomes hex/ABI (functions, not theorems):
 S1 is the call-free fragment (`CallFree` / `M1Frag`). S2 is `S2Frag` (`CallFree`
 plus `Op.call` / `Stmt.call`) over a list of `BindEnv` packages (Vault is the
 singleton `[assetB]`; AMM is `[token0B, token1B]`). Link 1 is `Core.denote schema f.core
-args = f args` (or `Core.denoteAWord` / `Core.denoteAUnit` when the surface is
-Amount-typed). Bytecode glue talks about `Core.denote` (Nat); Vault Amount ABI is
-identified via `deposit.core_denote` / `withdraw.core_denote`.
+args = f args`. `Amount a` / `Fixed d` erase to words. Bytecode glue
+talks about `Core.denote` (Nat).
 
 ## Hypotheses common to all links
 

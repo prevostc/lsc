@@ -38,20 +38,12 @@ Core  --toYul (ours)-->  Yul AST (powdr yul-semantics)  --powdr compile_correct-
 - Loop-free ANF over words with de Bruijn locals; compiler denotation `Core.denote : Core → List ℕ →
   Tx …`. Storage fields, events and errors are indices into a generated schema.
   `ContractSchema.ext` supplies `call : Nat → Nat → List Nat → Tx`. Core gains exactly
-  `Op.call b m args` and `Stmt.call b m args`. Amount surface programs have a second interp
-  `denoteAWord` / `denoteAUnit` used only in `f.core_denote` (same AST; compiler still uses
-  `Core.denote`).
-  **Interim decision (Sept 2026):** `Amount.ofNat <$> Core.denote = f` is not definitional
-  (`Functor.map` does not push through `bind`/`ite`), so the typed interp is the certificate
-  target. Its limits: one `(τ, s)` per function, so mixed-unit programs (the Vault) stay on `Nat`
-  storage for now. The principled end state is a **type-directed interp with erasure**: Core
-  ops tagged with their unit, `denoteTyped` producing surface types, one generic theorem
-  `denoteTyped c = ofNat <$> Core.denote (erase c)` proved once by induction, compiler on the
-  erased term. Scheduled after the first end-to-end bytecode theorem; not on its critical path.
+  `Op.call b m args` and `Stmt.call b m args`. `Amount a` is a one-field
+  structure erased to a word by Reify (not an abbrev: that would unify every
+  amount back to `Word`). `Fixed d` is `Amount (Asset.fixed d)`.
 - The reifier (`lsc_reify`, MetaM) is **untrusted**: every run emits `f.core_denote`,
-  kernel-checked — `Core.denote schema f.core args = f args` for word-typed programs, or
-  `Core.denoteAWord` / `Core.denoteAUnit` when the surface returns `Amount` or is `Unit` with
-  `Amount` storage. The proof is `rfl` when the sides are definitionally equal, otherwise
+  kernel-checked — `Core.denote schema f.core args = f args`. The proof is `rfl`
+  when the sides are definitionally equal, otherwise
   the `Tx` monad laws (`bind` is not definitionally associative). A propositional
   certificate is not a trust extension: a reifier bug is still a build error. Rejections
   carry a positioned message naming the offending subterm.
