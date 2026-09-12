@@ -5,7 +5,8 @@ set_option linter.unusedSimpArgs false
 set_option linter.unusedVariables false
 
 /-!
-Read a scalar / `map1` slot out of `σ` from `storageRel`.
+Read a scalar or one-key mapping slot out of EVM storage from `storageRel`.
+Statements live in `TransportTheorems`.
 -/
 
 namespace Lsc.Compiler

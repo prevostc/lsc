@@ -5,7 +5,8 @@ set_option linter.unusedVariables false
 set_option linter.unnecessarySimpa false
 
 /-!
-Per-call transport steps (`transport_step` / `transport_step_ext`).
+Per-call transport simulation used by `transport_trace` / `_ext`.
+Statements live in `TransportTheorems`; this file holds the proofs.
 -/
 
 namespace Lsc.Compiler
@@ -13,6 +14,8 @@ namespace Lsc.Compiler
 open Lsc Lsc.Security
 open YulSemantics.EVM
 open YulEvmCompiler
+
+namespace Proof
 
 theorem transport_step (T : TransportSetup S X E ε)
     (hcf : ∀ f ∈ T.c.functions, CallFree f.core)
@@ -162,5 +165,7 @@ theorem RXs_dummy_of_ξ {I : Interface} {S X E} {bs : List (BindEnv I S X)}
       ξ₁ (BitVec.ofNat 256 (e.bind.addr w.self)) k := by
     simp [dummyCtx, mkEvmStateExt_foreign, hne']
   simp [hloc, hloc', hξ e he]
+
+end Proof
 
 end Lsc.Compiler

@@ -1,6 +1,6 @@
 import Lsc.Compiler.EndToEndExtDefs
-import Lsc.Compiler.EndToEndExtProof
-import Lsc.Compiler.ExtOracle
+import Lsc.Compiler.Proof.EndToEndExtProof
+import Lsc.Compiler.ExtOracleTheorems
 
 set_option linter.unusedVariables false
 

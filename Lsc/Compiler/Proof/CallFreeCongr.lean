@@ -1,5 +1,6 @@
 import Lsc.Compiler.CoreDefs
 import Lsc.Compiler.Proof.CoreProof
+import Lsc.Security.Trace
 
 set_option linter.unusedSimpArgs false
 
@@ -10,7 +11,7 @@ Call-free `Core.denote` depends on `self`/`ext` only, so `transport_trace`'s
 
 namespace Lsc.Compiler.Proof
 
-open Lsc Lsc.Compiler
+open Lsc Lsc.Compiler Lsc.Security
 
 variable {S X E ε : Type}
 
@@ -212,15 +213,15 @@ theorem callFree_run_self_ext {Γ : ContractSchema S X E ε} {t}
 theorem worldAfter_callFree_congr {Γ : ContractSchema S X E ε} {t}
     (core : Core t) (hM1 : CallFree core) (env : List Nat) (ctx : Ctx)
     (w w' : World S X E) (hs : w.self = w'.self) (he : w.ext = w'.ext) :
-    (Lang.worldAfter (Core.denote Γ core env) ctx w).self =
-      (Lang.worldAfter (Core.denote Γ core env) ctx w').self ∧
-    (Lang.worldAfter (Core.denote Γ core env) ctx w).ext =
-      (Lang.worldAfter (Core.denote Γ core env) ctx w').ext := by
+    (worldAfter (Core.denote Γ core env) ctx w).self =
+      (worldAfter (Core.denote Γ core env) ctx w').self ∧
+    (worldAfter (Core.denote Γ core env) ctx w).ext =
+      (worldAfter (Core.denote Γ core env) ctx w').ext := by
   have hrun := callFree_run_self_ext (Γ := Γ) hM1 env ctx w w' hs he
   cases h1 : Tx.run (Core.denote Γ core env) ctx w with
   | error e =>
     cases h2 : Tx.run (Core.denote Γ core env) ctx w' with
-    | error e' => simp [Lang.worldAfter, h1, h2, hs, he]
+    | error e' => simp [worldAfter, h1, h2, hs, he]
     | ok _ => simp [exceptSelfExt, h1, h2] at hrun
   | ok p =>
     cases h2 : Tx.run (Core.denote Γ core env) ctx w' with
@@ -229,6 +230,6 @@ theorem worldAfter_callFree_congr {Γ : ContractSchema S X E ε} {t}
       rcases p with ⟨v, w1⟩
       rcases p' with ⟨v', w1'⟩
       have ⟨_, hs1, he1⟩ := exceptSelfExt_ok_ok h1 h2 hrun
-      simp [Lang.worldAfter, h1, h2, hs1, he1]
+      simp [worldAfter, h1, h2, hs1, he1]
 
 end Lsc.Compiler.Proof

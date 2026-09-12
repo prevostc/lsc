@@ -2,7 +2,7 @@ import Lsc.Compiler.EndToEndExtDefs
 import Lsc.Compiler.DispatchExtTheorems
 import Lsc.Compiler.ProgressCoreTheorems
 import Lsc.Compiler.EvmDetTheorems
-import Lsc.Compiler.ExtOracle
+import Lsc.Compiler.ExtOracleTheorems
 import Lsc.Compiler.Proof.SpillOpen
 import YulEvmCompiler.Correctness
 import YulEvmCompiler.LowerDefs

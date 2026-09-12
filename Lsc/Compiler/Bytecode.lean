@@ -41,10 +41,6 @@ def compileSpilled (b : YBlock) : Option (List Instr) :=
 abbrev compileBlock (b : YBlock) : Option (List Instr) :=
   compileErased b <|> compileSpilled b
 
-theorem compileErased_to_compileBlock {b : YBlock} {is : List Instr}
-    (h : compileErased b = some is) : compileBlock b = some is := by
-  simp [compileBlock, h]
-
 def compileRuntime (c : ContractDef) : Option (List UInt8) := do
   let b ← runtimeBlock c
   let is ← compileBlock b

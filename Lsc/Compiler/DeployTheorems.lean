@@ -1,4 +1,4 @@
-import Lsc.Compiler.DeployProof
+import Lsc.Compiler.Proof.DeployProof
 import YulEvmCompiler.ObjectCompile
 
 set_option linter.unusedVariables false

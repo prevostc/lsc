@@ -1,5 +1,5 @@
 import Lsc.Compiler.EndToEndExt
-import Lsc.Compiler.ExtOracle
+import Lsc.Compiler.ExtOracleTheorems
 import Lsc.Security.Wealth
 import Lsc.Security.WealthTheorems
 

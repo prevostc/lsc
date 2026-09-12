@@ -1,5 +1,5 @@
 import Lsc.Compiler.EndToEnd
-import Lsc.Compiler.EndToEndProof
+import Lsc.Compiler.Proof.EndToEndProof
 
 set_option linter.unusedVariables false
 

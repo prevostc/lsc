@@ -1,7 +1,7 @@
 import Lsc.Compiler.Transport.Defs
-import Lsc.Compiler.TransportProof
-import Lsc.Compiler.Transport.Slots
-import Lsc.Compiler.Proof.BindEnvs
+import Lsc.Compiler.Proof.TransportProof
+import Lsc.Compiler.Proof.TransportSlotsProof
+import Lsc.Compiler.Proof.TransportStepProof
 import Lsc.Compiler.Proof.CallFreeCongr
 
 /-!
@@ -60,13 +60,8 @@ theorem worldAfter_callFree_congr {S X E ε} {Γ : ContractSchema S X E ε} {t}
     (worldAfter (Core.denote Γ core env) ctx w).self =
       (worldAfter (Core.denote Γ core env) ctx w').self ∧
     (worldAfter (Core.denote Γ core env) ctx w).ext =
-      (worldAfter (Core.denote Γ core env) ctx w').ext := by
-  change
-    (Lang.worldAfter (Core.denote Γ core env) ctx w).self =
-      (Lang.worldAfter (Core.denote Γ core env) ctx w').self ∧
-    (Lang.worldAfter (Core.denote Γ core env) ctx w).ext =
-      (Lang.worldAfter (Core.denote Γ core env) ctx w').ext
-  exact Proof.worldAfter_callFree_congr core hM1 env ctx w w' hs he
+      (worldAfter (Core.denote Γ core env) ctx w').ext :=
+  Proof.worldAfter_callFree_congr core hM1 env ctx w w' hs he
 
 /-- Same independence of logs and faults as `worldAfter_callFree_congr`,
 stated at the contract's high-level entrypoints rather than the Core IR.
@@ -79,12 +74,8 @@ theorem post_congr_callFree {S X E ε} (T : TransportSetup S X E ε)
     (worldAfter (T.spec.exec fn args) ctx w).self =
       (worldAfter (T.spec.exec fn args) ctx w').self ∧
     (worldAfter (T.spec.exec fn args) ctx w).ext =
-      (worldAfter (T.spec.exec fn args) ctx w').ext := by
-  have h1 := T.codec.core_exec fn args ctx w
-  have h2 := T.codec.core_exec fn args ctx w'
-  rw [← h1, ← h2]
-  exact worldAfter_callFree_congr (T.codec.fnDef fn).core
-    (hcf _ (T.codec.mem fn)) (T.codec.encode fn args).reverse ctx w w' hs he
+      (worldAfter (T.spec.exec fn args) ctx w').ext :=
+  Proof.post_congr_callFree T hcf fn args ctx w w' hs he
 
 /-- The converse of `transport_trace` for a call-free contract: a high-level
 call sequence whose arguments fit the ABI has some EVM execution of the
@@ -110,7 +101,57 @@ theorem transport_exists (T : TransportSetup S X E ε)
         { run (decodeTrace T (encodeCalls T tr)) { w with log := [] } with log := [] } :=
   Proof.transport_exists T hcf hpc tr w σ hs hwf hb
 
+/-- One compiled call-free call from matching storage ends with EVM storage
+that matches the high-level model of that call, or is unchanged if the
+selector is unknown. The caller must be well-formed and calldata must
+fit in a word. `transport_trace` is the iteration of this step. -/
+theorem transport_step (T : TransportSetup S X E ε)
+    (hcf : ∀ f ∈ T.c.functions, CallFree f.core)
+    (ctx : Ctx) (cd : List UInt8) (w : World S X E) (σ : U256 → U256)
+    (hctxWF : CtxWF ctx) (hcd : cd.length < wordBound)
+    (hs : storageRel T.c T.Γ evmKeccak w.self σ)
+    (hlog : w.log = []) (hwf : WorldWF T.c T.Γ w) :
+    let yst0 := mkEvmState cd σ evmKeccak ctx
+    ∃ σ', EvmCallRun T.is yst0 σ' ∧
+      match decodeCall T ctx cd with
+      | none => σ' = σ
+      | some c =>
+          let w' := { step (.call c) w with log := [] }
+          storageRel T.c T.Γ evmKeccak w'.self σ' ∧ WorldWF T.c T.Γ w' :=
+  Proof.transport_step T hcf ctx cd w σ hctxWF hcd hs hlog hwf
+
 variable {I : Interface}
+
+/-- One compiled call that may CALL out has some EVM post-storage and
+bound-token storage predicted by the high-level model under some choice
+of which external calls fail. Unknown selectors leave storage unchanged.
+Bound tokens must conform. `transport_trace_ext` is the iteration of this
+step. -/
+theorem transport_step_ext (T : TransportSetup S X E ε)
+    (Xpkg : TransportBindings S X E ε I T)
+    (ctx : Ctx) (cd : List UInt8) (w : World S X E)
+    (σ : U256 → U256) (ξ : Foreign)
+    (hctxWF : CtxWF ctx) (hcd : cd.length < wordBound)
+    (hs : storageRel T.c T.Γ evmKeccak w.self σ)
+    (hlog : w.log = []) (hwf : WorldWF T.c T.Γ w)
+    (hRX : RXs Xpkg.bs w (mkEvmStateExt cd σ ξ evmKeccak ctx))
+    (hBindNe : BindEnvs.neSelf Xpkg.bs ctx.self w.self)
+    (hconf : BindEnvs.conforms Xpkg.bs ctx.self w.self Xpkg.extCalls)
+    (hinj : BindEnvs.addrInj Xpkg.bs w.self) :
+    let yst0 := mkEvmStateExt cd σ ξ evmKeccak ctx
+    ∃ σ' ξ', EvmCallRunξ T.is yst0 σ' ξ' ∧
+      ∃ fo : Nat → Bool,
+        match decodeCall T ctx cd with
+        | none => σ' = σ ∧ ξ' = evmForeign yst0
+        | some c =>
+            let wfo : World S X E := { w with faults := fo }
+            let w' : World S X E := { step (.call c) wfo with log := [] }
+            storageRel T.c T.Γ evmKeccak w'.self σ' ∧ WorldWF T.c T.Γ w' ∧
+              ∃ stObs : EvmState,
+                stObs.storage = σ' ∧ evmForeign stObs = ξ' ∧
+                  RXs Xpkg.bs w' stObs :=
+  Proof.transport_step_ext T Xpkg ctx cd w σ ξ hctxWF hcd hs hlog hwf hRX
+    hBindNe hconf hinj
 
 /-- Whatever sequence of calls an adversary sends to bytecode that CALLs
 out, there is a high-level post-world whose storage matches the EVM,

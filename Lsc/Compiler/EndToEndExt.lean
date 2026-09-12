@@ -1,7 +1,7 @@
 import Lsc.Compiler.EndToEndExtDefs
 import Lsc.Compiler.EndToEndExtTheorems
 import Lsc.Compiler.ProgressCoreTheorems
-import Lsc.Compiler.ExtOracle
+import Lsc.Compiler.ExtOracleTheorems
 
 set_option linter.unusedSimpArgs false
 set_option linter.unusedVariables false

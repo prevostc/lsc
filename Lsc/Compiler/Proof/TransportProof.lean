@@ -1,7 +1,8 @@
 import Lsc.Compiler.Transport.Defs
-import Lsc.Compiler.Transport.Step
 import Lsc.Compiler.Transport.Abi
-import Lsc.Compiler.Transport.Slots
+import Lsc.Compiler.Proof.TransportStepProof
+import Lsc.Compiler.Proof.TransportSlotsProof
+import Lsc.Compiler.Proof.CallFreeCongr
 
 set_option linter.unusedSimpArgs false
 set_option linter.unusedVariables false
@@ -22,6 +23,20 @@ open YulSemantics.EVM
 open YulEvmCompiler
 
 namespace Proof
+
+theorem post_congr_callFree {S X E ε} (T : TransportSetup S X E ε)
+    (hcf : ∀ f ∈ T.c.functions, CallFree f.core)
+    (fn : T.spec.Fn) (args : T.spec.Args fn) (ctx : Ctx) (w w' : World S X E)
+    (hs : w.self = w'.self) (he : w.ext = w'.ext) :
+    (worldAfter (T.spec.exec fn args) ctx w).self =
+      (worldAfter (T.spec.exec fn args) ctx w').self ∧
+    (worldAfter (T.spec.exec fn args) ctx w).ext =
+      (worldAfter (T.spec.exec fn args) ctx w').ext := by
+  have h1 := T.codec.core_exec fn args ctx w
+  have h2 := T.codec.core_exec fn args ctx w'
+  rw [← h1, ← h2]
+  exact worldAfter_callFree_congr (T.codec.fnDef fn).core
+    (hcf _ (T.codec.mem fn)) (T.codec.encode fn args).reverse ctx w w' hs he
 
 /-- Universal S1: every halted EVM run of an arbitrary calldata list is
 `storageRel` of `Security.run` of the decoded trace (dispatcher rejects

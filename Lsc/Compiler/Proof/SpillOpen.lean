@@ -1,4 +1,4 @@
-import Lsc.Compiler.ExtOracle
+import Lsc.Compiler.ExtOracleTheorems
 import Lsc.Compiler.EndToEndExtDefs
 import Lsc.Compiler.Proof.GasLift
 import Lsc.Compiler.Proof.NoGas
