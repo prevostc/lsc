@@ -441,10 +441,13 @@ def fieldOfUpd (ci : ContractInfo) (upd : Expr) : MetaM FieldInfo := do
     let ctor := getStructureCtor (← getEnv) ci.storage
     unless body.getAppFn.isConstOf ctor.name && args.size == ctor.numParams + ci.fields.size do
       throwError "reify: `{upd}` is not a storage update"
-    let idx? := (List.range ci.fields.size).find? fun i => args[ctor.numParams + i]! == m
-    match idx? with
-    | some i => pure ci.fields[i]!
-    | none => throwError "reify: `{upd}` does not update exactly one field"
+    let some mid := m.fvarId? |
+      throwError "reify: `{upd}` is not a storage update"
+    let idxs := (List.range ci.fields.size).filter fun i =>
+      (args[ctor.numParams + i]!).containsFVar mid
+    match idxs with
+    | [i] => pure ci.fields[i]!
+    | _ => throwError "reify: `{upd}` does not update exactly one field"
 
 def ctorIndex (ctors : Array Name) (e : Expr) : MetaM (Nat × Array Expr) := do
   let e := e.consumeMData
@@ -669,14 +672,24 @@ partial def isOfWordFn (e : Expr) : Bool :=
     isOfWordFn e.bindingBody!
   else false
 
-/-- Drop `ofWord <$> tx`. Do not peel when the last argument is itself an
-`Amount` (e.g. `mulDivDown a (ofWord scale) x`). `Tx` unfolds to `ReaderT`,
-so the guard is "not an Amount", not `isAppOf Tx`. -/
+/-- `Ref.mk`, possibly η-expanded (`fun n => { addr := n }`). -/
+partial def isRefMkFn (e : Expr) : Bool :=
+  let e := e.consumeMData
+  if e.isAppOf ``Lsc.Ref.mk || e.isConstOf ``Lsc.Ref.mk then
+    true
+  else if e.isLambda then
+    isRefMkFn e.bindingBody!
+  else false
+
+/-- Drop `ofWord <$> tx` / `Ref.mk <$> tx`. Do not peel when the last argument
+is itself an `Amount` or `Ref` (e.g. `mulDivDown a (ofWord scale) x`). `Tx`
+unfolds to `ReaderT`, so the guard is "not an Amount/Ref", not `isAppOf Tx`. -/
 partial def peelAmountWrap (e : Expr) : MetaM Expr := do
   let (_, args) := flattenApp e
-  if args.size ≥ 2 && isOfWordFn args[args.size - 2]! then
+  if args.size ≥ 2 && (isOfWordFn args[args.size - 2]! || isRefMkFn args[args.size - 2]!) then
     let x := args[args.size - 1]!
-    if ← isAmountTy (← inferType x) then
+    let ty ← inferType x
+    if (← isAmountTy ty) || (← isRefTy ty) then
       return e
     else
       peelAmountWrap x
@@ -884,7 +897,7 @@ def assocBindRight (innerBind k γ : Expr) : MetaM Expr := do
 
 partial def reify (ci : ContractInfo) (t : RetTy) (env : Env t) (e : Expr)
     (inline? : Option Name := none) : MetaM (Core t) := do
-  let e := e.consumeMData
+  let e ← peelAmountWrap e.consumeMData
   match e with
   | .letE n ty v b _ =>
     let v := v.consumeMData
@@ -921,7 +934,7 @@ partial def reify (ci : ContractInfo) (t : RetTy) (env : Env t) (e : Expr)
     | .const name _ =>
       match name, args.size with
       | ``Bind.bind, 6 =>
-        let x0 := args[4]!
+        let x0 ← peelAmountWrap args[4]!
         let k ← ensureLambda args[5]!
         let (x, seen) ← deltaUnfold x0
         let inline? := seen.orElse fun _ => inline?
@@ -1067,19 +1080,25 @@ non-matching `do` block) and only the `simp only` branch runs. A
 propositional certificate is not a trust extension: the reifier is still
 untrusted MetaM, and the kernel checks `Core.denote (reify f) = f`.
 -/
-def certifyDenote (fn : Name) (lhs lhsRaw rhs coreE : Expr) : TermElabM Expr := do
+def certifyDenote (fn schema : Name) (lhs lhsRaw rhs coreE : Expr) : TermElabM Expr := do
   let eq ← mkEq lhs rhs
   let inlines ← inlinesUsedBy fn
   -- `isDefEq` on a large non-matching `do` block (inlined helper mid-body)
   -- burns the heartbeat budget; skip it when inlines are present.
   if inlines.isEmpty then
-    if ← withNewMCtxDepth (withDefault (isDefEq lhs rhs)) then
+    -- Default `isDefEq` on a large mismatched `do` block burns heartbeats.
+    -- Reducible equality is the fast path; otherwise fall through to simp.
+    if ← withNewMCtxDepth (withReducible (isDefEq lhs rhs)) then
       return (← mkEqRefl lhs)
   let mut idsWord : Array Ident := #[
     mkIdent ``Lsc.Tx.bind_assoc,
     mkIdent ``Lsc.Tx.pure_bind,
     mkIdent ``Lsc.Tx.bind_pure,
     mkIdent ``Lsc.Tx.map_eq_pure_bind,
+    mkIdent ``Lsc.Address.toWord,
+    mkIdent ``Lsc.Amount.ofWord,
+    mkIdent ``Lsc.Amount.raw,
+    mkIdent schema,
     mkIdent fn]
   let mut idsAmount : Array Ident := #[
     mkIdent ``Lsc.Tx.map_bind,
@@ -1101,15 +1120,18 @@ def certifyDenote (fn : Name) (lhs lhsRaw rhs coreE : Expr) : TermElabM Expr := 
     mkIdent ``Lsc.Tx.HSubChecked.hSub,
     mkIdent ``Lsc.Tx.HMulChecked.hMul,
     mkIdent ``Lsc.Tx.HDivChecked.hDiv,
+    mkIdent ``Lsc.Address.toWord,
+    mkIdent ``Lsc.Amount.raw,
+    mkIdent schema,
     mkIdent fn]
   for n in inlines do
     idsWord := idsWord.push (mkIdent n)
     idsAmount := idsAmount.push (mkIdent n)
   let tacWord ←
     if inlines.isEmpty then
-      `(by first | rfl | (simp only [$[$idsWord:ident],*]; rfl))
+      `(by first | with_reducible rfl | (simp only [$[$idsWord:ident],*]; with_reducible rfl))
     else
-      `(by simp only [$[$idsWord:ident],*]; rfl)
+      `(by simp only [$[$idsWord:ident],*]; with_reducible rfl)
   let pfWord ← try
     some <$> withoutErrToSorry (elabTermAndSynthesize tacWord eq)
   catch _ =>
@@ -1126,7 +1148,11 @@ def certifyDenote (fn : Name) (lhs lhsRaw rhs coreE : Expr) : TermElabM Expr := 
     for n in inlines do
       ds := ds.push (mkIdent n)
     ds := ds.push (mkIdent fn)
-    let tacAmt ← `(by delta $[$ds:ident]*; dsimp only; simp only [$[$idsAmount:ident],*]; rfl)
+    let tacAmt ← `(by
+      delta $[$ds:ident]*
+      dsimp only
+      simp only [$[$idsAmount:ident],*]
+      rfl)
     try
       withoutErrToSorry (elabTermAndSynthesize tacAmt eqRaw)
     catch _ =>
@@ -1224,7 +1250,8 @@ def reifyFunction (fn : Name) : TermElabM Unit := do
     let lhsRaw ← wrapDenote ρ coreDenoteRaw
     let rhs := mkAppN (Lean.mkConst fn) params
     let eq ← mkEq lhs rhs
-    let pf ← withDeclName (fn ++ `core_denote) <| certifyDenote fn lhs lhsRaw rhs core.toExpr
+    let pf ← withDeclName (fn ++ `core_denote) <|
+      certifyDenote fn ci.schema lhs lhsRaw rhs core.toExpr
     let stmt ← mkForallFVars params eq
     let proof ← mkLambdaFVars params pf
     addDecl <| .thmDecl { name := fn ++ `core_denote, levelParams := [], type := stmt, value := proof }
@@ -1638,6 +1665,23 @@ def mkCoreEqAlt (ns fn : Name) : MetaM (TSyntax ``Lean.Parser.Tactic.inductionAl
   let wId := mkIdent `w
   let binders : Array Ident := surf.params.mapIdx fun i (nm, _) =>
     mkIdent (if nm.hasMacroScopes then Name.mkSimple s!"a{i}" else nm)
+  let wrapMap : TSyntax ``Lean.Parser.Tactic.tacticSeq ←
+    if ← isAmountTy surf.ρ then
+      let ρ ← whnfD surf.ρ
+      let aT ← exprToTerm (ρ.getArg! 0)
+      `(Lean.Parser.Tactic.tacticSeq|
+          conv => lhs; erw [Lsc.Lang.worldAfter_ofWord (a := $aT)]
+          erw [$coreDenote:ident, $specExec:ident]
+          try rfl)
+    else if ← isRefTy surf.ρ then
+      `(Lean.Parser.Tactic.tacticSeq|
+          conv => lhs; erw [Lsc.Lang.worldAfter_refMk]
+          erw [$coreDenote:ident, $specExec:ident]
+          try rfl)
+    else
+      `(Lean.Parser.Tactic.tacticSeq|
+          rw [$coreDenote:ident, $specExec:ident]
+          try rfl)
   let tac ←
     match n with
     | 0 =>
@@ -1646,16 +1690,14 @@ def mkCoreEqAlt (ns fn : Name) : MetaM (TSyntax ``Lean.Parser.Tactic.inductionAl
           dsimp [$fnDefId:ident, $encodeId:ident]
           change Lsc.Lang.worldAfter (Lsc.Core.denote $schemaId $coreId []) $ctxId $wId =
             Lsc.Lang.worldAfter (Lsc.Spec.exec $specId .$ctor:ident ()) $ctxId $wId
-          rw [$coreDenote:ident, $specExec:ident]
-          rfl)
+          ($wrapMap))
     | 1 => do
       let enc ← encodeWordTerm surf.params[0]!.2 ⟨argsId⟩
       `(Lean.Parser.Tactic.tacticSeq|
           dsimp [$fnDefId:ident, $encodeId:ident, Lsc.Address.toWord]
           change Lsc.Lang.worldAfter (Lsc.Core.denote $schemaId $coreId [$enc]) $ctxId $wId =
             Lsc.Lang.worldAfter (Lsc.Spec.exec $specId .$ctor:ident $argsId) $ctxId $wId
-          rw [$coreDenote:ident, $specExec:ident]
-          rfl)
+          ($wrapMap))
     | 2 => do
       let b0 := binders[0]!; let b1 := binders[1]!
       let e0 ← encodeWordTerm surf.params[0]!.2 ⟨b0⟩
@@ -1665,8 +1707,7 @@ def mkCoreEqAlt (ns fn : Name) : MetaM (TSyntax ``Lean.Parser.Tactic.inductionAl
           dsimp [$fnDefId:ident, $encodeId:ident, Lsc.Address.toWord]
           change Lsc.Lang.worldAfter (Lsc.Core.denote $schemaId $coreId [$e1, $e0]) $ctxId $wId =
             Lsc.Lang.worldAfter (Lsc.Spec.exec $specId .$ctor:ident ($b0, $b1)) $ctxId $wId
-          rw [$coreDenote:ident, $specExec:ident]
-          rfl)
+          ($wrapMap))
     | 3 => do
       let b0 := binders[0]!; let b1 := binders[1]!; let b2 := binders[2]!
       let e0 ← encodeWordTerm surf.params[0]!.2 ⟨b0⟩
@@ -1677,8 +1718,7 @@ def mkCoreEqAlt (ns fn : Name) : MetaM (TSyntax ``Lean.Parser.Tactic.inductionAl
           dsimp [$fnDefId:ident, $encodeId:ident, Lsc.Address.toWord]
           change Lsc.Lang.worldAfter (Lsc.Core.denote $schemaId $coreId [$e2, $e1, $e0]) $ctxId $wId =
             Lsc.Lang.worldAfter (Lsc.Spec.exec $specId .$ctor:ident ($b0, $b1, $b2)) $ctxId $wId
-          rw [$coreDenote:ident, $specExec:ident]
-          rfl)
+          ($wrapMap))
     | _ => throwError "lsc_contract: worldAfter_core_eq supports at most 3 parameters"
   `(Lean.Parser.Tactic.inductionAlt| | $ctor:ident => $tac)
 

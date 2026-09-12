@@ -77,8 +77,65 @@ def ofWord (n : Word) : Amount a := ⟨n⟩
 @[simp] theorem raw_sub (x y : Amount a) : (x - y).raw = x.raw - y.raw := rfl
 @[simp] theorem raw_mul (x y : Amount a) : (x * y).raw = x.raw * y.raw := rfl
 @[simp] theorem raw_ofNat (n : Nat) : (OfNat.ofNat n : Amount a).raw = n := rfl
+@[simp] theorem raw_zero : (0 : Amount a).raw = 0 := rfl
+@[simp] theorem mk_add (x y : Amount a) : (⟨x.raw + y.raw⟩ : Amount a) = x + y := rfl
+@[simp] theorem mk_sub (x y : Amount a) : (⟨x.raw - y.raw⟩ : Amount a) = x - y := rfl
+@[simp] theorem ofWord_add (x y : Amount a) : ofWord (x.raw + y.raw) = x + y := rfl
+@[simp] theorem ofWord_sub (x y : Amount a) : ofWord (x.raw - y.raw) = x - y := rfl
+
+theorem raw_sub_add {x y : Amount a} (h : y.raw ≤ x.raw) : (x - y + y).raw = x.raw :=
+  Nat.sub_add_cancel h
 @[simp] theorem lt_iff (x y : Amount a) : x < y ↔ x.raw < y.raw := Iff.rfl
 @[simp] theorem le_iff (x y : Amount a) : x ≤ y ↔ x.raw ≤ y.raw := Iff.rfl
+
+theorem not_le_of_gt {x y : Amount a} (h : y < x) : ¬ x ≤ y :=
+  Nat.not_le_of_gt h
+theorem not_lt_of_ge {x y : Amount a} (h : x ≤ y) : ¬ y < x :=
+  Nat.not_lt_of_ge h
+
+/-- Schema-shaped map updates agree with `Function.update` on `Amount`. -/
+theorem update_raw {K : Type} [DecidableEq K] (m : K → Amount a)
+    (k : K) (n : Word) :
+    (fun k' => ofWord (Function.update (fun i => (m i).raw) k n k')) =
+      Function.update m k (ofWord n) := by
+  funext k'
+  by_cases h : k' = k <;> simp [Function.update, h, ofWord]
+
+@[simp] theorem update_raw_apply {K : Type} [DecidableEq K] (m : K → Amount a)
+    (k k' : K) (v : Amount a) :
+    (Function.update m k v k').raw = Function.update (fun i => (m i).raw) k v.raw k' := by
+  by_cases h : k' = k <;> simp [Function.update, h]
+
+/-- Two successive schema-shaped updates agree with `Function.update`. -/
+theorem update2_raw {K : Type} [DecidableEq K] (m : K → Amount a)
+    (k₁ k₂ : K) (n₁ n₂ : Word) :
+    (fun k => ofWord
+      (Function.update (Function.update (fun i => (m i).raw) k₁ n₁) k₂ n₂ k)) =
+      Function.update (Function.update m k₁ (ofWord n₁)) k₂ (ofWord n₂) := by
+  have hraw :
+      (fun i => (Function.update m k₁ (ofWord n₁) i).raw) =
+        Function.update (fun i => (m i).raw) k₁ n₁ := by
+    funext i; simp [update_raw_apply]
+  rw [← hraw]
+  exact update_raw (Function.update m k₁ (ofWord n₁)) k₂ n₂
+
+/-- `ofWord` of a schema-shaped lookup-plus-word is the Amount lookup plus `ofWord`. -/
+theorem ofWord_update_add {K : Type} [DecidableEq K] (m : K → Amount a)
+    (k k' : K) (n addend : Word) :
+    ofWord (Function.update (fun i => (m i).raw) k n k' + addend) =
+      Function.update m k (ofWord n) k' + ofWord addend := by
+  apply ext
+  simp [raw_add, update_raw_apply]
+
+/-- Nested mapping update used by `allowances[owner, spender]`. -/
+theorem update_nested_raw {K₁ K₂ : Type} [DecidableEq K₁] [DecidableEq K₂]
+    (m : K₁ → K₂ → Amount a) (k₁ : K₁) (k₂ : K₂) (n : Word) :
+    (fun i j => ofWord (Function.update (fun i j => (m i j).raw) k₁
+      (Function.update (fun j => (m k₁ j).raw) k₂ n) i j)) =
+      Function.update m k₁ (Function.update (m k₁) k₂ (ofWord n)) := by
+  funext i j
+  by_cases h₁ : i = k₁ <;> by_cases h₂ : j = k₂
+    <;> simp [Function.update, h₁, h₂, ofWord]
 
 variable {S X E ε : Type}
 
@@ -115,6 +172,17 @@ instance : Tx.HMulChecked (Amount a) Word (Amount a) where
   hMul := mulScalar
 instance : Tx.HDivChecked (Amount a) Word (Amount a) where
   hDiv := divScalar
+
+variable {S X E ε : Type}
+
+@[simp] theorem hAdd_def (x y : Amount a) :
+    Tx.HAddChecked.hAdd (S := S) (X := X) (E := E) (ε := ε) x y = add x y := rfl
+@[simp] theorem hSub_def (x y : Amount a) :
+    Tx.HSubChecked.hSub (S := S) (X := X) (E := E) (ε := ε) x y = sub x y := rfl
+@[simp] theorem hMul_def (x : Amount a) (k : Word) :
+    Tx.HMulChecked.hMul (S := S) (X := X) (E := E) (ε := ε) x k = mulScalar x k := rfl
+@[simp] theorem hDiv_def (x : Amount a) (k : Word) :
+    Tx.HDivChecked.hDiv (S := S) (X := X) (E := E) (ε := ε) x k = divScalar x k := rfl
 
 @[simp] theorem run_add (x y : Amount a) (ctx : Ctx) (w : World S X E) :
     Tx.run (add (S := S) (X := X) (E := E) (ε := ε) x y) ctx w =
@@ -172,5 +240,16 @@ instance : Tx.HDivChecked (Amount a) Word (Amount a) where
   · by_cases hfit : num.raw * x.raw < wordBound <;> simp [hy, hfit, ofWord]
 
 end Amount
+
+namespace Lang
+variable {S X E ε : Type}
+
+/-- Reverse `worldAfter_map` so `rw` can wrap a Core word denotation. -/
+theorem worldAfter_ofWord {a : Asset} (x : Tx S X E ε Nat)
+    (ctx : Ctx) (w : World S X E) :
+    worldAfter x ctx w = worldAfter (Amount.ofWord (a := a) <$> x) ctx w :=
+  (worldAfter_map (Amount.ofWord (a := a)) x ctx w).symm
+
+end Lang
 
 end Lsc

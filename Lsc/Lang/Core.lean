@@ -133,7 +133,7 @@ inductive RetTy
   | pair (a b : RetTy)
   deriving DecidableEq, Repr, Lean.ToExpr
 
-def RetTy.denote : RetTy → Type
+@[reducible] def RetTy.denote : RetTy → Type
   | .unit => Unit
   | .word => Nat
   | .addr => Address

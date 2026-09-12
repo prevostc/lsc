@@ -18,41 +18,68 @@ namespace Token
 theorem inv_solvent (self : Address) (w : World Storage Unit Event) (h : Inv w) :
     Solvent claim holdings self w := by
   obtain ⟨H, h0, hs⟩ := h
-  exact ⟨H, h0, hs.le⟩
+  refine ⟨H, ?_, hs.le⟩
+  intro a ha
+  have hraw := congrArg Amount.raw (h0 a ha)
+  simp [claim]
+  exact hraw.trans (Amount.raw_ofNat 0)
 
 /-! ### Auth reductions -/
 
-lemma Auth_transfer (a : Address) (ctx : Ctx) (dst : Address) (n : Nat) (s : Storage) :
+lemma Auth_transfer (a : Address) (ctx : Ctx) (dst : Address)
+    (n : Amount tokenAsset) (s : Storage) :
     Auth a (Call.ofCtx ctx .transfer (dst, n)) s ↔ ctx.sender = a :=
   Iff.rfl
 
-lemma Auth_burn (a : Address) (ctx : Ctx) (n : Nat) (s : Storage) :
+lemma Auth_burn (a : Address) (ctx : Ctx) (n : Amount tokenAsset) (s : Storage) :
     Auth a (Call.ofCtx ctx .burn n) s ↔ ctx.sender = a :=
   Iff.rfl
 
-lemma Auth_transferFrom (a : Address) (ctx : Ctx) (src dst : Address) (n : Nat) (s : Storage) :
+lemma Auth_transferFrom (a : Address) (ctx : Ctx) (src dst : Address)
+    (n : Amount tokenAsset) (s : Storage) :
     Auth a (Call.ofCtx ctx .transferFrom (src, dst, n)) s ↔
       src = a ∧ n ≤ s.allowances src ctx.sender :=
   Iff.rfl
 
 /-! ### Sum helpers for `Inv` -/
 
-private theorem sum_debit (H : Finset Address) (bals : Address → Nat) {src : Address}
-    (hs : src ∈ H) {n : Nat} (hn : n ≤ bals src) :
-    H.sum (debit bals src n) + n = H.sum bals := by
-  unfold debit
-  have hupd := sum_update_mem H bals hs (bals src - n)
-  revert hn hupd
-  generalize hS' : H.sum (Function.update bals src (bals src - n)) = S'
-  generalize hS : H.sum bals = S
-  generalize hd : bals src = d
-  intro hn hupd
+private abbrev rawBals (bals : Address → Amount tokenAsset) : Address → Nat :=
+  fun a => (bals a).raw
+
+private theorem rawBals_update (bals : Address → Amount tokenAsset) (src : Address)
+    (n : Amount tokenAsset) :
+    rawBals (Function.update bals src n) =
+      Function.update (rawBals bals) src n.raw := by
+  funext a
+  by_cases h : a = src <;> simp [rawBals, Function.update, h]
+
+private theorem nat_sum_update_sub (H : Finset Address) (f : Address → Nat)
+    {i : Address} (hi : i ∈ H) {n : Nat} (hn : n ≤ f i) :
+    H.sum (Function.update f i (f i - n)) + n = H.sum f := by
+  have hS := sum_update_mem H f hi (f i - n)
+  have : f i - n + n = f i := Nat.sub_add_cancel hn
   omega
 
-private theorem inv_of_transferPost (σ : Storage) (src dst : Address) (n : Nat)
+private theorem nat_sum_update_add (H : Finset Address) (f : Address → Nat)
+    {i : Address} (hi : i ∈ H) (n : Nat) :
+    H.sum (Function.update f i (f i + n)) = H.sum f + n := by
+  have hS := sum_update_mem H f hi (f i + n)
+  omega
+
+private theorem sum_debit (H : Finset Address) (bals : Address → Amount tokenAsset)
+    {src : Address} (hs : src ∈ H) {n : Amount tokenAsset}
+    (hn : n.raw ≤ (bals src).raw) :
+    H.sum (rawBals (debit bals src n)) + n.raw = H.sum (rawBals bals) := by
+  unfold debit
+  rw [rawBals_update, Amount.raw_sub]
+  exact nat_sum_update_sub H (rawBals bals) hs hn
+
+private theorem inv_of_transferPost (σ : Storage) (src dst : Address)
+    (n : Amount tokenAsset)
     (hInv : InvStorage σ) (hn : n ≤ σ.balances src) :
     InvStorage (transferPost σ src dst n) := by
   obtain ⟨H, h0, hsum⟩ := hInv
+  have hn' : n.raw ≤ (σ.balances src).raw := hn
   by_cases hsrc : src ∈ H
   · by_cases hto : dst ∈ H
     · refine ⟨H, ?_, ?_⟩
@@ -61,22 +88,16 @@ private theorem inv_of_transferPost (σ : Storage) (src dst : Address) (n : Nat)
         have ha_src : a ≠ src := by intro h; subst h; exact ha hsrc
         simp [transferPost, credit_other _ ha_to, debit_other _ ha_src]
         exact h0 a ha
-      · have hs1 := sum_debit H σ.balances hsrc hn
+      · have hs1 := sum_debit H σ.balances hsrc hn'
+        let f := rawBals (debit σ.balances src n)
         have hsum' :
-            H.sum (Function.update (debit σ.balances src n) dst
-              (debit σ.balances src n dst + n)) =
-              H.sum (debit σ.balances src n) + n := by
-          have hcredit :=
-            sum_update_mem H (debit σ.balances src n) hto (debit σ.balances src n dst + n)
-          revert hcredit
-          generalize hS' : H.sum (Function.update (debit σ.balances src n) dst
-              (debit σ.balances src n dst + n)) = S'
-          generalize hSd : H.sum (debit σ.balances src n) = Sd
-          generalize hd : debit σ.balances src n dst = d
-          intro hcredit
-          omega
-        change (∑ a ∈ H, (transferPost σ src dst n).balances a) =
-          (transferPost σ src dst n).totalSupply
+            H.sum (rawBals (Function.update (debit σ.balances src n) dst
+              (debit σ.balances src n dst + n))) =
+              H.sum f + n.raw := by
+          rw [rawBals_update, Amount.raw_add]
+          exact nat_sum_update_add H f hto n.raw
+        change H.sum (rawBals (transferPost σ src dst n).balances) =
+          (transferPost σ src dst n).totalSupply.raw
         simp only [transferPost, credit]
         exact (hsum'.trans hs1).trans hsum
     · have hne : src ≠ dst := by intro h; subst h; exact hto hsrc
@@ -88,38 +109,54 @@ private theorem inv_of_transferPost (σ : Storage) (src dst : Address) (n : Nat)
         have ha_src : a ≠ src := by intro h; subst h; exact haH hsrc
         simp [transferPost, credit_other _ hat, debit_other _ ha_src]
         exact h0 a haH
-      · have hs1 := sum_debit H σ.balances hsrc hn
-        have hframe := sum_update_not_mem H (debit σ.balances src n) hto
-          (debit σ.balances src n dst + n)
+      · have hs1 := sum_debit H σ.balances hsrc hn'
+        let f := rawBals (debit σ.balances src n)
+        have hframe := sum_update_not_mem H f hto (f dst + n.raw)
         have hb0 : σ.balances dst = 0 := h0 dst hto
         have hdt : debit σ.balances src n dst = 0 := by
           simp [debit, Function.update_of_ne hne.symm, hb0]
         have hsum' :
-            (∑ a ∈ insert dst H, (transferPost σ src dst n).balances a) =
-              H.sum σ.balances := by
+            (∑ a ∈ insert dst H, rawBals (transferPost σ src dst n).balances a) =
+              H.sum (rawBals σ.balances) := by
           rw [Finset.sum_insert hto]
-          simp only [transferPost, credit, Function.update_self]
-          rw [hframe, hdt]
-          omega
-        change (∑ a ∈ insert dst H, (transferPost σ src dst n).balances a) =
-          (transferPost σ src dst n).totalSupply
+          simp only [transferPost, credit]
+          rw [rawBals_update, Amount.raw_add, Function.update_self, hframe]
+          simp [hdt, Amount.raw_zero]
+          rw [Nat.add_comm]
+          exact hs1
+        change (∑ a ∈ insert dst H,
+            ((transferPost σ src dst n).balances a).raw) =
+          (transferPost σ src dst n).totalSupply.raw
         simpa [transferPost] using hsum'.trans hsum
   · have hb0 : σ.balances src = 0 := h0 src hsrc
-    have hn0 : n = 0 := Nat.eq_zero_of_le_zero (hn.trans_eq hb0)
+    have hn0 : n = 0 := by
+      cases n with | mk nraw =>
+      have hz : (σ.balances src).raw = 0 := by
+        simpa [Amount.raw_zero] using congrArg Amount.raw hb0
+      have : nraw = 0 := Nat.eq_zero_of_le_zero (hn'.trans_eq hz)
+      subst this
+      rfl
     subst hn0
     have hbals : (transferPost σ src dst 0).balances = σ.balances := by
+      have hsub0 : σ.balances src - 0 = σ.balances src :=
+        Amount.ext (by simp [Amount.raw_sub, Amount.raw_zero])
+      have hadd0 (x : Amount tokenAsset) : x + 0 = x :=
+        Amount.ext (by simp [Amount.raw_add, Amount.raw_zero])
       funext a
-      simp [transferPost, credit, debit, Function.update_eq_self]
+      simp [transferPost, credit, debit, hsub0, hadd0, Function.update_eq_self]
     refine ⟨H, fun a ha => ?_, ?_⟩
     · rw [show (transferPost σ src dst 0).balances a = σ.balances a from
         congrFun hbals a]
       exact h0 a ha
-    · have hsum' : (∑ a ∈ H, (transferPost σ src dst 0).balances a) = H.sum σ.balances := by
+    · have hsum' :
+          (∑ a ∈ H, ((transferPost σ src dst 0).balances a).raw) =
+            H.sum (fun a => (σ.balances a).raw) := by
         apply Finset.sum_congr rfl
         intro a _; rw [hbals]
       simpa [transferPost] using hsum'.trans hsum
 
-private theorem inv_of_mintPost (σ : Storage) (dst : Address) (n : Nat) (hInv : InvStorage σ) :
+private theorem inv_of_mintPost (σ : Storage) (dst : Address) (n : Amount tokenAsset)
+    (hInv : InvStorage σ) :
     InvStorage (mintPost σ dst n) := by
   obtain ⟨H, h0, hsum⟩ := hInv
   refine ⟨insert dst H, ?_, ?_⟩
@@ -131,54 +168,72 @@ private theorem inv_of_mintPost (σ : Storage) (dst : Address) (n : Nat) (hInv :
     exact h0 a haH
   · by_cases ht : dst ∈ H
     · rw [Finset.insert_eq_of_mem ht]
+      let f := rawBals σ.balances
       have hcancel :
-          H.sum (Function.update σ.balances dst (σ.balances dst + n)) =
-            H.sum σ.balances + n := by
-        have hupd := sum_update_mem H σ.balances ht (σ.balances dst + n)
-        revert hupd
-        generalize hS' : H.sum (Function.update σ.balances dst (σ.balances dst + n)) = S'
-        generalize hS : H.sum σ.balances = S
-        generalize hd : σ.balances dst = d
-        intro hupd
-        omega
-      change (∑ a ∈ H, (mintPost σ dst n).balances a) = (mintPost σ dst n).totalSupply
+          H.sum (rawBals (Function.update σ.balances dst (σ.balances dst + n))) =
+            H.sum f + n.raw := by
+        rw [rawBals_update, Amount.raw_add]
+        exact nat_sum_update_add H f ht n.raw
+      change H.sum (fun a => ((mintPost σ dst n).balances a).raw) =
+        (mintPost σ dst n).totalSupply.raw
       simp only [mintPost, credit]
-      rw [hcancel, hsum]
-    · have hframe := sum_update_not_mem H σ.balances ht (σ.balances dst + n)
+      simpa [rawBals] using hcancel.trans (by rw [hsum])
+    · let f := rawBals σ.balances
+      have hframe := sum_update_not_mem H f ht (f dst + n.raw)
       have hb0 : σ.balances dst = 0 := h0 dst ht
       have hsum' :
-          (∑ a ∈ insert dst H, (mintPost σ dst n).balances a) =
-            H.sum σ.balances + n := by
+          (∑ a ∈ insert dst H, ((mintPost σ dst n).balances a).raw) =
+            H.sum f + n.raw := by
         rw [Finset.sum_insert ht]
         simp only [mintPost, credit, Function.update_self]
-        rw [hframe, hb0]
-        omega
-      change (∑ a ∈ insert dst H, (mintPost σ dst n).balances a) =
-        (mintPost σ dst n).totalSupply
+        change (σ.balances dst + n).raw +
+            H.sum (rawBals (Function.update σ.balances dst (σ.balances dst + n))) =
+          H.sum f + n.raw
+        rw [rawBals_update, Amount.raw_add, hb0, Amount.raw_zero, Nat.zero_add]
+        have hf0 : f dst = 0 := by simpa [rawBals, Amount.raw_zero] using congrArg Amount.raw hb0
+        have hfr : H.sum (Function.update f dst n.raw) = H.sum f := by
+          simpa [hf0, Nat.zero_add] using hframe
+        rw [hfr, Nat.add_comm]
+      change (∑ a ∈ insert dst H, ((mintPost σ dst n).balances a).raw) =
+        (mintPost σ dst n).totalSupply.raw
       simpa [mintPost] using hsum'.trans (by rw [hsum])
 
-private theorem inv_of_burnPost (σ : Storage) (src : Address) (n : Nat)
+private theorem inv_of_burnPost (σ : Storage) (src : Address) (n : Amount tokenAsset)
     (hInv : InvStorage σ) (hn : n ≤ σ.balances src) :
     InvStorage (burnPost σ src n) := by
   obtain ⟨H, h0, hsum⟩ := hInv
+  have hn' : n.raw ≤ (σ.balances src).raw := hn
   by_cases hs : src ∈ H
   · refine ⟨H, ?_, ?_⟩
     · intro a ha
       have ha_src : a ≠ src := by intro h; subst h; exact ha hs
       simp [burnPost, debit_other _ ha_src]
       exact h0 a ha
-    · have hs1 := sum_debit H σ.balances hs hn
-      have hsumd : H.sum (debit σ.balances src n) = H.sum σ.balances - n := by
-        rw [← Nat.add_sub_cancel (H.sum (debit σ.balances src n)) n, hs1]
-      simp [burnPost, hsumd, hsum]
+    · have hs1 := sum_debit H σ.balances hs hn'
+      have hsumd :
+          H.sum (rawBals (debit σ.balances src n)) =
+            H.sum (rawBals σ.balances) - n.raw := by
+        rw [← Nat.add_sub_cancel (H.sum (rawBals (debit σ.balances src n))) n.raw, hs1]
+      change H.sum (fun a => ((burnPost σ src n).balances a).raw) =
+        (burnPost σ src n).totalSupply.raw
+      simp only [burnPost, debit, Amount.raw_sub]
+      simpa [rawBals] using hsumd.trans (by rw [hsum])
   · have hb0 : σ.balances src = 0 := h0 src hs
-    have hn0 : n = 0 := Nat.eq_zero_of_le_zero (hn.trans_eq hb0)
+    have hn0 : n = 0 := by
+      cases n with | mk nraw =>
+      have hz : (σ.balances src).raw = 0 := by
+        simpa [Amount.raw_zero] using congrArg Amount.raw hb0
+      have : nraw = 0 := Nat.eq_zero_of_le_zero (hn'.trans_eq hz)
+      subst this
+      rfl
     subst hn0
+    have hbals0 : σ.balances src - 0 = σ.balances src := Amount.ext (by simp [Amount.raw_sub])
     refine ⟨H, ?_, ?_⟩
     · intro a ha
-      simp [burnPost, debit, Function.update_eq_self]
+      simp [burnPost, debit, hbals0, Function.update_eq_self]
       exact h0 a ha
-    · simp [burnPost, debit, Function.update_eq_self, hsum]
+    · simpa [burnPost, debit, hbals0, Function.update_eq_self, Amount.raw_zero, Amount.raw_sub,
+        Nat.sub_zero] using hsum
 
 /-! ### (a) No unauthorized decrease -/
 
@@ -188,7 +243,7 @@ theorem transfer_auth : NoUnauthorizedDecreaseFn spec Inv claim Auth .transfer :
   by_cases hs : ctx.sender = a
   · exact hs
   · by_cases hsub : amount ≤ w.self.balances ctx.sender
-    · by_cases hadd : debit w.self.balances ctx.sender amount dst + amount < wordBound
+    · by_cases hadd : (debit w.self.balances ctx.sender amount dst + amount).raw < wordBound
       · have hrun := transfer_ok ctx w dst amount hsub hadd
         simp [worldAfter, hrun] at hdec
         simp [claim, transferPost] at hdec
@@ -212,7 +267,7 @@ theorem transferFrom_auth : NoUnauthorizedDecreaseFn spec Inv claim Auth .transf
       simp [worldAfter, hrun] at hdec
   · by_cases hallow : amount ≤ w.self.allowances src ctx.sender
     · by_cases hsub : amount ≤ w.self.balances src
-      · by_cases hadd : debit w.self.balances src amount dst + amount < wordBound
+      · by_cases hadd : (debit w.self.balances src amount dst + amount).raw < wordBound
         · have hrun := transferFrom_ok ctx w src dst amount hallow hsub hadd
           simp [worldAfter, hrun] at hdec
           simp [claim, transferFromPost] at hdec
@@ -249,8 +304,8 @@ theorem burn_auth : NoUnauthorizedDecreaseFn spec Inv claim Auth .burn := by
 theorem mint_auth : NoUnauthorizedDecreaseFn spec Inv claim Auth .mint := by
   intro ⟨dst, amount⟩ ctx w a _hInv hdec
   by_cases howner : ctx.sender = w.self.owner
-  · by_cases hsupply : w.self.totalSupply + amount < wordBound
-    · by_cases hadd : w.self.balances dst + amount < wordBound
+  · by_cases hsupply : (w.self.totalSupply + amount).raw < wordBound
+    · by_cases hadd : (w.self.balances dst + amount).raw < wordBound
       · have hrun := mint_ok ctx w dst amount howner hsupply hadd
         simp [worldAfter, hrun] at hdec
         simp [claim, mintPost] at hdec
@@ -311,7 +366,7 @@ theorem transfer_conservesFn : ConservesFn spec Inv claim inflow .transfer := by
     have hst : a ≠ ctx.sender ∧ a ≠ dst := by
       simpa [Finset.mem_insert, Finset.mem_singleton] using ha
     by_cases hsub : amount ≤ w.self.balances ctx.sender
-    · by_cases hadd : debit w.self.balances ctx.sender amount dst + amount < wordBound
+    · by_cases hadd : (debit w.self.balances ctx.sender amount dst + amount).raw < wordBound
       · have ⟨w', hrun, hb⟩ :=
           transfer_preserves_other_balances ctx w dst amount a hst.1 hst.2 hsub hadd
         simp [worldAfter, hrun]; simp [claim, hb]
@@ -320,16 +375,18 @@ theorem transfer_conservesFn : ConservesFn spec Inv claim inflow .transfer := by
     · have hrun := transfer_reverts_on_insufficient_balance ctx w dst amount (Nat.not_le.mp hsub)
       simp [worldAfter, hrun]
   · by_cases hsub : amount ≤ w.self.balances ctx.sender
-    · by_cases hadd : debit w.self.balances ctx.sender amount dst + amount < wordBound
+    · by_cases hadd : (debit w.self.balances ctx.sender amount dst + amount).raw < wordBound
       · by_cases hne : ctx.sender = dst
         · subst hne
-          have hbound : w.self.balances ctx.sender < wordBound := by
-            simp [debit] at hadd
-            omega
+          have hbound : (w.self.balances ctx.sender).raw < wordBound := by
+            have hle : amount.raw ≤ (w.self.balances ctx.sender).raw := hsub
+            simp [debit, Function.update_self, Amount.raw_add, Amount.raw_sub] at hadd
+            rw [Nat.sub_add_cancel hle] at hadd
+            exact hadd
           have ⟨w', hrun, hb⟩ := transfer_self_transfer_is_noop ctx w amount hsub hbound
           simp [worldAfter, hrun]; simp [claim, hb, inflow, Call.ofCtx]
         · have hne' : ctx.sender ≠ dst := hne
-          have hadd' : w.self.balances dst + amount < wordBound := by
+          have hadd' : (w.self.balances dst + amount).raw < wordBound := by
             simpa [debit_other _ hne'.symm] using hadd
           have hrun := transfer_ok ctx w dst amount hsub
             (by simpa [debit_other _ hne'.symm] using hadd')
@@ -337,7 +394,7 @@ theorem transfer_conservesFn : ConservesFn spec Inv claim inflow .transfer := by
           simp [worldAfter, hrun]
           rw [Finset.sum_pair hne', Finset.sum_pair hne']
           simp [claim, inflow, Call.ofCtx]
-          exact le_of_eq hcons
+          exact le_of_eq (by simpa [Amount.raw_add] using congrArg Amount.raw hcons)
       · have hrun := transfer_reverts_on_overflow ctx w dst amount hsub (Nat.not_lt.mp hadd)
         simp [worldAfter, hrun]
     · have hrun := transfer_reverts_on_insufficient_balance ctx w dst amount (Nat.not_le.mp hsub)
@@ -351,7 +408,7 @@ theorem transferFrom_conservesFn : ConservesFn spec Inv claim inflow .transferFr
       simpa [Finset.mem_insert, Finset.mem_singleton] using ha
     by_cases hallow : amount ≤ w.self.allowances src ctx.sender
     · by_cases hsub : amount ≤ w.self.balances src
-      · by_cases hadd : debit w.self.balances src amount dst + amount < wordBound
+      · by_cases hadd : (debit w.self.balances src amount dst + amount).raw < wordBound
         · have ⟨w', hrun, hb⟩ :=
             transferFrom_preserves_other_balances ctx w src dst amount a hst.1 hst.2
               hallow hsub hadd
@@ -367,24 +424,26 @@ theorem transferFrom_conservesFn : ConservesFn spec Inv claim inflow .transferFr
       simp [worldAfter, hrun]
   · by_cases hallow : amount ≤ w.self.allowances src ctx.sender
     · by_cases hsub : amount ≤ w.self.balances src
-      · by_cases hadd : debit w.self.balances src amount dst + amount < wordBound
+      · by_cases hadd : (debit w.self.balances src amount dst + amount).raw < wordBound
         · by_cases hne : src = dst
           · subst hne
-            have hbound : w.self.balances src < wordBound := by
-              simp [debit] at hadd
-              omega
+            have hbound : (w.self.balances src).raw < wordBound := by
+              have hle : amount.raw ≤ (w.self.balances src).raw := hsub
+              simp [debit, Function.update_self, Amount.raw_add, Amount.raw_sub] at hadd
+              rw [Nat.sub_add_cancel hle] at hadd
+              exact hadd
             have ⟨w', hrun, hb⟩ :=
               transferFrom_self_transfer_is_noop ctx w src amount hallow hsub hbound
             simp [worldAfter, hrun]; simp [claim, hb, inflow, Call.ofCtx]
           · have hne' : src ≠ dst := hne
-            have hadd' : w.self.balances dst + amount < wordBound := by
+            have hadd' : (w.self.balances dst + amount).raw < wordBound := by
               simpa [debit_other _ hne'.symm] using hadd
             have ⟨w', hrun, hcons⟩ :=
               transferFrom_conserves ctx w src dst amount hne' hallow hsub hadd'
             simp [worldAfter, hrun]
             rw [Finset.sum_pair hne', Finset.sum_pair hne']
             simp [claim, inflow, Call.ofCtx]
-            exact le_of_eq hcons
+            exact le_of_eq (by simpa [Amount.raw_add] using congrArg Amount.raw hcons)
         · have hrun := transferFrom_reverts_on_overflow ctx w src dst amount hallow hsub
             (Nat.not_lt.mp hadd)
           simp [worldAfter, hrun]
@@ -401,8 +460,8 @@ theorem mint_conservesFn : ConservesFn spec Inv claim inflow .mint := by
   · intro a ha
     have hat : a ≠ dst := by simpa [Finset.mem_singleton] using ha
     by_cases howner : ctx.sender = w.self.owner
-    · by_cases hsupply : w.self.totalSupply + amount < wordBound
-      · by_cases hadd : w.self.balances dst + amount < wordBound
+    · by_cases hsupply : (w.self.totalSupply + amount).raw < wordBound
+      · by_cases hadd : (w.self.balances dst + amount).raw < wordBound
         · have ⟨w', hrun, hb⟩ :=
             mint_preserves_other_balances ctx w dst amount a hat howner hsupply hadd
           simp [worldAfter, hrun]; simp [claim, hb]
@@ -414,8 +473,8 @@ theorem mint_conservesFn : ConservesFn spec Inv claim inflow .mint := by
     · have hrun := mint_reverts_for_non_owner ctx w dst amount howner
       simp [worldAfter, hrun]
   · by_cases howner : ctx.sender = w.self.owner
-    · by_cases hsupply : w.self.totalSupply + amount < wordBound
-      · by_cases hadd : w.self.balances dst + amount < wordBound
+    · by_cases hsupply : (w.self.totalSupply + amount).raw < wordBound
+      · by_cases hadd : (w.self.balances dst + amount).raw < wordBound
         · have hrun := mint_ok ctx w dst amount howner hsupply hadd
           simp [worldAfter, hrun]
           simp [claim, mintPost, credit, inflow, Call.ofCtx, Call.toCtx, hrun]
@@ -509,7 +568,7 @@ theorem token_conservation : Conservation spec Inv claim inflow :=
 theorem transfer_preserves_inv : PreservesInvFn spec Inv .transfer := by
   intro ⟨dst, amount⟩ ctx w hInv
   by_cases hsub : amount ≤ w.self.balances ctx.sender
-  · by_cases hadd : debit w.self.balances ctx.sender amount dst + amount < wordBound
+  · by_cases hadd : (debit w.self.balances ctx.sender amount dst + amount).raw < wordBound
     · have hrun := transfer_ok ctx w dst amount hsub hadd
       simp [worldAfter, hrun]
       exact inv_of_transferPost w.self ctx.sender dst amount hInv hsub
@@ -524,7 +583,7 @@ theorem transferFrom_preserves_inv : PreservesInvFn spec Inv .transferFrom := by
   intro ⟨src, dst, amount⟩ ctx w hInv
   by_cases hallow : amount ≤ w.self.allowances src ctx.sender
   · by_cases hsub : amount ≤ w.self.balances src
-    · by_cases hadd : debit w.self.balances src amount dst + amount < wordBound
+    · by_cases hadd : (debit w.self.balances src amount dst + amount).raw < wordBound
       · have hrun := transferFrom_ok ctx w src dst amount hallow hsub hadd
         simp [worldAfter, hrun]
         exact inv_of_transferPost w.self src dst amount hInv hsub
@@ -544,8 +603,8 @@ theorem transferFrom_preserves_inv : PreservesInvFn spec Inv .transferFrom := by
 theorem mint_preserves_inv : PreservesInvFn spec Inv .mint := by
   intro ⟨dst, amount⟩ ctx w hInv
   by_cases howner : ctx.sender = w.self.owner
-  · by_cases hsupply : w.self.totalSupply + amount < wordBound
-    · by_cases hadd : w.self.balances dst + amount < wordBound
+  · by_cases hsupply : (w.self.totalSupply + amount).raw < wordBound
+    · by_cases hadd : (w.self.balances dst + amount).raw < wordBound
       · have hrun := mint_ok ctx w dst amount howner hsupply hadd
         simp [worldAfter, hrun]
         exact inv_of_mintPost w.self dst amount hInv
@@ -617,7 +676,7 @@ theorem token_inv_rely : PreservesInvEnv spec Inv (fun _ _ => True) := by
   exact hw
 
 /-- Deployment from empty balances establishes `Inv`. -/
-theorem «constructor_inv» (owner : Address) (supply : Nat) (ctx : Ctx)
+theorem «constructor_inv» (owner : Address) (supply : Amount tokenAsset) (ctx : Ctx)
     (w : World Storage Unit Event)
     (hempty : ∀ a, w.self.balances a = 0) :
     Inv (worldAfter (Token.constructor owner supply) ctx w) := by

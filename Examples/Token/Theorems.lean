@@ -27,7 +27,7 @@ includes a self-transfer, which is a no-op on those two balances. Success
 already implies the sender had the funds and the recipient's balance plus
 the amount fit in a 256-bit word. This is the local conservation fact
 behind Token's global "balances sum to supply" invariant. -/
-theorem transfer_conserves (dst : Address) (amount : Nat)
+theorem transfer_conserves (dst : Address) (amount : Amount tokenAsset)
     {w' : World Storage Unit Event}
     (h : Tx.run (transfer dst amount) ctx w = .ok ((), w')) :
     w'.self.balances ctx.sender + w'.self.balances dst =

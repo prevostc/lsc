@@ -58,18 +58,18 @@ theorem token_balances_fd :
   simp [Token.contract]
 
 theorem token_schema_balances (s : Storage) (k : Address) :
-    Token.schema.st.map1 2 s k = s.balances k := rfl
+    Token.schema.st.map1 2 s k = (s.balances k).raw := rfl
 
 theorem token_claim_slot (s : Storage) (σ : U256 → U256) (a : Address)
     (hs : storageRel Token.contract Token.schema evmKeccak s σ)
-    (ha : Nat.lt a wordBound) (hb : s.balances a < wordBound) :
+    (ha : Nat.lt a wordBound) (hb : (s.balances a).raw < wordBound) :
     (σ (mapSlot1 evmKeccak 2 a)).toNat = claim a s := by
   simpa [claim, token_schema_balances] using
     storageRel_map1_toNat hs token_balances_fd rfl (by rw [token_schema_balances]) ha hb
 
 theorem token_map1_bound (w : World Storage Unit Event) (a : Address)
     (hwf : WorldWF Token.contract Token.schema w) (ha : Nat.lt a wordBound) :
-    w.self.balances a < wordBound := by
+    (w.self.balances a).raw < wordBound := by
   have h := hwf 2 _ token_balances_fd a ha
   simpa [token_schema_balances] using h
 

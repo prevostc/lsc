@@ -1,3 +1,4 @@
+import Lsc.Lang.Word
 import Lsc.Lang.Reify
 
 /-!
@@ -12,15 +13,18 @@ open Lsc Lsc.Syntax
 
 namespace Token
 
+/-- This contract's token. Decimals are not static. -/
+def tokenAsset : Asset := ⟨`tokenAsset, none⟩
+
 structure Storage where
   owner : Address
-  totalSupply : Nat
-  balances : Mapping Address Nat
-  allowances : Mapping Address (Mapping Address Nat)
+  totalSupply : Amount tokenAsset
+  balances : Mapping Address (Amount tokenAsset)
+  allowances : Mapping Address (Mapping Address (Amount tokenAsset))
 
 inductive Event
-  | Transfer (src to : Address) (amount : Nat)
-  | Approval (owner spender : Address) (amount : Nat)
+  | Transfer (src to : Address) (amount : Amount tokenAsset)
+  | Approval (owner spender : Address) (amount : Amount tokenAsset)
   deriving DecidableEq, Repr
 
 inductive Error
@@ -32,13 +36,13 @@ inductive Error
 abbrev M := Tx Storage Unit Event Error
 
 /-- Deployment: the deployer owns the whole initial supply. -/
-def constructor (owner : Address) (supply : Nat) : M Unit := do
+def constructor (owner : Address) (supply : Amount tokenAsset) : M Unit := do
   write owner owner
   write totalSupply supply
   write balances[owner] supply
   Tx.emit (.Transfer 0 owner supply)
 
-def transfer (to : Address) (amount : Nat) : M Unit := do
+def transfer (to : Address) (amount : Amount tokenAsset) : M Unit := do
   let src ← Tx.sender
   let b ← read balances[src]
   Tx.require (amount ≤ b) .InsufficientBalance
@@ -47,12 +51,12 @@ def transfer (to : Address) (amount : Nat) : M Unit := do
   write balances[to] (← r +? amount)
   Tx.emit (.Transfer src to amount)
 
-def approve (spender : Address) (amount : Nat) : M Unit := do
+def approve (spender : Address) (amount : Amount tokenAsset) : M Unit := do
   let owner ← Tx.sender
   write allowances[owner, spender] amount
   Tx.emit (.Approval owner spender amount)
 
-def transferFrom (src to : Address) (amount : Nat) : M Unit := do
+def transferFrom (src to : Address) (amount : Amount tokenAsset) : M Unit := do
   let spender ← Tx.sender
   let a ← read allowances[src, spender]
   Tx.require (amount ≤ a) .InsufficientAllowance
@@ -64,7 +68,7 @@ def transferFrom (src to : Address) (amount : Nat) : M Unit := do
   write balances[to] (← r +? amount)
   Tx.emit (.Transfer src to amount)
 
-def mint (to : Address) (amount : Nat) : M Unit := do
+def mint (to : Address) (amount : Amount tokenAsset) : M Unit := do
   let caller ← Tx.sender
   let owner ← read owner
   Tx.require (caller = owner) .NotOwner
@@ -75,7 +79,7 @@ def mint (to : Address) (amount : Nat) : M Unit := do
   Tx.emit (.Transfer 0 to amount)
 
 /-- Burn with an `if` in statement position, to exercise join points. -/
-def burn (amount : Nat) : M Unit := do
+def burn (amount : Amount tokenAsset) : M Unit := do
   let src ← Tx.sender
   let b ← read balances[src]
   if amount ≤ b then
@@ -86,11 +90,12 @@ def burn (amount : Nat) : M Unit := do
     Tx.revert .InsufficientBalance
   Tx.emit (.Transfer src 0 amount)
 
-def balanceOf (who : Address) : M Nat := read balances[who]
+def balanceOf (who : Address) : M (Amount tokenAsset) := read balances[who]
 
-def allowance (owner spender : Address) : M Nat := read allowances[owner, spender]
+def allowance (owner spender : Address) : M (Amount tokenAsset) :=
+  read allowances[owner, spender]
 
-def totalSupply : M Nat := read totalSupply
+def totalSupply : M (Amount tokenAsset) := read totalSupply
 
 end Token
 

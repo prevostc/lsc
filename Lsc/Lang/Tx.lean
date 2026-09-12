@@ -401,12 +401,22 @@ def worldAfter {S X E ε α} (x : Tx S X E ε α) (ctx : Ctx) (w : World S X E) 
     (h : Tx.run x ctx w = .error e) : worldAfter x ctx w = w := by
   simp [worldAfter, h]
 
+/-- Mapping the result does not change the post-world. Used when `core_denote`
+is `ofWord <$> Core.denote = f`. -/
+theorem worldAfter_map {S X E ε α β} (f : α → β) (x : Tx S X E ε α)
+    (ctx : Ctx) (w : World S X E) :
+    worldAfter (f <$> x) ctx w = worldAfter x ctx w := by
+  simp [worldAfter, Tx.run_map]
+  cases Tx.run x ctx w <;> rfl
+
 end Lang
 
 /-! ### Surface sugar
 
-Scoped macros only (no custom syntax categories, no elaborators): each expands to a plain
-application of a primitive, which is what the reifier matches on.
+`+?` / `+↻` are macros over the primitives. `read` / `write` are named
+syntax; their elaborators live in `Lsc.Lang.Interface` so they can wrap
+`Amount` / `Ref` fields to the schema's word form (`ofWord` / `.raw`,
+`{ addr := · }` / `.addr`). The reifier still matches `Tx.load` / `Tx.store`.
 
 * `read f`, `read f[k]`, `read f[k₁, k₂]` — storage reads
 * `write f v`, `write f[k] v`, `write f[k₁, k₂] v` — storage writes
@@ -416,28 +426,11 @@ application of a primitive, which is what the reifier matches on.
 namespace Syntax
 open Lean
 
-scoped syntax:max "read " ident ("[" term,+ "]")? : term
-scoped syntax:max "write " ident ("[" term,+ "]")? ppSpace term:max : term
+scoped syntax:max (name := lscRead) "read " ident ("[" term,+ "]")? : term
+scoped syntax:max (name := lscWrite) "write " ident ("[" term,+ "]")? ppSpace term:max : term
 
-private def sigma : Ident := mkIdent `σ
-private def projOf (f : Ident) : Ident := mkIdent (`σ ++ f.getId)
-
-macro_rules
-  | `(read $f:ident) => `(Lsc.Tx.load (fun $sigma => $(projOf f)))
-  | `(read $f:ident [ $ks:term,* ]) => do
-    match ks.getElems with
-    | #[k] => `(Lsc.Tx.loadMap (fun $sigma => $(projOf f)) $k)
-    | #[k₁, k₂] => `(Lsc.Tx.loadMap2 (fun $sigma => $(projOf f)) $k₁ $k₂)
-    | _ => Macro.throwError "read: mappings have one or two keys"
-  | `(write $f:ident $v) =>
-    `(Lsc.Tx.store (fun $sigma m => { $sigma with $f:ident := m }) $v)
-  | `(write $f:ident [ $ks:term,* ] $v) => do
-    match ks.getElems with
-    | #[k] =>
-      `(Lsc.Tx.storeMap (fun $sigma => $(projOf f)) (fun $sigma m => { $sigma with $f:ident := m }) $k $v)
-    | #[k₁, k₂] =>
-      `(Lsc.Tx.storeMap2 (fun $sigma => $(projOf f)) (fun $sigma m => { $sigma with $f:ident := m }) $k₁ $k₂ $v)
-    | _ => Macro.throwError "write: mappings have one or two keys"
+def sigma : Ident := mkIdent `σ
+def projOf (f : Ident) : Ident := mkIdent (`σ ++ f.getId)
 
 scoped infixl:65 " +? " => Lsc.Tx.HAddChecked.hAdd
 scoped infixl:65 " -? " => Lsc.Tx.HSubChecked.hSub
