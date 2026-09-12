@@ -27,7 +27,7 @@ theorem amm_quote0for1_callFree : CallFree Amm.quote0for1.core := by
   simp [CallFree, M1Frag, M1Op, M1Stmt, M1Cond, Amm.quote0for1.core]
 
 theorem amm_fields_lt : Amm.contract.fields.length < wordBound := by
-  have h : Amm.contract.fields.length = 8 := by simp [Amm.contract]
+  have h : Amm.contract.fields.length = 6 := by simp [Amm.contract]
   rw [h]
   exact lt_256_wordBound (by decide)
 
@@ -60,25 +60,25 @@ theorem amm_fn_s2 {f : FnDef} (hf : f ∈ Amm.contract.functions) :
   · exact s2frag_of_callFree amm_quote0for1_callFree
 
 theorem amm_scalar_token0 (σ : Amm.Storage) :
-    Amm.schema.st.scalar 4 σ = Amm.token0B.addr σ := by
+    Amm.schema.st.scalar 0 σ = Amm.token0B.addr σ := by
   simp [Amm.schema, Amm.token0B]
   rfl
 
 theorem amm_scalar_token1 (σ : Amm.Storage) :
-    Amm.schema.st.scalar 5 σ = Amm.token1B.addr σ := by
+    Amm.schema.st.scalar 1 σ = Amm.token1B.addr σ := by
   simp [Amm.schema, Amm.token1B]
   rfl
 
 theorem amm_field_token0 :
-    (Amm.contract.fields[4]?).map (·.kind) = some FieldKind.scalar := by
+    (Amm.contract.fields[0]?).map (·.kind) = some FieldKind.scalar := by
   simp [Amm.contract]
 
 theorem amm_field_token1 :
-    (Amm.contract.fields[5]?).map (·.kind) = some FieldKind.scalar := by
+    (Amm.contract.fields[1]?).map (·.kind) = some FieldKind.scalar := by
   simp [Amm.contract]
 
 theorem amm_fn_avoids0 {f : FnDef} (hf : f ∈ Amm.contract.functions) :
-    coreAvoids 4 f.core := by
+    coreAvoids 0 f.core := by
   simp [Amm.contract] at hf
   rcases hf with rfl | rfl | rfl | rfl | rfl | rfl | rfl
   · simp [coreAvoids, stmtAvoids, Amm.addLiquidity.core]
@@ -90,7 +90,7 @@ theorem amm_fn_avoids0 {f : FnDef} (hf : f ∈ Amm.contract.functions) :
   · simp [coreAvoids, stmtAvoids, Amm.quote0for1.core]
 
 theorem amm_fn_avoids1 {f : FnDef} (hf : f ∈ Amm.contract.functions) :
-    coreAvoids 5 f.core := by
+    coreAvoids 1 f.core := by
   simp [Amm.contract] at hf
   rcases hf with rfl | rfl | rfl | rfl | rfl | rfl | rfl
   · simp [coreAvoids, stmtAvoids, Amm.addLiquidity.core]
@@ -108,8 +108,8 @@ theorem amm_hslot (α : Abs IERC20.Ghost) {f : FnDef}
   have : e = ⟨α, Amm.token0B⟩ ∨ e = ⟨α, Amm.token1B⟩ := by
     simpa [ammBs, List.mem_cons, List.mem_singleton] using he
   rcases this with rfl | rfl
-  · exact ⟨4, amm_scalar_token0, amm_field_token0, amm_fn_avoids0 hf⟩
-  · exact ⟨5, amm_scalar_token1, amm_field_token1, amm_fn_avoids1 hf⟩
+  · exact ⟨0, amm_scalar_token0, amm_field_token0, amm_fn_avoids0 hf⟩
+  · exact ⟨1, amm_scalar_token1, amm_field_token1, amm_fn_avoids1 hf⟩
 
 private def ierc20Methods : List (String × AbiSpec) := [
   ("transfer", { selector := 0xa9059cbb, arity := 2, ret := .boolOpt }),
@@ -119,13 +119,13 @@ private def ierc20Methods : List (String × AbiSpec) := [
 
 private def ammToken0Bd : BindingDef where
   name := "token0B"
-  fieldSlot := 4
+  fieldSlot := 0
   ifaceName := "IERC20"
   methods := ierc20Methods
 
 private def ammToken1Bd : BindingDef where
   name := "token1B"
-  fieldSlot := 5
+  fieldSlot := 1
   ifaceName := "IERC20"
   methods := ierc20Methods
 

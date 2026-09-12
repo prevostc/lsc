@@ -123,7 +123,7 @@ theorem amm_bytecode_no_unauthorized_extraction
                 accountKey (BitVec.ofNat 256 self))
     (hBindNe1 : accountKey (BitVec.ofNat 256 (token1B.addr w.self)) ≠
                 accountKey (BitVec.ofNat 256 self))
-    (hneq : w.self.token0 ≠ w.self.token1) :
+    (hneq : w.self.token0Ref.addr ≠ w.self.token1Ref.addr) :
     ∀ σ' ξ', EvmTraceRunExtAll is calls σ ξ σ' ξ' →
       ammClaimRead evmKeccak σ a ≤ ammClaimRead evmKeccak σ' a :=
   Proof.amm_bytecode_no_unauthorized_extraction α o hCalls rt hrt is hcomp

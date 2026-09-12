@@ -27,24 +27,24 @@ open YulEvmCompiler (compile Instr)
 namespace Amm
 
 theorem amm_field_shares :
-    Amm.contract.fields[3]? =
+    Amm.contract.fields[5]? =
       some { name := "shares", kind := .map1, ty := .uint256 } := by
   simp [Amm.contract]
 
 theorem amm_schema_shares (s : Storage) (k : Address) :
-    Amm.schema.st.map1 3 s k = s.shares k := rfl
+    Amm.schema.st.map1 5 s k = (s.shares k).raw := rfl
 
 theorem amm_claim_of_rel (s : Storage) (σ : U256 → U256) (a : Address)
     (hs : storageRel Amm.contract Amm.schema evmKeccak s σ)
-    (ha : Nat.lt a wordBound) (hsh : s.shares a < wordBound) :
+    (ha : Nat.lt a wordBound) (hsh : (s.shares a).raw < wordBound) :
     ammClaimRead evmKeccak σ a = claim a s := by
   simpa [ammClaimRead, claim, amm_schema_shares] using
     storageRel_map1_toNat hs amm_field_shares rfl (by rw [amm_schema_shares]) ha hsh
 
 theorem amm_shares_bound (w : World Storage Ext Event) (a : Address)
     (hwf : WorldWF Amm.contract Amm.schema w) (ha : Nat.lt a wordBound) :
-    w.self.shares a < wordBound := by
-  have h := hwf 3 _ amm_field_shares
+    (w.self.shares a).raw < wordBound := by
+  have h := hwf 5 _ amm_field_shares
   simpa [amm_schema_shares] using h a ha
 
 @[reducible] def mkAmmSetup (hκ : KeccakSep Amm.contract evmKeccak)
@@ -92,36 +92,9 @@ theorem noAuthAlong_irrel (a : Address) :
         (ih (step (.call c) w) (step (.call c) w'))
 
 private theorem amm_scalarUpd_token0 (i : Nat) (σ : Storage) (v : Nat)
-    (h : 4 ≠ i) : (Amm.schema.st.scalarUpd i σ v).token0 = σ.token0 := by
+    (h : 0 ≠ i) : (Amm.schema.st.scalarUpd i σ v).token0Ref = σ.token0Ref := by
   cases i with
-  | zero => simp [Amm.schema]
-  | succ i =>
-    cases i with
-    | zero => simp [Amm.schema]
-    | succ i =>
-      cases i with
-      | zero => simp [Amm.schema]
-      | succ i =>
-        cases i with
-        | zero => simp [Amm.schema]
-        | succ i =>
-          cases i with
-          | zero => cases h rfl
-          | succ i =>
-            cases i with
-            | zero => simp [Amm.schema]
-            | succ i =>
-              cases i with
-              | zero => simp [Amm.schema]
-              | succ i =>
-                cases i with
-                | zero => simp [Amm.schema]
-                | succ _ => simp [Amm.schema]
-
-private theorem amm_scalarUpd_token1 (i : Nat) (σ : Storage) (v : Nat)
-    (h : 5 ≠ i) : (Amm.schema.st.scalarUpd i σ v).token1 = σ.token1 := by
-  cases i with
-  | zero => simp [Amm.schema]
+  | zero => cases h rfl
   | succ i =>
     cases i with
     | zero => simp [Amm.schema]
@@ -136,7 +109,31 @@ private theorem amm_scalarUpd_token1 (i : Nat) (σ : Storage) (v : Nat)
           | zero => simp [Amm.schema]
           | succ i =>
             cases i with
-            | zero => cases h rfl
+            | zero => simp [Amm.schema]
+            | succ i =>
+              cases i with
+              | zero => simp [Amm.schema]
+              | succ _ => simp [Amm.schema]
+
+private theorem amm_scalarUpd_token1 (i : Nat) (σ : Storage) (v : Nat)
+    (h : 1 ≠ i) : (Amm.schema.st.scalarUpd i σ v).token1Ref = σ.token1Ref := by
+  cases i with
+  | zero => simp [Amm.schema]
+  | succ i =>
+    cases i with
+    | zero => cases h rfl
+    | succ i =>
+      cases i with
+      | zero => simp [Amm.schema]
+      | succ i =>
+        cases i with
+        | zero => simp [Amm.schema]
+        | succ i =>
+          cases i with
+          | zero => simp [Amm.schema]
+          | succ i =>
+            cases i with
+            | zero => simp [Amm.schema]
             | succ i =>
               cases i with
               | zero => simp [Amm.schema]
@@ -146,7 +143,7 @@ private theorem amm_scalarUpd_token1 (i : Nat) (σ : Storage) (v : Nat)
                 | succ _ => simp [Amm.schema]
 
 private theorem amm_map1Upd_token0 (i : Nat) (σ : Storage) (m : Nat → Nat) :
-    (Amm.schema.st.map1Upd i σ m).token0 = σ.token0 := by
+    (Amm.schema.st.map1Upd i σ m).token0Ref = σ.token0Ref := by
   cases i with
   | zero => simp [Amm.schema]
   | succ i =>
@@ -173,7 +170,7 @@ private theorem amm_map1Upd_token0 (i : Nat) (σ : Storage) (m : Nat → Nat) :
                 | succ _ => simp [Amm.schema]
 
 private theorem amm_map1Upd_token1 (i : Nat) (σ : Storage) (m : Nat → Nat) :
-    (Amm.schema.st.map1Upd i σ m).token1 = σ.token1 := by
+    (Amm.schema.st.map1Upd i σ m).token1Ref = σ.token1Ref := by
   cases i with
   | zero => simp [Amm.schema]
   | succ i =>
@@ -200,7 +197,7 @@ private theorem amm_map1Upd_token1 (i : Nat) (σ : Storage) (m : Nat → Nat) :
                 | succ _ => simp [Amm.schema]
 
 private theorem amm_map2Upd_token0 (i : Nat) (σ : Storage) (m : Nat → Nat → Nat) :
-    (Amm.schema.st.map2Upd i σ m).token0 = σ.token0 := by
+    (Amm.schema.st.map2Upd i σ m).token0Ref = σ.token0Ref := by
   cases i with
   | zero => simp [Amm.schema]
   | succ i =>
@@ -227,7 +224,7 @@ private theorem amm_map2Upd_token0 (i : Nat) (σ : Storage) (m : Nat → Nat →
                 | succ _ => simp [Amm.schema]
 
 private theorem amm_map2Upd_token1 (i : Nat) (σ : Storage) (m : Nat → Nat → Nat) :
-    (Amm.schema.st.map2Upd i σ m).token1 = σ.token1 := by
+    (Amm.schema.st.map2Upd i σ m).token1Ref = σ.token1Ref := by
   cases i with
   | zero => simp [Amm.schema]
   | succ i =>
@@ -272,15 +269,16 @@ private theorem amm_ext_call_self
 theorem amm_token0_stable_core (fn : Fn) (args : spec.Args fn) (ctx : Ctx)
     (w : World Storage Ext Event) :
     (worldAfter (Core.denote Amm.schema (Amm.fnDef fn).core
-      (Amm.encode fn args).reverse) ctx w).self.token0 = w.self.token0 := by
+      (Amm.encode fn args).reverse) ctx w).self.token0Ref.addr = w.self.token0Ref.addr := by
   cases htx : Tx.run (Core.denote Amm.schema (Amm.fnDef fn).core
       (Amm.encode fn args).reverse) ctx w with
   | error _ => simp [worldAfter, htx]
   | ok p =>
     rcases p with ⟨v, w'⟩
     simp [worldAfter, htx]
-    exact effects_frame_on (P := fun s : Storage => s.token0)
-      (Amm.fnDef fn).core (Amm.encode fn args).reverse 4
+    exact congrArg (·.addr) <|
+      effects_frame_on (P := fun s : Storage => s.token0Ref)
+      (Amm.fnDef fn).core (Amm.encode fn args).reverse 0
       (fun i σ v hne => amm_scalarUpd_token0 i σ v hne)
       (fun i σ m _hne => amm_map1Upd_token0 i σ m)
       (fun i σ m _hne => amm_map2Upd_token0 i σ m)
@@ -290,15 +288,16 @@ theorem amm_token0_stable_core (fn : Fn) (args : spec.Args fn) (ctx : Ctx)
 theorem amm_token1_stable_core (fn : Fn) (args : spec.Args fn) (ctx : Ctx)
     (w : World Storage Ext Event) :
     (worldAfter (Core.denote Amm.schema (Amm.fnDef fn).core
-      (Amm.encode fn args).reverse) ctx w).self.token1 = w.self.token1 := by
+      (Amm.encode fn args).reverse) ctx w).self.token1Ref.addr = w.self.token1Ref.addr := by
   cases htx : Tx.run (Core.denote Amm.schema (Amm.fnDef fn).core
       (Amm.encode fn args).reverse) ctx w with
   | error _ => simp [worldAfter, htx]
   | ok p =>
     rcases p with ⟨v, w'⟩
     simp [worldAfter, htx]
-    exact effects_frame_on (P := fun s : Storage => s.token1)
-      (Amm.fnDef fn).core (Amm.encode fn args).reverse 5
+    exact congrArg (·.addr) <|
+      effects_frame_on (P := fun s : Storage => s.token1Ref)
+      (Amm.fnDef fn).core (Amm.encode fn args).reverse 1
       (fun i σ v hne => amm_scalarUpd_token1 i σ v hne)
       (fun i σ m _hne => amm_map1Upd_token1 i σ m)
       (fun i σ m _hne => amm_map2Upd_token1 i σ m)
@@ -363,7 +362,7 @@ theorem amm_confs_of (α : Abs IERC20.Ghost) (self : Address) (ext : ExternalCal
   · exact (h w').1
   · exact (h w').2
 
-theorem amm_inj_of (α : Abs IERC20.Ghost) (σ : Storage) (h : σ.token0 ≠ σ.token1) :
+theorem amm_inj_of (α : Abs IERC20.Ghost) (σ : Storage) (h : σ.token0Ref.addr ≠ σ.token1Ref.addr) :
     BindEnvs.addrInj (ammBs α) σ := by
   intro e1 h1 e2 h2 heq
   have h1' : e1 = ammEnv0 α ∨ e1 = ammEnv1 α := by
@@ -411,7 +410,7 @@ theorem amm_bytecode_no_unauthorized_extraction
                 accountKey (BitVec.ofNat 256 self))
     (hBindNe1 : accountKey (BitVec.ofNat 256 (token1B.addr w.self)) ≠
                 accountKey (BitVec.ofNat 256 self))
-    (hneq : w.self.token0 ≠ w.self.token1) :
+    (hneq : w.self.token0Ref.addr ≠ w.self.token1Ref.addr) :
     ∀ σ' ξ', EvmTraceRunExtAll is calls σ ξ σ' ξ' →
       ammClaimRead evmKeccak σ a ≤ ammClaimRead evmKeccak σ' a := by
   intro σ' ξ' hE
