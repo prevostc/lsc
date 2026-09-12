@@ -51,9 +51,11 @@ contract DecompiledContract {
         require(!var_a | (((var_a * 0x26f2) / var_a) == 0x26f2), CustomError_bb2875c3());
         require(!((unresolved_0902f1ac + ((var_a * 0x26f2) / 0x2710)) < unresolved_0902f1ac), CustomError_bb2875c3());
         require(unresolved_0902f1ac + ((var_a * 0x26f2) / 0x2710), CustomError_bb2875c3());
-        require((!(var_a * 0x26f2) / 0x2710) | ((((var_a * 0x26f2) / 0x2710) * store_b) / ((var_a * 0x26f2) / 0x2710) == store_b), CustomError_bb2875c3());
-        require(!((((var_a * 0x26f2) / 0x2710) * store_b) / (unresolved_0902f1ac + ((var_a * 0x26f2) / 0x2710)) < arg1), CustomError_bb2875c3());
-        require(0 < ((((var_a * 0x26f2) / 0x2710) * store_b) / (unresolved_0902f1ac + ((var_a * 0x26f2) / 0x2710))));
+        uint256 var_d = store_b * ((var_a * 0x26f2) / 0x2710);
+        require(!store_b | ((var_d / store_b) == ((var_a * 0x26f2) / 0x2710)), CustomError_bb2875c3());
+        var_d = var_d / (unresolved_0902f1ac + ((var_a * 0x26f2) / 0x2710));
+        require(!(var_d < arg1), CustomError_bb2875c3());
+        require(0 < var_d);
         require(0 == (store_c == 0));
         require(0x2710);
         require(!var_a | (((var_a * 0x26f2) / var_a) == 0x26f2));
@@ -63,8 +65,8 @@ contract DecompiledContract {
         require(!var_a < (((var_a - ((var_a * 0x26f2) / 0x2710)) * store_d) / 0x2710));
         require(!(unresolved_0902f1ac + (var_a - (((var_a - ((var_a * 0x26f2) / 0x2710)) * store_d) / 0x2710))) < unresolved_0902f1ac);
         unresolved_0902f1ac = unresolved_0902f1ac + (var_a - (((var_a - ((var_a * 0x26f2) / 0x2710)) * store_d) / 0x2710));
-        require(!store_b < ((((var_a * 0x26f2) / 0x2710) * store_b) / (unresolved_0902f1ac + ((var_a * 0x26f2) / 0x2710))));
-        store_b = store_b - ((((var_a * 0x26f2) / 0x2710) * store_b) / (unresolved_0902f1ac + ((var_a * 0x26f2) / 0x2710)));
+        require(!store_b < var_d);
+        store_b = store_b - var_d;
         require(!(unresolved_a1af5b9a + (((var_a - ((var_a * 0x26f2) / 0x2710)) * store_d) / 0x2710)) < unresolved_a1af5b9a);
         unresolved_a1af5b9a = unresolved_a1af5b9a + (((var_a - ((var_a * 0x26f2) / 0x2710)) * store_d) / 0x2710);
         var_b = 0x23b872dd00000000000000000000000000000000000000000000000000000000;
@@ -77,27 +79,35 @@ contract DecompiledContract {
         (bool success, bytes memory ret0) = address(store_g).{ gas: 0x0f4240 }Unresolved_a9059cbb(var_c); // call
         require(!ret0.length | ((!ret0.length < 0x20) & (var_b == 0x01)), CustomError_90b8ec18());
         require(!(0x01 == 0), CustomError_90b8ec18());
-        emit Event_268d208c(msg.sender, var_a, (((var_a * 0x26f2) / 0x2710) * store_b) / (unresolved_0902f1ac + ((var_a * 0x26f2) / 0x2710)));
-        return (((var_a * 0x26f2) / 0x2710) * store_b) / (unresolved_0902f1ac + ((var_a * 0x26f2) / 0x2710));
-        require(!(unresolved_0902f1ac + var_a) < unresolved_0902f1ac);
-        unresolved_0902f1ac = unresolved_0902f1ac + var_a;
-        require(!store_b < ((((var_a * 0x26f2) / 0x2710) * store_b) / (unresolved_0902f1ac + ((var_a * 0x26f2) / 0x2710))));
-        store_b = store_b - ((((var_a * 0x26f2) / 0x2710) * store_b) / (unresolved_0902f1ac + ((var_a * 0x26f2) / 0x2710)));
+        emit Event_268d208c(msg.sender, var_a, var_d);
+        return var_d;
+        require(0x2710);
+        require(!var_a | (((var_a * 0x26f2) / var_a) == 0x26f2));
+        require(!var_a < ((var_a * 0x26f2) / 0x2710));
+        require(0x2710);
+        require((!var_a - ((var_a * 0x26f2) / 0x2710)) | (((var_a - ((var_a * 0x26f2) / 0x2710)) * 0) / (var_a - ((var_a * 0x26f2) / 0x2710)) == 0));
+        require(!var_a < (((var_a - ((var_a * 0x26f2) / 0x2710)) * 0) / 0x2710));
+        require(!(unresolved_0902f1ac + (var_a - (((var_a - ((var_a * 0x26f2) / 0x2710)) * 0) / 0x2710))) < unresolved_0902f1ac);
+        unresolved_0902f1ac = unresolved_0902f1ac + (var_a - (((var_a - ((var_a * 0x26f2) / 0x2710)) * 0) / 0x2710));
+        require(!store_b < var_d);
+        store_b = store_b - var_d;
+        require(!(unresolved_a1af5b9a + (((var_a - ((var_a * 0x26f2) / 0x2710)) * 0) / 0x2710)) < unresolved_a1af5b9a);
+        unresolved_a1af5b9a = unresolved_a1af5b9a + (((var_a - ((var_a * 0x26f2) / 0x2710)) * 0) / 0x2710);
         var_b = 0x23b872dd00000000000000000000000000000000000000000000000000000000;
         var_c = msg.sender;
-        var_d = address(this);
-        var_e = var_a;
-        (bool success, bytes memory ret0) = address(store_f).{ gas: 0x0f4240 }Unresolved_23b872dd(var_c, var_d, var_e); // call
+        var_e = address(this);
+        var_f = var_a;
+        (bool success, bytes memory ret0) = address(store_f).{ gas: 0x0f4240 }Unresolved_23b872dd(var_c, var_e, var_f); // call
         require(!ret0.length | ((!ret0.length < 0x20) & (var_b == 0x01)), CustomError_90b8ec18());
         require(!(0x01 == 0), CustomError_90b8ec18());
         var_b = 0xa9059cbb00000000000000000000000000000000000000000000000000000000;
         var_c = msg.sender;
-        var_d = (((var_a * 0x26f2) / 0x2710) * store_b) / (unresolved_0902f1ac + ((var_a * 0x26f2) / 0x2710));
-        (bool success, bytes memory ret0) = address(store_g).{ gas: 0x0f4240 }Unresolved_a9059cbb(var_c, var_d, var_e); // call
+        var_e = var_d;
+        (bool success, bytes memory ret0) = address(store_g).{ gas: 0x0f4240 }Unresolved_a9059cbb(var_c, var_e, var_f); // call
         require(!ret0.length | ((!ret0.length < 0x20) & (var_b == 0x01)), CustomError_90b8ec18());
         require(!(0x01 == 0), CustomError_90b8ec18());
-        emit Event_268d208c(msg.sender, var_a, (((var_a * 0x26f2) / 0x2710) * store_b) / (unresolved_0902f1ac + ((var_a * 0x26f2) / 0x2710)));
-        return (((var_a * 0x26f2) / 0x2710) * store_b) / (unresolved_0902f1ac + ((var_a * 0x26f2) / 0x2710));
+        emit Event_268d208c(msg.sender, var_a, var_d);
+        return var_d;
     }
     
     /// @custom:selector    0x9cd441da
@@ -114,21 +124,21 @@ contract DecompiledContract {
         require(0 < unresolved_0902f1ac);
         require(0 < store_b);
         require(unresolved_0902f1ac);
-        require(!var_a | (((var_a * store_i) / var_a) == store_i));
+        require(!store_i | (((store_i * var_a) / store_i) == var_a));
         require(store_b);
-        require(!var_b | (((var_b * store_i) / var_b) == store_i));
-        require(0 == (!((var_b * store_i) / store_b) < ((var_a * store_i) / unresolved_0902f1ac)));
-        require(0 < ((var_b * store_i) / store_b));
+        require(!store_i | (((store_i * var_b) / store_i) == var_b));
+        require(0 == (!((store_i * var_b) / store_b) < ((store_i * var_a) / unresolved_0902f1ac)));
+        require(0 < ((store_i * var_b) / store_b));
         require(!(unresolved_0902f1ac + var_a) < unresolved_0902f1ac);
         unresolved_0902f1ac = unresolved_0902f1ac + var_a;
         require(!(store_b + var_b) < store_b);
         store_b = store_b + var_b;
-        require(!(((var_b * store_i) / store_b) + store_i) < ((var_b * store_i) / store_b));
-        store_i = ((var_b * store_i) / store_b) + store_i;
+        require(!(((store_i * var_b) / store_b) + store_i) < ((store_i * var_b) / store_b));
+        store_i = ((store_i * var_b) / store_b) + store_i;
         address var_e = msg.sender;
-        require(!(((var_b * store_i) / store_b) + storage_map_j[var_e]) < ((var_b * store_i) / store_b));
+        require(!(((store_i * var_b) / store_b) + storage_map_j[var_e]) < ((store_i * var_b) / store_b));
         var_e = msg.sender;
-        storage_map_j[var_e] = ((var_b * store_i) / store_b) + storage_map_j[var_e];
+        storage_map_j[var_e] = ((store_i * var_b) / store_b) + storage_map_j[var_e];
         var_c = 0x23b872dd00000000000000000000000000000000000000000000000000000000;
         address var_d = msg.sender;
         (bool success, bytes memory ret0) = address(store_f).{ gas: 0x0f4240 }Unresolved_23b872dd(var_d); // call
@@ -139,19 +149,19 @@ contract DecompiledContract {
         (bool success, bytes memory ret0) = address(store_g).{ gas: 0x0f4240 }Unresolved_23b872dd(var_d); // call
         require(!ret0.length | ((!ret0.length < 0x20) & (var_c == 0x01)), CustomError_90b8ec18());
         require(!(0x01 == 0), CustomError_90b8ec18());
-        emit Event_beb38857(msg.sender, var_a, var_b, (var_b * store_i) / store_b);
-        return (var_b * store_i) / store_b;
-        require(0 < ((var_a * store_i) / unresolved_0902f1ac));
+        emit Event_beb38857(msg.sender, var_a, var_b, (store_i * var_b) / store_b);
+        return (store_i * var_b) / store_b;
+        require(0 < ((store_i * var_a) / unresolved_0902f1ac));
         require(!(unresolved_0902f1ac + var_a) < unresolved_0902f1ac);
         unresolved_0902f1ac = unresolved_0902f1ac + var_a;
         require(!(store_b + var_b) < store_b);
         store_b = store_b + var_b;
-        require(!(((var_a * store_i) / unresolved_0902f1ac) + store_i) < ((var_a * store_i) / unresolved_0902f1ac));
-        store_i = ((var_a * store_i) / unresolved_0902f1ac) + store_i;
+        require(!(((store_i * var_a) / unresolved_0902f1ac) + store_i) < ((store_i * var_a) / unresolved_0902f1ac));
+        store_i = ((store_i * var_a) / unresolved_0902f1ac) + store_i;
         var_e = msg.sender;
-        require(!(((var_a * store_i) / unresolved_0902f1ac) + storage_map_j[var_e]) < ((var_a * store_i) / unresolved_0902f1ac));
+        require(!(((store_i * var_a) / unresolved_0902f1ac) + storage_map_j[var_e]) < ((store_i * var_a) / unresolved_0902f1ac));
         var_e = msg.sender;
-        storage_map_j[var_e] = ((var_a * store_i) / unresolved_0902f1ac) + storage_map_j[var_e];
+        storage_map_j[var_e] = ((store_i * var_a) / unresolved_0902f1ac) + storage_map_j[var_e];
         var_c = 0x23b872dd00000000000000000000000000000000000000000000000000000000;
         var_d = msg.sender;
         var_g = address(this);
@@ -166,8 +176,8 @@ contract DecompiledContract {
         (bool success, bytes memory ret0) = address(store_g).{ gas: 0x0f4240 }Unresolved_23b872dd(var_d, var_g, var_h, var_l); // call
         require(!ret0.length | ((!ret0.length < 0x20) & (var_c == 0x01)), CustomError_90b8ec18());
         require(!(0x01 == 0), CustomError_90b8ec18());
-        emit Event_beb38857(msg.sender, var_a, var_b, (var_a * store_i) / unresolved_0902f1ac);
-        return (var_a * store_i) / unresolved_0902f1ac;
+        emit Event_beb38857(msg.sender, var_a, var_b, (store_i * var_a) / unresolved_0902f1ac);
+        return (store_i * var_a) / unresolved_0902f1ac;
         require(0 < var_a);
         require(!(unresolved_0902f1ac + var_a) < unresolved_0902f1ac);
         unresolved_0902f1ac = unresolved_0902f1ac + var_a;
@@ -207,20 +217,20 @@ contract DecompiledContract {
         require(!(storage_map_k[var_a] < arg0), CustomError_39996567());
         require(0 < store_i);
         require(store_i);
-        require(!arg0 | (((arg0 * unresolved_0902f1ac) / arg0) == unresolved_0902f1ac));
+        require(!unresolved_0902f1ac | (((unresolved_0902f1ac * arg0) / unresolved_0902f1ac) == arg0));
         require(store_i);
-        require(!arg0 | (((arg0 * store_b) / arg0) == store_b));
-        require(0 < ((arg0 * unresolved_0902f1ac) / store_i));
-        require(0 < ((arg0 * store_b) / store_i));
+        require(!store_b | (((store_b * arg0) / store_b) == arg0));
+        require(0 < ((unresolved_0902f1ac * arg0) / store_i));
+        require(0 < ((store_b * arg0) / store_i));
         require(!storage_map_k[var_a] < arg0);
         var_a = msg.sender;
         storage_map_k[var_a] = storage_map_k[var_a] - arg0;
         require(!store_i < arg0);
         store_i = store_i - arg0;
-        require(!unresolved_0902f1ac < ((arg0 * unresolved_0902f1ac) / store_i));
-        unresolved_0902f1ac = unresolved_0902f1ac - ((arg0 * unresolved_0902f1ac) / store_i);
-        require(!store_b < ((arg0 * store_b) / store_i));
-        store_b = store_b - ((arg0 * store_b) / store_i);
+        require(!unresolved_0902f1ac < ((unresolved_0902f1ac * arg0) / store_i));
+        unresolved_0902f1ac = unresolved_0902f1ac - ((unresolved_0902f1ac * arg0) / store_i);
+        require(!store_b < ((store_b * arg0) / store_i));
+        store_b = store_b - ((store_b * arg0) / store_i);
         var_c = 0xa9059cbb00000000000000000000000000000000000000000000000000000000;
         address var_d = msg.sender;
         (bool success, bytes memory ret0) = address(store_f).{ gas: 0x0f4240 }Unresolved_a9059cbb(var_d); // call
@@ -231,8 +241,8 @@ contract DecompiledContract {
         (bool success, bytes memory ret0) = address(store_g).{ gas: 0x0f4240 }Unresolved_a9059cbb(var_d); // call
         require(!ret0.length | ((!ret0.length < 0x20) & (var_c == 0x01)), CustomError_90b8ec18());
         require(!(0x01 == 0), CustomError_90b8ec18());
-        emit Event_59c3a0b6(msg.sender, (arg0 * unresolved_0902f1ac) / store_i, (arg0 * store_b) / store_i, arg0);
-        return abi.encodePacked((arg0 * unresolved_0902f1ac) / store_i, (arg0 * store_b) / store_i);
+        emit Event_59c3a0b6(msg.sender, (unresolved_0902f1ac * arg0) / store_i, (store_b * arg0) / store_i, arg0);
+        return abi.encodePacked((unresolved_0902f1ac * arg0) / store_i, (store_b * arg0) / store_i);
     }
     
     /// @custom:selector    0xf46901ed
@@ -259,9 +269,11 @@ contract DecompiledContract {
         require(!var_a | (((var_a * 0x26f2) / var_a) == 0x26f2), CustomError_bb2875c3());
         require(!((store_b + ((var_a * 0x26f2) / 0x2710)) < store_b), CustomError_bb2875c3());
         require(store_b + ((var_a * 0x26f2) / 0x2710), CustomError_bb2875c3());
-        require((!(var_a * 0x26f2) / 0x2710) | ((((var_a * 0x26f2) / 0x2710) * unresolved_0902f1ac) / ((var_a * 0x26f2) / 0x2710) == unresolved_0902f1ac), CustomError_bb2875c3());
-        require(!((((var_a * 0x26f2) / 0x2710) * unresolved_0902f1ac) / (store_b + ((var_a * 0x26f2) / 0x2710)) < arg1), CustomError_bb2875c3());
-        require(0 < ((((var_a * 0x26f2) / 0x2710) * unresolved_0902f1ac) / (store_b + ((var_a * 0x26f2) / 0x2710))));
+        uint256 var_d = unresolved_0902f1ac * ((var_a * 0x26f2) / 0x2710);
+        require(!unresolved_0902f1ac | ((var_d / unresolved_0902f1ac) == ((var_a * 0x26f2) / 0x2710)), CustomError_bb2875c3());
+        var_d = var_d / (store_b + ((var_a * 0x26f2) / 0x2710));
+        require(!(var_d < arg1), CustomError_bb2875c3());
+        require(0 < var_d);
         require(0 == (store_c == 0));
         require(0x2710);
         require(!var_a | (((var_a * 0x26f2) / var_a) == 0x26f2));
@@ -271,8 +283,8 @@ contract DecompiledContract {
         require(!var_a < (((var_a - ((var_a * 0x26f2) / 0x2710)) * store_d) / 0x2710));
         require(!(store_b + (var_a - (((var_a - ((var_a * 0x26f2) / 0x2710)) * store_d) / 0x2710))) < store_b);
         store_b = store_b + (var_a - (((var_a - ((var_a * 0x26f2) / 0x2710)) * store_d) / 0x2710));
-        require(!unresolved_0902f1ac < ((((var_a * 0x26f2) / 0x2710) * unresolved_0902f1ac) / (store_b + ((var_a * 0x26f2) / 0x2710))));
-        unresolved_0902f1ac = unresolved_0902f1ac - ((((var_a * 0x26f2) / 0x2710) * unresolved_0902f1ac) / (store_b + ((var_a * 0x26f2) / 0x2710)));
+        require(!unresolved_0902f1ac < var_d);
+        unresolved_0902f1ac = unresolved_0902f1ac - var_d;
         require(!(store_h + (((var_a - ((var_a * 0x26f2) / 0x2710)) * store_d) / 0x2710)) < store_h);
         store_h = store_h + (((var_a - ((var_a * 0x26f2) / 0x2710)) * store_d) / 0x2710);
         var_b = 0x23b872dd00000000000000000000000000000000000000000000000000000000;
@@ -285,27 +297,35 @@ contract DecompiledContract {
         (bool success, bytes memory ret0) = address(store_f).{ gas: 0x0f4240 }Unresolved_a9059cbb(var_c); // call
         require(!ret0.length | ((!ret0.length < 0x20) & (var_b == 0x01)), CustomError_90b8ec18());
         require(!(0x01 == 0), CustomError_90b8ec18());
-        emit Event_ec43a82f(msg.sender, var_a, (((var_a * 0x26f2) / 0x2710) * unresolved_0902f1ac) / (store_b + ((var_a * 0x26f2) / 0x2710)));
-        return (((var_a * 0x26f2) / 0x2710) * unresolved_0902f1ac) / (store_b + ((var_a * 0x26f2) / 0x2710));
-        require(!(store_b + var_a) < store_b);
-        store_b = store_b + var_a;
-        require(!unresolved_0902f1ac < ((((var_a * 0x26f2) / 0x2710) * unresolved_0902f1ac) / (store_b + ((var_a * 0x26f2) / 0x2710))));
-        unresolved_0902f1ac = unresolved_0902f1ac - ((((var_a * 0x26f2) / 0x2710) * unresolved_0902f1ac) / (store_b + ((var_a * 0x26f2) / 0x2710)));
+        emit Event_ec43a82f(msg.sender, var_a, var_d);
+        return var_d;
+        require(0x2710);
+        require(!var_a | (((var_a * 0x26f2) / var_a) == 0x26f2));
+        require(!var_a < ((var_a * 0x26f2) / 0x2710));
+        require(0x2710);
+        require((!var_a - ((var_a * 0x26f2) / 0x2710)) | (((var_a - ((var_a * 0x26f2) / 0x2710)) * 0) / (var_a - ((var_a * 0x26f2) / 0x2710)) == 0));
+        require(!var_a < (((var_a - ((var_a * 0x26f2) / 0x2710)) * 0) / 0x2710));
+        require(!(store_b + (var_a - (((var_a - ((var_a * 0x26f2) / 0x2710)) * 0) / 0x2710))) < store_b);
+        store_b = store_b + (var_a - (((var_a - ((var_a * 0x26f2) / 0x2710)) * 0) / 0x2710));
+        require(!unresolved_0902f1ac < var_d);
+        unresolved_0902f1ac = unresolved_0902f1ac - var_d;
+        require(!(store_h + (((var_a - ((var_a * 0x26f2) / 0x2710)) * 0) / 0x2710)) < store_h);
+        store_h = store_h + (((var_a - ((var_a * 0x26f2) / 0x2710)) * 0) / 0x2710);
         var_b = 0x23b872dd00000000000000000000000000000000000000000000000000000000;
         var_c = msg.sender;
-        var_d = address(this);
-        var_e = var_a;
-        (bool success, bytes memory ret0) = address(store_g).{ gas: 0x0f4240 }Unresolved_23b872dd(var_c, var_d, var_e); // call
+        var_e = address(this);
+        var_f = var_a;
+        (bool success, bytes memory ret0) = address(store_g).{ gas: 0x0f4240 }Unresolved_23b872dd(var_c, var_e, var_f); // call
         require(!ret0.length | ((!ret0.length < 0x20) & (var_b == 0x01)), CustomError_90b8ec18());
         require(!(0x01 == 0), CustomError_90b8ec18());
         var_b = 0xa9059cbb00000000000000000000000000000000000000000000000000000000;
         var_c = msg.sender;
-        var_d = (((var_a * 0x26f2) / 0x2710) * unresolved_0902f1ac) / (store_b + ((var_a * 0x26f2) / 0x2710));
-        (bool success, bytes memory ret0) = address(store_f).{ gas: 0x0f4240 }Unresolved_a9059cbb(var_c, var_d, var_e); // call
+        var_e = var_d;
+        (bool success, bytes memory ret0) = address(store_f).{ gas: 0x0f4240 }Unresolved_a9059cbb(var_c, var_e, var_f); // call
         require(!ret0.length | ((!ret0.length < 0x20) & (var_b == 0x01)), CustomError_90b8ec18());
         require(!(0x01 == 0), CustomError_90b8ec18());
-        emit Event_ec43a82f(msg.sender, var_a, (((var_a * 0x26f2) / 0x2710) * unresolved_0902f1ac) / (store_b + ((var_a * 0x26f2) / 0x2710)));
-        return (((var_a * 0x26f2) / 0x2710) * unresolved_0902f1ac) / (store_b + ((var_a * 0x26f2) / 0x2710));
+        emit Event_ec43a82f(msg.sender, var_a, var_d);
+        return var_d;
     }
     
     /// @custom:selector    0xce9c0bb7

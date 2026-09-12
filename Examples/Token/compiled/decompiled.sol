@@ -18,32 +18,32 @@ contract DecompiledContract {
     mapping(bytes32 => bytes32) storage_map_a;
     mapping(bytes32 => bytes32) storage_map_d;
     bytes32 store_c;
-    uint256 public totalSupply;
+    uint256 public unresolved_18160ddd;
     
-    event Approval(address, address, uint256);
-    error NotOwner();
-    event Transfer(address, address, uint256);
+    event Event_8c5be1e5();
+    error CustomError_00000000();
+    event Event_ddf252ad();
     
     /// @custom:selector    0x42966c68
-    /// @custom:signature   burn(uint256 arg0) public payable
+    /// @custom:signature   Unresolved_42966c68(uint256 arg0) public payable
     /// @param              arg0 ["uint256", "bytes32", "int256"]
-    function burn(uint256 arg0) public payable {
+    function Unresolved_42966c68(uint256 arg0) public payable {
         require(!(msg.data.length < 0x24), CustomError_f4d678b8());
         address var_a = msg.sender;
         require(0 == (!storage_map_a[var_a] < arg0), CustomError_f4d678b8());
         require(!storage_map_a[var_a] < arg0);
         var_a = msg.sender;
         storage_map_a[var_a] = storage_map_a[var_a] - arg0;
-        require(!totalSupply < arg0);
-        totalSupply = totalSupply - arg0;
-        emit Transfer(msg.sender, 0, arg0);
+        require(!unresolved_18160ddd < arg0);
+        unresolved_18160ddd = unresolved_18160ddd - arg0;
+        emit Event_ddf252ad(msg.sender, 0, arg0);
     }
     
     /// @custom:selector    0xa9059cbb
-    /// @custom:signature   workMyDirefulOwner(uint256 arg0, uint256 arg1) public payable
+    /// @custom:signature   Unresolved_a9059cbb(uint256 arg0, uint256 arg1) public payable
     /// @param              arg0 ["uint256", "bytes32", "int256"]
     /// @param              arg1 ["uint256", "bytes32", "int256"]
-    function workMyDirefulOwner(uint256 arg0, uint256 arg1) public payable {
+    function Unresolved_a9059cbb(uint256 arg0, uint256 arg1) public payable {
         require(!(msg.data.length < 0x44), CustomError_f4d678b8());
         address var_a = msg.sender;
         require(!(storage_map_a[var_a] < arg1), CustomError_f4d678b8());
@@ -54,7 +54,7 @@ contract DecompiledContract {
         require(!(storage_map_a[var_a] + arg1) < storage_map_a[var_a]);
         var_a = arg0;
         storage_map_a[var_a] = storage_map_a[var_a] + arg1;
-        emit Transfer(msg.sender, arg0, arg1);
+        emit Event_ddf252ad(msg.sender, arg0, arg1);
     }
     
     /// @custom:selector    0x40c10f19
@@ -64,13 +64,13 @@ contract DecompiledContract {
     function Unresolved_40c10f19(uint256 arg0, uint256 arg1) public payable {
         require(!(msg.data.length < 0x44), CustomError_30cd7471());
         require(msg.sender == store_c, CustomError_30cd7471());
-        require(!(totalSupply + arg1) < totalSupply);
-        totalSupply = totalSupply + arg1;
+        require(!(unresolved_18160ddd + arg1) < unresolved_18160ddd);
+        unresolved_18160ddd = unresolved_18160ddd + arg1;
         uint256 var_c = arg0;
         require(!(storage_map_d[var_c] + arg1) < storage_map_d[var_c]);
         var_c = arg0;
         storage_map_d[var_c] = storage_map_d[var_c] + arg1;
-        emit Transfer(0, arg0, arg1);
+        emit Event_ddf252ad(0, arg0, arg1);
     }
     
     /// @custom:selector    0xdd62ed3e
@@ -107,7 +107,7 @@ contract DecompiledContract {
         require(!(storage_map_a[var_a] + arg2) < storage_map_a[var_a]);
         var_a = arg1;
         storage_map_a[var_a] = storage_map_a[var_a] + arg2;
-        emit Transfer(arg0, arg1, arg2);
+        emit Event_ddf252ad(arg0, arg1, arg2);
     }
     
     /// @custom:selector    0x095ea7b3
@@ -119,7 +119,7 @@ contract DecompiledContract {
         address var_a = msg.sender;
         var_a = arg0;
         storage_map_a[var_a] = arg1;
-        emit Approval(msg.sender, arg0, arg1);
+        emit Event_8c5be1e5(msg.sender, arg0, arg1);
     }
     
     /// @custom:selector    0x70a08231

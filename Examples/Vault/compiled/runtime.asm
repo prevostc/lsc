@@ -8,7 +8,6 @@
 //   0x8456cb59  (2220280665)  pause()
 //   0x3f4ba83a  (1061922874)  unpause()
 //   0x67dda112  (1742577938)  paused?()
-//   0x313ce567  (826074471)  decimals()
 
     PUSH 0x0100
     ISZERO
@@ -54,10 +53,6 @@ L1:    // JUMPDEST
     PUSH 0x67dda112    // selector: paused?()
     EQ
     JUMPI L55
-    DUP1
-    PUSH 0x313ce567    // selector: decimals()
-    EQ
-    JUMPI L57
     POP
     PUSH 0x00
     PUSH 0x00
@@ -1103,27 +1098,6 @@ L55:    // JUMPDEST
     REVERT
 L56:    // JUMPDEST
     PUSH 0x03
-    SLOAD
-    DUP1
-    PUSH 0x80
-    MSTORE
-    PUSH 0x20
-    PUSH 0x80
-    RETURN
-    POP
-    JUMP L2
-L57:    // JUMPDEST
-    POP
-    PUSH 0x04
-    CALLDATASIZE
-    LT
-    ISZERO
-    JUMPI L58
-    PUSH 0x00
-    PUSH 0x00
-    REVERT
-L58:    // JUMPDEST
-    PUSH 0x06
     SLOAD
     DUP1
     PUSH 0x80

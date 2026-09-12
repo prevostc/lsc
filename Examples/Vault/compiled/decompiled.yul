@@ -26,7 +26,7 @@ object "DecompiledContract" {
             switch selector()
             
             /*
-            * @custom:signature    previewRedeem(uint256 arg0) public view returns (uint256)
+            * @custom:signature    Unresolved_4cdad506(uint256 arg0) public view returns (uint256)
             * @param                arg0 ["uint256", "bytes32", "int256"]
             */
             case 0x4cdad506 {
@@ -45,7 +45,7 @@ object "DecompiledContract" {
             }
             
             /*
-            * @custom:signature    pause() public payable
+            * @custom:signature    Unresolved_8456cb59() public payable
             */
             case 0x8456cb59 {
                 if iszero(lt(calldatasize(), 0x04)) { revert(0, 0); } else {
@@ -53,6 +53,19 @@ object "DecompiledContract" {
                         mstore(0x80, 0x30cd747100000000000000000000000000000000000000000000000000000000)
                         sstore(0x03, 0x01)
                         log1(0x80, 0, 0x9e87fac88ff661f02d44f95383c817fece4bce600a3dab7a54406878b965e752)
+                    }
+                }
+            }
+            
+            /*
+            * @custom:signature    Unresolved_3f4ba83a() public payable
+            */
+            case 0x3f4ba83a {
+                if iszero(lt(calldatasize(), 0x04)) { revert(0, 0); } else {
+                    if eq(caller(), sload(0x04)) { revert(0x80, 0x04); } else {
+                        mstore(0x80, 0x30cd747100000000000000000000000000000000000000000000000000000000)
+                        sstore(0x03, 0)
+                        log1(0x80, 0, 0xa45f47fdea8a1efdd9029a5691c7f759c32b7c698632b563573e155625d16933)
                     }
                 }
             }
@@ -68,7 +81,7 @@ object "DecompiledContract" {
             }
             
             /*
-            * @custom:signature    previewDeposit(uint256 arg0) public view returns (uint256)
+            * @custom:signature    Unresolved_ef8b30f7(uint256 arg0) public view returns (uint256)
             * @param                arg0 ["uint256", "bytes32", "int256"]
             */
             case 0xef8b30f7 {
@@ -91,12 +104,13 @@ object "DecompiledContract" {
             }
             
             /*
-            * @custom:signature    withdraw(uint256 arg0) public payable returns (uint256)
+            * @custom:signature    Unresolved_2e1a7d4d(uint256 arg0) public payable returns (uint256)
             * @param                arg0 ["uint256", "bytes32", "int256"]
             */
             case 0x2e1a7d4d {
                 if iszero(lt(calldatasize(), 0x24)) {
-                    if eq(sload(0x03), 0) {
+                    if eq(sload(0x03), 0) { revert(0x80, 0x04); } else {
+                        mstore(0x80, 0x9e87fac800000000000000000000000000000000000000000000000000000000)
                         if lt(0, calldataload(0x04)) {
                             mstore(0, caller())
                             mstore(0x20, 0x02)
@@ -139,7 +153,6 @@ object "DecompiledContract" {
                                                                     mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
                                                                     mstore(0x84, 0x12)
                                                                     mstore(0x80, 0xf456040300000000000000000000000000000000000000000000000000000000)
-                                                                    mstore(0x80, 0x9e87fac800000000000000000000000000000000000000000000000000000000)
                                                                 }
                                                             }
                                                         }
@@ -156,20 +169,7 @@ object "DecompiledContract" {
             }
             
             /*
-            * @custom:signature    unpause() public payable
-            */
-            case 0x3f4ba83a {
-                if iszero(lt(calldatasize(), 0x04)) { revert(0, 0); } else {
-                    if eq(caller(), sload(0x04)) { revert(0x80, 0x04); } else {
-                        mstore(0x80, 0x30cd747100000000000000000000000000000000000000000000000000000000)
-                        sstore(0x03, 0)
-                        log1(0x80, 0, 0xa45f47fdea8a1efdd9029a5691c7f759c32b7c698632b563573e155625d16933)
-                    }
-                }
-            }
-            
-            /*
-            * @custom:signature    deposit(uint256 arg0) public payable returns (uint256)
+            * @custom:signature    Unresolved_b6b55f25(uint256 arg0) public payable returns (uint256)
             * @param                arg0 ["uint256", "bytes32", "int256"]
             */
             case 0xb6b55f25 {
@@ -270,16 +270,6 @@ object "DecompiledContract" {
                             }
                         }
                     }
-                }
-            }
-            
-            /*
-            * @custom:signature    decimals() public view returns (uint256)
-            */
-            case 0x313ce567 {
-                if iszero(lt(calldatasize(), 0x04)) { revert(0, 0); } else {
-                    mstore(0x80, sload(0x06))
-                    return(0x80, 0x20)
                 }
             }
             default { revert(0, 0) }

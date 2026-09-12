@@ -6,7 +6,6 @@
 //   0x8456cb59  (2220280665)  pause()
 //   0x3f4ba83a  (1061922874)  unpause()
 //   0x67dda112  (1742577938)  paused?()
-//   0x313ce567  (826074471)  decimals()
 
 object "Vault" {
     code {
@@ -16,20 +15,6 @@ object "Vault" {
         sstore(4, constructor_0)
         sstore(5, constructor_1)
         sstore(3, 0)
-        let constructor_2 := 0
-        {
-            let constructor__tok_2 := sload(5)
-            mstore(128, shl(224, 826074471))
-            let constructor__ok_2 := call(1000000, constructor__tok_2, 0, 128, 4, 128, 32)
-            if iszero(constructor__ok_2) {
-                revert(0, 0)
-            }
-            if lt(returndatasize(), 32) {
-                revert(0, 0)
-            }
-            constructor_2 := mload(128)
-        }
-        sstore(6, constructor_2)
         datacopy(0, dataoffset("runtime"), datasize("runtime"))
         return(0, datasize("runtime"))
     }
@@ -393,18 +378,6 @@ object "Vault" {
                 {
                     let paused?_0 := sload(3)
                     mstore(128, paused?_0)
-                    return(128, 32)
-                }
-            }
-            case 826074471 { // decimals()
-                {
-                    if lt(calldatasize(), 4) {
-                        revert(0, 0)
-                    }
-                }
-                {
-                    let decimals_0 := sload(6)
-                    mstore(128, decimals_0)
                     return(128, 32)
                 }
             }

@@ -35,9 +35,9 @@
             }
             let addLiquidity_2 := caller()
             let addLiquidity_3 := address()
-            let addLiquidity_4 := sload(0)
-            let addLiquidity_5 := sload(1)
-            let addLiquidity_6 := sload(2)
+            let addLiquidity_4 := sload(2)
+            let addLiquidity_5 := sload(3)
+            let addLiquidity_6 := sload(4)
             switch eq(addLiquidity_6, 0)
             case 0 {
                 if iszero(lt(0, addLiquidity_4)) {
@@ -53,8 +53,8 @@
                     mstore(132, 18)
                     revert(128, 36)
                 }
-                let addLiquidity_7 := mul(addLiquidity_0, addLiquidity_6)
-                if iszero(or(iszero(addLiquidity_0), eq(div(addLiquidity_7, addLiquidity_0), addLiquidity_6))) {
+                let addLiquidity_7 := mul(addLiquidity_6, addLiquidity_0)
+                if iszero(or(iszero(addLiquidity_6), eq(div(addLiquidity_7, addLiquidity_6), addLiquidity_0))) {
                     mstore(128, shl(224, 1313373041))
                     mstore(132, 17)
                     revert(128, 36)
@@ -65,8 +65,8 @@
                     mstore(132, 18)
                     revert(128, 36)
                 }
-                let addLiquidity_8 := mul(addLiquidity_1, addLiquidity_6)
-                if iszero(or(iszero(addLiquidity_1), eq(div(addLiquidity_8, addLiquidity_1), addLiquidity_6))) {
+                let addLiquidity_8 := mul(addLiquidity_6, addLiquidity_1)
+                if iszero(or(iszero(addLiquidity_6), eq(div(addLiquidity_8, addLiquidity_6), addLiquidity_1))) {
                     mstore(128, shl(224, 1313373041))
                     mstore(132, 17)
                     revert(128, 36)
@@ -85,23 +85,23 @@
                         mstore(132, 17)
                         revert(128, 36)
                     }
-                    sstore(0, addLiquidity_10)
+                    sstore(2, addLiquidity_10)
                     let addLiquidity_11 := add(addLiquidity_5, addLiquidity_1)
                     if lt(addLiquidity_11, addLiquidity_5) {
                         mstore(128, shl(224, 1313373041))
                         mstore(132, 17)
                         revert(128, 36)
                     }
-                    sstore(1, addLiquidity_11)
+                    sstore(3, addLiquidity_11)
                     let addLiquidity_12 := add(addLiquidity_9, addLiquidity_6)
                     if lt(addLiquidity_12, addLiquidity_9) {
                         mstore(128, shl(224, 1313373041))
                         mstore(132, 17)
                         revert(128, 36)
                     }
-                    sstore(2, addLiquidity_12)
+                    sstore(4, addLiquidity_12)
                     mstore(0, addLiquidity_2)
-                    mstore(32, 3)
+                    mstore(32, 5)
                     let addLiquidity_13 := sload(keccak256(0, 64))
                     let addLiquidity_14 := add(addLiquidity_9, addLiquidity_13)
                     if lt(addLiquidity_14, addLiquidity_9) {
@@ -110,11 +110,11 @@
                         revert(128, 36)
                     }
                     mstore(0, addLiquidity_2)
-                    mstore(32, 3)
+                    mstore(32, 5)
                     sstore(keccak256(0, 64), addLiquidity_14)
                     let addLiquidity_15 := 0
                     {
-                        let addLiquidity__tok_15 := sload(4)
+                        let addLiquidity__tok_15 := sload(0)
                         mstore(128, shl(224, 599290589))
                         mstore(132, addLiquidity_2)
                         mstore(164, addLiquidity_3)
@@ -134,7 +134,7 @@
                     }
                     let addLiquidity_16 := 0
                     {
-                        let addLiquidity__tok_16 := sload(5)
+                        let addLiquidity__tok_16 := sload(1)
                         mstore(128, shl(224, 599290589))
                         mstore(132, addLiquidity_2)
                         mstore(164, addLiquidity_3)
@@ -172,23 +172,23 @@
                         mstore(132, 17)
                         revert(128, 36)
                     }
-                    sstore(0, addLiquidity_10)
+                    sstore(2, addLiquidity_10)
                     let addLiquidity_11 := add(addLiquidity_5, addLiquidity_1)
                     if lt(addLiquidity_11, addLiquidity_5) {
                         mstore(128, shl(224, 1313373041))
                         mstore(132, 17)
                         revert(128, 36)
                     }
-                    sstore(1, addLiquidity_11)
+                    sstore(3, addLiquidity_11)
                     let addLiquidity_12 := add(addLiquidity_9, addLiquidity_6)
                     if lt(addLiquidity_12, addLiquidity_9) {
                         mstore(128, shl(224, 1313373041))
                         mstore(132, 17)
                         revert(128, 36)
                     }
-                    sstore(2, addLiquidity_12)
+                    sstore(4, addLiquidity_12)
                     mstore(0, addLiquidity_2)
-                    mstore(32, 3)
+                    mstore(32, 5)
                     let addLiquidity_13 := sload(keccak256(0, 64))
                     let addLiquidity_14 := add(addLiquidity_9, addLiquidity_13)
                     if lt(addLiquidity_14, addLiquidity_9) {
@@ -197,11 +197,11 @@
                         revert(128, 36)
                     }
                     mstore(0, addLiquidity_2)
-                    mstore(32, 3)
+                    mstore(32, 5)
                     sstore(keccak256(0, 64), addLiquidity_14)
                     let addLiquidity_15 := 0
                     {
-                        let addLiquidity__tok_15 := sload(4)
+                        let addLiquidity__tok_15 := sload(0)
                         mstore(128, shl(224, 599290589))
                         mstore(132, addLiquidity_2)
                         mstore(164, addLiquidity_3)
@@ -221,7 +221,7 @@
                     }
                     let addLiquidity_16 := 0
                     {
-                        let addLiquidity__tok_16 := sload(5)
+                        let addLiquidity__tok_16 := sload(1)
                         mstore(128, shl(224, 599290589))
                         mstore(132, addLiquidity_2)
                         mstore(164, addLiquidity_3)
@@ -260,23 +260,23 @@
                     mstore(132, 17)
                     revert(128, 36)
                 }
-                sstore(0, addLiquidity_8)
+                sstore(2, addLiquidity_8)
                 let addLiquidity_9 := add(addLiquidity_5, addLiquidity_1)
                 if lt(addLiquidity_9, addLiquidity_5) {
                     mstore(128, shl(224, 1313373041))
                     mstore(132, 17)
                     revert(128, 36)
                 }
-                sstore(1, addLiquidity_9)
+                sstore(3, addLiquidity_9)
                 let addLiquidity_10 := add(addLiquidity_7, addLiquidity_6)
                 if lt(addLiquidity_10, addLiquidity_7) {
                     mstore(128, shl(224, 1313373041))
                     mstore(132, 17)
                     revert(128, 36)
                 }
-                sstore(2, addLiquidity_10)
+                sstore(4, addLiquidity_10)
                 mstore(0, addLiquidity_2)
-                mstore(32, 3)
+                mstore(32, 5)
                 let addLiquidity_11 := sload(keccak256(0, 64))
                 let addLiquidity_12 := add(addLiquidity_7, addLiquidity_11)
                 if lt(addLiquidity_12, addLiquidity_7) {
@@ -285,11 +285,11 @@
                     revert(128, 36)
                 }
                 mstore(0, addLiquidity_2)
-                mstore(32, 3)
+                mstore(32, 5)
                 sstore(keccak256(0, 64), addLiquidity_12)
                 let addLiquidity_13 := 0
                 {
-                    let addLiquidity__tok_13 := sload(4)
+                    let addLiquidity__tok_13 := sload(0)
                     mstore(128, shl(224, 599290589))
                     mstore(132, addLiquidity_2)
                     mstore(164, addLiquidity_3)
@@ -309,7 +309,7 @@
                 }
                 let addLiquidity_14 := 0
                 {
-                    let addLiquidity__tok_14 := sload(5)
+                    let addLiquidity__tok_14 := sload(1)
                     mstore(128, shl(224, 599290589))
                     mstore(132, addLiquidity_2)
                     mstore(164, addLiquidity_3)
@@ -351,15 +351,15 @@
             }
             let removeLiquidity_1 := caller()
             mstore(0, removeLiquidity_1)
-            mstore(32, 3)
+            mstore(32, 5)
             let removeLiquidity_2 := sload(keccak256(0, 64))
             if iszero(iszero(lt(removeLiquidity_2, removeLiquidity_0))) {
                 mstore(128, shl(224, 966354279))
                 revert(128, 4)
             }
-            let removeLiquidity_3 := sload(0)
-            let removeLiquidity_4 := sload(1)
-            let removeLiquidity_5 := sload(2)
+            let removeLiquidity_3 := sload(2)
+            let removeLiquidity_4 := sload(3)
+            let removeLiquidity_5 := sload(4)
             if iszero(lt(0, removeLiquidity_5)) {
                 mstore(128, shl(224, 4099277827))
                 revert(128, 4)
@@ -369,8 +369,8 @@
                 mstore(132, 18)
                 revert(128, 36)
             }
-            let removeLiquidity_6 := mul(removeLiquidity_0, removeLiquidity_3)
-            if iszero(or(iszero(removeLiquidity_0), eq(div(removeLiquidity_6, removeLiquidity_0), removeLiquidity_3))) {
+            let removeLiquidity_6 := mul(removeLiquidity_3, removeLiquidity_0)
+            if iszero(or(iszero(removeLiquidity_3), eq(div(removeLiquidity_6, removeLiquidity_3), removeLiquidity_0))) {
                 mstore(128, shl(224, 1313373041))
                 mstore(132, 17)
                 revert(128, 36)
@@ -381,8 +381,8 @@
                 mstore(132, 18)
                 revert(128, 36)
             }
-            let removeLiquidity_7 := mul(removeLiquidity_0, removeLiquidity_4)
-            if iszero(or(iszero(removeLiquidity_0), eq(div(removeLiquidity_7, removeLiquidity_0), removeLiquidity_4))) {
+            let removeLiquidity_7 := mul(removeLiquidity_4, removeLiquidity_0)
+            if iszero(or(iszero(removeLiquidity_4), eq(div(removeLiquidity_7, removeLiquidity_4), removeLiquidity_0))) {
                 mstore(128, shl(224, 1313373041))
                 mstore(132, 17)
                 revert(128, 36)
@@ -403,7 +403,7 @@
             }
             let removeLiquidity_8 := sub(removeLiquidity_2, removeLiquidity_0)
             mstore(0, removeLiquidity_1)
-            mstore(32, 3)
+            mstore(32, 5)
             sstore(keccak256(0, 64), removeLiquidity_8)
             if lt(removeLiquidity_5, removeLiquidity_0) {
                 mstore(128, shl(224, 1313373041))
@@ -411,24 +411,24 @@
                 revert(128, 36)
             }
             let removeLiquidity_9 := sub(removeLiquidity_5, removeLiquidity_0)
-            sstore(2, removeLiquidity_9)
+            sstore(4, removeLiquidity_9)
             if lt(removeLiquidity_3, removeLiquidity_6) {
                 mstore(128, shl(224, 1313373041))
                 mstore(132, 17)
                 revert(128, 36)
             }
             let removeLiquidity_10 := sub(removeLiquidity_3, removeLiquidity_6)
-            sstore(0, removeLiquidity_10)
+            sstore(2, removeLiquidity_10)
             if lt(removeLiquidity_4, removeLiquidity_7) {
                 mstore(128, shl(224, 1313373041))
                 mstore(132, 17)
                 revert(128, 36)
             }
             let removeLiquidity_11 := sub(removeLiquidity_4, removeLiquidity_7)
-            sstore(1, removeLiquidity_11)
+            sstore(3, removeLiquidity_11)
             let removeLiquidity_12 := 0
             {
-                let removeLiquidity__tok_12 := sload(4)
+                let removeLiquidity__tok_12 := sload(0)
                 mstore(128, shl(224, 2835717307))
                 mstore(132, removeLiquidity_1)
                 mstore(164, removeLiquidity_6)
@@ -447,7 +447,7 @@
             }
             let removeLiquidity_13 := 0
             {
-                let removeLiquidity__tok_13 := sload(5)
+                let removeLiquidity__tok_13 := sload(1)
                 mstore(128, shl(224, 2835717307))
                 mstore(132, removeLiquidity_1)
                 mstore(164, removeLiquidity_7)
@@ -487,8 +487,8 @@
                 mstore(128, shl(224, 4099277827))
                 revert(128, 4)
             }
-            let swap0for1_2 := sload(0)
-            let swap0for1_3 := sload(1)
+            let swap0for1_2 := sload(2)
+            let swap0for1_3 := sload(3)
             if iszero(lt(0, swap0for1_2)) {
                 mstore(128, shl(224, 4099277827))
                 revert(128, 4)
@@ -508,8 +508,8 @@
                 mstore(132, 18)
                 revert(128, 36)
             }
-            let swap0for1_5 := mul(swap0for1_0, swap0for1_3)
-            if iszero(or(iszero(swap0for1_0), eq(div(swap0for1_5, swap0for1_0), swap0for1_3))) {
+            let swap0for1_5 := mul(swap0for1_3, swap0for1_0)
+            if iszero(or(iszero(swap0for1_3), eq(div(swap0for1_5, swap0for1_3), swap0for1_0))) {
                 mstore(128, shl(224, 1313373041))
                 mstore(132, 17)
                 revert(128, 36)
@@ -529,19 +529,19 @@
                 mstore(132, 17)
                 revert(128, 36)
             }
-            sstore(0, swap0for1_6)
+            sstore(2, swap0for1_6)
             if lt(swap0for1_3, swap0for1_5) {
                 mstore(128, shl(224, 1313373041))
                 mstore(132, 17)
                 revert(128, 36)
             }
             let swap0for1_7 := sub(swap0for1_3, swap0for1_5)
-            sstore(1, swap0for1_7)
+            sstore(3, swap0for1_7)
             let swap0for1_8 := caller()
             let swap0for1_9 := address()
             let swap0for1_10 := 0
             {
-                let swap0for1__tok_10 := sload(4)
+                let swap0for1__tok_10 := sload(0)
                 mstore(128, shl(224, 599290589))
                 mstore(132, swap0for1_8)
                 mstore(164, swap0for1_9)
@@ -561,7 +561,7 @@
             }
             let swap0for1_11 := 0
             {
-                let swap0for1__tok_11 := sload(5)
+                let swap0for1__tok_11 := sload(1)
                 mstore(128, shl(224, 2835717307))
                 mstore(132, swap0for1_8)
                 mstore(164, swap0for1_5)
@@ -599,8 +599,8 @@
                 mstore(128, shl(224, 4099277827))
                 revert(128, 4)
             }
-            let swap1for0_2 := sload(0)
-            let swap1for0_3 := sload(1)
+            let swap1for0_2 := sload(2)
+            let swap1for0_3 := sload(3)
             if iszero(lt(0, swap1for0_2)) {
                 mstore(128, shl(224, 4099277827))
                 revert(128, 4)
@@ -620,8 +620,8 @@
                 mstore(132, 18)
                 revert(128, 36)
             }
-            let swap1for0_5 := mul(swap1for0_0, swap1for0_2)
-            if iszero(or(iszero(swap1for0_0), eq(div(swap1for0_5, swap1for0_0), swap1for0_2))) {
+            let swap1for0_5 := mul(swap1for0_2, swap1for0_0)
+            if iszero(or(iszero(swap1for0_2), eq(div(swap1for0_5, swap1for0_2), swap1for0_0))) {
                 mstore(128, shl(224, 1313373041))
                 mstore(132, 17)
                 revert(128, 36)
@@ -641,19 +641,19 @@
                 mstore(132, 17)
                 revert(128, 36)
             }
-            sstore(1, swap1for0_6)
+            sstore(3, swap1for0_6)
             if lt(swap1for0_2, swap1for0_5) {
                 mstore(128, shl(224, 1313373041))
                 mstore(132, 17)
                 revert(128, 36)
             }
             let swap1for0_7 := sub(swap1for0_2, swap1for0_5)
-            sstore(0, swap1for0_7)
+            sstore(2, swap1for0_7)
             let swap1for0_8 := caller()
             let swap1for0_9 := address()
             let swap1for0_10 := 0
             {
-                let swap1for0__tok_10 := sload(5)
+                let swap1for0__tok_10 := sload(1)
                 mstore(128, shl(224, 599290589))
                 mstore(132, swap1for0_8)
                 mstore(164, swap1for0_9)
@@ -673,7 +673,7 @@
             }
             let swap1for0_11 := 0
             {
-                let swap1for0__tok_11 := sload(4)
+                let swap1for0__tok_11 := sload(0)
                 mstore(128, shl(224, 2835717307))
                 mstore(132, swap1for0_8)
                 mstore(164, swap1for0_5)
@@ -705,8 +705,8 @@
             }
         }
         {
-            let getReserves_0 := sload(0)
-            let getReserves_1 := sload(1)
+            let getReserves_0 := sload(2)
+            let getReserves_1 := sload(3)
             mstore(128, getReserves_0)
             mstore(160, getReserves_1)
             return(128, 64)
@@ -721,7 +721,7 @@
         {
             let sharesOf_0 := calldataload(4)
             mstore(0, sharesOf_0)
-            mstore(32, 3)
+            mstore(32, 5)
             let sharesOf_1 := sload(keccak256(0, 64))
             mstore(128, sharesOf_1)
             return(128, 32)
@@ -739,8 +739,8 @@
                 mstore(128, shl(224, 4099277827))
                 revert(128, 4)
             }
-            let quote0for1_1 := sload(0)
-            let quote0for1_2 := sload(1)
+            let quote0for1_1 := sload(2)
+            let quote0for1_2 := sload(3)
             if iszero(lt(0, quote0for1_1)) {
                 mstore(128, shl(224, 4099277827))
                 revert(128, 4)
@@ -756,8 +756,8 @@
                 mstore(132, 18)
                 revert(128, 36)
             }
-            let quote0for1_4 := mul(quote0for1_0, quote0for1_2)
-            if iszero(or(iszero(quote0for1_0), eq(div(quote0for1_4, quote0for1_0), quote0for1_2))) {
+            let quote0for1_4 := mul(quote0for1_2, quote0for1_0)
+            if iszero(or(iszero(quote0for1_2), eq(div(quote0for1_4, quote0for1_2), quote0for1_0))) {
                 mstore(128, shl(224, 1313373041))
                 mstore(132, 17)
                 revert(128, 36)

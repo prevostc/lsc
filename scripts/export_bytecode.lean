@@ -15,6 +15,7 @@ swaps CALL out and are not expected to match anvil without token fixtures.
 Vault and CPAMM are exported for artifacts only (no Tx.run cases); constructors CALL out.
 -/
 import Lsc.Compiler.Bytecode
+import Lsc.Compiler.Pipeline
 import Lsc.Compiler.Yul
 import YulEvmCompiler.Asm
 import YulEvmCompiler.Compile
@@ -81,56 +82,21 @@ def selectorsJson (c : ContractDef) : String :=
   "{\"functions\":{" ++ String.intercalate "," fns ++
     "},\"errors\":{" ++ String.intercalate "," errs ++ "}}"
 
-structure RtArt where
-  hex : Option (List UInt8)
-  yul : String
-  asm : String
-
-/-- One `compileAsm` + `lowerProg` (same pipeline as `compileRuntime`).
-If the verified gate rejects the program, still list `compileProgram` Asm. -/
-def runtimeArt (c : ContractDef) : RtArt :=
-  match runtimeBlock c with
-  | none => { hex := none, yul := "// runtimeBlock failed", asm := "// compileAsm failed\n" }
-  | some b =>
-    let yul := printYul b
-    match compileAsmBlock b with
-    | some asm =>
-      { hex := (YulEvmCompiler.lowerProg YulEvmCompiler.unpatchedImmutables asm).map
-          YulEvmCompiler.assembleBytes
-      , yul
-      , asm := Disasm.printAsmFile c asm }
-    | none =>
-      match YulEvmCompiler.compileProgram
-          (YulEvmCompiler.Optimizer.MemorySpill.eraseMemoryGuardStmts b) with
-      | none =>
-        { hex := none, yul
-        , asm :=
-            "// compileProgram failed (powdr rejected this Yul; no bytecode).\n" ++
-            "// Read the sibling .runtime.yul for the dispatcher and bodies.\n" }
-      | some asm =>
-        { hex := none, yul
-        , asm := "// compileAsm rejected (stackOK2/wfCheck); hex not emitted.\n" ++
-            Disasm.printAsmFile c asm }
-
 /-- Per-example artifact directory. The exporter writes here directly. -/
 def compiledDir (name : String) : String := s!"Examples/{name}/compiled"
 
-def writeContract (name : String) (c : ContractDef) (art : RtArt) : IO Unit := do
+def writeContract (name : String) (c : ContractDef) (art : Artifacts) : IO Unit := do
   let dir := compiledDir name
   IO.FS.createDirAll dir
-  let dyul :=
-    match deployObject c with
-    | none => "// deployObject failed\n"
-    | some o => Disasm.printYulFile c (printYulObject o)
   IO.FS.writeFile s!"{dir}/runtime.yul" (Disasm.printYulFile c art.yul)
-  IO.FS.writeFile s!"{dir}/deploy.yul" dyul
-  IO.FS.writeFile s!"{dir}/runtime.asm" art.asm
-  IO.FS.writeFile s!"{dir}/abi.json" (contractAbiJson c ++ "\n")
-  IO.FS.writeFile s!"{dir}/selectors.json" (selectorsJson c ++ "\n")
-  match art.hex with
+  IO.FS.writeFile s!"{dir}/deploy.yul" art.deployYul
+  IO.FS.writeFile s!"{dir}/runtime.asm" (art.asm.getD "// compileAsm failed\n")
+  IO.FS.writeFile s!"{dir}/abi.json" (art.abi ++ "\n")
+  IO.FS.writeFile s!"{dir}/selectors.json" (art.selectors ++ "\n")
+  match art.runtimeHex with
   | none => IO.eprintln s!"{name}: compileRuntime failed"
   | some bs => IO.FS.writeFile s!"{dir}/runtime.hex" (bytesHex bs ++ "\n")
-  match compileDeploy c with
+  match art.deployHex with
   | none => IO.eprintln s!"{name}: compileDeploy failed"
   | some bs => IO.FS.writeFile s!"{dir}/deploy.hex" (bytesHex bs ++ "\n")
 
@@ -246,10 +212,10 @@ def tokErr : Token.Error → Nat
 def tokAddrs : List Nat := [0, 1, 2, 3]
 
 def tokSlots (σ : Token.Storage) : List (BitVec 256 × BitVec 256) :=
-  [(u256 0, u256 σ.owner), (u256 1, u256 σ.totalSupply)] ++
-    tokAddrs.map (fun a => (mapSlot1 keccakOf 2 a, u256 (σ.balances a))) ++
+  [(u256 0, u256 σ.owner), (u256 1, u256 σ.totalSupply.raw)] ++
+    tokAddrs.map (fun a => (mapSlot1 keccakOf 2 a, u256 (σ.balances a).raw)) ++
     tokAddrs.flatMap (fun a =>
-      tokAddrs.map (fun b => (mapSlot2 keccakOf 3 a b, u256 (σ.allowances a b))))
+      tokAddrs.map (fun b => (mapSlot2 keccakOf 3 a b, u256 (σ.allowances a b).raw)))
 
 def bals₁ : Nat → Nat
   | 1 => 1000
@@ -263,9 +229,12 @@ def allow₁₂ : Nat → Nat → Nat
   | _, _ => 0
 
 def σ₁ : Token.Storage :=
-  { owner := 1, totalSupply := 1000, balances := bals₁, allowances := allow₀ }
+  { owner := 1, totalSupply := 1000
+    balances := fun a => Amount.ofWord (bals₁ a)
+    allowances := fun a b => Amount.ofWord (allow₀ a b) }
 
-def σAllow : Token.Storage := { σ₁ with allowances := allow₁₂ }
+def σAllow : Token.Storage :=
+  { σ₁ with allowances := fun a b => Amount.ofWord (allow₁₂ a b) }
 
 def w₁ : World Token.Storage Unit Token.Event := { self := σ₁, ext := () }
 def wAllow : World Token.Storage Unit Token.Event := { self := σAllow, ext := () }
@@ -311,11 +280,11 @@ def tokenCases : List Case :=
   , tokUnit "burn_revert" "burn" [2000] ctxOwner σ₁
       (Tx.run (Token.burn 2000) ctxOwner w₁)
   , tokWord "balanceOf" "balanceOf" [1] ctxOwner σ₁
-      (Tx.run (Token.balanceOf 1) ctxOwner w₁)
+      ((Tx.run (Token.balanceOf 1) ctxOwner w₁).map fun (n, w) => (n.raw, w))
   , tokWord "allowance" "allowance" [1, 2] ctxOwner σAllow
-      (Tx.run (Token.allowance 1 2) ctxOwner wAllow)
+      ((Tx.run (Token.allowance 1 2) ctxOwner wAllow).map fun (n, w) => (n.raw, w))
   , tokWord "totalSupply" "totalSupply" [] ctxOwner σ₁
-      (Tx.run Token.totalSupply ctxOwner w₁) ]
+      ((Tx.run Token.totalSupply ctxOwner w₁).map fun (n, w) => (n.raw, w)) ]
 
 /-! ## Amm (view-only cases; swaps/ctor CALL out) -/
 
@@ -331,10 +300,10 @@ def ammErr : Amm.Error → Nat
 def ammAddrs : List Nat := [0, 2]
 
 def ammSlots (σ : Amm.Storage) : List (BitVec 256 × BitVec 256) :=
-  [(u256 0, u256 σ.reserve0), (u256 1, u256 σ.reserve1), (u256 2, u256 σ.totalShares),
-    (u256 4, u256 σ.token0), (u256 5, u256 σ.token1),
-    (u256 6, u256 σ.decimals0), (u256 7, u256 σ.decimals1)] ++
-    ammAddrs.map (fun a => (mapSlot1 keccakOf 3 a, u256 (σ.shares a)))
+  [(u256 0, u256 σ.token0Ref.addr), (u256 1, u256 σ.token1Ref.addr),
+    (u256 2, u256 σ.reserve0.raw), (u256 3, u256 σ.reserve1.raw),
+    (u256 4, u256 σ.totalShares.raw)] ++
+    ammAddrs.map (fun a => (mapSlot1 keccakOf 5 a, u256 (σ.shares a).raw))
 
 def ammWord (name fname : String) (args : List Nat)
     (tx : Except (Err Amm.Error) (Nat × World Amm.Storage Amm.Ext Amm.Event)) : Case :=
@@ -349,20 +318,26 @@ def ammPair (name fname : String) (args : List Nat)
     (pairOutcome Amm.contract ammErr tx pre pre) pre
 
 def ammCases : List Case :=
-  [ ammPair "getReserves" "getReserves" [] (Tx.run Amm.getReserves Amm.smokeCtx Amm.smokePool)
-  , ammWord "sharesOf" "sharesOf" [2] (Tx.run (Amm.sharesOf 2) Amm.smokeCtx Amm.smokePool)
+  [ ammPair "getReserves" "getReserves" []
+      ((Tx.run Amm.getReserves Amm.smokeCtx Amm.smokePool).map
+        fun ((a, b), w) => ((a.raw, b.raw), w))
+  , ammWord "sharesOf" "sharesOf" [2]
+      ((Tx.run (Amm.sharesOf 2) Amm.smokeCtx Amm.smokePool).map
+        fun (n, w) => (n.raw, w))
   , ammWord "quote0for1_ok" "quote0for1" [100]
-      (Tx.run (Amm.quote0for1 (Amount.ofNat 100)) Amm.smokeCtx Amm.smokePool)
+      ((Tx.run (Amm.quote0for1 100) Amm.smokeCtx Amm.smokePool).map
+        fun (n, w) => (n.raw, w))
   , ammWord "quote0for1_zero" "quote0for1" [0]
-      (Tx.run (Amm.quote0for1 (Amount.ofNat 0)) Amm.smokeCtx Amm.smokePool) ]
+      ((Tx.run (Amm.quote0for1 0) Amm.smokeCtx Amm.smokePool).map
+        fun (n, w) => (n.raw, w)) ]
 
-def contractJson (name : String) (c : ContractDef) (art : RtArt) (cases : List Case)
+def contractJson (name : String) (c : ContractDef) (art : Artifacts) (cases : List Case)
     (ctorCalldata : Option (List UInt8) := none)
     (ctorChecks : List Case := []) : String :=
   "{" ++ String.intercalate "," [
     "\"name\":" ++ jStr name,
-    "\"runtime\":" ++ hexOpt art.hex,
-    "\"deploy\":" ++ hexOpt (compileDeploy c),
+    "\"runtime\":" ++ hexOpt art.runtimeHex,
+    "\"deploy\":" ++ hexOpt art.deployHex,
     "\"ctor_calldata\":" ++ hexOpt ctorCalldata,
     "\"ctor_checks\":[" ++ String.intercalate "," (ctorChecks.map caseJson) ++ "]",
     "\"abi\":" ++ contractAbiJson c,
@@ -377,25 +352,28 @@ def tokenW0 : World Token.Storage Unit Token.Event :=
   , ext := () }
 def tokenCtxDeploy : Ctx := { sender := 1, self := 7 }
 def tokenW1 : World Token.Storage Unit Token.Event :=
-  match Tx.run (Token.constructor tokenCtorOwner tokenCtorSupply) tokenCtxDeploy tokenW0 with
+  match Tx.run (Token.constructor tokenCtorOwner (Amount.ofWord tokenCtorSupply))
+    tokenCtxDeploy tokenW0 with
   | .ok (_, w) => w
   | .error _ => tokenW0
 
 def tokenCtorChecks : List Case :=
   [ tokWord "ctor_balanceOf" "balanceOf" [tokenCtorOwner] tokenCtxDeploy tokenW1.self
-      (Tx.run (Token.balanceOf tokenCtorOwner) tokenCtxDeploy tokenW1)
+      ((Tx.run (Token.balanceOf tokenCtorOwner) tokenCtxDeploy tokenW1).map
+        fun (n, w) => (n.raw, w))
   , tokWord "ctor_totalSupply" "totalSupply" [] tokenCtxDeploy tokenW1.self
-      (Tx.run Token.totalSupply tokenCtxDeploy tokenW1) ]
+      ((Tx.run Token.totalSupply tokenCtxDeploy tokenW1).map
+        fun (n, w) => (n.raw, w)) ]
 
 /-- Fixed `anvil_setCode` address. YulTests uses `Ctx.self = 7`, but `0x07` is the
 ECMUL precompile on a real EVM; Counter/Token do not read `ADDRESS`. -/
 def runtimeAddress : String := addrHex 0xC0DE
 
-def counterArt := runtimeArt Counter.contract
-def tokenArt := runtimeArt Token.contract
-def ammArt := runtimeArt Amm.contract
-def vaultArt := runtimeArt Vault.contract
-def cpammArt := runtimeArt Cpamm.contract
+def counterArt := compileContract Counter.contract
+def tokenArt := compileContract Token.contract
+def ammArt := compileContract Amm.contract
+def vaultArt := compileContract Vault.contract
+def cpammArt := compileContract Cpamm.contract
 
 def exportJson : String :=
   "{" ++ String.intercalate "," [

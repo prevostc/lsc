@@ -6,7 +6,6 @@
 //   0x8456cb59  (2220280665)  pause()
 //   0x3f4ba83a  (1061922874)  unpause()
 //   0x67dda112  (1742577938)  paused?()
-//   0x313ce567  (826074471)  decimals()
 
 {
     if memoryguard(256) {
@@ -367,18 +366,6 @@
         {
             let paused?_0 := sload(3)
             mstore(128, paused?_0)
-            return(128, 32)
-        }
-    }
-    case 826074471 { // decimals()
-        {
-            if lt(calldatasize(), 4) {
-                revert(0, 0)
-            }
-        }
-        {
-            let decimals_0 := sload(6)
-            mstore(128, decimals_0)
             return(128, 32)
         }
     }

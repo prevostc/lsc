@@ -26,7 +26,7 @@ object "DecompiledContract" {
             switch selector()
             
             /*
-            * @custom:signature    burn(uint256 arg0) public payable
+            * @custom:signature    Unresolved_42966c68(uint256 arg0) public payable
             * @param                arg0 ["uint256", "bytes32", "int256"]
             */
             case 0x42966c68 {
@@ -56,7 +56,7 @@ object "DecompiledContract" {
             }
             
             /*
-            * @custom:signature    workMyDirefulOwner(uint256 arg0, uint256 arg1) public payable
+            * @custom:signature    Unresolved_a9059cbb(uint256 arg0, uint256 arg1) public payable
             * @param                arg0 ["uint256", "bytes32", "int256"]
             * @param                arg1 ["uint256", "bytes32", "int256"]
             */
@@ -222,7 +222,7 @@ object "DecompiledContract" {
             }
             
             /*
-            * @custom:signature    totalSupply() public view returns (uint256)
+            * @custom:signature    Unresolved_18160ddd() public view returns (uint256)
             */
             case 0x18160ddd {
                 if iszero(lt(calldatasize(), 0x04)) { revert(0, 0); } else {

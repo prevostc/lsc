@@ -15,39 +15,39 @@ pragma solidity >=0.8.0;
 ///                       https://heimdall.rs
 
 contract DecompiledContract {
-    uint256 public get;
+    uint256 public unresolved_6d4ce63c;
     
-    event Incremented(uint256);
-    error Zero();
+    event Event_20d8a6f5();
+    error CustomError_00000000();
     
     /// @custom:selector    0x2baeceb7
-    /// @custom:signature   decrement() public payable
-    function decrement() public payable {
-        if (0 == (get == 0)) {
-            if (!get < 0x01) {
-                get = get - 0x01;
-                get = 0;
+    /// @custom:signature   Unresolved_2baeceb7() public payable
+    function Unresolved_2baeceb7() public payable {
+        if (0 == (unresolved_6d4ce63c == 0)) {
+            if (!unresolved_6d4ce63c < 0x01) {
+                unresolved_6d4ce63c = unresolved_6d4ce63c - 0x01;
+                unresolved_6d4ce63c = 0;
             }
         }
     }
     
     /// @custom:selector    0x03df179c
-    /// @custom:signature   incrementBy(uint256 arg0) public payable
+    /// @custom:signature   Unresolved_03df179c(uint256 arg0) public payable
     /// @param              arg0 ["uint256", "bytes32", "int256"]
-    function incrementBy(uint256 arg0) public payable {
+    function Unresolved_03df179c(uint256 arg0) public payable {
         require(!(msg.data.length < 0x24), CustomError_f4560403());
         require(!(arg0 == 0), CustomError_f4560403());
-        require(!((get + arg0) < get), CustomError_f4560403());
-        get = get + arg0;
-        emit Incremented(arg0);
+        require(!((unresolved_6d4ce63c + arg0) < unresolved_6d4ce63c), CustomError_f4560403());
+        unresolved_6d4ce63c = unresolved_6d4ce63c + arg0;
+        emit Event_20d8a6f5(arg0);
     }
     
     /// @custom:selector    0xd09de08a
-    /// @custom:signature   increment() public payable
-    function increment() public payable {
-        if (!(get + 0x01) < get) {
-            get = get + 0x01;
-            emit Incremented(0x01);
+    /// @custom:signature   Unresolved_d09de08a() public payable
+    function Unresolved_d09de08a() public payable {
+        if (!(unresolved_6d4ce63c + 0x01) < unresolved_6d4ce63c) {
+            unresolved_6d4ce63c = unresolved_6d4ce63c + 0x01;
+            emit Event_20d8a6f5(0x01);
         }
     }
 }

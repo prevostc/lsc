@@ -26,7 +26,7 @@ object "DecompiledContract" {
             switch selector()
             
             /*
-            * @custom:signature    decrement() public payable
+            * @custom:signature    Unresolved_2baeceb7() public payable
             */
             case 0x2baeceb7 {
                 if iszero(lt(calldatasize(), 0x04)) { revert(0, 0); } else {
@@ -42,7 +42,7 @@ object "DecompiledContract" {
             }
             
             /*
-            * @custom:signature    incrementBy(uint256 arg0) public payable
+            * @custom:signature    Unresolved_03df179c(uint256 arg0) public payable
             * @param                arg0 ["uint256", "bytes32", "int256"]
             */
             case 0x03df179c {
@@ -61,7 +61,7 @@ object "DecompiledContract" {
             }
             
             /*
-            * @custom:signature    increment() public payable
+            * @custom:signature    Unresolved_d09de08a() public payable
             */
             case 0xd09de08a {
                 if iszero(lt(calldatasize(), 0x04)) { revert(0, 0); } else {
@@ -76,7 +76,7 @@ object "DecompiledContract" {
             }
             
             /*
-            * @custom:signature    get() public view returns (uint256)
+            * @custom:signature    Unresolved_6d4ce63c() public view returns (uint256)
             */
             case 0x6d4ce63c {
                 if iszero(lt(calldatasize(), 0x04)) { revert(0, 0); } else {

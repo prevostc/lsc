@@ -15,7 +15,7 @@ source scripts/heimdall_decompile.sh
 CONTRACTS=(Counter Token Vault Amm Cpamm)
 
 echo "==> lake build (bytecode exporter deps)"
-scripts/lean lake build Lsc.Compiler.Bytecode Lsc.Tools.Disasm Lsc.Tools.AbiJson \
+scripts/lean lake build Lsc.Compiler.Pipeline Lsc.Compiler.Bytecode Lsc.Tools.Disasm Lsc.Tools.AbiJson \
   Examples.Counter.Contract Examples.Token.Contract Examples.Amm.Contract \
   Examples.Vault.Contract Examples.Cpamm.Contract
 echo "==> export bytecode / Yul / labelled Asm → Examples/*/compiled"

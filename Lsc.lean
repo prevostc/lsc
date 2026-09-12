@@ -10,6 +10,7 @@ import Lsc.Tools.AbiJson
 import Lsc.Compiler.Yul
 import Lsc.Compiler.YulExec
 import Lsc.Compiler.Bytecode
+import Lsc.Compiler.Pipeline
 import Lsc.Compiler.Transport
 import Lsc.Security.Trace
 import Lsc.Security.Invariant
