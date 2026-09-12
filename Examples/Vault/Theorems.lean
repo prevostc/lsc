@@ -59,8 +59,7 @@ the emitted Yul is predicted by the high-level Vault model under some
 choice of which external calls fail: success agrees on storage, shares,
 and token balances; a revert rolls our storage back. The asset token
 must behave like a conforming ERC-20 at an address other than the vault.
-Constructors are excluded — Vault's constructor CALLs `decimals` and is
-outside this theorem. -/
+Constructors are excluded. -/
 theorem vault_correct_ext
     (α : Abs IERC20.Ghost)
     (κ : List UInt8 → U256) (hκ : KeccakSep Vault.contract κ)

@@ -32,11 +32,8 @@ theorem vault_unpause_callFree : CallFree Vault.unpause.core := by
 theorem vault_paused?_callFree : CallFree Vault.paused?.core := by
   simp [CallFree, M1Frag, M1Op, M1Stmt, M1Cond, Vault.paused?.core]
 
-theorem vault_decimals_callFree : CallFree Vault.decimals.core := by
-  simp [CallFree, M1Frag, M1Op, M1Stmt, M1Cond, Vault.decimals.core]
-
 theorem vault_fields_lt : Vault.contract.fields.length < wordBound := by
-  have h : Vault.contract.fields.length = 7 := by simp [Vault.contract]
+  have h : Vault.contract.fields.length = 6 := by simp [Vault.contract]
   rw [h]
   exact lt_256_wordBound (by decide)
 
@@ -48,18 +45,18 @@ theorem vault_fn_params_bound {f : FnDef} (hf : f ∈ Vault.contract.functions) 
     4 + 32 * f.params.length < wordBound := by
   have hlen : f.params.length ≤ 3 := by
     simp [Vault.contract] at hf
-    rcases hf with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl <;> simp
+    rcases hf with rfl | rfl | rfl | rfl | rfl | rfl | rfl <;> simp
   exact vault_params_bound_le_three hlen
 
 theorem vault_fn_not_ctor {f : FnDef} (hf : f ∈ Vault.contract.functions) :
     f.kind ≠ .constructor := by
   simp [Vault.contract] at hf
-  rcases hf with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl <;> simp
+  rcases hf with rfl | rfl | rfl | rfl | rfl | rfl | rfl <;> simp
 
 theorem vault_fn_s2 {f : FnDef} (hf : f ∈ Vault.contract.functions) :
     S2Frag f.core := by
   simp [Vault.contract] at hf
-  rcases hf with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl
+  rcases hf with rfl | rfl | rfl | rfl | rfl | rfl | rfl
   · simp [S2Frag, S2Op, S2Stmt, M1Op, M1Stmt, M1Cond, Vault.deposit.core]
   · simp [S2Frag, S2Op, S2Stmt, M1Op, M1Stmt, M1Cond, Vault.withdraw.core]
   · exact s2frag_of_callFree vault_previewDeposit_callFree
@@ -67,7 +64,6 @@ theorem vault_fn_s2 {f : FnDef} (hf : f ∈ Vault.contract.functions) :
   · exact s2frag_of_callFree vault_pause_callFree
   · exact s2frag_of_callFree vault_unpause_callFree
   · exact s2frag_of_callFree vault_paused?_callFree
-  · exact s2frag_of_callFree vault_decimals_callFree
 
 theorem vault_scalar_asset (σ : Vault.Storage) :
     Vault.schema.st.scalar 5 σ = Vault.assetB.addr σ := by
@@ -81,7 +77,7 @@ theorem vault_field_asset :
 theorem vault_fn_avoids {f : FnDef} (hf : f ∈ Vault.contract.functions) :
     coreAvoids 5 f.core := by
   simp [Vault.contract] at hf
-  rcases hf with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl
+  rcases hf with rfl | rfl | rfl | rfl | rfl | rfl | rfl
   · simp [coreAvoids, stmtAvoids, Vault.deposit.core]
   · simp [coreAvoids, stmtAvoids, Vault.withdraw.core]
   · simp [coreAvoids, stmtAvoids, Vault.previewDeposit.core]
@@ -89,7 +85,6 @@ theorem vault_fn_avoids {f : FnDef} (hf : f ∈ Vault.contract.functions) :
   · simp [coreAvoids, stmtAvoids, Vault.pause.core]
   · simp [coreAvoids, stmtAvoids, Vault.unpause.core]
   · simp [coreAvoids, stmtAvoids, Vault.paused?.core]
-  · simp [coreAvoids, stmtAvoids, Vault.decimals.core]
 
 theorem vault_hslot {f : FnDef} (hf : f ∈ Vault.contract.functions) :
     ∃ slot : Nat,

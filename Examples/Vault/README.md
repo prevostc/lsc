@@ -9,8 +9,8 @@ called `withdraw`. Other depositors, pause/unpause, and views cannot debit
 it. Assumed, not proved: the asset token behaves like a conforming ERC-20;
 between calls the vault's token balance does not fall. The vault stays
 solvent vs that token balance. Both facts at `Tx.run` and on compiled S2
-runtime bytecode. Constructor calls `decimals` and is outside the EVM
-deploy theorem.
+runtime bytecode. The constructor binds the asset and sets the owner; it
+does not CALL `decimals`.
 
 | File | Role |
 |------|------|

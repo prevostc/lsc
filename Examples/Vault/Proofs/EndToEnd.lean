@@ -41,19 +41,19 @@ theorem vault_field_shares :
   simp [Vault.contract]
 
 theorem vault_schema_totalAssets (s : Storage) :
-    Vault.schema.st.scalar 0 s = s.totalAssets := rfl
+    Vault.schema.st.scalar 0 s = s.totalAssets.raw := rfl
 
 theorem vault_schema_totalShares (s : Storage) :
-    Vault.schema.st.scalar 1 s = s.totalShares := rfl
+    Vault.schema.st.scalar 1 s = s.totalShares.raw := rfl
 
 theorem vault_schema_shares (s : Storage) (k : Address) :
-    Vault.schema.st.map1 2 s k = s.shares k := rfl
+    Vault.schema.st.map1 2 s k = (s.shares k).raw := rfl
 
 theorem vault_claim_of_rel (s : Storage) (σ : U256 → U256) (a : Address)
     (hs : storageRel Vault.contract Vault.schema evmKeccak s σ)
     (ha : Nat.lt a wordBound)
-    (hta : s.totalAssets < wordBound) (hts : s.totalShares < wordBound)
-    (hsh : s.shares a < wordBound) :
+    (hta : s.totalAssets.raw < wordBound) (hts : s.totalShares.raw < wordBound)
+    (hsh : (s.shares a).raw < wordBound) :
     vaultClaimRead evmKeccak σ a = claim a s := by
   have h0 := storageRel_scalar_toNat hs vault_field_totalAssets rfl
     (by rw [vault_schema_totalAssets]) hta
@@ -61,7 +61,7 @@ theorem vault_claim_of_rel (s : Storage) (σ : U256 → U256) (a : Address)
     (by rw [vault_schema_totalShares]) hts
   have h2 := storageRel_map1_toNat hs vault_field_shares rfl
     (by rw [vault_schema_shares]) ha hsh
-  simp [vaultClaimRead, claim, h0, h1, h2]
+  simp [vaultClaimRead, claim, h0, h1, h2, Amount.eq_iff]
 
 theorem vault_wf_scalar (w : World Storage Ext Event) (i : Nat) (fd : FieldDef)
     (hwf : WorldWF Vault.contract Vault.schema w)
@@ -72,19 +72,19 @@ theorem vault_wf_scalar (w : World Storage Ext Event) (i : Nat) (fd : FieldDef)
 
 theorem vault_ta_bound (w : World Storage Ext Event)
     (hwf : WorldWF Vault.contract Vault.schema w) :
-    w.self.totalAssets < wordBound := by
+    w.self.totalAssets.raw < wordBound := by
   simpa [vault_schema_totalAssets] using
     vault_wf_scalar w 0 _ hwf vault_field_totalAssets rfl
 
 theorem vault_ts_bound (w : World Storage Ext Event)
     (hwf : WorldWF Vault.contract Vault.schema w) :
-    w.self.totalShares < wordBound := by
+    w.self.totalShares.raw < wordBound := by
   simpa [vault_schema_totalShares] using
     vault_wf_scalar w 1 _ hwf vault_field_totalShares rfl
 
 theorem vault_shares_bound (w : World Storage Ext Event) (a : Address)
     (hwf : WorldWF Vault.contract Vault.schema w) (ha : Nat.lt a wordBound) :
-    w.self.shares a < wordBound := by
+    (w.self.shares a).raw < wordBound := by
   have h := hwf 2 _ vault_field_shares
   simpa [vault_schema_shares] using h a ha
 
@@ -176,7 +176,7 @@ theorem vaultSolventRead_of_inv (α : Abs IERC20.Ghost)
     simpa [hhold, hsum'] using Nat.le_trans hle hsum
 
 private theorem vault_scalarUpd_asset (i : Nat) (σ : Storage) (v : Nat)
-    (h : 5 ≠ i) : (Vault.schema.st.scalarUpd i σ v).asset = σ.asset := by
+    (h : 5 ≠ i) : (Vault.schema.st.scalarUpd i σ v).assetRef.addr = σ.assetRef.addr := by
   cases i with
   | zero => simp [Vault.schema]
   | succ i =>
@@ -200,7 +200,7 @@ private theorem vault_scalarUpd_asset (i : Nat) (σ : Storage) (v : Nat)
               | succ _ => simp [Vault.schema]
 
 private theorem vault_map1Upd_asset (i : Nat) (σ : Storage) (m : Nat → Nat) :
-    (Vault.schema.st.map1Upd i σ m).asset = σ.asset := by
+    (Vault.schema.st.map1Upd i σ m).assetRef.addr = σ.assetRef.addr := by
   cases i with
   | zero => simp [Vault.schema]
   | succ i =>
@@ -224,7 +224,7 @@ private theorem vault_map1Upd_asset (i : Nat) (σ : Storage) (m : Nat → Nat) :
               | succ _ => simp [Vault.schema]
 
 private theorem vault_map2Upd_asset (i : Nat) (σ : Storage) (m : Nat → Nat → Nat) :
-    (Vault.schema.st.map2Upd i σ m).asset = σ.asset := by
+    (Vault.schema.st.map2Upd i σ m).assetRef.addr = σ.assetRef.addr := by
   cases i with
   | zero => simp [Vault.schema]
   | succ i =>
@@ -262,14 +262,14 @@ private theorem vault_ext_call_self
 theorem vault_asset_stable_core (fn : Fn) (args : spec.Args fn) (ctx : Ctx)
     (w : World Storage Ext Event) :
     (worldAfter (Core.denote Vault.schema (Vault.fnDef fn).core
-      (Vault.encode fn args).reverse) ctx w).self.asset = w.self.asset := by
+      (Vault.encode fn args).reverse) ctx w).self.assetRef.addr = w.self.assetRef.addr := by
   cases htx : Tx.run (Core.denote Vault.schema (Vault.fnDef fn).core
       (Vault.encode fn args).reverse) ctx w with
   | error _ => simp [worldAfter, htx]
   | ok p =>
     rcases p with ⟨v, w'⟩
     simp [worldAfter, htx]
-    exact effects_frame_on (P := fun s : Storage => s.asset)
+    exact effects_frame_on (P := fun s : Storage => s.assetRef.addr)
       (Vault.fnDef fn).core (Vault.encode fn args).reverse 5
       (fun i σ v hne => vault_scalarUpd_asset i σ v hne)
       (fun i σ m _hne => vault_map1Upd_asset i σ m)

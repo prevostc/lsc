@@ -21,7 +21,8 @@ namespace Vault
 
 /-- Redeemable assets of `a`. Zero when the supply is empty. -/
 def claim (a : Address) (σ : Storage) : Nat :=
-  if σ.totalShares = 0 then 0 else σ.shares a * σ.totalAssets / σ.totalShares
+  if σ.totalShares = 0 then 0
+  else (σ.shares a).raw * σ.totalAssets.raw / σ.totalShares.raw
 
 /-- Only a `withdraw` by `a` itself may decrease `claim a`. -/
 def Auth (a : Address) (c : Call spec) (_s : Storage) : Prop :=
@@ -34,7 +35,7 @@ def inflow (c : Call spec) (w : World Storage Ext Event) : Nat :=
   match c.fn, c.args with
   | .deposit, assets =>
     match Tx.run (deposit assets) c.toCtx w with
-    | .ok _ => assets.toNat
+    | .ok _ => assets.raw
     | .error _ => 0
   | _, _ => 0
 
@@ -45,13 +46,13 @@ def holdings (self : Address) (w : World Storage Ext Event) : Nat :=
 def InvStorage (σ : Storage) : Prop :=
   ∃ H : Finset Address,
     (∀ a, a ∉ H → σ.shares a = 0) ∧
-    H.sum (fun a => σ.shares a) = σ.totalShares
+    H.sum (fun a => (σ.shares a).raw) = σ.totalShares.raw
 
 /-- `totalAssets ≤` ghost balance of `self`, and share balances have finite support. -/
 def Inv (self : Address) (w : World Storage Ext Event) : Prop :=
-  w.self.totalAssets ≤ holdings self w ∧ InvStorage w.self
+  w.self.totalAssets.raw ≤ holdings self w ∧ InvStorage w.self
 
-/-- Between our calls: vault token balance is non-decreasing and `decimals` is fixed. -/
+/-- Between our calls: vault token balance is non-decreasing. -/
 def vaultRely (self : Address) (x x' : Ext) : Prop :=
   Rely self x.asset x'.asset
 

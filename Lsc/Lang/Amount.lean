@@ -78,10 +78,19 @@ def ofWord (n : Word) : Amount a := ⟨n⟩
 @[simp] theorem raw_mul (x y : Amount a) : (x * y).raw = x.raw * y.raw := rfl
 @[simp] theorem raw_ofNat (n : Nat) : (OfNat.ofNat n : Amount a).raw = n := rfl
 @[simp] theorem raw_zero : (0 : Amount a).raw = 0 := rfl
+@[simp] theorem add_zero (x : Amount a) : x + 0 = x := Amount.ext (by simp)
+@[simp] theorem zero_add (x : Amount a) : 0 + x = x := Amount.ext (by simp)
+@[simp] theorem sub_zero (x : Amount a) : x - 0 = x := Amount.ext (by simp)
 @[simp] theorem mk_add (x y : Amount a) : (⟨x.raw + y.raw⟩ : Amount a) = x + y := rfl
 @[simp] theorem mk_sub (x y : Amount a) : (⟨x.raw - y.raw⟩ : Amount a) = x - y := rfl
 @[simp] theorem ofWord_add (x y : Amount a) : ofWord (x.raw + y.raw) = x + y := rfl
+@[simp] theorem ofWord_add_right (n : Word) (x : Amount a) :
+    ofWord (n + x.raw) = ofWord n + x := rfl
 @[simp] theorem ofWord_sub (x y : Amount a) : ofWord (x.raw - y.raw) = x - y := rfl
+@[simp] theorem ofWord_sub_right (n : Word) (x : Amount a) :
+    ofWord (n - x.raw) = ofWord n - x := rfl
+@[simp] theorem ofWord_sub_left (x : Amount a) (n : Word) :
+    ofWord (x.raw - n) = x - ofWord n := rfl
 
 theorem raw_sub_add {x y : Amount a} (h : y.raw ≤ x.raw) : (x - y + y).raw = x.raw :=
   Nat.sub_add_cancel h
