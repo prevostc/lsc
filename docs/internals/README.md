@@ -13,6 +13,7 @@ AMM has `amm_bytecode_no_unauthorized_extraction`; solvency is spec-level
 - `SECURITY_MODEL.md` — `Inv` / `claim` / `Auth`, adversary, language vs protocol.
 - `INTERFACE_MODEL.md` — `Interface` / `Binding` / `Tx.call`, `Conforms` / `Rely`.
 - `PROOF_CHAIN.md` — four links from a `Tx` theorem to bytecode.
+- `COMPILER_PIPELINE.md` — contract → Yul → bytecode / ABI (`compileContract`).
 - `MODULE_MAP.md` — `Lsc/` vs `Examples/`, `*Theorems` / `*Proof` / `*Defs`.
 - `TRUSTED_COMPUTING_BASE.md` — what every end-to-end theorem trusts.
 - `YUL_TARGET.md` — powdr Yul/EVM contract and Core → Yul mapping.

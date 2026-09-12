@@ -11,6 +11,9 @@ Yul         ──(3) compile_correct────  bytecode (powdr `Steps`)
 bytecode    ──(4) EndToEnd glue──────  bytecode-level anti-exploit theorem
 ```
 
+How a `ContractDef` becomes hex/ABI (functions, not theorems):
+[`COMPILER_PIPELINE.md`](COMPILER_PIPELINE.md).
+
 | Link | Theorem(s) | File | Status | Fragment | Examples |
 |------|------------|------|--------|----------|----------|
 | 1 Spec→Core | `f.core_denote` | `Lsc/Lang/Reify.lean` | proved | both | Counter, Token, Vault, AMM |
