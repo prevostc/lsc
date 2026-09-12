@@ -135,6 +135,13 @@ theorem update2_raw {K : Type} [DecidableEq K] (m : K → Amount a)
   rw [← hraw]
   exact update_raw (Function.update m k₁ (ofWord n₁)) k₂ n₂
 
+/-- Pointwise form of `update_raw`. -/
+theorem ofWord_update_lookup {K : Type} [DecidableEq K] (m : K → Amount a)
+    (k k' : K) (n : Word) :
+    ofWord (Function.update (fun i => (m i).raw) k n k') =
+      Function.update m k (ofWord n) k' :=
+  congrFun (update_raw m k n) k'
+
 /-- `ofWord` of a schema-shaped lookup-plus-word is the Amount lookup plus `ofWord`. -/
 theorem ofWord_update_add {K : Type} [DecidableEq K] (m : K → Amount a)
     (k k' : K) (n addend : Word) :

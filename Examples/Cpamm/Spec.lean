@@ -29,13 +29,15 @@ end Lsc.Compiler
 
 namespace Cpamm
 
-def claim (a : Address) (σ : Storage) : Nat := σ.shares a
+def claim (a : Address) (σ : Storage) : Nat := (σ.shares a).raw
 
 def claim0 (a : Address) (σ : Storage) : Nat :=
-  if σ.totalShares = 0 then 0 else σ.shares a * σ.reserve0 / σ.totalShares
+  if σ.totalShares = 0 then 0
+  else (σ.shares a).raw * σ.reserve0.raw / σ.totalShares.raw
 
 def claim1 (a : Address) (σ : Storage) : Nat :=
-  if σ.totalShares = 0 then 0 else σ.shares a * σ.reserve1 / σ.totalShares
+  if σ.totalShares = 0 then 0
+  else (σ.shares a).raw * σ.reserve1.raw / σ.totalShares.raw
 
 def Auth (a : Address) (c : Call spec) (_s : Storage) : Prop :=
   match c.fn, c.args with
@@ -46,7 +48,7 @@ def inflow (c : Call spec) (w : World Storage Ext Event) : Nat :=
   match c.fn, c.args with
   | .addLiquidity, (a0, a1) =>
     match Tx.run (addLiquidity a0 a1) c.toCtx w with
-    | .ok (n, _) => n
+    | .ok (n, _) => n.raw
     | .error _ => 0
   | _, _ => 0
 
@@ -62,11 +64,14 @@ def holdings (self : Address) (w : World Storage Ext Event) : Nat :=
 def InvStorage (σ : Storage) : Prop :=
   ∃ H : Finset Address,
     (∀ a, a ∉ H → σ.shares a = 0) ∧
-    H.sum (fun a => σ.shares a) = σ.totalShares
+    H.sum (fun a => (σ.shares a).raw) = σ.totalShares.raw
 
+/-- Each reserve plus that token's protocol bucket is covered by the pool's
+token balance, share balances have finite support, and the protocol share
+is at most 100%. -/
 def Inv (self : Address) (w : World Storage Ext Event) : Prop :=
-  w.self.reserve0 + w.self.protocolFees0 ≤ holdings0 self w ∧
-  w.self.reserve1 + w.self.protocolFees1 ≤ holdings1 self w ∧
+  w.self.reserve0.raw + w.self.protocolFees0.raw ≤ holdings0 self w ∧
+  w.self.reserve1.raw + w.self.protocolFees1.raw ≤ holdings1 self w ∧
   InvStorage w.self ∧
   w.self.protocolShareBps ≤ BPS
 
@@ -74,14 +79,14 @@ def Inv (self : Address) (w : World Storage Ext Event) : Prop :=
 def CoversLpsAndProtocol (self : Address) (w : World Storage Ext Event) : Prop :=
   ∃ H : Finset Address,
     (∀ a, a ∉ H → w.self.shares a = 0) ∧
-    H.sum (fun a => claim0 a w.self) + w.self.protocolFees0 ≤ holdings0 self w ∧
-    H.sum (fun a => claim1 a w.self) + w.self.protocolFees1 ≤ holdings1 self w
+    H.sum (fun a => claim0 a w.self) + w.self.protocolFees0.raw ≤ holdings0 self w ∧
+    H.sum (fun a => claim1 a w.self) + w.self.protocolFees1.raw ≤ holdings1 self w
 
 def cpammRely (self : Address) (x x' : Ext) : Prop :=
   Rely self x.token0 x'.token0 ∧ Rely self x.token1 x'.token1
 
 def cpammClaimRead (κ : List UInt8 → U256) (σ : U256 → U256) (a : Address) : Nat :=
-  (σ (mapSlot1 κ 3 a)).toNat
+  (σ (mapSlot1 κ 5 a)).toNat
 
 def ConfFun (self : Address) (ext : ExternalCalls) (α : Abs IERC20.Ghost) : Prop :=
   ∀ (w' : World Storage Ext Event),
@@ -104,11 +109,11 @@ def swapFee (dx : Nat) : Nat :=
 
 /-- Protocol take: zero when `feeTo = 0`, else `⌊fee · protocolShareBps / BPS⌋`. -/
 def protoTake (feeTo protocolShareBps fee : Nat) : Nat :=
-  if feeTo = 0 then 0 else fee * protocolShareBps / BPS
+  if (feeTo : Nat) = 0 then 0 else fee * protocolShareBps / BPS
 
 def amountOutF (rIn rOut dx : Nat) : Nat :=
   let dxF := dxFeeLess dx
-  dxF * rOut / (rIn + dxF)
+  rOut * dxF / (rIn + dxF)
 
 /-- Shared quote used by both swap directions: `(out, proto)`. -/
 def swapQuote (rIn rOut dx feeTo pShareBps : Nat) : Nat × Nat :=

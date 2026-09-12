@@ -8,8 +8,9 @@ take is a share of the swap fee, not of `amountIn`, and never enters the curve.
 protocol buckets move only on swaps and `collectProtocolFees`; `removeLiquidity`
 pays the floor pro-rata of each reserve.
 
-**Proved (spec, later):** share-count anti-extraction and solvency of LP claims
-plus protocol buckets against holdings.
+**Proved (spec):** share-count anti-extraction (`cpamm_no_unauthorized_extraction`)
+and solvency of LP claims plus protocol buckets against holdings
+(`cpamm_solvent`).
 
 **Not proved:** strict `k` increase, bytecode solvency, 512-bit `mulDiv` (a
 word-overflow intermediate reverts), impermanent loss, the owner redirecting
@@ -20,9 +21,8 @@ future fees via `setFeeTo`, fee-on-transfer/rebasing tokens, reentrancy
 |------|------|
 | `Contract.lean` | Pool surface + `lsc_contract` |
 | `Spec.lean` | `claim`, `Auth`, `Inv`, two-token `cpammBs`, codec |
-| `Theorems.lean` | Exported Tx, security, compiler, and bytecode theorems |
+| `Theorems.lean` | Exported Tx and security theorems |
 | `Proofs/Tx.lean` | `Tx.run` lemmas |
-| `Proofs/Security.lean` | Invariant and authorisation (checkpoint B) |
-| `Proofs/Compile.lean` | S2 compile check / compiler proofs |
-| `Proofs/EndToEnd.lean` | Bytecode glue (checkpoint C) |
+| `Proofs/Security.lean` | Invariant and authorisation |
+| `Proofs/Compile.lean` | Runtime `compileBlock` non-vacuity `#guard` |
 | `compiled/` | Yul, labelled Asm, bytecode, ABI, heimdall decompile |

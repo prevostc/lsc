@@ -91,8 +91,8 @@ theorem transfer_ok (to : Address) (amount : Amount tokenAsset)
       .ok ((), { w with self := transferPost w.self ctx.sender to amount, log := w.log ++ [.Transfer ctx.sender to amount] }) := by
   simp only [debit, Amount.le_iff, Amount.raw_add, Amount.raw_sub, Amount.update_raw_apply] at hsub hadd
   simp [transfer, hsub, hadd]
-  simp [transferPost, debit, credit, Amount.update2_raw, Amount.ofWord_sub, Amount.ofWord_update_add,
-    Amount.ofWord_raw]
+  simp [transferPost, debit, credit, Amount.update2_raw,
+    Amount.ofWord_update_lookup, Amount.ofWord_raw]
 
 theorem transfer_debits_sender (to : Address) (amount : Amount tokenAsset) (hne : ctx.sender ≠ to)
     (hsub : amount ≤ w.self.balances ctx.sender)
@@ -267,8 +267,8 @@ theorem transferFrom_ok (src to : Address) (amount : Amount tokenAsset)
   have hsub' : amount.raw ≤ (w.self.balances src).raw := hsub
   simp only [debit_credit_raw] at hadd
   simp [transferFrom, hallow', hsub', hadd]
-  simp [transferFromPost, debit, credit, Amount.update_nested_raw, Amount.ofWord_sub,
-    Amount.update2_raw, Amount.ofWord_update_add, Amount.ofWord_raw]
+  simp [transferFromPost, debit, credit, Amount.update_nested_raw,
+    Amount.update2_raw, Amount.ofWord_update_lookup, Amount.ofWord_raw]
 
 theorem transferFrom_reverts_on_insufficient_allowance (src to : Address) (amount : Amount tokenAsset)
     (h : w.self.allowances src ctx.sender < amount) :
@@ -390,7 +390,7 @@ theorem burn_ok (amount : Amount tokenAsset)
       .ok ((), { w with self := burnPost w.self ctx.sender amount, log := w.log ++ [.Transfer ctx.sender 0 amount] }) := by
   have hle : amount.raw ≤ (w.self.balances ctx.sender).raw := hsub
   have hsup : amount.raw ≤ w.self.totalSupply.raw := hsupply
-  simp [burn, burnPost, debit, hle, hsup, Amount.update_raw, Amount.ofWord_sub]
+  simp [burn, burnPost, debit, hle, hsup, Amount.update_raw]
 
 theorem burn_decreases_supply (amount : Amount tokenAsset)
     (hsub : amount ≤ w.self.balances ctx.sender) (hsupply : amount ≤ w.self.totalSupply) :

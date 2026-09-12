@@ -127,16 +127,20 @@ def counterAll : List (String × Bool) :=
 
 def tokW (owner supply : Nat) (bals : Nat → Nat) (allows : Nat → Nat → Nat) :
     World Token.Storage Unit Token.Event :=
-  { self := { owner := owner, totalSupply := supply, balances := bals, allowances := allows },
+  { self := {
+      owner := owner
+      totalSupply := Amount.ofWord supply
+      balances := fun a => Amount.ofWord (bals a)
+      allowances := fun a b => Amount.ofWord (allows a b) }
     ext := () }
 
 def tokAddrs : List Nat := [0, 1, 2, 3]
 
 def tokSlots (σ : Token.Storage) : List (U256 × U256) :=
-  [(u256 0, u256 σ.owner), (u256 1, u256 σ.totalSupply)] ++
-    tokAddrs.map (fun a => (mapSlot1 keccakOf 2 a, u256 (σ.balances a))) ++
+  [(u256 0, u256 σ.owner), (u256 1, u256 σ.totalSupply.raw)] ++
+    tokAddrs.map (fun a => (mapSlot1 keccakOf 2 a, u256 (σ.balances a).raw)) ++
     tokAddrs.flatMap (fun a =>
-      tokAddrs.map (fun b => (mapSlot2 keccakOf 3 a b, u256 (σ.allowances a b))))
+      tokAddrs.map (fun b => (mapSlot2 keccakOf 3 a b, u256 (σ.allowances a b).raw)))
 
 def tokStore (σ : Token.Storage) : U256 → U256 := storageOf (tokSlots σ)
 
@@ -151,9 +155,13 @@ def allow₁₂ : Nat → Nat → Nat
   | 1, 2 => 200
   | _, _ => 0
 
-def σ₁ : Token.Storage := { owner := 1, totalSupply := 1000, balances := bals₁, allowances := allow₀ }
+def σ₁ : Token.Storage :=
+  { owner := 1, totalSupply := 1000
+    balances := fun a => Amount.ofWord (bals₁ a)
+    allowances := fun a b => Amount.ofWord (allow₀ a b) }
 
-def σAllow : Token.Storage := { σ₁ with allowances := allow₁₂ }
+def σAllow : Token.Storage :=
+  { σ₁ with allowances := fun a b => Amount.ofWord (allow₁₂ a b) }
 
 def w₁ : World Token.Storage Unit Token.Event := { self := σ₁, ext := () }
 def wAllow : World Token.Storage Unit Token.Event := { self := σAllow, ext := () }
@@ -228,13 +236,16 @@ def token_burn_revert : Bool :=
   checkTokUnit "burn" [2000] ctxOwner σ₁ (Tx.run (Token.burn 2000) ctxOwner w₁)
 
 def token_balanceOf : Bool :=
-  checkTokWord "balanceOf" [1] ctxOwner σ₁ (Tx.run (Token.balanceOf 1) ctxOwner w₁)
+  checkTokWord "balanceOf" [1] ctxOwner σ₁
+    ((Tx.run (Token.balanceOf 1) ctxOwner w₁).map fun (n, w) => (n.raw, w))
 
 def token_allowance : Bool :=
-  checkTokWord "allowance" [1, 2] ctxOwner σAllow (Tx.run (Token.allowance 1 2) ctxOwner wAllow)
+  checkTokWord "allowance" [1, 2] ctxOwner σAllow
+    ((Tx.run (Token.allowance 1 2) ctxOwner wAllow).map fun (n, w) => (n.raw, w))
 
 def token_totalSupply : Bool :=
-  checkTokWord "totalSupply" [] ctxOwner σ₁ (Tx.run Token.totalSupply ctxOwner w₁)
+  checkTokWord "totalSupply" [] ctxOwner σ₁
+    ((Tx.run Token.totalSupply ctxOwner w₁).map fun (n, w) => (n.raw, w))
 
 def tokenAll : List (String × Bool) :=
   [ ("transfer_ok", token_transfer_ok)
