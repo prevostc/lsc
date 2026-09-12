@@ -11,7 +11,7 @@ Lake libraries (`lakefile.lean`): `Lsc` (language, compiler, security — `Lsc.L
 `Lsc.Tools`, `Lsc.Util`, barrel `Lsc.lean`) → `Stdlib` (`Stdlib.ERC20`,
 `Stdlib.Scales`, `Stdlib.SafeERC20`, barrel `Stdlib.lean`) → `Examples`
 (`Examples.Counter.*`, `Examples.Token.*`, `Examples.Vault.*`, `Examples.Amm.*`,
-`Examples.Misc.*`). Import direction is strictly downward.
+`Examples.Cpamm.*`, `Examples.Misc.*`). Import direction is strictly downward.
 
 ## `Lsc/Lang` — the language
 
@@ -66,8 +66,8 @@ Does not import `Examples`. `Lsc` does not import `Stdlib`.
   `safeApprove` (`checkOk`); `@[lsc_inline]`, usable mid-`do`.
 - `Tests.lean` — reify of stdlib helpers, including a compound helper mid-`do`.
 
-Protocol instances (Token, Vault, AMM, Counter) live under `Examples/`, not
-stdlib.
+Protocol instances (Token, Vault, AMM, CPAMM, Counter) live under `Examples/`,
+not stdlib.
 
 ## `Lsc/Compiler` — Core → Yul → bytecode
 
@@ -173,5 +173,9 @@ Naming (each protocol is a directory; modules are `Examples.C.Role`):
 - **AMM** — `Examples/Amm/`. S2, two `IERC20`. `amm_no_unauthorized_extraction`, `amm_solvent`;
   `amm_correct_ext`; `amm_bytecode_no_unauthorized_extraction` (no bytecode
   solvency theorem).
+- **CPAMM** — `Examples/Cpamm/`. Constant-product AMM with LP fee and protocol-fee
+  switch. Tx-level `k` / protocol-fee / pro-rata theorems; spec anti-extraction
+  and solvency in `Proofs/Security.lean`.
+- `Examples/Misc/AmountDemo.lean` — Amount-typed surface demo.
 - `Examples/Misc/AmountDemo.lean` — Amount-typed surface demo.
 - `Examples/Misc/YulTests.lean` — interpreter harness.

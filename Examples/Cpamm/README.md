@@ -1,9 +1,8 @@
-# FeeAmm
+# CPAMM
 
-Constant-product pool with a 0.3% swap fee accruing to LPs and an owner-settable
-protocol-fee switch. Same two-token `IERC20` bindings as `Examples/Amm` (the
-fee-less teaching version). The protocol take is a share of the swap fee, not
-of `amountIn`, and never enters the curve.
+CPAMM (constant-product AMM with LP fee and protocol-fee switch). Same two-token
+`IERC20` bindings as `Examples/Amm` (the fee-less teaching version). The protocol
+take is a share of the swap fee, not of `amountIn`, and never enters the curve.
 
 **Proved (Tx):** a successful swap does not decrease `reserve0 · reserve1`;
 protocol buckets move only on swaps and `collectProtocolFees`; `removeLiquidity`
@@ -20,7 +19,7 @@ future fees via `setFeeTo`, fee-on-transfer/rebasing tokens, reentrancy
 | File | Role |
 |------|------|
 | `Contract.lean` | Pool surface + `lsc_contract` |
-| `Spec.lean` | `claim`, `Auth`, `Inv`, two-token `feeAmmBs`, codec |
+| `Spec.lean` | `claim`, `Auth`, `Inv`, two-token `cpammBs`, codec |
 | `Theorems.lean` | Exported Tx, security, compiler, and bytecode theorems |
 | `Proofs/Tx.lean` | `Tx.run` lemmas |
 | `Proofs/Security.lean` | Invariant and authorisation (checkpoint B) |

@@ -10,7 +10,7 @@
 //   0xf5eb42dc  (4125835996)  sharesOf(address)
 //   0x1ad8b03b  (450408507)  protocolFees()
 
-object "FeeAmm" {
+object "Cpamm" {
     code {
         codecopy(128, sub(codesize(), 96), 96)
         let constructor_0 := mload(128)

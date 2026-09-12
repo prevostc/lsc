@@ -6,7 +6,7 @@ import Stdlib.SafeERC20
 import Stdlib.Scales
 
 /-!
-# FeeAmm — constant-product pool with a 0.3% swap fee
+# CPAMM (constant-product AMM with LP fee and protocol-fee switch)
 
 Same storage prefix as `Amm` (reserves, shares, token slots), then owner,
 fee recipient, protocol share, and protocol-fee buckets. The swap fee is
@@ -17,7 +17,7 @@ writes; `Conforms` / `NoInterfere` exclude reentrancy.
 
 open Lsc Lsc.Syntax Lsc.Stdlib Stdlib
 
-namespace FeeAmm
+namespace Cpamm
 
 /-- Phantom markers. Scales are opaque (not Core literals), as in Amm. -/
 structure TOKEN0 where
@@ -296,21 +296,21 @@ def protocolFees : M (Nat × Nat) := do
   let p1 ← read protocolFees1
   pure (p0, p1)
 
-end FeeAmm
+end Cpamm
 
 set_option maxHeartbeats 8000000
 
-lsc_schema FeeAmm
-lsc_reify FeeAmm.constructor FeeAmm.addLiquidity FeeAmm.removeLiquidity
-lsc_reify FeeAmm.setProtocolShare FeeAmm.setFeeTo FeeAmm.collectProtocolFees
-lsc_reify FeeAmm.getReserves FeeAmm.sharesOf FeeAmm.protocolFees
-lsc_reify FeeAmm.swap0for1
-lsc_reify FeeAmm.swap1for0
-lsc_contract FeeAmm constructor addLiquidity removeLiquidity swap0for1 swap1for0
+lsc_schema Cpamm
+lsc_reify Cpamm.constructor Cpamm.addLiquidity Cpamm.removeLiquidity
+lsc_reify Cpamm.setProtocolShare Cpamm.setFeeTo Cpamm.collectProtocolFees
+lsc_reify Cpamm.getReserves Cpamm.sharesOf Cpamm.protocolFees
+lsc_reify Cpamm.swap0for1
+lsc_reify Cpamm.swap1for0
+lsc_contract Cpamm constructor addLiquidity removeLiquidity swap0for1 swap1for0
   setProtocolShare setFeeTo collectProtocolFees getReserves sharesOf protocolFees
 
 
-namespace FeeAmm
+namespace Cpamm
 
 def smokeCtx : Ctx := { sender := 2, self := 1 }
 
@@ -360,30 +360,30 @@ def swap0World (w : World Storage Ext Event) : Option (World Storage Ext Event) 
   | .ok (_, w') => some w'
   | .error _ => none
 
-end FeeAmm
+end Cpamm
 
-#guard FeeAmm.okNat (Lsc.Tx.run (FeeAmm.addLiquidity (Lsc.Amount.ofNat 100) (Lsc.Amount.ofNat 200))
-    FeeAmm.smokeCtx FeeAmm.smokeEmpty) == some 100
-#guard FeeAmm.okPair (Lsc.Tx.run FeeAmm.getReserves FeeAmm.smokeCtx FeeAmm.smokePool) == some (1000, 2000)
-#guard FeeAmm.okNat (Lsc.Tx.run (FeeAmm.sharesOf 2) FeeAmm.smokeCtx FeeAmm.smokePool) == some 1000
-#guard FeeAmm.okPair (Lsc.Tx.run FeeAmm.protocolFees FeeAmm.smokeCtx FeeAmm.smokePool) == some (0, 0)
+#guard Cpamm.okNat (Lsc.Tx.run (Cpamm.addLiquidity (Lsc.Amount.ofNat 100) (Lsc.Amount.ofNat 200))
+    Cpamm.smokeCtx Cpamm.smokeEmpty) == some 100
+#guard Cpamm.okPair (Lsc.Tx.run Cpamm.getReserves Cpamm.smokeCtx Cpamm.smokePool) == some (1000, 2000)
+#guard Cpamm.okNat (Lsc.Tx.run (Cpamm.sharesOf 2) Cpamm.smokeCtx Cpamm.smokePool) == some 1000
+#guard Cpamm.okPair (Lsc.Tx.run Cpamm.protocolFees Cpamm.smokeCtx Cpamm.smokePool) == some (0, 0)
 -- dx=100, dxF=99, out=⌊99·2000/1099⌋=180, feeTo=0 so proto=0, r0'=1100, r1'=1820
-#guard (match FeeAmm.swap0World FeeAmm.smokePool with
+#guard (match Cpamm.swap0World Cpamm.smokePool with
     | some w' => w'.self.reserve0 == 1100 && w'.self.reserve1 == 1820
         && w'.self.protocolFees0 == 0 && w'.self.protocolFees1 == 0
     | none => false)
 -- 100% protocol take: proto=1, r0'=1099, bucket0=1, r1' still 1820
-#guard (match FeeAmm.swap0World FeeAmm.smokePoolProto with
+#guard (match Cpamm.swap0World Cpamm.smokePoolProto with
     | some w' => w'.self.reserve0 == 1099 && w'.self.reserve1 == 1820
         && w'.self.protocolFees0 == 1 && w'.self.protocolFees1 == 0
     | none => false)
-#guard (match Lsc.Tx.run (FeeAmm.setProtocolShare 5000) FeeAmm.smokeCtx FeeAmm.smokePool with
+#guard (match Lsc.Tx.run (Cpamm.setProtocolShare 5000) Cpamm.smokeCtx Cpamm.smokePool with
     | .ok (_, w') => w'.self.protocolShareBps == 5000 && w'.self.protocolFees0 == 0
     | _ => false)
-#guard (match Lsc.Tx.run (FeeAmm.setProtocolShare 5000)
-      { FeeAmm.smokeCtx with sender := 9 } FeeAmm.smokePool with
+#guard (match Lsc.Tx.run (Cpamm.setProtocolShare 5000)
+      { Cpamm.smokeCtx with sender := 9 } Cpamm.smokePool with
     | .error (.user .NotOwner) => true
     | _ => false)
-#guard (match Lsc.Tx.run (FeeAmm.setProtocolShare 10001) FeeAmm.smokeCtx FeeAmm.smokePool with
+#guard (match Lsc.Tx.run (Cpamm.setProtocolShare 10001) Cpamm.smokeCtx Cpamm.smokePool with
     | .error (.user .FeeTooHigh) => true
     | _ => false)

@@ -1,23 +1,23 @@
 import Mathlib.Tactic.SplitIfs
 import Mathlib.Algebra.BigOperators.Group.Finset.Basic
 import Lsc.Security.Wealth
-import Examples.FeeAmm.Spec
-import Examples.FeeAmm.Contract
-import Examples.FeeAmm.Proofs.Math
+import Examples.Cpamm.Spec
+import Examples.Cpamm.Contract
+import Examples.Cpamm.Proofs.Math
 import Stdlib.SafeERC20
 
 set_option linter.unusedSimpArgs false
 set_option maxHeartbeats 8000000
 
 /-!
-# FeeAmm — functional lemmas
+# CPAMM — functional lemmas
 
 `Tx.run` statements. Storage is `Nat`; ABI amounts use `toNat` / `ofNat`.
 -/
 
-open Lsc Lsc.Stdlib Lsc.Security FeeAmm
+open Lsc Lsc.Stdlib Lsc.Security Cpamm
 
-namespace FeeAmm
+namespace Cpamm
 
 variable (ctx : Ctx) (w : World Storage Ext Event)
 
@@ -1780,4 +1780,4 @@ theorem removeLiquidity_pro_rata (s : Amount SHARE shareScale)
 
 end Proof
 
-end FeeAmm
+end Cpamm

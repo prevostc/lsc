@@ -51,8 +51,9 @@ def transfer (to : Address) (amount : Nat) : M Unit := do
 ```
 
 Vault (`Examples/Vault/Contract.lean`) binds one external token and pulls it on
-deposit. AMM (`Examples/Amm/Contract.lean`) binds two. See
-[External calls](EXTERNAL_CALLS.md).
+deposit. AMM (`Examples/Amm/Contract.lean`) binds two. CPAMM (constant-product
+AMM with LP fee and protocol-fee switch) is `Examples/Cpamm/Contract.lean`.
+See [External calls](EXTERNAL_CALLS.md).
 
 A function named `constructor` is deployment only; it is not a trace
 entrypoint. Token's constructor mints the initial supply to the owner.

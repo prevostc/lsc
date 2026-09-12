@@ -2,32 +2,32 @@ import Mathlib.Algebra.BigOperators.Group.Finset.Basic
 import Lsc.Security.Wealth
 import Lsc.Compiler.TransportTheorems
 import Lsc.Compiler.Externals
-import Examples.FeeAmm.Contract
+import Examples.Cpamm.Contract
 import Stdlib.ERC20
 
 /-!
-FeeAmm spec: `claim` is LP share count; `Auth` is the victim's own
+CPAMM spec: `claim` is LP share count; `Auth` is the victim's own
 `removeLiquidity`. `Inv` is share-support, `protocolShareBps ≤ BPS`, and
 each reserve plus that token's protocol bucket covered by the pool's
 balance of that token. `k` is a swap fact, not `Inv`.
 -/
 
-open Lsc Lsc.Stdlib Lsc.Security Lsc.Compiler FeeAmm
+open Lsc Lsc.Stdlib Lsc.Security Lsc.Compiler Cpamm
 open YulSemantics.EVM
 open YulEvmCompiler (Instr)
 
-lsc_codec FeeAmm
+lsc_codec Cpamm
 
 namespace Lsc.Compiler
 
 open Lsc.Stdlib
 
-@[reducible] def feeAmmBs (α : Abs IERC20.Ghost) : List (BindEnv IERC20 FeeAmm.Storage FeeAmm.Ext) :=
-  [⟨α, FeeAmm.token0B⟩, ⟨α, FeeAmm.token1B⟩]
+@[reducible] def cpammBs (α : Abs IERC20.Ghost) : List (BindEnv IERC20 Cpamm.Storage Cpamm.Ext) :=
+  [⟨α, Cpamm.token0B⟩, ⟨α, Cpamm.token1B⟩]
 
 end Lsc.Compiler
 
-namespace FeeAmm
+namespace Cpamm
 
 def claim (a : Address) (σ : Storage) : Nat := σ.shares a
 
@@ -77,10 +77,10 @@ def CoversLpsAndProtocol (self : Address) (w : World Storage Ext Event) : Prop :
     H.sum (fun a => claim0 a w.self) + w.self.protocolFees0 ≤ holdings0 self w ∧
     H.sum (fun a => claim1 a w.self) + w.self.protocolFees1 ≤ holdings1 self w
 
-def feeAmmRely (self : Address) (x x' : Ext) : Prop :=
+def cpammRely (self : Address) (x x' : Ext) : Prop :=
   Rely self x.token0 x'.token0 ∧ Rely self x.token1 x'.token1
 
-def feeAmmClaimRead (κ : List UInt8 → U256) (σ : U256 → U256) (a : Address) : Nat :=
+def cpammClaimRead (κ : List UInt8 → U256) (σ : U256 → U256) (a : Address) : Nat :=
   (σ (mapSlot1 κ 3 a)).toNat
 
 def ConfFun (self : Address) (ext : ExternalCalls) (α : Abs IERC20.Ghost) : Prop :=
@@ -88,10 +88,10 @@ def ConfFun (self : Address) (ext : ExternalCalls) (α : Abs IERC20.Ghost) : Pro
     Conforms IERC20 self (token0B.addr w'.self) ext α ∧
     Conforms IERC20 self (token1B.addr w'.self) ext α
 
-@[reducible] def feeAmmEnv0 (α : Abs IERC20.Ghost) : BindEnv IERC20 Storage Ext :=
+@[reducible] def cpammEnv0 (α : Abs IERC20.Ghost) : BindEnv IERC20 Storage Ext :=
   ⟨α, token0B⟩
 
-@[reducible] def feeAmmEnv1 (α : Abs IERC20.Ghost) : BindEnv IERC20 Storage Ext :=
+@[reducible] def cpammEnv1 (α : Abs IERC20.Ghost) : BindEnv IERC20 Storage Ext :=
   ⟨α, token1B⟩
 
 /-- Fee-less notional input `⌊dx · (BPS − FEE_BPS) / BPS⌋`. -/
@@ -114,4 +114,4 @@ def amountOutF (rIn rOut dx : Nat) : Nat :=
 def swapQuote (rIn rOut dx feeTo pShareBps : Nat) : Nat × Nat :=
   (amountOutF rIn rOut dx, protoTake feeTo pShareBps (swapFee dx))
 
-end FeeAmm
+end Cpamm

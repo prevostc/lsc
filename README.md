@@ -21,7 +21,8 @@ A contract is a storage structure, events, errors, and `do` blocks using
 `read` / `write`, checked arithmetic (`+?`, `-?`, …), and `Binding` calls to a
 declared `IERC20` when the contract talks to an external token. `lsc_schema`,
 `lsc_reify`, and `lsc_contract` assemble the schema and the contract object.
-Start from `Examples/Counter/Contract.lean`, then Token, Vault, Amm.
+Start from `Examples/Counter/Contract.lean`, then Token, Vault, Amm, and
+CPAMM (constant-product AMM with LP fee and protocol-fee switch).
 
 ## Build
 

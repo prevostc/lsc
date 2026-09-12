@@ -1,12 +1,12 @@
 import Mathlib.Tactic.SplitIfs
-import Examples.FeeAmm.Spec
+import Examples.Cpamm.Spec
 
 /-!
-FeeAmm floor-product facts. Duplicated from the fee-less Amm example on
-purpose: FeeAmm must not import `Examples.Amm.Proofs`.
+CPAMM floor-product facts. Duplicated from the fee-less Amm example on
+purpose: Cpamm must not import `Examples.Amm.Proofs`.
 -/
 
-namespace FeeAmm
+namespace Cpamm
 
 /-- `⌊s * r / S⌋ ≤ r` when `s ≤ S`. -/
 theorem remove_le_reserves (s r S : Nat) (hs : s ≤ S) (hS : 0 < S) :
@@ -90,4 +90,4 @@ theorem swapQuote_k (rIn rOut dx feeTo pShareBps : Nat)
       (rIn + (dx - protoTake feeTo pShareBps (swapFee dx)))
       rOut (dxFeeLess dx) hIn hr'
 
-end FeeAmm
+end Cpamm

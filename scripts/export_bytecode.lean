@@ -12,7 +12,7 @@ Does not import `Examples.Misc.YulTests` (that file's `#eval`/`#guard` would re-
 Yul interpreter). Case lists, senders, and mapping slots follow YulTests.
 Amm cases are view-only (`getReserves` / `sharesOf` / `quote0for1`); constructor and
 swaps CALL out and are not expected to match anvil without token fixtures.
-Vault and FeeAmm are exported for artifacts only (no Tx.run cases); constructors CALL out.
+Vault and CPAMM are exported for artifacts only (no Tx.run cases); constructors CALL out.
 -/
 import Lsc.Compiler.Bytecode
 import Lsc.Compiler.Yul
@@ -23,7 +23,7 @@ import Examples.Counter.Contract
 import Examples.Token.Contract
 import Examples.Amm.Contract
 import Examples.Vault.Contract
-import Examples.FeeAmm.Contract
+import Examples.Cpamm.Contract
 import Lsc.Tools.AbiJson
 import Lsc.Tools.Disasm
 
@@ -395,7 +395,7 @@ def counterArt := runtimeArt Counter.contract
 def tokenArt := runtimeArt Token.contract
 def ammArt := runtimeArt Amm.contract
 def vaultArt := runtimeArt Vault.contract
-def feeAmmArt := runtimeArt FeeAmm.contract
+def cpammArt := runtimeArt Cpamm.contract
 
 def exportJson : String :=
   "{" ++ String.intercalate "," [
@@ -409,7 +409,7 @@ def exportJson : String :=
         (some (ctorCalldata [10, 11])),
       contractJson "Vault" Vault.contract vaultArt []
         (some (ctorCalldata [1, 10])),
-      contractJson "FeeAmm" FeeAmm.contract feeAmmArt []
+      contractJson "Cpamm" Cpamm.contract cpammArt []
         (some (ctorCalldata [1, 10, 11]))
     ] ++ "]"
   ] ++ "}"
@@ -419,7 +419,7 @@ def main : IO Unit := do
   writeContract "Token" Token.contract tokenArt
   writeContract "Amm" Amm.contract ammArt
   writeContract "Vault" Vault.contract vaultArt
-  writeContract "FeeAmm" FeeAmm.contract feeAmmArt
+  writeContract "Cpamm" Cpamm.contract cpammArt
   IO.println "BEGIN_LSC_EXPORT"
   IO.println exportJson
   IO.println "END_LSC_EXPORT"

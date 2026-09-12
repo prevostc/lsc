@@ -1,6 +1,8 @@
 # AMM example
 
 Constant-product pool in LSC (`Examples/Amm/Contract.lean`), two `IERC20` bindings, no fee.
+CPAMM (constant-product AMM with LP fee and protocol-fee switch) is
+`Examples/Cpamm/`.
 
 ## Design
 

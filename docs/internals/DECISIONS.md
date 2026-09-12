@@ -85,7 +85,8 @@ Core's ANF keeps every `let` live to the end of a function, and powdr's raw
 `compile` rejects programs that need `DUP17`+ (`compileExpr`: `off + idx <
 16`). The AMM's later-LP `addLiquidity` branch reaches 17 live locals, so
 `compileRuntime` returned `none` and `amm_bytecode_no_unauthorized_extraction`
-was vacuous. A fee-bearing AMM is estimated at 21–23.
+was vacuous. CPAMM (constant-product AMM with LP fee and protocol-fee switch)
+is estimated at 21–23.
 
 Decision: route runtime compilation through powdr's verified guarded
 memory-spilling pass (`MemorySpillSelect.spillBlock?`, theorems

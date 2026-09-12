@@ -4,23 +4,23 @@ import Mathlib.Algebra.Order.BigOperators.Group.Finset
 import Lsc.Security.Wealth
 import Lsc.Security.WealthTheorems
 import Lsc.Security.InvariantTheorems
-import Examples.FeeAmm.Spec
-import Examples.FeeAmm.Proofs.Tx
+import Examples.Cpamm.Spec
+import Examples.Cpamm.Proofs.Tx
 
 set_option linter.unusedSimpArgs false
 set_option maxHeartbeats 8000000
 
 /-!
-Security obligations for FeeAmm. `Inv` is indexed by the pool address because
+Security obligations for CPAMM. `Inv` is indexed by the pool address because
 holdings read the IERC20 ghosts. `k` is a swap theorem, not `Inv`.
 -/
 
-open Lsc Lsc.Stdlib Lsc.Security FeeAmm
+open Lsc Lsc.Stdlib Lsc.Security Cpamm
 
-namespace FeeAmm
+namespace Cpamm
 
 theorem inv_rely (self : Address) :
-    PreservesInvEnv spec (Inv self) (feeAmmRely self) := by
+    PreservesInvEnv spec (Inv self) (cpammRely self) := by
   intro w x' ⟨h0, h1, hinv, hps⟩ ⟨hR0, hR1⟩
   obtain ⟨hb0, _⟩ := hR0
   obtain ⟨hb1, _⟩ := hR1
@@ -242,7 +242,7 @@ theorem protocolFees_preserves_inv (self : Address) :
   intro u ctx w _ _ hInv
   simpa [worldAfter, protocolFees_ok ctx w] using hInv
 
-theorem feeAmm_preserves_inv (self : Address) :
+theorem cpamm_preserves_inv (self : Address) :
     PreservesInvAt spec (Inv self) self :=
   PreservesInvAt.of_fns fun fn =>
     match fn with
@@ -346,7 +346,7 @@ theorem protocolFees_auth (self : Address) :
   intro u ctx w a _hInv hdec
   simp [worldAfter, protocolFees_ok ctx w, claim] at hdec
 
-theorem feeAmm_no_unauth (self : Address) :
+theorem cpamm_no_unauth (self : Address) :
     NoUnauthorizedDecrease spec (Inv self) claim Auth :=
   NoUnauthorizedDecrease.of_fns fun fn =>
     match fn with
@@ -363,21 +363,21 @@ theorem feeAmm_no_unauth (self : Address) :
 
 namespace Proof
 
-theorem feeAmm_no_unauthorized_extraction (self : Address)
+theorem cpamm_no_unauthorized_extraction (self : Address)
     (tr : List (Step spec)) (w : World Storage Ext Event) (a : Address)
-    (hw : Inv self w) (hW : Wf self tr) (hR : RelyAlong (feeAmmRely self) tr w)
+    (hw : Inv self w) (hW : Wf self tr) (hR : RelyAlong (cpammRely self) tr w)
     (hA : NoAuthAlong Auth a tr w) :
     claim a w.self ≤ claim a (run tr w).self :=
-  no_unauthorized_extraction_at (feeAmm_no_unauth self) (feeAmm_preserves_inv self)
+  no_unauthorized_extraction_at (cpamm_no_unauth self) (cpamm_preserves_inv self)
     (inv_rely self) tr w a hw hW hR hA
 
-theorem feeAmm_solvent (self : Address) (tr : List (Step spec))
+theorem cpamm_solvent (self : Address) (tr : List (Step spec))
     (w : World Storage Ext Event)
-    (hW : Wf self tr) (hR : RelyAlong (feeAmmRely self) tr w) (h : Inv self w) :
+    (hW : Wf self tr) (hR : RelyAlong (cpammRely self) tr w) (h : Inv self w) :
     CoversLpsAndProtocol self (run tr w) :=
   inv_covers self (run tr w)
-    (inv_run_at (feeAmm_preserves_inv self) (inv_rely self) h tr hW hR)
+    (inv_run_at (cpamm_preserves_inv self) (inv_rely self) h tr hW hR)
 
 end Proof
 
-end FeeAmm
+end Cpamm

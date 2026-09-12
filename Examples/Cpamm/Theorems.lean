@@ -1,17 +1,18 @@
-import Examples.FeeAmm.Spec
-import Examples.FeeAmm.Proofs.Tx
-import Examples.FeeAmm.Contract
+import Examples.Cpamm.Spec
+import Examples.Cpamm.Proofs.Tx
+import Examples.Cpamm.Contract
 
 set_option linter.unusedVariables false
 
 /-!
-FeeAmm theorems: swap `k` non-decrease, protocol-fee accounting, pro-rata
-redemption, and (later) anti-extraction / solvency.
+CPAMM (constant-product AMM with LP fee and protocol-fee switch) theorems:
+swap `k` non-decrease, protocol-fee accounting, pro-rata redemption, and
+(later) anti-extraction / solvency.
 -/
 
-open Lsc Lsc.Stdlib FeeAmm
+open Lsc Lsc.Stdlib Cpamm
 
-namespace FeeAmm
+namespace Cpamm
 
 variable (ctx : Ctx) (w : World Storage Ext Event)
 
@@ -104,4 +105,4 @@ theorem removeLiquidity_pro_rata (s : Amount SHARE shareScale)
       p.2 = s.toNat * w.self.reserve1 / w.self.totalShares :=
   Proof.removeLiquidity_pro_rata ctx w s h
 
-end FeeAmm
+end Cpamm

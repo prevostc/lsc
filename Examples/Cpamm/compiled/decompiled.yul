@@ -181,7 +181,7 @@ object "DecompiledContract" {
             }
             
             /*
-            * @custom:signature    collectProtocolFees() public payable returns (bytes memory)
+            * @custom:signature    Unresolved_a1af5b9a() public payable returns (bytes memory)
             */
             case 0xa1af5b9a {
                 if iszero(lt(calldatasize(), 0x04)) { revert(0, 0); } else {
@@ -226,7 +226,7 @@ object "DecompiledContract" {
             }
             
             /*
-            * @custom:signature    protocolFees() public view returns (bytes memory)
+            * @custom:signature    Unresolved_1ad8b03b() public view returns (bytes memory)
             */
             case 0x1ad8b03b {
                 if iszero(lt(calldatasize(), 0x04)) { revert(0, 0); } else {
@@ -237,7 +237,7 @@ object "DecompiledContract" {
             }
             
             /*
-            * @custom:signature    addLiquidity(uint256 arg0, uint256 arg1) public payable returns (uint256)
+            * @custom:signature    Unresolved_9cd441da(uint256 arg0, uint256 arg1) public payable returns (uint256)
             * @param                arg0 ["uint256", "bytes32", "int256"]
             * @param                arg1 ["uint256", "bytes32", "int256"]
             */
@@ -455,7 +455,7 @@ object "DecompiledContract" {
             }
             
             /*
-            * @custom:signature    removeLiquidity(uint256 arg0) public payable returns (bytes memory)
+            * @custom:signature    Unresolved_9c8f9f23(uint256 arg0) public payable returns (bytes memory)
             * @param                arg0 ["uint256", "bytes32", "int256"]
             */
             case 0x9c8f9f23 {
@@ -719,7 +719,7 @@ object "DecompiledContract" {
             }
             
             /*
-            * @custom:signature    setProtocolShare(uint256 arg0) public payable
+            * @custom:signature    Unresolved_ce9c0bb7(uint256 arg0) public payable
             * @param                arg0 ["uint256", "bytes32", "int256"]
             */
             case 0xce9c0bb7 {
@@ -737,7 +737,7 @@ object "DecompiledContract" {
             }
             
             /*
-            * @custom:signature    getReserves() public view returns (bytes memory)
+            * @custom:signature    Unresolved_0902f1ac() public view returns (bytes memory)
             */
             case 0x0902f1ac {
                 if iszero(lt(calldatasize(), 0x04)) { revert(0, 0); } else {

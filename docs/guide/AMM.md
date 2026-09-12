@@ -54,3 +54,7 @@ is no AMM bytecode solvency theorem; solvency stays at the spec.
 
 For the curious: the theorems behind this are `amm_no_unauthorized_extraction`
 and `amm_bytecode_no_unauthorized_extraction` (`amm_solvent` at the spec).
+
+CPAMM (constant-product AMM with LP fee and protocol-fee switch) is
+`Examples/Cpamm/Contract.lean`: same two-token shape, plus a 0.3% LP fee and
+an owner-settable protocol-fee switch.
