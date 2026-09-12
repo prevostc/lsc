@@ -2,6 +2,7 @@ import Mathlib.Data.Fintype.Basic
 import Mathlib.Tactic.FinCases
 import Lsc.Lang.Inline
 import Lsc.Lang.Interface
+import Lsc.Lang.Word
 
 /-!
 # IERC20 may-model
@@ -88,8 +89,10 @@ slot 0 (`keccak(abi.encode(o, 0))`); `decimals` at scalar slot 1. -/
 def IERC20.balancesMappingSlot : Nat := 0
 def IERC20.decimalsSlot : Nat := 1
 
-/-- Field type of a bound token: definitionally `Address` so Core certificates stay `rfl`. -/
-abbrev IERC20.Ref : Type := Address
+/-- Field type of a bound token, indexed by the asset it denominates.
+A one-field structure (`Ref`) so `Ref IERC20 token0` and `Ref IERC20 token1`
+do not unify. -/
+abbrev IERC20.Ref (a : Asset) : Type := Lsc.Ref IERC20 a
 
 @[simp] theorem IERC20.model_eq : IERC20.model = model := rfl
 
@@ -111,48 +114,49 @@ namespace Lsc.Binding
 
 open Lsc.Stdlib
 
-variable {S X E ε : Type}
+variable {S X E ε : Type} {a : Asset}
 
 @[lsc_inline]
-def transfer (b : Binding IERC20 S X) (dst : Address) (amt : Nat) : Tx S X E ε Nat :=
-  Tx.call b .transfer [dst, amt]
+def transfer (b : Binding IERC20 S X) (dst : Address) (amt : Amount a) : Tx S X E ε Nat :=
+  Tx.call b .transfer [dst, amt.raw]
 
 @[lsc_inline]
-def transferFrom (b : Binding IERC20 S X) (src dst : Address) (amt : Nat) : Tx S X E ε Nat :=
-  Tx.call b .transferFrom [src, dst, amt]
+def transferFrom (b : Binding IERC20 S X) (src dst : Address) (amt : Amount a) : Tx S X E ε Nat :=
+  Tx.call b .transferFrom [src, dst, amt.raw]
 
 @[lsc_inline]
-def balanceOf (b : Binding IERC20 S X) (owner : Address) : Tx S X E ε Nat :=
-  Tx.call b .balanceOf [owner]
+def balanceOf (b : Binding IERC20 S X) (owner : Address) : Tx S X E ε (Amount a) :=
+  Amount.ofWord <$> Tx.call b .balanceOf [owner]
 
 @[lsc_inline]
-def decimals (b : Binding IERC20 S X) : Tx S X E ε Nat :=
+def decimals (b : Binding IERC20 S X) : Tx S X E ε Word :=
   Tx.call b .decimals []
 
 @[lsc_inline]
-def transferUnit (b : Binding IERC20 S X) (dst : Address) (amt : Nat) : Tx S X E ε Unit :=
-  Tx.callUnit b .transfer [dst, amt]
+def transferUnit (b : Binding IERC20 S X) (dst : Address) (amt : Amount a) : Tx S X E ε Unit :=
+  Tx.callUnit b .transfer [dst, amt.raw]
 
 @[lsc_inline]
-def transferFromUnit (b : Binding IERC20 S X) (src dst : Address) (amt : Nat) : Tx S X E ε Unit :=
-  Tx.callUnit b .transferFrom [src, dst, amt]
+def transferFromUnit (b : Binding IERC20 S X) (src dst : Address) (amt : Amount a) : Tx S X E ε Unit :=
+  Tx.callUnit b .transferFrom [src, dst, amt.raw]
 
-@[simp] theorem run_transfer (b : Binding IERC20 S X) (dst : Address) (amt : Nat)
+@[simp] theorem run_transfer (b : Binding IERC20 S X) (dst : Address) (amt : Amount a)
     (ctx : Ctx) (w : World S X E) :
     Tx.run (transfer (E := E) (ε := ε) b dst amt) ctx w =
-      Tx.run (Tx.call (E := E) (ε := ε) b Method.transfer [dst, amt]) ctx w :=
+      Tx.run (Tx.call (E := E) (ε := ε) b Method.transfer [dst, amt.raw]) ctx w :=
   rfl
 
-@[simp] theorem run_transferFrom (b : Binding IERC20 S X) (src dst : Address) (amt : Nat)
+@[simp] theorem run_transferFrom (b : Binding IERC20 S X) (src dst : Address) (amt : Amount a)
     (ctx : Ctx) (w : World S X E) :
     Tx.run (transferFrom (E := E) (ε := ε) b src dst amt) ctx w =
-      Tx.run (Tx.call (E := E) (ε := ε) b Method.transferFrom [src, dst, amt]) ctx w :=
+      Tx.run (Tx.call (E := E) (ε := ε) b Method.transferFrom [src, dst, amt.raw]) ctx w :=
   rfl
 
 @[simp] theorem run_balanceOf (b : Binding IERC20 S X) (owner : Address)
     (ctx : Ctx) (w : World S X E) :
-    Tx.run (balanceOf (E := E) (ε := ε) b owner) ctx w =
-      Tx.run (Tx.call (E := E) (ε := ε) b Method.balanceOf [owner]) ctx w :=
+    Tx.run (balanceOf (a := a) (E := E) (ε := ε) b owner) ctx w =
+      Tx.run (Amount.ofWord (a := a) <$>
+        Tx.call (E := E) (ε := ε) b Method.balanceOf [owner]) ctx w :=
   rfl
 
 @[simp] theorem run_decimals (b : Binding IERC20 S X) (ctx : Ctx) (w : World S X E) :
@@ -160,28 +164,28 @@ def transferFromUnit (b : Binding IERC20 S X) (src dst : Address) (amt : Nat) : 
       Tx.run (Tx.call (E := E) (ε := ε) b Method.decimals []) ctx w :=
   rfl
 
-@[simp] theorem run_transferUnit (b : Binding IERC20 S X) (dst : Address) (amt : Nat)
+@[simp] theorem run_transferUnit (b : Binding IERC20 S X) (dst : Address) (amt : Amount a)
     (ctx : Ctx) (w : World S X E) :
     Tx.run (transferUnit (E := E) (ε := ε) b dst amt) ctx w =
-      Tx.run (Tx.callUnit (E := E) (ε := ε) b Method.transfer [dst, amt]) ctx w :=
+      Tx.run (Tx.callUnit (E := E) (ε := ε) b Method.transfer [dst, amt.raw]) ctx w :=
   rfl
 
-@[simp] theorem transferUnit_run (b : Binding IERC20 S X) (dst : Address) (amt : Nat)
+@[simp] theorem transferUnit_run (b : Binding IERC20 S X) (dst : Address) (amt : Amount a)
     (ctx : Ctx) (w : World S X E) :
     (transferUnit (E := E) (ε := ε) b dst amt).run ctx w =
-      (Tx.callUnit (E := E) (ε := ε) b Method.transfer [dst, amt]).run ctx w :=
+      (Tx.callUnit (E := E) (ε := ε) b Method.transfer [dst, amt.raw]).run ctx w :=
   rfl
 
-@[simp] theorem run_transferFromUnit (b : Binding IERC20 S X) (src dst : Address) (amt : Nat)
+@[simp] theorem run_transferFromUnit (b : Binding IERC20 S X) (src dst : Address) (amt : Amount a)
     (ctx : Ctx) (w : World S X E) :
     Tx.run (transferFromUnit (E := E) (ε := ε) b src dst amt) ctx w =
-      Tx.run (Tx.callUnit (E := E) (ε := ε) b Method.transferFrom [src, dst, amt]) ctx w :=
+      Tx.run (Tx.callUnit (E := E) (ε := ε) b Method.transferFrom [src, dst, amt.raw]) ctx w :=
   rfl
 
-@[simp] theorem transferFromUnit_run (b : Binding IERC20 S X) (src dst : Address) (amt : Nat)
+@[simp] theorem transferFromUnit_run (b : Binding IERC20 S X) (src dst : Address) (amt : Amount a)
     (ctx : Ctx) (w : World S X E) :
     (transferFromUnit (E := E) (ε := ε) b src dst amt).run ctx w =
-      (Tx.callUnit (E := E) (ε := ε) b Method.transferFrom [src, dst, amt]).run ctx w :=
+      (Tx.callUnit (E := E) (ε := ε) b Method.transferFrom [src, dst, amt.raw]).run ctx w :=
   rfl
 
 end Lsc.Binding

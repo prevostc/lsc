@@ -1,4 +1,5 @@
 import Mathlib.Logic.Equiv.Defs
+import Lsc.Lang.Amount
 import Lsc.Lang.Tx
 
 /-!
@@ -33,6 +34,22 @@ structure Interface where
   model : Method → Address → List Nat → Ghost → Option (Nat × Ghost)
   abi : Method → AbiSpec
   idx : Method ≃ Fin n
+
+/-- A storage slot holding a callee of interface `I` that denominates asset `a`.
+One-field structure so `Ref I token0` and `Ref I token1` do not unify. -/
+structure Ref (I : Interface) (a : Asset) where
+  addr : Address
+  deriving Repr
+
+namespace Ref
+variable {I : Interface} {a : Asset}
+instance : DecidableEq (Ref I a) := fun x y =>
+  if h : x.addr = y.addr then
+    isTrue (by cases x; cases y; subst h; rfl)
+  else
+    isFalse (by intro h'; cases x; cases y; exact h (Ref.mk.inj h'))
+instance : Inhabited (Ref I a) := ⟨⟨(0 : Address)⟩⟩
+end Ref
 
 /-- Static binding of an interface: address lives in our storage, ghost in `World.ext`. -/
 structure Binding (I : Interface) (S X : Type) where

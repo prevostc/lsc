@@ -249,6 +249,9 @@ theorem noExt_letOp_m1 {c : ContractDef} {e : Emit} {d : Nat} {op : Lsc.Op} {e' 
     simp [emitLetOp] at h1; cases h1
     exact noExt_mulDivUp e _ (atomE tag d a) (atomE tag d b) (atomE tag d c) he
       (noExt_atomE tag d a) (noExt_atomE tag d b) (noExt_atomE tag d c)
+  | pow10 a =>
+    simp [emitLetOp] at h1; cases h1
+    exact noExt_pow10 e _ (atomE tag d a) he (noExt_atomE tag d a)
   | pure a =>
     simp [emitLetOp] at h1; cases h1
     exact noExt_let he (noExt_atomE tag d a)
@@ -444,6 +447,11 @@ theorem m1op_preserves_ghost {S X E ε} {Γ : ContractSchema S X E ε}
             if a.eval env * b.eval env % c.eval env = 0 then 0 else 1, w)
         else .error (.arith .overflow) := rfl
     rw [hred] at hok; split_ifs at hok <;> cases hok <;> simp
+  | pow10 d =>
+    have hred : Lsc.Op.denote Γ env (.pow10 d) ctx w =
+        if d.eval env > Tx.pow10Max then .error (.arith .overflow)
+        else .ok (10 ^ d.eval env, w) := rfl
+    rw [hred] at hok; split at hok <;> cases hok <;> simp
   | pure a =>
     have hred : Lsc.Op.denote Γ env (.pure a) ctx w = .ok (a.eval env, w) := rfl
     rw [hred] at hok; cases hok; simp

@@ -1,4 +1,5 @@
 import Lsc.Lang.Tx
+import Lsc.Lang.Word
 import Lsc.Lang.Amount
 import Lsc.Lang.Interface
 import Lsc.Lang.Core

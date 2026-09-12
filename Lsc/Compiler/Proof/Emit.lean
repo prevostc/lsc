@@ -177,6 +177,11 @@ theorem emitDivChecked_acc (e : Emit) (name : YIdent) (a b : YExpr) :
       { acc := (emitDivChecked {} name a b).acc ++ e.acc } := by
   simp [emitDivChecked, emitLet, emitIf, Emit.push]
 
+theorem emitPow10_acc (e : Emit) (name : YIdent) (d : YExpr) :
+    emitPow10 e name d =
+      { acc := (emitPow10 {} name d).acc ++ e.acc } := by
+  simp [emitPow10, emitLet, emitIf, Emit.push]
+
 theorem emitMulDivDown_acc (e : Emit) (name : YIdent) (a b c : YExpr) :
     emitMulDivDown e name a b c =
       { acc := (emitMulDivDown {} name a b c).acc ++ e.acc } := by
@@ -233,6 +238,8 @@ theorem emitLetOp_acc (c : ContractDef) (e : Emit) (d : Nat) (op : Lsc.Op) :
     simp only [emitLetOp, Option.map_some]; exact congrArg some (emitMulDivDown_acc _ _ _ _ _)
   | mulDivUp _ _ _ =>
     simp only [emitLetOp, Option.map_some]; exact congrArg some (emitMulDivUp_acc _ _ _ _ _)
+  | pow10 _ =>
+    simp only [emitLetOp, Option.map_some]; exact congrArg some (emitPow10_acc _ _ _)
   | call b m args =>
     simp only [emitLetOp, Option.map_some]; exact congrArg some (emitExtCall_acc tag _ _ _ _ _ _ _)
 
@@ -461,6 +468,10 @@ theorem noFun_divChecked (e : Emit) (name : YIdent) (a b : YExpr) (he : e.noFun)
     (emitDivChecked e name a b).noFun := by
   simp only [emitDivChecked]; exact noFun_let (noFun_if he)
 
+theorem noFun_pow10 (e : Emit) (name : YIdent) (d : YExpr) (he : e.noFun) :
+    (emitPow10 e name d).noFun := by
+  simp only [emitPow10]; exact noFun_let (noFun_if he)
+
 theorem noFun_mulDivDown (e : Emit) (name : YIdent) (a b c : YExpr) (he : e.noFun) :
     (emitMulDivDown e name a b c).noFun := by
   simp only [emitMulDivDown, emitMulOverflowGuard]
@@ -501,6 +512,7 @@ theorem noFun_letOp (c : ContractDef) (e : Emit) (d : Nat) (op : Lsc.Op) (he : e
   | divChecked _ _ => simp [emitLetOp] at h1; cases h1; exact noFun_divChecked _ _ _ _ he
   | mulDivDown _ _ _ => simp [emitLetOp] at h1; cases h1; exact noFun_mulDivDown _ _ _ _ _ he
   | mulDivUp _ _ _ => simp [emitLetOp] at h1; cases h1; exact noFun_mulDivUp _ _ _ _ _ he
+  | pow10 _ => simp [emitLetOp] at h1; cases h1; exact noFun_pow10 _ _ _ he
   | call b m args => simp [emitLetOp] at h1; cases h1; exact noFun_extCall tag _ _ _ _ _ _ _ he
 
 theorem noFun_stmt tag (c : ContractDef) (e : Emit) (d : Nat) (s : Lsc.Stmt) (he : e.noFun) :
@@ -883,6 +895,17 @@ theorem noExt_divChecked (e : Emit) (name : YIdent) (a b : YExpr)
       (noExt_panic {} 0x12 noExt_nil))
     (noExt_bop (op := YulSemantics.EVM.Op.div) rfl
       (noExtExprs_cons_true ha (noExtExprs_cons_true hb noExtExprs_nil)))
+
+theorem noExt_pow10 (e : Emit) (name : YIdent) (d : YExpr)
+    (he : noExtBlock e.stmts = true) (hd : noExtExpr d = true) :
+    noExtBlock (emitPow10 e name d).stmts = true := by
+  simp only [emitPow10]
+  exact noExt_let (noExt_if he
+      (noExt_bop (op := YulSemantics.EVM.Op.gt) rfl
+        (noExtExprs_cons_true hd (noExtExprs_cons_true (noExt_lit 77) noExtExprs_nil)))
+      (noExt_panic {} 0x11 noExt_nil))
+    (noExt_bop (op := YulSemantics.EVM.Op.exp) rfl
+      (noExtExprs_cons_true (noExt_lit 10) (noExtExprs_cons_true hd noExtExprs_nil)))
 
 theorem noExt_mulDivDown (e : Emit) (name : YIdent) (a b c : YExpr)
     (he : noExtBlock e.stmts = true) (ha : noExtExpr a = true)

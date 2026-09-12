@@ -19,7 +19,7 @@ def M1Op : Lsc.Op → Prop
   | .load _ | .loadMap _ _ | .loadMap2 _ _ _ => True
   | .sender | .value | .timestamp | .blockNumber | .selfAddress => True
   | .addChecked _ _ | .subChecked _ _ | .mulChecked _ _ | .divChecked _ _ => True
-  | .mulDivDown _ _ _ | .mulDivUp _ _ _ | .pure _ => True
+  | .mulDivDown _ _ _ | .mulDivUp _ _ _ | .pow10 _ | .pure _ => True
   | _ => False
 
 def M1Cond : Lsc.Cond → Prop

@@ -1,3 +1,4 @@
+import Lsc.Lang.Word
 import Lsc.Lang.Amount
 
 /-!
@@ -23,8 +24,9 @@ which `lsc_schema` generates from the user's Lean `structure`/`inductive`s. Ever
 `denote` is *literally* the surface primitive applied to evaluated atoms, which is what
 makes `Core.denote (reify f) = f` hold by `rfl` for word-typed programs whose `bind`
 nesting already matches the ANF, and by the `Tx` monad laws when an `@[lsc_inline]`
-helper sits mid-`do`. Amount-typed surface programs use `denoteAWord` / `denoteAUnit`
-(same Core AST; `ofNat` at each op rather than `Functor.map` over the whole `Tx`).
+helper sits mid-`do`. `Amount a` / `Fixed d` are one-field structures over `Word`;
+Reify erases `.raw` / `ofWord` and certificates of Amount-returning functions are
+`Amount.ofWord <$> Core.denote`.
 -/
 
 namespace Lsc
@@ -106,6 +108,7 @@ inductive Op
   | divChecked (a b : Atom)
   | mulDivDown (a b c : Atom)
   | mulDivUp (a b c : Atom)
+  | pow10 (d : Atom)
   | call (b m : Nat) (args : List Atom)
   | pure (a : Atom)
   deriving DecidableEq, Repr, Lean.ToExpr
@@ -219,6 +222,7 @@ def Op.denote (Γ : ContractSchema S X E ε) (env : List Nat) : Op → Tx S X E 
   | .divChecked a b => Tx.divChecked (a.eval env) (b.eval env)
   | .mulDivDown a b c => Tx.mulDivDown (a.eval env) (b.eval env) (c.eval env)
   | .mulDivUp a b c => Tx.mulDivUp (a.eval env) (b.eval env) (c.eval env)
+  | .pow10 d => Tx.pow10 (d.eval env)
   | .call b m args => Γ.ext.call b m (args.map (·.eval env))
   | .pure a => Pure.pure (a.eval env)
 
@@ -243,120 +247,6 @@ def Core.denote (Γ : ContractSchema S X E ε) : {t : RetTy} → Core t → List
   | _, .seq s k, env => Stmt.denote Γ env s >>= fun _ => Core.denote Γ k env
   | _, .letPure p args k, env => Core.denote Γ k (Prim.eval p (args.map (·.eval env)) :: env)
   | _, .ite c a b, env => if c.denote env then Core.denote Γ a env else Core.denote Γ b env
-
-/-! ## Amount-shaped denotation
-
-`Core.denote` is a language of words. An `Amount`-typed surface program has the same
-word operations, but each load/add/store carries `ofNat`/`toNat` in a different place
-than `Functor.map` over the whole `Tx`. Those two nestings are not definitionally
-equal (kernel `rfl` does not push `bind` through `ite`).
-
-`denoteA` interprets word ops as `Amount τ s` (the same `Amount.add` / `load` the
-surface used) and uses `map1Set` so mapping writes are `Function.update` on the
-Amount-valued field. Certificates are `denoteAWord` / `denoteAUnit` `= f` by `rfl`
-(or the `Tx` monad laws, same as `denote`).
-The compiler still uses `denote` (Nat); the two agree on the underlying words. -/
-
-def Op.denoteA {τ : Type} {scale : Nat} (Γ : ContractSchema S X E ε) (env : List Nat) :
-    Op → Tx S X E ε (Amount τ scale)
-  | .load f => Tx.load (fun σ => Amount.ofNat (Γ.st.scalar f σ))
-  | .loadMap f k => Tx.loadMap (fun σ key => Amount.ofNat (Γ.st.map1 f σ key)) (k.eval env)
-  | .loadMap2 f k₁ k₂ =>
-      Tx.loadMap2 (fun σ a b => Amount.ofNat (Γ.st.map2 f σ a b)) (k₁.eval env) (k₂.eval env)
-  | .addChecked a b => Amount.add (Amount.ofNat (a.eval env)) (Amount.ofNat (b.eval env))
-  | .subChecked a b => Amount.sub (Amount.ofNat (a.eval env)) (Amount.ofNat (b.eval env))
-  | .mulChecked a b =>
-      fun _ w =>
-        if a.eval env * b.eval env < wordBound then
-          .ok (Amount.ofNat (a.eval env * b.eval env), w)
-        else .error (.arith .overflow)
-  | .divChecked a b =>
-      fun _ w =>
-        if b.eval env ≠ 0 then .ok (Amount.ofNat (a.eval env / b.eval env), w)
-        else .error (.arith .divByZero)
-  | .mulDivDown a b c =>
-      -- Same `(τ, s)` as the result; mixed-unit `shareDown` (Vault assets vs shares) needs a
-      -- richer interp than a single `denoteAWord` annotation.
-      Amount.shareDown (τ' := τ) (s' := scale)
-        (Amount.ofNat (a.eval env)) (Amount.ofNat (b.eval env)) (Amount.ofNat (c.eval env))
-  | .mulDivUp a b c =>
-      Amount.shareUp (τ' := τ) (s' := scale)
-        (Amount.ofNat (a.eval env)) (Amount.ofNat (b.eval env)) (Amount.ofNat (c.eval env))
-  | .pure a => Pure.pure (Amount.ofNat (a.eval env))
-  | .sender | .value | .timestamp | .blockNumber | .selfAddress | .call .. =>
-      fun _ _ => .error .callFailed
-
-def Stmt.denoteA (Γ : ContractSchema S X E ε) (env : List Nat) : Stmt → Tx S X E ε Unit
-  | .store f v => Tx.store (Γ.st.scalarUpd f) (v.eval env)
-  | .storeMap f k v =>
-      fun _ w =>
-        .ok ((), { w with self := Γ.st.map1Set f w.self (k.eval env) (v.eval env) })
-  | .storeMap2 f k₁ k₂ v =>
-      fun _ w =>
-        .ok ((), { w with
-          self := Γ.st.map2Set f w.self (k₁.eval env) (k₂.eval env) (v.eval env) })
-  | .require c err args => Tx.require (c.denote env) (Γ.err.build err (args.map (·.eval env)))
-  | .emit ev args => Tx.emit (Γ.ev.build ev (args.map (·.eval env)))
-  | .revert err args => Tx.revert (Γ.err.build err (args.map (·.eval env)))
-  | .call b m args => Γ.ext.call b m (args.map (·.eval env)) >>= fun _ => pure ()
-
-/-- Amount-returning interp. Indexed on the full `Core` family (like `Core.denote`) so the
-equation compiler emits `brecOn`, which reduces. A definition on `Core .word` alone is
-well-founded `fix` and `@[irreducible]`. Dummy on non-`.word` constructors. -/
-def Core.denoteAWord {τ : Type} {scale : Nat} (Γ : ContractSchema S X E ε) :
-    {t : RetTy} → Core t → List Nat → Tx S X E ε (Amount τ scale)
-  | _, .ret (.word a), env => pure (Amount.ofNat (a.eval env))
-  | _, .opTail op, env => Op.denoteA (τ := τ) (scale := scale) Γ env op
-  | _, .revertTail err args, env => Tx.revert (Γ.err.build err (args.map (·.eval env)))
-  | _, .letOp op k, env =>
-      match op with
-      -- Word ops whose surface is `Tx.* >>= fun r => pure (ofNat r)` (inlined
-      -- `Amount.mulDown`, …). `opTail` still uses `Op.denoteA` / `shareDown`.
-      | .sender | .value | .timestamp | .blockNumber | .selfAddress | .call ..
-        | .mulDivDown .. | .mulDivUp .. =>
-          Op.denote Γ env op >>= fun v =>
-            Core.denoteAWord (τ := τ) (scale := scale) Γ k (v :: env)
-      | _ =>
-          Op.denoteA (τ := τ) (scale := scale) Γ env op >>= fun a =>
-            Core.denoteAWord (τ := τ) (scale := scale) Γ k (a.toNat :: env)
-  | _, .seq st k, env =>
-      Stmt.denoteA Γ env st >>= fun _ => Core.denoteAWord (τ := τ) (scale := scale) Γ k env
-  | _, .letPure p args k, env =>
-      Core.denoteAWord (τ := τ) (scale := scale) Γ k (Prim.eval p (args.map (·.eval env)) :: env)
-  | _, .ite c a b, env =>
-      if c.denote env then Core.denoteAWord (τ := τ) (scale := scale) Γ a env
-      else Core.denoteAWord (τ := τ) (scale := scale) Γ b env
-  | _, .ret _, _ => fun _ _ => .error .callFailed
-  | _, .opTailAddr _, _ => fun _ _ => .error .callFailed
-  | _, .opTailFlag _, _ => fun _ _ => .error .callFailed
-  | _, .stmtTail _, _ => fun _ _ => .error .callFailed
-
-/-- Unit-returning interp with Amount-shaped word ops. Same family-indexing as `denoteAWord`. -/
-def Core.denoteAUnit {τ : Type} {scale : Nat} (Γ : ContractSchema S X E ε) :
-    {t : RetTy} → Core t → List Nat → Tx S X E ε Unit
-  | _, .ret .unit, _env => pure ()
-  | _, .stmtTail st, env => Stmt.denoteA Γ env st
-  | _, .revertTail err args, env => Tx.revert (Γ.err.build err (args.map (·.eval env)))
-  | _, .letOp op k, env =>
-      match op with
-      | .sender | .value | .timestamp | .blockNumber | .selfAddress | .call ..
-        | .mulDivDown .. | .mulDivUp .. =>
-          Op.denote Γ env op >>= fun v =>
-            Core.denoteAUnit (τ := τ) (scale := scale) Γ k (v :: env)
-      | _ =>
-          Op.denoteA (τ := τ) (scale := scale) Γ env op >>= fun a =>
-            Core.denoteAUnit (τ := τ) (scale := scale) Γ k (a.toNat :: env)
-  | _, .seq st k, env =>
-      Stmt.denoteA Γ env st >>= fun _ => Core.denoteAUnit (τ := τ) (scale := scale) Γ k env
-  | _, .letPure p args k, env =>
-      Core.denoteAUnit (τ := τ) (scale := scale) Γ k (Prim.eval p (args.map (·.eval env)) :: env)
-  | _, .ite c a b, env =>
-      if c.denote env then Core.denoteAUnit (τ := τ) (scale := scale) Γ a env
-      else Core.denoteAUnit (τ := τ) (scale := scale) Γ b env
-  | _, .ret _, _ => fun _ _ => .error .callFailed
-  | _, .opTail _, _ => fun _ _ => .error .callFailed
-  | _, .opTailAddr _, _ => fun _ _ => .error .callFailed
-  | _, .opTailFlag _, _ => fun _ _ => .error .callFailed
 
 /-! ## Renaming (used by the reifier to eliminate join points) -/
 
@@ -398,6 +288,7 @@ def Op.rename (ρ : Nat → Atom) : Op → Op
   | .divChecked a b => .divChecked (a.rename ρ) (b.rename ρ)
   | .mulDivDown a b c => .mulDivDown (a.rename ρ) (b.rename ρ) (c.rename ρ)
   | .mulDivUp a b c => .mulDivUp (a.rename ρ) (b.rename ρ) (c.rename ρ)
+  | .pow10 d => .pow10 (d.rename ρ)
   | .call b m args => .call b m (args.map (·.rename ρ))
   | .pure a => .pure (a.rename ρ)
 

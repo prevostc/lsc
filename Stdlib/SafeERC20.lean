@@ -19,7 +19,7 @@ namespace Lsc.Binding
 
 open Lsc Lsc.Stdlib
 
-variable {S X E ε : Type}
+variable {S X E ε : Type} {a : Asset}
 
 /-- Revert on `false` (`0`) after a successful CALL; keep `callFailed` on fault/`none`. -/
 @[lsc_inline]
@@ -29,14 +29,14 @@ def checkOk (x : Tx S X E ε Nat) (err : ε) : Tx S X E ε Unit := do
 
 /-- Pull `amt` to `dst`; revert unless the CALL returns a non-zero word. -/
 @[lsc_inline]
-def safeTransfer (b : Binding IERC20 S X) (dst : Address) (amt : Nat) (err : ε) :
+def safeTransfer (b : Binding IERC20 S X) (dst : Address) (amt : Amount a) (err : ε) :
     Tx S X E ε Unit :=
   checkOk (transfer b dst amt) err
 
 /-- Pull `amt` from `src` to `dst`; revert unless the CALL returns a non-zero word. -/
 @[lsc_inline]
-def safeTransferFrom (b : Binding IERC20 S X) (src dst : Address) (amt : Nat) (err : ε) :
-    Tx S X E ε Unit :=
+def safeTransferFrom (b : Binding IERC20 S X) (src dst : Address) (amt : Amount a)
+    (err : ε) : Tx S X E ε Unit :=
   checkOk (transferFrom b src dst amt) err
 
 /-- Same bool-check as `safeTransfer`; `x` is the approve-shaped CALL. -/
@@ -53,14 +53,14 @@ def safeApprove (x : Tx S X E ε Nat) (err : ε) : Tx S X E ε Unit :=
   simp [checkOk]
   cases Tx.run x ctx w <;> rfl
 
-@[simp] theorem run_safeTransfer (b : Binding IERC20 S X) (dst : Address) (amt : Nat)
+@[simp] theorem run_safeTransfer (b : Binding IERC20 S X) (dst : Address) (amt : Amount a)
     (err : ε) (ctx : Ctx) (w : World S X E) :
     Tx.run (safeTransfer (E := E) b dst amt err) ctx w =
       Tx.run (checkOk (transfer b dst amt) err) ctx w :=
   rfl
 
-@[simp] theorem run_safeTransferFrom (b : Binding IERC20 S X) (src dst : Address) (amt : Nat)
-    (err : ε) (ctx : Ctx) (w : World S X E) :
+@[simp] theorem run_safeTransferFrom (b : Binding IERC20 S X) (src dst : Address)
+    (amt : Amount a) (err : ε) (ctx : Ctx) (w : World S X E) :
     Tx.run (safeTransferFrom (E := E) b src dst amt err) ctx w =
       Tx.run (checkOk (transferFrom b src dst amt) err) ctx w :=
   rfl

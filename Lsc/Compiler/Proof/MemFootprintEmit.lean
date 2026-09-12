@@ -274,6 +274,19 @@ theorem staticSafe_emitDivChecked (e : Emit) (name : YIdent) (a b : YExpr)
   exact staticSafe_emitLet _ name (bop Op.div [a, b]) hi
     (by simp [bop, staticSafeExpr_builtin, staticSafeOp, staticSafeExprs, ha, hb])
 
+theorem staticSafe_emitPow10 (e : Emit) (name : YIdent) (d : YExpr)
+    (he : staticSafeStmts memoryGuardK e.stmts = true)
+    (hd : staticSafeExpr memoryGuardK d = true) :
+    staticSafeStmts memoryGuardK (emitPow10 e name d).stmts = true := by
+  unfold emitPow10
+  have hi := staticSafe_emitIf e (bop Op.gt [d, lit 77]) (emitPanic {} 0x11).stmts he
+    (by simp [bop, staticSafeExpr_builtin, staticSafeOp, staticSafeExprs, hd,
+      staticSafeExpr_lit'])
+    (staticSafe_panicStmts _)
+  exact staticSafe_emitLet _ name (bop Op.exp [lit 10, d]) hi
+    (by simp [bop, staticSafeExpr_builtin, staticSafeOp, staticSafeExprs, hd,
+      staticSafeExpr_lit'])
+
 theorem staticSafe_emitMulDivDown (e : Emit) (name : YIdent) (a b c : YExpr)
     (he : staticSafeStmts memoryGuardK e.stmts = true)
     (ha : staticSafeExpr memoryGuardK a = true)
@@ -481,6 +494,9 @@ theorem staticSafe_emitLetOp (c : ContractDef) (e : Emit) (d : Nat) (op : Lsc.Op
     simp only [emitLetOp, Option.some.injEq] at h; subst e'
     exact staticSafe_emitMulDivUp e _ (atomE tag d a) (atomE tag d b) (atomE tag d c) he
       (staticSafe_atomE _ _ _ _) (staticSafe_atomE _ _ _ _) (staticSafe_atomE _ _ _ _)
+  | pow10 a =>
+    simp only [emitLetOp, Option.some.injEq] at h; subst e'
+    exact staticSafe_emitPow10 e _ (atomE tag d a) he (staticSafe_atomE _ _ _ _)
   | pure a =>
     simp only [emitLetOp, Option.some.injEq] at h; subst e'
     exact staticSafe_emitLet e _ (atomE tag d a) he (staticSafe_atomE _ _ _ _)

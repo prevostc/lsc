@@ -44,7 +44,7 @@ def m1OpB : Lsc.Op → Bool
   | .load _ | .loadMap _ _ | .loadMap2 _ _ _ => true
   | .sender | .value | .timestamp | .blockNumber | .selfAddress => true
   | .addChecked _ _ | .subChecked _ _ | .mulChecked _ _ | .divChecked _ _ => true
-  | .mulDivDown _ _ _ | .mulDivUp _ _ _ | .pure _ => true
+  | .mulDivDown _ _ _ | .mulDivUp _ _ _ | .pow10 _ | .pure _ => true
   | .call _ _ _ => false
 
 def m1StmtB : Lsc.Stmt → Bool

@@ -100,6 +100,11 @@ theorem m1op_world {S X E ε} {Γ : ContractSchema S X E ε}
     rw [hred] at hok
     split_ifs at hok <;> try cases hok
     all_goals rfl
+  | pow10 d =>
+    have hred : Lsc.Op.denote Γ env (.pow10 d) ctx w =
+        if d.eval env > Tx.pow10Max then .error (.arith .overflow)
+        else .ok (10 ^ d.eval env, w) := rfl
+    rw [hred] at hok; split at hok <;> cases hok; rfl
   | pure a =>
     have hred : Lsc.Op.denote Γ env (.pure a) ctx w = .ok (a.eval env, w) := rfl
     rw [hred] at hok; cases hok; rfl
@@ -224,6 +229,14 @@ theorem m1op_run_faults {S X E ε} {Γ : ContractSchema S X E ε}
           .ok (a.eval env * b.eval env / c.eval env +
             if a.eval env * b.eval env % c.eval env = 0 then 0 else 1, w)
         else .error (.arith .overflow) := rfl
+    simp [h1, h2]; split_ifs <;> rfl
+  | pow10 d =>
+    have h1 : Tx.run (Lsc.Op.denote Γ env (.pow10 d)) ctx { w with faults := fo } =
+        if d.eval env > Tx.pow10Max then .error (.arith .overflow)
+        else .ok (10 ^ d.eval env, { w with faults := fo }) := rfl
+    have h2 : Tx.run (Lsc.Op.denote Γ env (.pow10 d)) ctx w =
+        if d.eval env > Tx.pow10Max then .error (.arith .overflow)
+        else .ok (10 ^ d.eval env, w) := rfl
     simp [h1, h2]; split_ifs <;> rfl
 
 theorem m1stmt_run_faults {S X E ε} {Γ : ContractSchema S X E ε}

@@ -205,6 +205,7 @@ def opWF (c : ContractDef) : Lsc.Op → Bool
   | .addChecked a b | .subChecked a b | .mulChecked a b | .divChecked a b =>
       atomWF a && atomWF b
   | .mulDivDown a b d | .mulDivUp a b d => atomWF a && atomWF b && atomWF d
+  | .pow10 d => atomWF d
   | .call b m args => callWF c b m args
   | .pure a => atomWF a
 
@@ -498,6 +499,11 @@ def emitMulChecked (e : Emit) (name : YIdent) (a b : YExpr) : Emit :=
   let e := emitLet e name (bop YulSemantics.EVM.Op.mul [a, b])
   emitMulOverflowGuard e a b (var name)
 
+/-- `if gt(d, 77) { panic 0x11 }` then `let name := exp(10, d)`. -/
+def emitPow10 (e : Emit) (name : YIdent) (d : YExpr) : Emit :=
+  let e := emitIf e (bop YulSemantics.EVM.Op.gt [d, lit 77]) (emitPanic {} 0x11).stmts
+  emitLet e name (bop YulSemantics.EVM.Op.exp [lit 10, d])
+
 /-- `if iszero(b) { panic 0x12 }` then `let name := div(a,b)`. -/
 def emitDivChecked (e : Emit) (name : YIdent) (a b : YExpr) : Emit :=
   let e := emitIf e (bop YulSemantics.EVM.Op.iszero [b]) (emitPanic {} 0x12).stmts
@@ -618,6 +624,8 @@ def emitLetOp (tag : String) (c : ContractDef) (e : Emit) (depth : Nat) : Lsc.Op
       some (emitMulDivDown e (identV tag depth) (atomE tag depth a) (atomE tag depth b) (atomE tag depth d))
   | .mulDivUp a b d =>
       some (emitMulDivUp e (identV tag depth) (atomE tag depth a) (atomE tag depth b) (atomE tag depth d))
+  | .pow10 d =>
+      some (emitPow10 e (identV tag depth) (atomE tag depth d))
   | .pure a => some (emitLet e (identV tag depth) (atomE tag depth a))
   | .call b m args => some (emitExtCall tag c e depth b m args (some (identV tag depth)))
 

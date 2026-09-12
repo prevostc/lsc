@@ -157,6 +157,33 @@ def mulChecked (a b : Nat) : Tx S X E ε Nat :=
 def divChecked (a b : Nat) : Tx S X E ε Nat :=
   fun _ w => if b ≠ 0 then .ok (a / b, w) else .error (.arith .divByZero)
 
+/-! ### Checked arithmetic class (`Word`, `Amount a`, and `Fixed d` share `+? -? *? /?`) -/
+
+/-- Checked add: same type on both sides, revert on overflow. -/
+class HAddChecked (α β : Type) (γ : outParam Type) where
+  hAdd {S X E ε : Type} : α → β → Tx S X E ε γ
+
+/-- Checked subtract: same type on both sides, revert on underflow. -/
+class HSubChecked (α β : Type) (γ : outParam Type) where
+  hSub {S X E ε : Type} : α → β → Tx S X E ε γ
+
+/-- Checked multiply. `Amount a *? Word` scales; `Amount a *? Amount b` is not an instance. -/
+class HMulChecked (α β : Type) (γ : outParam Type) where
+  hMul {S X E ε : Type} : α → β → Tx S X E ε γ
+
+/-- Checked divide. `Amount a /? Word` scales; `Amount a /? Amount b` is not an instance. -/
+class HDivChecked (α β : Type) (γ : outParam Type) where
+  hDiv {S X E ε : Type} : α → β → Tx S X E ε γ
+
+instance : HAddChecked Nat Nat Nat where
+  hAdd := addChecked
+instance : HSubChecked Nat Nat Nat where
+  hSub := subChecked
+instance : HMulChecked Nat Nat Nat where
+  hMul := mulChecked
+instance : HDivChecked Nat Nat Nat where
+  hDiv := divChecked
+
 /-! ### Wrapping arithmetic (pure, exactly the EVM) -/
 
 def addWrap (a b : Nat) : Nat := (a + b) % wordBound
@@ -335,6 +362,23 @@ theorem map_eq_pure_bind {β : Type} (f : α → β) (x : Tx S X E ε α) :
   change run (f <$> x) ctx w = run (x >>= fun a => pure (f a)) ctx w
   simp only [run_map, run_bind, run_pure]
 
+/-- `map` slides inside `bind`. Needed when an Amount-returning function is
+`ofWord <$>` a Core sequence, while the surface mapped each `balanceOf`. -/
+theorem map_bind {β γ : Type} (f : β → γ) (x : Tx S X E ε α) (k : α → Tx S X E ε β) :
+    f <$> (x >>= k) = x >>= fun a => f <$> k a := by
+  funext ctx w
+  change run (f <$> (x >>= k)) ctx w = run (x >>= fun a => f <$> k a) ctx w
+  simp only [run_map, run_bind]
+  cases run x ctx w <;> rfl
+
+/-- Binding after `map` applies `k` to the mapped value. -/
+theorem bind_map {β γ : Type} (f : α → β) (x : Tx S X E ε α) (k : β → Tx S X E ε γ) :
+    (f <$> x) >>= k = x >>= fun a => k (f a) := by
+  funext ctx w
+  change run ((f <$> x) >>= k) ctx w = run (x >>= fun a => k (f a)) ctx w
+  simp only [run_map, run_bind]
+  cases run x ctx w <;> rfl
+
 end Tx
 
 /-! Post-world of a `Tx`: success keeps the returned world, revert keeps `w`.
@@ -395,10 +439,10 @@ macro_rules
       `(Lsc.Tx.storeMap2 (fun $sigma => $(projOf f)) (fun $sigma m => { $sigma with $f:ident := m }) $k₁ $k₂ $v)
     | _ => Macro.throwError "write: mappings have one or two keys"
 
-scoped infixl:65 " +? " => Lsc.Tx.addChecked
-scoped infixl:65 " -? " => Lsc.Tx.subChecked
-scoped infixl:70 " *? " => Lsc.Tx.mulChecked
-scoped infixl:70 " /? " => Lsc.Tx.divChecked
+scoped infixl:65 " +? " => Lsc.Tx.HAddChecked.hAdd
+scoped infixl:65 " -? " => Lsc.Tx.HSubChecked.hSub
+scoped infixl:70 " *? " => Lsc.Tx.HMulChecked.hMul
+scoped infixl:70 " /? " => Lsc.Tx.HDivChecked.hDiv
 scoped infixl:65 " +↻ " => Lsc.Tx.addWrap
 scoped infixl:65 " -↻ " => Lsc.Tx.subWrap
 scoped infixl:70 " *↻ " => Lsc.Tx.mulWrap

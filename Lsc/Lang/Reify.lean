@@ -11,12 +11,13 @@ user's Lean types, plus `C.schema_lawful : C.schema.st.Lawful …`, and `lsc_rei
 `C.f : … → Tx C.Storage C.Ext C.Event C.Error ρ` (or `Unit` when there is no `Ext`) into
 
 * `C.f.core : Core t` — the Core AST, and
-* `C.f.core_denote` — `Core.denote C.schema C.f.core [args] = C.f args` for word-typed
-  programs, or `Core.denoteAWord` / `Core.denoteAUnit` when the surface returns
-  `Amount` or has `Amount` storage. Proved by `rfl` when the sides are
-  definitionally equal; otherwise by the `Tx` monad laws (`bind` is not
-  definitionally associative, so an `@[lsc_inline]` helper mid-`do` needs them).
-  A propositional certificate is not a trust extension: the kernel still checks
+* `C.f.core_denote` — `Core.denote C.schema C.f.core [args] = C.f args`
+  for word/address/flag/unit programs. Amount-returning functions certify
+  `Amount.ofWord <$> Core.denote = f`. Proved by `rfl`
+  when the sides are definitionally equal;
+  otherwise by the `Tx` monad laws (`bind` is not definitionally associative,
+  so an `@[lsc_inline]` helper mid-`do` needs them). A propositional
+  certificate is not a trust extension: the kernel still checks
   `denote (reify f) = f`.
 
 `lsc_contract C f₁ … fₙ` additionally defines `C.contract` and a
@@ -100,30 +101,15 @@ def fieldKindAndVal (ty : Expr) : MetaM (FieldKind × Expr) :=
     | 2 => pure (.map2, val)
     | n => throwError "storage field with {n} keys is not supported (max 2)"
 
-/-- Unfold abbrevs such as `abbrev Dai := Amount …`. -/
-def whnfAmount? (ty : Expr) : MetaM (Option (Expr × Expr)) := do
+/-- Unfold abbrevs such as `Fixed d`. `Amount a` is a one-field structure. -/
+def isAmountTy (ty : Expr) : MetaM Bool := do
   let ty ← whnfD ty
-  if ty.isAppOfArity ``Lsc.Amount 2 then
-    return some (ty.getArg! 0, ty.getArg! 1)
-  else
-    return none
+  return ty.isAppOf ``Lsc.Amount
 
-def isAmountTy (ty : Expr) : MetaM Bool :=
-  return (← whnfAmount? ty).isSome
-
-/-- `some (τ, s)` when the certificate uses `Core.denoteAWord` / `Core.denoteAUnit`.
-Amount **return** always; Amount **storage** only for `Unit` returns (the first Amount
-field's `(τ, s)`). Nat/Flag/Addr returns stay on `Core.denote`, so
-`Vault.deposit : Amount → M Nat` is unchanged even if storage later becomes `Amount`. -/
-def amountAnnot (ci : ContractInfo) (ρ : Expr) : MetaM (Option (Expr × Expr)) := do
-  match ← whnfAmount? ρ with
-  | some ts => return some ts
-  | none =>
-    let ρ ← whnfR ρ
-    unless ρ.isConstOf ``Unit || ρ.isConstOf ``PUnit do return none
-    for f in ci.fields do
-      if let some ts ← whnfAmount? f.valTy then return some ts
-    return none
+/-- Unfold abbrevs such as `IERC20.Ref a`. -/
+def isRefTy (ty : Expr) : MetaM Bool := do
+  let ty ← whnfD ty
+  return ty.isAppOf ``Lsc.Ref
 
 def findBindings (ns storage ext : Name) : MetaM (Array BindingInfo) := do
   let env ← getEnv
@@ -143,8 +129,10 @@ def findBindings (ns storage ext : Name) : MetaM (Array BindingInfo) := do
         unless args.size ≥ 3 do continue
         let some ifaceN := args[0]!.constName? | continue
         let some fieldIdx :=
-          storageFields.toList.findIdx? (fun sf => sf.getString! == stem)
-          | throwError "reify: binding `{cand}` has no storage field `{stem}`"
+          storageFields.toList.findIdx? (fun sf =>
+            let n := sf.getString!
+            n == stem || n == stem ++ "Ref")
+          | throwError "reify: binding `{cand}` has no storage field `{stem}` or `{stem}Ref`"
         out := out.push { name := cand, fieldSlot := fieldIdx, iface := ifaceN }
         found := true
   return out
@@ -178,8 +166,8 @@ def contractInfo (ns : Name) : MetaM ContractInfo := do
 
 /-! ## Schema generation -/
 
-/-- `fun (args : List Nat) => C (ofNat (args.getD 0 0)) …` for constructor `C`.
-Amount fields are rebuilt with `ofNat`; `Address`/`Flag`/`Nat` are words. -/
+/-- `fun (args : List Nat) => C (ofWord (args.getD 0 0)) …` for constructor `C`.
+Amount fields are rebuilt with `ofWord`; `Ref` fields with `{ addr := … }`. -/
 def ctorBuilder (ctor : Name) : MetaM Term := do
   let info ← getConstInfoCtor ctor
   let argsId := mkIdent `args
@@ -189,7 +177,10 @@ def ctorBuilder (ctor : Name) : MetaM Term := do
     for i in [:xs.size] do
       let ty ← inferType xs[i]!
       let get ← `(List.getD $argsId $(quote i) 0)
-      let arg ← if ← isAmountTy ty then `(Lsc.Amount.ofNat $get) else pure get
+      let arg ←
+        if ← isAmountTy ty then `(Lsc.Amount.ofWord $get)
+        else if ← isRefTy ty then `({ addr := $get })
+        else pure get
       app ← `($app $arg)
     `(fun ($argsId : List Nat) => $app)
 
@@ -211,13 +202,19 @@ def mkSchemaCommand (ci : ContractInfo) : MetaM Syntax := do
     let proj := mkIdent (`σ ++ f.name)
     let fld := mkIdent f.name
     let amt? ← isAmountTy f.valTy
+    let ref? ← isRefTy f.valTy
     let k := mkIdent `k
     let v := mkIdent `v
     match f.kind with
     | .scalar =>
       if amt? then
-        scalar := scalar.push (← `(fun $σ => Lsc.Amount.toNat $proj))
-        scalarUpd := scalarUpd.push (← `(fun $σ $m => { $σ with $fld:ident := Lsc.Amount.ofNat $m }))
+        scalar := scalar.push (← `(fun $σ => Lsc.Amount.raw $proj))
+        scalarUpd := scalarUpd.push
+          (← `(fun $σ $m => { $σ with $fld:ident := Lsc.Amount.ofWord $m }))
+      else if ref? then
+        scalar := scalar.push (← `(fun $σ => Lsc.Ref.addr $proj))
+        scalarUpd := scalarUpd.push
+          (← `(fun $σ $m => { $σ with $fld:ident := { addr := $m } }))
       else
         scalar := scalar.push (← `(fun $σ => $proj))
         scalarUpd := scalarUpd.push (← `(fun $σ $m => { $σ with $fld:ident := $m }))
@@ -228,12 +225,12 @@ def mkSchemaCommand (ci : ContractInfo) : MetaM Syntax := do
     | .map1 =>
       scalar := scalar.push (← `(fun _ => 0)); scalarUpd := scalarUpd.push (← `(fun $σ _ => $σ))
       if amt? then
-        map1 := map1.push (← `(fun $σ $k => Lsc.Amount.toNat ($proj $k)))
+        map1 := map1.push (← `(fun $σ $k => Lsc.Amount.raw ($proj $k)))
         map1Upd := map1Upd.push
-          (← `(fun $σ $m => { $σ with $fld:ident := fun $k => Lsc.Amount.ofNat ($m $k) }))
+          (← `(fun $σ $m => { $σ with $fld:ident := fun $k => Lsc.Amount.ofWord ($m $k) }))
         map1Set := map1Set.push
           (← `(fun $σ $k $v =>
-            { $σ with $fld:ident := Function.update $proj $k (Lsc.Amount.ofNat $v) }))
+            { $σ with $fld:ident := Function.update $proj $k (Lsc.Amount.ofWord $v) }))
       else
         map1 := map1.push (← `(fun $σ => $proj))
         map1Upd := map1Upd.push (← `(fun $σ $m => { $σ with $fld:ident := $m }))
@@ -247,14 +244,14 @@ def mkSchemaCommand (ci : ContractInfo) : MetaM Syntax := do
       map1Set := map1Set.push (← `(fun $σ _ _ => $σ))
       if amt? then
         let k₁ := mkIdent `k₁; let k₂ := mkIdent `k₂
-        map2 := map2.push (← `(fun $σ $k₁ $k₂ => Lsc.Amount.toNat ($proj $k₁ $k₂)))
+        map2 := map2.push (← `(fun $σ $k₁ $k₂ => Lsc.Amount.raw ($proj $k₁ $k₂)))
         map2Upd := map2Upd.push
-          (← `(fun $σ $m => { $σ with $fld:ident := fun $k₁ $k₂ => Lsc.Amount.ofNat ($m $k₁ $k₂) }))
+          (← `(fun $σ $m => { $σ with $fld:ident := fun $k₁ $k₂ => Lsc.Amount.ofWord ($m $k₁ $k₂) }))
         map2Set := map2Set.push
           (← `(fun $σ $k₁ $k₂ $v =>
             let m := $proj
             { $σ with $fld:ident :=
-              Function.update m $k₁ (Function.update (m $k₁) $k₂ (Lsc.Amount.ofNat $v)) }))
+              Function.update m $k₁ (Function.update (m $k₁) $k₂ (Lsc.Amount.ofWord $v)) }))
       else
         let k₁ := mkIdent `k₁; let k₂ := mkIdent `k₂
         map2 := map2.push (← `(fun $σ => $proj))
@@ -317,8 +314,9 @@ def abiTyOf (ty : Expr) : MetaM AbiTy := do
   | some ``Nat => pure .uint256
   | some ``Lsc.Address => pure .address
   | some ``Lsc.Flag => pure .bool
-  | some ``Lsc.Amount | some ``Lsc.Price | some ``Lsc.Fixed => pure .uint256
-  | _ => throwError "lsc_contract: unsupported ABI type `{ty}` (Nat, Address, Flag, Amount)"
+  | some ``Lsc.Word | some ``Lsc.Amount | some ``Lsc.Fixed => pure .uint256
+  | some ``Lsc.Ref => pure .address
+  | _ => throwError "lsc_contract: unsupported ABI type `{ty}` (Nat, Address, Flag, Word, Amount, Fixed, Ref)"
 
 /-- `C.schema_lawful : C.schema.st.Lawful <fields>` by `cases` / `simp` / `rfl`.
 Unhygienic `i`/`j` so nested `succ i` rebinds the name the inner `cases` looks up. -/
@@ -394,10 +392,15 @@ def closedNat? (e : Expr) : MetaM (Option Nat) := do
 
 partial def atomOf (env : Env t) (e : Expr) : MetaM Atom := do
   let e := e.consumeMData
-  -- Amount boundary: Core stores the underlying word.
-  if e.isAppOf ``Lsc.Amount.toNat || e.isAppOf ``Lsc.Amount.ofNat
-      || e.isAppOf ``Lsc.Amount.mk then
+  -- Amount / Ref boundary: Core stores the underlying word.
+  if e.isAppOf ``Lsc.Amount.raw || e.isAppOf ``Lsc.Amount.ofWord
+      || e.isAppOf ``Lsc.Amount.mk
+      || e.isAppOf ``Lsc.Ref.addr || e.isAppOf ``Lsc.Ref.mk then
     return (← atomOf env e.appArg!)
+  if let .proj _ 0 s := e then
+    let ty ← whnfD (← inferType s)
+    if ty.isAppOf ``Lsc.Amount || ty.isAppOf ``Lsc.Ref then
+      return (← atomOf env s)
   if let some n ← closedNat? e then return .lit n
   if let .fvar id := e then
     match env.vars.idxOf? id with
@@ -412,7 +415,9 @@ def fieldOfProj (ci : ContractInfo) (proj : Expr) : MetaM FieldInfo := do
   let name? : Option Name ← lambdaTelescope proj fun _ body => do
     let body := body.consumeMData
     let body :=
-      if body.isAppOf ``Lsc.Amount.toNat then body.appArg! else body
+      if body.isAppOf ``Lsc.Amount.raw || body.isAppOf ``Lsc.Ref.addr then
+        body.appArg!
+      else body
     match body.getAppFn with
     | .const n _ => pure (some n)
     | _ =>
@@ -452,11 +457,12 @@ def ctorIndex (ctors : Array Name) (e : Expr) : MetaM (Nat × Array Expr) := do
     | none => throwError "reify: `{e}` is not a constructor of the contract's event/error type"
   | _ => throwError "reify: `{e}` must be an event/error constructor application"
 
-/-- Word-like types that may be compared: `Nat`, `Address`, `Amount`, `Flag`, `Price`. -/
+/-- Word-like types that may be compared: `Nat`, `Address`, `Word`, `Amount`, `Fixed`, `Flag`. -/
 def isWordLike (ty : Expr) : Bool :=
   let n := ty.getAppFn.constName?
-  n == some ``Nat || n == some ``Lsc.Address || n == some ``Lsc.Amount
-    || n == some ``Lsc.Flag || n == some ``Lsc.Price || n == some ``Lsc.Fixed
+  n == some ``Nat || n == some ``Lsc.Address || n == some ``Lsc.Word
+    || n == some ``Lsc.Amount
+    || n == some ``Lsc.Flag || n == some ``Lsc.Fixed
 
 partial def condOf (env : Env t) (e : Expr) : MetaM Cond := do
   let e := e.consumeMData
@@ -466,7 +472,7 @@ partial def condOf (env : Env t) (e : Expr) : MetaM Cond := do
   let checkWord (ty : Expr) : MetaM Unit := do
     let ty ← whnfR ty
     unless isWordLike ty || ty.isConstOf ``Nat do
-      throwError "reify: comparison on `{ty}` is not supported (use Nat, Address, Amount, Flag)"
+      throwError "reify: comparison on `{ty}` is not supported (use Nat, Address, Word, Amount, Flag)"
   match f.constName?, args.size with
   | some ``LT.lt, 4 =>
     checkWord args[0]!
@@ -504,9 +510,7 @@ def retExprOf (env : Env t) : (s : RetTy) → Expr → MetaM (RetExpr s)
       return .pair (← retExprOf env s₁ (e.getArg! 2)) (← retExprOf env s₂ (e.getArg! 3))
     throwError "reify: expected a pair in `pure`, found `{e}`"
 
-/-- Do not `whnf` through `Amount`/`Address`/`Flag` (`def` newtypes). `whnfR` still unfolds
-the `Fixed` abbrev to `Amount Unit s`; user `abbrev`s such as `Dai := Amount …` are
-unfolded one step on the fallback path so `Address` stays folded. -/
+/-- `Amount a` / `Fixed d` / `Word` map to `Nat`. `Address`/`Flag` stay named. -/
 partial def retTyOf (ρ : Expr) : MetaM RetTy := do
   let ρ ← whnfR ρ
   match ρ.getAppFn.constName?, ρ.getAppNumArgs with
@@ -514,28 +518,36 @@ partial def retTyOf (ρ : Expr) : MetaM RetTy := do
   | some ``Nat, 0 => pure .word
   | some ``Lsc.Address, 0 => pure .addr
   | some ``Lsc.Flag, 0 => pure .flag
-  | some ``Lsc.Amount, 2 => pure .word
-  | some ``Lsc.Price, 3 => pure .word
+  | some ``Lsc.Word, 0 => pure .word
+  | some ``Lsc.Amount, _ => pure .word
+  | some ``Lsc.Fixed, 1 => pure .word
   | some ``Prod, 2 => return .pair (← retTyOf (ρ.getArg! 0)) (← retTyOf (ρ.getArg! 1))
   | _, _ =>
     match ← unfoldDefinition? ρ with
     | some ρ' => retTyOf ρ'
     | none => throwError "reify: unsupported return type `{ρ}` \
-        (Unit, Nat, Address, Flag, Amount, Price, or pairs)"
+        (Unit, Nat, Address, Flag, Word, Amount, Fixed, or pairs)"
 
 /-- Head constants that unfold to a `Tx` primitive (`Amount.add` → `addChecked`,
 `Binding.transfer` → `Tx.call`, …). Compared as names so Reify need not import
 `Stdlib.ERC20`. -/
 def isSurfaceOp : Name → Bool
+  | ``Lsc.Tx.HAddChecked.hAdd | ``Lsc.Tx.HSubChecked.hSub
+  | ``Lsc.Tx.HMulChecked.hMul | ``Lsc.Tx.HDivChecked.hDiv => true
   | .str (.str `Lsc "Amount") s =>
-      s == "add" || s == "sub" || s == "mulDown" || s == "mulUp" || s == "divDown"
-        || s == "divUp" || s == "ratioDown" || s == "ratioUp" || s == "shareDown"
-        || s == "shareUp" || s == "rescale" || s == "convert"
+      s == "add" || s == "sub" || s == "mulScalar" || s == "divScalar"
+        || s == "mulDivDown" || s == "mulDivUp" || s == "rescale"
+  | .str (.str `Lsc "Fixed") s =>
+      s == "mulDown" || s == "mulUp" || s == "divDown" || s == "divUp"
   | .str (.str `Lsc "Binding") s =>
       s == "transfer" || s == "transferFrom" || s == "balanceOf" || s == "decimals"
         || s == "transferUnit" || s == "transferFromUnit"
         || s == "checkOk" || s == "safeTransfer" || s == "safeTransferFrom"
         || s == "safeApprove"
+  | .str p "1" =>
+      let s := p.getString!
+      s.startsWith "instHAdd" || s.startsWith "instHSub"
+        || s.startsWith "instHMul" || s.startsWith "instHDiv"
   | _ => false
 
 /-- `Rounding` must be a literal constructor so the reifier can pick `mulDivDown` vs `mulDivUp`. -/
@@ -546,11 +558,10 @@ def roundingOf (e : Expr) : MetaM Rounding := do
   | some ``Lsc.Rounding.up => return .up
   | _ => throwError "reify: rounding `{e}` must be a literal `.down` or `.up`"
 
-/-- Heads that `deltaUnfold` must not unfold past (primitives, `do` combinators,
-and `Amount.add`/`sub`/`share*` whose bodies are `if`s, not `Tx.*`). -/
+/-- Heads that `deltaUnfold` must not unfold past (primitives and `do` combinators). -/
 def isDeltaStop : Name → Bool
   | ``Lsc.Tx.addChecked | ``Lsc.Tx.subChecked | ``Lsc.Tx.mulChecked | ``Lsc.Tx.divChecked
-  | ``Lsc.Tx.mulDivDown | ``Lsc.Tx.mulDivUp
+  | ``Lsc.Tx.mulDivDown | ``Lsc.Tx.mulDivUp | ``Lsc.Tx.pow10
   | ``Lsc.Tx.call | ``Lsc.Tx.callUnit
   | ``Lsc.Tx.load | ``Lsc.Tx.loadMap | ``Lsc.Tx.loadMap2
   | ``Lsc.Tx.store | ``Lsc.Tx.storeMap | ``Lsc.Tx.storeMap2
@@ -558,7 +569,11 @@ def isDeltaStop : Name → Bool
   | ``Lsc.Tx.sender | ``Lsc.Tx.value | ``Lsc.Tx.timestamp | ``Lsc.Tx.blockNumber
   | ``Lsc.Tx.selfAddress
   | ``Bind.bind | ``Pure.pure | ``ite
-  | ``Lsc.Amount.add | ``Lsc.Amount.sub | ``Lsc.Amount.shareDown | ``Lsc.Amount.shareUp =>
+  | ``Lsc.Amount.add | ``Lsc.Amount.sub
+  | ``Lsc.Amount.mulScalar | ``Lsc.Amount.divScalar
+  | ``Lsc.Amount.mulDivDown | ``Lsc.Amount.mulDivUp
+  | ``Lsc.Tx.HAddChecked.hAdd | ``Lsc.Tx.HSubChecked.hSub
+  | ``Lsc.Tx.HMulChecked.hMul | ``Lsc.Tx.HDivChecked.hDiv =>
     true
   | _ => false
 
@@ -574,7 +589,7 @@ def throwInlineOr {α : Type} (inline? : Option Name) (sub : Expr) (fallback : M
   | none => throwError fallback
 
 /-- Unfold `@[lsc_inline]` (and `isSurfaceOp` fallback), reducing `Rounding` matches.
-Before unfolding `rescale`/`convert`, `roundingOf` requires a literal `.down`/`.up`. -/
+Before unfolding `rescale`, `roundingOf` requires a literal `.down`/`.up`. -/
 partial def deltaUnfold (e : Expr) (fuel : Nat := 8) : MetaM (Expr × Option Name) := do
   let rec go (e : Expr) (fuel : Nat) (seen : Option Name) : MetaM (Expr × Option Name) := do
     let e := e.consumeMData
@@ -584,8 +599,9 @@ partial def deltaUnfold (e : Expr) (fuel : Nat := 8) : MetaM (Expr × Option Nam
     if let some n := n? then
       let tagged ← isLscInline n
       if tagged || isSurfaceOp n then
-        if n == (.str (.str `Lsc "Amount") "rescale")
-            || n == (.str (.str `Lsc "Amount") "convert") then
+        if n == (.str (.str `Lsc "Word") "rescale")
+            || n == (.str (.str `Lsc "Amount") "rescale")
+            || n == ``Lsc.Tx.rescale then
           let args := e.getAppArgs
           if args.size > 0 then
             let _ ← roundingOf args[args.size - 2]!
@@ -634,36 +650,86 @@ def methodIndex (m : Expr) : MetaM Nat := do
     | none => throwError "reify: `{n}` is not a method constructor"
   | none => throwError "reify: method `{m}` must be an interface method constructor"
 
+/-- `getAppFn` / `getAppArgs` that skip intervening `MData`. -/
+partial def flattenApp (e : Expr) : Expr × Array Expr :=
+  let e := e.consumeMData
+  match e with
+  | .app f a =>
+    let (fn, args) := flattenApp f
+    (fn, args.push a)
+  | _ => (e, #[])
+
+/-- True when `e` is `Amount.ofWord` / `Amount.mk`, possibly η-expanded. -/
+partial def isOfWordFn (e : Expr) : Bool :=
+  let e := e.consumeMData
+  if e.isAppOf ``Lsc.Amount.ofWord || e.isConstOf ``Lsc.Amount.ofWord
+      || e.isAppOf ``Lsc.Amount.mk || e.isConstOf ``Lsc.Amount.mk then
+    true
+  else if e.isLambda then
+    isOfWordFn e.bindingBody!
+  else false
+
+/-- Drop `ofWord <$> tx`. Do not peel when the last argument is itself an
+`Amount` (e.g. `mulDivDown a (ofWord scale) x`). `Tx` unfolds to `ReaderT`,
+so the guard is "not an Amount", not `isAppOf Tx`. -/
+partial def peelAmountWrap (e : Expr) : MetaM Expr := do
+  let (_, args) := flattenApp e
+  if args.size ≥ 2 && isOfWordFn args[args.size - 2]! then
+    let x := args[args.size - 1]!
+    if ← isAmountTy (← inferType x) then
+      return e
+    else
+      peelAmountWrap x
+  else
+    return e
+
+/-- Drop unused `{Type}` binders (`fun {S X E ε} => Amount.add`). -/
+partial def dropUnusedTypeLams (e : Expr) : Expr :=
+  let e := e.consumeMData
+  match e with
+  | .lam _ d b _ =>
+    if d.isSort && !b.hasLooseBVars then dropUnusedTypeLams b else e
+  | _ => e
+
+/-- Unfold surface / inline / instance-projection heads, then peel `ofWord <$>`. -/
+partial def prepOp (x : Expr) (fuel : Nat := 8) : MetaM Expr := do
+  if fuel = 0 then return x
+  let x ← peelAmountWrap x.consumeMData
+  let (f0, args) := flattenApp x
+  let f := dropUnusedTypeLams f0
+  let x := mkAppN f args
+  if f.constName?.any isDeltaStop then return x
+  if let some n := f.constName? then
+    if (← isLscInline n) || isSurfaceOp n then
+      return (← prepOp (← deltaUnfold x).1 (fuel - 1))
+  if let some x' ← unfoldProjInst? x then
+    return (← prepOp x' (fuel - 1))
+  match f with
+  | .proj .. =>
+    let f' := dropUnusedTypeLams (← whnfR f)
+    if f' != f then
+      return (← prepOp (mkAppN f' args) (fuel - 1))
+    match ← reduceProj? f with
+    | some f' => prepOp (mkAppN (dropUnusedTypeLams f') args) (fuel - 1)
+    | none =>
+      match ← unfoldDefinition? x with
+      | some x' => prepOp x' (fuel - 1)
+      | none => return x
+  | .lam .. =>
+    let x' := f.beta args
+    if x' == x then return x
+    else prepOp x' (fuel - 1)
+  | _ =>
+    match ← unfoldDefinition? x with
+    | some x' => prepOp x' (fuel - 1)
+    | none => return x
+
 /-- Word-valued primitives. -/
 def opOf (ci : ContractInfo) (env : Env t) (x : Expr) : MetaM (Option Op) := do
-  let x := x.consumeMData
-  let n0 := x.getAppFn.constName?
-  -- Amount.add/sub/share* are explicit `if`s, not `addChecked`; match before unfolding.
-  if n0 == some ``Lsc.Amount.add || n0 == some ``Lsc.Amount.sub
-      || n0 == some ``Lsc.Amount.shareDown || n0 == some ``Lsc.Amount.shareUp then
-    let args := x.getAppArgs
-    let atom := atomOf env
-    match n0, args.size with
-    | some ``Lsc.Amount.add, n =>
-      return some (.addChecked (← atom args[n - 2]!) (← atom args[n - 1]!))
-    | some ``Lsc.Amount.sub, n =>
-      return some (.subChecked (← atom args[n - 2]!) (← atom args[n - 1]!))
-    | some ``Lsc.Amount.shareDown, n =>
-      return some (.mulDivDown (← atom args[n - 3]!) (← atom args[n - 2]!) (← atom args[n - 1]!))
-    | some ``Lsc.Amount.shareUp, n =>
-      return some (.mulDivUp (← atom args[n - 3]!) (← atom args[n - 2]!) (← atom args[n - 1]!))
-    | _, _ => return none
-  let x ← do
-    match n0 with
-    | some n =>
-      if (← isLscInline n) || isSurfaceOp n then
-        pure (← deltaUnfold x).1
-      else
-        pure x
-    | none => pure x
-  let args := x.getAppArgs
+  let x ← prepOp x
+  let (fn, args) := flattenApp x
   let atom := atomOf env
-  match x.getAppFn.constName?, args.size with
+  match fn.constName?, args.size with
   | some ``Lsc.Tx.load, 6 =>
     let f ← fieldOfProj ci args[5]!
     unless f.kind == .scalar do throwError "reify: `read {f.name}` needs keys"
@@ -685,10 +751,20 @@ def opOf (ci : ContractInfo) (env : Env t) (x : Expr) : MetaM (Option Op) := do
   | some ``Lsc.Tx.subChecked, 6 => return some (.subChecked (← atom args[4]!) (← atom args[5]!))
   | some ``Lsc.Tx.mulChecked, 6 => return some (.mulChecked (← atom args[4]!) (← atom args[5]!))
   | some ``Lsc.Tx.divChecked, 6 => return some (.divChecked (← atom args[4]!) (← atom args[5]!))
+  | some ``Lsc.Tx.HAddChecked.hAdd, n =>
+    return some (.addChecked (← atom args[n - 2]!) (← atom args[n - 1]!))
+  | some ``Lsc.Tx.HSubChecked.hSub, n =>
+    return some (.subChecked (← atom args[n - 2]!) (← atom args[n - 1]!))
+  | some ``Lsc.Tx.HMulChecked.hMul, n =>
+    return some (.mulChecked (← atom args[n - 2]!) (← atom args[n - 1]!))
+  | some ``Lsc.Tx.HDivChecked.hDiv, n =>
+    return some (.divChecked (← atom args[n - 2]!) (← atom args[n - 1]!))
   | some ``Lsc.Tx.mulDivDown, 7 =>
     return some (.mulDivDown (← atom args[4]!) (← atom args[5]!) (← atom args[6]!))
   | some ``Lsc.Tx.mulDivUp, 7 =>
     return some (.mulDivUp (← atom args[4]!) (← atom args[5]!) (← atom args[6]!))
+  | some ``Lsc.Tx.pow10, 5 =>
+    return some (.pow10 (← atom args[4]!))
   | some ``Lsc.Tx.call, n =>
     if n < 3 then return none
     let bIdx ← bindingIndex ci args[n - 3]!
@@ -699,28 +775,23 @@ def opOf (ci : ContractInfo) (env : Env t) (x : Expr) : MetaM (Option Op) := do
     return some (.addChecked (← atom args[n - 2]!) (← atom args[n - 1]!))
   | some ``Lsc.Amount.sub, n =>
     return some (.subChecked (← atom args[n - 2]!) (← atom args[n - 1]!))
-  | some ``Lsc.Amount.shareDown, n =>
+  | some ``Lsc.Amount.mulScalar, n =>
+    return some (.mulChecked (← atom args[n - 2]!) (← atom args[n - 1]!))
+  | some ``Lsc.Amount.divScalar, n =>
+    return some (.divChecked (← atom args[n - 2]!) (← atom args[n - 1]!))
+  | some ``Lsc.Amount.mulDivDown, n =>
     return some (.mulDivDown (← atom args[n - 3]!) (← atom args[n - 2]!) (← atom args[n - 1]!))
-  | some ``Lsc.Amount.shareUp, n =>
+  | some ``Lsc.Amount.mulDivUp, n =>
     return some (.mulDivUp (← atom args[n - 3]!) (← atom args[n - 2]!) (← atom args[n - 1]!))
   | some ``Pure.pure, 4 => return some (.pure (← atom args[3]!))
   | _, _ => return none
 
 /-- Unit-valued primitives. -/
 def stmtOf (ci : ContractInfo) (env : Env t) (x : Expr) : MetaM (Option Stmt) := do
-  let x := x.consumeMData
-  let n0 := x.getAppFn.constName?
-  let x ← do
-    match n0 with
-    | some n =>
-      if (← isLscInline n) || isSurfaceOp n then
-        pure (← deltaUnfold x).1
-      else
-        pure x
-    | none => pure x
-  let args := x.getAppArgs
+  let x ← prepOp x
+  let (fn, args) := flattenApp x
   let atom := atomOf env
-  match x.getAppFn.constName?, args.size with
+  match fn.constName?, args.size with
   | some ``Lsc.Tx.store, 7 =>
     let f ← fieldOfUpd ci args[5]!
     unless f.kind == .scalar do throwError "reify: `write {f.name}` needs keys"
@@ -890,7 +961,22 @@ partial def reify (ci : ContractInfo) (t : RetTy) (env : Env t) (e : Expr)
           | none => throwInlineOr inline? e m!"reify: `{e}` returns Unit but the function does not"
         else
           throwInlineOr inline? e m!"reify: `{e}` is outside the reifiable fragment"
-    | _ => throwInlineOr inline? e m!"reify: `{e}` is outside the reifiable fragment"
+    | _ =>
+      let e' ← prepOp e
+      if e' != e then
+        reify ci t env e' inline?
+      else if let some op ← opOf ci env e then
+        match opTailCore t op with
+        | some c => return c
+        | none =>
+            throwInlineOr inline? e m!"reify: `{e}` returns a word but the function does not"
+      else if let some s ← stmtOf ci env e then
+        match stmtTailCore t s with
+        | some c => return c
+        | none =>
+            throwInlineOr inline? e m!"reify: `{e}` returns Unit but the function does not"
+      else
+        throwInlineOr inline? e m!"reify: `{e}` is outside the reifiable fragment"
 
 /-! ## Commands -/
 
@@ -927,7 +1013,7 @@ partial def unfoldCertHead (e : Expr) (fuel : Nat := 16) : MetaM Expr := do
   let e := e.consumeMData
   if fuel = 0 then return e
   match e.getAppFn.constName? with
-  | some ``Core.denote | some ``Core.denoteAWord | some ``Core.denoteAUnit =>
+  | some ``Core.denote =>
     match ← unfoldDefinition? e with
     | some e' => unfoldCertHead e' (fuel - 1)
     | none =>
@@ -981,7 +1067,7 @@ non-matching `do` block) and only the `simp only` branch runs. A
 propositional certificate is not a trust extension: the reifier is still
 untrusted MetaM, and the kernel checks `Core.denote (reify f) = f`.
 -/
-def certifyDenote (fn : Name) (lhs rhs coreE : Expr) : TermElabM Expr := do
+def certifyDenote (fn : Name) (lhs lhsRaw rhs coreE : Expr) : TermElabM Expr := do
   let eq ← mkEq lhs rhs
   let inlines ← inlinesUsedBy fn
   -- `isDefEq` on a large non-matching `do` block (inlined helper mid-body)
@@ -989,29 +1075,68 @@ def certifyDenote (fn : Name) (lhs rhs coreE : Expr) : TermElabM Expr := do
   if inlines.isEmpty then
     if ← withNewMCtxDepth (withDefault (isDefEq lhs rhs)) then
       return (← mkEqRefl lhs)
-  let mut ids : Array Ident := #[
+  let mut idsWord : Array Ident := #[
     mkIdent ``Lsc.Tx.bind_assoc,
     mkIdent ``Lsc.Tx.pure_bind,
     mkIdent ``Lsc.Tx.bind_pure,
     mkIdent ``Lsc.Tx.map_eq_pure_bind,
     mkIdent fn]
+  let mut idsAmount : Array Ident := #[
+    mkIdent ``Lsc.Tx.map_bind,
+    mkIdent ``Lsc.Tx.bind_map,
+    mkIdent ``Lsc.Core.denote,
+    mkIdent ``Lsc.Op.denote,
+    mkIdent ``Lsc.Stmt.denote,
+    mkIdent ``Lsc.Atom.eval,
+    mkIdent ``Lsc.Cond.denote,
+    mkIdent ``List.getD,
+    mkIdent ``Lsc.Amount.ofWord,
+    mkIdent ``Lsc.Amount.add,
+    mkIdent ``Lsc.Amount.sub,
+    mkIdent ``Lsc.Amount.mulScalar,
+    mkIdent ``Lsc.Amount.divScalar,
+    mkIdent ``Lsc.Amount.mulDivDown,
+    mkIdent ``Lsc.Amount.mulDivUp,
+    mkIdent ``Lsc.Tx.HAddChecked.hAdd,
+    mkIdent ``Lsc.Tx.HSubChecked.hSub,
+    mkIdent ``Lsc.Tx.HMulChecked.hMul,
+    mkIdent ``Lsc.Tx.HDivChecked.hDiv,
+    mkIdent fn]
   for n in inlines do
-    ids := ids.push (mkIdent n)
-  let tac ←
+    idsWord := idsWord.push (mkIdent n)
+    idsAmount := idsAmount.push (mkIdent n)
+  let tacWord ←
     if inlines.isEmpty then
-      `(by first | rfl | (simp only [$[$ids:ident],*]; rfl))
+      `(by first | rfl | (simp only [$[$idsWord:ident],*]; rfl))
     else
-      `(by simp only [$[$ids:ident],*]; rfl)
-  try
-    withoutErrToSorry (elabTermAndSynthesize tac eq)
+      `(by simp only [$[$idsWord:ident],*]; rfl)
+  let pfWord ← try
+    some <$> withoutErrToSorry (elabTermAndSynthesize tacWord eq)
   catch _ =>
-    let extra ← do
-      if let some (l, r) ← firstDifferingBind lhs rhs then
-        pure m!"\nFirst differing bind:{indentExpr l}\nversus:{indentExpr r}"
-      else pure m!""
-    throwError "reify: certificate failed — denotation of the reified term is not \
-      equal to the original function (even after Tx monad laws).{indentExpr eq}{extra}\n\
-      Reified Core:{indentExpr coreE}"
+    pure none
+  match pfWord with
+  | some pf => return pf
+  | none =>
+    -- Amount-sequence fallback: `lhsRaw` inlines `f.core`. `delta`+`dsimp` unfold
+    -- `Core.denote` to a `Tx` `>>=` spine (`whnf` would go past that into ReaderT).
+    let eqRaw ← mkEq lhsRaw rhs
+    let mut ds : Array Ident := #[
+      mkIdent ``Lsc.Core.denote, mkIdent ``Lsc.Op.denote, mkIdent ``Lsc.Stmt.denote,
+      mkIdent ``Lsc.Atom.eval, mkIdent ``Lsc.Cond.denote]
+    for n in inlines do
+      ds := ds.push (mkIdent n)
+    ds := ds.push (mkIdent fn)
+    let tacAmt ← `(by delta $[$ds:ident]*; dsimp only; simp only [$[$idsAmount:ident],*]; rfl)
+    try
+      withoutErrToSorry (elabTermAndSynthesize tacAmt eqRaw)
+    catch _ =>
+      let extra ← do
+        if let some (l, r) ← firstDifferingBind lhsRaw rhs then
+          pure m!"\nFirst differing bind:{indentExpr l}\nversus:{indentExpr r}"
+        else pure m!""
+      throwError "reify: certificate failed — denotation of the reified term is not \
+        equal to the original function (even after Tx monad laws).{indentExpr eq}{extra}\n\
+        Reified Core:{indentExpr coreE}"
 
 /-- Unfold `abbrev`s such as `C.M` until the head is `Lsc.Tx`. -/
 partial def whnfToTx (ty : Expr) : MetaM Expr := do
@@ -1020,6 +1145,48 @@ partial def whnfToTx (ty : Expr) : MetaM Expr := do
   match ← unfoldDefinition? ty with
   | some ty' => whnfToTx ty'
   | none => throwError "reify: `{ty}` is not a `Tx` type"
+
+/-- Reconstruct a surface `Amount` / pair from a Core word (or pair of words). -/
+partial def wrapValue (ty : Expr) (e : Expr) : MetaM Expr := do
+  let ty ← whnfR ty
+  if ty.isAppOf ``Lsc.Amount then
+    mkAppOptM ``Lsc.Amount.ofWord #[ty.getArg! 0, some e]
+  else if ty.isAppOfArity ``Prod 2 then
+    let α := ty.getArg! 0
+    let β := ty.getArg! 1
+    let fst ← mkAppOptM ``Prod.fst #[none, none, some e]
+    let snd ← mkAppOptM ``Prod.snd #[none, none, some e]
+    let x ← wrapValue α fst
+    let y ← wrapValue β snd
+    mkAppM ``Prod.mk #[x, y]
+  else
+    pure e
+
+/-- `Amount.ofWord <$> core` (and the pair analogue) when the surface return is Amount. -/
+def wrapDenote (ρ : Expr) (core : Expr) : MetaM Expr := do
+  let ρ ← whnfR ρ
+  if ρ.isConstOf ``Unit || ρ.isConstOf ``PUnit
+      || ρ.isConstOf ``Nat || ρ.isConstOf ``Lsc.Word
+      || ρ.isConstOf ``Lsc.Address || ρ.isConstOf ``Lsc.Flag then
+    return core
+  unless ρ.isAppOf ``Lsc.Amount || ρ.isAppOf ``Prod do
+    return core
+  let txTy ← inferType core
+  let txTy ← whnfToTx txTy
+  let α := txTy.getArg! 4
+  if ← isDefEq α ρ then return core
+  withLocalDeclD `v α fun v => do
+    let body ← wrapValue ρ v
+    let f ← mkLambdaFVars #[v] body
+    mkAppM ``Functor.map #[f, core]
+
+/-- Core env atom: `.raw` / `.addr` for Amount / Ref parameters. -/
+def encodeEnvAtom (p : Expr) : MetaM Expr := do
+  let ty ← inferType p
+  if ← isAmountTy ty then mkAppM ``Lsc.Amount.raw #[p]
+  else if ← isRefTy ty then mkAppM ``Lsc.Ref.addr #[p]
+  else if (← whnfR ty).isConstOf ``Lsc.Address then mkAppM ``Lsc.Address.toWord #[p]
+  else pure p
 
 /-- Reify `fn` and add `fn.core` and `fn.core_denote` to the environment. -/
 def reifyFunction (fn : Name) : TermElabM Unit := do
@@ -1042,33 +1209,22 @@ def reifyFunction (fn : Name) : TermElabM Unit := do
     let coreName := fn ++ `core
     let coreTy := mkApp (Lean.mkConst ``Core) (toExpr t)
     addAndCompile <| .defnDecl (mkDefinitionValEx coreName [] coreTy core.toExpr .abbrev .safe [coreName])
-    -- Certificate: `Core.denote schema core env = f`, or `Core.denoteAWord/AUnit = f`
-    -- when the surface is Amount-typed (return or storage). `Functor.map ofNat` over
-    -- `Core.denote` is not definitionally `Amount.add` (bind does not push through `ite`).
+    -- Certificate: `Core.denote schema core env = f`, or `ofWord <$> Core.denote = f`
+    -- when the surface returns `Amount`.
     let schema := Lean.mkConst ci.schema
-    -- Amount parameters are words in Core; insert `toNat` at the boundary.
-    let envAtoms : List Expr ← params.toList.reverse.mapM fun p => do
-      let ty ← inferType p
-      if ← isAmountTy ty then mkAppM ``Lsc.Amount.toNat #[p]
-      else pure p
+    let envAtoms : List Expr ← params.toList.reverse.mapM fun p => encodeEnvAtom p
     let envList ← mkListLit (Lean.mkConst ``Nat) envAtoms
-    let annot ← amountAnnot ci ρ
-    let lhs ←
-      match t, annot with
-      | .word, some (τ, sc) =>
-        mkAppOptM ``Core.denoteAWord
-          #[some S, some X, some E, some ε, some τ, some sc, some schema,
-            some (toExpr t), some (Lean.mkConst coreName), some envList]
-      | .unit, some (τ, sc) =>
-        mkAppOptM ``Core.denoteAUnit
-          #[some S, some X, some E, some ε, some τ, some sc, some schema,
-            some (toExpr t), some (Lean.mkConst coreName), some envList]
-      | _, _ =>
-        pure <| mkAppN (Lean.mkConst ``Core.denote)
-          #[S, X, E, ε, schema, toExpr t, Lean.mkConst coreName, envList]
+    let coreDenote :=
+      mkAppN (Lean.mkConst ``Core.denote)
+        #[S, X, E, ε, schema, toExpr t, Lean.mkConst coreName, envList]
+    let coreDenoteRaw :=
+      mkAppN (Lean.mkConst ``Core.denote)
+        #[S, X, E, ε, schema, toExpr t, core.toExpr, envList]
+    let lhs ← wrapDenote ρ coreDenote
+    let lhsRaw ← wrapDenote ρ coreDenoteRaw
     let rhs := mkAppN (Lean.mkConst fn) params
     let eq ← mkEq lhs rhs
-    let pf ← withDeclName (fn ++ `core_denote) <| certifyDenote fn lhs rhs core.toExpr
+    let pf ← withDeclName (fn ++ `core_denote) <| certifyDenote fn lhs lhsRaw rhs core.toExpr
     let stmt ← mkForallFVars params eq
     let proof ← mkLambdaFVars params pf
     addDecl <| .thmDecl { name := fn ++ `core_denote, levelParams := [], type := stmt, value := proof }
@@ -1349,23 +1505,30 @@ def isAddressTy (ty : Expr) : MetaM Bool := do
   let ty ← whnfR ty
   return ty.isConstOf ``Lsc.Address
 
+def isWordTy (ty : Expr) : MetaM Bool := do
+  let ty ← whnfR ty
+  return ty.isConstOf ``Lsc.Word
+
 def isFlagTy (ty : Expr) : MetaM Bool := do
   let ty ← whnfR ty
   return ty.isConstOf ``Lsc.Flag
 
 def encodeWordTerm (ty : Expr) (x : Term) : MetaM Term := do
-  if ← isAmountTy ty then `(Lsc.Amount.toNat $x)
+  if ← isAmountTy ty then `(Lsc.Amount.raw $x)
+  else if ← isRefTy ty then `(Lsc.Ref.addr $x)
   else if ← isAddressTy ty then `(Lsc.Address.toWord $x)
+  else if ← isWordTy ty then `(($x : Nat))
   else pure x
 
 def decodeWordTerm (ty : Expr) (n : Term) : MetaM Term := do
   if ← isAmountTy ty then
-    match ← whnfAmount? ty with
-    | some (τ, s) =>
-      let τT ← exprToTerm τ
-      let sT ← exprToTerm s
-      `(Lsc.Amount.ofNat (τ := $τT) (s := $sT) $n)
-    | none => `(Lsc.Amount.ofNat $n)
+    let ty ← whnfD ty
+    let aT ← exprToTerm (ty.getArg! 0)
+    `(Lsc.Amount.ofWord (a := $aT) $n)
+  else if ← isRefTy ty then
+    `({ addr := $n })
+  else if ← isWordTy ty then
+    `(($n : Lsc.Word))
   else pure n
 
 def dummyTerm (ty : Expr) : MetaM Term := do
@@ -1615,7 +1778,7 @@ def mkCodecCommands (ns : Name) (fns : Array Name) : MetaM (Array (TSyntax `comm
   let lenCmd ←
     `(command| theorem $lenThm (fn : $fnName) (args : Lsc.Spec.Args $specId fn) :
         ($encodeId fn args).length = ($fnDefId fn).params.length := by
-        cases fn <;> simp [$encodeId:ident, $fnDefId:ident])
+        cases fn <;> simp [$encodeId:ident, $fnDefId:ident, Lsc.Address.toWord] <;> rfl)
   let decFnThm := mkIdent (ns ++ `decodeFn_fnDef)
   let decFnCmd ←
     `(command| theorem $decFnThm (fn : $fnName) : $decodeFnId ($fnDefId fn) = some fn := by

@@ -79,6 +79,9 @@ theorem m1op_run_self_ext {Γ : ContractSchema S X E ε} {op : Lsc.Op}
     · by_cases hb : Atom.eval env a * Atom.eval env b < wordBound
       · simp [hc, hb]; exact ⟨rfl, hs, he⟩
       · simp [hc, hb]
+  | pow10 d =>
+    simp [Lsc.Op.denote, Tx.run_pow10]
+    split <;> simp [exceptSelfExt, hs, he]
   | pure a =>
     simp [Lsc.Op.denote, Tx.run_pure, exceptSelfExt, hs, he]
 

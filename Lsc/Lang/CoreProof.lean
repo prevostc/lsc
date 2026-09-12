@@ -35,7 +35,7 @@ theorem Op.effects_frame {Γ : ContractSchema S X E ε} (op : Op) (env : List Na
     injection hxy with _ hw
     exact congrArg World.self hw.symm
   | addChecked _ _ | subChecked _ _ | mulChecked _ _ | divChecked _ _
-  | mulDivDown _ _ _ | mulDivUp _ _ _ =>
+  | mulDivDown _ _ _ | mulDivUp _ _ _ | pow10 _ =>
     simp [Op.denote] at h
     repeat' split at h
     all_goals simp at h

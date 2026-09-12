@@ -1,4 +1,5 @@
 import Lsc.Compiler.Proof.OpsMulDiv
+import Lsc.Compiler.Proof.OpsPow10
 import Lsc.Compiler.Proof.OpsCtx
 import Lsc.Compiler.CoreDefs
 import YulSemantics.Observation
@@ -271,6 +272,9 @@ theorem op_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
   | .mulDivUp a b d =>
     simp only [emitLetOp_mulDivUp]
     exact op_sim_mulDivUp tag funs hinv hwf hn
+  | .pow10 d =>
+    simp only [emitLetOp_pow10]
+    exact op_sim_pow10 tag funs hinv hwf hn
   | .pure a =>
     simp only [emitLetOp_pure]
     exact op_sim_pure tag funs hinv hwf hn

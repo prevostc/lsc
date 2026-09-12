@@ -416,6 +416,17 @@ theorem noYulCall_emitDivChecked (e : Emit) (name : YIdent) (a b : YExpr)
         (by simp [noYulCall_bop, noYulCallExprs, hb]) (noYulCall_panicStmts _))
       (by simp [noYulCall_bop, noYulCallExprs, ha, hb])
 
+theorem noYulCall_emitPow10 (e : Emit) (name : YIdent) (d : YExpr)
+    (he : noYulCallStmts e.stmts = true)
+    (hd : noYulCallExpr d = true) :
+    noYulCallStmts (emitPow10 e name d).stmts = true := by
+  simpa [emitPow10] using
+    noYulCall_emitLet (emitIf e (bop Op.gt [d, lit 77]) (emitPanic {} 0x11).stmts) name
+      (bop Op.exp [lit 10, d])
+      (noYulCall_emitIf e _ (emitPanic {} 0x11).stmts he
+        (by simp [noYulCall_bop, noYulCallExprs, hd, noYulCallExpr_lit]) (noYulCall_panicStmts _))
+      (by simp [noYulCall_bop, noYulCallExprs, hd, noYulCallExpr_lit])
+
 theorem noYulCall_emitMulDivDown (e : Emit) (name : YIdent) (a b c : YExpr)
     (he : noYulCallStmts e.stmts = true)
     (ha : noYulCallExpr a = true) (hb : noYulCallExpr b = true)
@@ -585,6 +596,9 @@ theorem noYulCall_emitLetOp tag (c : ContractDef) (e : Emit) (d : Nat) (op : Lsc
     simp only [emitLetOp, Option.some.injEq] at h; subst e'
     exact noYulCall_emitMulDivUp e _ (atomE tag d a) (atomE tag d b) (atomE tag d c) he
       (noYulCall_atom tag d a) (noYulCall_atom tag d b) (noYulCall_atom tag d c)
+  | pow10 a =>
+    simp only [emitLetOp, Option.some.injEq] at h; subst e'
+    exact noYulCall_emitPow10 e _ (atomE tag d a) he (noYulCall_atom tag d a)
   | pure a =>
     simp only [emitLetOp, Option.some.injEq] at h; subst e'
     exact noYulCall_emitLet e _ (atomE tag d a) he (noYulCall_atom tag d a)

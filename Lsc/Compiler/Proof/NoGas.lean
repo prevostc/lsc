@@ -254,6 +254,16 @@ theorem noGas_emitDivChecked (e : Emit) (name : YIdent) (a b : YExpr)
         (by simp [bop, noGasExpr, noGasOp, noGasExprs, hb]) (noGas_panicStmts _))
       (by simp [bop, noGasExpr, noGasOp, noGasExprs, ha, hb])
 
+theorem noGas_emitPow10 (e : Emit) (name : YIdent) (d : YExpr)
+    (he : noGasStmts e.stmts = true) (hd : noGasExpr d = true) :
+    noGasStmts (emitPow10 e name d).stmts = true := by
+  simpa [emitPow10] using
+    noGas_emitLet (emitIf e (bop Op.gt [d, lit 77]) (emitPanic {} 0x11).stmts) name
+      (bop Op.exp [lit 10, d])
+      (noGas_emitIf e _ (emitPanic {} 0x11).stmts he
+        (by simp [bop, noGasExpr, noGasOp, noGasExprs, hd, noGas_lit]) (noGas_panicStmts _))
+      (by simp [bop, noGasExpr, noGasOp, noGasExprs, hd, noGas_lit])
+
 theorem noGas_emitMulDivDown (e : Emit) (name : YIdent) (a b c : YExpr)
     (he : noGasStmts e.stmts = true)
     (ha : noGasExpr a = true) (hb : noGasExpr b = true) (hc : noGasExpr c = true) :
@@ -448,6 +458,9 @@ theorem noGas_emitLetOp tag (c : ContractDef) (e : Emit) (d : Nat) (op : Lsc.Op)
     simp only [emitLetOp, Option.some.injEq] at h; subst e'
     exact noGas_emitMulDivUp e _ (atomE tag d a) (atomE tag d b) (atomE tag d c) he
       (noGas_atom tag d a) (noGas_atom tag d b) (noGas_atom tag d c)
+  | pow10 a =>
+    simp only [emitLetOp, Option.some.injEq] at h; subst e'
+    exact noGas_emitPow10 e _ (atomE tag d a) he (noGas_atom tag d a)
   | pure a =>
     simp only [emitLetOp, Option.some.injEq] at h; subst e'
     exact noGas_emitLet e _ (atomE tag d a) he (noGas_atom tag d a)
