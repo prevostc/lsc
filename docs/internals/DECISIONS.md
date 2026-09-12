@@ -132,3 +132,63 @@ recovers every selector except those whose top byte is `0x00` (emitted as
 dispatcher Yul is unchanged; this is a TCB pin move, not a change to our
 emitter. Lsc theorems are expected to keep their names; a break in a
 transported goal should be reported, not patched around.
+
+## 2026-09-12 — Numbers: Word and Fixed replace Amount
+
+`Word` is the plain checked 256-bit amount type: `+? -? *? /?` revert on
+overflow, underflow, or zero-division, and `mulDivDown` / `mulDivUp` stay
+the only lossy word operations. `Fixed d` is definitionally `Word` with
+one optional type-level decimals parameter for WAD/RAY-style math
+(`mulDown` / `mulUp` / `divDown` / `divUp` / `rescale`). There is no token
+phantom — token identity is carried by the binding a value flows through,
+not by its type. An opt-in `Tagged τ` wrapper exists for events/ABI only
+and never appears in `Tx` signatures. Runtime-only ERC20 decimals are
+cached as a `Word` at construction and converted with `rescale` / `pow10`.
+The `Amount TOKEN scale` machinery (`denoteAWord` / `denoteAUnit`, `+ₐ`,
+`whnfAmount?`, `amountAnnot`, opaque `assetScale` / `scale0` / `scale1`)
+is deleted.
+
+Rationale: the phantom parameters infected every signature and proof for a
+guarantee (no cross-token mixing) that bindings already provide.
+
+## 2026-09-12 — Interfaces: typed Ref bindings, Implements, Rely in the interface
+
+An interface is signatures plus a deterministic Tx-level model plus a `Rely`
+(what the environment may do to its ghost between our calls). A contract
+field `x : Ref I` is a typed binding; calls through it reify to external
+calls assumed to satisfy the interface. `lsc_contract … implements I`
+generates the entry/ghost projection and the proof obligation
+`Implements I C` (Tx-level, proved once), and `implements_to_conforms`
+discharges the S2 `Conforms` assumption when the callee is a proved Lsc
+contract, so multi-contract systems compose by theorem rather than trust.
+Decimals are read at construction and cached, never type-level.
+
+## 2026-09-12 — Bytecode transport is one trace-refinement theorem per stratum; examples carry no bytecode proofs
+
+Bytecode transport becomes `refines_S1` / `refines_S2`: for any EVM trace of
+the compiled contract, the decoded Tx-level trace `tr` satisfies `Wf`, and
+`run tr w` is `storageRel`-related to the final EVM storage. Every Tx-level
+trace theorem then holds of the bytecode by a generic `lift`, so
+`Examples/*/Proofs/EndToEnd.lean` and all `*_bytecode_*` theorems are deleted.
+All per-contract obligations are decidable or emitted by `lsc_contract`
+(`C.refines`). Two semantics changes make S2 exact: the external-call fault
+bits become the adversary's per-call choice `Step.call c fo` (not
+`World.faults`), and the EVM trace relation gets between-call `env` hops
+constrained by the interface `Rely`, so `RelyAlong` is derived, not
+assumed. `Inv` becomes `S → X → Prop`.
+
+## 2026-09-12 — Security model: ℚ-valued value measure, own-call fairness, adversary quantifier
+
+`Claim S := Address → S → ℚ` is a value measure (Token: balance; Vault:
+exact pro-rata assets; CPAMM: the position's product value `(s/S)² · r0 · r1`,
+monotone under others' add/remove/swap with floor rounding). A new own-call
+fairness family states, in delta form, what a user's own successful call
+gives (swap: execution quote and `≥ minOut`; remove/withdraw: exact floor
+pro-rata; add/deposit: share-rounding bound `n+1 ≥ min(a0·S/r0, a1·S/r1)`).
+CPAMM first mint is `min(a0, a1)` with 1000 dead shares to address 0. The
+adversary is the trace quantifier itself (any senders, order, arguments,
+capital — flash loans and MEV ordering included). Reentrancy through foreign
+tokens remains a stated assumption (`NoInterfere`) and becomes a theorem
+for Lsc callees via `implements`. Per-asset solvency stays the exported
+solvency statement; the product measure is used for the extraction theorem
+only.

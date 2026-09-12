@@ -125,11 +125,14 @@ Tx.run (transfer to amount) ctx w = .ok ((), w') →
 
 `hne` is unnecessary: sender = receiver makes the sum trivially unchanged.
 
+State theorems on the state delta (fields of `w'` versus `w`); return values
+appear only as corollaries or for view functions.
+
 ## Example layout
 
 Each `Examples/<Name>/` contains exactly:
 
-- `Contract.lean` (the contract)
+- `Contract.lean` (the contract only)
 - `Spec.lean` (the invariant, claim, authorisation predicates and any
   binding/`TransportSetup` definitions — what we claim, no theorems)
 - `Theorems.lean` (every exposed theorem for this contract — Tx-level, security,
@@ -137,7 +140,8 @@ Each `Examples/<Name>/` contains exactly:
   one-line body referencing `Proofs/…`)
 - `Proofs/` (`Tx.lean`, `Security.lean`, `Compile.lean`, `EndToEnd.lean`, plus
   any helper files; nothing outside `Proofs/` contains proof code beyond
-  one-line references)
+  one-line references; compile witnesses stay in `Proofs/Compile.lean`)
+- optional `Tests.lean` (executable smoke `#guard`s)
 - `README.md` (what the contract does, what is proved in prose, one line per
   file)
 - `compiled/` (Yul, labelled Asm, bytecode, ABI, heimdall decompile; written
