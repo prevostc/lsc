@@ -32,6 +32,10 @@ One Lean process at a time, always through the lock:
 scripts/lean lake build Checks
 ```
 
+## Layout
+
+LscSemantics = what programs mean (Tx monad, World, Core and its denotation, security trace framework); Lsc = how they compile and why that is correct.
+
 ## Docs
 
 - Language users (write, audit, assumptions): [`docs/guide/`](docs/guide/)

@@ -91,6 +91,15 @@ Core  --toYul (ours)-->  Yul AST (powdr yul-semantics)  --powdr compile_correct-
   `runtimeBlock_correct_callFree` / `runtimeBlock_correct_ext`. Yul → bytecode is powdr's
   `compile_correct` / `compileObject_correct` (Apache-2.0, pinned commit).
 
+## Lake libraries
+
+Lake packages the meaning of programs separately from compilation: `LscSemantics`
+is `Lsc.Lang`, `Lsc.Security`, and `Lsc.Util` (Tx monad, World, Core and its
+denotation, security trace framework); `Lsc` depends on it and is `Lsc.Compiler`
+plus the remaining `Lsc.*` modules (how programs compile and why that is correct).
+Module names are unchanged. `scripts/check-layering.sh` forbids semantics files
+from importing `Lsc.Compiler.*` and `Lsc/` from importing `Examples.*` or `Stdlib.*`.
+
 ## Toolchain
 
 Lean 4.33 and powdr's Mathlib revision; Lake dependencies `yul-semantics`, `evm-semantics`,

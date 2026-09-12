@@ -23,16 +23,20 @@ require «yul-evm-compiler» from git
 require KeccakEngine from git
   "https://github.com/prevostc/lean-keccak-unrolled" @ "main"
 
-lean_lib Lsc where
+lean_lib LscSemantics where
   -- `Glob.submodules` (not `andSubmodules`) because there is no `Lsc/Lang.lean` etc.
   globs := #[
     Glob.submodules `Lsc.Lang,
     Glob.submodules `Lsc.Security,
+    Glob.submodules `Lsc.Util
+  ]
+
+lean_lib Lsc where
+  globs := #[
     Glob.submodules `Lsc.Compiler,
     Glob.submodules `Lsc.Compiler.Proof,
     Glob.submodules `Lsc.Compiler.Transport,
     Glob.submodules `Lsc.Tools,
-    Glob.submodules `Lsc.Util,
     Glob.one `Lsc
   ]
 

@@ -6,9 +6,9 @@ the statement needs structures). Downstream modules import `*Theorems`,
 never `*Proof`. `Checks.lean` pins exported theorems and the axiom
 footprint. Tasks should read APIs, not proofs.
 
-Lake libraries (`lakefile.lean`): `Lsc` (language, compiler, security — `Lsc.Lang`,
-`Lsc.Security`, `Lsc.Compiler`, `Lsc.Compiler.Proof`, `Lsc.Compiler.Transport`,
-`Lsc.Tools`, `Lsc.Util`, barrel `Lsc.lean`) → `Stdlib` (`Stdlib.ERC20`,
+Lake libraries (`lakefile.lean`): `LscSemantics` (`Lsc.Lang`, `Lsc.Security`,
+`Lsc.Util`) → `Lsc` (`Lsc.Compiler`, `Lsc.Compiler.Proof`, `Lsc.Compiler.Transport`,
+`Lsc.Tools`, barrel `Lsc.lean`) → `Stdlib` (`Stdlib.ERC20`,
 `Stdlib.Scales`, `Stdlib.SafeERC20`, barrel `Stdlib.lean`) → `Examples`
 (`Examples.Counter.*`, `Examples.Token.*`, `Examples.Vault.*`, `Examples.Amm.*`,
 `Examples.Cpamm.*`, `Examples.Misc.*`). Import direction is strictly downward.
