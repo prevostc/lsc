@@ -28,6 +28,6 @@ Guarantee modules put theorem intent in `*Theorems.lean`: every theorem there
 must have a natural-language docstring (what it guarantees, under which
 hypotheses) immediately above the statement. `scripts/check-theorem-docs.sh`
 enforces that in CI. Read those files, not the proof modules, when using a
-theorem. Language developers: theorem-statement shape and `Examples/<Name>/`
-layout are specified in [`AGENTS.md`](../../AGENTS.md) (Theorem statements;
-Example layout).
+theorem. Language developers: theorem-statement shape is in
+[`AGENTS.md`](../../AGENTS.md); file split in [`Lsc/AGENTS.md`](../../Lsc/AGENTS.md);
+`Examples/<Name>/` layout in [`Examples/AGENTS.md`](../../Examples/AGENTS.md).

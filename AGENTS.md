@@ -1,93 +1,101 @@
-# Project Agent Instructions
+# Agent instructions
 
-## Context discipline
+Treat context as scarce. Use subagents for contained work (coding, proofs,
+exploration, build fixes, research, isolated design). Keep the main context on
+goals, architectural decisions, evidence, unresolved questions, and current
+work. Prefer module APIs and exported guarantees over internals.
 
-Treat context as scarce.
-
-Use subagents for contained work such as coding, theorem proving, codebase exploration, build fixes, research, and isolated design questions.
-
-Keep the main context focused on goals, architectural decisions, evidence, unresolved questions, and current work.
-
-Prefer module APIs and exported guarantees over reading implementation internals.
-
-Read `docs/PROJECT_GOAL.md` when you need the canonical product goal. Keep that document concise and do not turn it into a project diary.
+Canonical product goal: `docs/PROJECT_GOAL.md`. Keep it concise; not a diary.
 
 ## Model routing
 
 When model selection is available:
 
-- **Cursor Grok 4.6 xhigh** (default for everything): coding, refactoring, exploration, build fixes,
-  proof implementation, proof-strategy drafts, design drafts, documentation, reports.
-- **Fable 5.1**: reserved for the few most critical architecture decisions (semantics, proof
-  boundaries, trusted assumptions) and for adjudicating when Grok's results conflict or fail
-  twice. At most one Fable subagent at a time, read-only, with a tight brief and a ≤ 250-line
-  deliverable. Never for implementation, docs, or first-draft designs.
+- **Cursor Grok 4.6 xhigh** (default): coding, refactoring, exploration, build
+  fixes, proof implementation, proof-strategy drafts, design drafts, docs,
+  reports.
+- **Fable 5.1**: only the few most critical architecture decisions (semantics,
+  proof boundaries, trusted assumptions) and when Grok conflicts or fails twice.
+  At most one at a time, read-only, tight brief, ≤250-line deliverable. Never
+  implementation, docs, or first-draft designs.
 
-Fable budget is the binding constraint of this project. Before spawning Fable ask: could Grok draft
-this and Fable only review the draft? If yes, do that. The main (Fable) context must stay brief:
-delegate, decide, record; do not read implementation files or long reports itself.
+Fable budget is the binding constraint. Before spawning Fable: could Grok draft
+and Fable only review? If yes, do that. Main (Fable) context: delegate, decide,
+record; do not read implementation files or long reports.
 
-Do not let execution agents make major architectural decisions implicitly through code.
-See **Human confirmation before large work**.
+Do not let execution agents make major architectural decisions implicitly
+through code. See **Preview before large work**.
 
 ## Lean execution
 
-**Never run more than one Lean build/checking process at once.**
+**Never run more than one Lean build/checking process at once.** One global lock
+across all agents: `lake build`, `lake env lean`, project-wide checks, and
+equivalents.
 
-Treat Lean execution as one global lock across all agents. This includes `lake build`, `lake env lean`, project-wide checks, and equivalent Lean processes.
+Always `scripts/lean …` (e.g. `scripts/lean lake build Lsc.Security.Wealth`);
+never raw `lake`/`lean`. It blocks until the other process finishes. Build only
+the targets you need (`lake build <Module>`), not the whole library, so another
+agent's in-progress file cannot fail your build. Parallel reasoning is fine;
+parallel Lean builds are not.
 
-The lock is enforced by `scripts/lean`: always run Lean through it, e.g. `scripts/lean lake build Lsc.Security.Wealth`. It blocks until the other Lean process finishes. Never invoke `lake` or `lean` directly.
+## Preview before large work
 
-Build only the targets you need (`lake build <Module>`), not the whole library, so another agent's in-progress file cannot fail your build.
+Large: new language feature, interface/security/compiler architecture, example
+rewrite, numeric/type-system change, or anything that touches more than one
+example or a public theorem family.
 
-Parallel reasoning is fine; parallel Lean builds are not.
+1. Show the owner the user-facing code: storage struct, one representative
+   function, 1–2 theorem statements as a Solidity developer would read them.
+2. Wait for an explicit go. Do not spawn implementation/proof subagents until
+   the owner confirms the preview (or a revised one).
+3. Do not deep-dive (read large internals, start proofs, rewrite trees) to
+   figure out the design. Draft the surface, ask, then implement.
 
-## Theorem organization
+Exempt: build/lint, renames, docs, theorem-docstring quality, one-file bugfixes
+that do not change a public API or theorem statement.
 
-A **guarantee module** is any module that exports a theorem referenced by
-`Checks.lean`, by `docs/internals/*.md` or `docs/guide/*.md`, or by another module's *statement*
-(not just its proof). Every guarantee module `Foo.lean` is split as follows:
+Subagent briefs must say `preview already approved`, or stop and return a
+preview instead of editing.
 
-- `FooTheorems.lean`: for each exported theorem, a docstring in plain language
-  (what it guarantees, under which hypotheses, in one to four sentences, no
-  proof talk), the statement verbatim, and the body `:= Foo.Proof.thm_name`
-  (or `:= by exact Foo.Proof.thm_name` if elaboration needs it). Definitions
-  the statement needs (`structure`s, `def`s, `abbrev`s such as `EvmTraceRunAll`,
-  `TransportSetup`, `R`, `Inv`) stay in a `FooDefs.lean` (or the existing defs
-  module) imported by both files; the Theorems file must **not** contain proof
-  code beyond the one-line reference.
-- `FooProof.lean`: the actual proof (`theorem thm_name … := by …`) in namespace
-  `<orig>.Proof`, plus all private helpers. Imports whatever it needs.
-- Downstream modules import `FooTheorems` (never `FooProof`).
-- Fully-qualified theorem names used by `Checks.lean` must not change — the
-  Theorems-file theorem keeps the original namespace and name.
-- Placement: Theorems/Defs of a `Proof/*` guarantee module go **up** to
-  `Lsc/Compiler/<Name>Theorems.lean` (and `…Defs.lean` if needed); the proof
-  stays `Lsc/Compiler/Proof/<Name>Proof.lean`.
-- Internal lemma libraries under `Lsc/Compiler/Proof/` (helpers nobody outside
-  the proof tree references) stay there, with a 2–5-line module docstring.
+```lean
+structure Storage where
+  reserve0 : Amount token0
+  reserve1 : Amount token1
 
-Every theorem in a `*Theorems.lean` file must have a `/-- … -/` docstring
-immediately above it (`@[simp]` and similar attributes may sit between). That
-is a rule: `scripts/check-theorem-docs.sh` enforces it and runs in CI. State
-the guarantee and its hypotheses in plain language — no proof talk, no
-boilerplate.
+def swap0for1 (amountIn : Amount token0) (minOut : Amount token1) : M (Amount token1) := do
+  -- …
 
-```
-/-- If `Inv` holds initially and is preserved, `claim a` does not fall. -/
-theorem no_unauthorized_extraction …
--- rejected: /-- `foo` holds under the hypotheses in its type. -/
+Tx.run (swap0for1 dx minOut) ctx w = .ok (out, w') →
+  w'.self.reserve0.raw * w'.self.reserve1.raw ≥
+    w.self.reserve0.raw * w.self.reserve1.raw
 ```
 
-If Lean dependencies make the exact layout awkward, preserve the principle:
-theorem intent and proof implementation should be independently understandable
-and loadable.
+## Implementation + proof
 
-### Theorem statements
+Plan implementation and proof jointly. Do not design code first and discover
+later that it is hostile to proof.
+
+## Simplification
+
+Treat deletion and refactoring as normal progress. After substantial work ask:
+
+> **If we rebuilt this subsystem today using what we now know, would it still look like this?**
+
+Remove, collapse, or refactor unnecessary complexity before building more on
+top. Temporary scaffolding must be removed or explicitly promoted to
+architecture.
+
+## Architecture contracts
+
+Do not silently change major architectural contracts. Changes affecting
+semantics, compilation, trusted assumptions, or proof boundaries must make
+their effect on the documented end-to-end proof chain explicit.
+
+## Theorem statements
 
 Safety theorems take *success* as the hypothesis — `Tx.run f ctx w = .ok (r, w')`,
-or at trace level "the call was accepted" — and conclude about `w'`. Anything the
-program checks itself (`require`, overflow, balance, authorisation checks) is
+or at trace level "the call was accepted" — and conclude about `w'`. Anything
+the program checks itself (`require`, overflow, balance, authorisation) is
 implied by success and must not appear as a hypothesis.
 
 No edge-case exclusions (self-transfer, zero amount, sender = owner, …) unless
@@ -104,6 +112,9 @@ safety theorem.
 Prefer statements over all `ctx`/`w`; avoid hypotheses that merely restate an
 invariant already carried by the trace framework (`Inv`) unless the theorem is
 stated outside that framework.
+
+State theorems on the state delta (fields of `w'` versus `w`); return values
+appear only as corollaries or for view functions.
 
 Before (`Examples/Token/ProofsTheorems.lean`):
 
@@ -126,74 +137,5 @@ Tx.run (transfer to amount) ctx w = .ok ((), w') →
 
 `hne` is unnecessary: sender = receiver makes the sum trivially unchanged.
 
-State theorems on the state delta (fields of `w'` versus `w`); return values
-appear only as corollaries or for view functions.
-
-## Example layout
-
-Each `Examples/<Name>/` contains exactly:
-
-- `Contract.lean` (the contract only)
-- `Spec.lean` (the invariant, claim, authorisation predicates and any
-  binding/`TransportSetup` definitions — what we claim, no theorems)
-- `Theorems.lean` (every exposed theorem for this contract — Tx-level, security,
-  compiler instance, bytecode — each with a plain-language docstring and a
-  one-line body referencing `Proofs/…`)
-- `Proofs/` (`Tx.lean`, `Security.lean`, `Compile.lean`, `EndToEnd.lean`, plus
-  any helper files; nothing outside `Proofs/` contains proof code beyond
-  one-line references; compile witnesses stay in `Proofs/Compile.lean`)
-- optional `Tests.lean` (executable smoke `#guard`s)
-- `README.md` (what the contract does, what is proved in prose, one line per
-  file)
-- `compiled/` (Yul, labelled Asm, bytecode, ABI, heimdall decompile; written
-  in place by `scripts/export_bytecode.sh`, not copied from `out/`)
-
-`Checks.lean` imports `Examples.<Name>.Theorems` only. This layout is the
-example-level instance of the Theorems/Proof rule; the docstring checker treats
-`Theorems.lean` as a Theorems file (its glob is `*Theorems.lean`, which matches).
-
-## Implementation + proof
-
-Plan implementation and proof jointly before substantial work.
-
-Do not design code first and discover later that it is hostile to proof.
-
-## Human confirmation before large work
-
-Before any large change (new language feature, interface/security/compiler
-architecture, example rewrite, numeric/type-system change, or anything that
-touches more than one example or a public theorem family), the main agent MUST
-show the owner a preview of what the user-facing code will look like: the
-storage struct, one representative function body, and one or two theorem
-statements as a Solidity developer would read them. Wait for an explicit go.
-
-Do not spawn implementation/proof subagents for that work until the owner
-confirms the preview (or a revised one).
-
-Do not deep-dive (read large internals, start proofs, rewrite trees) to
-"figure out" a large design in code. Draft the surface, ask, then implement.
-
-Mechanical / clearly-scoped follow-ups are exempt: build/lint fixes, renames,
-docs, theorem-docstring quality, one-file bugfixes that do not change a public
-API or theorem statement.
-
-Subagents inherit this: their brief must say "preview already approved" or they
-must stop and return a preview instead of editing.
-
-## Simplification
-
-Treat deletion and refactoring as normal progress.
-
-After substantial work ask:
-
-> **If we rebuilt this subsystem today using what we now know, would it still look like this?**
-
-Remove, collapse, or refactor unnecessary complexity before building more on top.
-
-Temporary scaffolding must be removed or explicitly promoted to architecture.
-
-## Architecture contracts
-
-Do not silently change major architectural contracts.
-
-Changes affecting semantics, compilation, trusted assumptions, or proof boundaries must make their effect on the documented end-to-end proof chain explicit.
+Guarantee-module file split: `Lsc/AGENTS.md`. Example layout: `Examples/AGENTS.md`.
+`Checks.lean` imports `*Theorems` only.

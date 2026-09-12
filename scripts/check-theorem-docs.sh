@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Every theorem in a *Theorems.lean file must carry a natural-language docstring
-# (see AGENTS.md, "Theorem organization"). Exits 1 and lists `file:line:`
+# (see Lsc/AGENTS.md). Exits 1 and lists `file:line:`
 # offenders otherwise.
 #
 # A theorem is documented when a `/-- … -/` docstring is the closest
@@ -213,7 +213,7 @@ case "${1:-}" in
     ;;
   "")
     if ! check_root "$ROOT"; then
-      echo "error: undocumented theorems in *Theorems.lean files (AGENTS.md: Theorem organization)" >&2
+      echo "error: undocumented theorems in *Theorems.lean files (Lsc/AGENTS.md)" >&2
       exit 1
     fi
     ;;

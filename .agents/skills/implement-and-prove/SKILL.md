@@ -9,12 +9,8 @@ Do not design implementation independently from proof.
 
 ## 1. Define the local contract
 
-If the change is large (new language feature, interface/security/compiler
-architecture, example rewrite, numeric/type-system change, or anything that
-touches more than one example or a public theorem family), stop and return a
-preview to the owner instead of editing: the storage struct, one representative
-function body, and one or two theorem statements as a Solidity developer would
-read them. Proceed only when the brief says the preview was approved.
+Large changes follow the preview rule in the root `AGENTS.md`. Proceed only when
+the brief says `preview already approved`; otherwise stop and return a preview.
 
 Before editing, write a compact blueprint:
 
