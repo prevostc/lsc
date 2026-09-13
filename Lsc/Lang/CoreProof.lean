@@ -9,16 +9,22 @@ namespace Lsc.Proof
 
 variable {S X E ε : Type}
 
-/-- Successful `Op.denote` never mutates `self`. CALLs are discharged by `hCall`. -/
+/-- Successful `Op.denote` never mutates `self`. CALLs leave `self` unchanged
+(no reentrancy in this slice). -/
 theorem Op.effects_frame {Γ : ContractSchema S X E ε} (op : Op) (env : List Nat)
-    (hCall : ∀ b m args ctx w v w',
-      Tx.run (Γ.ext.call b m args) ctx w = .ok (v, w') → w'.self = w.self)
     {ctx : Ctx} {w : World S X E} {v : Nat} {w' : World S X E}
     (h : Tx.run (Op.denote Γ env op) ctx w = .ok (v, w')) :
     w'.self = w.self := by
   cases op with
-  | call b m args =>
-    exact hCall b m _ ctx w v w' h
+  | call t sel args ret =>
+    simp [Op.denote] at h
+    exact Tx.callAsNat_self (S := S) (X := X) (E := E) ret
+      (Atom.eval env t) sel (args.map (Atom.eval env)) h
+  | view t sel args ret =>
+    simp [Op.denote] at h
+    exact congrArg World.self
+      (Tx.viewAsNat_world (S := S) (X := X) (E := E) ret
+        (Atom.eval env t) sel (args.map (Atom.eval env)) h)
   | load _ | loadMap _ _ | loadMap2 _ _ _ | value | timestamp | blockNumber | pure _ =>
     simp [Op.denote] at h
     rw [h.2]
@@ -47,8 +53,6 @@ theorem Stmt.effects_frame_on {α} {Γ : ContractSchema S X E ε} (P : S → α)
     (hStore : ∀ i σ v, f ≠ i → P (Γ.st.scalarUpd i σ v) = P σ)
     (hStoreMap : ∀ i σ m, f ≠ i → P (Γ.st.map1Upd i σ m) = P σ)
     (hStoreMap2 : ∀ i σ m, f ≠ i → P (Γ.st.map2Upd i σ m) = P σ)
-    (hCall : ∀ b m args ctx w v w',
-      Tx.run (Γ.ext.call b m args) ctx w = .ok (v, w') → w'.self = w.self)
     (hf : f ∉ (Stmt.effects s).writes)
     {ctx : Ctx} {w : World S X E} {v : Unit} {w' : World S X E}
     (h : Tx.run (Stmt.denote Γ env s) ctx w = .ok (v, w')) :
@@ -78,15 +82,24 @@ theorem Stmt.effects_frame_on {α} {Γ : ContractSchema S X E ε} (P : S → α)
     rfl
   | revert err args =>
     simp [Stmt.denote] at h
-  | call b m args =>
+  | call t sel args ret =>
     simp [Stmt.denote] at h
-    cases hRun : Tx.run (Γ.ext.call b m (args.map (·.eval env))) ctx w with
+    cases hRun : Tx.run (Op.denote Γ env (.call t sel args ret)) ctx w with
     | error _ => simp [hRun] at h
     | ok p =>
       rcases p with ⟨val, w1⟩
       simp [hRun] at h
       subst h
-      exact congrArg P (hCall b m (args.map (·.eval env)) ctx w val w1 hRun)
+      exact congrArg P (Op.effects_frame (.call t sel args ret) env hRun)
+  | view t sel args ret =>
+    simp [Stmt.denote] at h
+    cases hRun : Tx.run (Op.denote Γ env (.view t sel args ret)) ctx w with
+    | error _ => simp [hRun] at h
+    | ok p =>
+      rcases p with ⟨val, w1⟩
+      simp [hRun] at h
+      subst h
+      exact congrArg P (Op.effects_frame (.view t sel args ret) env hRun)
 
 /-- Scalar specialisation of `Stmt.effects_frame_on`. -/
 theorem Stmt.effects_frame {Γ : ContractSchema S X E ε} (s : Stmt) (env : List Nat)
@@ -95,8 +108,6 @@ theorem Stmt.effects_frame {Γ : ContractSchema S X E ε} (s : Stmt) (env : List
       Γ.st.scalar f₁ (Γ.st.scalarUpd f₂ σ v) = Γ.st.scalar f₁ σ)
     (hMap1 : ∀ i σ m, Γ.st.scalar f (Γ.st.map1Upd i σ m) = Γ.st.scalar f σ)
     (hMap2 : ∀ i σ m, Γ.st.scalar f (Γ.st.map2Upd i σ m) = Γ.st.scalar f σ)
-    (hCall : ∀ b m args ctx w v w',
-      Tx.run (Γ.ext.call b m args) ctx w = .ok (v, w') → w'.self = w.self)
     (hf : f ∉ (Stmt.effects s).writes)
     {ctx : Ctx} {w : World S X E} {v : Unit} {w' : World S X E}
     (h : Tx.run (Stmt.denote Γ env s) ctx w = .ok (v, w')) :
@@ -105,7 +116,7 @@ theorem Stmt.effects_frame {Γ : ContractSchema S X E ε} (s : Stmt) (env : List
     (fun i σ v hne => hΓ f i σ v hne)
     (fun i σ m _ => hMap1 i σ m)
     (fun i σ m _ => hMap2 i σ m)
-    hCall hf h
+    hf h
 
 /-- If `f` is not among `c`'s writes, a successful `Core.denote` leaves projection `P` unchanged. -/
 theorem effects_frame_on {α} {Γ : ContractSchema S X E ε} {t : RetTy} (c : Core t)
@@ -113,8 +124,6 @@ theorem effects_frame_on {α} {Γ : ContractSchema S X E ε} {t : RetTy} (c : Co
     (hStore : ∀ i σ v, f ≠ i → P (Γ.st.scalarUpd i σ v) = P σ)
     (hStoreMap : ∀ i σ m, f ≠ i → P (Γ.st.map1Upd i σ m) = P σ)
     (hStoreMap2 : ∀ i σ m, f ≠ i → P (Γ.st.map2Upd i σ m) = P σ)
-    (hCall : ∀ b m args ctx w v w',
-      Tx.run (Γ.ext.call b m args) ctx w = .ok (v, w') → w'.self = w.self)
     (hf : f ∉ (Core.effects c).writes)
     {ctx : Ctx} {w : World S X E} {v : t.denote} {w' : World S X E}
     (h : Tx.run (Core.denote Γ c env) ctx w = .ok (v, w')) :
@@ -125,16 +134,16 @@ theorem effects_frame_on {α} {Γ : ContractSchema S X E ε} {t : RetTy} (c : Co
     rw [h.2]
   | opTail op =>
     simp [Core.denote] at h
-    exact congrArg P (Op.effects_frame op env hCall h)
+    exact congrArg P (Op.effects_frame op env h)
   | opTailAddr op =>
     simp [Core.denote] at h
-    exact congrArg P (Op.effects_frame op env hCall h)
+    exact congrArg P (Op.effects_frame op env h)
   | opTailFlag op =>
     simp [Core.denote] at h
-    exact congrArg P (Op.effects_frame op env hCall h)
+    exact congrArg P (Op.effects_frame op env h)
   | stmtTail s =>
     simp [Core.denote] at h
-    exact Stmt.effects_frame_on P s env f hStore hStoreMap hStoreMap2 hCall hf h
+    exact Stmt.effects_frame_on P s env f hStore hStoreMap hStoreMap2 hf h
   | revertTail err args =>
     simp [Core.denote] at h
   | letOp op k ih =>
@@ -144,7 +153,7 @@ theorem effects_frame_on {α} {Γ : ContractSchema S X E ε} {t : RetTy} (c : Co
     | ok p =>
       rcases p with ⟨a, w1⟩
       simp [hOp] at h
-      have hself := Op.effects_frame op env hCall hOp
+      have hself := Op.effects_frame op env hOp
       have hf' : f ∉ (Core.effects k).writes := by
         simpa [Core.effects, Effects.append, Op.effects_writes] using hf
       rw [ih (a :: env) hf' h, hself]
@@ -158,7 +167,7 @@ theorem effects_frame_on {α} {Γ : ContractSchema S X E ε} {t : RetTy} (c : Co
       rcases p with ⟨u, w1⟩
       simp [hS] at h
       have hs :=
-        Stmt.effects_frame_on P s env f hStore hStoreMap hStoreMap2 hCall hfsk.1 hS
+        Stmt.effects_frame_on P s env f hStore hStoreMap hStoreMap2 hfsk.1 hS
       rw [ih env hfsk.2 h, hs]
   | letPure p args k ih =>
     simp [Core.denote] at h
@@ -178,8 +187,6 @@ theorem effects_frame {Γ : ContractSchema S X E ε} {t} (c : Core t) (env : Lis
       Γ.st.scalar f₁ (Γ.st.scalarUpd f₂ σ v) = Γ.st.scalar f₁ σ)
     (hMap1 : ∀ i σ m, Γ.st.scalar f (Γ.st.map1Upd i σ m) = Γ.st.scalar f σ)
     (hMap2 : ∀ i σ m, Γ.st.scalar f (Γ.st.map2Upd i σ m) = Γ.st.scalar f σ)
-    (hCall : ∀ b m args ctx w v w',
-      Tx.run (Γ.ext.call b m args) ctx w = .ok (v, w') → w'.self = w.self)
     (hf : f ∉ (Core.effects c).writes)
     {ctx : Ctx} {w : World S X E} {v : t.denote} {w' : World S X E}
     (h : Tx.run (Core.denote Γ c env) ctx w = .ok (v, w')) :
@@ -188,7 +195,7 @@ theorem effects_frame {Γ : ContractSchema S X E ε} {t} (c : Core t) (env : Lis
     (fun i σ v hne => hΓ f i σ v hne)
     (fun i σ m _ => hMap1 i σ m)
     (fun i σ m _ => hMap2 i σ m)
-    hCall hf h
+    hf h
 
 /-- A successful run does not change mapping field `f` unless `f` is in `writes`. -/
 theorem effects_frame_map1 {Γ : ContractSchema S X E ε} {t} (c : Core t)
@@ -196,13 +203,11 @@ theorem effects_frame_map1 {Γ : ContractSchema S X E ε} {t} (c : Core t)
     (hΓ : ∀ i σ v, f ≠ i → Γ.st.map1 f (Γ.st.scalarUpd i σ v) = Γ.st.map1 f σ)
     (hMap1 : ∀ i σ m, f ≠ i → Γ.st.map1 f (Γ.st.map1Upd i σ m) = Γ.st.map1 f σ)
     (hMap2 : ∀ i σ m, f ≠ i → Γ.st.map1 f (Γ.st.map2Upd i σ m) = Γ.st.map1 f σ)
-    (hCall : ∀ b m args ctx w v w',
-      Tx.run (Γ.ext.call b m args) ctx w = .ok (v, w') → w'.self = w.self)
     (hf : f ∉ (Core.effects c).writes)
     {ctx : Ctx} {w : World S X E} {v : t.denote} {w' : World S X E}
     (h : Tx.run (Core.denote Γ c env) ctx w = .ok (v, w')) :
     Γ.st.map1 f w'.self = Γ.st.map1 f w.self :=
-  effects_frame_on c env f (Γ.st.map1 f) hΓ hMap1 hMap2 hCall hf h
+  effects_frame_on c env f (Γ.st.map1 f) hΓ hMap1 hMap2 hf h
 
 /-- A successful run does not change a double mapping field `f` unless `f` is in `writes`. -/
 theorem effects_frame_map2 {Γ : ContractSchema S X E ε} {t} (c : Core t)
@@ -210,13 +215,11 @@ theorem effects_frame_map2 {Γ : ContractSchema S X E ε} {t} (c : Core t)
     (hΓ : ∀ i σ v, f ≠ i → Γ.st.map2 f (Γ.st.scalarUpd i σ v) = Γ.st.map2 f σ)
     (hMap1 : ∀ i σ m, f ≠ i → Γ.st.map2 f (Γ.st.map1Upd i σ m) = Γ.st.map2 f σ)
     (hMap2 : ∀ i σ m, f ≠ i → Γ.st.map2 f (Γ.st.map2Upd i σ m) = Γ.st.map2 f σ)
-    (hCall : ∀ b m args ctx w v w',
-      Tx.run (Γ.ext.call b m args) ctx w = .ok (v, w') → w'.self = w.self)
     (hf : f ∉ (Core.effects c).writes)
     {ctx : Ctx} {w : World S X E} {v : t.denote} {w' : World S X E}
     (h : Tx.run (Core.denote Γ c env) ctx w = .ok (v, w')) :
     Γ.st.map2 f w'.self = Γ.st.map2 f w.self :=
-  effects_frame_on c env f (Γ.st.map2 f) hΓ hMap1 hMap2 hCall hf h
+  effects_frame_on c env f (Γ.st.map2 f) hΓ hMap1 hMap2 hf h
 
 /-- `effects_frame_on` on `worldAfter`: reverts keep `self`, so an unwritten
 projection is unchanged whether the Core run succeeds or reverts. -/
@@ -225,8 +228,6 @@ theorem worldAfter_frame_on {α} {Γ : ContractSchema S X E ε} {t : RetTy} (c :
     (hStore : ∀ i σ v, f ≠ i → P (Γ.st.scalarUpd i σ v) = P σ)
     (hStoreMap : ∀ i σ m, f ≠ i → P (Γ.st.map1Upd i σ m) = P σ)
     (hStoreMap2 : ∀ i σ m, f ≠ i → P (Γ.st.map2Upd i σ m) = P σ)
-    (hCall : ∀ b m args ctx w v w',
-      Tx.run (Γ.ext.call b m args) ctx w = .ok (v, w') → w'.self = w.self)
     (hf : f ∉ (Core.effects c).writes)
     (ctx : Ctx) (w : World S X E) :
     P (Lang.worldAfter (Core.denote Γ c env) ctx w).self = P w.self := by
@@ -235,6 +236,6 @@ theorem worldAfter_frame_on {α} {Γ : ContractSchema S X E ε} {t : RetTy} (c :
   | ok p =>
     rcases p with ⟨v, w'⟩
     simp [Lang.worldAfter, h]
-    exact effects_frame_on c env f P hStore hStoreMap hStoreMap2 hCall hf h
+    exact effects_frame_on c env f P hStore hStoreMap hStoreMap2 hf h
 
 end Lsc.Proof

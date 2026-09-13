@@ -22,14 +22,6 @@ structure Storage where
   dummy : Nat
   token : IERC20.Ref testToken
 
-structure Ext where
-  token : Ghost
-
-instance : Inhabited Ext := ⟨⟨{}⟩⟩
-
-def tokenB : Binding IERC20 Storage Ext :=
-  ⟨(·.token.addr), (·.token), fun x g => { x with token := g }⟩
-
 inductive Event
   | Dummy
   deriving DecidableEq, Repr
@@ -38,45 +30,50 @@ inductive Error
   | TransferFailed
   deriving DecidableEq, Repr
 
-abbrev M := Tx Storage Ext Event Error
+abbrev M := Tx Storage Unit Event Error
 
-def doCheckOk (dst : Address) (amt : Amount testToken) : M Unit :=
-  Binding.checkOk (Binding.transfer tokenB dst amt) .TransferFailed
+def doCheckOk (r : IERC20.Ref testToken) (dst : Address) (amt : Amount testToken) :
+    M Unit := do
+  let ok ← r.transfer dst amt
+  Tx.require (ok = true) .TransferFailed
 
-def doSafeTransfer (dst : Address) (amt : Amount testToken) : M Unit :=
-  Binding.safeTransfer tokenB dst amt .TransferFailed
+def doSafeTransfer (r : IERC20.Ref testToken) (dst : Address) (amt : Amount testToken) :
+    M Unit :=
+  safeTransfer r dst amt .TransferFailed
 
-def doSafeTransferFrom (src dst : Address) (amt : Amount testToken) : M Unit :=
-  Binding.safeTransferFrom tokenB src dst amt .TransferFailed
+def doSafeTransferFrom (r : IERC20.Ref testToken) (src dst : Address)
+    (amt : Amount testToken) : M Unit :=
+  safeTransferFrom r src dst amt .TransferFailed
 
-/-- Compound helper mid-`do`. Typechecks; Amount-returning CALL sequences are
-not yet in the `lsc_reify` certificate fragment (see `doQuote` for Amount
-`mulDiv`/`+?` sequences). -/
-def doSafeTransferFromMid (src dst : Address) (amt : Amount testToken) : M (Amount testToken) := do
-  let _ ← Binding.balanceOf (a := testToken) tokenB src
-  Binding.safeTransferFrom tokenB src dst amt .TransferFailed
-  Binding.balanceOf (a := testToken) tokenB dst
+/-- Compound helper mid-`do`. -/
+def doSafeTransferFromMid (r : IERC20.Ref testToken) (src dst : Address)
+    (amt : Amount testToken) : M (Amount testToken) := do
+  let _ ← r.balanceOf src
+  safeTransferFrom r src dst amt .TransferFailed
+  r.balanceOf dst
 
-def doSafeApprove (dst : Address) (amt : Amount testToken) : M Unit :=
-  Binding.safeApprove (Binding.transfer tokenB dst amt) .TransferFailed
+def doSafeApprove (r : IERC20.Ref testToken) (dst : Address) (amt : Amount testToken) :
+    M Unit :=
+  safeApprove r dst amt .TransferFailed
 
-def doTransfer (dst : Address) (amt : Amount testToken) : M Nat :=
-  Binding.transfer tokenB dst amt
+def doTransfer (r : IERC20.Ref testToken) (dst : Address) (amt : Amount testToken) :
+    M Bool :=
+  r.transfer dst amt
 
-def doTransferFrom (src dst : Address) (amt : Amount testToken) : M Nat :=
-  Binding.transferFrom tokenB src dst amt
+def doTransferFrom (r : IERC20.Ref testToken) (src dst : Address)
+    (amt : Amount testToken) : M Bool :=
+  r.transferFrom src dst amt
 
-def doBalanceOf (owner : Address) : M (Amount testToken) :=
-  Binding.balanceOf (a := testToken) tokenB owner
+def doBalanceOf (r : IERC20.Ref testToken) (owner : Address) : M (Amount testToken) :=
+  r.balanceOf owner
 
-def doDecimals : M Word :=
-  Binding.decimals tokenB
+def doTransferUnit (r : IERC20.Ref testToken) (dst : Address) (amt : Amount testToken) :
+    M Unit := do
+  let _ ← r.transfer dst amt
 
-def doTransferUnit (dst : Address) (amt : Amount testToken) : M Unit :=
-  Binding.transferUnit tokenB dst amt
-
-def doTransferFromUnit (src dst : Address) (amt : Amount testToken) : M Unit :=
-  Binding.transferFromUnit tokenB src dst amt
+def doTransferFromUnit (r : IERC20.Ref testToken) (src dst : Address)
+    (amt : Amount testToken) : M Unit := do
+  let _ ← r.transferFrom src dst amt
 
 def doMulDown (a x : Fixed 18) : M (Fixed 18) := Fixed.mulDown (d := 18) a x
 def doMulUp (a x : Fixed 18) : M (Fixed 18) := Fixed.mulUp (d := 18) a x
@@ -101,10 +98,11 @@ lsc_schema StdlibTests
 lsc_reify StdlibTests.doCheckOk StdlibTests.doSafeTransfer StdlibTests.doSafeTransferFrom
   StdlibTests.doSafeApprove
 lsc_reify StdlibTests.doTransfer StdlibTests.doTransferFrom StdlibTests.doBalanceOf
-  StdlibTests.doDecimals StdlibTests.doTransferUnit StdlibTests.doTransferFromUnit
+  StdlibTests.doTransferUnit StdlibTests.doTransferFromUnit
 lsc_reify StdlibTests.doMulDown StdlibTests.doMulUp StdlibTests.doDivDown StdlibTests.doDivUp
 lsc_reify StdlibTests.doRescaleDown StdlibTests.doRescaleUp StdlibTests.doPow10
 lsc_reify StdlibTests.doAdd StdlibTests.doQuote
+lsc_reify StdlibTests.doSafeTransferFromMid
 
 #check StdlibTests.doCheckOk.core_denote
 #check StdlibTests.doSafeTransfer.core_denote
@@ -113,7 +111,6 @@ lsc_reify StdlibTests.doAdd StdlibTests.doQuote
 #check StdlibTests.doTransfer.core_denote
 #check StdlibTests.doTransferFrom.core_denote
 #check StdlibTests.doBalanceOf.core_denote
-#check StdlibTests.doDecimals.core_denote
 #check StdlibTests.doTransferUnit.core_denote
 #check StdlibTests.doTransferFromUnit.core_denote
 #check StdlibTests.doMulDown.core_denote
@@ -125,6 +122,7 @@ lsc_reify StdlibTests.doAdd StdlibTests.doQuote
 #check StdlibTests.doPow10.core_denote
 #check StdlibTests.doAdd.core_denote
 #check StdlibTests.doQuote.core_denote
+#check StdlibTests.doSafeTransferFromMid.core_denote
 
 example : Nat.pow 10 18 = WAD := rfl
 example : Nat.pow 10 27 = RAY := rfl

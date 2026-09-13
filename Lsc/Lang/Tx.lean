@@ -448,6 +448,13 @@ theorem worldAfter_wrap {S X E ε α β} (f : α → β) (x : Tx S X E ε α)
     worldAfter x ctx w = worldAfter (f <$> x) ctx w :=
   (worldAfter_map f x ctx w).symm
 
+/-- `worldAfter_wrap` with a `core_denote` certificate (`f <$> Core.denote = g`). -/
+theorem worldAfter_wrap_eq {S X E ε α β} (f : α → β) {x : Tx S X E ε α}
+    {y : Tx S X E ε β} {ctx : Ctx} {w : World S X E}
+    (h : f <$> x = y) :
+    worldAfter x ctx w = worldAfter y ctx w := by
+  rw [worldAfter_wrap f, h]
+
 end Lang
 
 /-! ### Surface sugar
