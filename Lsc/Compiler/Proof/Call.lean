@@ -8,11 +8,7 @@ set_option linter.unusedVariables false
 set_option maxHeartbeats 800000
 
 /-!
-Backward simulation of the scoped `emitExtCall` block (`op_sim_call_bwd`).
-
-Fault oracle: the call reads `w.ncalls`. Failure uses `composeFault ncalls true rest`
-(Core does not bump `ncalls`). Success uses `composeFault ncalls false rest`; a
-continuation sees indices `≥ ncalls + 1`.
+Inversion of CALL/STATICCALL evaluation for selector-driven `emitExtCall`.
 -/
 
 namespace Lsc.Compiler
@@ -85,20 +81,34 @@ theorem evalArgs_cons_var_inv {calls : ExternalCalls} {funs : FunEnv (yulD calls
     subst hv; subst hst
     exact ⟨_, ⟨rfl, hrest⟩⟩
 
+theorem evalArgs_cons_vals_inv {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
+    {V : VEnv (yulD calls)} {st : EvmState} {e : YExpr} {es : List YExpr}
+    {vs : List U256} {st' : EvmState}
+    (h : EvalArgs (yulD calls) funs V st (e :: es) (.vals vs st')) :
+    ∃ v vs' st1, vs = v :: vs' ∧
+      EvalArgs (yulD calls) funs V st es (.vals vs' st1) ∧
+      EvalExpr (yulD calls) funs V st1 e (.vals [v] st') := by
+  cases h
+  · next hrest hhead => exact ⟨_, _, _, rfl, hrest, hhead⟩
+
 theorem eval_call_args_inv {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
     {V : VEnv (yulD calls)} {st st' : EvmState}
-    {tok : YIdent} {target : U256} {gas insize : Nat} {vs : List U256}
-    (hget : VEnv.get V tok = some target)
+    {targetE : YExpr} {target : U256} {gas insize : Nat} {vs : List U256}
+    (ht : ∀ {st0 r}, EvalExpr (yulD calls) funs V st0 targetE r →
+      r = .vals [target] st0)
     (h : EvalArgs (yulD calls) funs V st
-      [lit gas, var tok, lit 0, lit abiPtr, lit insize, lit abiPtr, lit 32]
+      [lit gas, targetE, lit 0, lit abiPtr, lit insize, lit abiPtr, lit 32]
       (.vals vs st')) :
     vs = [BitVec.ofNat 256 gas, target, 0, BitVec.ofNat 256 abiPtr,
       BitVec.ofNat 256 insize, BitVec.ofNat 256 abiPtr, BitVec.ofNat 256 32] ∧
     st' = st := by
   obtain ⟨vs1, ⟨e1, h1⟩⟩ := evalArgs_cons_lit_inv h
   subst e1
-  obtain ⟨vs2, ⟨e2, h2⟩⟩ := evalArgs_cons_var_inv hget h1
+  obtain ⟨vT, vs2, stT, e2, h2, htgt⟩ := evalArgs_cons_vals_inv h1
   subst e2
+  injection (ht htgt) with hlist hstT
+  injection hlist with hvT
+  subst hvT; subst hstT
   obtain ⟨vs3, ⟨e3, h3⟩⟩ := evalArgs_cons_lit_inv h2
   subst e3
   obtain ⟨vs4, ⟨e4, h4⟩⟩ := evalArgs_cons_lit_inv h3
@@ -113,14 +123,77 @@ theorem eval_call_args_inv {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
   subst hnil; subst hst
   exact ⟨rfl, rfl⟩
 
+theorem evalExpr_lit_ne_halt {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
+    {V : VEnv (yulD calls)} {st st' : EvmState} {n : Nat}
+    (h : EvalExpr (yulD calls) funs V st (lit n) (.halt st')) : False := by
+  have hr := eval_lit_unique h
+  injection hr
+
+/-- Arguments that each evaluate uniquely to a value cannot halt. -/
+theorem evalArgs_unique_ne_halt {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
+    {V : VEnv (yulD calls)} {st st' : EvmState} {es : List YExpr}
+    (hv : ∀ e ∈ es, ∀ {st0 r},
+      EvalExpr (yulD calls) funs V st0 e r → ∃ v, r = .vals [v] st0)
+    (h : EvalArgs (yulD calls) funs V st es (.halt st')) : False := by
+  induction es generalizing st st' with
+  | nil =>
+    cases h
+  | cons e rest ih =>
+    cases h with
+    | argsRestHalt hr =>
+      exact ih (fun e' hm st0 r he => hv e' (List.mem_cons_of_mem _ hm) he) hr
+    | argsHeadHalt _ he =>
+      obtain ⟨_, hv'⟩ := hv e List.mem_cons_self he
+      injection hv'
+
+theorem eval_call_args_ne_halt {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
+    {V : VEnv (yulD calls)} {st st' : EvmState}
+    {targetE : YExpr} {target : U256} {gas insize : Nat}
+    (ht : ∀ {st0 r}, EvalExpr (yulD calls) funs V st0 targetE r →
+      r = .vals [target] st0)
+    (h : EvalArgs (yulD calls) funs V st
+      [lit gas, targetE, lit 0, lit abiPtr, lit insize, lit abiPtr, lit 32]
+      (.halt st')) : False := by
+  refine evalArgs_unique_ne_halt ?_ h
+  intro e he st0 r hr
+  simp at he
+  rcases he with rfl | rfl | rfl | rfl | rfl | rfl | rfl
+  · exact ⟨_, eval_lit_unique hr⟩
+  · exact ⟨_, ht hr⟩
+  · exact ⟨_, eval_lit_unique hr⟩
+  · exact ⟨_, eval_lit_unique hr⟩
+  · exact ⟨_, eval_lit_unique hr⟩
+  · exact ⟨_, eval_lit_unique hr⟩
+  · exact ⟨_, eval_lit_unique hr⟩
+
+theorem eval_staticcall_args_ne_halt {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
+    {V : VEnv (yulD calls)} {st st' : EvmState}
+    {targetE : YExpr} {target : U256} {gas insize : Nat}
+    (ht : ∀ {st0 r}, EvalExpr (yulD calls) funs V st0 targetE r →
+      r = .vals [target] st0)
+    (h : EvalArgs (yulD calls) funs V st
+      [lit gas, targetE, lit abiPtr, lit insize, lit abiPtr, lit 32]
+      (.halt st')) : False := by
+  refine evalArgs_unique_ne_halt ?_ h
+  intro e he st0 r hr
+  simp at he
+  rcases he with rfl | rfl | rfl | rfl | rfl | rfl
+  · exact ⟨_, eval_lit_unique hr⟩
+  · exact ⟨_, ht hr⟩
+  · exact ⟨_, eval_lit_unique hr⟩
+  · exact ⟨_, eval_lit_unique hr⟩
+  · exact ⟨_, eval_lit_unique hr⟩
+  · exact ⟨_, eval_lit_unique hr⟩
+
 theorem eval_call_inv {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
     {V : VEnv (yulD calls)} {st : EvmState}
-    {tok : YIdent} {target : U256} {gas insize : Nat} {r}
-    (hget : VEnv.get V tok = some target)
+    {targetE : YExpr} {target : U256} {gas insize : Nat} {r}
+    (ht : ∀ {st0 r}, EvalExpr (yulD calls) funs V st0 targetE r →
+      r = .vals [target] st0)
     (hstatic : st.env.static = false)
     (h : EvalExpr (yulD calls) funs V st
       (bop YulSemantics.EVM.Op.call
-        [lit gas, var tok, lit 0, lit abiPtr, lit insize, lit abiPtr, lit 32]) r) :
+        [lit gas, targetE, lit 0, lit abiPtr, lit insize, lit abiPtr, lit 32]) r) :
     ∃ resp : CallResponse,
       r = .vals [resp.flag]
         (finishCall .call st resp
@@ -136,7 +209,7 @@ theorem eval_call_inv {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
         st resp := by
   cases h with
   | builtinOk hargs hbu =>
-    obtain ⟨hvs, hst⟩ := eval_call_args_inv hget hargs
+    obtain ⟨hvs, hst⟩ := eval_call_args_inv ht hargs
     subst hvs; subst hst
     dsimp [yulD, evmWithExternal] at hbu
     simp only [builtinWithExternal, hstatic, Bool.false_and, ↓reduceIte] at hbu
@@ -145,36 +218,14 @@ theorem eval_call_inv {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
     subst hrets; subst hst
     exact ⟨resp, rfl, hCall⟩
   | builtinHalt hargs hbu =>
-    obtain ⟨hvs, hst⟩ := eval_call_args_inv hget hargs
+    obtain ⟨hvs, hst⟩ := eval_call_args_inv ht hargs
     subst hvs; subst hst
     dsimp [yulD, evmWithExternal] at hbu
     simp only [builtinWithExternal, hstatic, Bool.false_and, ↓reduceIte] at hbu
     rcases hbu with ⟨_, _, hres⟩
     cases hres
   | builtinArgsHalt hargs =>
-    have : False := by
-      cases hargs
-      · next hh =>
-        cases hh
-        · next hh =>
-          cases hh
-          · next hh =>
-            cases hh
-            · next hh =>
-              cases hh
-              · next hh =>
-                cases hh
-                · next hh =>
-                  cases hh
-                  · next hh => cases hh
-                  · next hhead => cases hhead
-                · next hhead => cases hhead
-              · next hhead => cases hhead
-            · next hhead => cases hhead
-          · next hhead => cases hhead
-        · next hhead => cases hhead
-      · next hhead => cases hhead
-    exact this.elim
+    exact (eval_call_args_ne_halt ht hargs).elim
 
 theorem haltSuccess_unit_stop {h} (hh : h = some (.stop, ([] : List UInt8))) :
     haltSuccess .unit () h := by
@@ -220,13 +271,14 @@ theorem selectorBytes_inj {a b : Nat} (ha : a < 2 ^ 32) (hb : b < 2 ^ 32)
 
 theorem exec_let_call_inv {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
     {V : VEnv (yulD calls)} {st : EvmState}
-    {tok ok : YIdent} {target : U256} {gas insize : Nat}
+    {ok : YIdent} {targetE : YExpr} {target : U256} {gas insize : Nat}
     {V' : VEnv (yulD calls)} {st' : EvmState} {o : Outcome}
-    (hget : VEnv.get V tok = some target)
+    (ht : ∀ {st0 r}, EvalExpr (yulD calls) funs V st0 targetE r →
+      r = .vals [target] st0)
     (hstatic : st.env.static = false)
     (h : ExecStmt (yulD calls) funs V st
       (.letDecl [ok] (some (bop YulSemantics.EVM.Op.call
-        [lit gas, var tok, lit 0, lit abiPtr, lit insize, lit abiPtr, lit 32])))
+        [lit gas, targetE, lit 0, lit abiPtr, lit insize, lit abiPtr, lit 32])))
       V' st' o) :
     ∃ resp, o = .normal ∧ V' = (ok, resp.flag) :: V ∧
       st' = finishCall .call st resp
@@ -242,23 +294,116 @@ theorem exec_let_call_inv {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
         st resp := by
   cases h with
   | letVal he hlen =>
-    obtain ⟨resp, hr, hCall⟩ := eval_call_inv hget hstatic he
+    obtain ⟨resp, hr, hCall⟩ := eval_call_inv ht hstatic he
     injection hr with hvs hst
     subst hvs; subst hst
     exact ⟨resp, rfl, rfl, rfl, hCall⟩
   | letHalt he =>
-    obtain ⟨resp, hr, _⟩ := eval_call_inv hget hstatic he
+    obtain ⟨resp, hr, _⟩ := eval_call_inv ht hstatic he
     injection hr
 
-theorem evalArgs_cons_vals_inv {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
-    {V : VEnv (yulD calls)} {st : EvmState} {e : YExpr} {es : List YExpr}
-    {vs : List U256} {st' : EvmState}
-    (h : EvalArgs (yulD calls) funs V st (e :: es) (.vals vs st')) :
-    ∃ v vs' st1, vs = v :: vs' ∧
-      EvalArgs (yulD calls) funs V st es (.vals vs' st1) ∧
-      EvalExpr (yulD calls) funs V st1 e (.vals [v] st') := by
-  cases h
-  · next hrest hhead => exact ⟨_, _, _, rfl, hrest, hhead⟩
+theorem eval_staticcall_args_inv {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
+    {V : VEnv (yulD calls)} {st st' : EvmState}
+    {targetE : YExpr} {target : U256} {gas insize : Nat} {vs : List U256}
+    (ht : ∀ {st0 r}, EvalExpr (yulD calls) funs V st0 targetE r →
+      r = .vals [target] st0)
+    (h : EvalArgs (yulD calls) funs V st
+      [lit gas, targetE, lit abiPtr, lit insize, lit abiPtr, lit 32]
+      (.vals vs st')) :
+    vs = [BitVec.ofNat 256 gas, target, BitVec.ofNat 256 abiPtr,
+      BitVec.ofNat 256 insize, BitVec.ofNat 256 abiPtr, BitVec.ofNat 256 32] ∧
+    st' = st := by
+  obtain ⟨vs1, ⟨e1, h1⟩⟩ := evalArgs_cons_lit_inv h
+  subst e1
+  obtain ⟨vT, vs2, stT, e2, h2, htgt⟩ := evalArgs_cons_vals_inv h1
+  subst e2
+  injection (ht htgt) with hlist hstT
+  injection hlist with hvT
+  subst hvT; subst hstT
+  obtain ⟨vs3, ⟨e3, h3⟩⟩ := evalArgs_cons_lit_inv h2
+  subst e3
+  obtain ⟨vs4, ⟨e4, h4⟩⟩ := evalArgs_cons_lit_inv h3
+  subst e4
+  obtain ⟨vs5, ⟨e5, h5⟩⟩ := evalArgs_cons_lit_inv h4
+  subst e5
+  obtain ⟨vs6, ⟨e6, h6⟩⟩ := evalArgs_cons_lit_inv h5
+  subst e6
+  obtain ⟨hnil, hst⟩ := evalArgs_nil_inv h6
+  subst hnil; subst hst
+  exact ⟨rfl, rfl⟩
+
+theorem eval_staticcall_inv {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
+    {V : VEnv (yulD calls)} {st : EvmState}
+    {targetE : YExpr} {target : U256} {gas insize : Nat} {r}
+    (ht : ∀ {st0 r}, EvalExpr (yulD calls) funs V st0 targetE r →
+      r = .vals [target] st0)
+    (h : EvalExpr (yulD calls) funs V st
+      (bop YulSemantics.EVM.Op.staticcall
+        [lit gas, targetE, lit abiPtr, lit insize, lit abiPtr, lit 32]) r) :
+    ∃ resp : CallResponse,
+      r = .vals [resp.flag]
+        (finishCall .staticcall st resp
+          (BitVec.ofNat 256 abiPtr).toNat (BitVec.ofNat 256 insize).toNat
+          (BitVec.ofNat 256 abiPtr).toNat (BitVec.ofNat 256 32).toNat) ∧
+      calls.Call
+        { kind := .staticcall
+          gas := BitVec.ofNat 256 gas
+          target := target
+          value := 0
+          input := readBytes st.memory (BitVec.ofNat 256 abiPtr).toNat
+            (BitVec.ofNat 256 insize).toNat }
+        st resp := by
+  cases h with
+  | builtinOk hargs hbu =>
+    obtain ⟨hvs, hst⟩ := eval_staticcall_args_inv ht hargs
+    subst hvs; subst hst
+    dsimp [yulD, evmWithExternal] at hbu
+    simp only [builtinWithExternal] at hbu
+    rcases hbu with ⟨resp, hCall, hres⟩
+    injection hres with hrets hst
+    subst hrets; subst hst
+    exact ⟨resp, rfl, hCall⟩
+  | builtinHalt hargs hbu =>
+    obtain ⟨hvs, hst⟩ := eval_staticcall_args_inv ht hargs
+    subst hvs; subst hst
+    dsimp [yulD, evmWithExternal] at hbu
+    simp only [builtinWithExternal] at hbu
+    rcases hbu with ⟨_, _, hres⟩
+    cases hres
+  | builtinArgsHalt hargs =>
+    exact (eval_staticcall_args_ne_halt ht hargs).elim
+
+theorem exec_let_staticcall_inv {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
+    {V : VEnv (yulD calls)} {st : EvmState}
+    {ok : YIdent} {targetE : YExpr} {target : U256} {gas insize : Nat}
+    {V' : VEnv (yulD calls)} {st' : EvmState} {o : Outcome}
+    (ht : ∀ {st0 r}, EvalExpr (yulD calls) funs V st0 targetE r →
+      r = .vals [target] st0)
+    (h : ExecStmt (yulD calls) funs V st
+      (.letDecl [ok] (some (bop YulSemantics.EVM.Op.staticcall
+        [lit gas, targetE, lit abiPtr, lit insize, lit abiPtr, lit 32])))
+      V' st' o) :
+    ∃ resp, o = .normal ∧ V' = (ok, resp.flag) :: V ∧
+      st' = finishCall .staticcall st resp
+        (BitVec.ofNat 256 abiPtr).toNat (BitVec.ofNat 256 insize).toNat
+        (BitVec.ofNat 256 abiPtr).toNat (BitVec.ofNat 256 32).toNat ∧
+      calls.Call
+        { kind := .staticcall
+          gas := BitVec.ofNat 256 gas
+          target := target
+          value := 0
+          input := readBytes st.memory (BitVec.ofNat 256 abiPtr).toNat
+            (BitVec.ofNat 256 insize).toNat }
+        st resp := by
+  cases h with
+  | letVal he hlen =>
+    obtain ⟨resp, hr, hCall⟩ := eval_staticcall_inv ht he
+    injection hr with hvs hst
+    subst hvs; subst hst
+    exact ⟨resp, rfl, rfl, rfl, hCall⟩
+  | letHalt he =>
+    obtain ⟨resp, hr, _⟩ := eval_staticcall_inv ht he
+    injection hr
 
 theorem eval_shl_unique {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
     {V : VEnv (yulD calls)} {st : EvmState} {sel : Nat} {r}
@@ -500,19 +645,15 @@ theorem eval_lt_rds32_unique {calls : ExternalCalls} {funs : FunEnv (yulD calls)
       have hr := eval_rds_unique hrds
       injection hr
 
-theorem bindingSlot_eq {c : ContractDef} {b : Nat} {bd : BindingDef}
-    (h : c.bindings[b]? = some bd) : bindingSlot c b = bd.fieldSlot := by
-  simp [bindingSlot, h]
-
-theorem bindingMethod_eq {c : ContractDef} {b m : Nat} {bd : BindingDef}
-    {p : String × AbiSpec}
-    (hb : c.bindings[b]? = some bd) (hm : bd.methods[m]? = some p) :
-    bindingMethod c b m = (p.2.selector, p.2.ret) := by
-  simp [bindingMethod, hb, hm]
-
 theorem emitCallRetCheck_word_stmts (e : Emit) :
     (emitCallRetCheck e .word).stmts =
-      e.stmts ++ [.cond (bop Op.lt [bop Op.returndatasize [], lit 32]) [revert00]] :=
+      e.stmts ++
+        [.cond
+          (bop Op.iszero
+            [bop Op.and
+              [bop Op.iszero [bop Op.lt [bop Op.returndatasize [], lit 32]],
+                bop Op.lt [bop Op.returndatasize [], lit 64]]])
+          [revert00]] :=
   emitIf_stmts _ _ _
 
 theorem emitCallRetCheck_none_stmts (e : Emit) :
@@ -531,18 +672,29 @@ theorem emitCallRetCheck_boolOpt_stmts (e : Emit) :
               [bop Op.iszero [bop Op.returndatasize []],
                 bop Op.and
                   [bop Op.iszero [bop Op.lt [bop Op.returndatasize [], lit 32]],
-                    bop Op.eq [bop Op.mload [lit abiPtr], lit 1]]]])
+                    bop Op.lt [bop Op.returndatasize [], lit 64]]]])
           [revert00]] :=
   emitIf_stmts _ _ _
 
-theorem emitLetOp_call (c : ContractDef) (e : Emit) (d b m : Nat) (args : List Atom) :
-    emitLetOp tag c e d (.call b m args) =
-      some (emitExtCall tag c e d b m args (some (identV tag d))) := rfl
+theorem emitLetOp_call (e : Emit) (d : Nat) (t : Atom) (sel : Nat)
+    (args : List Atom) (ret : AbiRet) :
+    emitLetOp tag ({} : ContractDef) e d (.call t sel args ret) =
+      some (emitExtCall tag e d t sel args ret false (some (identV tag d))) := rfl
 
-theorem emitStmt_call (c : ContractDef) (e : Emit) (d b m : Nat) (args : List Atom) :
-    emitStmt tag c e d (.call b m args) = emitExtCall tag c e d b m args none := rfl
+theorem emitLetOp_view (e : Emit) (d : Nat) (t : Atom) (sel : Nat)
+    (args : List Atom) (ret : AbiRet) :
+    emitLetOp tag ({} : ContractDef) e d (.view t sel args ret) =
+      some (emitExtCall tag e d t sel args ret true (some (identV tag d))) := rfl
 
-theorem extTok_string tag (d : Nat) : extTok tag d = tag ++ "__tok_" ++ toString d := rfl
+theorem emitStmt_call (c : ContractDef) (e : Emit) (d : Nat) (t : Atom)
+    (sel : Nat) (args : List Atom) (ret : AbiRet) :
+    emitStmt tag c e d (.call t sel args ret) =
+      emitExtCall tag e d t sel args ret false none := rfl
+
+theorem emitStmt_view (c : ContractDef) (e : Emit) (d : Nat) (t : Atom)
+    (sel : Nat) (args : List Atom) (ret : AbiRet) :
+    emitStmt tag c e d (.view t sel args ret) =
+      emitExtCall tag e d t sel args ret true none := rfl
 
 theorem extOk_string tag (d : Nat) : extOk tag d = tag ++ "__ok_" ++ toString d := rfl
 
@@ -577,21 +729,6 @@ private theorem string_append_cancel_left {a s t : String}
     (h : a ++ s = a ++ t) : s = t := by
   apply String.ext
   simpa [String.toList_append] using congrArg String.toList h
-
-theorem identV_ne_extTok tag (i d : Nat) : identV tag i ≠ extTok tag d := by
-  intro h
-  have h' : tag ++ ("_" ++ toString i) = tag ++ ("__tok_" ++ toString d) := by
-    simpa [identV_string, extTok_string, String.append_assoc] using h
-  have h2 : "_" ++ toString i = "__tok_" ++ toString d :=
-    string_append_cancel_left h'
-  have h2' : "_" ++ toString i = "_" ++ ("_tok_" ++ toString d) := by
-    rw [show "__tok_" = "_" ++ "_tok_" from rfl, String.append_assoc] at h2
-    exact h2
-  have h3 : toString i = "_tok_" ++ toString d :=
-    string_append_cancel_left h2'
-  have hhead : (toString i).toList.head? = some '_' := by
-    simp [h3, String.toList_append]
-  exact toString_nat_head_ne_underscore i hhead
 
 theorem identV_ne_extOk tag (i d : Nat) : identV tag i ≠ extOk tag d := by
   intro h

@@ -300,30 +300,15 @@ theorem noExt_memoryGuardErased : noExtStmt memoryGuardErased = true := by
   unfold memoryGuardErased
   rfl
 
-theorem CallWorld_stAfterGuard (st : EvmState) :
-    CallWorld.ofState (stAfterGuard st) = CallWorld.ofState st := by
-  simp [CallWorld.ofState, stAfterGuard]
+theorem ExtAgree_stAfterGuard {self : Address} {x : Lsc.ExtState} {st : EvmState}
+    (h : ExtAgree self x st) : ExtAgree self x (stAfterGuard st) := by
+  simpa [stAfterGuard] using h
 
-theorem RX_stAfterGuard {I : Interface} {S X E} {α : Abs I.Ghost}
-    {b : Binding I S X} {w : World S X E} {st : EvmState}
-    (h : RX α b w st) : RX α b w (stAfterGuard st) := by
-  simpa [RX, ofState_of_CallWorld α (CallWorld_stAfterGuard st)] using h
-
-theorem RXs_stAfterGuard {I : Interface} {S X E} {bs : List (BindEnv I S X)}
-    {w : World S X E} {st : EvmState} (h : RXs bs w st) :
-    RXs bs w (stAfterGuard st) :=
-  fun e he => RX_stAfterGuard (h e he)
-
-theorem CallWorld_committed_guard (st0 st' : EvmState) :
-    CallWorld.ofState (committedState (stAfterGuard st0) st') =
-      CallWorld.ofState (committedState st0 st') := by
-  cases hhalt : st'.halted with
-  | none => simp [committedState, hhalt]
-  | some p =>
-    rcases p with ⟨k, bytes⟩
-    by_cases hc : k.commits = true
-    · simp [committedState, hhalt, hc]
-    · simp [committedState, hhalt, hc, CallWorld.ofState, stAfterGuard]
+theorem ExtAgree_committed_guard {self : Address} {x : Lsc.ExtState}
+    {st0 st' : EvmState}
+    (h : ExtAgree self x (committedState (stAfterGuard st0) st')) :
+    ExtAgree self x (committedState st0 st') := by
+  simpa [stAfterGuard] using h
 
 theorem R_committed_guard {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ} {w : World S X E} {st0 st' : EvmState}
@@ -354,14 +339,6 @@ theorem R_committed_guard {S X E ε} {c : ContractDef} {Γ : ContractSchema S X 
       rcases hMO with ⟨hs, hl, hcaller, hv, ht, hn, ha, hst, hk, hcd, _⟩
       exact ⟨hs.symm, hl.symm, hcaller.symm, hv.symm, ht.symm, hn.symm, ha.symm,
         hst.symm, hk.symm, hcd.symm, rfl⟩
-
-theorem RXs_committed_guard {I : Interface} {S X E} {bs : List (BindEnv I S X)}
-    {w : World S X E} {st0 st' : EvmState}
-    (h : RXs bs w (committedState (stAfterGuard st0) st')) :
-    RXs bs w (committedState st0 st') :=
-  fun e he => by
-    have hRX := h e he
-    simpa [RX, ofState_of_CallWorld e.α (CallWorld_committed_guard st0 st')] using hRX
 
 theorem committedState_halted_eq (st0 st' : EvmState) :
     (committedState st0 st').halted = st'.halted := by
@@ -415,41 +392,37 @@ theorem revert_obs {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
   ⟨by simp [committedState_rollback hh HaltKind.revert_commits, hh],
     R_rollback_obs hR hh HaltKind.revert_commits⟩
 
-/-! ### Main theorem (`RuntimeBlockCorrectExt` is in `Correctness.lean`) -/
+/-! ### Main theorem (`RuntimeBlockCorrectExt` is in `DispatchExtDefs.lean`) -/
 
 namespace Proof
-theorem runtimeBlock_correct_ext {I : Interface} {S X E ε : Type}
-    (bs : List (BindEnv I S X))
-    (c : ContractDef) (Γ : ContractSchema S X E ε)
+theorem runtimeBlock_correct_ext {S E ε : Type}
+    (c : ContractDef) (Γ : ContractSchema S ExtState E ε)
     (hΓ : Γ.st.Lawful c.fields) (κ : List UInt8 → U256) (hκ : KeccakSep c κ)
-    (calls : ExternalCalls)
+    (o : ExtOracle)
     (hctor : ∀ f ∈ c.functions, f.kind ≠ .constructor)
     (hS2 : ∀ f ∈ c.functions, S2Frag f.core)
     (hlen : c.fields.length < wordBound)
     (hbound : ∀ f ∈ c.functions, 4 + 32 * f.params.length < wordBound)
     (yul : YBlock) (hyul : runtimeBlock c = some yul)
-    (ctx : Ctx) (w : World S X E) (st0 : EvmState)
+    (ctx : Ctx) (w : World S ExtState E) (st0 : EvmState)
     (hctx : ctxRel ctx st0) (hR : R c Γ κ w st0)
-    (hRX : RXs bs w st0) (hign : BindEnvs.ignoresLocal bs)
-    (hBindNe : BindEnvs.neSelf bs ctx.self w.self)
-    (hconf : BindEnvs.conforms bs ctx.self w.self calls)
-    (hsame : BindEnvs.sameAbs bs) (horth : BindEnvs.orthogonal bs)
-    (hinj : BindEnvs.addrInj bs w.self)
-    (hBind : BindEnvs.lookupWF c Γ bs)
-    (hslot : ∀ f ∈ c.functions, BindEnvs.avoids Γ c bs f.core) :
-    RuntimeBlockCorrectExts bs c Γ κ calls yul ctx w st0 := by
-  intro st' o hrun
+    (hAgr : ExtAgree ctx.self w.ext st0)
+    (hOr : w.oracle = Oracle.ofExt o)
+    (hNR : ExtOracle.NoReentry o ctx.self) :
+    RuntimeBlockCorrectExt c Γ κ o yul ctx w st0 := by
+  intro st' out hrun
   obtain ⟨_, cases, hmap, hy⟩ := runtimeBlock_inv hyul
   obtain ⟨casesE, hmapE, hE⟩ := erase_runtimeBlock hyul
   rw [show casesE = cases from Option.some.inj (hmapE.symm.trans hmap)] at hE
   subst hy
   rw [hE] at hrun
   obtain ⟨Vb, hbody, _⟩ := run_block_inv hrun
-  have hhoist := hoist_yulD_of_evm (calls := calls)
+  have hhoist := hoist_yulD_of_evm (calls := toCalls o)
     (hoist_erased_runtime (emitGuardLt {} 4).stmts
       (bop Op.shr [lit 224, bop Op.calldataload [lit 0]]) cases)
   rw [hhoist] at hbody
-  have hfuns0 : noExtFuns ([] :: [] : FunEnv (yulD calls)) = true := noExtFuns_nilScope
+  have hfuns0 : noExtFuns ([] :: [] : FunEnv (yulD (toCalls o))) = true :=
+    noExtFuns_nilScope
   cases execStmts_cons_inv hbody with
   | inr hstopG =>
     obtain ⟨hneG, hGhalt⟩ := hstopG
@@ -466,12 +439,13 @@ theorem runtimeBlock_correct_ext {I : Interface} {S X E ε : Type}
     have hMO := memOnly_stAfterGuard st0
     have hctxA := ctxRel_memOnly hctx hMO
     have hRA := R_memOnly hR hMO
-    have hRXA := RXs_stAfterGuard hRX
+    have hAgrA := ExtAgree_stAfterGuard hAgr
     have hcdA : (stAfterGuard st0).env.calldata = cd := by
       rcases hMO with ⟨_, _, _, _, _, _, _, _, _, hcd', _⟩
       exact hcd'
     have hlenA : (stAfterGuard st0).env.calldata.length = cd.length := by simp [hcdA]
-    have hselA : calldataSelector (stAfterGuard st0).env.calldata = calldataSelector cd := by
+    have hselA : calldataSelector (stAfterGuard st0).env.calldata =
+        calldataSelector cd := by
       simp [hcdA]
     cases execStmts_cons_inv hrest with
     | inr hstop =>
@@ -483,7 +457,6 @@ theorem runtimeBlock_correct_ext {I : Interface} {S X E ε : Type}
         have hnone : selectedFn c cd = none := selectedFn_none_of_short hshort
         have hhalted : st'.halted = some (.revert, []) := by rw [hst]
         obtain ⟨hh, hR'⟩ := revert_obs hR hhalted
-        refine ⟨w.faults, ?_⟩
         simp only [hnone]
         exact ⟨ho, hh, hR'⟩
       · rcases hinv.2 (Nat.not_lt.mp (by simpa [hlenA] using hshort)) with ⟨ho, _⟩
@@ -495,7 +468,8 @@ theorem runtimeBlock_correct_ext {I : Interface} {S X E ε : Type}
     by_cases hshort : cd.length < 4
     · rcases hinv.1 (by simpa [hlenA] using hshort) with ⟨ho, _⟩
       cases ho
-    · rcases hinv.2 (Nat.not_lt.mp (by simpa [hlenA] using hshort)) with ⟨_, ⟨hVeq, hst⟩⟩
+    · rcases hinv.2 (Nat.not_lt.mp (by simpa [hlenA] using hshort)) with
+        ⟨_, ⟨hVeq, hst⟩⟩
       subst hVeq
       rw [hst] at htail
       have hsw := execStmts_singleton_inv htail
@@ -520,10 +494,10 @@ theorem runtimeBlock_correct_ext {I : Interface} {S X E ε : Type}
             simpa [hfind] using hswM
           rw [hswEq] at hb
           rcases exec_revert00_block_open hb with ⟨ho, ⟨_, hst⟩⟩
-          have hnone : selectedFn c cd = none := selectedFn_none_of_find_none hshort hfind
+          have hnone : selectedFn c cd = none :=
+            selectedFn_none_of_find_none hshort hfind
           have hhalted : st'.halted = some (.revert, []) := by rw [hst]
           obtain ⟨hh, hR'⟩ := revert_obs hR hhalted
-          refine ⟨w.faults, ?_⟩
           simp only [hnone]
           exact ⟨ho, hh, hR'⟩
         | some f =>
@@ -537,13 +511,14 @@ theorem runtimeBlock_correct_ext {I : Interface} {S X E ε : Type}
           rw [hswEq] at hb
           have hfmem : f ∈ c.functions := mem_of_find? hfind
           obtain ⟨Vb2, hcase, hV2⟩ := exec_block_inv hb
-          have hhcase : hoist (yulD calls)
+          have hhcase : hoist (yulD (toCalls o))
               [YulSemantics.Stmt.block
                 (emitGuardLt {} (4 + 32 * f.params.length)).stmts,
                 YulSemantics.Stmt.block body] = [] :=
-            hoist_yulD_of_evm (calls := calls) (hoist_two_blocks _ _)
+            hoist_yulD_of_evm (calls := toCalls o) (hoist_two_blocks _ _)
           rw [hhcase] at hcase
-          have hfuns1 : noExtFuns ([] :: ([] :: []) : FunEnv (yulD calls)) = true :=
+          have hfuns1 : noExtFuns
+              ([] :: ([] :: []) : FunEnv (yulD (toCalls o))) = true :=
             noExtFuns_cons_nil hfuns0
           cases execStmts_cons_inv hcase with
           | inr hstopF =>
@@ -556,10 +531,10 @@ theorem runtimeBlock_correct_ext {I : Interface} {S X E ε : Type}
                 selectedFn_none_of_short_params hshort hfind hshortF
               have hhalted : st'.halted = some (.revert, []) := by rw [hst]
               obtain ⟨hh, hR'⟩ := revert_obs hR hhalted
-              refine ⟨w.faults, ?_⟩
               simp only [hnone]
               exact ⟨ho, hh, hR'⟩
-            · rcases hgi.2 (Nat.not_lt.mp (by simpa [hlenA] using hshortF)) with ⟨ho, _⟩
+            · rcases hgi.2 (Nat.not_lt.mp (by simpa [hlenA] using hshortF))
+                with ⟨ho, _⟩
               exact (hneF ho).elim
           | inl hokF =>
             obtain ⟨V2, st2, hgf, hrestF⟩ := hokF
@@ -568,73 +543,45 @@ theorem runtimeBlock_correct_ext {I : Interface} {S X E ε : Type}
             by_cases hshortF : cd.length < 4 + 32 * f.params.length
             · rcases hgi.1 (by simpa [hlenA] using hshortF) with ⟨ho, _⟩
               cases ho
-            · rcases hgi.2 (Nat.not_lt.mp (by simpa [hlenA] using hshortF)) with ⟨_, ⟨hVeqF, hstF⟩⟩
+            · rcases hgi.2 (Nat.not_lt.mp (by simpa [hlenA] using hshortF)) with
+                ⟨_, ⟨hVeqF, hstF⟩⟩
               subst hVeqF
               rw [hstF] at hrestF
               have hbodyStmt := execStmts_singleton_inv hrestF
               obtain ⟨Vb3, hss, _⟩ := exec_block_inv hbodyStmt
-              have hhf := hoist_yulD_of_evm (calls := calls) (toYulFn_hoist hyF (hctor f hfmem))
+              have hhf := hoist_yulD_of_evm (calls := toCalls o)
+                (toYulFn_hoist hyF (hctor f hfmem))
               rw [hhf] at hss
-              have hss' : ExecStmts (yulD calls) [[]] [] (stAfterGuard st0) body Vb3 st' o :=
+              have hss' :
+                  ExecStmts (yulD (toCalls o)) [[]] [] (stAfterGuard st0)
+                    body Vb3 st' out :=
                 execStmts_of_dropEmpty (by simp [dropEmpty]) hss
-              have hRun : Run (yulD calls) body (stAfterGuard st0) [] st' o :=
+              have hRun :
+                  Run (yulD (toCalls o)) body (stAfterGuard st0) [] st' out :=
                 run_of_execStmts_open hhf hss'
               have hsome : selectedFn c cd = some f :=
                 selectedFn_some_of hshort hfind hshortF
-              have hfn := toYulFn_correct_ext (I := I) bs c Γ hΓ κ hκ calls f
+              have hfn := toYulFn_correct_ext (c := c) (Γ := Γ) hΓ κ hκ o f
                 (hctor f hfmem) (hS2 f hfmem) hlen (hbound f hfmem) body hyF
-                ctx w (stAfterGuard st0) hctxA hRA hRXA hign hBindNe hconf hsame horth hinj hBind
-                (hslot f hfmem)
-              obtain ⟨fo, hconcl⟩ := hfn st' o hRun
-              refine ⟨fo, ?_⟩
+                ctx w (stAfterGuard st0) hctxA hRA hAgrA hOr hNR
+              have hconcl := hfn st' out hRun
               simp only [hsome]
               rw [hcdA] at hconcl
               cases htx : Tx.run (Core.denote Γ f.core (decodeArgs f cd).reverse)
-                  ctx { w with faults := fo } with
+                  ctx w with
               | ok p =>
                 rcases p with ⟨v, w'⟩
                 simp only [htx] at hconcl ⊢
-                obtain ⟨ho, hsucc, hR', hRX'⟩ := hconcl
+                obtain ⟨ho, hsucc, hR', hAgr'⟩ := hconcl
                 exact ⟨ho, haltSuccess_committed_guard hsucc,
-                  R_committed_guard hMO hR', RXs_committed_guard hRX'⟩
+                  R_committed_guard hMO hR', ExtAgree_committed_guard hAgr'⟩
               | error err =>
                 simp only [htx] at hconcl ⊢
                 obtain ⟨bytes, ho, hh, herr, hR'⟩ := hconcl
-                exact ⟨bytes, ho, by simpa [committedState_halted_eq] using hh, herr,
-                  R_committed_guard hMO hR'⟩
+                exact ⟨bytes, ho, by simpa [committedState_halted_eq] using hh,
+                  herr, R_committed_guard hMO hR'⟩
 
 end Proof
 
-theorem runtimeBlock_correct_ext_one {I : Interface} {S X E ε : Type}
-    (α : Abs I.Ghost) (bind : Binding I S X)
-    (c : ContractDef) (Γ : ContractSchema S X E ε)
-    (hΓ : Γ.st.Lawful c.fields) (κ : List UInt8 → U256) (hκ : KeccakSep c κ)
-    (calls : ExternalCalls)
-    (hctor : ∀ f ∈ c.functions, f.kind ≠ .constructor)
-    (hS2 : ∀ f ∈ c.functions, S2Frag f.core)
-    (hlen : c.fields.length < wordBound)
-    (hbound : ∀ f ∈ c.functions, 4 + 32 * f.params.length < wordBound)
-    (yul : YBlock) (hyul : runtimeBlock c = some yul)
-    (ctx : Ctx) (w : World S X E) (st0 : EvmState)
-    (hctx : ctxRel ctx st0) (hR : R c Γ κ w st0)
-    (hRX : RX α bind w st0) (hign : α.ignoresLocal)
-    (hBindNe : accountKey (BitVec.ofNat 256 (bind.addr w.self)) ≠
-      accountKey (BitVec.ofNat 256 ctx.self))
-    (hconf : Conforms I ctx.self (bind.addr w.self) calls α)
-    (hBind : ∀ b m args, callWF c b m args = true → ∃ meth, BindWF c Γ bind b m meth)
-    (hslot : ∀ f ∈ c.functions, ∃ slot : Nat,
-        (∀ σ, Γ.st.scalar slot σ = bind.addr σ) ∧
-        (c.fields[slot]?).map (·.kind) = some FieldKind.scalar ∧
-        coreAvoids slot f.core) :
-    RuntimeBlockCorrectExts [⟨α, bind⟩] c Γ κ calls yul ctx w st0 :=
-  Proof.runtimeBlock_correct_ext [⟨α, bind⟩] c Γ hΓ κ hκ calls hctor hS2 hlen hbound yul hyul
-    ctx w st0 hctx hR (RXs_singleton ⟨α, bind⟩ w st0 |>.mpr hRX)
-    (BindEnvs.ignoresLocal_singleton ⟨α, bind⟩ hign)
-    (BindEnvs.neSelf_singleton ⟨α, bind⟩ ctx.self w.self hBindNe)
-    (BindEnvs.conforms_singleton ⟨α, bind⟩ ctx.self w.self calls hconf)
-    (BindEnvs.sameAbs_singleton ⟨α, bind⟩) (BindEnvs.orthogonal_singleton ⟨α, bind⟩)
-    (BindEnvs.addrInj_singleton ⟨α, bind⟩ w.self)
-    (BindEnvs.lookupWF_singleton hBind)
-    (fun f hf => BindEnvs.avoids_singleton (hslot f hf))
-
 end Lsc.Compiler
+

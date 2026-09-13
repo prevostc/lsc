@@ -365,51 +365,61 @@ theorem noGas_foldl_mstore_atoms tag (depth base : Nat) (args : List Atom) (i0 :
       (noGas_emitDo e _ _ he (by simp [noGasOp])
         (by simp [noGasExprs, noGasExpr, lit, noGas_atom]))
 
-theorem noGas_emitExtCallBody tag (c : ContractDef) (depth b m : Nat) (args : List Atom)
-    (assign : Option YIdent) :
-    noGasStmts (emitExtCallBody tag c depth b m args assign) = true := by
+theorem noGas_emitCallRetVal (ret : AbiRet) :
+    noGasExpr (emitCallRetVal ret) = true := by
+  cases ret <;> simp [emitCallRetVal, bop, noGasExpr, noGasOp, noGasExprs, lit]
+
+theorem noGas_emitExtCallOp (isView : Bool) (target : YExpr) (insize : Nat)
+    (ht : noGasExpr target = true) :
+    noGasExpr (emitExtCallOp isView target insize) = true := by
+  cases isView <;>
+    simp [emitExtCallOp, emitCallGas, bop, noGasExpr, noGasOp, noGasExprs, lit, ht]
+
+theorem noGas_emitExtCallBody tag (depth : Nat) (target : Atom) (sel : Nat)
+    (args : List Atom) (ret : AbiRet) (isView : Bool) (assign : Option YIdent) :
+    noGasStmts (emitExtCallBody tag depth target sel args ret isView assign) = true := by
   have h0 : noGasStmts ({} : Emit).stmts = true := noGas_nilEmit
-  have hlet := noGas_emitLet ({} : Emit) (extTok tag depth)
-    (bop Op.sload [lit (bindingSlot c b)]) h0
-    (by simp [bop, noGasExpr, noGasOp, noGasExprs, lit])
-  have hsel := noGas_emitDo _ Op.mstore
-    [lit abiPtr, bop Op.shl [lit 224, lit (bindingMethod c b m).1]] hlet (by simp [noGasOp])
+  have hsel := noGas_emitDo ({} : Emit) Op.mstore
+    [lit abiPtr, bop Op.shl [lit 224, lit sel]] h0 (by simp [noGasOp])
     (by simp [bop, noGasExpr, noGasOp, noGasExprs, lit])
   have hargs := noGas_foldl_mstore_atoms tag depth abiAfterSel args 0 _ hsel
   have hcall := noGas_emitLet _ (extOk tag depth)
-    (bop YulSemantics.EVM.Op.call
-      [lit extCallGas, var (extTok tag depth), lit 0, lit abiPtr,
-        lit (4 + 32 * args.length), lit abiPtr, lit 32]) hargs
-    (by simp [bop, noGasExpr, noGasOp, noGasExprs, lit, var])
-  have hif := noGas_emitIf _ (bop Op.iszero [var (extOk tag depth)]) [revert00] hcall
-    (by simp [bop, noGasExpr, noGasOp, noGasExprs, var]) (by simp [noGasStmts, noGas_revert00])
-  have hret := noGas_emitCallRetCheck _ (bindingMethod c b m).2 hif
-  cases assign with
-  | none =>
-    convert hret using 1
-    simp [emitExtCallBody]
-  | some name =>
-    cases hrv : (bindingMethod c b m).2 with
-    | boolOpt | none =>
-      convert (noGas_emitAssign _ name (lit 1) hret (by simp [noGasExpr, lit])) using 1
-      simp [emitExtCallBody, hrv]
-    | word =>
-      convert (noGas_emitAssign _ name (bop Op.mload [lit abiPtr]) hret
-        (by simp [bop, noGasExpr, noGasOp, noGasExprs, lit])) using 1
-      simp [emitExtCallBody, hrv]
+    (emitExtCallOp isView (atomE tag depth target) (4 + 32 * args.length)) hargs
+    (noGas_emitExtCallOp isView _ _ (noGas_atom tag depth target))
+  by_cases hskip : isView = true ∧ ret = AbiRet.none
+  · have hret := noGas_emitCallRetCheck _ ret hcall
+    cases assign with
+    | none =>
+      convert hret using 1
+      simp [emitExtCallBody, hskip]
+    | some name =>
+      convert (noGas_emitAssign _ name (emitCallRetVal ret) hret (noGas_emitCallRetVal ret)) using 1
+      simp [emitExtCallBody, hskip]
+  · have hif := noGas_emitIf _ (bop Op.iszero [var (extOk tag depth)]) [revert00] hcall
+      (by simp [bop, noGasExpr, noGasOp, noGasExprs, var]) (by simp [noGasStmts, noGas_revert00])
+    have hret := noGas_emitCallRetCheck _ ret hif
+    cases assign with
+    | none =>
+      convert hret using 1
+      simp [emitExtCallBody, hskip]
+    | some name =>
+      convert (noGas_emitAssign _ name (emitCallRetVal ret) hret (noGas_emitCallRetVal ret)) using 1
+      simp [emitExtCallBody, hskip]
 
-theorem noGas_emitExtCall tag (c : ContractDef) (e : Emit) (depth b m : Nat)
-    (args : List Atom) (bind : Option YIdent)
+theorem noGas_emitExtCall tag (e : Emit) (depth : Nat) (target : Atom) (sel : Nat)
+    (args : List Atom) (ret : AbiRet) (isView : Bool) (bind : Option YIdent)
     (he : noGasStmts e.stmts = true) :
-    noGasStmts (emitExtCall tag c e depth b m args bind).stmts = true := by
+    noGasStmts (emitExtCall tag e depth target sel args ret isView bind).stmts = true := by
   cases bind with
   | none =>
     simp [emitExtCall, emitBlock]
-    exact noGas_emitBlock e _ he (noGas_emitExtCallBody tag c depth b m args none)
+    exact noGas_emitBlock e _ he
+      (noGas_emitExtCallBody tag depth target sel args ret isView none)
   | some name =>
     simp [emitExtCall, emitBlock]
     have hl := noGas_emitLet e name (lit 0) he (by simp [noGasExpr, lit])
-    exact noGas_emitBlock _ _ hl (noGas_emitExtCallBody tag c depth b m args (some name))
+    exact noGas_emitBlock _ _ hl
+      (noGas_emitExtCallBody tag depth target sel args ret isView (some name))
 
 theorem noGas_emitLetOp tag (c : ContractDef) (e : Emit) (d : Nat) (op : Lsc.Op)
     (he : noGasStmts e.stmts = true) {e'}
@@ -464,9 +474,12 @@ theorem noGas_emitLetOp tag (c : ContractDef) (e : Emit) (d : Nat) (op : Lsc.Op)
   | pure a =>
     simp only [emitLetOp, Option.some.injEq] at h; subst e'
     exact noGas_emitLet e _ (atomE tag d a) he (noGas_atom tag d a)
-  | call b m args =>
+  | call t sel args ret =>
     simp only [emitLetOp, Option.some.injEq] at h; subst e'
-    exact noGas_emitExtCall tag c e d b m args (some (identV tag d)) he
+    exact noGas_emitExtCall tag e d t sel args ret false (some (identV tag d)) he
+  | view t sel args ret =>
+    simp only [emitLetOp, Option.some.injEq] at h; subst e'
+    exact noGas_emitExtCall tag e d t sel args ret true (some (identV tag d)) he
 
 theorem noGas_emitStmt tag (c : ContractDef) (e : Emit) (d : Nat) (s : Lsc.Stmt)
     (he : noGasStmts e.stmts = true) :
@@ -500,9 +513,12 @@ theorem noGas_emitStmt tag (c : ContractDef) (e : Emit) (d : Nat) (s : Lsc.Stmt)
     simp only [emitStmt]
     exact noGas_emitCustomError c e err (args.map (atomE tag d)) he
       (noGasExprs_map_atom tag d args)
-  | call b m args =>
+  | call t sel args ret =>
     simp only [emitStmt]
-    exact noGas_emitExtCall tag c e d b m args none he
+    exact noGas_emitExtCall tag e d t sel args ret false none he
+  | view t sel args ret =>
+    simp only [emitStmt]
+    exact noGas_emitExtCall tag e d t sel args ret true none he
 
 theorem noGas_emitRet tag (e : Emit) (d : Nat) (halt : Bool) {t} (r : RetExpr t)
     (he : noGasStmts e.stmts = true) :

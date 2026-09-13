@@ -90,6 +90,13 @@ structure ContractDef where
   events : List EventDef
   errors : List ErrorDef
 
+instance : EmptyCollection ContractDef where
+  emptyCollection :=
+    { name := "", fields := [], functions := [], ctor := none, events := [], errors := [] }
+
+instance : Inhabited ContractDef where
+  default := {}
+
 /-! ## ABI hashing -/
 
 /-- Canonical signature, e.g. `transfer(address,uint256)`. -/

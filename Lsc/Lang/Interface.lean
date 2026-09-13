@@ -285,6 +285,18 @@ theorem call_self (addr : Address) (sel : Nat) (args : List Word)
     · intro h; cases h
     · intro h; cases h; rfl
 
+/-- A successful CALL leaves the oracle unchanged. -/
+theorem call_oracle (addr : Address) (sel : Nat) (args : List Word)
+    {ctx : Ctx} {w : World S X E} {v : α} {w' : World S X E} :
+    Tx.run (call (ε := ε) (α := α) addr sel args) ctx w = .ok (v, w') →
+      w'.oracle = w.oracle := by
+  simp [run_call]
+  split
+  · intro h; cases h
+  · split
+    · intro h; cases h
+    · intro h; cases h; rfl
+
 /-- A successful view returns the pre-world. -/
 theorem view_world (addr : Address) (sel : Nat) (args : List Word)
     {ctx : Ctx} {w : World S X E} {v : α} {w' : World S X E} :
@@ -706,6 +718,39 @@ theorem callAsNat_self (ret : AbiRet) (addr : Address) (sel : Nat) (args : List 
       rw [hrun] at h
       cases h
       exact call_self (α := Unit) addr sel args hrun
+
+/-- A successful `callAsNat` leaves the oracle unchanged. -/
+theorem callAsNat_oracle (ret : AbiRet) (addr : Address) (sel : Nat) (args : List Word)
+    {ctx : Ctx} {w : World S X E} {v : Nat} {w' : World S X E} :
+    Tx.run (callAsNat (S := S) (X := X) (E := E) (ε := ε) ret addr sel args) ctx w =
+        .ok (v, w') →
+      w'.oracle = w.oracle := by
+  cases ret with
+  | word => exact call_oracle (α := Nat) addr sel args
+  | boolOpt =>
+    intro h
+    simp only [callAsNat] at h
+    rw [run_map] at h
+    cases hrun :
+        Tx.run (call (S := S) (X := X) (E := E) (α := Bool) addr sel args) ctx w with
+    | error _ =>
+      rw [hrun] at h; cases h
+    | ok p =>
+      rw [hrun] at h
+      cases h
+      exact call_oracle (α := Bool) addr sel args hrun
+  | none =>
+    intro h
+    simp only [callAsNat] at h
+    rw [run_map] at h
+    cases hrun :
+        Tx.run (call (S := S) (X := X) (E := E) (α := Unit) addr sel args) ctx w with
+    | error _ =>
+      rw [hrun] at h; cases h
+    | ok p =>
+      rw [hrun] at h
+      cases h
+      exact call_oracle (α := Unit) addr sel args hrun
 
 /-- A successful `viewAsNat` returns the pre-world. -/
 theorem viewAsNat_world (ret : AbiRet) (addr : Address) (sel : Nat) (args : List Word)

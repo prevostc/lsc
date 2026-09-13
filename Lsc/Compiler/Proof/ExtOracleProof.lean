@@ -31,7 +31,7 @@ theorem CallsScratchInsensitive_of_memoryBlind {calls : ExternalCalls}
     (h : CallsMemoryBlind calls) (base reserved : Nat) :
     CallsScratchInsensitive calls base reserved := by
   intro req left right response hrel
-  exact h req left right response hrel.observables_eq
+  exact h req left right response (ExtView.ofState_congr hrel.observables_eq)
 
 theorem toCalls_scratchInsensitive (o : ExtOracle) (base reserved : Nat) :
     CallsScratchInsensitive (toCalls o) base reserved :=

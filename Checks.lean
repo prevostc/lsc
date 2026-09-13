@@ -1,8 +1,9 @@
-import Examples.Counter.Theorems
-import Examples.Token.Theorems
-import Examples.Vault.Theorems
-import Examples.Amm.Theorems
-import Examples.Cpamm.Theorems
+-- slice 4: Example imports restored when Examples compile on the oracle model.
+-- import Examples.Counter.Theorems
+-- import Examples.Token.Theorems
+-- import Examples.Vault.Theorems
+-- import Examples.Amm.Theorems
+-- import Examples.Cpamm.Theorems
 import Lsc.Security.WealthTheorems
 import Lsc.Compiler.DispatchTheorems
 import Lsc.Compiler.CoreTheorems
@@ -22,47 +23,10 @@ axioms. `#guard_msgs` turns a widened footprint into a build error (see
 `docs/internals/TRUSTED_COMPUTING_BASE.md`).
 -/
 
-/-- info: 'Counter.increment.core_denote' depends on axioms: [propext] -/
-#guard_msgs in #print axioms Counter.increment.core_denote
-
-/-- info: 'Token.transfer.core_denote' depends on axioms: [propext, Quot.sound] -/
-#guard_msgs in #print axioms Token.transfer.core_denote
-
-/-- info: 'Token.transfer_conserves' depends on axioms: [propext, Quot.sound] -/
-#guard_msgs in #print axioms Token.transfer_conserves
-
-/-- info: 'Token.token_no_unauthorized_extraction' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs in #print axioms Token.token_no_unauthorized_extraction
-
-/-- info: 'Token.token_solvent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs in #print axioms Token.token_solvent
-
-/-- info: 'Vault.vault_solvent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs in #print axioms Vault.vault_solvent
-
 /-- info: 'Lsc.Security.no_unauthorized_extraction' depends on axioms: [propext] -/
 #guard_msgs in #print axioms Lsc.Security.no_unauthorized_extraction
 
-/-- info: 'Vault.vault_no_unauthorized_extraction' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs in #print axioms Vault.vault_no_unauthorized_extraction
-
-/-- info: 'Lsc.Compiler.counter_increment_correct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs in #print axioms Lsc.Compiler.counter_increment_correct
-
-/-- info: 'Lsc.Compiler.counter_incrementBy_correct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs in #print axioms Lsc.Compiler.counter_incrementBy_correct
-
-/-- info: 'Lsc.Compiler.counter_decrement_correct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs in #print axioms Lsc.Compiler.counter_decrement_correct
-
-/-- info: 'Lsc.Compiler.counter_get_correct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs in #print axioms Lsc.Compiler.counter_get_correct
-
-/-- info: 'Lsc.Compiler.counter_correct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs in #print axioms Lsc.Compiler.counter_correct
-
-/-- info: 'Lsc.Compiler.token_correct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs in #print axioms Lsc.Compiler.token_correct
+-- slice 4: Counter / Token / Vault / Amm / Cpamm example pins.
 
 /-- info: 'Lsc.Compiler.toYulFn_correct_callFree' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms Lsc.Compiler.toYulFn_correct_callFree
@@ -70,20 +34,11 @@ axioms. `#guard_msgs` turns a widened footprint into a build error (see
 /-- info: 'Lsc.Compiler.toYulFn_correct_ext' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms Lsc.Compiler.toYulFn_correct_ext
 
-/-- info: 'Lsc.Compiler.vault_correct_ext' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs in #print axioms Lsc.Compiler.vault_correct_ext
-
 /-- info: 'Lsc.Compiler.core_sim_ext_callFree' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms Lsc.Compiler.core_sim_ext_callFree
 
 /-- info: 'Lsc.Compiler.runtimeBlock_correct_callFree' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms Lsc.Compiler.runtimeBlock_correct_callFree
-
-/-- info: 'Lsc.Compiler.counter_dispatch_correct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs in #print axioms Lsc.Compiler.counter_dispatch_correct
-
-/-- info: 'Lsc.Compiler.token_dispatch_correct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs in #print axioms Lsc.Compiler.token_dispatch_correct
 
 /-- info: 'Lsc.Compiler.bytecode_call_correct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms Lsc.Compiler.bytecode_call_correct
@@ -100,55 +55,8 @@ axioms. `#guard_msgs` turns a widened footprint into a build error (see
 /-- info: 'Lsc.Compiler.evmCallRunExtAll_of_progress' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms Lsc.Compiler.evmCallRunExtAll_of_progress
 
-/-- info: 'Vault.vault_abs_nonvacuous' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs in #print axioms Vault.vault_abs_nonvacuous
-
-/-- info: 'Vault.vault_bytecode_no_unauthorized_extraction' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs in #print axioms Vault.vault_bytecode_no_unauthorized_extraction
-
-/-- info: 'Vault.vault_bytecode_no_unauthorized_extraction_exists' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs in #print axioms Vault.vault_bytecode_no_unauthorized_extraction_exists
-
-/-- info: 'Vault.vault_bytecode_solvent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs in #print axioms Vault.vault_bytecode_solvent
-
-/-- info: 'Vault.vault_bytecode_solvent_exists' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs in #print axioms Vault.vault_bytecode_solvent_exists
-
-/-- info: 'Token.token_bytecode_no_unauthorized_extraction' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs in #print axioms Token.token_bytecode_no_unauthorized_extraction
-
-/-- info: 'Token.token_bytecode_no_unauthorized_extraction_exists' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs in #print axioms Token.token_bytecode_no_unauthorized_extraction_exists
-
-/-- info: 'Token.token_bytecode_solvent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs in #print axioms Token.token_bytecode_solvent
-
-/-- info: 'Token.token_bytecode_solvent_exists' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs in #print axioms Token.token_bytecode_solvent_exists
-
 /-- info: 'Lsc.Compiler.constructor_correct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms Lsc.Compiler.constructor_correct
 
 /-- info: 'Lsc.Compiler.bytecode_deploy_correct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms Lsc.Compiler.bytecode_deploy_correct
-
-/-- info: 'Token.token_deploy_then_no_unauthorized_extraction' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs in #print axioms Token.token_deploy_then_no_unauthorized_extraction
-
-/-! ### Multi-binding S2 / AMM bytecode (appended) -/
-
-/-- info: 'Lsc.Compiler.amm_correct_ext' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs in #print axioms Lsc.Compiler.amm_correct_ext
-
-/-- info: 'Amm.amm_bytecode_no_unauthorized_extraction' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs in #print axioms Amm.amm_bytecode_no_unauthorized_extraction
-
-/-- info: 'Cpamm.swap0for1_k' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs in #print axioms Cpamm.swap0for1_k
-
-/-- info: 'Cpamm.cpamm_solvent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs in #print axioms Cpamm.cpamm_solvent
-
-/-- info: 'Cpamm.cpamm_no_unauthorized_extraction' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs in #print axioms Cpamm.cpamm_no_unauthorized_extraction

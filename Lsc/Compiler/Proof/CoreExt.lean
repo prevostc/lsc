@@ -7,15 +7,10 @@ set_option linter.unusedVariables false
 set_option linter.unnecessarySeqFocus false
 
 /-!
-Backward `toYulFn_correct_ext` for **call-free** cores: invert `Run` → `step_descend` →
-S1 `toYulFn_execStmts_callFree` → `execStmts_det_evm`. Call-free Yul never consults `calls`,
-so `fo := w.faults`. Extra `hstab` (ghost independent of this execution's `EvmState`) plus
-`haddr` (binding address independent of `self`) close `RX`; `Abs.ignoresLocal` is not
-enough because `sstore` also updates `env.storageOf` at the executing address.
-
-`Op.call`/`Stmt.call` (`op_sim_call_bwd`, `core_sim_ext`) remain M1: the call reads
-`w.ncalls`. Failure uses `composeFault ncalls true rest` (Core does not bump `ncalls`).
-Success uses `composeFault ncalls false rest`; a continuation sees indices `≥ ncalls + 1`.
+S2 fragment (`CallFree ∪ {Op.call, Op.view, Stmt.call, Stmt.view}`) and call-free
+`ExtAgree` framing. Call/view heads live in `CallBwd`; `core_sim_ext` composes them.
+The only callee hypothesis on the S2 theorems is `ExtOracle.NoReentry` (reentrancy
+is not modelled).
 -/
 
 namespace Lsc.Compiler
@@ -29,11 +24,13 @@ open Lsc hiding Op Stmt
 /-! ## S2 fragment (`CallFree ∪ {Op.call, Stmt.call}`) -/
 
 def S2Op : Lsc.Op → Prop
-  | .call _ _ _ => True
+  | .call _ _ _ _ => True
+  | .view _ _ _ _ => True
   | op => M1Op op
 
 def S2Stmt : Lsc.Stmt → Prop
-  | .call _ _ _ => True
+  | .call _ _ _ _ => True
+  | .view _ _ _ _ => True
   | s => M1Stmt s
 
 def S2Frag : {t : RetTy} → Core t → Prop
@@ -54,11 +51,13 @@ def S2Frag : {t : RetTy} → Core t → Prop
   | _, _ => False
 
 def s2OpB : Lsc.Op → Bool
-  | .call _ _ _ => true
+  | .call _ _ _ _ => true
+  | .view _ _ _ _ => true
   | op => m1OpB op
 
 def s2StmtB : Lsc.Stmt → Bool
-  | .call _ _ _ => true
+  | .call _ _ _ _ => true
+  | .view _ _ _ _ => true
   | s => m1StmtB s
 
 def s2FragB : {t : RetTy} → Core t → Bool
@@ -80,12 +79,14 @@ def s2FragB : {t : RetTy} → Core t → Bool
 
 theorem s2OpB_eq (op : Lsc.Op) : s2OpB op = true ↔ S2Op op := by
   cases op with
-  | call _ _ _ => simp [s2OpB, S2Op]
+  | call _ _ _ _ => simp [s2OpB, S2Op]
+  | view _ _ _ _ => simp [s2OpB, S2Op]
   | _ => simp [s2OpB, S2Op, m1OpB_eq, M1Op]
 
 theorem s2StmtB_eq (s : Lsc.Stmt) : s2StmtB s = true ↔ S2Stmt s := by
   cases s with
-  | call _ _ _ => simp [s2StmtB, S2Stmt]
+  | call _ _ _ _ => simp [s2StmtB, S2Stmt]
+  | view _ _ _ _ => simp [s2StmtB, S2Stmt]
   | _ => simp [s2StmtB, S2Stmt, m1StmtB_eq, M1Stmt]
 
 theorem s2FragB_eq {t} (core : Core t) : s2FragB core = true ↔ S2Frag core := by
@@ -131,16 +132,20 @@ theorem s2stmt_of_m1 {s} (h : M1Stmt s) : S2Stmt s := by
   cases s <;> first | exact h | simp [S2Stmt, M1Stmt] at h
 
 theorem s2op_elim {op} (h : S2Op op) :
-    (∃ b m args, op = .call b m args) ∨ M1Op op := by
+    (∃ t sel args ret, op = .call t sel args ret) ∨
+      (∃ t sel args ret, op = .view t sel args ret) ∨ M1Op op := by
   cases op with
-  | call b m args => exact .inl ⟨b, m, args, rfl⟩
-  | _ => exact .inr h
+  | call t sel args ret => exact .inl ⟨t, sel, args, ret, rfl⟩
+  | view t sel args ret => exact .inr (.inl ⟨t, sel, args, ret, rfl⟩)
+  | _ => exact .inr (.inr h)
 
 theorem s2stmt_elim {s} (h : S2Stmt s) :
-    (∃ b m args, s = .call b m args) ∨ M1Stmt s := by
+    (∃ t sel args ret, s = .call t sel args ret) ∨
+      (∃ t sel args ret, s = .view t sel args ret) ∨ M1Stmt s := by
   cases s with
-  | call b m args => exact .inl ⟨b, m, args, rfl⟩
-  | _ => exact .inr h
+  | call t sel args ret => exact .inl ⟨t, sel, args, ret, rfl⟩
+  | view t sel args ret => exact .inr (.inl ⟨t, sel, args, ret, rfl⟩)
+  | _ => exact .inr (.inr h)
 
 theorem s2frag_letOp {t op} {k : Core t} :
     S2Frag (.letOp op k) ↔ S2Op op ∧ S2Frag k := by
@@ -255,7 +260,7 @@ theorem noExt_letOp_m1 {c : ContractDef} {e : Emit} {d : Nat} {op : Lsc.Op} {e' 
   | pure a =>
     simp [emitLetOp] at h1; cases h1
     exact noExt_let he (noExt_atomE tag d a)
-  | call _ _ _ => exact (show False from hM1).elim
+  | call _ _ _ _ | view _ _ _ _ => exact (show False from hM1).elim
 
 theorem noExt_stmt_m1 {c : ContractDef} {e : Emit} {d : Nat} {s : Lsc.Stmt}
     (hM1 : M1Stmt s) (he : noExtBlock e.stmts = true) :
@@ -296,7 +301,7 @@ theorem noExt_stmt_m1 {c : ContractDef} {e : Emit} {d : Nat} {s : Lsc.Stmt}
     | [] =>
       simp only [emitStmt, List.map_nil]
       exact noExt_customError c e err [] he (fun _ hx => by cases hx)
-  | call _ _ _ => exact (show False from hM1).elim
+  | call _ _ _ _ | view _ _ _ _ => exact (show False from hM1).elim
 
 theorem noExt_core_callFree {c halt t} {core : Core t} (hM1 : CallFree core) :
     ∀ (e : Emit) (d : Nat) {e' : Emit},
@@ -382,9 +387,9 @@ theorem m1op_preserves_ghost {S X E ε} {Γ : ContractSchema S X E ε}
     {op : Lsc.Op} (h : M1Op op) (env : List Nat) (ctx : Ctx) (w : World S X E)
     {v : Nat} {w' : World S X E}
     (hok : Lsc.Op.denote Γ env op ctx w = .ok (v, w')) :
-    w'.ext = w.ext ∧ w'.faults = w.faults ∧ w'.ncalls = w.ncalls := by
+    w'.ext = w.ext ∧ w'.oracle = w.oracle := by
   cases op with
-  | call _ _ _ => exact (show False from h).elim
+  | call _ _ _ _ | view _ _ _ _ => exact (show False from h).elim
   | load f =>
     have hred : Lsc.Op.denote Γ env (.load f) ctx w =
         .ok (Γ.st.scalar f w.self, w) := rfl
@@ -456,13 +461,95 @@ theorem m1op_preserves_ghost {S X E ε} {Γ : ContractSchema S X E ε}
     have hred : Lsc.Op.denote Γ env (.pure a) ctx w = .ok (a.eval env, w) := rfl
     rw [hred] at hok; cases hok; simp
 
+/-- M1 ops do not modify the world. -/
+theorem m1op_world {S X E ε} {Γ : ContractSchema S X E ε}
+    {op : Lsc.Op} (h : M1Op op) (env : List Nat) (ctx : Ctx) (w : World S X E)
+    {v : Nat} {w' : World S X E}
+    (hok : Lsc.Op.denote Γ env op ctx w = .ok (v, w')) : w' = w := by
+  cases op with
+  | call _ _ _ _ | view _ _ _ _ => exact (show False from h).elim
+  | load f =>
+    have hred : Lsc.Op.denote Γ env (.load f) ctx w =
+        .ok (Γ.st.scalar f w.self, w) := rfl
+    rw [hred] at hok; cases hok; rfl
+  | loadMap f k =>
+    have hred : Lsc.Op.denote Γ env (.loadMap f k) ctx w =
+        .ok (Γ.st.map1 f w.self (k.eval env), w) := rfl
+    rw [hred] at hok; cases hok; rfl
+  | loadMap2 f k₁ k₂ =>
+    have hred : Lsc.Op.denote Γ env (.loadMap2 f k₁ k₂) ctx w =
+        .ok (Γ.st.map2 f w.self (k₁.eval env) (k₂.eval env), w) := rfl
+    rw [hred] at hok; cases hok; rfl
+  | sender =>
+    have hred : Lsc.Op.denote (Γ := Γ) env .sender ctx w = .ok (ctx.sender, w) := rfl
+    rw [hred] at hok; cases hok; rfl
+  | value =>
+    have hred : Lsc.Op.denote (Γ := Γ) env .value ctx w = .ok (ctx.value, w) := rfl
+    rw [hred] at hok; cases hok; rfl
+  | timestamp =>
+    have hred : Lsc.Op.denote (Γ := Γ) env .timestamp ctx w = .ok (ctx.timestamp, w) := rfl
+    rw [hred] at hok; cases hok; rfl
+  | blockNumber =>
+    have hred : Lsc.Op.denote (Γ := Γ) env .blockNumber ctx w = .ok (ctx.blockNumber, w) := rfl
+    rw [hred] at hok; cases hok; rfl
+  | selfAddress =>
+    have hred : Lsc.Op.denote (Γ := Γ) env .selfAddress ctx w = .ok (ctx.self, w) := rfl
+    rw [hred] at hok; cases hok; rfl
+  | addChecked a b =>
+    have hred : Lsc.Op.denote Γ env (.addChecked a b) ctx w =
+        if a.eval env + b.eval env < wordBound then .ok (a.eval env + b.eval env, w)
+        else .error (.arith .overflow) := rfl
+    rw [hred] at hok; split at hok <;> cases hok; rfl
+  | subChecked a b =>
+    have hred : Lsc.Op.denote Γ env (.subChecked a b) ctx w =
+        if b.eval env ≤ a.eval env then .ok (a.eval env - b.eval env, w)
+        else .error (.arith .underflow) := rfl
+    rw [hred] at hok; split at hok <;> cases hok; rfl
+  | mulChecked a b =>
+    have hred : Lsc.Op.denote Γ env (.mulChecked a b) ctx w =
+        if a.eval env * b.eval env < wordBound then .ok (a.eval env * b.eval env, w)
+        else .error (.arith .overflow) := rfl
+    rw [hred] at hok; split at hok <;> cases hok; rfl
+  | divChecked a b =>
+    have hred : Lsc.Op.denote Γ env (.divChecked a b) ctx w =
+        if b.eval env ≠ 0 then .ok (a.eval env / b.eval env, w)
+        else .error (.arith .divByZero) := rfl
+    rw [hred] at hok; split at hok <;> cases hok; rfl
+  | mulDivDown a b c =>
+    have hred : Lsc.Op.denote Γ env (.mulDivDown a b c) ctx w =
+        if c.eval env = 0 then .error (.arith .divByZero)
+        else if a.eval env * b.eval env < wordBound then
+          .ok (a.eval env * b.eval env / c.eval env, w)
+        else .error (.arith .overflow) := rfl
+    rw [hred] at hok
+    split_ifs at hok <;> try cases hok
+    all_goals rfl
+  | mulDivUp a b c =>
+    have hred : Lsc.Op.denote Γ env (.mulDivUp a b c) ctx w =
+        if c.eval env = 0 then .error (.arith .divByZero)
+        else if a.eval env * b.eval env < wordBound then
+          .ok (a.eval env * b.eval env / c.eval env +
+            if a.eval env * b.eval env % c.eval env = 0 then 0 else 1, w)
+        else .error (.arith .overflow) := rfl
+    rw [hred] at hok
+    split_ifs at hok <;> try cases hok
+    all_goals rfl
+  | pow10 d =>
+    have hred : Lsc.Op.denote Γ env (.pow10 d) ctx w =
+        if d.eval env > Tx.pow10Max then .error (.arith .overflow)
+        else .ok (10 ^ d.eval env, w) := rfl
+    rw [hred] at hok; split at hok <;> cases hok; rfl
+  | pure a =>
+    have hred : Lsc.Op.denote Γ env (.pure a) ctx w = .ok (a.eval env, w) := rfl
+    rw [hred] at hok; cases hok; rfl
+
 theorem m1stmt_preserves_ghost {S X E ε} {Γ : ContractSchema S X E ε}
     {s : Lsc.Stmt} (h : M1Stmt s) (env : List Nat) (ctx : Ctx) (w : World S X E)
     {v : Unit} {w' : World S X E}
     (hok : Lsc.Stmt.denote Γ env s ctx w = .ok (v, w')) :
-    w'.ext = w.ext ∧ w'.faults = w.faults ∧ w'.ncalls = w.ncalls := by
+    w'.ext = w.ext ∧ w'.oracle = w.oracle := by
   cases s with
-  | call _ _ _ => exact (show False from h).elim
+  | call _ _ _ _ | view _ _ _ _ => exact (show False from h).elim
   | store f val =>
     have hred : Lsc.Stmt.denote Γ env (.store f val) ctx w =
         .ok ((), { w with self := Γ.st.scalarUpd f w.self (val.eval env) }) := rfl
@@ -499,7 +586,7 @@ theorem callFree_preserves_ghost {S X E ε} {Γ : ContractSchema S X E ε} {t}
     {core : Core t} (hM1 : CallFree core) (env : List Nat) (ctx : Ctx) (w : World S X E)
     {v : t.denote} {w' : World S X E}
     (hok : Core.denote Γ core env ctx w = .ok (v, w')) :
-    w'.ext = w.ext ∧ w'.faults = w.faults ∧ w'.ncalls = w.ncalls := by
+    w'.ext = w.ext ∧ w'.oracle = w.oracle := by
   revert hM1 env w v w' hok
   induction core with
   | ret r =>
@@ -533,7 +620,7 @@ theorem callFree_preserves_ghost {S X E ε} {Γ : ContractSchema S X E ε} {t}
       have hopg := m1op_preserves_ghost hop env ctx w (by simpa [Tx.run] using hopr)
       simp [hopr] at hok
       have ih' := ih hk (p.1 :: env) p.2 hok
-      exact ⟨ih'.1.trans hopg.1, ih'.2.1.trans hopg.2.1, ih'.2.2.trans hopg.2.2⟩
+      exact ⟨ih'.1.trans hopg.1, ih'.2.trans hopg.2⟩
   | seq s k ih =>
     intro h env w v w' hok
     have ⟨hs, hk⟩ := m1frag_seq.mp h
@@ -547,7 +634,7 @@ theorem callFree_preserves_ghost {S X E ε} {Γ : ContractSchema S X E ε} {t}
       have hsg := m1stmt_preserves_ghost hs env ctx w (by simpa [Tx.run] using hsr)
       simp [hsr] at hok
       have ih' := ih hk env p.2 hok
-      exact ⟨ih'.1.trans hsg.1, ih'.2.1.trans hsg.2.1, ih'.2.2.trans hsg.2.2⟩
+      exact ⟨ih'.1.trans hsg.1, ih'.2.trans hsg.2⟩
   | letPure p args k ih =>
     intro h env w v w' hok
     have ⟨_, _, hk⟩ := m1frag_letPure.mp h
@@ -561,28 +648,40 @@ theorem callFree_preserves_ghost {S X E ε} {Γ : ContractSchema S X E ε} {t}
     · simp [hc] at hok; exact iha ha env w hok
     · simp [hc] at hok; exact ihb hb env w hok
 
-theorem RX_callFree {I : Interface} {S X E} {α : Abs I.Ghost}
-    {bind : Binding I S X} {w w' : World S X E} {st0 st' : EvmState}
-    (hRX : RX α bind w st0)
-    (hstab : α.ofState st' (bind.addr w.self) = α.ofState st0 (bind.addr w.self))
-    (hext : w'.ext = w.ext)
-    (haddr : bind.addr w'.self = bind.addr w.self) :
-    RX α bind w' st' := by
-  unfold RX at *
-  rw [haddr, hstab, hext]
-  exact hRX
+/-! ## `ExtAgree` after local storage writes -/
 
-theorem RXs_callFree {I : Interface} {S X E} {bs : List (BindEnv I S X)}
-    {w w' : World S X E} {st0 st' : EvmState}
-    (hRX : RXs bs w st0)
-    (hstab : ∀ e ∈ bs,
-      e.α.ofState st' (e.bind.addr w.self) = e.α.ofState st0 (e.bind.addr w.self))
-    (hext : w'.ext = w.ext)
-    (haddr : ∀ e ∈ bs, e.bind.addr w'.self = e.bind.addr w.self) :
-    RXs bs w' st' := by
-  intro e he
-  exact RX_callFree (α := e.α) (hRX e he) (hstab e he) hext (haddr e he)
+/-- Local `sstore` only updates this account's storage, which `scrubSelf` drops. -/
+theorem ExtAgree_sstore {self : Address} {x : Lsc.ExtState} {st : EvmState}
+    {slot val : U256}
+    (h : ExtAgree self x st)
+    (haddr : st.env.address = BitVec.ofNat 256 self) :
+    ExtAgree self x
+      { st with
+        storage := upd st.storage slot val
+        env := { st.env with
+          storageOf := updAccount st.env.storageOf st.env.address slot val } } := by
+  apply ExtAgree_of_scrub h
+  unfold scrubSelf ExtView.ofState ExtState.ofState
+  simp only [haddr]
+  congr
+  ext a k
+  by_cases hkey : accountKey a = accountKey (BitVec.ofNat 256 self) <;> simp [hkey, updAccount]
 
-/-! `toYulFn_correct_ext` (no `haddr`/`hstab`) lives in `Proof/CoreExtSim.lean`. -/
+/-- Local `tstore` only updates this account's transient storage. -/
+theorem ExtAgree_tstore {self : Address} {x : Lsc.ExtState} {st : EvmState}
+    {slot val : U256}
+    (h : ExtAgree self x st)
+    (haddr : st.env.address = BitVec.ofNat 256 self) :
+    ExtAgree self x
+      { st with
+        transient := upd st.transient slot val
+        env := { st.env with
+          transientOf := updAccount st.env.transientOf st.env.address slot val } } := by
+  apply ExtAgree_of_scrub h
+  unfold scrubSelf ExtView.ofState ExtState.ofState
+  simp only [haddr]
+  congr
+  ext a k
+  by_cases hkey : accountKey a = accountKey (BitVec.ofNat 256 self) <;> simp [hkey, updAccount]
 
 end Lsc.Compiler

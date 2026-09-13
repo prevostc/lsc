@@ -1,6 +1,6 @@
 import Lsc.Compiler.Proof.Calldata
 import Lsc.Compiler.Proof.Layout
-import Lsc.Compiler.Externals
+import Lsc.Compiler.ExtOracle
 import YulSemantics.Dialect.EVM
 
 set_option linter.unusedSimpArgs false
@@ -118,12 +118,11 @@ theorem selfLogs_finishCall_fail (kind st resp iOff iSz oOff oSz)
     selfLogs (finishCall kind st resp iOff iSz oOff oSz) = selfLogs st := by
   simp [selfLogs, finishCall_logs_fail (h := h), finishCall_address]
 
-theorem selfLogs_finishCall_success {G} {α : Abs G} {st : EvmState}
-    {resp : CallResponse} {callee : Address} {iOff iSz oOff oSz : Nat}
+theorem selfLogs_finishCall_success {st : EvmState}
+    {resp : CallResponse} {iOff iSz oOff oSz : Nat}
     (hs : resp.success = true)
-    (hni : NoInterfere α st resp.world callee) :
+    (hlogs : ∀ l ∈ resp.world.logs, l.address ≠ st.env.address) :
     selfLogs (finishCall .call st resp iOff iSz oOff oSz) = selfLogs st := by
-  have ⟨_, _, _, _, hlogs, _⟩ := hni
   have hk : CallKind.call ≠ .staticcall := by decide
   simp only [selfLogs, finishCall_logs_success .call st resp iOff iSz oOff oSz hs hk,
     finishCall_address, List.filter_append]
@@ -164,14 +163,6 @@ theorem boolOpt_or_b2w (rds mload : U256) :
       b2w (decide (rds = 0) || (rds.ult 32 = false && decide (mload = 1))) := by
   simp [b2w_or, b2w_and]
 
-theorem Abs.ofState_finishCall_fail {G} (α : Abs G) (kind st resp a iOff iSz oOff oSz)
-    (h : resp.success = false) :
-    α.ofState (finishCall kind st resp iOff iSz oOff oSz) a = α.ofState st a := by
-  have hproj := α.ofState_proj
-  rw [hproj, hproj]
-  congr 1
-  simp [CallWorld.ofState, finishCall, h, touchMemory2, touchMemory]
-
 theorem finishCall_storage_success_eq (st : EvmState) (resp : CallResponse)
     (iOff iSz oOff oSz : Nat) (hs : resp.success = true) :
     (finishCall .call st resp iOff iSz oOff oSz).storage = resp.world.storage :=
@@ -183,13 +174,6 @@ theorem CallWorld.ofState_finishCall_success (st : EvmState) (resp : CallRespons
     CallWorld.ofState (finishCall .call st resp iOff iSz oOff oSz) =
       CallWorld.ofState (resp.world.install (touchMemory2 st iOff iSz oOff oSz)) := by
   simp [finishCall, hs, CallWorld.ofState, CallWorld.install, touchMemory2, touchMemory]
-
-theorem Abs.ofState_finishCall_success {G} (α : Abs G) (st : EvmState)
-    (resp : CallResponse) (a : Address) (iOff iSz oOff oSz : Nat)
-    (hs : resp.success = true) :
-    α.ofState (finishCall .call st resp iOff iSz oOff oSz) a = α.ofWorld resp.world a := by
-  rw [α.ofState_proj, CallWorld.ofState_finishCall_success st resp iOff iSz oOff oSz hs,
-    α.ofWorld_install]
 
 private theorem storeWord_out_prefix (mem : Nat → UInt8) (dst : Nat) (v : U256)
     (p n : Nat) (h : p + n ≤ dst) :

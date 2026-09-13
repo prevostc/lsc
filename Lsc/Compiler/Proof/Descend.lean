@@ -1,5 +1,5 @@
 import Lsc.Compiler.Proof.Lift
-import Lsc.Compiler.Externals
+import Lsc.Compiler.Correctness
 import YulSemantics.Determinism
 
 set_option linter.unusedSimpArgs false

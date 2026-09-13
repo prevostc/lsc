@@ -6,14 +6,13 @@ set_option linter.unusedVariables false
 
 /-!
 Bytecode for contracts that CALL out: compiled runtime related to the
-high-level model under some choice of which external calls fail, and
-to EVM steps by the pinned Yul-to-EVM compiler.
+high-level model under `Oracle.ofExt`, and to EVM steps by the pinned
+Yul-to-EVM compiler.
 
-Shared assumptions: bound tokens conform to their interface, are not
-this contract, and do not alias each other; the compiler accepted the
-contract; given enough gas. Other contracts are modelled as unable to
-see this contract's private memory, which is true of the EVM. Vault
-and AMM instantiate this.
+`NoReentry o ctx.self` is the only assumption about the callee
+(reentrancy is not modelled); everything else is adversarial. The compiler
+may have used either the erase path or powdr spill (`compileBlock`).
+This is the Vault/AMM analogue of `bytecode_call_correct`.
 -/
 
 namespace Lsc.Compiler
@@ -25,18 +24,15 @@ open YulEvmCompiler
 open EvmSemantics.EVM (State Steps)
 
 /-- Every Yul run of a compiled runtime that may CALL out is predicted by
-the high-level model under some choice of which external calls fail, and
-the pinned compiler produces matching EVM steps. Every halted matching
-EVM execution agrees on our storage and on the bound tokens' storage.
-Bound tokens must conform, must not be this contract, and must not
-alias each other. The external-call oracle cannot see this contract's
-memory or `msize` — other contracts in the EVM cannot either. The
-compiler may have used either the erase path or powdr spill
-(`compileBlock`). This is the Vault/AMM analogue of
+the high-level model with `w.oracle = Oracle.ofExt o`, and the pinned
+compiler produces matching EVM steps. Every halted matching EVM
+execution agrees on our storage and on foreign storage. Reentrancy is
+not modelled (`NoReentry`); everything else about the callee is
+adversarial. The compiler may have used either the erase path or powdr
+spill (`compileBlock`). This is the Vault/AMM analogue of
 `bytecode_call_correct`. -/
-theorem bytecode_call_correct_ext {I : Interface} {S X E ε : Type}
-    (bs : List (BindEnv I S X))
-    (c : ContractDef) (Γ : ContractSchema S X E ε)
+theorem bytecode_call_correct_ext {S E ε : Type}
+    (c : ContractDef) (Γ : ContractSchema S ExtState E ε)
     (hΓ : Γ.st.Lawful c.fields) (hκ : KeccakSep c evmKeccak)
     (o : ExtOracle) (hCalls : CallsRealized (toCalls o))
     (hctor : ∀ f ∈ c.functions, f.kind ≠ .constructor)
@@ -45,32 +41,26 @@ theorem bytecode_call_correct_ext {I : Interface} {S X E ε : Type}
     (hbound : ∀ f ∈ c.functions, 4 + 32 * f.params.length < wordBound)
     (rt : YBlock) (hrt : runtimeBlock c = some rt)
     (is : List Instr) (hcomp : compileBlock rt = some is)
-    (ctx : Ctx) (w : World S X E) (yst0 : EvmState)
+    (ctx : Ctx) (w : World S ExtState E) (yst0 : EvmState)
     (hctx : ctxRel ctx yst0) (hR : R c Γ evmKeccak w yst0)
-    (hRX : RXs bs w yst0) (hign : BindEnvs.ignoresLocal bs)
-    (hBindNe : BindEnvs.neSelf bs ctx.self w.self)
-    (hconf : BindEnvs.conforms bs ctx.self w.self (toCalls o))
-    (hsame : BindEnvs.sameAbs bs) (horth : BindEnvs.orthogonal bs)
-    (hinj : BindEnvs.addrInj bs w.self)
-    (hBind : BindEnvs.lookupWF c Γ bs)
-    (hslot : ∀ f ∈ c.functions, BindEnvs.avoids Γ c bs f.core)
+    (hAgr : ExtAgree ctx.self w.ext yst0)
+    (hOr : w.oracle = Oracle.ofExt o)
+    (hNR : ExtOracle.NoReentry o ctx.self)
     (himm0 : ∀ k, yst0.env.immutable k = 0) :
-    BytecodeCallCorrectExt bs c Γ evmKeccak (toCalls o) ctx w yst0 rt is :=
-  Proof.bytecode_call_correct_ext (I := I) bs c Γ hΓ hκ o hCalls hctor hS2
-    hlen hbound rt hrt is hcomp ctx w yst0 hctx hR hRX hign hBindNe hconf
-    hsame horth hinj hBind hslot himm0
+    BytecodeCallCorrectExt c Γ evmKeccak o ctx w yst0 rt is :=
+  Proof.bytecode_call_correct_ext c Γ hΓ hκ o hCalls hctor hS2
+    hlen hbound rt hrt is hcomp ctx w yst0 hctx hR hAgr hOr hNR himm0
 
 /-- Given a memory-blind CALL oracle, there is a matching EVM execution of
-compiled runtime whose post-storage (and bound-token storage) is the
-unique one the high-level model predicts. Without a total CALL oracle,
-"every matching EVM execution" could hold vacuously, because the
-Yul-to-EVM compiler only goes forward from a Yul run; a memory-blind
-oracle is total by construction. Same conformance assumptions as
+compiled runtime whose post-storage (and foreign storage) is the unique
+one the high-level model predicts. Without a total CALL oracle, "every
+matching EVM execution" could hold vacuously, because the Yul-to-EVM
+compiler only goes forward from a Yul run; a memory-blind oracle is
+total by construction. Same callee hypothesis as
 `bytecode_call_correct_ext`. The compiler may have used either compile
 branch. -/
-theorem evmCallRunExtAll_of_progress {I : Interface} {S X E ε : Type}
-    (bs : List (BindEnv I S X))
-    (c : ContractDef) (Γ : ContractSchema S X E ε)
+theorem evmCallRunExtAll_of_progress {S E ε : Type}
+    (c : ContractDef) (Γ : ContractSchema S ExtState E ε)
     (hΓ : Γ.st.Lawful c.fields) (hκ : KeccakSep c evmKeccak)
     (o : ExtOracle) (hCalls : CallsRealized (toCalls o))
     (hctor : ∀ f ∈ c.functions, f.kind ≠ .constructor)
@@ -79,19 +69,14 @@ theorem evmCallRunExtAll_of_progress {I : Interface} {S X E ε : Type}
     (hbound : ∀ f ∈ c.functions, 4 + 32 * f.params.length < wordBound)
     (rt : YBlock) (hrt : runtimeBlock c = some rt)
     (is : List Instr) (hcomp : compileBlock rt = some is)
-    (ctx : Ctx) (w : World S X E) (yst0 : EvmState)
+    (ctx : Ctx) (w : World S ExtState E) (yst0 : EvmState)
     (hctx : ctxRel ctx yst0) (hR : R c Γ evmKeccak w yst0)
-    (hRX : RXs bs w yst0) (hign : BindEnvs.ignoresLocal bs)
-    (hBindNe : BindEnvs.neSelf bs ctx.self w.self)
-    (hconf : BindEnvs.conforms bs ctx.self w.self (toCalls o))
-    (hsame : BindEnvs.sameAbs bs) (horth : BindEnvs.orthogonal bs)
-    (hinj : BindEnvs.addrInj bs w.self)
-    (hBind : BindEnvs.lookupWF c Γ bs)
-    (hslot : ∀ f ∈ c.functions, BindEnvs.avoids Γ c bs f.core)
+    (hAgr : ExtAgree ctx.self w.ext yst0)
+    (hOr : w.oracle = Oracle.ofExt o)
+    (hNR : ExtOracle.NoReentry o ctx.self)
     (himm0 : ∀ k, yst0.env.immutable k = 0) :
-    ∃ σ' ξ', EvmCallRunExtAll bs c Γ evmKeccak (toCalls o) ctx w is yst0 σ' ξ' :=
-  Proof.evmCallRunExtAll_of_progress (I := I) bs c Γ hΓ hκ o hCalls
-    hctor hS2 hlen hbound rt hrt is hcomp ctx w yst0 hctx hR hRX hign hBindNe
-    hconf hsame horth hinj hBind hslot himm0
+    ∃ σ' ξ', EvmCallRunExtAll c Γ evmKeccak o ctx w is yst0 σ' ξ' :=
+  Proof.evmCallRunExtAll_of_progress c Γ hΓ hκ o hCalls
+    hctor hS2 hlen hbound rt hrt is hcomp ctx w yst0 hctx hR hAgr hOr hNR himm0
 
 end Lsc.Compiler

@@ -10,7 +10,7 @@ import KeccakEngine.Sponge
 `toYulFn` compiles one `FnDef` to a powdr `YulSemantics` block. `Op.call` /
 `Stmt.call` / `Op.view` / `Stmt.view` are emitted as a scoped Yul block: ABI
 pack at `0x80` (`mstore(0x80, shl(224, sel))`, args at `0x84+`), then
-`call(gas(), target, 0, …)` or `staticcall(gas(), target, …)`,
+`call(extCallGas, target, 0, …)` or `staticcall(extCallGas, target, …)`,
 `if iszero(ok) { revert(0,0) }`, then `AbiRet` decode. Temporaries `_ok_*`
 live inside the block so `restore` drops them; the Core result variable is
 declared outside and assigned inside. `toYulFn` does **not** return `none` on
@@ -107,8 +107,10 @@ def listBytes (bs : List UInt8) : ByteArray :=
 def keccakOf (bs : List UInt8) : YulSemantics.EVM.U256 :=
   BitVec.ofNat 256 (bytesToNat (KeccakEngine.keccak256 (listBytes bs)))
 
-/-- Fallback gas stipend if a future backend rejects fused `call(gas(), …)`.
-Current emission uses `gas()`. -/
+/-- Gas stipend forwarded to CALL/STATICCALL. A literal, not `gas()`: the S2
+dialect is `ExternalGas.none` (needed by the spill-path theorem), so `gas()`
+would be stuck. The EVM still caps the forwarded amount at 63/64 of remaining
+gas. -/
 def extCallGas : Nat := 1_000_000
 
 /-- ABI packing / CALL in-out / panic / custom error / `log1` / returns start here. -/
@@ -205,8 +207,8 @@ def opWF (c : ContractDef) : Lsc.Op → Bool
       atomWF a && atomWF b
   | .mulDivDown a b d | .mulDivUp a b d => atomWF a && atomWF b && atomWF d
   | .pow10 d => atomWF d
-  | .call t _ args _ => callWF t args
-  | .view t _ args _ => callWF t args
+  | .call t sel args _ => callWF t args && decide (sel < 2 ^ 32)
+  | .view t sel args _ => callWF t args && decide (sel < 2 ^ 32)
   | .pure a => atomWF a
 
 def stmtWF (c : ContractDef) : Lsc.Stmt → Bool
@@ -216,8 +218,8 @@ def stmtWF (c : ContractDef) : Lsc.Stmt → Bool
   | .require cond err args => condWF cond && errorOK c err args.length && args.all atomWF
   | .emit ev args => eventOK c ev args.length && args.all atomWF
   | .revert err args => errorOK c err args.length && args.all atomWF
-  | .call t _ args _ => callWF t args
-  | .view t _ args _ => callWF t args
+  | .call t sel args _ => callWF t args && decide (sel < 2 ^ 32)
+  | .view t sel args _ => callWF t args && decide (sel < 2 ^ 32)
 
 def retWF : {t : RetTy} → RetExpr t → Bool
   | _, .unit => true
@@ -338,6 +340,31 @@ theorem fitsGuardCall_iff (n : Nat) :
   unfold fitsGuardCall abiPtr memoryGuardK
   rw [decide_eq_true_eq]
   constructor <;> intro <;> omega
+
+theorem callWF_elim {t args} (h : callWF t args = true) :
+    atomWF t = true ∧ (∀ x ∈ args, atomWF x = true) ∧ args.length ≤ 3 := by
+  simp [callWF, Bool.and_eq_true, fitsGuardCall_iff] at h
+  exact ⟨h.1.1, h.1.2, h.2⟩
+
+theorem opWF_call {c t sel args ret}
+    (h : opWF c (.call t sel args ret) = true) :
+    callWF t args = true ∧ sel < 2 ^ 32 := by
+  simpa [opWF, Bool.and_eq_true, decide_eq_true_eq] using h
+
+theorem opWF_view {c t sel args ret}
+    (h : opWF c (.view t sel args ret) = true) :
+    callWF t args = true ∧ sel < 2 ^ 32 := by
+  simpa [opWF, Bool.and_eq_true, decide_eq_true_eq] using h
+
+theorem stmtWF_call {c t sel args ret}
+    (h : stmtWF c (.call t sel args ret) = true) :
+    callWF t args = true ∧ sel < 2 ^ 32 := by
+  simpa [stmtWF, Bool.and_eq_true, decide_eq_true_eq] using h
+
+theorem stmtWF_view {c t sel args ret}
+    (h : stmtWF c (.view t sel args ret) = true) :
+    callWF t args = true ∧ sel < 2 ^ 32 := by
+  simpa [stmtWF, Bool.and_eq_true, decide_eq_true_eq] using h
 
 theorem abiWords_le {n : Nat} (h : n ≤ 4) : abiPtr + 32 * n ≤ memoryGuardK := by
   unfold abiPtr memoryGuardK; omega
@@ -528,9 +555,9 @@ def emitMulDivUp (e : Emit) (name : YIdent) (a b c : YExpr) : Emit :=
       (bop YulSemantics.EVM.Op.add [bop YulSemantics.EVM.Op.div [var name, c], lit 1])]))
 
 /-- After a successful CALL/STATICCALL: `boolOpt` is empty returndata (true) or
-exactly one ABI word (`word ≠ 0` ⇒ true); `word` requires `returndatasize ≥ 32`;
-short (1–31) and two-word (`≥ 64`) `boolOpt` payloads revert (`AbiRetType.decode
-none` is `callFailed`). -/
+exactly one ABI word (`word ≠ 0` ⇒ true); `word` requires exactly one ABI word
+(`32 ≤ returndatasize < 64`). Short (1–31) and two-word (`≥ 64`) payloads
+revert, matching `AbiRetType.decode none` = `callFailed`. -/
 def emitCallRetCheck (e : Emit) (ret : AbiRet) : Emit :=
   match ret with
   | .boolOpt =>
@@ -547,8 +574,16 @@ def emitCallRetCheck (e : Emit) (ret : AbiRet) : Emit :=
                   [bop YulSemantics.EVM.Op.returndatasize [], lit 64]]]])
       [revert00]
   | .word =>
-    emitIf e (bop YulSemantics.EVM.Op.lt
-      [bop YulSemantics.EVM.Op.returndatasize [], lit 32]) [revert00]
+    -- revert unless `32 ≤ returndatasize < 64` (exactly one ABI word)
+    emitIf e
+      (bop YulSemantics.EVM.Op.iszero
+        [bop YulSemantics.EVM.Op.and
+          [bop YulSemantics.EVM.Op.iszero
+            [bop YulSemantics.EVM.Op.lt
+              [bop YulSemantics.EVM.Op.returndatasize [], lit 32]],
+            bop YulSemantics.EVM.Op.lt
+              [bop YulSemantics.EVM.Op.returndatasize [], lit 64]]])
+      [revert00]
   | .none => e
 
 /-- Core word of a successful ABI decode. `boolOpt` is `1` on empty or nonzero
@@ -563,9 +598,8 @@ def emitCallRetVal (ret : AbiRet) : YExpr :=
   | .word => bop YulSemantics.EVM.Op.mload [lit abiPtr]
   | .none => lit 0
 
-/-- Fused `gas()` argument; the Asm peephole accepts `call(gas(), …)` /
-`staticcall(gas(), …)`. -/
-def emitCallGas : YExpr := bop YulSemantics.EVM.Op.gas []
+/-- Forwarded gas argument: the `extCallGas` literal (not `gas()`). -/
+def emitCallGas : YExpr := lit extCallGas
 
 def emitExtCallOp (isView : Bool) (target : YExpr) (insize : Nat) : YExpr :=
   if isView then
@@ -589,14 +623,18 @@ def emitExtCallBody (tag : String) (depth : Nat) (target : Atom) (sel : Nat)
       i + 1)) (e, 0)
   let insize := 4 + 32 * args.length
   let e := emitLet e ok (emitExtCallOp isView (atomE tag depth target) insize)
-  let e := emitIf e (bop YulSemantics.EVM.Op.iszero [var ok]) [revert00]
+  -- `view` + `.none` has no ABI payload and `Tx.viewAsNat .none` never fails,
+  -- so a failed STATICCALL must not revert (Unit decode is total).
+  let e :=
+    if isView && decide (ret = .none) then e
+    else emitIf e (bop YulSemantics.EVM.Op.iszero [var ok]) [revert00]
   let e := emitCallRetCheck e ret
   match assignResult with
   | none => e.stmts
   | some name => (emitAssign e name (emitCallRetVal ret)).stmts
 
-/-- ABI-pack at `0x80`, `call(gas(), …)` / `staticcall(gas(), …)`, revert on
-failure. Temps are scoped in `{ … }`. When `bindResult` is set:
+/-- ABI-pack at `0x80`, `call(extCallGas, …)` / `staticcall(extCallGas, …)`, revert
+on failure. Temps are scoped in `{ … }`. When `bindResult` is set:
 `let v := 0 { … v := r }`. -/
 def emitExtCall (tag : String) (e : Emit) (depth : Nat) (target : Atom) (sel : Nat)
     (args : List Atom) (ret : AbiRet) (isView : Bool)

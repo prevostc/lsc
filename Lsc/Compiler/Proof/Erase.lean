@@ -524,17 +524,28 @@ theorem noYulCall_emitExtCallBody tag (depth : Nat) (target : Atom) (sel : Nat)
   have hcall := noYulCall_emitLet _ (extOk tag depth)
     (emitExtCallOp isView (atomE tag depth target) (4 + 32 * args.length)) hargs
     (noYulCall_emitExtCallOp isView _ _ (noYulCall_atom tag depth target))
-  have hif := noYulCall_emitIf _ (bop Op.iszero [var (extOk tag depth)]) [revert00] hcall
-    (by simp [noYulCall_bop, noYulCallExprs, noYulCallExpr, var]) noYulCall_revert00
-  have hret := noYulCall_emitCallRetCheck _ ret hif
-  cases assign with
-  | none =>
-    convert hret using 1
-    simp [emitExtCallBody]
-  | some name =>
-    convert (noYulCall_emitAssign _ name (emitCallRetVal ret) hret
-      (noYulCall_emitCallRetVal ret)) using 1
-    simp [emitExtCallBody]
+  by_cases hskip : isView = true ∧ ret = AbiRet.none
+  · have hret := noYulCall_emitCallRetCheck _ ret hcall
+    cases assign with
+    | none =>
+      convert hret using 1
+      simp [emitExtCallBody, hskip]
+    | some name =>
+      convert (noYulCall_emitAssign _ name (emitCallRetVal ret) hret
+        (noYulCall_emitCallRetVal ret)) using 1
+      simp [emitExtCallBody, hskip]
+  · have hif := noYulCall_emitIf _ (bop Op.iszero [var (extOk tag depth)]) [revert00]
+      hcall (by simp [noYulCall_bop, noYulCallExprs, noYulCallExpr, var])
+      noYulCall_revert00
+    have hret := noYulCall_emitCallRetCheck _ ret hif
+    cases assign with
+    | none =>
+      convert hret using 1
+      simp [emitExtCallBody, hskip]
+    | some name =>
+      convert (noYulCall_emitAssign _ name (emitCallRetVal ret) hret
+        (noYulCall_emitCallRetVal ret)) using 1
+      simp [emitExtCallBody, hskip]
 
 theorem noYulCall_emitExtCall tag (e : Emit) (depth : Nat) (target : Atom) (sel : Nat)
     (args : List Atom) (ret : AbiRet) (isView : Bool) (bind : Option YIdent)

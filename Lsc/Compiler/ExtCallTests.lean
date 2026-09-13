@@ -82,7 +82,8 @@ def extYul : String :=
 
 #guard extYul.contains "call("
 #guard extYul.contains "staticcall("
-#guard extYul.contains "gas()"
+#guard extYul.contains (toString extCallGas)
+#guard !extYul.contains "gas()"
 #guard extYul.contains (toString transferFromSel)
 #guard extYul.contains (toString balanceOfSel)
 

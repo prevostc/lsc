@@ -53,35 +53,62 @@ structure TransportSetup (S X E ε : Type) where
   is : List Instr
   hcomp : compileBlock rt = some is
 
-/-- S2 binding family. One-binding contracts instantiate `bs := [⟨α, bind⟩]`.
-The CALL oracle is memory-blind by construction (`ExtOracle`): other
-contracts cannot see this contract's private memory, which is true of
-the EVM. -/
-structure TransportBindings (S X E ε : Type) (I : Interface)
-    (T : TransportSetup S X E ε) where
-  bs : List (BindEnv I S X)
+/-- S2 package: the memory-blind CALL oracle and the call-carrying fragment.
+There is no per-interface `BindEnv` / `RX` layer; `Oracle.ofExt` is the
+only Core bridge. `NoReentry` is a theorem hypothesis, not a field. -/
+structure TransportBindings (S E ε : Type)
+    (T : TransportSetup S ExtState E ε) where
   oracle : ExtOracle
   hCalls : CallsRealized (toCalls oracle)
   hS2 : ∀ f ∈ T.c.functions, S2Frag f.core
-  hign : BindEnvs.ignoresLocal bs
-  hF : BindEnvs.ofState_foreign bs
-  hsame : BindEnvs.sameAbs bs
-  horth : BindEnvs.orthogonal bs
-  hBind : BindEnvs.lookupWF T.c T.Γ bs
-  hslot : ∀ f ∈ T.c.functions, BindEnvs.avoids T.Γ T.c bs f.core
-  bindAddr_stable :
-    ∀ e ∈ bs, ∀ (fn : T.spec.Fn) (args : T.spec.Args fn) (ctx : Ctx) (w : World S X E),
-      e.bind.addr (worldAfter (T.spec.exec fn args) ctx w).self = e.bind.addr w.self
 
-abbrev TransportBindings.extCalls {S X E ε : Type} {I : Interface}
-    {T : TransportSetup S X E ε} (X : TransportBindings S X E ε I T) :
+abbrev TransportBindings.extCalls {S E ε : Type}
+    {T : TransportSetup S ExtState E ε} (X : TransportBindings S E ε T) :
     ExternalCalls :=
   toCalls X.oracle
 
-theorem TransportBindings.htot {S X E ε : Type} {I : Interface}
-    {T : TransportSetup S X E ε} (X : TransportBindings S X E ε I T) :
+theorem TransportBindings.htot {S E ε : Type}
+    {T : TransportSetup S ExtState E ε} (X : TransportBindings S E ε T) :
     CallsTotal X.extCalls :=
   toCalls_total X.oracle
+
+/-- Start a call from the same skeleton `EvmTraceRunExtAll` uses: executing
+storage `σ`, foreign persistent storage `ξ`, and `Oracle.ofExt`. Callee-visible
+agreement with that skeleton is then definitional. -/
+def reframeExt {S E : Type} (o : ExtOracle) (w : World S ExtState E)
+    (cd : List UInt8) (σ : U256 → U256) (ξ : Foreign) (ctx : Ctx) :
+    World S ExtState E :=
+  { w with
+    ext := ExtView.ofState (mkEvmStateExt cd σ ξ evmKeccak ctx)
+    oracle := Oracle.ofExt o }
+
+@[simp] theorem reframeExt_self {S E : Type} (o : ExtOracle)
+    (w : World S ExtState E) (cd σ ξ ctx) :
+    (reframeExt o w cd σ ξ ctx).self = w.self := rfl
+
+@[simp] theorem reframeExt_log {S E : Type} (o : ExtOracle)
+    (w : World S ExtState E) (cd σ ξ ctx) :
+    (reframeExt o w cd σ ξ ctx).log = w.log := rfl
+
+@[simp] theorem reframeExt_oracle {S E : Type} (o : ExtOracle)
+    (w : World S ExtState E) (cd σ ξ ctx) :
+    (reframeExt o w cd σ ξ ctx).oracle = Oracle.ofExt o := rfl
+
+theorem ExtAgree_reframeExt {S E : Type} (o : ExtOracle)
+    (w : World S ExtState E) (cd σ ξ ctx) :
+    ExtAgree ctx.self (reframeExt o w cd σ ξ ctx).ext
+      (mkEvmStateExt cd σ ξ evmKeccak ctx) := by
+  unfold ExtAgree agreeExceptSelf reframeExt ExtView.ofState
+  rfl
+
+/-- `Inv` survives the `mkEvmStateExt` reframe that `EvmTraceRunExtAll`
+already does between calls. Replaces the old `hInvF` (fault-bit
+irrelevance). If `Inv` depends only on `self`, this is immediate. -/
+def InvReframe {S E : Type} (Inv : World S ExtState E → Prop)
+    (o : ExtOracle) : Prop :=
+  ∀ (w : World S ExtState E) (cd : List UInt8) (σ : U256 → U256)
+    (ξ : Foreign) (ctx : Ctx),
+    Inv w → Inv (reframeExt o w cd σ ξ ctx)
 
 variable {S X E ε : Type}
 
@@ -317,11 +344,6 @@ theorem callsOf_are_calls {C : Spec S X E ε} (tr : List (Step C)) :
       rcases hs with rfl | htl
       · exact ⟨c, rfl⟩
       · exact ih s htl
-
-theorem RX_irrel_log_faults {I : Interface} {α : Abs I.Ghost}
-    {bind : Binding I S X} {w : World S X E} {st : EvmState}
-    (log' : List E) (fo : Nat → Bool) (h : RX α bind w st) :
-    RX α bind { w with log := log', faults := fo } st := h
 
 def dummyCtx (self : Address) : Ctx where
   sender := 0
