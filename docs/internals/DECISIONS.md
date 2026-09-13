@@ -189,3 +189,14 @@ tokens remains a stated assumption (`NoInterfere`) and becomes a theorem
 for Lsc callees via `implements`. Per-asset solvency stays the exported
 solvency statement; the product measure is used for the extraction theorem
 only.
+
+## 2026-09-13 — Interfaces are signature structures + Spec theorems; callee = oracle
+
+An interface is two ordinary Lean structures: `Fn`/`View` field types (the ABI)
+and a user-written `Prop` `I.Spec` over `T : I.Impl …`, in theorem shape
+(success as hypothesis, state delta as conclusion). `deriving Interface`
+builds the method table, `I.Ref` / `I.Try` / `I.Impl`, and `Impl.ofRef`.
+Callee behaviour is a deterministic, memory-blind `Oracle` on `World.ext`;
+`oracle.call = none` is revert. The adversarial oracle is the baseline; a
+`Spec` hypothesis restricts it. Views are pure `oracle.view` reads. Reentrancy
+during a call is not modelled (`self` unchanged) — next architecture step.

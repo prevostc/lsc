@@ -1,6 +1,5 @@
 import Lsc.Lang.Core
 import Lsc.Lang.Interface
-import KeccakEngine.Sponge
 
 /-!
 # Contract assembly: the `ContractDef` data model
@@ -10,7 +9,7 @@ import KeccakEngine.Sponge
 downstream of `C.contract` is a Lean function of that value: ABI JSON, selectors, the Yul
 dispatcher and codegen (`Lsc.Compiler.toYul`).
 
-This file is the data model plus the ABI hashing helpers (KeccakEngine); it has no
+This file is the data model plus ABI hashing (`selectorOf` / `topic0Of`); it has no
 metaprogramming. `FnDef.core` is a dependent field, so `ToExpr`/`Repr` are hand-written by
 the assembly command rather than derived.
 -/
@@ -101,21 +100,14 @@ structure ContractDef where
 
 /-! ## ABI hashing -/
 
-/-- Big-endian bytes as a natural number. -/
-def bytesToNat (bytes : ByteArray) : Nat :=
-  bytes.foldl (fun acc b => acc * 256 + b.toNat) 0
-
-/-- `keccak256` of a byte string, as a word. -/
-def keccakWord (bytes : ByteArray) : Nat :=
-  bytesToNat (KeccakEngine.keccak256 bytes)
-
 /-- Canonical signature, e.g. `transfer(address,uint256)`. -/
 def abiSignature (name : String) (params : List Param) : String :=
   s!"{name}({String.intercalate "," (params.map (·.ty.render))})"
 
-/-- 4-byte function/error selector as a number below `2^32`. -/
+/-- 4-byte function/error selector as a number below `2^32`. Same formula as
+`methodSelector`. -/
 def selectorOf (name : String) (params : List Param) : Nat :=
-  keccakWord (abiSignature name params).toUTF8 / 2 ^ 224
+  methodSelector name (params.map (·.ty.render))
 
 /-- Full 32-byte event topic. -/
 def topic0Of (name : String) (params : List Param) : Nat :=

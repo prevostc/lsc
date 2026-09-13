@@ -52,17 +52,30 @@ structure Ctx where
   self : Address := 0
   deriving Repr
 
+/-- Deterministic, memory-blind callee oracle over opaque external state `X`.
+`call` is CALL: `none` is revert. `view` is STATICCALL: total, no `ext` update.
+Argument/return lists are ABI words (`Word` = `Nat`). -/
+structure Oracle (X : Type) where
+  call : Address → Nat → List Nat → X → Option (List Nat × X) :=
+    fun _ _ _ _ => none
+  view : Address → Nat → List Nat → X → List Nat :=
+    fun _ _ _ _ => []
+
+/-- Always-revert / empty-view oracle. `World.oracle` defaults to this so
+`{ self := …, ext := … }` still elaborates. -/
+def Oracle.reject (X : Type) : Oracle X := {}
+
 /-- The world a contract executes in: own storage `self`, external ghosts `ext`,
-the event log, and the fault oracle (`faults` / `ncalls`). `faults` defaults to
-success; theorems quantify over all oracles. `ext` has no type-class default
-(that would constrain `World`/`Tx` by `Inhabited` and change `Tx`'s arity).
-Call sites that omit a ghost use `ext := default` (e.g. `X := Unit`). -/
+the event log, and the callee `oracle`. `ext` has no type-class default (that
+would constrain `World`/`Tx` by `Inhabited` and change `Tx`'s arity). Call
+sites that omit a ghost use `ext := default` (e.g. `X := Unit`). The oracle
+field is never modified by any Tx primitive. Reentrancy during a call is not
+modelled in this slice (`self` is unchanged). -/
 structure World (S X E : Type) where
   self : S
   ext : X
   log : List E := []
-  faults : Nat → Bool := fun _ => false
-  ncalls : Nat := 0
+  oracle : Oracle X := {}
 
 /-- Reasons an arithmetic primitive reverts (Solidity `Panic` codes 0x11/0x12). -/
 inductive ArithError
