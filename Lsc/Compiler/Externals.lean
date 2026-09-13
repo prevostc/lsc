@@ -1,5 +1,6 @@
 import Lsc.Lang.Interface
 import Lsc.Compiler.Yul
+import Lsc.Compiler.Correctness
 import YulSemantics.Dialect.EVM
 import YulSemantics.Observation
 
@@ -16,19 +17,6 @@ namespace Lsc.Compiler
 open Lsc
 open YulSemantics
 open YulSemantics.EVM
-
-/-- S2 dialect: relational `ExternalCalls`, no creates, no `gas()`.
-Bytecode glue must instantiate powdr `ExternalModel` with `gas := .none`
-(the class default is `.any`) so the dialect equals `yulD`. -/
-@[reducible] def yulD (calls : ExternalCalls) : Dialect :=
-  evmWithExternal calls .none .none
-
-/-- Foreign account persistent storage (`env.storageOf`), indexed by 256-bit
-address words (low-160-bit aliases are the EVM account). -/
-abbrev Foreign := U256 → U256 → U256
-
-/-- Projection of an `EvmState` onto foreign persistent storage. -/
-def evmForeign (st : EvmState) : Foreign := st.env.storageOf
 
 /-- Abstraction of a ghost `G` from an EVM/`CallWorld` snapshot at a callee address.
 `ofState` / `ofWorld` agree on the `CallWorld` projection (they ignore memory,

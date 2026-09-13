@@ -45,7 +45,7 @@ def m1OpB : Lsc.Op → Bool
   | .sender | .value | .timestamp | .blockNumber | .selfAddress => true
   | .addChecked _ _ | .subChecked _ _ | .mulChecked _ _ | .divChecked _ _ => true
   | .mulDivDown _ _ _ | .mulDivUp _ _ _ | .pow10 _ | .pure _ => true
-  | .call _ _ _ => false
+  | .call _ _ _ _ | .view _ _ _ _ => false
 
 def m1StmtB : Lsc.Stmt → Bool
   | .store _ _ | .storeMap _ _ _ | .storeMap2 _ _ _ _ => true
@@ -53,7 +53,7 @@ def m1StmtB : Lsc.Stmt → Bool
       args.length == 0 || args.length == 1 || args.length == 3 || args.length == 4
   | .require _ _ args => args.length == 0
   | .revert _ args => args.length == 0
-  | .call _ _ _ => false
+  | .call _ _ _ _ | .view _ _ _ _ => false
 
 def m1FragB : {t : RetTy} → Core t → Bool
   | .unit, .ret _ => true
@@ -83,7 +83,7 @@ theorem m1StmtB_eq (s : Lsc.Stmt) : m1StmtB s = true ↔ M1Stmt s := by
   | emit _ args => simp [m1StmtB, M1Stmt]; tauto
   | require c _ args => simp [m1StmtB, M1Stmt, M1Cond]
   | revert _ args => simp [m1StmtB, M1Stmt]
-  | call _ _ _ => simp [m1StmtB, M1Stmt]
+  | call _ _ _ _ | view _ _ _ _ => simp [m1StmtB, M1Stmt]
 
 theorem m1FragB_eq {t} (core : Core t) : m1FragB core = true ↔ M1Frag core := by
   induction core with

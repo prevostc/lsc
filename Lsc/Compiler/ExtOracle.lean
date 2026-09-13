@@ -1,4 +1,5 @@
-import Lsc.Compiler.Externals
+import Lsc.Lang.ExtState
+import YulSemantics.Observation
 import YulEvmCompiler.Optimizer.Spec.Observe
 
 /-!
@@ -18,9 +19,9 @@ callee whose response depended on hidden state outside the caller's
 observable world, or that answered differently on two calls with the same
 request and the same observable world. The EVM is deterministic given the
 world state and the block environment, and every callee's own storage,
-balance, and code are already in `Obs`, so a real callee is a function of
-exactly (request, world). What is excluded is an adversary with state
-outside the modelled world — nothing a real deployment can exhibit.
+balance, and code are already in `Lsc.ExtState`, so a real callee is a
+function of exactly (request, world). What is excluded is an adversary with
+state outside the modelled world — nothing a real deployment can exhibit.
 Wrapping with `toCalls` discharges `CallsTotal` once (`toCalls_total`)
 instead of assuming it.
 -/
@@ -31,13 +32,20 @@ open YulSemantics
 open YulSemantics.EVM
 open YulEvmCompiler.Optimizer
 
-/-- Caller/transaction-observable projection: every `EvmState` field except
-byte memory and `msize`. An external callee in the real EVM cannot see more
-than this plus the explicit `CallRequest`. -/
-abbrev ExtView := Obs
+/-- Caller/transaction-observable projection: the fixed `Lsc.ExtState`. -/
+abbrev ExtView := Lsc.ExtState
 
 /-- Project an `EvmState` onto the view a callee can observe. -/
-abbrev ExtView.ofState : EvmState → ExtView := observables
+def ExtView.ofState (st : EvmState) : ExtView := Lsc.ExtState.ofState st
+
+/-- `observables` agreement implies `ExtView.ofState` agreement. -/
+theorem ExtView.ofState_congr {l r : EvmState}
+    (h : observables l = observables r) :
+    ExtView.ofState l = ExtView.ofState r :=
+  congrArg (fun o : Obs =>
+    ({ storage := o.storage, transient := o.transient, env := o.env,
+       returndata := o.returndata, logs := o.logs,
+       selfdestructs := o.selfdestructs, halted := o.halted } : Lsc.ExtState)) h
 
 /-- External-call oracle that is memory-free by construction. -/
 abbrev ExtOracle := CallRequest → ExtView → CallResponse

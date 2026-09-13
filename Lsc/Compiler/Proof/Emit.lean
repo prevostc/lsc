@@ -34,15 +34,15 @@ theorem emitBlock_acc (e : Emit) (body : YBlock) :
 theorem emitIf_acc (e : Emit) (cnd : YExpr) (body : YBlock) :
     emitIf e cnd body = { acc := (emitIf ({} : Emit) cnd body).acc ++ e.acc } := rfl
 
-theorem emitExtCall_stmts (c : ContractDef) (e : Emit) (depth b m : Nat)
-    (args : List Atom) (bind : Option YIdent) :
-    (emitExtCall tag c e depth b m args bind).stmts =
+theorem emitExtCall_stmts (e : Emit) (depth : Nat) (target : Atom) (sel : Nat)
+    (args : List Atom) (ret : AbiRet) (isView : Bool) (bind : Option YIdent) :
+    (emitExtCall tag e depth target sel args ret isView bind).stmts =
       e.stmts ++
         match bind with
-        | none => [.block (emitExtCallBody tag c depth b m args none)]
+        | none => [.block (emitExtCallBody tag depth target sel args ret isView none)]
         | some name =>
           [.letDecl [name] (some (lit 0)),
-           .block (emitExtCallBody tag c depth b m args (some name))] := by
+           .block (emitExtCallBody tag depth target sel args ret isView (some name))] := by
   cases bind <;> simp [emitExtCall, emitBlock, emitLet, Emit.stmts_push]
 
 theorem emitReturnUnit_acc (e : Emit) (halt : Bool) :
@@ -201,10 +201,10 @@ private theorem emitCallRetCheck_cat (e extra : Emit) (ret : AbiRet) :
       { acc := (emitCallRetCheck extra ret).acc ++ e.acc } := by
   cases ret <;> simp [emitCallRetCheck, emitIf, Emit.push, List.append_assoc]
 
-theorem emitExtCall_acc tag (c : ContractDef) (e : Emit) (depth b m : Nat) (args : List Atom)
-    (bindResult : Option YIdent) :
-    emitExtCall tag c e depth b m args bindResult =
-      { acc := (emitExtCall tag c {} depth b m args bindResult).acc ++ e.acc } := by
+theorem emitExtCall_acc tag (e : Emit) (depth : Nat) (target : Atom) (sel : Nat)
+    (args : List Atom) (ret : AbiRet) (isView : Bool) (bindResult : Option YIdent) :
+    emitExtCall tag e depth target sel args ret isView bindResult =
+      { acc := (emitExtCall tag {} depth target sel args ret isView bindResult).acc ++ e.acc } := by
   cases bindResult with
   | none =>
     simp [emitExtCall, emitBlock, Emit.push]
@@ -240,8 +240,12 @@ theorem emitLetOp_acc (c : ContractDef) (e : Emit) (d : Nat) (op : Lsc.Op) :
     simp only [emitLetOp, Option.map_some]; exact congrArg some (emitMulDivUp_acc _ _ _ _ _)
   | pow10 _ =>
     simp only [emitLetOp, Option.map_some]; exact congrArg some (emitPow10_acc _ _ _)
-  | call b m args =>
-    simp only [emitLetOp, Option.map_some]; exact congrArg some (emitExtCall_acc tag _ _ _ _ _ _ _)
+  | call t sel args ret =>
+    simp only [emitLetOp, Option.map_some]
+    exact congrArg some (emitExtCall_acc tag e _ t sel args ret false _)
+  | view t sel args ret =>
+    simp only [emitLetOp, Option.map_some]
+    exact congrArg some (emitExtCall_acc tag e _ t sel args ret true _)
 
 theorem emitLetOp_some tag (c : ContractDef) (e : Emit) (d : Nat) (op : Lsc.Op) :
     ∃ e', emitLetOp tag c e d op = some e' := by
@@ -258,7 +262,10 @@ theorem emitStmt_acc (c : ContractDef) (e : Emit) (d : Nat) (s : Lsc.Stmt) :
   | require _ _ _ => simp [emitStmt, emitIf, Emit.push]
   | emit _ _ => simp only [emitStmt]; exact emitLog1_acc _ _ _
   | revert _ _ => simp only [emitStmt]; exact emitCustomError_acc _ _ _ _
-  | call b m args => simp only [emitStmt]; exact emitExtCall_acc tag _ _ _ _ _ _ _
+  | call t sel args ret =>
+    simp only [emitStmt]; exact emitExtCall_acc tag e _ t sel args ret false none
+  | view t sel args ret =>
+    simp only [emitStmt]; exact emitExtCall_acc tag e _ t sel args ret true none
 
 theorem emitRet_acc tag (e : Emit) (d : Nat) (halt : Bool) {t} (r : RetExpr t) :
     emitRet tag e d halt r = { acc := (emitRet tag {} d halt r).acc ++ e.acc } := by
@@ -486,9 +493,10 @@ theorem noFun_callRetCheck (e : Emit) (ret : AbiRet) (he : e.noFun) :
     (emitCallRetCheck e ret).noFun := by
   cases ret <;> simp [emitCallRetCheck] <;> first | exact he | exact noFun_if he
 
-theorem noFun_extCall tag (c : ContractDef) (e : Emit) (depth b m : Nat) (args : List Atom)
-    (bindResult : Option YIdent) (he : e.noFun) :
-    (emitExtCall tag c e depth b m args bindResult).noFun := by
+theorem noFun_extCall tag (e : Emit) (depth : Nat) (target : Atom) (sel : Nat)
+    (args : List Atom) (ret : AbiRet) (isView : Bool) (bindResult : Option YIdent)
+    (he : e.noFun) :
+    (emitExtCall tag e depth target sel args ret isView bindResult).noFun := by
   cases bindResult with
   | none =>
     simp only [emitExtCall]
@@ -513,7 +521,12 @@ theorem noFun_letOp (c : ContractDef) (e : Emit) (d : Nat) (op : Lsc.Op) (he : e
   | mulDivDown _ _ _ => simp [emitLetOp] at h1; cases h1; exact noFun_mulDivDown _ _ _ _ _ he
   | mulDivUp _ _ _ => simp [emitLetOp] at h1; cases h1; exact noFun_mulDivUp _ _ _ _ _ he
   | pow10 _ => simp [emitLetOp] at h1; cases h1; exact noFun_pow10 _ _ _ he
-  | call b m args => simp [emitLetOp] at h1; cases h1; exact noFun_extCall tag _ _ _ _ _ _ _ he
+  | call t sel args ret =>
+    simp [emitLetOp] at h1; cases h1
+    exact noFun_extCall tag e _ t sel args ret false _ he
+  | view t sel args ret =>
+    simp [emitLetOp] at h1; cases h1
+    exact noFun_extCall tag e _ t sel args ret true _ he
 
 theorem noFun_stmt tag (c : ContractDef) (e : Emit) (d : Nat) (s : Lsc.Stmt) (he : e.noFun) :
     (emitStmt tag c e d s).noFun := by
@@ -524,7 +537,10 @@ theorem noFun_stmt tag (c : ContractDef) (e : Emit) (d : Nat) (s : Lsc.Stmt) (he
   | require _ _ _ => simp only [emitStmt]; exact noFun_if he
   | emit _ _ => simp only [emitStmt]; exact noFun_log1 _ _ _ he
   | revert _ _ => simp only [emitStmt]; exact noFun_customError _ _ _ _ he
-  | call b m args => simp only [emitStmt]; exact noFun_extCall tag _ _ _ _ _ _ none he
+  | call t sel args ret =>
+    simp only [emitStmt]; exact noFun_extCall tag e _ t sel args ret false none he
+  | view t sel args ret =>
+    simp only [emitStmt]; exact noFun_extCall tag e _ t sel args ret true none he
 
 theorem noFun_ret tag (e : Emit) (d : Nat) (halt : Bool) {t} (r : RetExpr t) (he : e.noFun) :
     (emitRet tag e d halt r).noFun := by

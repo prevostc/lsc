@@ -7,19 +7,22 @@ import KeccakEngine.Sponge
 /-!
 # Core → Yul
 
-`toYulFn` compiles one `FnDef` to a powdr `YulSemantics` block. `Op.call` / `Stmt.call`
-are emitted as a scoped Yul block (`sload` of the bound slot, ABI pack at `0x80`, `call`
-with a gas literal, `if iszero(ok) { revert(0,0) }`, then `boolOpt` / `word` return
-handling). Temporaries `_tok_*` / `_ok_*` live inside the block so `restore` drops them;
-the Core result variable is declared outside and assigned inside. `toYulFn` does
-**not** return `none` on calls.
+`toYulFn` compiles one `FnDef` to a powdr `YulSemantics` block. `Op.call` /
+`Stmt.call` / `Op.view` / `Stmt.view` are emitted as a scoped Yul block: ABI
+pack at `0x80` (`mstore(0x80, shl(224, sel))`, args at `0x84+`), then
+`call(gas(), target, 0, …)` or `staticcall(gas(), target, …)`,
+`if iszero(ok) { revert(0,0) }`, then `AbiRet` decode. Temporaries `_ok_*`
+live inside the block so `restore` drops them; the Core result variable is
+declared outside and assigned inside. `toYulFn` does **not** return `none` on
+calls.
 
-Not emitted in this slice: `tload`/`tstore` (reentrancy lock), `gas()`, `for`, `delegatecall`,
-`selfdestruct`, `create`. `ite` is `switch` (Yul `if` has no else). Dispatcher is
-`switch shr(224, calldataload(0))`. Sub-expressions are nested Yul builtins (no flatten /
-`t_i` temps); `{ … }` wraps `if` bodies, `switch` cases, and external-call temps.
-`toYulFn` requires `coreWF` and `Nodup` `identV` names (`{f.name}_{i}`, unique across
-the dispatcher `switch`); `runtimeBlock` requires unique selectors.
+Not emitted in this slice: `tload`/`tstore` (reentrancy lock), `for`,
+`delegatecall`, `selfdestruct`, `create`. `ite` is `switch` (Yul `if` has no
+else). Dispatcher is `switch shr(224, calldataload(0))`. Sub-expressions are
+nested Yul builtins (no flatten / `t_i` temps); `{ … }` wraps `if` bodies,
+`switch` cases, and external-call temps. `toYulFn` requires `coreWF` and
+`Nodup` `identV` names (`{f.name}_{i}`, unique across the dispatcher
+`switch`); `runtimeBlock` requires unique selectors.
 -/
 
 namespace Lsc.Compiler
@@ -104,7 +107,8 @@ def listBytes (bs : List UInt8) : ByteArray :=
 def keccakOf (bs : List UInt8) : YulSemantics.EVM.U256 :=
   BitVec.ofNat 256 (bytesToNat (KeccakEngine.keccak256 (listBytes bs)))
 
-/-- Gas stipend for an external CALL (literal; never `gas()`). -/
+/-- Fallback gas stipend if a future backend rejects fused `call(gas(), …)`.
+Current emission uses `gas()`. -/
 def extCallGas : Nat := 1_000_000
 
 /-- ABI packing / CALL in-out / panic / custom error / `log1` / returns start here. -/
@@ -187,15 +191,10 @@ def errorOK (c : ContractDef) (err n : Nat) : Bool :=
   | some ed => decide (ed.params.length = n) && fitsGuardCall n
   | none => false
 
-/-- Binding `b` exists and method `m` has this arity; otherwise `toYulFn` is `none`. -/
-def callWF (c : ContractDef) (b m : Nat) (args : List Atom) : Bool :=
-  match c.bindings[b]? with
-  | none => false
-  | some bd =>
-    match bd.methods[m]? with
-    | none => false
-    | some (_, spec) =>
-        decide (args.length = spec.arity) && args.all atomWF && fitsGuardCall args.length
+/-- Target in range and CALL/STATICCALL packing (`4 + 32n` bytes from `abiPtr`)
+fits the memory guard. Equivalent to `n ≤ 3`. -/
+def callWF (target : Atom) (args : List Atom) : Bool :=
+  atomWF target && args.all atomWF && fitsGuardCall args.length
 
 def opWF (c : ContractDef) : Lsc.Op → Bool
   | .load f => fieldKindOK c f .scalar
@@ -206,7 +205,8 @@ def opWF (c : ContractDef) : Lsc.Op → Bool
       atomWF a && atomWF b
   | .mulDivDown a b d | .mulDivUp a b d => atomWF a && atomWF b && atomWF d
   | .pow10 d => atomWF d
-  | .call b m args => callWF c b m args
+  | .call t _ args _ => callWF t args
+  | .view t _ args _ => callWF t args
   | .pure a => atomWF a
 
 def stmtWF (c : ContractDef) : Lsc.Stmt → Bool
@@ -216,7 +216,8 @@ def stmtWF (c : ContractDef) : Lsc.Stmt → Bool
   | .require cond err args => condWF cond && errorOK c err args.length && args.all atomWF
   | .emit ev args => eventOK c ev args.length && args.all atomWF
   | .revert err args => errorOK c err args.length && args.all atomWF
-  | .call b m args => callWF c b m args
+  | .call t _ args _ => callWF t args
+  | .view t _ args _ => callWF t args
 
 def retWF : {t : RetTy} → RetExpr t → Bool
   | _, .unit => true
@@ -394,8 +395,7 @@ def emitBlock (e : Emit) (body : YBlock) : Emit :=
 def emitIf (e : Emit) (cnd : YExpr) (body : YBlock) : Emit :=
   e.push (.cond cnd body)
 
-/-- Call temporaries; distinct from `identV` (`{tag}_i` vs `{tag}__tok_{d}`). -/
-def extTok (tag : String) (d : Nat) : YIdent := s!"{tag}__tok_{d}"
+/-- Per-function CALL/STATICCALL success flag. -/
 def extOk (tag : String) (d : Nat) : YIdent := s!"{tag}__ok_{d}"
 
 /-- `if lt(calldatasize(), n) { revert(0,0) }`. -/
@@ -527,27 +527,14 @@ def emitMulDivUp (e : Emit) (name : YIdent) (a b c : YExpr) : Emit :=
     (some [.assign [name]
       (bop YulSemantics.EVM.Op.add [bop YulSemantics.EVM.Op.div [var name, c], lit 1])]))
 
-/-- Look up ABI of binding `b`, method `m`. Defaults are inert (empty selector, word). -/
-def bindingMethod (c : ContractDef) (b m : Nat) : Nat × AbiRet :=
-  match c.bindings[b]? with
-  | none => (0, .word)
-  | some bd =>
-    match bd.methods[m]? with
-    | none => (0, .word)
-    | some (_, spec) => (spec.selector, spec.ret)
-
-def bindingSlot (c : ContractDef) (b : Nat) : Nat :=
-  match c.bindings[b]? with
-  | some bd => bd.fieldSlot
-  | none => 0
-
-/-- After a successful CALL: `boolOpt` accepts empty return or a 32-byte `true`;
-`word` requires `returndatasize ≥ 32`. Short (1–31 byte) `boolOpt` returns revert:
-the old `or(iszero(returndatasize), eq(mload, 1))` accepted them with stale memory. -/
+/-- After a successful CALL/STATICCALL: `boolOpt` is empty returndata (true) or
+exactly one ABI word (`word ≠ 0` ⇒ true); `word` requires `returndatasize ≥ 32`;
+short (1–31) and two-word (`≥ 64`) `boolOpt` payloads revert (`AbiRetType.decode
+none` is `callFailed`). -/
 def emitCallRetCheck (e : Emit) (ret : AbiRet) : Emit :=
   match ret with
   | .boolOpt =>
-    -- revert unless `returndatasize = 0 ∨ (returndatasize ≥ 32 ∧ mload(0x80) = 1)`
+    -- revert unless `returndatasize = 0 ∨ (32 ≤ returndatasize ∧ returndatasize < 64)`
     emitIf e
       (bop YulSemantics.EVM.Op.iszero
         [bop YulSemantics.EVM.Op.or
@@ -556,50 +543,71 @@ def emitCallRetCheck (e : Emit) (ret : AbiRet) : Emit :=
               [bop YulSemantics.EVM.Op.iszero
                 [bop YulSemantics.EVM.Op.lt
                   [bop YulSemantics.EVM.Op.returndatasize [], lit 32]],
-                bop YulSemantics.EVM.Op.eq
-                  [bop YulSemantics.EVM.Op.mload [lit abiPtr], lit 1]]]])
+                bop YulSemantics.EVM.Op.lt
+                  [bop YulSemantics.EVM.Op.returndatasize [], lit 64]]]])
       [revert00]
   | .word =>
     emitIf e (bop YulSemantics.EVM.Op.lt
       [bop YulSemantics.EVM.Op.returndatasize [], lit 32]) [revert00]
   | .none => e
 
-/-- Body of an external CALL. Temps `{tag}__tok_*` / `{tag}__ok_*` live inside a
-Yul block so `restore` drops them. When `assignResult` is set, that outer variable is
-assigned the ABI result (`boolOpt` / `.none` yield `1`). -/
-def emitExtCallBody (tag : String) (c : ContractDef) (depth : Nat) (b m : Nat) (args : List Atom)
+/-- Core word of a successful ABI decode. `boolOpt` is `1` on empty or nonzero
+word (mirroring `boolBit <$> AbiRetType.decode`); `.none` is `0`. -/
+def emitCallRetVal (ret : AbiRet) : YExpr :=
+  match ret with
+  | .boolOpt =>
+    bop YulSemantics.EVM.Op.or
+      [bop YulSemantics.EVM.Op.iszero [bop YulSemantics.EVM.Op.returndatasize []],
+        bop YulSemantics.EVM.Op.iszero
+          [bop YulSemantics.EVM.Op.iszero [bop YulSemantics.EVM.Op.mload [lit abiPtr]]]]
+  | .word => bop YulSemantics.EVM.Op.mload [lit abiPtr]
+  | .none => lit 0
+
+/-- Fused `gas()` argument; the Asm peephole accepts `call(gas(), …)` /
+`staticcall(gas(), …)`. -/
+def emitCallGas : YExpr := bop YulSemantics.EVM.Op.gas []
+
+def emitExtCallOp (isView : Bool) (target : YExpr) (insize : Nat) : YExpr :=
+  if isView then
+    bop YulSemantics.EVM.Op.staticcall
+      [emitCallGas, target, lit abiPtr, lit insize, lit abiPtr, lit 32]
+  else
+    bop YulSemantics.EVM.Op.call
+      [emitCallGas, target, lit 0, lit abiPtr, lit insize, lit abiPtr, lit 32]
+
+/-- Body of an external CALL/STATICCALL. Temps `{tag}__ok_*` live inside a Yul
+block so `restore` drops them. When `assignResult` is set, that outer variable
+is assigned the ABI Core word. -/
+def emitExtCallBody (tag : String) (depth : Nat) (target : Atom) (sel : Nat)
+    (args : List Atom) (ret : AbiRet) (isView : Bool)
     (assignResult : Option YIdent) : YBlock :=
-  let slot := bindingSlot c b
-  let (sel, ret) := bindingMethod c b m
-  let tok := extTok tag depth
   let ok := extOk tag depth
-  let e := emitLet {} tok (bop YulSemantics.EVM.Op.sload [lit slot])
-  let e := emitDo e YulSemantics.EVM.Op.mstore
+  let e := emitDo {} YulSemantics.EVM.Op.mstore
     [lit abiPtr, bop YulSemantics.EVM.Op.shl [lit 224, lit sel]]
   let (e, _) := args.foldl (fun (e, i) a =>
-    (emitDo e YulSemantics.EVM.Op.mstore [lit (abiAfterSel + 32 * i), atomE tag depth a], i + 1)) (e, 0)
+    (emitDo e YulSemantics.EVM.Op.mstore [lit (abiAfterSel + 32 * i), atomE tag depth a],
+      i + 1)) (e, 0)
   let insize := 4 + 32 * args.length
-  let e := emitLet e ok (bop YulSemantics.EVM.Op.call
-    [lit extCallGas, var tok, lit 0, lit abiPtr, lit insize, lit abiPtr, lit 32])
+  let e := emitLet e ok (emitExtCallOp isView (atomE tag depth target) insize)
   let e := emitIf e (bop YulSemantics.EVM.Op.iszero [var ok]) [revert00]
   let e := emitCallRetCheck e ret
   match assignResult with
   | none => e.stmts
-  | some name =>
-    match ret with
-    | .boolOpt | .none => (emitAssign e name (lit 1)).stmts
-    | .word => (emitAssign e name (bop YulSemantics.EVM.Op.mload [lit abiPtr])).stmts
+  | some name => (emitAssign e name (emitCallRetVal ret)).stmts
 
-/-- `sload` bound address, ABI-pack at `0x80`, `call(extCallGas, tok, 0, …)`, revert on
-failure. Temps are scoped in `{ … }`. When `bindResult` is set: `let v := 0 { … v := r }`. -/
-def emitExtCall (tag : String) (c : ContractDef) (e : Emit) (depth : Nat) (b m : Nat) (args : List Atom)
+/-- ABI-pack at `0x80`, `call(gas(), …)` / `staticcall(gas(), …)`, revert on
+failure. Temps are scoped in `{ … }`. When `bindResult` is set:
+`let v := 0 { … v := r }`. -/
+def emitExtCall (tag : String) (e : Emit) (depth : Nat) (target : Atom) (sel : Nat)
+    (args : List Atom) (ret : AbiRet) (isView : Bool)
     (bindResult : Option YIdent) : Emit :=
   match bindResult with
-  | none => emitBlock e (emitExtCallBody tag c depth b m args none)
+  | none => emitBlock e (emitExtCallBody tag depth target sel args ret isView none)
   | some name =>
-    emitBlock (emitLet e name (lit 0)) (emitExtCallBody tag c depth b m args (some name))
+    emitBlock (emitLet e name (lit 0))
+      (emitExtCallBody tag depth target sel args ret isView (some name))
 
-def emitLetOp (tag : String) (c : ContractDef) (e : Emit) (depth : Nat) : Lsc.Op → Option Emit
+def emitLetOp (tag : String) (_c : ContractDef) (e : Emit) (depth : Nat) : Lsc.Op → Option Emit
   | .load f => some (emitLet e (identV tag depth) (bop YulSemantics.EVM.Op.sload [lit f]))
   | .loadMap f k =>
     let e := emitMapSlotPrep e f (atomE tag depth k)
@@ -627,7 +635,10 @@ def emitLetOp (tag : String) (c : ContractDef) (e : Emit) (depth : Nat) : Lsc.Op
   | .pow10 d =>
       some (emitPow10 e (identV tag depth) (atomE tag depth d))
   | .pure a => some (emitLet e (identV tag depth) (atomE tag depth a))
-  | .call b m args => some (emitExtCall tag c e depth b m args (some (identV tag depth)))
+  | .call t sel args ret =>
+      some (emitExtCall tag e depth t sel args ret false (some (identV tag depth)))
+  | .view t sel args ret =>
+      some (emitExtCall tag e depth t sel args ret true (some (identV tag depth)))
 
 def emitPrim (tag : String) (depth : Nat) (p : Prim) (args : List Atom) : YExpr :=
   match p, args with
@@ -669,8 +680,10 @@ def emitStmt (tag : String) (c : ContractDef) (e : Emit) (depth : Nat) : Lsc.Stm
     emitLog1 e topic (args.map (atomE tag depth))
   | .revert err args =>
     emitCustomError c e err (args.map (atomE tag depth))
-  | .call b m args =>
-    emitExtCall tag c e depth b m args none
+  | .call t sel args ret =>
+    emitExtCall tag e depth t sel args ret false none
+  | .view t sel args ret =>
+    emitExtCall tag e depth t sel args ret true none
 
 def emitRet (tag : String) (e : Emit) (depth : Nat) (haltUnit : Bool) : {t : RetTy} → RetExpr t → Emit
   | _, .unit => emitReturnUnit e haltUnit

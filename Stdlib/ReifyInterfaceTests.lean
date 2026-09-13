@@ -32,7 +32,7 @@ inductive Error
   | TransferFailed
   deriving DecidableEq, Repr, Inhabited
 
-abbrev M := Tx Storage Unit Event Error
+abbrev M := Tx Storage ExtState Event Error
 
 def pull (n : Amount toyAsset) : M Unit := do
   let tok ← read token
@@ -64,7 +64,7 @@ inductive Error
   | TransferFailed
   deriving DecidableEq, Repr, Inhabited
 
-abbrev M := Tx Storage Unit Event Error
+abbrev M := Tx Storage ExtState Event Error
 
 def pull (_n : Amount otherAsset) : M Unit := do
   write owner (← Tx.sender)
@@ -85,9 +85,9 @@ lsc_contract Toy pull held implements IHolder toyAsset
 #check Toy.contract
 #check Toy.pull.core_denote
 #check Toy.held.core_denote
-#check (Toy.impl : IHolder.Impl toyAsset (World Toy.Storage Unit Toy.Event) Toy.Error)
+#check (Toy.impl : IHolder.Impl toyAsset (World Toy.Storage ExtState Toy.Event) Toy.Error)
 #check (Toy.impl_IHolder :
-  IHolder.Impl toyAsset (World Toy.Storage Unit Toy.Event) Toy.Error)
+  IHolder.Impl toyAsset (World Toy.Storage ExtState Toy.Event) Toy.Error)
 
 #guard (Toy.pull.core.effects.calls).contains 0x23b872dd
 #guard (Toy.held.core.effects.views).contains 0x70a08231
@@ -96,14 +96,14 @@ lsc_contract Toy pull held implements IHolder toyAsset
 
 def tokAddr : Address := 9
 
-def toyOracle : Oracle Unit where
+def toyOracle : Oracle ExtState where
   call _addr sel _args ext :=
     if sel == 0x23b872dd then some ([1], ext) else none
   view _addr sel _args _ext :=
     if sel == 0x70a08231 then [42] else []
 
-def toyWorld : World Toy.Storage Unit Toy.Event :=
-  { self := { token := ⟨tokAddr⟩, owner := 0 }, ext := (), oracle := toyOracle }
+def toyWorld : World Toy.Storage ExtState Toy.Event :=
+  { self := { token := ⟨tokAddr⟩, owner := 0 }, ext := default, oracle := toyOracle }
 
 #guard
   (match Tx.run (Toy.pull (Amount.ofWord 3)) { sender := 5, self := 7 } toyWorld with

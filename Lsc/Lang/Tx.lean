@@ -1,4 +1,5 @@
 import Mathlib.Logic.Function.Basic
+import Lsc.Lang.ExtState
 
 /-!
 # the contract monad
@@ -66,11 +67,11 @@ structure Oracle (X : Type) where
 def Oracle.reject (X : Type) : Oracle X := {}
 
 /-- The world a contract executes in: own storage `self`, external ghosts `ext`,
-the event log, and the callee `oracle`. `ext` has no type-class default (that
-would constrain `World`/`Tx` by `Inhabited` and change `Tx`'s arity). Call
-sites that omit a ghost use `ext := default` (e.g. `X := Unit`). The oracle
-field is never modified by any Tx primitive. Reentrancy during a call is not
-modelled in this slice (`self` is unchanged). -/
+the event log, and the callee `oracle`. `X` is a parameter of `World`/`Tx`;
+compiled contracts instantiate it as the fixed `Lsc.ExtState`. Call sites
+that omit a ghost use `ext := default`. The oracle field is never modified
+by any Tx primitive. Reentrancy during a call is not modelled in this slice
+(`self` is unchanged). -/
 structure World (S X E : Type) where
   self : S
   ext : X

@@ -202,6 +202,8 @@ theorem stmt_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     | _ :: _ => cases hnil
   | .call .. =>
     exact (show False from hM1).elim
+  | .view .. =>
+    exact (show False from hM1).elim
 
 theorem op_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx} {w : World S X E} {env V st} {op : Lsc.Op}
@@ -279,6 +281,8 @@ theorem op_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     simp only [emitLetOp_pure]
     exact op_sim_pure tag funs hinv hwf hn
   | .call .. =>
+    exact (show False from hM1).elim
+  | .view .. =>
     exact (show False from hM1).elim
 
 theorem core_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}

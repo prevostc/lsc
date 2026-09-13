@@ -1,15 +1,16 @@
 import Lsc.Lang.Core
 import Lsc.Lang.Contract
+import Lsc.Lang.ExtState
 import Lsc.Lang.Inline
 import Lsc.Lang.Spec
 
 /-!
 # reification
 
-`lsc_schema C` derives `C.schema : ContractSchema C.Storage X C.Event C.Error` from the
-user's Lean types (`X` is `C.Ext` if that structure exists, otherwise `Unit`), plus
-`C.schema_lawful : C.schema.st.Lawful …`, and `lsc_reify C.f` turns the elaborated term of a contract function
-`C.f : … → Tx C.Storage X C.Event C.Error ρ` into
+`lsc_schema C` derives `C.schema : ContractSchema C.Storage Lsc.ExtState C.Event C.Error`
+from the user's Lean types, plus `C.schema_lawful : C.schema.st.Lawful …`, and
+`lsc_reify C.f` turns the elaborated term of a contract function
+`C.f : … → Tx C.Storage Lsc.ExtState C.Event C.Error ρ` into
 
 * `C.f.core : Core t` — the Core AST, and
 * `C.f.core_denote` — `Core.denote C.schema C.f.core [args] = C.f args`
@@ -71,7 +72,6 @@ structure ContractInfo where
   fields : Array FieldInfo
   evCtors : Array Name
   errCtors : Array Name
-  ext? : Option Name
 
 /-- A join point in scope: `have jp := fun (y : T) => rest`. `body` is `rest` reified in
 the environment at the definition point (plus `y` if `hasArg`). -/
@@ -129,12 +129,9 @@ def contractInfo (ns : Name) : MetaM ContractInfo := do
       pure { name := fieldNames[i]!, idx := i, kind, valTy : FieldInfo }
   let evInfo ← getConstInfoInduct event
   let errInfo ← getConstInfoInduct error
-  let extName := ns ++ `Ext
-  let ext? := if isStructure env extName then some extName else none
   pure {
     storage, event, error, schema := ns ++ `schema, fields
-    evCtors := evInfo.ctors.toArray, errCtors := errInfo.ctors.toArray
-    ext? }
+    evCtors := evInfo.ctors.toArray, errCtors := errInfo.ctors.toArray }
 
 /-! ## Schema generation -/
 
@@ -247,12 +244,8 @@ def mkSchemaCommand (ci : ContractInfo) : MetaM Syntax := do
   let S := mkIdent ci.storage
   let E := mkIdent ci.event
   let Er := mkIdent ci.error
-  let X : Term ←
-    match ci.ext? with
-    | some ext => pure ⟨mkIdent ext⟩
-    | none => `(Unit)
   let name := mkIdent (`_root_ ++ ci.schema)
-  `(def $name : Lsc.ContractSchema $S $X $E $Er where
+  `(def $name : Lsc.ContractSchema $S Lsc.ExtState $E $Er where
       st := {
         scalar := fun $i => List.getD [$scalar,*] $i (fun _ => 0)
         scalarUpd := fun $i => List.getD [$scalarUpd,*] $i (fun $σ _ => $σ)
@@ -1633,10 +1626,7 @@ def mkSpecCommands (ns : Name) (fns : Array Name) : TermElabM (Array (TSyntax `c
     `(command| inductive $fnName where $[| $ctorIds:ident]* deriving DecidableEq, Repr)
   let (S₀, X₀, E₀, ε₀) ←
     if entries.isEmpty then
-      let env ← getEnv
-      let X :=
-        if isStructure env (ns ++ `Ext) then Lean.mkConst (ns ++ `Ext)
-        else Lean.mkConst ``Unit
+      let X := Lean.mkConst ``Lsc.ExtState
       pure (Lean.mkConst (ns ++ `Storage), X, Lean.mkConst (ns ++ `Event),
         Lean.mkConst (ns ++ `Error))
     else
@@ -1841,11 +1831,7 @@ def implMethodBody (ns : Name) (m : IfaceMethod) : MetaM Term := do
 def worldTyTerm (ci : ContractInfo) : MetaM Term := do
   let S := mkIdent ci.storage
   let E := mkIdent ci.event
-  let X : Term ←
-    match ci.ext? with
-    | some ext => pure ⟨mkIdent ext⟩
-    | none => `(Unit)
-  `(Lsc.World $S $X $E)
+  `(Lsc.World $S Lsc.ExtState $E)
 
 /-- `C.impl_<I>` (and `C.impl` when there is exactly one clause). -/
 def mkImplCommands (ns : Name) (clauses : Array ImplementsClause) :
@@ -2072,19 +2058,19 @@ def mkCoreEqAlt (ns fn : Name) : MetaM (TSyntax ``Lean.Parser.Tactic.inductionAl
           apply Lsc.Lang.worldAfter_wrap_eq
             (f := Lsc.Amount.ofWord (a := $aT))
           rw [$specExec:ident]
-          exact $coreDenote)
+          apply $coreDenote)
     else if ← isBoolTy surf.ρ then
       `(Lean.Parser.Tactic.tacticSeq|
           apply Lsc.Lang.worldAfter_wrap_eq (f := Lsc.Tx.natToBool)
           rw [$specExec:ident]
-          exact $coreDenote)
+          apply $coreDenote)
     else if ← isRefTy surf.ρ then
       let ρT ← exprToTerm surf.ρ
       `(Lean.Parser.Tactic.tacticSeq|
           apply Lsc.Lang.worldAfter_wrap_eq
             (f := fun n => ({ addr := n } : $ρT))
           rw [$specExec:ident]
-          exact $coreDenote)
+          apply $coreDenote)
     else if ← isProdTy surf.ρ then
       let ρ ← whnfD surf.ρ
       let α ← whnfD (ρ.getArg! 0)
@@ -2098,7 +2084,7 @@ def mkCoreEqAlt (ns fn : Name) : MetaM (TSyntax ``Lean.Parser.Tactic.inductionAl
             (f := fun v => (Lsc.Amount.ofWord (a := $aT) v.1,
               Lsc.Amount.ofWord (a := $bT) v.2))
           rw [$specExec:ident]
-          exact $coreDenote)
+          apply $coreDenote)
     else
       `(Lean.Parser.Tactic.tacticSeq|
           simp only [$coreDenote:ident, $specExec:ident])
@@ -2352,10 +2338,10 @@ def obligationsMissing (ns : Name) : MetaM (Array Name) := do
   return missing
 
 /-- Copy-pasteable security theorems for `C`'s generated `Fn` (not imported from Security). -/
-def obligationsText (ns : Name) (ctors : List Name) (extName : String) : String :=
+def obligationsText (ns : Name) (ctors : List Name) (_extName : String) : String :=
   let C := ns.toString
   let leaf (n : Name) : String := n.getString!
-  let world := s!"Lsc.World {C}.Storage {extName} {C}.Event"
+  let world := s!"Lsc.World {C}.Storage Lsc.ExtState {C}.Event"
   let thm (fn : Name) (suffix ty args : String) : String :=
     s!"theorem {C}.{leaf fn}_{suffix} : {ty} {C}.spec {args} .{leaf fn} := by sorry"
   let preserves := ctors.map fun fn =>
@@ -2369,8 +2355,7 @@ def obligationsText (ns : Name) (ctors : List Name) (extName : String) : String 
       s!"    | .{leaf fn} => {C}.{leaf fn}_{suffix}")
   let assembler (name ty ofFns suffix : String) : String :=
     s!"theorem {C}.{name} : {ty} :=\n  {ofFns} fun fn =>\n    match fn with\n{arms suffix}"
-  let rely :=
-    if extName == "Unit" then "fun _ _ => True" else s!"{C}.rely"
+  let rely := s!"{C}.rely"
   let invRely :=
     s!"theorem {C}.inv_rely : Lsc.Security.PreservesInvEnv {C}.spec {C}.Inv ({rely}) := by sorry"
   let extraction :=
@@ -2539,9 +2524,7 @@ syntax (name := lscObligations) "#lsc_obligations " ident : command
         throwError "#lsc_obligations: missing {missing.toList} \
           (need {nsName}.Inv, {nsName}.claim, {nsName}.Auth, {nsName}.inflow, {nsName}.holdings)"
       let info ← getConstInfoInduct (nsName ++ `Fn)
-      let extName :=
-        if isStructure env (nsName ++ `Ext) then (nsName ++ `Ext).toString else "Unit"
-      logInfo m!"{obligationsText nsName info.ctors extName}"
+      logInfo m!"{obligationsText nsName info.ctors ""}"
   | _ => throwUnsupportedSyntax
 
 end Lsc.Reify

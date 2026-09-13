@@ -30,7 +30,7 @@ inductive Error
   | TransferFailed
   deriving DecidableEq, Repr
 
-abbrev M := Tx Storage Unit Event Error
+abbrev M := Tx Storage ExtState Event Error
 
 def doCheckOk (r : IERC20.Ref testToken) (dst : Address) (amt : Amount testToken) :
     M Unit := do

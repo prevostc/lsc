@@ -503,51 +503,53 @@ theorem noYulCall_foldl_mstore_atoms tag (depth base : Nat) (args : List Atom) (
       (noYulCall_emitDo e _ _ he
         (by simp [noYulCallExprs, noYulCallExpr, lit, noYulCall_atom]))
 
-theorem noYulCall_emitExtCallBody tag (c : ContractDef) (depth b m : Nat) (args : List Atom)
-    (assign : Option YIdent) :
-    noYulCallStmts (emitExtCallBody tag c depth b m args assign) = true := by
+theorem noYulCall_emitCallRetVal (ret : AbiRet) :
+    noYulCallExpr (emitCallRetVal ret) = true := by
+  cases ret <;> simp [emitCallRetVal, noYulCall_bop, noYulCallExprs, noYulCallExpr, lit]
+
+theorem noYulCall_emitExtCallOp (isView : Bool) (target : YExpr) (insize : Nat)
+    (ht : noYulCallExpr target = true) :
+    noYulCallExpr (emitExtCallOp isView target insize) = true := by
+  cases isView <;>
+    simp [emitExtCallOp, emitCallGas, noYulCall_bop, noYulCallExprs, noYulCallExpr, lit, ht]
+
+theorem noYulCall_emitExtCallBody tag (depth : Nat) (target : Atom) (sel : Nat)
+    (args : List Atom) (ret : AbiRet) (isView : Bool) (assign : Option YIdent) :
+    noYulCallStmts (emitExtCallBody tag depth target sel args ret isView assign) = true := by
   have h0 : noYulCallStmts ({} : Emit).stmts = true := noYulCall_nilEmit
-  have hlet := noYulCall_emitLet ({} : Emit) (extTok tag depth)
-    (bop Op.sload [lit (bindingSlot c b)]) h0
-    (by simp [noYulCall_bop, noYulCallExprs, noYulCallExpr, lit])
-  have hsel := noYulCall_emitDo _ Op.mstore
-    [lit abiPtr, bop Op.shl [lit 224, lit (bindingMethod c b m).1]] hlet
+  have hsel := noYulCall_emitDo ({} : Emit) Op.mstore
+    [lit abiPtr, bop Op.shl [lit 224, lit sel]] h0
     (by simp [noYulCall_bop, noYulCallExprs, noYulCallExpr, lit])
   have hargs := noYulCall_foldl_mstore_atoms tag depth abiAfterSel args 0 _ hsel
   have hcall := noYulCall_emitLet _ (extOk tag depth)
-    (bop YulSemantics.EVM.Op.call
-      [lit extCallGas, var (extTok tag depth), lit 0, lit abiPtr,
-        lit (4 + 32 * args.length), lit abiPtr, lit 32]) hargs
-    (by simp [noYulCall_bop, noYulCallExprs, noYulCallExpr, lit, var])
+    (emitExtCallOp isView (atomE tag depth target) (4 + 32 * args.length)) hargs
+    (noYulCall_emitExtCallOp isView _ _ (noYulCall_atom tag depth target))
   have hif := noYulCall_emitIf _ (bop Op.iszero [var (extOk tag depth)]) [revert00] hcall
     (by simp [noYulCall_bop, noYulCallExprs, noYulCallExpr, var]) noYulCall_revert00
-  have hret := noYulCall_emitCallRetCheck _ (bindingMethod c b m).2 hif
+  have hret := noYulCall_emitCallRetCheck _ ret hif
   cases assign with
   | none =>
     convert hret using 1
     simp [emitExtCallBody]
   | some name =>
-    cases hrv : (bindingMethod c b m).2 with
-    | boolOpt | none =>
-      convert (noYulCall_emitAssign _ name (lit 1) hret (by simp [noYulCallExpr, lit])) using 1
-      simp [emitExtCallBody, hrv]
-    | word =>
-      convert (noYulCall_emitAssign _ name (bop Op.mload [lit abiPtr]) hret
-        (by simp [noYulCall_bop, noYulCallExprs, noYulCallExpr, lit])) using 1
-      simp [emitExtCallBody, hrv]
+    convert (noYulCall_emitAssign _ name (emitCallRetVal ret) hret
+      (noYulCall_emitCallRetVal ret)) using 1
+    simp [emitExtCallBody]
 
-theorem noYulCall_emitExtCall tag (c : ContractDef) (e : Emit) (depth b m : Nat)
-    (args : List Atom) (bind : Option YIdent)
+theorem noYulCall_emitExtCall tag (e : Emit) (depth : Nat) (target : Atom) (sel : Nat)
+    (args : List Atom) (ret : AbiRet) (isView : Bool) (bind : Option YIdent)
     (he : noYulCallStmts e.stmts = true) :
-    noYulCallStmts (emitExtCall tag c e depth b m args bind).stmts = true := by
+    noYulCallStmts (emitExtCall tag e depth target sel args ret isView bind).stmts = true := by
   cases bind with
   | none =>
     simp [emitExtCall, emitBlock]
-    exact noYulCall_emitBlock e _ he (noYulCall_emitExtCallBody tag c depth b m args none)
+    exact noYulCall_emitBlock e _ he
+      (noYulCall_emitExtCallBody tag depth target sel args ret isView none)
   | some name =>
     simp [emitExtCall, emitBlock]
     have hl := noYulCall_emitLet e name (lit 0) he (by simp [noYulCallExpr, lit])
-    exact noYulCall_emitBlock _ _ hl (noYulCall_emitExtCallBody tag c depth b m args (some name))
+    exact noYulCall_emitBlock _ _ hl
+      (noYulCall_emitExtCallBody tag depth target sel args ret isView (some name))
 
 theorem noYulCall_emitLetOp tag (c : ContractDef) (e : Emit) (d : Nat) (op : Lsc.Op)
     (he : noYulCallStmts e.stmts = true) {e'}
@@ -602,9 +604,12 @@ theorem noYulCall_emitLetOp tag (c : ContractDef) (e : Emit) (d : Nat) (op : Lsc
   | pure a =>
     simp only [emitLetOp, Option.some.injEq] at h; subst e'
     exact noYulCall_emitLet e _ (atomE tag d a) he (noYulCall_atom tag d a)
-  | call b m args =>
+  | call t sel args ret =>
     simp only [emitLetOp, Option.some.injEq] at h; subst e'
-    exact noYulCall_emitExtCall tag c e d b m args (some (identV tag d)) he
+    exact noYulCall_emitExtCall tag e d t sel args ret false (some (identV tag d)) he
+  | view t sel args ret =>
+    simp only [emitLetOp, Option.some.injEq] at h; subst e'
+    exact noYulCall_emitExtCall tag e d t sel args ret true (some (identV tag d)) he
 
 theorem noYulCall_emitStmt tag (c : ContractDef) (e : Emit) (d : Nat) (s : Lsc.Stmt)
     (he : noYulCallStmts e.stmts = true) :
@@ -637,9 +642,12 @@ theorem noYulCall_emitStmt tag (c : ContractDef) (e : Emit) (d : Nat) (s : Lsc.S
     simp only [emitStmt]
     exact noYulCall_emitCustomError c e err (args.map (atomE tag d)) he
       (noYulCallExprs_map_atom tag d args)
-  | call b m args =>
+  | call t sel args ret =>
     simp only [emitStmt]
-    exact noYulCall_emitExtCall tag c e d b m args none he
+    exact noYulCall_emitExtCall tag e d t sel args ret false none he
+  | view t sel args ret =>
+    simp only [emitStmt]
+    exact noYulCall_emitExtCall tag e d t sel args ret true none he
 
 theorem noYulCall_emitRet tag (e : Emit) (d : Nat) (halt : Bool) {t} (r : RetExpr t)
     (he : noYulCallStmts e.stmts = true) :

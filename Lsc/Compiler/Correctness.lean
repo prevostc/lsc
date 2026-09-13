@@ -1,5 +1,4 @@
 import Lsc.Compiler.Yul
-import Lsc.Compiler.Externals
 import YulSemantics.BigStep
 import YulSemantics.Observation
 import Batteries.Data.List.Basic
@@ -7,13 +6,10 @@ import Batteries.Data.List.Basic
 /-!
 # `toYulFn_correct` / `runtimeBlock_correct`
 
-Stated against powdr `RunCommitted` (S1, closed `evm`) and `RunCommittedExt` (S2,
-`yulD calls`). A Yul `revert` rolls back storage/logs, matching `Tx`'s `Except.error`.
-S1 (call-free) is `toYulFn_correct_callFree` in `Proof/Core.lean`. S2 is backward:
-every Yul run admitted by `Conforms` `calls` is predicted by Core under some fault
-oracle (`ToYulFnCorrectExt` here; proof `toYulFn_correct_ext` in
-`Proof/CoreExtSim.lean`). Dispatcher over `yulD` is `RuntimeBlockCorrectExt` here;
-proof `runtimeBlock_correct_ext` in `Proof/DispatchExt.lean`.
+Stated against powdr `RunCommitted` (S1, closed `evm`). A Yul `revert` rolls
+back storage/logs, matching `Tx`'s `Except.error`. S1 (call-free) is
+`toYulFn_correct_callFree` in `Proof/Core.lean`. S2 (`ToYulFnCorrectExt`,
+`RuntimeBlockCorrectExt`) lives in `CoreExtSimDefs` / `DispatchExtDefs`.
 -/
 
 namespace Lsc.Compiler
@@ -21,6 +17,17 @@ namespace Lsc.Compiler
 open Lsc
 open YulSemantics
 open YulSemantics.EVM
+
+/-- S2 dialect: relational `ExternalCalls`, no creates, no `gas()` oracle.
+S1 `mkEvmStateExt` / `EndToEnd` use this without importing `Externals`. -/
+@[reducible] def yulD (calls : ExternalCalls) : Dialect :=
+  evmWithExternal calls .none .none
+
+/-- Foreign account persistent storage (`env.storageOf`). -/
+abbrev Foreign := U256 → U256 → U256
+
+/-- Projection of an `EvmState` onto foreign persistent storage. -/
+def evmForeign (st : EvmState) : Foreign := st.env.storageOf
 
 /-- Context words fit in an EVM word. -/
 def CtxWF (ctx : Ctx) : Prop :=
@@ -184,55 +191,6 @@ nondeterministic). -/
 def RunCommittedExt (calls : ExternalCalls) (prog : YBlock) (st0 : EvmState)
     (V' : VEnv (yulD calls)) (stObs : EvmState) (o : Outcome) : Prop :=
   ∃ st', Run (yulD calls) prog st0 V' st' o ∧ stObs = committedState st0 st'
-
-/-- Backward simulation: every Yul run admitted by `calls` is predicted by Core
-under some fault oracle `fo` (`w` with `faults := fo`). Success ⇒ `haltSuccess` ∧
-`R w' stObs` ∧ `RX α w' stObs`; error ⇒ revert ∧ `haltError` ∧ `R w stObs`.
-`Realizes` is not a hypothesis. -/
-@[reducible] def ToYulFnCorrectExt {I : Interface} {S X E ε : Type}
-    (α : Abs I.Ghost) (bind : Binding I S X)
-    (c : ContractDef) (Γ : ContractSchema S X E ε) (κ : List UInt8 → U256)
-    (calls : ExternalCalls) (f : FnDef) (yul : YBlock)
-    (ctx : Ctx) (w : World S X E) (st0 : EvmState) : Prop :=
-  ∀ (st' : EvmState) (o : Outcome),
-    Run (yulD calls) yul st0 [] st' o →
-      ∃ fo : Nat → Bool,
-        let wfo : World S X E := { w with faults := fo }
-        let stObs := committedState st0 st'
-        match Tx.run (Core.denote Γ f.core (decodeArgs f st0.env.calldata).reverse)
-            ctx wfo with
-        | .ok (v, w') =>
-            o = Outcome.halt ∧ haltSuccess f.ret v stObs.halted ∧
-              R c Γ κ w' stObs ∧ RX α bind w' stObs
-        | .error e =>
-            ∃ bytes, o = Outcome.halt ∧ stObs.halted = some (.revert, bytes) ∧
-              haltError c Γ e bytes ∧ R c Γ κ w stObs
-
-/-- Backward dispatcher: every Yul run of `runtimeBlock` is predicted by
-`selectedFn` + Core under some `fo`. Proof: `runtimeBlock_correct_ext`
-(`Proof/DispatchExt.lean`; import cycle: Proof → Layout → Correctness). -/
-@[reducible] def RuntimeBlockCorrectExt {I : Interface} {S X E ε : Type}
-    (α : Abs I.Ghost) (bind : Binding I S X)
-    (c : ContractDef) (Γ : ContractSchema S X E ε) (κ : List UInt8 → U256)
-    (calls : ExternalCalls) (yul : YBlock) (ctx : Ctx) (w : World S X E)
-    (st0 : EvmState) : Prop :=
-  ∀ (st' : EvmState) (o : Outcome),
-    Run (yulD calls) yul st0 [] st' o →
-      ∃ fo : Nat → Bool,
-        let wfo : World S X E := { w with faults := fo }
-        let stObs := committedState st0 st'
-        match selectedFn c st0.env.calldata with
-        | none =>
-            o = Outcome.halt ∧ stObs.halted = some (.revert, []) ∧ R c Γ κ w stObs
-        | some f =>
-            match Tx.run (Core.denote Γ f.core (decodeArgs f st0.env.calldata).reverse)
-                ctx wfo with
-            | .ok (v, w') =>
-                o = Outcome.halt ∧ haltSuccess f.ret v stObs.halted ∧
-                  R c Γ κ w' stObs ∧ RX α bind w' stObs
-            | .error e =>
-                ∃ bytes, o = Outcome.halt ∧ stObs.halted = some (.revert, bytes) ∧
-                  haltError c Γ e bytes ∧ R c Γ κ w stObs
 
 /-- Like `mkEvmState`, but foreign `storageOf` is `ξ` (the executing account
 still mirrors `storage`). `mkEvmState cd σ κ ctx = mkEvmStateExt cd σ (fun _ _ => 0) κ ctx`. -/

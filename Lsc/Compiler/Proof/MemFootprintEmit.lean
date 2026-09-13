@@ -339,13 +339,6 @@ theorem staticSafe_emitCallRetCheck (e : Emit) (ret : AbiRet)
       (by simp [staticSafeStmts, staticSafe_revert00])
   | none => simpa [emitCallRetCheck] using he
 
-theorem staticSafe_callOp (n : Nat) (tok : YIdent) (hn : n ≤ 3) :
-    staticSafeOp memoryGuardK YulSemantics.EVM.Op.call
-      [lit extCallGas, var tok, lit 0, lit abiPtr, lit (4 + 32 * n),
-        lit abiPtr, lit 32] = true := by
-  simp [staticSafeOp, litNat?, rangeBelow, lit, rangeBelow_iff]
-  exact ⟨abiCall_le hn, by unfold abiPtr memoryGuardK; omega⟩
-
 theorem foldl_mstore_map (depth ptr i0 : Nat) (args : List Atom) (e : Emit) :
     ((args.map (atomE tag depth)).foldl
         (fun p a => (emitDo p.1 Op.mstore [lit (ptr + 32 * p.2), a], p.2 + 1)) (e, i0)) =
@@ -369,71 +362,74 @@ theorem staticSafe_foldl_mstore_atoms (depth ptr : Nat) (args : List Atom) (i0 :
     (by simpa [List.length_map] using hend) e he
   simpa [foldl_mstore_map] using h
 
-theorem staticSafe_emitExtCallBody (c : ContractDef) (depth b m : Nat) (args : List Atom)
-    (assign : Option YIdent) (hn : args.length ≤ 3) :
-    staticSafeStmts memoryGuardK (emitExtCallBody tag c depth b m args assign) = true := by
+theorem staticSafe_emitExtCallOp (isView : Bool) (target : YExpr) (n : Nat)
+    (hn : n ≤ 3) (ht : staticSafeExpr memoryGuardK target = true) :
+    staticSafeExpr memoryGuardK (emitExtCallOp isView target (4 + 32 * n)) = true := by
+  cases isView <;>
+    (simp [emitExtCallOp, emitCallGas, bop, staticSafeExpr_builtin, staticSafeExprs,
+        staticSafeOp, litNat?, rangeBelow, rangeBelow_iff, lit, ht];
+     exact ⟨abiCall_le hn, by unfold abiPtr memoryGuardK; omega⟩)
+
+theorem staticSafe_emitCallRetVal (ret : AbiRet) :
+    staticSafeExpr memoryGuardK (emitCallRetVal ret) = true := by
+  cases ret with
+  | boolOpt =>
+    simp [emitCallRetVal, bop, staticSafeExpr_builtin, staticSafeOp, staticSafeExprs,
+      litNat?, rangeBelow, rangeBelow_iff, lit, abiPtr, memoryGuardK]
+  | word =>
+    simp [emitCallRetVal, bop, staticSafeExpr_builtin, staticSafeOp, staticSafeExprs,
+      litNat?, rangeBelow, rangeBelow_iff, lit, abiPtr, memoryGuardK]
+  | none => simp [emitCallRetVal, staticSafeExpr_lit]
+
+theorem staticSafe_emitExtCallBody (depth : Nat) (target : Atom) (sel : Nat)
+    (args : List Atom) (ret : AbiRet) (isView : Bool) (assign : Option YIdent)
+    (hn : args.length ≤ 3) :
+    staticSafeStmts memoryGuardK
+      (emitExtCallBody tag depth target sel args ret isView assign) = true := by
   have h0 := staticSafe_nilEmit memoryGuardK
-  have hlet := staticSafe_emitLet ({} : Emit) (extTok tag depth)
-    (bop Op.sload [lit (bindingSlot c b)]) h0
-    (by simp [bop, staticSafeExpr_builtin, staticSafeOp, staticSafeExprs, lit])
-  have hsel := staticSafe_emitDo_mstore _ abiPtr
-    (bop Op.shl [lit 224, lit (bindingMethod c b m).1]) hlet
+  have hsel := staticSafe_emitDo_mstore ({} : Emit) abiPtr
+    (bop Op.shl [lit 224, lit sel]) h0
     (by simp [abiPtr, memoryGuardK])
     (by simp [bop, staticSafeExpr_builtin, staticSafeOp, staticSafeExprs, lit])
   have hargs := staticSafe_foldl_mstore_atoms tag depth abiAfterSel args 0
     (by simpa using abiAfterSel_le hn) _ hsel
   have hcall := staticSafe_emitLet _ (extOk tag depth)
-    (bop YulSemantics.EVM.Op.call
-      [lit extCallGas, var (extTok tag depth), lit 0, lit abiPtr,
-        lit (4 + 32 * args.length), lit abiPtr, lit 32]) hargs
-    (by
-      simp [bop, staticSafeExpr_builtin, staticSafeExprs]
-      exact staticSafe_callOp args.length (extTok tag depth) hn)
+    (emitExtCallOp isView (atomE tag depth target) (4 + 32 * args.length)) hargs
+    (staticSafe_emitExtCallOp isView _ args.length hn (staticSafe_atomE _ _ _ _))
   have hif := staticSafe_emitIf _ (bop Op.iszero [var (extOk tag depth)]) [revert00] hcall
     (by simp [bop, staticSafeExpr_builtin, staticSafeOp, staticSafeExprs, staticSafeExpr_var])
     (by simp [staticSafeStmts, staticSafe_revert00])
-  have hret := staticSafe_emitCallRetCheck _ (bindingMethod c b m).2 hif
+  have hret := staticSafe_emitCallRetCheck _ ret hif
   cases assign with
   | none =>
     convert hret using 1
     simp [emitExtCallBody]
   | some name =>
-    cases hrv : (bindingMethod c b m).2 with
-    | boolOpt | none =>
-      convert (staticSafe_emitAssign _ name (lit 1) hret (staticSafeExpr_lit _ _)) using 1
-      simp [emitExtCallBody, hrv]
-    | word =>
-      convert (staticSafe_emitAssign _ name (bop Op.mload [lit abiPtr]) hret
-        (by
-          simp [bop, staticSafeExpr_builtin, staticSafeOp, staticSafeExprs, litNat?,
-            rangeBelow, rangeBelow_iff, lit, abiPtr, memoryGuardK])) using 1
-      simp [emitExtCallBody, hrv]
+    convert (staticSafe_emitAssign _ name (emitCallRetVal ret) hret
+      (staticSafe_emitCallRetVal ret)) using 1
+    simp [emitExtCallBody]
 
-theorem staticSafe_emitExtCall (c : ContractDef) (e : Emit) (depth b m : Nat)
-    (args : List Atom) (bind : Option YIdent)
+theorem staticSafe_emitExtCall (e : Emit) (depth : Nat) (target : Atom) (sel : Nat)
+    (args : List Atom) (ret : AbiRet) (isView : Bool) (bind : Option YIdent)
     (he : staticSafeStmts memoryGuardK e.stmts = true)
     (hn : args.length ≤ 3) :
-    staticSafeStmts memoryGuardK (emitExtCall tag c e depth b m args bind).stmts = true := by
+    staticSafeStmts memoryGuardK
+      (emitExtCall tag e depth target sel args ret isView bind).stmts = true := by
   cases bind with
   | none =>
     simp [emitExtCall, emitBlock]
     exact staticSafe_emitBlock e _ he
-      (staticSafe_emitExtCallBody tag c depth b m args none hn)
+      (staticSafe_emitExtCallBody tag depth target sel args ret isView none hn)
   | some name =>
     simp [emitExtCall, emitBlock]
     have hl := staticSafe_emitLet e name (lit 0) he (staticSafeExpr_lit _ _)
     exact staticSafe_emitBlock _ _ hl
-      (staticSafe_emitExtCallBody tag c depth b m args (some name) hn)
+      (staticSafe_emitExtCallBody tag depth target sel args ret isView (some name) hn)
 
-theorem callWF_fits (c : ContractDef) (b m : Nat) (args : List Atom)
-    (h : callWF c b m args = true) : args.length ≤ 3 := by
-  unfold callWF at h
-  split at h
-  · cases h
-  · split at h
-    · cases h
-    · simp [Bool.and_eq_true, fitsGuardCall_iff] at h
-      exact h.2
+theorem callWF_fits (target : Atom) (args : List Atom)
+    (h : callWF target args = true) : args.length ≤ 3 := by
+  simp [callWF, Bool.and_eq_true, fitsGuardCall_iff] at h
+  exact h.2
 
 theorem eventOK_fits {c ev n} (h : eventOK c ev n = true) : n ≤ 4 := by
   obtain ⟨_, hrest⟩ := (eventOK_iff c ev n).mp h
@@ -500,11 +496,16 @@ theorem staticSafe_emitLetOp (c : ContractDef) (e : Emit) (d : Nat) (op : Lsc.Op
   | pure a =>
     simp only [emitLetOp, Option.some.injEq] at h; subst e'
     exact staticSafe_emitLet e _ (atomE tag d a) he (staticSafe_atomE _ _ _ _)
-  | call b m args =>
+  | call t sel args ret =>
     simp only [emitLetOp, Option.some.injEq] at h; subst e'
     simp only [opWF] at hwf
-    exact staticSafe_emitExtCall tag c e d b m args (some (identV tag d)) he
-      (callWF_fits c b m args hwf)
+    exact staticSafe_emitExtCall tag e d t sel args ret false (some (identV tag d)) he
+      (callWF_fits t args hwf)
+  | view t sel args ret =>
+    simp only [emitLetOp, Option.some.injEq] at h; subst e'
+    simp only [opWF] at hwf
+    exact staticSafe_emitExtCall tag e d t sel args ret true (some (identV tag d)) he
+      (callWF_fits t args hwf)
 
 theorem staticSafe_emitStmt (c : ContractDef) (e : Emit) (d : Nat) (s : Lsc.Stmt)
     (he : staticSafeStmts memoryGuardK e.stmts = true)
@@ -551,10 +552,14 @@ theorem staticSafe_emitStmt (c : ContractDef) (e : Emit) (d : Nat) (s : Lsc.Stmt
     exact staticSafe_emitCustomError c e err (args.map (atomE tag d)) he
       (staticSafeExprs_map_atom _ _ _ _)
       (by simpa [List.length_map] using errorOK_fits hwf.1)
-  | call b m args =>
+  | call t sel args ret =>
     simp only [emitStmt]
     simp only [stmtWF] at hwf
-    exact staticSafe_emitExtCall tag c e d b m args none he (callWF_fits c b m args hwf)
+    exact staticSafe_emitExtCall tag e d t sel args ret false none he (callWF_fits t args hwf)
+  | view t sel args ret =>
+    simp only [emitStmt]
+    simp only [stmtWF] at hwf
+    exact staticSafe_emitExtCall tag e d t sel args ret true none he (callWF_fits t args hwf)
 
 theorem staticSafe_emitRet (e : Emit) (d : Nat) (halt : Bool) {t} (r : RetExpr t)
     (he : staticSafeStmts memoryGuardK e.stmts = true)

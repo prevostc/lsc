@@ -1,7 +1,6 @@
 import Lsc.Compiler.Proof.Erase
 import Lsc.Compiler.Proof.Lift
 import Lsc.Compiler.Proof.DispatchProof
-import Lsc.Compiler.Proof.Descend
 import YulEvmCompiler.Optimizer.Spec.MemoryGuard
 import YulEvmCompiler.Optimizer.Implementation.MemorySpillSelect
 

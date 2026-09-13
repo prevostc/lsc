@@ -31,7 +31,8 @@ theorem m1op_run_self_ext {Γ : ContractSchema S X E ε} {op : Lsc.Op}
     exceptSelfExt (ε := ε) (Tx.run (Lsc.Op.denote Γ env op) ctx w)
       (Tx.run (Lsc.Op.denote Γ env op) ctx w') := by
   cases op with
-  | call _ _ _ => exact (show False from h).elim
+  | call _ _ _ _ => exact (show False from h).elim
+  | view _ _ _ _ => exact (show False from h).elim
   | load f =>
     simp [Lsc.Op.denote, Tx.run_load, exceptSelfExt, hs, he]
   | loadMap f k =>
@@ -91,7 +92,8 @@ theorem m1stmt_run_self_ext {Γ : ContractSchema S X E ε} {s : Lsc.Stmt}
     exceptSelfExt (ε := ε) (Tx.run (Lsc.Stmt.denote Γ env s) ctx w)
       (Tx.run (Lsc.Stmt.denote Γ env s) ctx w') := by
   cases s with
-  | call _ _ _ => exact (show False from h).elim
+  | call _ _ _ _ => exact (show False from h).elim
+  | view _ _ _ _ => exact (show False from h).elim
   | store f v =>
     simp [Lsc.Stmt.denote, Tx.run_store, exceptSelfExt, hs, he]
   | storeMap f k v =>

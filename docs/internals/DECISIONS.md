@@ -200,3 +200,10 @@ Callee behaviour is a deterministic, memory-blind `Oracle` on `World.ext`;
 `oracle.call = none` is revert. The adversarial oracle is the baseline; a
 `Spec` hypothesis restricts it. Views are pure `oracle.view` reads. Reentrancy
 during a call is not modelled (`self` unchanged) — next architecture step.
+
+## 2026-09-13 — `X` is the fixed `Lsc.ExtState`
+
+`World.ext` is no longer a per-contract user structure. Compiled contracts
+use the single type `Lsc.ExtState` (the memory-blind observable state of
+every account other than the executing one). The compiler `ExtView` is
+that type.
