@@ -10,7 +10,7 @@ open Lsc Token
 
 namespace Token
 
-variable (ctx : Ctx) (w : World Storage Unit Event)
+variable (ctx : Ctx) (w : World Storage ExtState Event)
 
 /-- `bals` after removing `amount` from `a`. -/
 def debit {α} [Sub α] (bals : Mapping Address α) (a : Address) (amount : α) :
@@ -58,7 +58,7 @@ theorem balanceOf_returns_stored_balance (who : Address) :
   simp [balanceOf]
 
 theorem totalSupply_returns_stored :
-    Tx.run totalSupply ctx w = .ok (w.self.totalSupply, w) := by
+    Tx.run totalSupply ctx w = .ok (w.self.totalSupply.raw, w) := by
   simp [totalSupply]
 
 theorem allowance_returns_stored (owner spender : Address) :
@@ -73,8 +73,7 @@ def ctorPost (σ : Storage) (owner : Address) (supply : Amount tokenAsset) : Sto
 
 theorem ctor_ok (owner : Address) (supply : Amount tokenAsset) :
     Tx.run (Token.constructor owner supply) ctx w =
-      .ok ((), World.mk (ctorPost w.self owner supply) w.ext
-        (w.log ++ [.Transfer 0 owner supply]) w.faults w.ncalls) := by
+      .ok ((), { w with self := ctorPost w.self owner supply, log := w.log ++ [.Transfer 0 owner supply] }) := by
   simp [Token.constructor, ctorPost, Amount.update_raw, Amount.ofWord_raw]
 
 /-! ### transfer -/
@@ -88,16 +87,16 @@ theorem transfer_ok (to : Address) (amount : Amount tokenAsset)
     (hsub : amount ≤ w.self.balances ctx.sender)
     (hadd : (debit w.self.balances ctx.sender amount to + amount).raw < wordBound) :
     Tx.run (transfer to amount) ctx w =
-      .ok ((), { w with self := transferPost w.self ctx.sender to amount, log := w.log ++ [.Transfer ctx.sender to amount] }) := by
+      .ok (true, { w with self := transferPost w.self ctx.sender to amount, log := w.log ++ [.Transfer ctx.sender to amount] }) := by
   simp only [debit, Amount.le_iff, Amount.raw_add, Amount.raw_sub, Amount.update_raw_apply] at hsub hadd
-  simp [transfer, hsub, hadd]
+  simp [transfer, transferU, hsub, hadd]
   simp [transferPost, debit, credit, Amount.update2_raw,
     Amount.ofWord_update_lookup, Amount.ofWord_raw]
 
 theorem transfer_debits_sender (to : Address) (amount : Amount tokenAsset) (hne : ctx.sender ≠ to)
     (hsub : amount ≤ w.self.balances ctx.sender)
     (hadd : (w.self.balances to + amount).raw < wordBound) :
-    ∃ w', Tx.run (transfer to amount) ctx w = .ok ((), w') ∧
+    ∃ w', Tx.run (transfer to amount) ctx w = .ok (true, w') ∧
       w'.self.balances ctx.sender = w.self.balances ctx.sender - amount := by
   refine ⟨_, transfer_ok ctx w to amount hsub (by simpa [debit_other _ hne.symm] using hadd), ?_⟩
   simp [transferPost, credit_other _ hne]
@@ -105,7 +104,7 @@ theorem transfer_debits_sender (to : Address) (amount : Amount tokenAsset) (hne 
 theorem transfer_credits_recipient (to : Address) (amount : Amount tokenAsset) (hne : ctx.sender ≠ to)
     (hsub : amount ≤ w.self.balances ctx.sender)
     (hadd : (w.self.balances to + amount).raw < wordBound) :
-    ∃ w', Tx.run (transfer to amount) ctx w = .ok ((), w') ∧
+    ∃ w', Tx.run (transfer to amount) ctx w = .ok (true, w') ∧
       w'.self.balances to = w.self.balances to + amount := by
   refine ⟨_, transfer_ok ctx w to amount hsub (by simpa [debit_other _ hne.symm] using hadd), ?_⟩
   simp [transferPost, debit_other _ hne.symm]
@@ -114,14 +113,14 @@ theorem transfer_preserves_other_balances (to : Address) (amount : Amount tokenA
     (ha1 : a ≠ ctx.sender) (ha2 : a ≠ to)
     (hsub : amount ≤ w.self.balances ctx.sender)
     (hadd : (debit w.self.balances ctx.sender amount to + amount).raw < wordBound) :
-    ∃ w', Tx.run (transfer to amount) ctx w = .ok ((), w') ∧
+    ∃ w', Tx.run (transfer to amount) ctx w = .ok (true, w') ∧
       w'.self.balances a = w.self.balances a :=
   ⟨_, transfer_ok ctx w to amount hsub hadd, by simp [transferPost, credit_other _ ha2, debit_other _ ha1]⟩
 
 theorem transfer_self_transfer_is_noop (amount : Amount tokenAsset)
     (hsub : amount ≤ w.self.balances ctx.sender)
     (hbound : (w.self.balances ctx.sender).raw < wordBound) :
-    ∃ w', Tx.run (transfer ctx.sender amount) ctx w = .ok ((), w') ∧
+    ∃ w', Tx.run (transfer ctx.sender amount) ctx w = .ok (true, w') ∧
       w'.self.balances = w.self.balances := by
   refine ⟨_, transfer_ok ctx w ctx.sender amount hsub (by
     have hle : amount.raw ≤ (w.self.balances ctx.sender).raw := hsub
@@ -136,9 +135,24 @@ theorem transfer_self_transfer_is_noop (amount : Amount tokenAsset)
     exact Nat.sub_add_cancel hle
   · simp [transferPost, credit_other _ h, debit_other _ h]
 
+theorem transfer_preserves_allowances (to : Address) (amount : Amount tokenAsset)
+    (w' : World Storage ExtState Event)
+    (h : Tx.run (transfer to amount) ctx w = .ok (true, w')) :
+    w'.self.allowances = w.self.allowances := by
+  by_cases hsub : amount ≤ w.self.balances ctx.sender
+  · by_cases hadd : (debit w.self.balances ctx.sender amount to + amount).raw < wordBound
+    · rw [transfer_ok ctx w to amount hsub hadd] at h
+      cases h; rfl
+    · have hle : amount.raw ≤ (w.self.balances ctx.sender).raw := hsub
+      simp only [debit_credit_raw] at hadd
+      simp [transfer, transferU, hle, hadd] at h
+  · have hle : ¬ amount.raw ≤ (w.self.balances ctx.sender).raw := hsub
+    simp [transfer, transferU, hle] at h
+
 /-- Frame: `transfer` never touches `totalSupply`, whatever happens. -/
-theorem transfer_preserves_totalSupply (to : Address) (amount : Amount tokenAsset) (w' : World Storage Unit Event)
-    (h : Tx.run (transfer to amount) ctx w = .ok ((), w')) :
+theorem transfer_preserves_totalSupply (to : Address) (amount : Amount tokenAsset)
+    (w' : World Storage ExtState Event)
+    (h : Tx.run (transfer to amount) ctx w = .ok (true, w')) :
     w'.self.totalSupply = w.self.totalSupply := by
   by_cases hsub : amount ≤ w.self.balances ctx.sender
   · by_cases hadd : (debit w.self.balances ctx.sender amount to + amount).raw < wordBound
@@ -146,14 +160,14 @@ theorem transfer_preserves_totalSupply (to : Address) (amount : Amount tokenAsse
       cases h; rfl
     · have hle : amount.raw ≤ (w.self.balances ctx.sender).raw := hsub
       simp only [debit_credit_raw] at hadd
-      simp [transfer, hle, hadd] at h
+      simp [transfer, transferU, hle, hadd] at h
   · have hle : ¬ amount.raw ≤ (w.self.balances ctx.sender).raw := hsub
-    simp [transfer, hle] at h
+    simp [transfer, transferU, hle] at h
 
 theorem transfer_reverts_on_insufficient_balance (to : Address) (amount : Amount tokenAsset)
     (h : w.self.balances ctx.sender < amount) :
     Tx.run (transfer to amount) ctx w = .error (.user .InsufficientBalance) := by
-  simp [transfer, Amount.not_le_of_gt h]
+  simp [transfer, transferU, Amount.not_le_of_gt h]
 
 theorem transfer_reverts_on_overflow (to : Address) (amount : Amount tokenAsset)
     (hsub : amount ≤ w.self.balances ctx.sender)
@@ -161,7 +175,7 @@ theorem transfer_reverts_on_overflow (to : Address) (amount : Amount tokenAsset)
     Tx.run (transfer to amount) ctx w = .error (.arith .overflow) := by
   have hle : amount.raw ≤ (w.self.balances ctx.sender).raw := hsub
   simp only [debit_credit_raw] at hadd
-  simp [transfer, hle, Nat.not_lt.mpr hadd]
+  simp [transfer, transferU, hle, Nat.not_lt.mpr hadd]
 
 /-! ### mint -/
 
@@ -225,17 +239,17 @@ def approvePost (σ : Storage) (owner spender : Address) (amount : Amount tokenA
 
 theorem approve_ok (spender : Address) (amount : Amount tokenAsset) :
     Tx.run (approve spender amount) ctx w =
-      .ok ((), { w with self := approvePost w.self ctx.sender spender amount, log := w.log ++ [.Approval ctx.sender spender amount] }) := by
+      .ok (true, { w with self := approvePost w.self ctx.sender spender amount, log := w.log ++ [.Approval ctx.sender spender amount] }) := by
   simp [approve, approvePost, Amount.update_nested_raw, Amount.ofWord_raw]
 
 theorem approve_sets_allowance (spender : Address) (amount : Amount tokenAsset) :
-    ∃ w', Tx.run (approve spender amount) ctx w = .ok ((), w') ∧
+    ∃ w', Tx.run (approve spender amount) ctx w = .ok (true, w') ∧
       w'.self.allowances ctx.sender spender = amount :=
   ⟨_, approve_ok ctx w spender amount, by simp [approvePost]⟩
 
 theorem approve_preserves_other_allowances (spender : Address) (amount : Amount tokenAsset)
     (o s : Address) (h : o ≠ ctx.sender ∨ s ≠ spender) :
-    ∃ w', Tx.run (approve spender amount) ctx w = .ok ((), w') ∧
+    ∃ w', Tx.run (approve spender amount) ctx w = .ok (true, w') ∧
       w'.self.allowances o s = w.self.allowances o s := by
   refine ⟨_, approve_ok ctx w spender amount, ?_⟩
   rcases h with h | h
@@ -245,7 +259,7 @@ theorem approve_preserves_other_allowances (spender : Address) (amount : Amount 
     · simp [approvePost, Function.update_of_ne ho]
 
 theorem approve_preserves_balances (spender : Address) (amount : Amount tokenAsset) :
-    ∃ w', Tx.run (approve spender amount) ctx w = .ok ((), w') ∧
+    ∃ w', Tx.run (approve spender amount) ctx w = .ok (true, w') ∧
       w'.self.balances = w.self.balances :=
   ⟨_, approve_ok ctx w spender amount, rfl⟩
 
@@ -262,29 +276,29 @@ theorem transferFrom_ok (src to : Address) (amount : Amount tokenAsset)
     (hsub : amount ≤ w.self.balances src)
     (hadd : (debit w.self.balances src amount to + amount).raw < wordBound) :
     Tx.run (transferFrom src to amount) ctx w =
-      .ok ((), { w with self := transferFromPost w.self src ctx.sender to amount, log := w.log ++ [.Transfer src to amount] }) := by
+      .ok (true, { w with self := transferFromPost w.self src ctx.sender to amount, log := w.log ++ [.Transfer src to amount] }) := by
   have hallow' : amount.raw ≤ (w.self.allowances src ctx.sender).raw := hallow
   have hsub' : amount.raw ≤ (w.self.balances src).raw := hsub
   simp only [debit_credit_raw] at hadd
-  simp [transferFrom, hallow', hsub', hadd]
+  simp [transferFrom, transferFromU, hallow', hsub', hadd]
   simp [transferFromPost, debit, credit, Amount.update_nested_raw,
     Amount.update2_raw, Amount.ofWord_update_lookup, Amount.ofWord_raw]
 
 theorem transferFrom_reverts_on_insufficient_allowance (src to : Address) (amount : Amount tokenAsset)
     (h : w.self.allowances src ctx.sender < amount) :
     Tx.run (transferFrom src to amount) ctx w = .error (.user .InsufficientAllowance) := by
-  simp [transferFrom, Amount.not_le_of_gt h]
+  simp [transferFrom, transferFromU, Amount.not_le_of_gt h]
 
 theorem transferFrom_reverts_on_insufficient_balance (src to : Address) (amount : Amount tokenAsset)
     (hallow : amount ≤ w.self.allowances src ctx.sender) (h : w.self.balances src < amount) :
     Tx.run (transferFrom src to amount) ctx w = .error (.user .InsufficientBalance) := by
-  simp [transferFrom, hallow, Amount.not_le_of_gt h]
+  simp [transferFrom, transferFromU, hallow, Amount.not_le_of_gt h]
 
 theorem transferFrom_decrements_allowance (src to : Address) (amount : Amount tokenAsset)
     (hallow : amount ≤ w.self.allowances src ctx.sender)
     (hsub : amount ≤ w.self.balances src)
     (hadd : (debit w.self.balances src amount to + amount).raw < wordBound) :
-    ∃ w', Tx.run (transferFrom src to amount) ctx w = .ok ((), w') ∧
+    ∃ w', Tx.run (transferFrom src to amount) ctx w = .ok (true, w') ∧
       w'.self.allowances src ctx.sender = w.self.allowances src ctx.sender - amount :=
   ⟨_, transferFrom_ok ctx w src to amount hallow hsub hadd, by simp [transferFromPost]⟩
 
@@ -292,7 +306,7 @@ theorem transferFrom_debits_sender (src to : Address) (amount : Amount tokenAsse
     (hallow : amount ≤ w.self.allowances src ctx.sender)
     (hsub : amount ≤ w.self.balances src)
     (hadd : (w.self.balances to + amount).raw < wordBound) :
-    ∃ w', Tx.run (transferFrom src to amount) ctx w = .ok ((), w') ∧
+    ∃ w', Tx.run (transferFrom src to amount) ctx w = .ok (true, w') ∧
       w'.self.balances src = w.self.balances src - amount :=
   ⟨_, transferFrom_ok ctx w src to amount hallow hsub (by simpa [debit_other _ hne.symm] using hadd),
     by simp [transferFromPost, credit_other _ hne]⟩
@@ -301,7 +315,7 @@ theorem transferFrom_credits_recipient (src to : Address) (amount : Amount token
     (hallow : amount ≤ w.self.allowances src ctx.sender)
     (hsub : amount ≤ w.self.balances src)
     (hadd : (w.self.balances to + amount).raw < wordBound) :
-    ∃ w', Tx.run (transferFrom src to amount) ctx w = .ok ((), w') ∧
+    ∃ w', Tx.run (transferFrom src to amount) ctx w = .ok (true, w') ∧
       w'.self.balances to = w.self.balances to + amount :=
   ⟨_, transferFrom_ok ctx w src to amount hallow hsub (by simpa [debit_other _ hne.symm] using hadd),
     by simp [transferFromPost, debit_other _ hne.symm]⟩
@@ -311,7 +325,7 @@ theorem transferFrom_preserves_other_balances (src to : Address) (amount : Amoun
     (hallow : amount ≤ w.self.allowances src ctx.sender)
     (hsub : amount ≤ w.self.balances src)
     (hadd : (debit w.self.balances src amount to + amount).raw < wordBound) :
-    ∃ w', Tx.run (transferFrom src to amount) ctx w = .ok ((), w') ∧
+    ∃ w', Tx.run (transferFrom src to amount) ctx w = .ok (true, w') ∧
       w'.self.balances a = w.self.balances a :=
   ⟨_, transferFrom_ok ctx w src to amount hallow hsub hadd,
     by simp [transferFromPost, credit_other _ ha2, debit_other _ ha1]⟩
@@ -321,7 +335,7 @@ theorem transferFrom_preserves_other_allowances (src to : Address) (amount : Amo
     (hallow : amount ≤ w.self.allowances src ctx.sender)
     (hsub : amount ≤ w.self.balances src)
     (hadd : (debit w.self.balances src amount to + amount).raw < wordBound) :
-    ∃ w', Tx.run (transferFrom src to amount) ctx w = .ok ((), w') ∧
+    ∃ w', Tx.run (transferFrom src to amount) ctx w = .ok (true, w') ∧
       w'.self.allowances o s = w.self.allowances o s := by
   refine ⟨_, transferFrom_ok ctx w src to amount hallow hsub hadd, ?_⟩
   rcases h with h | h
@@ -330,11 +344,12 @@ theorem transferFrom_preserves_other_allowances (src to : Address) (amount : Amo
     · subst ho; simp [transferFromPost, Function.update_of_ne h]
     · simp [transferFromPost, Function.update_of_ne ho]
 
-theorem transferFrom_conserves (src to : Address) (amount : Amount tokenAsset) (hne : src ≠ to)
+theorem transferFrom_conserves_of_pre (src to : Address) (amount : Amount tokenAsset)
+    (hne : src ≠ to)
     (hallow : amount ≤ w.self.allowances src ctx.sender)
     (hsub : amount ≤ w.self.balances src)
     (hadd : (w.self.balances to + amount).raw < wordBound) :
-    ∃ w', Tx.run (transferFrom src to amount) ctx w = .ok ((), w') ∧
+    ∃ w', Tx.run (transferFrom src to amount) ctx w = .ok (true, w') ∧
       w'.self.balances src + w'.self.balances to =
         w.self.balances src + w.self.balances to := by
   refine ⟨_, transferFrom_ok ctx w src to amount hallow hsub
@@ -349,7 +364,7 @@ theorem transferFrom_self_transfer_is_noop (src : Address) (amount : Amount toke
     (hallow : amount ≤ w.self.allowances src ctx.sender)
     (hsub : amount ≤ w.self.balances src)
     (hbound : (w.self.balances src).raw < wordBound) :
-    ∃ w', Tx.run (transferFrom src src amount) ctx w = .ok ((), w') ∧
+    ∃ w', Tx.run (transferFrom src src amount) ctx w = .ok (true, w') ∧
       w'.self.balances = w.self.balances := by
   refine ⟨_, transferFrom_ok ctx w src src amount hallow hsub (by
     have hle : amount.raw ≤ (w.self.balances src).raw := hsub
@@ -372,7 +387,7 @@ theorem transferFrom_reverts_on_overflow (src to : Address) (amount : Amount tok
   have hallow' : amount.raw ≤ (w.self.allowances src ctx.sender).raw := hallow
   have hsub' : amount.raw ≤ (w.self.balances src).raw := hsub
   simp only [debit_credit_raw] at hadd
-  simp [transferFrom, hallow', hsub', Nat.not_lt.mpr hadd]
+  simp [transferFrom, transferFromU, hallow', hsub', Nat.not_lt.mpr hadd]
 
 /-! ### burn -/
 
@@ -414,34 +429,189 @@ theorem burn_reverts_on_insufficient_supply (amount : Amount tokenAsset)
 
 namespace Proof
 
-/-- A successful `transfer` conserves the sum of the two balances, including
-when sender = recipient. Success implies the funds and overflow checks. -/
-theorem transfer_conserves (to : Address) (amount : Amount tokenAsset)
-    {w' : World Storage Unit Event}
-    (h : Tx.run (transfer to amount) ctx w = .ok ((), w')) :
-    w'.self.balances ctx.sender + w'.self.balances to =
-      w.self.balances ctx.sender + w.self.balances to := by
+/-- Invert a successful `transfer`: funds and overflow already held, and the
+post-state is `transferPost`. -/
+theorem transfer_ok_inv (to : Address) (amount : Amount tokenAsset)
+    {w' : World Storage ExtState Event}
+    (h : Tx.run (transfer to amount) ctx w = .ok (true, w')) :
+    amount ≤ w.self.balances ctx.sender ∧
+    (debit w.self.balances ctx.sender amount to + amount).raw < wordBound ∧
+    w' = { w with self := transferPost w.self ctx.sender to amount, log := w.log ++ [.Transfer ctx.sender to amount] } := by
   by_cases hsub : amount ≤ w.self.balances ctx.sender
   · by_cases hadd : (debit w.self.balances ctx.sender amount to + amount).raw < wordBound
     · rw [transfer_ok ctx w to amount hsub hadd] at h
       cases h
-      if hne : ctx.sender = to then
-        subst hne
-        apply Amount.ext
-        have hle : amount.raw ≤ (w.self.balances ctx.sender).raw := hsub
-        simp [transferPost, credit_self, debit_self, Amount.raw_add, Amount.raw_sub,
-          Nat.sub_add_cancel hle]
-      else
-        apply Amount.ext
-        have hle : amount.raw ≤ (w.self.balances ctx.sender).raw := hsub
-        simp [transferPost, credit_other _ hne, debit_other _ (Ne.symm hne),
-          Amount.raw_add, Amount.raw_sub]
-        exact nat_sub_add_add _ _ _ hle
+      exact ⟨hsub, hadd, rfl⟩
     · rw [transfer_reverts_on_overflow ctx w to amount hsub (Nat.not_lt.mp hadd)] at h
       cases h
   · have hlt : w.self.balances ctx.sender < amount := Nat.not_le.mp hsub
     rw [transfer_reverts_on_insufficient_balance ctx w to amount hlt] at h
     cases h
+
+/-- Invert a successful `transferFrom`. -/
+theorem transferFrom_ok_inv (src to : Address) (amount : Amount tokenAsset)
+    {w' : World Storage ExtState Event}
+    (h : Tx.run (transferFrom src to amount) ctx w = .ok (true, w')) :
+    amount ≤ w.self.allowances src ctx.sender ∧
+    amount ≤ w.self.balances src ∧
+    (debit w.self.balances src amount to + amount).raw < wordBound ∧
+    w' = { w with self := transferFromPost w.self src ctx.sender to amount, log := w.log ++ [.Transfer src to amount] } := by
+  by_cases hallow : amount ≤ w.self.allowances src ctx.sender
+  · by_cases hsub : amount ≤ w.self.balances src
+    · by_cases hadd : (debit w.self.balances src amount to + amount).raw < wordBound
+      · rw [transferFrom_ok ctx w src to amount hallow hsub hadd] at h
+        cases h
+        exact ⟨hallow, hsub, hadd, rfl⟩
+      · rw [transferFrom_reverts_on_overflow ctx w src to amount hallow hsub
+          (Nat.not_lt.mp hadd)] at h
+        cases h
+    · have hlt : w.self.balances src < amount := Nat.not_le.mp hsub
+      rw [transferFrom_reverts_on_insufficient_balance ctx w src to amount hallow hlt] at h
+      cases h
+  · have hlt : w.self.allowances src ctx.sender < amount := Nat.not_le.mp hallow
+    rw [transferFrom_reverts_on_insufficient_allowance ctx w src to amount hlt] at h
+    cases h
+
+theorem transferFrom_preserves_totalSupply (src to : Address) (amount : Amount tokenAsset)
+    {w' : World Storage ExtState Event}
+    (h : Tx.run (transferFrom src to amount) ctx w = .ok (true, w')) :
+    w'.self.totalSupply = w.self.totalSupply := by
+  have ⟨_, _, _, hw'⟩ := transferFrom_ok_inv ctx w src to amount h
+  simp [hw', transferFromPost]
+
+/-- A successful `transfer` conserves the sum of the two balances, including
+when sender = recipient. Success implies the funds and overflow checks. -/
+theorem transfer_conserves (to : Address) (amount : Amount tokenAsset)
+    {w' : World Storage ExtState Event}
+    (h : Tx.run (transfer to amount) ctx w = .ok (true, w')) :
+    w'.self.balances ctx.sender + w'.self.balances to =
+      w.self.balances ctx.sender + w.self.balances to := by
+  have ⟨hsub, _, hw'⟩ := transfer_ok_inv ctx w to amount h
+  if hne : ctx.sender = to then
+    subst hne
+    apply Amount.ext
+    have hle : amount.raw ≤ (w.self.balances ctx.sender).raw := hsub
+    simp [hw', transferPost, credit_self, debit_self, Amount.raw_add, Amount.raw_sub,
+      Nat.sub_add_cancel hle]
+  else
+    apply Amount.ext
+    have hle : amount.raw ≤ (w.self.balances ctx.sender).raw := hsub
+    simp [hw', transferPost, credit_other _ hne, debit_other _ (Ne.symm hne),
+      Amount.raw_add, Amount.raw_sub]
+    exact nat_sub_add_add _ _ _ hle
+
+theorem transfer_credits (to : Address) (amount : Amount tokenAsset)
+    {w' : World Storage ExtState Event}
+    (h : Tx.run (transfer to amount) ctx w = .ok (true, w'))
+    (hne : ctx.sender ≠ to) :
+    w'.self.balances to = w.self.balances to + amount := by
+  have ⟨_, _, hw'⟩ := transfer_ok_inv ctx w to amount h
+  simp [hw', transferPost, debit_other _ hne.symm]
+
+theorem transfer_others (to : Address) (amount : Amount tokenAsset)
+    {w' : World Storage ExtState Event}
+    (h : Tx.run (transfer to amount) ctx w = .ok (true, w'))
+    (x : Address) (hx1 : x ≠ ctx.sender) (hx2 : x ≠ to) :
+    w'.self.balances x = w.self.balances x := by
+  have ⟨_, _, hw'⟩ := transfer_ok_inv ctx w to amount h
+  simp [hw', transferPost, credit_other _ hx2, debit_other _ hx1]
+
+theorem transfer_preserves_totalSupply (to : Address) (amount : Amount tokenAsset)
+    {w' : World Storage ExtState Event}
+    (h : Tx.run (transfer to amount) ctx w = .ok (true, w')) :
+    w'.self.totalSupply = w.self.totalSupply := by
+  have ⟨_, _, hw'⟩ := transfer_ok_inv ctx w to amount h
+  simp [hw', transferPost]
+
+theorem transferFrom_conserves (src to : Address) (amount : Amount tokenAsset)
+    {w' : World Storage ExtState Event}
+    (h : Tx.run (transferFrom src to amount) ctx w = .ok (true, w')) :
+    w'.self.balances src + w'.self.balances to =
+      w.self.balances src + w.self.balances to := by
+  have ⟨_, hsub, _, hw'⟩ := transferFrom_ok_inv ctx w src to amount h
+  if hne : src = to then
+    subst hne
+    apply Amount.ext
+    have hle : amount.raw ≤ (w.self.balances src).raw := hsub
+    simp [hw', transferFromPost, credit_self, debit_self, Amount.raw_add, Amount.raw_sub,
+      Nat.sub_add_cancel hle]
+  else
+    apply Amount.ext
+    have hle : amount.raw ≤ (w.self.balances src).raw := hsub
+    simp [hw', transferFromPost, credit_other _ hne, debit_other _ (Ne.symm hne),
+      Amount.raw_add, Amount.raw_sub]
+    exact nat_sub_add_add _ _ _ hle
+
+theorem transferFrom_credits (src to : Address) (amount : Amount tokenAsset)
+    {w' : World Storage ExtState Event}
+    (h : Tx.run (transferFrom src to amount) ctx w = .ok (true, w'))
+    (hne : src ≠ to) :
+    w'.self.balances to = w.self.balances to + amount := by
+  have ⟨_, _, _, hw'⟩ := transferFrom_ok_inv ctx w src to amount h
+  simp [hw', transferFromPost, debit_other _ hne.symm]
+
+theorem transferFrom_others (src to : Address) (amount : Amount tokenAsset)
+    {w' : World Storage ExtState Event}
+    (h : Tx.run (transferFrom src to amount) ctx w = .ok (true, w'))
+    (x : Address) (hx1 : x ≠ src) (hx2 : x ≠ to) :
+    w'.self.balances x = w.self.balances x := by
+  have ⟨_, _, _, hw'⟩ := transferFrom_ok_inv ctx w src to amount h
+  simp [hw', transferFromPost, credit_other _ hx2, debit_other _ hx1]
+
+theorem transferFrom_allowance (src to : Address) (amount : Amount tokenAsset)
+    {w' : World Storage ExtState Event}
+    (h : Tx.run (transferFrom src to amount) ctx w = .ok (true, w')) :
+    w'.self.allowances src ctx.sender + amount =
+      w.self.allowances src ctx.sender := by
+  have ⟨hallow, _, _, hw'⟩ := transferFrom_ok_inv ctx w src to amount h
+  apply Amount.ext
+  have hle : amount.raw ≤ (w.self.allowances src ctx.sender).raw := hallow
+  simp [hw', transferFromPost, Amount.raw_add, Amount.raw_sub, Nat.sub_add_cancel hle]
+
+theorem approve_sets (spender : Address) (amount : Amount tokenAsset)
+    {w' : World Storage ExtState Event}
+    (h : Tx.run (approve spender amount) ctx w = .ok (true, w')) :
+    w'.self.allowances ctx.sender spender = amount := by
+  rw [approve_ok ctx w spender amount] at h
+  cases h
+  simp [approvePost]
+
+theorem transfer_returns_true (to : Address) (amount : Amount tokenAsset)
+    {r : Bool} {w' : World Storage ExtState Event}
+    (h : Tx.run (transfer to amount) ctx w = .ok (r, w')) : r = true := by
+  by_cases hsub : amount ≤ w.self.balances ctx.sender
+  · by_cases hadd : (debit w.self.balances ctx.sender amount to + amount).raw < wordBound
+    · rw [transfer_ok ctx w to amount hsub hadd] at h
+      cases h; rfl
+    · rw [transfer_reverts_on_overflow ctx w to amount hsub (Nat.not_lt.mp hadd)] at h
+      cases h
+  · have hlt : w.self.balances ctx.sender < amount := Nat.not_le.mp hsub
+    rw [transfer_reverts_on_insufficient_balance ctx w to amount hlt] at h
+    cases h
+
+theorem transferFrom_returns_true (src to : Address) (amount : Amount tokenAsset)
+    {r : Bool} {w' : World Storage ExtState Event}
+    (h : Tx.run (transferFrom src to amount) ctx w = .ok (r, w')) : r = true := by
+  by_cases hallow : amount ≤ w.self.allowances src ctx.sender
+  · by_cases hsub : amount ≤ w.self.balances src
+    · by_cases hadd : (debit w.self.balances src amount to + amount).raw < wordBound
+      · rw [transferFrom_ok ctx w src to amount hallow hsub hadd] at h
+        cases h; rfl
+      · rw [transferFrom_reverts_on_overflow ctx w src to amount hallow hsub
+          (Nat.not_lt.mp hadd)] at h
+        cases h
+    · have hlt : w.self.balances src < amount := Nat.not_le.mp hsub
+      rw [transferFrom_reverts_on_insufficient_balance ctx w src to amount hallow hlt] at h
+      cases h
+  · have hlt : w.self.allowances src ctx.sender < amount := Nat.not_le.mp hallow
+    rw [transferFrom_reverts_on_insufficient_allowance ctx w src to amount hlt] at h
+    cases h
+
+theorem approve_returns_true (spender : Address) (amount : Amount tokenAsset)
+    {r : Bool} {w' : World Storage ExtState Event}
+    (h : Tx.run (approve spender amount) ctx w = .ok (r, w')) : r = true := by
+  rw [approve_ok ctx w spender amount] at h
+  cases h; rfl
 
 end Proof
 

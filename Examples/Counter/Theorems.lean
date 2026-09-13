@@ -27,7 +27,7 @@ Counter world. -/
 theorem counter_increment_correct
     (κ : List UInt8 → U256) (hκ : KeccakSep Counter.contract κ)
     (yul : YBlock) (hyul : toYulFn Counter.contract incrementFn = some yul)
-    (ctx : Ctx) (w : World Counter.Storage Unit Counter.Event) (st0 : EvmState)
+    (ctx : Ctx) (w : World Counter.Storage ExtState Counter.Event) (st0 : EvmState)
     (hctx : ctxRel ctx st0)
     (hR : R Counter.contract Counter.schema κ w st0) :
     ToYulFnCorrect Counter.contract Counter.schema κ incrementFn yul ctx w st0 :=
@@ -40,7 +40,7 @@ high-level model. Same compiler and layout assumptions as
 theorem counter_incrementBy_correct
     (κ : List UInt8 → U256) (hκ : KeccakSep Counter.contract κ)
     (yul : YBlock) (hyul : toYulFn Counter.contract incrementByFn = some yul)
-    (ctx : Ctx) (w : World Counter.Storage Unit Counter.Event) (st0 : EvmState)
+    (ctx : Ctx) (w : World Counter.Storage ExtState Counter.Event) (st0 : EvmState)
     (hctx : ctxRel ctx st0)
     (hR : R Counter.contract Counter.schema κ w st0) :
     ToYulFnCorrect Counter.contract Counter.schema κ incrementByFn yul ctx w st0 :=
@@ -53,7 +53,7 @@ Counter entrypoints. -/
 theorem counter_decrement_correct
     (κ : List UInt8 → U256) (hκ : KeccakSep Counter.contract κ)
     (yul : YBlock) (hyul : toYulFn Counter.contract decrementFn = some yul)
-    (ctx : Ctx) (w : World Counter.Storage Unit Counter.Event) (st0 : EvmState)
+    (ctx : Ctx) (w : World Counter.Storage ExtState Counter.Event) (st0 : EvmState)
     (hctx : ctxRel ctx st0)
     (hR : R Counter.contract Counter.schema κ w st0) :
     ToYulFnCorrect Counter.contract Counter.schema κ decrementFn yul ctx w st0 :=
@@ -65,7 +65,7 @@ mutating Counter entrypoints. -/
 theorem counter_get_correct
     (κ : List UInt8 → U256) (hκ : KeccakSep Counter.contract κ)
     (yul : YBlock) (hyul : toYulFn Counter.contract getFn = some yul)
-    (ctx : Ctx) (w : World Counter.Storage Unit Counter.Event) (st0 : EvmState)
+    (ctx : Ctx) (w : World Counter.Storage ExtState Counter.Event) (st0 : EvmState)
     (hctx : ctxRel ctx st0)
     (hR : R Counter.contract Counter.schema κ w st0) :
     ToYulFnCorrect Counter.contract Counter.schema κ getFn yul ctx w st0 :=
@@ -81,7 +81,7 @@ theorem counter_correct
     (f : FnDef) (hf : f ∈ Counter.contract.functions)
     (_hk : f.kind ≠ .constructor)
     (yul : YBlock) (hyul : toYulFn Counter.contract f = some yul)
-    (ctx : Ctx) (w : World Counter.Storage Unit Counter.Event) (st0 : EvmState)
+    (ctx : Ctx) (w : World Counter.Storage ExtState Counter.Event) (st0 : EvmState)
     (hctx : ctxRel ctx st0)
     (hR : R Counter.contract Counter.schema κ w st0) :
     ToYulFnCorrect Counter.contract Counter.schema κ f yul ctx w st0 :=
@@ -94,7 +94,7 @@ unchanged. This is the whole ABI surface, not one function. -/
 theorem counter_dispatch_correct
     (κ : List UInt8 → U256) (hκ : KeccakSep Counter.contract κ)
     (yul : YBlock) (hyul : runtimeBlock Counter.contract = some yul)
-    (ctx : Ctx) (w : World Counter.Storage Unit Counter.Event) (st0 : EvmState)
+    (ctx : Ctx) (w : World Counter.Storage ExtState Counter.Event) (st0 : EvmState)
     (hctx : ctxRel ctx st0)
     (hR : R Counter.contract Counter.schema κ w st0) :
     RuntimeBlockCorrectCallFree Counter.contract Counter.schema κ yul ctx w st0 :=

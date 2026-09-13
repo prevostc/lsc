@@ -27,7 +27,7 @@ def Auth (a : Address) (c : Call spec) (s : Storage) : Prop :=
   | _, _ => False
 
 /-- Mint is the only inflow; it is `0` on revert. -/
-def inflow (c : Call spec) (w : World Storage Unit Event) : Nat :=
+def inflow (c : Call spec) (w : World Storage ExtState Event) : Nat :=
   match c.fn, c.args with
   | .mint, (dst, amt) =>
     match Tx.run (mint dst amt) c.toCtx w with
@@ -36,7 +36,7 @@ def inflow (c : Call spec) (w : World Storage Unit Event) : Nat :=
   | _, _ => 0
 
 /-- Token holdings are the recorded `totalSupply`. The address is ignored. -/
-def holdings (_self : Address) (w : World Storage Unit Event) : Nat :=
+def holdings (_self : Address) (w : World Storage ExtState Event) : Nat :=
   w.self.totalSupply.raw
 
 /-- Finite support of balances. Used by `inv_of_*`; `Inv` wraps it on a world. -/
@@ -45,6 +45,6 @@ def InvStorage (s : Storage) : Prop :=
     (∀ a, a ∉ H → s.balances a = 0) ∧
     H.sum (fun a => (s.balances a).raw) = s.totalSupply.raw
 
-def Inv (w : World Storage Unit Event) : Prop := InvStorage w.self
+def Inv (w : World Storage ExtState Event) : Prop := InvStorage w.self
 
 end Token

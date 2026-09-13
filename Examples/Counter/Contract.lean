@@ -17,7 +17,7 @@ inductive Error
   | Zero
   deriving DecidableEq, Repr
 
-abbrev M := Tx Storage Unit Event Error
+abbrev M := Tx Storage ExtState Event Error
 
 def increment : M Unit := do
   let c ← read count

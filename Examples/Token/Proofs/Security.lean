@@ -6,6 +6,8 @@ import Lsc.Security.InvariantTheorems
 import Examples.Token.Spec
 import Examples.Token.Proofs.Tx
 
+set_option linter.unusedSimpArgs false
+
 open Lsc Lsc.Security Token
 
 namespace Token
@@ -15,7 +17,7 @@ namespace Token
 (constructor excluded). No pause. `claim` / `Auth` / `Inv` live in `Spec.lean`.
 -/
 
-theorem inv_solvent (self : Address) (w : World Storage Unit Event) (h : Inv w) :
+theorem inv_solvent (self : Address) (w : World Storage ExtState Event) (h : Inv w) :
     Solvent claim holdings self w := by
   obtain ⟨H, h0, hs⟩ := h
   refine ⟨H, ?_, hs.le⟩
@@ -439,7 +441,7 @@ theorem transferFrom_conservesFn : ConservesFn spec Inv claim inflow .transferFr
             have hadd' : (w.self.balances dst + amount).raw < wordBound := by
               simpa [debit_other _ hne'.symm] using hadd
             have ⟨w', hrun, hcons⟩ :=
-              transferFrom_conserves ctx w src dst amount hne' hallow hsub hadd'
+              transferFrom_conserves_of_pre ctx w src dst amount hne' hallow hsub hadd'
             simp [worldAfter, hrun]
             rw [Finset.sum_pair hne', Finset.sum_pair hne']
             simp [claim, inflow, Call.ofCtx]
@@ -670,14 +672,15 @@ theorem token_preserves_inv : PreservesInv spec Inv :=
     | .allowance => allowance_preserves_inv
     | .totalSupply => totalSupply_preserves_inv
 
-/-- Environment steps are a no-op on `Inv` (`X := Unit`). -/
+/-- Environment steps are a no-op on `Inv` (`X := ExtState`; Token makes no
+external calls, so `RelyAlong (fun _ _ => True)`). -/
 theorem token_inv_rely : PreservesInvEnv spec Inv (fun _ _ => True) := by
   intro w x' hw _
   exact hw
 
 /-- Deployment from empty balances establishes `Inv`. -/
 theorem «constructor_inv» (owner : Address) (supply : Amount tokenAsset) (ctx : Ctx)
-    (w : World Storage Unit Event)
+    (w : World Storage ExtState Event)
     (hempty : ∀ a, w.self.balances a = 0) :
     Inv (worldAfter (Token.constructor owner supply) ctx w) := by
   have hrun := ctor_ok ctx w owner supply
@@ -691,14 +694,14 @@ theorem «constructor_inv» (owner : Address) (supply : Amount tokenAsset) (ctx 
 namespace Proof
 
 theorem token_no_unauthorized_extraction
-    (tr : List (Step spec)) (w : World Storage Unit Event) (a : Address)
+    (tr : List (Step spec)) (w : World Storage ExtState Event) (a : Address)
     (hw : Inv w) (hR : RelyAlong (fun _ _ => True) tr w)
     (hA : NoAuthAlong Auth a tr w) :
     claim a w.self ≤ claim a (run tr w).self :=
   no_unauthorized_extraction token_no_unauth token_preserves_inv token_inv_rely
     tr w a hw hR hA
 
-theorem token_solvent (self : Address) (tr : List (Step spec)) (w : World Storage Unit Event)
+theorem token_solvent (self : Address) (tr : List (Step spec)) (w : World Storage ExtState Event)
     (hW : Wf self tr) (hR : RelyAlong (fun _ _ => True) tr w) (h : Inv w) :
     Inv (run tr w) :=
   inv_run token_preserves_inv token_inv_rely h tr hW hR

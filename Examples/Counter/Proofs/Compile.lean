@@ -82,11 +82,11 @@ open Lsc.Compiler
 theorem counter_increment_correct
     (κ : List UInt8 → U256) (hκ : KeccakSep Counter.contract κ)
     (yul : YBlock) (hyul : toYulFn Counter.contract incrementFn = some yul)
-    (ctx : Ctx) (w : World Counter.Storage Unit Counter.Event) (st0 : EvmState)
+    (ctx : Ctx) (w : World Counter.Storage ExtState Counter.Event) (st0 : EvmState)
     (hctx : ctxRel ctx st0)
     (hR : R Counter.contract Counter.schema κ w st0) :
     ToYulFnCorrect Counter.contract Counter.schema κ incrementFn yul ctx w st0 :=
-    toYulFn_correct_callFree (S := Counter.Storage) (X := Unit) (E := Counter.Event)
+    toYulFn_correct_callFree (S := Counter.Storage) (X := ExtState) (E := Counter.Event)
     (ε := Counter.Error)
     Counter.contract Counter.schema Counter.schema_lawful κ hκ
     incrementFn (by simp [incrementFn]) increment_m1 counter_fields_lt
@@ -95,11 +95,11 @@ theorem counter_increment_correct
 theorem counter_incrementBy_correct
     (κ : List UInt8 → U256) (hκ : KeccakSep Counter.contract κ)
     (yul : YBlock) (hyul : toYulFn Counter.contract incrementByFn = some yul)
-    (ctx : Ctx) (w : World Counter.Storage Unit Counter.Event) (st0 : EvmState)
+    (ctx : Ctx) (w : World Counter.Storage ExtState Counter.Event) (st0 : EvmState)
     (hctx : ctxRel ctx st0)
     (hR : R Counter.contract Counter.schema κ w st0) :
     ToYulFnCorrect Counter.contract Counter.schema κ incrementByFn yul ctx w st0 :=
-    toYulFn_correct_callFree (S := Counter.Storage) (X := Unit) (E := Counter.Event)
+    toYulFn_correct_callFree (S := Counter.Storage) (X := ExtState) (E := Counter.Event)
     (ε := Counter.Error)
     Counter.contract Counter.schema Counter.schema_lawful κ hκ
     incrementByFn (by simp [incrementByFn]) incrementBy_m1 counter_fields_lt
@@ -108,11 +108,11 @@ theorem counter_incrementBy_correct
 theorem counter_decrement_correct
     (κ : List UInt8 → U256) (hκ : KeccakSep Counter.contract κ)
     (yul : YBlock) (hyul : toYulFn Counter.contract decrementFn = some yul)
-    (ctx : Ctx) (w : World Counter.Storage Unit Counter.Event) (st0 : EvmState)
+    (ctx : Ctx) (w : World Counter.Storage ExtState Counter.Event) (st0 : EvmState)
     (hctx : ctxRel ctx st0)
     (hR : R Counter.contract Counter.schema κ w st0) :
     ToYulFnCorrect Counter.contract Counter.schema κ decrementFn yul ctx w st0 :=
-    toYulFn_correct_callFree (S := Counter.Storage) (X := Unit) (E := Counter.Event)
+    toYulFn_correct_callFree (S := Counter.Storage) (X := ExtState) (E := Counter.Event)
     (ε := Counter.Error)
     Counter.contract Counter.schema Counter.schema_lawful κ hκ
     decrementFn (by simp [decrementFn]) decrement_m1 counter_fields_lt
@@ -121,11 +121,11 @@ theorem counter_decrement_correct
 theorem counter_get_correct
     (κ : List UInt8 → U256) (hκ : KeccakSep Counter.contract κ)
     (yul : YBlock) (hyul : toYulFn Counter.contract getFn = some yul)
-    (ctx : Ctx) (w : World Counter.Storage Unit Counter.Event) (st0 : EvmState)
+    (ctx : Ctx) (w : World Counter.Storage ExtState Counter.Event) (st0 : EvmState)
     (hctx : ctxRel ctx st0)
     (hR : R Counter.contract Counter.schema κ w st0) :
     ToYulFnCorrect Counter.contract Counter.schema κ getFn yul ctx w st0 :=
-    toYulFn_correct_callFree (S := Counter.Storage) (X := Unit) (E := Counter.Event)
+    toYulFn_correct_callFree (S := Counter.Storage) (X := ExtState) (E := Counter.Event)
     (ε := Counter.Error)
     Counter.contract Counter.schema Counter.schema_lawful κ hκ
     getFn (by simp [getFn]) get_m1 counter_fields_lt
@@ -136,11 +136,11 @@ theorem counter_correct
     (f : FnDef) (hf : f ∈ Counter.contract.functions)
     (_hk : f.kind ≠ .constructor)
     (yul : YBlock) (hyul : toYulFn Counter.contract f = some yul)
-    (ctx : Ctx) (w : World Counter.Storage Unit Counter.Event) (st0 : EvmState)
+    (ctx : Ctx) (w : World Counter.Storage ExtState Counter.Event) (st0 : EvmState)
     (hctx : ctxRel ctx st0)
     (hR : R Counter.contract Counter.schema κ w st0) :
     ToYulFnCorrect Counter.contract Counter.schema κ f yul ctx w st0 :=
-    toYulFn_correct_callFree (S := Counter.Storage) (X := Unit) (E := Counter.Event)
+    toYulFn_correct_callFree (S := Counter.Storage) (X := ExtState) (E := Counter.Event)
     (ε := Counter.Error)
     Counter.contract Counter.schema Counter.schema_lawful κ hκ
     f (by
@@ -152,11 +152,11 @@ theorem counter_correct
 theorem counter_dispatch_correct
     (κ : List UInt8 → U256) (hκ : KeccakSep Counter.contract κ)
     (yul : YBlock) (hyul : runtimeBlock Counter.contract = some yul)
-    (ctx : Ctx) (w : World Counter.Storage Unit Counter.Event) (st0 : EvmState)
+    (ctx : Ctx) (w : World Counter.Storage ExtState Counter.Event) (st0 : EvmState)
     (hctx : ctxRel ctx st0)
     (hR : R Counter.contract Counter.schema κ w st0) :
     RuntimeBlockCorrectCallFree Counter.contract Counter.schema κ yul ctx w st0 :=
-  Lsc.Compiler.runtimeBlock_correct_callFree (S := Counter.Storage) (X := Unit)
+  Lsc.Compiler.runtimeBlock_correct_callFree (S := Counter.Storage) (X := ExtState)
     (E := Counter.Event) (ε := Counter.Error)
     Counter.contract Counter.schema Counter.schema_lawful κ hκ
     (fun f hf => counter_fn_m1 hf)
