@@ -3,19 +3,25 @@ import Lsc.Lang.Contract
 import Lsc.Lang.ExtState
 import Lsc.Lang.Inline
 import Lsc.Lang.Spec
+import Lsc.Lang.TxTheorems
 
 /-!
 # reification
 
 `lsc_schema C` derives `C.schema : ContractSchema C.Storage Lsc.ExtState C.Event C.Error`
-from the user's Lean types, plus `C.schema_lawful : C.schema.st.Lawful …`, and
+from the user's Lean types, plus `C.schema_lawful : C.schema.st.Lawful …`,
+per-field `@[simp]` reductions `C.schema_read_<field>` / `C.schema_write_<field>`
+(and `C.schema_ev_*` / `C.schema_err_*`), and
 `lsc_reify C.f` turns the elaborated term of a contract function
 `C.f : … → Tx C.Storage Lsc.ExtState C.Event C.Error ρ` into
 
 * `C.f.core : Core t` — the Core AST, and
 * `C.f.core_denote` — `Core.denote C.schema C.f.core [args] = C.f args`
   for word/address/flag/unit programs. Amount-returning functions certify
-  `Amount.ofWord <$> Core.denote = f`. Proved by `rfl`
+  `Amount.ofWord <$> Core.denote = f`; Bool-returning functions certify
+  `Tx.natToBool <$> Core.denote = f` (`natToBool n` is `n != 0`).
+  Intermediate `Amount` / `Ref` loads are peeled with `load_bind_ofWord` /
+  `bind_map` and the generated schema-read lemmas. Proved by `rfl`
   when the sides are definitionally equal;
   otherwise by the `Tx` monad laws (`bind` is not definitionally associative,
   so an `@[lsc_inline]` helper mid-`do` needs them). A propositional
@@ -24,7 +30,9 @@ from the user's Lean types, plus `C.schema_lawful : C.schema.st.Lawful …`, and
 
 `lsc_contract C f₁ … fₙ implements I args, …` additionally defines `C.contract`, a
 language-level `C.spec` (`C.Fn` / `C.entry` / `C.spec_exec_*`), and `C.impl_<I>`
-(`C.impl` when there is exactly one `implements` clause). `#lsc_obligations C`
+(`C.impl` when there is exactly one `implements` clause). Function kind
+(`view` / `tx`) is decided by effects (`Core.isPureRead`: no writes, emits,
+or CALLs ⇒ `view`), never by return type. `#lsc_obligations C`
 prints the security theorems to prove; it does not import `Lsc.Security`.
 
 The reifier only accepts the *reifiable fragment* — the fixed set of
@@ -257,6 +265,114 @@ def mkSchemaCommand (ci : ContractInfo) : MetaM Syntax := do
         map2Set := fun $i => List.getD [$map2Set,*] $i (fun $σ _ _ _ => $σ) }
       ev := ⟨fun $i $args => List.getD [$evBuilders,*] $i $evDefault $args⟩
       err := ⟨fun $i $args => List.getD [$errBuilders,*] $i $errDefault $args⟩)
+
+/-- `@[simp]` reductions for each storage field and event/error constructor.
+`lsc_reify` includes them in the certificate `simp only` set. -/
+def mkSchemaFieldCommands (ci : ContractInfo) : MetaM (Array (TSyntax `command)) := do
+  let schema := mkIdent (`_root_ ++ ci.schema)
+  let ns := ci.schema.getPrefix
+  let σ := mkIdent `σ
+  let m := mkIdent `m
+  let k := mkIdent `k
+  let tac ← `(Lean.Parser.Tactic.tacticSeq|
+      simp [$schema:ident, Lsc.list_getD_cons_zero, Lsc.list_getD_cons_one,
+        Lsc.list_getD_cons_two, Lsc.list_getD_cons_three, Lsc.list_getD_cons_four,
+        Lsc.list_getD_cons_five, Lsc.list_getD_cons_six, Lsc.list_getD_cons_seven,
+        Lsc.list_getD_cons_zero_app, Lsc.list_getD_pair_zero,
+        Lsc.list_getElem?_cons_one, Lsc.list_getElem?_cons_two,
+        Lsc.list_getElem?_cons_three, Lsc.list_getElem?_cons_four,
+        Lsc.list_getElem?_cons_five, List.getElem?_cons_zero, Option.getD_some]
+      <;> first | rfl | (funext; simp [$schema:ident,
+        Lsc.list_getD_cons_zero, Lsc.list_getD_cons_one, Lsc.list_getD_cons_two,
+        Lsc.list_getElem?_cons_one, Lsc.list_getElem?_cons_two,
+        List.getElem?_cons_zero, Option.getD_some]))
+  let mut cmds : Array (TSyntax `command) := #[]
+  for f in ci.fields do
+    let proj := mkIdent (`σ ++ f.name)
+    let fld := mkIdent f.name
+    let amt? ← isAmountTy f.valTy
+    let ref? ← isRefTy f.valTy
+    let readN := mkIdent (ns ++ Name.mkSimple s!"schema_read_{f.name.getString!}")
+    let writeN := mkIdent (ns ++ Name.mkSimple s!"schema_write_{f.name.getString!}")
+    let idx : Term := quote f.idx
+    match f.kind with
+    | .scalar =>
+      let (readRhs, writeRhs) ←
+        if amt? then
+          pure (← `(fun $σ => Lsc.Amount.raw $proj),
+            ← `(fun $σ $m => { $σ with $fld:ident := Lsc.Amount.ofWord $m }))
+        else if ref? then
+          pure (← `(fun $σ => Lsc.Address.toWord ($proj).addr),
+            ← `(fun $σ $m => { $σ with $fld:ident := { addr := $m } }))
+        else
+          pure (← `(fun $σ => $proj),
+            ← `(fun $σ $m => { $σ with $fld:ident := $m }))
+      cmds := cmds.push (← `(command|
+        @[simp] theorem $readN : ($schema).st.scalar $idx = $readRhs := by ($tac)))
+      cmds := cmds.push (← `(command|
+        @[simp] theorem $writeN : ($schema).st.scalarUpd $idx = $writeRhs := by ($tac)))
+    | .map1 =>
+      let (readRhs, writeRhs) ←
+        if amt? then
+          pure (← `(fun $σ $k => Lsc.Amount.raw ($proj $k)),
+            ← `(fun $σ $m => { $σ with $fld:ident := fun $k => Lsc.Amount.ofWord ($m $k) }))
+        else if ref? then
+          pure (← `(fun $σ $k => Lsc.Address.toWord ($proj $k).addr),
+            ← `(fun $σ $m => { $σ with $fld:ident := fun $k => { addr := $m $k } }))
+        else
+          pure (← `(fun $σ => $proj),
+            ← `(fun $σ $m => { $σ with $fld:ident := $m }))
+      cmds := cmds.push (← `(command|
+        @[simp] theorem $readN : ($schema).st.map1 $idx = $readRhs := by ($tac)))
+      cmds := cmds.push (← `(command|
+        @[simp] theorem $writeN : ($schema).st.map1Upd $idx = $writeRhs := by ($tac)))
+    | .map2 =>
+      let k₁ := mkIdent `k₁; let k₂ := mkIdent `k₂
+      let (readRhs, writeRhs) ←
+        if amt? then
+          pure (← `(fun $σ $k₁ $k₂ => Lsc.Amount.raw ($proj $k₁ $k₂)),
+            ← `(fun $σ $m => { $σ with $fld:ident :=
+              fun $k₁ $k₂ => Lsc.Amount.ofWord ($m $k₁ $k₂) }))
+        else
+          pure (← `(fun $σ => $proj),
+            ← `(fun $σ $m => { $σ with $fld:ident := $m }))
+      cmds := cmds.push (← `(command|
+        @[simp] theorem $readN : ($schema).st.map2 $idx = $readRhs := by ($tac)))
+      cmds := cmds.push (← `(command|
+        @[simp] theorem $writeN : ($schema).st.map2Upd $idx = $writeRhs := by ($tac)))
+  for i in [:ci.evCtors.size] do
+    let ctor := ci.evCtors[i]!
+    let builder ← ctorBuilder ctor
+    let n := mkIdent (ns ++ Name.mkSimple s!"schema_ev_{ctor.getString!}")
+    let idx : Term := quote i
+    cmds := cmds.push (← `(command|
+      @[simp] theorem $n : ($schema).ev.build $idx = $builder := by ($tac)))
+  for i in [:ci.errCtors.size] do
+    let ctor := ci.errCtors[i]!
+    let builder ← ctorBuilder ctor
+    let n := mkIdent (ns ++ Name.mkSimple s!"schema_err_{ctor.getString!}")
+    let idx : Term := quote i
+    cmds := cmds.push (← `(command|
+      @[simp] theorem $n : ($schema).err.build $idx = $builder := by ($tac)))
+  return cmds
+
+def schemaLemmaNames (ci : ContractInfo) : Array Name := Id.run do
+  let ns := ci.schema.getPrefix
+  let mut acc : Array Name := #[]
+  for f in ci.fields do
+    let s := f.name.getString!
+    acc := acc.push (ns ++ Name.mkSimple s!"schema_read_{s}")
+    acc := acc.push (ns ++ Name.mkSimple s!"schema_write_{s}")
+  for ctor in ci.evCtors do
+    acc := acc.push (ns ++ Name.mkSimple s!"schema_ev_{ctor.getString!}")
+  for ctor in ci.errCtors do
+    acc := acc.push (ns ++ Name.mkSimple s!"schema_err_{ctor.getString!}")
+  return acc
+
+def existingIdents (names : Array Name) : MetaM (Array Ident) := do
+  let env ← getEnv
+  return names.filterMap fun n =>
+    if env.contains n then some (mkIdent n) else none
 
 def abiTyOf (ty : Expr) : MetaM AbiTy := do
   let ty ← whnfR ty
@@ -526,7 +642,8 @@ def isTryHead : Name → Bool
 `Stdlib.ERC20`. -/
 def isSurfaceOp : Name → Bool
   | ``Lsc.Tx.HAddChecked.hAdd | ``Lsc.Tx.HSubChecked.hSub
-  | ``Lsc.Tx.HMulChecked.hMul | ``Lsc.Tx.HDivChecked.hDiv => true
+  | ``Lsc.Tx.HMulChecked.hMul | ``Lsc.Tx.HDivChecked.hDiv
+  | ``Lsc.Tx.HMulDivDown.hMulDivDown | ``Lsc.Tx.HMulDivUp.hMulDivUp => true
   | .str (.str `Lsc "Amount") s =>
       s == "add" || s == "sub" || s == "mulScalar" || s == "divScalar"
         || s == "mulDivDown" || s == "mulDivUp" || s == "rescale"
@@ -539,6 +656,7 @@ def isSurfaceOp : Name → Bool
             let s := p.getString!
             s.startsWith "instHAdd" || s.startsWith "instHSub"
               || s.startsWith "instHMul" || s.startsWith "instHDiv"
+              || s.startsWith "instHMulDiv"
         | _ => false
 
 /-- `Rounding` must be a literal constructor so the reifier can pick `mulDivDown` vs `mulDivUp`. -/
@@ -553,6 +671,7 @@ def roundingOf (e : Expr) : MetaM Rounding := do
 def isDeltaStop : Name → Bool
   | ``Lsc.Tx.addChecked | ``Lsc.Tx.subChecked | ``Lsc.Tx.mulChecked | ``Lsc.Tx.divChecked
   | ``Lsc.Tx.mulDivDown | ``Lsc.Tx.mulDivUp | ``Lsc.Tx.pow10
+  | ``Lsc.Tx.HMulDivDown.hMulDivDown | ``Lsc.Tx.HMulDivUp.hMulDivUp
   | ``Lsc.Tx.call | ``Lsc.Tx.view | ``Lsc.Tx.callAsNat | ``Lsc.Tx.viewAsNat
   | ``Lsc.Tx.tryCall | ``Lsc.Tx.tryView
   | ``Lsc.Tx.load | ``Lsc.Tx.loadMap | ``Lsc.Tx.loadMap2
@@ -706,12 +825,22 @@ partial def isRefMkFn (e : Expr) : Bool :=
     isRefMkFn e.bindingBody!
   else false
 
-/-- Drop `ofWord <$> tx` / `Ref.mk <$> tx`. Do not peel when the last argument
+/-- `Tx.natToBool`, possibly η-expanded. -/
+partial def isNatToBoolFn (e : Expr) : Bool :=
+  let e := e.consumeMData
+  if e.isAppOf ``Lsc.Tx.natToBool || e.isConstOf ``Lsc.Tx.natToBool then
+    true
+  else if e.isLambda then
+    isNatToBoolFn e.bindingBody!
+  else false
+
+/-- Drop `ofWord <$> tx` / `Ref.mk <$> tx` / `natToBool <$> tx`. Do not peel when the last argument
 is itself an `Amount` or `Ref` (e.g. `mulDivDown a (ofWord scale) x`). `Tx`
 unfolds to `ReaderT`, so the guard is "not an Amount/Ref", not `isAppOf Tx`. -/
 partial def peelAmountWrap (e : Expr) : MetaM Expr := do
   let (_, args) := flattenApp e
-  if args.size ≥ 2 && (isOfWordFn args[args.size - 2]! || isRefMkFn args[args.size - 2]!) then
+  if args.size ≥ 2 && (isOfWordFn args[args.size - 2]! || isRefMkFn args[args.size - 2]!
+      || isNatToBoolFn args[args.size - 2]!) then
     let x := args[args.size - 1]!
     let ty ← inferType x
     if (← isAmountTy ty) || (← isRefTy ty) then
@@ -826,6 +955,12 @@ def opOf (ci : ContractInfo) (env : Env t) (x : Expr) : MetaM (Option Op) := do
   | some ``Lsc.Amount.mulDivDown, n =>
     return some (.mulDivDown (← atom args[n - 3]!) (← atom args[n - 2]!) (← atom args[n - 1]!))
   | some ``Lsc.Amount.mulDivUp, n =>
+    return some (.mulDivUp (← atom args[n - 3]!) (← atom args[n - 2]!) (← atom args[n - 1]!))
+  | some ``Lsc.Tx.HMulDivDown.hMulDivDown, n =>
+    if n < 3 then return none
+    return some (.mulDivDown (← atom args[n - 3]!) (← atom args[n - 2]!) (← atom args[n - 1]!))
+  | some ``Lsc.Tx.HMulDivUp.hMulDivUp, n =>
+    if n < 3 then return none
     return some (.mulDivUp (← atom args[n - 3]!) (← atom args[n - 2]!) (← atom args[n - 1]!))
   | some ``Pure.pure, 4 => return some (.pure (← atom args[3]!))
   | _, _ => return none
@@ -1129,15 +1264,20 @@ partial def firstDifferingBind (lhs rhs : Expr) (fuel : Nat := 32) :
 /--
 Generate the `f.core_denote` proof term.
 
-The certificate tactic is `first | rfl | (simp only [<fn>, <@[lsc_inline]
-helpers>, Tx.bind_assoc, Tx.pure_bind, Tx.bind_pure, Tx.map_eq_pure_bind]; rfl)`.
-`rfl` (`isDefEq` / `mkEqRefl`) is the fast path when no inlines are used.
-With inlines the `rfl` attempt is skipped (it times out on a large
-non-matching `do` block) and only the `simp only` branch runs. A
-propositional certificate is not a trust extension: the reifier is still
-untrusted MetaM, and the kernel checks `Core.denote (reify f) = f`.
+The certificate tactic is `first | rfl | (push Amount/Bool wrap through Core
+constructors; simp only [Core.denote, inlines, monad laws, schema field
+lemmas]; rfl)`.
+`rfl` is the fast path when no inlines are used. With inlines the `rfl`
+attempt is skipped (it times out on a large non-matching `do` block).
+An outer `Amount.ofWord <$>` / `natToBool <$>` wrapper is pushed inward by
+`map_denote_*` (matching `Core` constructors, not `do`/`bind` pretty-printing)
+before `Core.denote` unfolds. `map_eq_pure_bind` is not in the `simp only`
+set (it would hide `map_callAsNat_bool`). A propositional certificate is not a
+trust extension: the reifier is still untrusted MetaM, and the kernel checks
+`Core.denote (reify f) = f`.
 -/
-def certifyDenote (fn schema : Name) (lhs lhsRaw rhs coreE : Expr) : TermElabM Expr := do
+def certifyDenote (fn : Name) (ci : ContractInfo) (lhs lhsRaw rhs coreE : Expr) :
+    TermElabM Expr := do
   let eq ← mkEq lhs rhs
   let inlines ← inlinesUsedBy fn
   -- `isDefEq` on a large non-matching `do` block (inlined helper mid-body)
@@ -1147,59 +1287,13 @@ def certifyDenote (fn schema : Name) (lhs lhsRaw rhs coreE : Expr) : TermElabM E
     -- Reducible equality is the fast path; otherwise fall through to simp.
     if ← withNewMCtxDepth (withReducible (isDefEq lhs rhs)) then
       return (← mkEqRefl lhs)
-  let mut idsWord : Array Ident := #[
-    mkIdent ``Lsc.Tx.bind_assoc,
-    mkIdent ``Lsc.Tx.pure_bind,
-    mkIdent ``Lsc.Tx.bind_pure,
-    mkIdent ``Lsc.Tx.map_eq_pure_bind,
-    mkIdent ``Lsc.Tx.map_pure,
-    mkIdent ``Lsc.Tx.map_ite,
-    mkIdent ``Lsc.Tx.bind_ite,
-    mkIdent ``Lsc.Tx.bind_map,
-    mkIdent ``Lsc.Tx.map_bind,
-    mkIdent ``Lsc.Tx.map_callAsNat_bool,
-    mkIdent ``Lsc.Tx.map_viewAsNat_bool,
-    mkIdent ``Lsc.Tx.map_callAsNat_amount,
-    mkIdent ``Lsc.Tx.map_viewAsNat_amount,
-    mkIdent ``Lsc.Tx.callAsNat_bool_bind_require,
-    mkIdent ``Lsc.Tx.viewAsNat_bool_bind_require,
-    mkIdent ``Lsc.Tx.callAsNat_bool_bind_unit,
-    mkIdent ``Lsc.Tx.viewAsNat_bool_bind_unit,
-    mkIdent ``Lsc.Tx.viewAsNat_word_bind_const,
-    mkIdent ``Lsc.Tx.callAsNat_word_bind_const,
-    mkIdent ``Lsc.Tx.encode_address,
-    mkIdent ``Lsc.Tx.encode_amount,
-    mkIdent ``Lsc.Tx.encode_word,
-    mkIdent ``Lsc.Tx.callAsNat_addr,
-    mkIdent ``Lsc.Tx.viewAsNat_addr,
-    mkIdent ``Lsc.Core.denote,
-    mkIdent ``Lsc.Op.denote,
-    mkIdent ``Lsc.Stmt.denote,
-    mkIdent ``Lsc.Atom.eval_lit,
-    mkIdent ``Lsc.Atom.eval_var_0,
-    mkIdent ``Lsc.Atom.eval_var_1,
-    mkIdent ``Lsc.Atom.eval_var_2,
-    mkIdent ``Lsc.Atom.eval_var_3,
-    mkIdent ``Lsc.Atom.eval_var_4,
-    mkIdent ``Lsc.Atom.eval_var_5,
-    mkIdent ``Lsc.Cond.denote,
-    mkIdent ``List.map_cons,
-    mkIdent ``List.map_nil,
-    mkIdent ``Lsc.list_getD_cons_zero,
-    mkIdent ``Option.getD_some,
-    mkIdent ``Option.getD_none,
-    mkIdent ``Lsc.AbiType.encode,
-    mkIdent ``Lsc.Amount.ofWord,
-    mkIdent ``Lsc.Amount.raw,
-    mkIdent ``Lsc.Amount.eq_iff,
-    mkIdent ``Lsc.Amount.ne_iff,
-    mkIdent ``Lsc.Amount.lt_iff,
-    mkIdent ``Lsc.Amount.le_iff,
-    mkIdent fn]
   -- Do not include `map_eq_pure_bind`: it rewrites `f <$> callAsNat` to a
   -- bind and hides `map_callAsNat_bool` / `map_viewAsNat_amount`.
   let mut idsAmount : Array Ident := #[
     mkIdent ``Lsc.Tx.bind_assoc,
+    mkIdent ``Lsc.Tx.bind_assoc_pure,
+    mkIdent ``Lsc.Tx.discard_bind_pure,
+    mkIdent ``Lsc.Tx.require_iff,
     mkIdent ``Lsc.Tx.pure_bind,
     mkIdent ``Lsc.Tx.bind_pure,
     mkIdent ``Lsc.Tx.map_pure,
@@ -1217,6 +1311,8 @@ def certifyDenote (fn schema : Name) (lhs lhsRaw rhs coreE : Expr) : TermElabM E
     mkIdent ``Lsc.Tx.load_selfAddress_view_amount,
     mkIdent ``Lsc.Tx.view_toWord_arg,
     mkIdent ``Lsc.load_getD_cons,
+    mkIdent ``Lsc.load_getD_cons_one,
+    mkIdent ``Lsc.load_getD_cons_two,
     mkIdent ``Lsc.Tx.map_callAsNat_bool,
     mkIdent ``Lsc.Tx.map_viewAsNat_bool,
     mkIdent ``Lsc.Tx.map_callAsNat_amount,
@@ -1227,10 +1323,17 @@ def certifyDenote (fn schema : Name) (lhs lhsRaw rhs coreE : Expr) : TermElabM E
     mkIdent ``Lsc.Tx.bind_viewAsNat_amount,
     mkIdent ``Lsc.Tx.callAsNat_bool_bind_require,
     mkIdent ``Lsc.Tx.viewAsNat_bool_bind_require,
+    mkIdent ``Lsc.Tx.callAsNat_bool_bind_require_bind,
+    mkIdent ``Lsc.Tx.viewAsNat_bool_bind_require_bind,
     mkIdent ``Lsc.Tx.callAsNat_bool_bind_unit,
     mkIdent ``Lsc.Tx.viewAsNat_bool_bind_unit,
     mkIdent ``Lsc.Tx.viewAsNat_word_bind_const,
     mkIdent ``Lsc.Tx.callAsNat_word_bind_const,
+    mkIdent ``Lsc.Tx.natToBool_one,
+    mkIdent ``Lsc.Tx.map_discard,
+    mkIdent ``Lsc.Address.toWord,
+    mkIdent ``Lsc.Flag.off_eq_zero,
+    mkIdent ``Lsc.Flag.on_eq_one,
     mkIdent ``Lsc.Tx.encode_address,
     mkIdent ``Lsc.Tx.encode_amount,
     mkIdent ``Lsc.Tx.encode_word,
@@ -1242,80 +1345,173 @@ def certifyDenote (fn schema : Name) (lhs lhsRaw rhs coreE : Expr) : TermElabM E
     mkIdent ``Lsc.Stmt.denote,
     mkIdent ``Lsc.Atom.eval_lit,
     mkIdent ``Lsc.Atom.eval_var_0,
+    mkIdent ``Lsc.Atom.eval_var_0_addr,
+    mkIdent ``Lsc.Atom.eval_var_1_addr,
+    mkIdent ``Lsc.Atom.eval_var_2_addr,
+    mkIdent ``Lsc.Atom.eval_var_3_addr,
+    mkIdent ``Lsc.Atom.eval_var_succ_addr,
     mkIdent ``Lsc.Atom.eval_var_1,
     mkIdent ``Lsc.Atom.eval_var_2,
     mkIdent ``Lsc.Atom.eval_var_3,
     mkIdent ``Lsc.Atom.eval_var_4,
     mkIdent ``Lsc.Atom.eval_var_5,
+    mkIdent ``Lsc.Atom.eval_var_succ,
+    mkIdent ``Lsc.Atom.eval_var_6,
+    mkIdent ``Lsc.Atom.eval_var_7,
+    mkIdent ``Lsc.Atom.eval_var_8,
+    mkIdent ``Lsc.Atom.eval_var_9,
+    mkIdent ``Lsc.Atom.eval_var_10,
+    mkIdent ``Lsc.Atom.eval_var_11,
+    mkIdent ``Lsc.Atom.eval_var_12,
     mkIdent ``Lsc.Cond.denote,
+    mkIdent ``Lsc.Cond.denote_eq,
+    mkIdent ``Lsc.Cond.denote_ne,
+    mkIdent ``Lsc.Cond.denote_lt,
+    mkIdent ``Lsc.Cond.denote_le,
     mkIdent ``List.map_cons,
     mkIdent ``List.map_nil,
     mkIdent ``Lsc.list_getD_cons_zero,
+    mkIdent ``Lsc.list_getD_cons_one,
+    mkIdent ``Lsc.list_getD_cons_two,
+    mkIdent ``Lsc.list_getD_cons_three,
+    mkIdent ``Lsc.list_getD_cons_four,
+    mkIdent ``Lsc.list_getD_cons_five,
+    mkIdent ``Lsc.list_getD_cons_six,
+    mkIdent ``Lsc.list_getD_cons_seven,
+    mkIdent ``Lsc.list_getD_cons_succ,
     mkIdent ``Lsc.list_getD_cons_zero_app,
     mkIdent ``Lsc.list_getD_pair_zero,
     mkIdent ``Option.getD_some,
     mkIdent ``Option.getD_none,
-    mkIdent ``Lsc.Amount.ofWord,
+    mkIdent ``Lsc.Amount.ofWord_eq_zero,
+    mkIdent ``Lsc.Amount.ofWord_raw,
+    mkIdent ``Lsc.Amount.raw_ofWord,
+    mkIdent ``Lsc.Amount.load_bind_ofWord,
+    mkIdent ``Lsc.Amount.loadMap_bind_ofWord,
+    mkIdent ``Lsc.Amount.loadMap2_bind_ofWord,
+    mkIdent ``Lsc.Amount.add_bind_ofWord,
+    mkIdent ``Lsc.Amount.sub_bind_ofWord,
+    mkIdent ``Lsc.Amount.mulDivDown_bind_ofWord,
+    mkIdent ``Lsc.Amount.mulDivUp_bind_ofWord,
     mkIdent ``Lsc.Amount.add,
     mkIdent ``Lsc.Amount.sub,
     mkIdent ``Lsc.Amount.mulScalar,
     mkIdent ``Lsc.Amount.divScalar,
     mkIdent ``Lsc.Amount.mulDivDown,
     mkIdent ``Lsc.Amount.mulDivUp,
+    mkIdent ``Lsc.Amount.hMulDivDown_def,
+    mkIdent ``Lsc.Amount.hMulDivUp_def,
     mkIdent ``Lsc.Amount.eq_iff,
     mkIdent ``Lsc.Amount.ne_iff,
     mkIdent ``Lsc.Amount.lt_iff,
     mkIdent ``Lsc.Amount.le_iff,
+    mkIdent ``Lsc.Amount.require_lt_ofWord,
+    mkIdent ``Lsc.Amount.require_le_ofWord,
+    mkIdent ``Lsc.Amount.require_eq_zero_ofWord,
+    mkIdent ``Lsc.Amount.ite_eq_zero_ofWord,
+    mkIdent ``Lsc.Amount.raw_ofNat,
+    mkIdent ``Lsc.Amount.raw_zero,
+    mkIdent ``Lsc.Amount.mk_raw,
     mkIdent ``Lsc.Tx.HAddChecked.hAdd,
     mkIdent ``Lsc.Tx.HSubChecked.hSub,
     mkIdent ``Lsc.Tx.HMulChecked.hMul,
     mkIdent ``Lsc.Tx.HDivChecked.hDiv,
+    mkIdent ``Lsc.Tx.HMulDivDown.hMulDivDown,
+    mkIdent ``Lsc.Tx.HMulDivUp.hMulDivUp,
     mkIdent ``Lsc.Amount.raw,
-    mkIdent schema,
+    mkIdent ``Lsc.Prim.eval_id,
+    mkIdent ``Lsc.RetExpr.eval_word,
+    mkIdent ``Lsc.RetExpr.eval_flag,
+    mkIdent ``Lsc.list_getElem?_cons_one,
+    mkIdent ``Lsc.list_getElem?_cons_two,
+    mkIdent ``Lsc.list_getElem?_cons_three,
+    mkIdent ``Lsc.list_getElem?_cons_four,
+    mkIdent ``Lsc.list_getElem?_cons_five,
+    mkIdent ``List.getElem?_cons_zero,
     mkIdent fn]
+  let schemaIds ← existingIdents (schemaLemmaNames ci)
+  idsAmount := idsAmount ++ schemaIds
   for n in inlines do
-    idsWord := idsWord.push (mkIdent n)
     idsAmount := idsAmount.push (mkIdent n)
-  let pfWord : Option Expr := none
-  match pfWord with
-  | some pf => return pf
-  | none =>
-    -- Amount-sequence fallback: `lhsRaw` inlines `f.core`. `simp` of `Core.denote`
-    -- equation lemmas gives the `Tx` `>>=` spine without unfolding into ReaderT.
-    let eqRaw ← mkEq lhsRaw rhs
-    let schemaId := mkIdent schema
-    let tacAmt ← `(by
-      simp only [$[$idsAmount:ident],*]
-      try dsimp only [$schemaId:ident]
-      try simp only [Lsc.list_getD_cons_zero, Lsc.list_getD_cons_zero_app,
-        Lsc.list_getD_pair_zero, Option.getD_some, Lsc.load_getD_cons]
-      try simp only [Lsc.Tx.map_callAsNat_bool, Lsc.Tx.map_viewAsNat_bool,
-        Lsc.Tx.map_callAsNat_amount, Lsc.Tx.map_viewAsNat_amount,
-        Lsc.Tx.bind_callAsNat_bool, Lsc.Tx.bind_viewAsNat_bool,
-        Lsc.Tx.bind_callAsNat_amount, Lsc.Tx.bind_viewAsNat_amount,
-        Lsc.Tx.map_bind, Lsc.Tx.bind_map, Lsc.Tx.map_bind_ofWord,
-        Lsc.Tx.map_bind_natToBool, Lsc.Tx.map_bind_viewAsNat_amount,
-        Lsc.Tx.bind_load_inner_viewAsNat_amount,
-        Lsc.Tx.bind_load_inner_viewAsNat_amount_addr,
-        Lsc.Tx.bind_load_getD_inner_viewAsNat_amount,
-        Lsc.Tx.bind_load_getD_pair_addr_view_amount,
-        Lsc.Tx.load_selfAddress_view_amount, Lsc.Tx.view_toWord_arg]
-      try dsimp only [List.getD]
-      try (exact Lsc.Tx.bind_load_getD_pair_addr_view_amount _ _ _)
-      try (exact Lsc.Tx.bind_load_getD_inner_viewAsNat_amount _ _ _ _)
-      try (exact Lsc.Tx.bind_load_inner_viewAsNat_amount_addr _ _)
-      try (exact Lsc.Tx.bind_load_inner_viewAsNat_amount _ _)
-      all_goals rfl)
-    try
-      withoutErrToSorry (elabTermAndSynthesize tacAmt eqRaw)
-    catch e =>
-      let extra ← do
-        if let some (l, r) ← firstDifferingBind lhsRaw rhs then
-          pure m!"\nFirst differing bind:{indentExpr l}\nversus:{indentExpr r}"
-        else pure m!""
-      throwError "reify: certificate failed — denotation of the reified term is not \
-        equal to the original function (even after Tx monad laws).{indentExpr eq}{extra}\n\
-        Reified Core:{indentExpr coreE}\nTactic:{e.toMessageData}"
+  -- `lhsRaw` inlines `f.core`. `simp` of `Core.denote` equation lemmas gives
+  -- the `Tx` `>>=` spine without unfolding into ReaderT.
+  let eqRaw ← mkEq lhsRaw rhs
+  let tacAmt ← `(by
+    -- Push `ofWord <$>` / `natToBool <$>` through Core constructors *before*
+    -- unfolding `Core.denote` (unfolding yields a `do`/`bind` spine that
+    -- `map_bind` does not match on large programs). Constructor lemmas are
+    -- first-order. Then unfold primitives / schema / inlines.
+    -- Do not `simp` `map_eq_pure_bind`: it hides `map_callAsNat_bool`.
+    try (conv =>
+      lhs
+      simp (config := { maxSteps := 20000 }) only
+        [Lsc.map_denote_letOp_ofWord, Lsc.map_denote_seq_ofWord,
+          Lsc.map_denote_ret_ofWord, Lsc.map_denote_ite_ofWord,
+          Lsc.map_denote_letPure_ofWord, Lsc.map_denote_letOp_natToBool,
+          Lsc.map_denote_seq_natToBool, Lsc.map_denote_ret_natToBool,
+          Lsc.map_denote_ite_natToBool, Lsc.map_denote_letPure_natToBool,
+          Lsc.map_denote_letOp, Lsc.map_denote_seq, Lsc.map_denote_ret,
+          Lsc.map_denote_ite, Lsc.map_denote_letPure, Lsc.map_denote_opTail,
+          Lsc.map_denote_opTailFlag, Lsc.map_denote_opTailAddr,
+          Lsc.map_denote_stmtTail, Lsc.map_denote_revertTail,
+          Lsc.Tx.map_pure, Lsc.Tx.natToBool_one])
+    simp only [$[$idsAmount:ident],*]
+    try (conv =>
+      lhs
+      simp (config := { maxSteps := 20000 }) only
+        [Lsc.Tx.map_bind_ofWord, Lsc.Tx.map_bind_natToBool, Lsc.Tx.map_bind,
+          Lsc.Tx.map_discard, Lsc.Tx.map_pure, Lsc.Tx.map_ite, Lsc.Tx.bind_ite])
+    try simp only [Lsc.list_getD_cons_zero, Lsc.list_getD_cons_one,
+      Lsc.list_getD_cons_two, Lsc.list_getD_cons_three, Lsc.list_getD_cons_four,
+      Lsc.list_getD_cons_five, Lsc.list_getD_cons_six, Lsc.list_getD_cons_seven,
+      Lsc.list_getD_cons_succ, Lsc.list_getD_cons_zero_app,
+      Lsc.list_getD_pair_zero, Option.getD_some, Lsc.load_getD_cons,
+      Lsc.load_getD_cons_one, Lsc.load_getD_cons_two,
+      Lsc.list_getElem?_cons_one, Lsc.list_getElem?_cons_two,
+      Lsc.list_getElem?_cons_three, Lsc.list_getElem?_cons_four,
+      Lsc.list_getElem?_cons_five, List.getElem?_cons_zero,
+      Lsc.Atom.eval_var_0, Lsc.Atom.eval_var_0_addr, Lsc.Atom.eval_var_1,
+      Lsc.Atom.eval_var_1_addr, Lsc.Atom.eval_var_2, Lsc.Atom.eval_var_2_addr,
+      Lsc.Atom.eval_var_3, Lsc.Atom.eval_var_3_addr, Lsc.Atom.eval_var_succ,
+      Lsc.Atom.eval_var_succ_addr]
+    try simp only [Lsc.Tx.map_callAsNat_bool, Lsc.Tx.map_viewAsNat_bool,
+      Lsc.Tx.map_callAsNat_amount, Lsc.Tx.map_viewAsNat_amount,
+      Lsc.Tx.bind_callAsNat_bool, Lsc.Tx.bind_viewAsNat_bool,
+      Lsc.Tx.bind_callAsNat_amount, Lsc.Tx.bind_viewAsNat_amount,
+      Lsc.Tx.callAsNat_bool_bind_require, Lsc.Tx.viewAsNat_bool_bind_require,
+      Lsc.Tx.callAsNat_bool_bind_require_bind,
+      Lsc.Tx.viewAsNat_bool_bind_require_bind,
+      Lsc.Tx.map_bind, Lsc.Tx.bind_map, Lsc.Tx.map_bind_ofWord,
+      Lsc.Tx.map_bind_natToBool, Lsc.Tx.map_bind_viewAsNat_amount,
+      Lsc.Tx.bind_load_inner_viewAsNat_amount,
+      Lsc.Tx.bind_load_inner_viewAsNat_amount_addr,
+      Lsc.Tx.bind_load_getD_inner_viewAsNat_amount,
+      Lsc.Tx.bind_load_getD_pair_addr_view_amount,
+      Lsc.Tx.load_selfAddress_view_amount, Lsc.Tx.view_toWord_arg,
+      Lsc.Amount.load_bind_ofWord, Lsc.Amount.loadMap_bind_ofWord,
+      Lsc.Amount.add_bind_ofWord, Lsc.Amount.sub_bind_ofWord,
+      Lsc.Amount.mulDivDown_bind_ofWord, Lsc.Amount.mulDivUp_bind_ofWord,
+      Lsc.Amount.require_lt_ofWord, Lsc.Amount.require_le_ofWord,
+      Lsc.Amount.require_eq_zero_ofWord, Lsc.Amount.ite_eq_zero_ofWord,
+      Lsc.Tx.bind_assoc, Lsc.Tx.bind_assoc_pure, Lsc.Tx.discard_bind_pure,
+      Lsc.Tx.pure_bind, Lsc.Tx.bind_pure, Lsc.Tx.map_pure,
+      Lsc.Address.toWord, Lsc.Flag.off_eq_zero, Lsc.Flag.on_eq_one,
+      Lsc.Tx.natToBool_one]
+    try (exact Lsc.Tx.bind_load_getD_pair_addr_view_amount _ _ _)
+    try (exact Lsc.Tx.bind_load_getD_inner_viewAsNat_amount _ _ _ _)
+    try (exact Lsc.Tx.bind_load_inner_viewAsNat_amount_addr _ _)
+    try (exact Lsc.Tx.bind_load_inner_viewAsNat_amount _ _)
+    all_goals rfl)
+  try
+    withoutErrToSorry (elabTermAndSynthesize tacAmt eqRaw)
+  catch e =>
+    let extra ← do
+      if let some (l, r) ← firstDifferingBind lhsRaw rhs then
+        pure m!"\nFirst differing bind:{indentExpr l}\nversus:{indentExpr r}"
+      else pure m!""
+    throwError "reify: certificate failed — denotation of the reified term is not \
+      equal to the original function (even after Tx monad laws).{indentExpr eq}{extra}\n\
+      Reified Core:{indentExpr coreE}\nTactic:{e.toMessageData}"
 
 /-- Unfold `abbrev`s such as `C.M` until the head is `Lsc.Tx`. -/
 partial def whnfToTx (ty : Expr) : MetaM Expr := do
@@ -1426,7 +1622,7 @@ def reifyFunction (fn : Name) : TermElabM Unit := do
     let rhs := mkAppN (Lean.mkConst fn) params
     let eq ← mkEq lhs rhs
     let pf ← withDeclName (fn ++ `core_denote) <|
-      certifyDenote fn ci.schema lhs lhsRaw rhs core.toExpr
+      certifyDenote fn ci lhs lhsRaw rhs core.toExpr
     let stmt ← mkForallFVars params eq
     let proof ← mkLambdaFVars params pf
     addDecl <| .thmDecl { name := fn ++ `core_denote, levelParams := [], type := stmt, value := proof }
@@ -1443,10 +1639,14 @@ def ctorParams (ctor : Name) : MetaM (List Param) := do
       let abi ← abiTyOf (← inferType x)
       pure { name := n, ty := abi }
 
-def fnKindOf (fn : Name) (t : RetTy) : FnKind :=
-  if fn.getString! == "constructor" then .constructor
-  else if t == RetTy.unit then .tx
-  else .view
+def fnKindOf (fn : Name) : MetaM FnKind := do
+  if fn.getString! == "constructor" then
+    return .constructor
+  unless (← getEnv).contains (fn ++ `core) do
+    throwError "reify: `{fn}.core` missing when classifying function kind"
+  let e ← mkAppM ``Core.isPureRead #[mkConst (fn ++ `core)]
+  let e ← reduce (skipTypes := true) e
+  if e.isConstOf ``Bool.true then return .view else return .tx
 
 def fnMeta (fn : Name) : MetaM (List Param × RetTy × FnKind) := do
   let info ← getConstInfoDefn fn
@@ -1457,7 +1657,8 @@ def fnMeta (fn : Name) : MetaM (List Param × RetTy × FnKind) := do
       let n := (← x.fvarId!.getUserName).getString!
       let abi ← abiTyOf (← inferType x)
       pure { name := n, ty := abi }
-    pure (params, t, fnKindOf fn t)
+    let kind ← fnKindOf fn
+    pure (params, t, kind)
 
 def mkFnDefExpr (name : String) (decl : Name) (kind : FnKind) (params : List Param)
     (ret : RetTy) (coreName : Name) : Expr :=
@@ -2271,64 +2472,6 @@ def mkCodecCommands (ns : Name) (fns : Array Name) : MetaM (Array (TSyntax `comm
   return #[fnDefCmd, encodeCmd, decodeFnCmd, decodeCmd, memCmd, lenCmd, decFnCmd,
     ofMemCmd, encDecCmd, decEncCmd, coreCmd]
 
-def mkSchemaFieldsTerm (ci : ContractInfo) : MetaM Term := do
-  let fieldTerms : Array Term ← ci.fields.mapM fun f => do
-    let nm : TSyntax `str := Syntax.mkStrLit f.name.getString!
-    let k ← match f.kind with
-      | .scalar => `(Lsc.FieldKind.scalar)
-      | .map1 => `(Lsc.FieldKind.map1)
-      | .map2 => `(Lsc.FieldKind.map2)
-    let abi ← abiTyOf f.valTy
-    let abiT ← match abi with
-      | .uint256 => `(Lsc.AbiTy.uint256)
-      | .address => `(Lsc.AbiTy.address)
-      | .bool => `(Lsc.AbiTy.bool)
-    `({ name := $nm, kind := $k, ty := $abiT })
-  `([$fieldTerms,*])
-
-def mkTgtIdent (id : Ident) : TSyntax ``Lean.Parser.Tactic.elimTarget :=
-  ⟨mkNode ``Lean.Parser.Tactic.elimTarget #[mkNullNode, id]⟩
-
-def nestedCasesNat (n : Nat) (var : Ident)
-    (close : TSyntax ``Lean.Parser.Tactic.tacticSeq) :
-    MetaM (TSyntax ``Lean.Parser.Tactic.tacticSeq) := do
-  let tgt := mkTgtIdent var
-  let mut rest := close
-  for _ in [:n] do
-    rest ← `(Lean.Parser.Tactic.tacticSeq|
-      cases $tgt with
-      | zero => $close
-      | succ $var => $rest)
-  return rest
-
-/-- Identity of `scalarUpd` / `map1Upd` / `map2Upd` on the wrong field kind. -/
-def mkSchemaIdCommands (ci : ContractInfo) : MetaM (Array (TSyntax `command)) := do
-  let schema := mkIdent (`_root_ ++ ci.schema)
-  let S := mkIdent ci.storage
-  let fieldsTerm ← mkSchemaFieldsTerm ci
-  let n := ci.fields.size
-  let iId := mkIdent `i
-  let close ← `(Lean.Parser.Tactic.tacticSeq|
-      simp [$schema:ident] at h ⊢
-      first | contradiction | rfl)
-  let casesI ← nestedCasesNat n iId close
-  let scalarId := mkIdent (ci.schema.getPrefix ++ `schema_scalarUpd_id)
-  let map1Id := mkIdent (ci.schema.getPrefix ++ `schema_map1Upd_id)
-  let map2Id := mkIdent (ci.schema.getPrefix ++ `schema_map2Upd_id)
-  let c1 ←
-    `(command| theorem $scalarId (i : Nat) (σ : $S) (v : Nat)
-        (h : ($fieldsTerm)[i]?.map (·.kind) ≠ some Lsc.FieldKind.scalar) :
-        ($schema).st.scalarUpd i σ v = σ := by ($casesI))
-  let c2 ←
-    `(command| theorem $map1Id (i : Nat) (σ : $S) (m : Nat → Nat)
-        (h : ($fieldsTerm)[i]?.map (·.kind) ≠ some Lsc.FieldKind.map1) :
-        ($schema).st.map1Upd i σ m = σ := by ($casesI))
-  let c3 ←
-    `(command| theorem $map2Id (i : Nat) (σ : $S) (m : Nat → Nat → Nat)
-        (h : ($fieldsTerm)[i]?.map (·.kind) ≠ some Lsc.FieldKind.map2) :
-        ($schema).st.map2Upd i σ m = σ := by ($casesI))
-  return #[c1, c2, c3]
-
 def obligationsMissing (ns : Name) : MetaM (Array Name) := do
   let env ← getEnv
   let mut missing : Array Name := #[]
@@ -2391,13 +2534,15 @@ syntax (name := lscSchema) "lsc_schema " ident : command
   | `(lsc_schema $ns:ident) => do
     let ns ← liftCoreM <| realizeGlobalConstNoOverloadWithInfo (mkIdent (ns.getId ++ `Storage))
     let ns := ns.getPrefix
-    let (cmd, thm) ← liftTermElabM do
+    let (schema, lawful, fields) ← liftTermElabM do
       let ci ← contractInfo ns
-      let cmd ← mkSchemaCommand ci
-      let thm ← mkSchemaLawfulCommand ci
-      pure (cmd, thm)
-    elabCommand cmd
-    elabCommand thm
+      let schema ← mkSchemaCommand ci
+      let lawful ← mkSchemaLawfulCommand ci
+      let fields ← mkSchemaFieldCommands ci
+      pure (schema, lawful, fields)
+    elabCommand schema
+    elabCommand lawful
+    for cmd in fields do elabCommand cmd
   | _ => throwUnsupportedSyntax
 
 /-- `lsc_reify C.f` reifies a contract function and certifies the result. -/
@@ -2412,9 +2557,9 @@ syntax (name := lscReify) "lsc_reify " ident+ : command
 
 /-- `lsc_contract C f₁ … fₙ implements I args, …` reifies each `C.fᵢ` if needed, then
 defines `C.contract`, `C.Fn` / `C.entry` / `C.spec`, the transport codec, and
-`C.impl_<I>` (`C.impl` when there is exactly one `implements` clause). Unit-returning
-functions are `tx`; a function named `constructor` is the constructor; the rest
-are `view`. -/
+`C.impl_<I>` (`C.impl` when there is exactly one `implements` clause). A function
+named `constructor` is the constructor; otherwise the kind is `view` when
+`Core.isPureRead` (no writes, emits, or CALLs) and `tx` otherwise. -/
 syntax (name := lscContract)
   "lsc_contract " ident ident+
     ("implements " ident term:arg* (", " ident term:arg*)*)* : command

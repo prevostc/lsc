@@ -198,6 +198,15 @@ instance : HMulChecked Nat Nat Nat where
 instance : HDivChecked Nat Nat Nat where
   hDiv := divChecked
 
+/-- Fused checked `⌊a * b / c⌋`. One operation, not `*?` then `/?`.
+Instances: `Nat` (`Tx.mulDivDown`) and `Amount` (`Amount.mulDivDown`). -/
+class HMulDivDown (α β γ : Type) (δ : outParam Type) where
+  hMulDivDown {S X E ε : Type} : α → β → γ → Tx S X E ε δ
+
+/-- Fused checked `⌈a * b / c⌉`. -/
+class HMulDivUp (α β γ : Type) (δ : outParam Type) where
+  hMulDivUp {S X E ε : Type} : α → β → γ → Tx S X E ε δ
+
 /-! ### Wrapping arithmetic (pure, exactly the EVM) -/
 
 def addWrap (a b : Nat) : Nat := (a + b) % wordBound
@@ -226,6 +235,15 @@ section RunLemmas
       | .error e => .error e := by
   simp only [run, bind, ReaderT.bind, StateT.bind]
   cases x ctx w <;> rfl
+
+/-- `simp` after `funext` sees `(x >>= f) ctx w` rather than `Tx.run`. -/
+@[simp] theorem bind_apply {β : Type} (x : Tx S X E ε α) (f : α → Tx S X E ε β)
+    (ctx : Ctx) (w : World S X E) :
+    (x >>= f) ctx w =
+      match run x ctx w with
+      | .ok (a, w') => run (f a) ctx w'
+      | .error e => .error e :=
+  run_bind x f ctx w
 
 @[simp] theorem run_load (proj : S → α) (ctx : Ctx) (w : World S X E) :
     run (load (X := X) (E := E) (ε := ε) proj) ctx w = .ok (proj w.self, w) := rfl
@@ -256,6 +274,30 @@ section RunLemmas
 @[simp] theorem run_require (c : Prop) [Decidable c] (e : ε) (ctx : Ctx) (w : World S X E) :
     run (require (S := S) (X := X) (E := E) c e) ctx w =
       if c then .ok ((), w) else .error (.user e) := rfl
+
+/-- Peel a successful `require`. -/
+theorem run_require_true {c : Prop} [Decidable c] (h : c) (e : ε) (ctx : Ctx)
+    (w : World S X E) :
+    run (require (S := S) (X := X) (E := E) c e) ctx w = .ok ((), w) := by
+  simp [run_require, h]
+
+/-- Peel a failing `require`. -/
+theorem run_require_false {c : Prop} [Decidable c] (h : ¬c) (e : ε) (ctx : Ctx)
+    (w : World S X E) :
+    run (require (S := S) (X := X) (E := E) c e) ctx w = .error (.user e) := by
+  simp [run_require, h]
+
+/-- `require` depends only on the truth of the condition. -/
+theorem require_iff {c d : Prop} [Decidable c] [Decidable d] (e : ε)
+    (h : c ↔ d) :
+    require (S := S) (X := X) (E := E) c e = require d e := by
+  funext ctx w
+  simp only [require]
+  by_cases hc : c
+  · have hd : d := h.mp hc
+    simp [hc, hd]
+  · have hd : ¬ d := mt h.mpr hc
+    simp [hc, hd]
 
 @[simp] theorem run_revert (e : ε) (ctx : Ctx) (w : World S X E) :
     run (revert (S := S) (X := X) (E := E) (α := α) e) ctx w = .error (.user e) := rfl
@@ -356,6 +398,22 @@ theorem bind_assoc {β γ : Type} (x : Tx S X E ε α) (f : α → Tx S X E ε �
   simp only [bind, ReaderT.bind, StateT.bind]
   cases x ctx w <;> rfl
 
+/-- First-order `bind_assoc` when the outer continuation is `pure ∘ f`.
+Certificate `simp` matches this under binders; generic `bind_assoc` does not
+reliably instantiate `g`. -/
+theorem bind_assoc_pure {β γ : Type} (x : Tx S X E ε α)
+    (k : α → Tx S X E ε β) (f : β → γ) :
+    (x >>= k) >>= (fun b => pure (f b)) =
+      x >>= fun a => k a >>= fun b => pure (f b) :=
+  bind_assoc x k (fun b => pure (f b))
+
+/-- Discarded bind (`do require e; rest`) then `pure ∘ f`. First-order in `y`. -/
+theorem discard_bind_pure {β γ : Type} (x : Tx S X E ε α) (y : Tx S X E ε β)
+    (f : β → γ) :
+    (x >>= fun _ => y) >>= (fun b => pure (f b)) =
+      x >>= fun _ => y >>= fun b => pure (f b) :=
+  bind_assoc_pure x (fun _ => y) f
+
 /-- `pure` is a left identity of `bind`. -/
 theorem pure_bind {β : Type} (a : α) (f : α → Tx S X E ε β) :
     pure a >>= f = f a := by
@@ -393,6 +451,14 @@ theorem bind_map {β γ : Type} (f : α → β) (x : Tx S X E ε α) (k : β →
   simp only [run_map, run_bind]
   cases run x ctx w <;> rfl
 
+/-- `map` slides past a discarded bind (`do require e; rest`). `seqRight` (`>>`)
+is this shape; `map_bind` matches it, but the named form keys the certificate
+simp set when the continuation ignores the Unit. -/
+theorem map_discard {β γ : Type} (f : α → β) (x : Tx S X E ε γ)
+    (y : Tx S X E ε α) :
+    f <$> (x >>= fun _ => y) = x >>= fun _ => f <$> y :=
+  map_bind f x (fun _ => y)
+
 /-- `f <$> pure a` is `pure (f a)`. First-mint `pure (Amount.ofWord n)` vs
 `ofWord <$>` Core `pure n`. -/
 theorem map_pure {β : Type} (f : α → β) (a : α) :
@@ -404,6 +470,13 @@ theorem map_ite {β : Type} (c : Prop) [Decidable c] (f : α → β)
     (t e : Tx S X E ε α) :
     f <$> (if c then t else e) = if c then (f <$> t) else (f <$> e) := by
   split <;> rfl
+
+/-- Mapping a reverted program is still that revert. -/
+theorem map_revert {β : Type} (f : α → β) (e : ε) :
+    f <$> (revert (S := S) (X := X) (E := E) (α := α) e) = revert e := by
+  funext ctx w
+  change run (f <$> revert e) ctx w = run (revert e) ctx w
+  simp [run_map, run_revert]
 
 /-- `bind` distributes over `if`. Core.ite duplicates the continuation;
 Lean `let x ← if …` is `bind` of an `ite`. -/
@@ -468,6 +541,7 @@ syntax; their elaborators live in `Lsc.Lang.Interface` so they can wrap
 * `read f`, `read f[k]`, `read f[k₁, k₂]` — storage reads
 * `write f v`, `write f[k] v`, `write f[k₁, k₂] v` — storage writes
 * `a +? b`, `a -? b`, `a *? b`, `a /? b` — checked arithmetic (monadic, bind with `←`)
+* `a mulDiv↓ b / c`, `a mulDiv↑ b / c` — fused checked mulDiv (one op, not `*?` then `/?`)
 * `a +↻ b`, `a -↻ b`, `a *↻ b` — wrapping arithmetic (pure)
 -/
 namespace Syntax
@@ -486,6 +560,15 @@ scoped infixl:70 " /? " => Lsc.Tx.HDivChecked.hDiv
 scoped infixl:65 " +↻ " => Lsc.Tx.addWrap
 scoped infixl:65 " -↻ " => Lsc.Tx.subWrap
 scoped infixl:70 " *↻ " => Lsc.Tx.mulWrap
+
+/-- Fused `⌊a * b / c⌋`. Elaborates to `HMulDivDown` (`Nat` or `Amount`). -/
+scoped syntax:70 term:71 " mulDiv↓ " term:71 " / " term:70 : term
+/-- Fused `⌈a * b / c⌉`. -/
+scoped syntax:70 term:71 " mulDiv↑ " term:71 " / " term:70 : term
+
+macro_rules
+  | `($a mulDiv↓ $b / $c) => `(Lsc.Tx.HMulDivDown.hMulDivDown $a $b $c)
+  | `($a mulDiv↑ $b / $c) => `(Lsc.Tx.HMulDivUp.hMulDivUp $a $b $c)
 
 end Syntax
 

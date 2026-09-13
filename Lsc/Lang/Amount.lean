@@ -9,7 +9,8 @@ contract-level closed constant; bindings and storage fields are typed by
 it. `Amount a` is a one-field structure (an abbrev would unify every
 amount back to `Word`). Same-asset `+? -?`; `*? /?` only against a `Word`
 scalar; `mulDivDown` / `Up` take a numerator of asset `b` and a ratio of
-two `a`s.
+two `a`s. The fused ops are written `num mulDiv↓ x / y` and
+`num mulDiv↑ x / y` (same as the named functions; not `*?` then `/?`).
 
 `Fixed d` is dimensionless fixed-point with static decimals.
 -/
@@ -79,6 +80,12 @@ def ofWord (n : Word) : Amount a := ⟨n⟩
 @[simp] theorem raw_mul (x y : Amount a) : (x * y).raw = x.raw * y.raw := rfl
 @[simp] theorem raw_ofNat (n : Nat) : (OfNat.ofNat n : Amount a).raw = n := rfl
 @[simp] theorem raw_zero : (0 : Amount a).raw = 0 := rfl
+@[simp] theorem ofWord_eq_zero (n : Word) : (ofWord n : Amount a) = 0 ↔ n = 0 :=
+  ⟨fun h => by
+    have := congrArg Amount.raw h
+    simp only [raw_ofWord, raw_zero] at this
+    exact this,
+   fun h => h ▸ ofWord_zero⟩
 @[simp] theorem add_zero (x : Amount a) : x + 0 = x := Amount.ext (by simp)
 @[simp] theorem zero_add (x : Amount a) : 0 + x = x := Amount.ext (by simp)
 @[simp] theorem sub_zero (x : Amount a) : x - 0 = x := Amount.ext (by simp)
@@ -195,6 +202,10 @@ instance : Tx.HMulChecked (Amount a) Word (Amount a) where
   hMul := mulScalar
 instance : Tx.HDivChecked (Amount a) Word (Amount a) where
   hDiv := divScalar
+instance : Tx.HMulDivDown (Amount b) (Amount a) (Amount a) (Amount b) where
+  hMulDivDown := mulDivDown
+instance : Tx.HMulDivUp (Amount b) (Amount a) (Amount a) (Amount b) where
+  hMulDivUp := mulDivUp
 
 variable {S X E ε : Type}
 
@@ -206,6 +217,14 @@ variable {S X E ε : Type}
     Tx.HMulChecked.hMul (S := S) (X := X) (E := E) (ε := ε) x k = mulScalar x k := rfl
 @[simp] theorem hDiv_def (x : Amount a) (k : Word) :
     Tx.HDivChecked.hDiv (S := S) (X := X) (E := E) (ε := ε) x k = divScalar x k := rfl
+@[simp] theorem hMulDivDown_def (num : Amount b) (x y : Amount a) :
+    Tx.HMulDivDown.hMulDivDown (S := S) (X := X) (E := E) (ε := ε) num x y =
+      mulDivDown num x y :=
+  rfl
+@[simp] theorem hMulDivUp_def (num : Amount b) (x y : Amount a) :
+    Tx.HMulDivUp.hMulDivUp (S := S) (X := X) (E := E) (ε := ε) num x y =
+      mulDivUp num x y :=
+  rfl
 
 @[simp] theorem run_add (x y : Amount a) (ctx : Ctx) (w : World S X E) :
     Tx.run (add (S := S) (X := X) (E := E) (ε := ε) x y) ctx w =
@@ -261,6 +280,83 @@ variable {S X E ε : Type}
   by_cases hy : y.raw = 0
   · simp [hy]
   · by_cases hfit : num.raw * x.raw < wordBound <;> simp [hy, hfit, ofWord]
+
+/-- Surface `load` of an `Amount` field vs Core `load` of `.raw`. -/
+theorem load_bind_ofWord {β : Type} (proj : S → Amount a)
+    (k : Amount a → Tx S X E ε β) :
+    Tx.load (X := X) (E := E) (ε := ε) proj >>= k =
+      Tx.load (fun σ => (proj σ).raw) >>= fun n => k (ofWord n) := by
+  funext ctx w
+  simp [Tx.load, bind, ReaderT.bind, StateT.bind, Except.bind, ofWord, mk_raw]
+
+/-- Surface `loadMap` of an `Amount` mapping vs Core `.raw`. -/
+theorem loadMap_bind_ofWord {K β : Type} (proj : S → K → Amount a) (key : K)
+    (k : Amount a → Tx S X E ε β) :
+    Tx.loadMap (X := X) (E := E) (ε := ε) proj key >>= k =
+      Tx.loadMap (fun σ i => (proj σ i).raw) key >>= fun n => k (ofWord n) := by
+  funext ctx w
+  simp [Tx.loadMap, bind, ReaderT.bind, StateT.bind, Except.bind, ofWord, mk_raw]
+
+/-- Surface `loadMap2` of an `Amount` nested mapping vs Core `.raw`. -/
+theorem loadMap2_bind_ofWord {K₁ K₂ β : Type} (proj : S → K₁ → K₂ → Amount a)
+    (k₁ : K₁) (k₂ : K₂) (k : Amount a → Tx S X E ε β) :
+    Tx.loadMap2 (X := X) (E := E) (ε := ε) proj k₁ k₂ >>= k =
+      Tx.loadMap2 (fun σ i j => (proj σ i j).raw) k₁ k₂ >>=
+        fun n => k (ofWord n) := by
+  funext ctx w
+  simp [Tx.loadMap2, bind, ReaderT.bind, StateT.bind, Except.bind, ofWord, mk_raw]
+
+/-- Surface `add` vs Core `addChecked`. -/
+theorem add_bind_ofWord {β : Type} (x y : Amount a)
+    (k : Amount a → Tx S X E ε β) :
+    add (S := S) (X := X) (E := E) (ε := ε) x y >>= k =
+      Tx.addChecked x.raw y.raw >>= fun n => k (ofWord n) := by
+  simp [add]
+
+/-- Surface `sub` vs Core `subChecked`. -/
+theorem sub_bind_ofWord {β : Type} (x y : Amount a)
+    (k : Amount a → Tx S X E ε β) :
+    sub (S := S) (X := X) (E := E) (ε := ε) x y >>= k =
+      Tx.subChecked x.raw y.raw >>= fun n => k (ofWord n) := by
+  simp [sub]
+
+/-- Surface `mulDivDown` vs Core `Tx.mulDivDown` on `.raw`. -/
+theorem mulDivDown_bind_ofWord {β : Type} (num : Amount b) (x y : Amount a)
+    (k : Amount b → Tx S X E ε β) :
+    mulDivDown (S := S) (X := X) (E := E) (ε := ε) num x y >>= k =
+      Tx.mulDivDown num.raw x.raw y.raw >>= fun n => k (ofWord n) := by
+  simp [mulDivDown]
+
+/-- Surface `mulDivUp` vs Core `Tx.mulDivUp`. -/
+theorem mulDivUp_bind_ofWord {β : Type} (num : Amount b) (x y : Amount a)
+    (k : Amount b → Tx S X E ε β) :
+    mulDivUp (S := S) (X := X) (E := E) (ε := ε) num x y >>= k =
+      Tx.mulDivUp num.raw x.raw y.raw >>= fun n => k (ofWord n) := by
+  simp [mulDivUp]
+
+/-- `require (0 < ofWord n)` is the Core word test `0 < n`. -/
+@[simp] theorem require_lt_ofWord (n : Word) (err : ε) :
+    Tx.require (S := S) (X := X) (E := E) (0 < ofWord (a := a) n) err =
+      Tx.require (0 < n) err :=
+  Tx.require_iff err (by simp [lt_iff, ofWord])
+
+/-- `require (x ≤ ofWord n)` is the Core word test `x.raw ≤ n`. -/
+@[simp] theorem require_le_ofWord (x : Amount a) (n : Word) (err : ε) :
+    Tx.require (S := S) (X := X) (E := E) (x ≤ ofWord n) err =
+      Tx.require (x.raw ≤ n) err :=
+  Tx.require_iff err (by simp [le_iff, ofWord])
+
+/-- `require (ofWord n = 0)` is the Core word test `n = 0`. -/
+@[simp] theorem require_eq_zero_ofWord (n : Word) (err : ε) :
+    Tx.require (S := S) (X := X) (E := E) (ofWord (a := a) n = 0) err =
+      Tx.require (n = 0) err :=
+  Tx.require_iff err (ofWord_eq_zero n)
+
+/-- `if ofWord n = 0` is the Core word branch `if n = 0`. -/
+@[simp] theorem ite_eq_zero_ofWord {β : Type} (n : Word)
+    (t e : Tx S X E ε β) :
+    (if ofWord (a := a) n = 0 then t else e) = (if n = 0 then t else e) :=
+  ite_congr (propext (ofWord_eq_zero n)) (fun _ => rfl) (fun _ => rfl)
 
 end Amount
 

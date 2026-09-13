@@ -248,6 +248,57 @@ def tryView (addr : Address) (sel : Nat) (args : List Word) :
       Tx.run (view (ε := ε) (α := α) addr sel args) ctx w :=
   rfl
 
+/-- A successful CALL: the oracle returned a decodable payload and `ext`
+was updated. -/
+theorem run_call_ok {addr : Address} {sel : Nat} {args : List Word}
+    {ctx : Ctx} {w : World S X E} {v : α} {w' : World S X E}
+    (h : Tx.run (call (ε := ε) (α := α) addr sel args) ctx w = .ok (v, w')) :
+    ∃ rets x', w.oracle.call addr sel args w.ext = some (rets, x') ∧
+      AbiRetType.decode (α := α) rets = some v ∧
+      w' = { w with ext := x' } := by
+  simp only [run_call] at h
+  cases hcall : w.oracle.call addr sel args w.ext with
+  | none =>
+    simp [hcall] at h
+  | some pair =>
+    rcases pair with ⟨rets, x'⟩
+    simp [hcall] at h
+    cases hdec : AbiRetType.decode (α := α) rets with
+    | none =>
+      simp [hdec] at h
+    | some v' =>
+      simp [hdec] at h
+      rcases h with ⟨hv, hw⟩
+      subst hv
+      exact ⟨rets, x', rfl, hdec, hw.symm⟩
+
+/-- Oracle `none` is `.callFailed`. -/
+theorem run_call_none (addr : Address) (sel : Nat) (args : List Word)
+    (ctx : Ctx) (w : World S X E)
+    (h : w.oracle.call addr sel args w.ext = none) :
+    Tx.run (call (ε := ε) (α := α) addr sel args) ctx w = .error .callFailed := by
+  simp [run_call, h]
+
+/-- A successful view: the oracle payload decoded and the world is unchanged. -/
+theorem run_view_ok {addr : Address} {sel : Nat} {args : List Word}
+    {ctx : Ctx} {w : World S X E} {v : α} {w' : World S X E}
+    (h : Tx.run (view (ε := ε) (α := α) addr sel args) ctx w = .ok (v, w')) :
+    AbiRetType.decode (α := α) (w.oracle.view addr sel args w.ext) = some v ∧
+      w' = w := by
+  simp only [run_view] at h
+  split at h
+  · cases h
+  · next hv =>
+    cases h
+    exact ⟨hv, rfl⟩
+
+/-- Decode failure on a view is `.callFailed`; the world is unchanged. -/
+theorem run_view_none (addr : Address) (sel : Nat) (args : List Word)
+    (ctx : Ctx) (w : World S X E)
+    (h : AbiRetType.decode (α := α) (w.oracle.view addr sel args w.ext) = none) :
+    Tx.run (view (ε := ε) (α := α) addr sel args) ctx w = .error .callFailed := by
+  simp [run_view, h]
+
 @[simp] theorem run_tryCall (addr : Address) (sel : Nat) (args : List Word)
     (ctx : Ctx) (w : World S X E) :
     Tx.run (tryCall (ε := ε) (α := α) addr sel args) ctx w =
@@ -321,14 +372,31 @@ variable {S X E ε : Type}
 /-- Bit encoding of a `Bool` ABI result (`true` ↔ `1`). -/
 @[inline] def boolBit (b : Bool) : Nat := if b then 1 else 0
 
-/-- Inverse of `boolBit`. Reify wraps a Core `boolOpt` word with this (a
-named function, so certificate `simp` can match it). -/
-@[inline] def natToBool (n : Nat) : Bool := n == 1
+/-- Inverse of `boolBit` on `{0,1}`. Non-zero is `true`, matching
+`AbiRetType Bool` (`w != 0`) and ERC20 `boolOpt`. Reify wraps a Core
+`boolOpt` word with this (a named function, so certificate `simp` can
+match it). -/
+@[inline] def natToBool (n : Nat) : Bool := n != 0
 
 @[simp] theorem natToBool_boolBit (b : Bool) : natToBool (boolBit b) = b := by
   cases b <;> rfl
 
-@[simp] theorem natToBool_eq (n : Nat) : natToBool n = (n == 1) := rfl
+@[simp] theorem natToBool_eq (n : Nat) : natToBool n = (n != 0) := rfl
+
+@[simp] theorem natToBool_eq_true (n : Nat) : natToBool n = true ↔ n ≠ 0 := by
+  simp [natToBool]
+
+@[simp] theorem natToBool_zero : natToBool 0 = false := rfl
+@[simp] theorem natToBool_one : natToBool 1 = true := rfl
+
+/-- `decide (n ≠ 0) = true` is `n ≠ 0`. Used when `require (ok = true)`
+meets a `n != 0` decode. -/
+@[simp] theorem decide_ne_zero_eq_true (n : Nat) :
+    decide (n ≠ 0) = true ↔ n ≠ 0 :=
+  decide_eq_true_iff
+
+@[simp] theorem bne_zero_eq_true (n : Nat) : (n != 0) = true ↔ n ≠ 0 := by
+  simp [bne]
 
 /-- `Tx.call` with the result erased to a Core word. -/
 def callAsNat (ret : AbiRet) (addr : Address) (sel : Nat) (args : List Word) :
@@ -381,6 +449,13 @@ theorem map_callAsNat_bool (addr : Address) (sel : Nat) (args : List Word) :
   simp only [natToBool_boolBit]
   exact bind_pure _
 
+/-- `Tx.call` at `Bool` is `natToBool <$> callAsNat .boolOpt` (`n ≠ 0`). -/
+theorem call_bool (addr : Address) (sel : Nat) (args : List Word) :
+    call (S := S) (X := X) (E := E) (α := Bool) addr sel args =
+      natToBool <$>
+        callAsNat (S := S) (X := X) (E := E) (ε := ε) .boolOpt addr sel args :=
+  (map_callAsNat_bool addr sel args).symm
+
 /-- Recover a `Bool` view from the Core-word wrapper. -/
 theorem map_viewAsNat_bool (addr : Address) (sel : Nat) (args : List Word) :
     natToBool <$>
@@ -390,6 +465,13 @@ theorem map_viewAsNat_bool (addr : Address) (sel : Nat) (args : List Word) :
   rw [map_eq_pure_bind, bind_map]
   simp only [natToBool_boolBit]
   exact bind_pure _
+
+/-- `Tx.view` at `Bool` is `natToBool <$> viewAsNat .boolOpt`. -/
+theorem view_bool (addr : Address) (sel : Nat) (args : List Word) :
+    view (S := S) (X := X) (E := E) (α := Bool) addr sel args =
+      natToBool <$>
+        viewAsNat (S := S) (X := X) (E := E) (ε := ε) .boolOpt addr sel args :=
+  (map_viewAsNat_bool addr sel args).symm
 
 /-- Bind form of `map_callAsNat_bool` (`simp` may rewrite `<$>` to `>>= pure`). -/
 theorem bind_callAsNat_bool (addr : Address) (sel : Nat) (args : List Word) :
@@ -629,6 +711,28 @@ theorem viewAsNat_bool_bind_require (addr : Address) (sel : Nat)
   simp only [viewAsNat]
   exact (bind_map boolBit (view (α := Bool) addr sel args)
     (fun n => require (n = 1) err)).symm
+
+/-- `require (ok = true)` then a continuation after a Bool CALL. -/
+theorem callAsNat_bool_bind_require_bind {β : Type} (addr : Address) (sel : Nat)
+    (args : List Word) (err : ε) (k : Tx S X E ε β) :
+    call (S := S) (X := X) (E := E) (α := Bool) addr sel args >>=
+        (fun ok => require (ok = true) err >>= fun _ => k) =
+      callAsNat (S := S) (X := X) (E := E) (ε := ε) .boolOpt addr sel args >>=
+        (fun n => require (n = 1) err >>= fun _ => k) := by
+  have h := callAsNat_bool_bind_require (S := S) (X := X) (E := E)
+    addr sel args err
+  rw [← bind_assoc, h, bind_assoc]
+
+/-- `require (ok = true)` then a continuation after a Bool view. -/
+theorem viewAsNat_bool_bind_require_bind {β : Type} (addr : Address) (sel : Nat)
+    (args : List Word) (err : ε) (k : Tx S X E ε β) :
+    view (S := S) (X := X) (E := E) (α := Bool) addr sel args >>=
+        (fun ok => require (ok = true) err >>= fun _ => k) =
+      viewAsNat (S := S) (X := X) (E := E) (ε := ε) .boolOpt addr sel args >>=
+        (fun n => require (n = 1) err >>= fun _ => k) := by
+  have h := viewAsNat_bool_bind_require (S := S) (X := X) (E := E)
+    addr sel args err
+  rw [← bind_assoc, h, bind_assoc]
 
 /-- Discarded Bool CALL: Core `boolOpt` vs surface `Bool`. -/
 theorem callAsNat_bool_bind_unit (addr : Address) (sel : Nat) (args : List Word) :

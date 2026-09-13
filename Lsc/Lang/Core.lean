@@ -27,7 +27,9 @@ makes `Core.denote (reify f) = f` hold by `rfl` for word-typed programs whose `b
 nesting already matches the ANF, and by the `Tx` monad laws when an `@[lsc_inline]`
 helper sits mid-`do`. `Amount a` / `Fixed d` are one-field structures over `Word`;
 Reify erases `.raw` / `ofWord` and certificates of Amount-returning functions are
-`Amount.ofWord <$> Core.denote`.
+`Amount.ofWord <$> Core.denote`. The `map_denote_*` lemmas push that wrapper through
+Core constructors (so the certificate does not depend on `do`-notation matching
+`map_bind`). Bool-returning functions wrap with `Tx.natToBool`.
 -/
 
 namespace Lsc
@@ -50,6 +52,28 @@ def Atom.eval (env : List Nat) : Atom → Nat
     Atom.eval (x :: env) (.var 0) = x :=
   rfl
 
+/-- `Address` is a `def` newtype, so simp's discrimination tree does not
+reuse the `Nat` lemma on `Atom.eval (to :: env)`. -/
+@[simp] theorem Atom.eval_var_0_addr (x : Address) (env : List Nat) :
+    Atom.eval (x :: env) (.var 0) = x :=
+  rfl
+
+@[simp] theorem Atom.eval_var_1_addr (x y : Address) (env : List Nat) :
+    Atom.eval (x :: y :: env) (.var 1) = y :=
+  rfl
+
+@[simp] theorem Atom.eval_var_2_addr (x y z : Address) (env : List Nat) :
+    Atom.eval (x :: y :: z :: env) (.var 2) = z :=
+  rfl
+
+@[simp] theorem Atom.eval_var_3_addr (a b c d : Address) (env : List Nat) :
+    Atom.eval (a :: b :: c :: d :: env) (.var 3) = d :=
+  rfl
+
+@[simp] theorem Atom.eval_var_succ_addr (x : Address) (env : List Nat) (i : Nat) :
+    Atom.eval (x :: env) (.var (i + 1)) = Atom.eval env (.var i) :=
+  rfl
+
 @[simp] theorem Atom.eval_var_1 (x y : Nat) (env : List Nat) :
     Atom.eval (x :: y :: env) (.var 1) = y :=
   rfl
@@ -70,8 +94,81 @@ def Atom.eval (env : List Nat) : Atom → Nat
     Atom.eval (a :: b :: c :: d :: e :: f :: env) (.var 5) = f :=
   rfl
 
+@[simp] theorem Atom.eval_var_succ (x : Nat) (env : List Nat) (i : Nat) :
+    Atom.eval (x :: env) (.var (i + 1)) = Atom.eval env (.var i) :=
+  rfl
+
+@[simp] theorem Atom.eval_var_6 (a b c d e f g : Nat) (env : List Nat) :
+    Atom.eval (a :: b :: c :: d :: e :: f :: g :: env) (.var 6) = g :=
+  rfl
+
+@[simp] theorem Atom.eval_var_7 (a b c d e f g h : Nat) (env : List Nat) :
+    Atom.eval (a :: b :: c :: d :: e :: f :: g :: h :: env) (.var 7) = h :=
+  rfl
+
+@[simp] theorem Atom.eval_var_8 (a b c d e f g h i : Nat) (env : List Nat) :
+    Atom.eval (a :: b :: c :: d :: e :: f :: g :: h :: i :: env) (.var 8) = i :=
+  rfl
+
+@[simp] theorem Atom.eval_var_9 (a b c d e f g h i j : Nat) (env : List Nat) :
+    Atom.eval (a :: b :: c :: d :: e :: f :: g :: h :: i :: j :: env)
+      (.var 9) = j :=
+  rfl
+
+@[simp] theorem Atom.eval_var_10 (a b c d e f g h i j k : Nat) (env : List Nat) :
+    Atom.eval (a :: b :: c :: d :: e :: f :: g :: h :: i :: j :: k :: env)
+      (.var 10) = k :=
+  rfl
+
+@[simp] theorem Atom.eval_var_11 (a b c d e f g h i j k l : Nat)
+    (env : List Nat) :
+    Atom.eval (a :: b :: c :: d :: e :: f :: g :: h :: i :: j :: k :: l :: env)
+      (.var 11) = l :=
+  rfl
+
+@[simp] theorem Atom.eval_var_12 (a b c d e f g h i j k l m : Nat)
+    (env : List Nat) :
+    Atom.eval (a :: b :: c :: d :: e :: f :: g :: h :: i :: j :: k :: l :: m
+        :: env) (.var 12) = m :=
+  rfl
+
 @[simp] theorem list_getD_cons_zero {α : Type _} (x : α) (xs : List α) (d : α) :
     List.getD (x :: xs) 0 d = x :=
+  rfl
+
+/-- `List.getD (x :: xs) (n+1)` steps into the tail (`OfNat` indices use the
+explicit `1`/`2`/… lemmas below). -/
+@[simp] theorem list_getD_cons_succ {α : Type _} (x : α) (xs : List α) (n : Nat)
+    (d : α) :
+    List.getD (x :: xs) (n + 1) d = List.getD xs n d :=
+  rfl
+
+@[simp] theorem list_getD_cons_one {α : Type _} (x : α) (xs : List α) (d : α) :
+    List.getD (x :: xs) 1 d = List.getD xs 0 d :=
+  rfl
+
+@[simp] theorem list_getD_cons_two {α : Type _} (x : α) (xs : List α) (d : α) :
+    List.getD (x :: xs) 2 d = List.getD xs 1 d :=
+  rfl
+
+@[simp] theorem list_getD_cons_three {α : Type _} (x : α) (xs : List α) (d : α) :
+    List.getD (x :: xs) 3 d = List.getD xs 2 d :=
+  rfl
+
+@[simp] theorem list_getD_cons_four {α : Type _} (x : α) (xs : List α) (d : α) :
+    List.getD (x :: xs) 4 d = List.getD xs 3 d :=
+  rfl
+
+@[simp] theorem list_getD_cons_five {α : Type _} (x : α) (xs : List α) (d : α) :
+    List.getD (x :: xs) 5 d = List.getD xs 4 d :=
+  rfl
+
+@[simp] theorem list_getD_cons_six {α : Type _} (x : α) (xs : List α) (d : α) :
+    List.getD (x :: xs) 6 d = List.getD xs 5 d :=
+  rfl
+
+@[simp] theorem list_getD_cons_seven {α : Type _} (x : α) (xs : List α) (d : α) :
+    List.getD (x :: xs) 7 d = List.getD xs 6 d :=
   rfl
 
 /-- `schema.err.build i args` is `List.getD [ctor] i default args`. -/
@@ -91,6 +188,19 @@ def Atom.eval (env : List Nat) : Atom → Nat
     Tx.load (S := S) (X := X) (E := E) (ε := ε) (List.getD (a :: xs) 0 d) =
       Tx.load a := by
   rw [list_getD_cons_zero]
+
+@[simp] theorem load_getD_cons_one {S X E ε α : Type}
+    (a b : S → α) (xs : List (S → α)) (d : S → α) :
+    Tx.load (S := S) (X := X) (E := E) (ε := ε) (List.getD (a :: b :: xs) 1 d) =
+      Tx.load b := by
+  rw [list_getD_cons_one, list_getD_cons_zero]
+
+@[simp] theorem load_getD_cons_two {S X E ε α : Type}
+    (a b c : S → α) (xs : List (S → α)) (d : S → α) :
+    Tx.load (S := S) (X := X) (E := E) (ε := ε)
+        (List.getD (a :: b :: c :: xs) 2 d) =
+      Tx.load c := by
+  rw [list_getD_cons_two, list_getD_cons_one, list_getD_cons_zero]
 
 /-- `simp` lemma: `xs[1]?` is `OfNat` `1`, not `n.succ` / `i+1`. -/
 @[simp] theorem list_getElem?_cons_one {α : Type _} (a : α) (l : List α) :
@@ -138,6 +248,23 @@ def Cond.denote (env : List Nat) : Cond → Prop
   | .tt => True
   | .ff => False
 
+@[simp] theorem Cond.denote_lt (env : List Nat) (a b : Atom) :
+    Cond.denote env (.lt a b) = (a.eval env < b.eval env) := rfl
+@[simp] theorem Cond.denote_le (env : List Nat) (a b : Atom) :
+    Cond.denote env (.le a b) = (a.eval env ≤ b.eval env) := rfl
+@[simp] theorem Cond.denote_eq (env : List Nat) (a b : Atom) :
+    Cond.denote env (.eq a b) = (a.eval env = b.eval env) := rfl
+@[simp] theorem Cond.denote_ne (env : List Nat) (a b : Atom) :
+    Cond.denote env (.ne a b) = (a.eval env ≠ b.eval env) := rfl
+@[simp] theorem Cond.denote_and (env : List Nat) (c d : Cond) :
+    Cond.denote env (.and c d) = (c.denote env ∧ d.denote env) := rfl
+@[simp] theorem Cond.denote_or (env : List Nat) (c d : Cond) :
+    Cond.denote env (.or c d) = (c.denote env ∨ d.denote env) := rfl
+@[simp] theorem Cond.denote_not (env : List Nat) (c : Cond) :
+    Cond.denote env (.not c) = ¬ c.denote env := rfl
+@[simp] theorem Cond.denote_tt (env : List Nat) : Cond.denote env .tt = True := rfl
+@[simp] theorem Cond.denote_ff (env : List Nat) : Cond.denote env .ff = False := rfl
+
 instance Cond.instDecidable (env : List Nat) : (c : Cond) → Decidable (c.denote env)
   | .lt a b => inferInstanceAs (Decidable (a.eval env < b.eval env))
   | .le a b => inferInstanceAs (Decidable (a.eval env ≤ b.eval env))
@@ -163,6 +290,8 @@ def Prim.eval : Prim → List Nat → Nat
   | .subWrap, [a, b] => Tx.subWrap a b
   | .mulWrap, [a, b] => Tx.mulWrap a b
   | _, _ => 0
+
+@[simp] theorem Prim.eval_id (a : Nat) : Prim.eval .id [a] = a := rfl
 
 /-- Word-valued monadic primitives. -/
 inductive Op
@@ -216,7 +345,7 @@ inductive RetTy
   | .unit => Unit
   | .word => Nat
   | .addr => Address
-  | .flag => Flag
+  | .flag => Nat
   | .pair a b => a.denote × b.denote
 
 /-- Return expressions, typed by `RetTy`. -/
@@ -233,6 +362,13 @@ def RetExpr.eval (env : List Nat) : {t : RetTy} → RetExpr t → t.denote
   | _, .addr a => (a.eval env : Nat)
   | _, .flag a => (a.eval env : Nat)
   | _, .pair x y => (x.eval env, y.eval env)
+
+@[simp] theorem RetExpr.eval_word (env : List Nat) (a : Atom) :
+    RetExpr.eval env (.word a) = a.eval env :=
+  rfl
+@[simp] theorem RetExpr.eval_flag (env : List Nat) (a : Atom) :
+    RetExpr.eval env (.flag a) = a.eval env :=
+  rfl
 
 /-- The Core language. Indexed by the function's return type. -/
 inductive Core : RetTy → Type
@@ -330,6 +466,144 @@ def Core.denote (Γ : ContractSchema S X E ε) : {t : RetTy} → Core t → List
   | _, .seq s k, env => Stmt.denote Γ env s >>= fun _ => Core.denote Γ k env
   | _, .letPure p args k, env => Core.denote Γ k (Prim.eval p (args.map (·.eval env)) :: env)
   | _, .ite c a b, env => if c.denote env then Core.denote Γ a env else Core.denote Γ b env
+
+/-- Push `f <$>` through `letOp`. Certificate wrap of an Amount/Bool body. -/
+theorem map_denote_letOp {t : RetTy} {γ : Type} (f : t.denote → γ)
+    (Γ : ContractSchema S X E ε) (op : Op) (k : Core t) (env : List Nat) :
+    f <$> Core.denote Γ (.letOp op k) env =
+      Op.denote Γ env op >>= fun v => f <$> Core.denote Γ k (v :: env) := by
+  simp only [Core.denote]
+  exact Tx.map_bind f (Op.denote Γ env op) (fun v => Core.denote Γ k (v :: env))
+
+/-- Push `f <$>` through `seq`. -/
+theorem map_denote_seq {t : RetTy} {γ : Type} (f : t.denote → γ)
+    (Γ : ContractSchema S X E ε) (s : Stmt) (k : Core t) (env : List Nat) :
+    f <$> Core.denote Γ (.seq s k) env =
+      Stmt.denote Γ env s >>= fun _ => f <$> Core.denote Γ k env := by
+  simp only [Core.denote]
+  exact Tx.map_bind f (Stmt.denote Γ env s) (fun _ => Core.denote Γ k env)
+
+/-- `f <$> ret` is `pure (f (eval r))`. -/
+theorem map_denote_ret {t : RetTy} {γ : Type} (f : t.denote → γ)
+    (Γ : ContractSchema S X E ε) (r : RetExpr t) (env : List Nat) :
+    f <$> Core.denote Γ (.ret r) env = pure (f (r.eval env)) := by
+  simp only [Core.denote, Tx.map_pure]
+
+/-- Push `f <$>` through `ite`. -/
+theorem map_denote_ite {t : RetTy} {γ : Type} (f : t.denote → γ)
+    (Γ : ContractSchema S X E ε) (c : Cond) (a b : Core t) (env : List Nat) :
+    f <$> Core.denote Γ (.ite c a b) env =
+      if c.denote env then f <$> Core.denote Γ a env
+      else f <$> Core.denote Γ b env :=
+  Tx.map_ite (c.denote env) f (Core.denote Γ a env) (Core.denote Γ b env)
+
+/-- `letPure` is substitution; the wrap stays on the continuation. -/
+theorem map_denote_letPure {t : RetTy} {γ : Type} (f : t.denote → γ)
+    (Γ : ContractSchema S X E ε) (p : Prim) (args : List Atom) (k : Core t)
+    (env : List Nat) :
+    f <$> Core.denote Γ (.letPure p args k) env =
+      f <$> Core.denote Γ k (Prim.eval p (args.map (·.eval env)) :: env) := by
+  simp only [Core.denote]
+
+/-- Tail op: wrap stays on the primitive. -/
+theorem map_denote_opTail {γ : Type} (f : Nat → γ)
+    (Γ : ContractSchema S X E ε) (op : Op) (env : List Nat) :
+    f <$> Core.denote Γ (.opTail op) env = f <$> Op.denote Γ env op := by
+  simp only [Core.denote]
+
+theorem map_denote_opTailFlag {γ : Type} (f : Nat → γ)
+    (Γ : ContractSchema S X E ε) (op : Op) (env : List Nat) :
+    f <$> Core.denote Γ (.opTailFlag op) env = f <$> Op.denote Γ env op := by
+  simp only [Core.denote]
+
+theorem map_denote_opTailAddr {γ : Type} (f : Address → γ)
+    (Γ : ContractSchema S X E ε) (op : Op) (env : List Nat) :
+    f <$> Core.denote Γ (.opTailAddr op) env =
+      f <$> (Op.denote Γ env op : Tx S X E ε Nat) := by
+  simp only [Core.denote]
+
+theorem map_denote_stmtTail {γ : Type} (f : Unit → γ)
+    (Γ : ContractSchema S X E ε) (s : Stmt) (env : List Nat) :
+    f <$> Core.denote Γ (.stmtTail s) env = f <$> Stmt.denote Γ env s := by
+  simp only [Core.denote]
+
+theorem map_denote_revertTail {t : RetTy} {γ : Type} (f : t.denote → γ)
+    (Γ : ContractSchema S X E ε) (err : Nat) (args : List Atom) (env : List Nat) :
+    f <$> Core.denote Γ (.revertTail err args) env =
+      Tx.revert (Γ.err.build err (args.map (·.eval env))) := by
+  simp only [Core.denote, Tx.map_revert]
+
+/-- Amount wrap through `letOp`. First-order key for `lsc_reify`. -/
+theorem map_denote_letOp_ofWord {a : Asset}
+    (Γ : ContractSchema S X E ε) (op : Op) (k : Core .word) (env : List Nat) :
+    Amount.ofWord (a := a) <$> Core.denote Γ (.letOp op k) env =
+      Op.denote Γ env op >>= fun v =>
+        Amount.ofWord (a := a) <$> Core.denote Γ k (v :: env) :=
+  map_denote_letOp (Amount.ofWord (a := a)) Γ op k env
+
+theorem map_denote_seq_ofWord {a : Asset}
+    (Γ : ContractSchema S X E ε) (s : Stmt) (k : Core .word) (env : List Nat) :
+    Amount.ofWord (a := a) <$> Core.denote Γ (.seq s k) env =
+      Stmt.denote Γ env s >>= fun _ =>
+        Amount.ofWord (a := a) <$> Core.denote Γ k env :=
+  map_denote_seq (Amount.ofWord (a := a)) Γ s k env
+
+theorem map_denote_ret_ofWord {a : Asset}
+    (Γ : ContractSchema S X E ε) (r : RetExpr .word) (env : List Nat) :
+    Amount.ofWord (a := a) <$> Core.denote Γ (.ret r) env =
+      pure (Amount.ofWord (a := a) (r.eval env)) :=
+  map_denote_ret (Amount.ofWord (a := a)) Γ r env
+
+theorem map_denote_ite_ofWord {a : Asset}
+    (Γ : ContractSchema S X E ε) (c : Cond) (th el : Core .word) (env : List Nat) :
+    Amount.ofWord (a := a) <$> Core.denote Γ (.ite c th el) env =
+      if c.denote env then Amount.ofWord (a := a) <$> Core.denote Γ th env
+      else Amount.ofWord (a := a) <$> Core.denote Γ el env :=
+  map_denote_ite (Amount.ofWord (a := a)) Γ c th el env
+
+theorem map_denote_letPure_ofWord {a : Asset}
+    (Γ : ContractSchema S X E ε) (p : Prim) (args : List Atom) (k : Core .word)
+    (env : List Nat) :
+    Amount.ofWord (a := a) <$> Core.denote Γ (.letPure p args k) env =
+      Amount.ofWord (a := a) <$>
+        Core.denote Γ k (Prim.eval p (args.map (·.eval env)) :: env) :=
+  map_denote_letPure (Amount.ofWord (a := a)) Γ p args k env
+
+/-- Bool wrap through `letOp`. `RetTy.flag` denotes to `Nat`. -/
+theorem map_denote_letOp_natToBool
+    (Γ : ContractSchema S X E ε) (op : Op) (k : Core .flag) (env : List Nat) :
+    Tx.natToBool <$> Core.denote Γ (.letOp op k) env =
+      Op.denote Γ env op >>= fun v =>
+        Tx.natToBool <$> Core.denote Γ k (v :: env) :=
+  map_denote_letOp Tx.natToBool Γ op k env
+
+theorem map_denote_seq_natToBool
+    (Γ : ContractSchema S X E ε) (s : Stmt) (k : Core .flag) (env : List Nat) :
+    Tx.natToBool <$> Core.denote Γ (.seq s k) env =
+      Stmt.denote Γ env s >>= fun _ =>
+        Tx.natToBool <$> Core.denote Γ k env :=
+  map_denote_seq Tx.natToBool Γ s k env
+
+theorem map_denote_ret_natToBool
+    (Γ : ContractSchema S X E ε) (r : RetExpr .flag) (env : List Nat) :
+    Tx.natToBool <$> Core.denote Γ (.ret r) env =
+      pure (Tx.natToBool (r.eval env)) :=
+  map_denote_ret Tx.natToBool Γ r env
+
+theorem map_denote_ite_natToBool
+    (Γ : ContractSchema S X E ε) (c : Cond) (th el : Core .flag) (env : List Nat) :
+    Tx.natToBool <$> Core.denote Γ (.ite c th el) env =
+      if c.denote env then Tx.natToBool <$> Core.denote Γ th env
+      else Tx.natToBool <$> Core.denote Γ el env :=
+  map_denote_ite Tx.natToBool Γ c th el env
+
+theorem map_denote_letPure_natToBool
+    (Γ : ContractSchema S X E ε) (p : Prim) (args : List Atom) (k : Core .flag)
+    (env : List Nat) :
+    Tx.natToBool <$> Core.denote Γ (.letPure p args k) env =
+      Tx.natToBool <$>
+        Core.denote Γ k (Prim.eval p (args.map (·.eval env)) :: env) :=
+  map_denote_letPure Tx.natToBool Γ p args k env
 
 /-! ## Renaming (used by the reifier to eliminate join points) -/
 

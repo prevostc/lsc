@@ -5,9 +5,10 @@ import Lsc.Lang.Inline
 # `Word` — the plain checked 256-bit word
 
 `Word` is the unitless 256-bit base: `+? -? *? /?` revert on overflow,
-underflow, or zero-division, plus `mulDivDown` / `Up` and `pow10` (revert
-if the exponent exceeds 77). Quantities of an asset are `Amount a` in
-`Lsc.Lang.Amount`; dimensionless fixed-point is `Fixed d`.
+underflow, or zero-division, plus fused `mulDivDown` / `Up` (surface
+`a mulDiv↓ b / c` / `a mulDiv↑ b / c`) and `pow10` (revert if the exponent
+exceeds 77). Quantities of an asset are `Amount a` in `Lsc.Lang.Amount`;
+dimensionless fixed-point is `Fixed d`.
 -/
 
 namespace Lsc
@@ -46,6 +47,8 @@ instance : Inhabited Flag := ⟨(0 : Nat)⟩
 def on : Flag := (1 : Nat)
 /-- The cleared flag (the storage default). -/
 def off : Flag := (0 : Nat)
+@[simp] theorem on_eq_one : on = (1 : Nat) := rfl
+@[simp] theorem off_eq_zero : off = (0 : Nat) := rfl
 end Flag
 
 /-! ## `mulDiv` and `pow10` -/
@@ -102,6 +105,20 @@ def rescale (srcDec tgtDec : Nat) (r : Rounding) (a : Nat) : Tx S X E ε Nat :=
       if c = 0 then .error (.arith .divByZero)
       else if a * b < wordBound then .ok (a * b / c + (if a * b % c = 0 then 0 else 1), w)
       else .error (.arith .overflow) := rfl
+
+instance : Lsc.Tx.HMulDivDown Nat Nat Nat Nat where
+  hMulDivDown := mulDivDown
+instance : Lsc.Tx.HMulDivUp Nat Nat Nat Nat where
+  hMulDivUp := mulDivUp
+
+@[simp] theorem hMulDivDown_nat (a b c : Nat) :
+    Lsc.Tx.HMulDivDown.hMulDivDown (S := S) (X := X) (E := E) (ε := ε) a b c =
+      mulDivDown a b c :=
+  rfl
+@[simp] theorem hMulDivUp_nat (a b c : Nat) :
+    Lsc.Tx.HMulDivUp.hMulDivUp (S := S) (X := X) (E := E) (ε := ε) a b c =
+      mulDivUp a b c :=
+  rfl
 
 @[simp] theorem run_pow10 (d : Nat) (ctx : Ctx) (w : World S X E) :
     run (pow10 (S := S) (X := X) (E := E) (ε := ε) d) ctx w =
