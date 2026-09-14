@@ -92,6 +92,40 @@ def doQuote (r0 : Amount asset0) (r1 : Amount asset1) (dx : Amount asset0) :
   let den ← r0 +? dxF
   Amount.mulDivDown r1 dxF den
 
+/-- Inline helper returning a pair; consumed by `let (out, dxF) ← …`. -/
+@[lsc_inline] def quotePair (r0 : Amount asset0) (r1 : Amount asset1)
+    (dx : Amount asset0) : M (Amount asset1 × Amount asset0) := do
+  let dxF ← dx mulDiv↓ 9970 / 10000
+  let den ← r0 +? dxF
+  let out ← Amount.mulDivDown r1 dxF den
+  return (out, dxF)
+
+/-- Inline helper returning a triple; consumed by `let (out, fee, dxF) ← …`. -/
+@[lsc_inline] def quoteTriple (r0 : Amount asset0) (r1 : Amount asset1)
+    (dx : Amount asset0) : M (Amount asset1 × Amount asset0 × Amount asset0) := do
+  let dxF ← dx mulDiv↓ 9970 / 10000
+  let den ← r0 +? dxF
+  let out ← Amount.mulDivDown r1 dxF den
+  let fee ← dx -? dxF
+  return (out, fee, dxF)
+
+def doQuotePair (r0 : Amount asset0) (r1 : Amount asset1) (dx : Amount asset0) :
+    M (Amount asset1) := do
+  let (out, dxF) ← quotePair r0 r1 dx
+  Amount.mulDivDown out dxF r0
+
+def doQuoteTriple (r0 : Amount asset0) (r1 : Amount asset1) (dx : Amount asset0) :
+    M (Amount asset1) := do
+  let (out, fee, dxF) ← quoteTriple r0 r1 dx
+  let t ← fee +? dxF
+  Amount.mulDivDown out t r0
+
+/-- Word-`ite` bound by a pure `let` and consumed by `*?↓`. -/
+def doIteCoeff (x : Amount testToken) (ft : Address) (ps : Bps) :
+    M (Amount testToken) := do
+  let coeff : Bps := if ft = 0 then 0 else ps
+  x *?↓ coeff
+
 end StdlibTests
 
 lsc_schema StdlibTests
@@ -103,6 +137,8 @@ lsc_reify StdlibTests.doMulDown StdlibTests.doMulUp StdlibTests.doDivDown Stdlib
 lsc_reify StdlibTests.doRescaleDown StdlibTests.doRescaleUp StdlibTests.doPow10
 lsc_reify StdlibTests.doAdd StdlibTests.doQuote StdlibTests.doMulFixed
 lsc_reify StdlibTests.doSafeTransferFromMid
+lsc_reify StdlibTests.doQuotePair StdlibTests.doQuoteTriple
+lsc_reify StdlibTests.doIteCoeff
 
 #check StdlibTests.doCheckOk.core_denote
 #check StdlibTests.doSafeTransfer.core_denote
@@ -124,6 +160,9 @@ lsc_reify StdlibTests.doSafeTransferFromMid
 #check StdlibTests.doQuote.core_denote
 #check StdlibTests.doMulFixed.core_denote
 #check StdlibTests.doSafeTransferFromMid.core_denote
+#check StdlibTests.doQuotePair.core_denote
+#check StdlibTests.doQuoteTriple.core_denote
+#check StdlibTests.doIteCoeff.core_denote
 
 example : Nat.pow 10 18 = WAD.raw := rfl
 example : Nat.pow 10 27 = RAY.raw := rfl

@@ -64,17 +64,16 @@ inductive Error
 
 abbrev M := Tx Storage ExtState Event Error
 
-/-- Constant-product quote with a 0.3% fee: output amount, protocol fee, LP fee. -/
-@[lsc_inline] def swapOut {a b : Asset} {ρ : Type} (rIn : Amount a) (rOut : Amount b)
-    (amountIn : Amount a) (share : Bps)
-    (k : Amount b → Amount a → Amount a → M ρ) : M ρ := do
+/-- Constant-product quote: 0.3% fee, output and protocol take; oversized take reverts. -/
+@[lsc_inline] def swapOut {a b : Asset} (rIn : Amount a) (rOut : Amount b)
+    (amountIn : Amount a) (share : Bps) : M (Amount b × Amount a) := do
   let dxF ← amountIn mulDiv↓ 9970 / 10000
   let den ← rIn +? dxF
   let out ← rOut mulDiv↓ dxF / den
   let fee ← amountIn -? dxF
   let protoFee ← fee *?↓ share
-  let lpFee ← fee -? protoFee
-  k out protoFee lpFee
+  let _ ← fee -? protoFee
+  return (out, protoFee)
 
 /-- Bind two distinct tokens and set the owner; protocol take starts disabled. -/
 def constructor (owner t0 t1 : Address) : M Unit := do
@@ -157,26 +156,26 @@ def swap0for1 (amountIn : Amount asset0) (minOut : Amount asset1) : M (Amount as
   Tx.require (0 < r1) .Zero
   let ft ← read feeTo
   let ps ← read protocolShareBps
-  let coeff : Bps ← if ft = 0 then (0 : Bps) else ps
-  swapOut r0 r1 amountIn coeff fun out protoFee _lpFee => do
-    Tx.require (minOut ≤ out) .InsufficientOutput
-    Tx.require (0 < out) .ZeroOut
-    let taken ← amountIn -? protoFee
-    let r0' ← r0 +? taken
-    write reserve0 r0'
-    let r1' ← r1 -? out
-    write reserve1 r1'
-    let acc ← read protocolFees0
-    let acc' ← acc +? protoFee
-    write protocolFees0 acc'
-    let who ← Tx.sender
-    let me ← Tx.selfAddress
-    let t0 ← read token0
-    let t1 ← read token1
-    safeTransferFrom t0 who me amountIn .TransferFailed
-    safeTransfer t1 who out .TransferFailed
-    Tx.emit (.Swap0for1 who amountIn out)
-    return out
+  let coeff : Bps := if ft = 0 then 0 else ps
+  let (out, protoFee) ← swapOut r0 r1 amountIn coeff
+  Tx.require (minOut ≤ out) .InsufficientOutput
+  Tx.require (0 < out) .ZeroOut
+  let taken ← amountIn -? protoFee
+  let r0' ← r0 +? taken
+  write reserve0 r0'
+  let r1' ← r1 -? out
+  write reserve1 r1'
+  let acc ← read protocolFees0
+  let acc' ← acc +? protoFee
+  write protocolFees0 acc'
+  let who ← Tx.sender
+  let me ← Tx.selfAddress
+  let t0 ← read token0
+  let t1 ← read token1
+  safeTransferFrom t0 who me amountIn .TransferFailed
+  safeTransfer t1 who out .TransferFailed
+  Tx.emit (.Swap0for1 who amountIn out)
+  return out
 
 /-- Sell `amountIn` of token1. Symmetric to `swap0for1`. -/
 def swap1for0 (amountIn : Amount asset1) (minOut : Amount asset0) : M (Amount asset0) := do
@@ -187,26 +186,26 @@ def swap1for0 (amountIn : Amount asset1) (minOut : Amount asset0) : M (Amount as
   Tx.require (0 < r1) .Zero
   let ft ← read feeTo
   let ps ← read protocolShareBps
-  let coeff : Bps ← if ft = 0 then (0 : Bps) else ps
-  swapOut r1 r0 amountIn coeff fun out protoFee _lpFee => do
-    Tx.require (minOut ≤ out) .InsufficientOutput
-    Tx.require (0 < out) .ZeroOut
-    let taken ← amountIn -? protoFee
-    let r1' ← r1 +? taken
-    write reserve1 r1'
-    let r0' ← r0 -? out
-    write reserve0 r0'
-    let acc ← read protocolFees1
-    let acc' ← acc +? protoFee
-    write protocolFees1 acc'
-    let who ← Tx.sender
-    let me ← Tx.selfAddress
-    let t1 ← read token1
-    let t0 ← read token0
-    safeTransferFrom t1 who me amountIn .TransferFailed
-    safeTransfer t0 who out .TransferFailed
-    Tx.emit (.Swap1for0 who amountIn out)
-    return out
+  let coeff : Bps := if ft = 0 then 0 else ps
+  let (out, protoFee) ← swapOut r1 r0 amountIn coeff
+  Tx.require (minOut ≤ out) .InsufficientOutput
+  Tx.require (0 < out) .ZeroOut
+  let taken ← amountIn -? protoFee
+  let r1' ← r1 +? taken
+  write reserve1 r1'
+  let r0' ← r0 -? out
+  write reserve0 r0'
+  let acc ← read protocolFees1
+  let acc' ← acc +? protoFee
+  write protocolFees1 acc'
+  let who ← Tx.sender
+  let me ← Tx.selfAddress
+  let t1 ← read token1
+  let t0 ← read token0
+  safeTransferFrom t1 who me amountIn .TransferFailed
+  safeTransfer t0 who out .TransferFailed
+  Tx.emit (.Swap1for0 who amountIn out)
+  return out
 
 /-- Owner sets the protocol's share of the swap fee, in bps of that fee. -/
 def setProtocolShare (bps : Bps) : M Unit := do

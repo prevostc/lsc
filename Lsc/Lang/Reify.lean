@@ -6,6 +6,49 @@ import Lsc.Lang.Inline
 import Lsc.Lang.Spec
 import Lsc.Lang.TxTheorems
 
+namespace Lsc.Tx
+
+/-- `mulDivDown a (if c then t else e) z` is an `ite` of two `mulDivDown`s. -/
+theorem mulDivDown_ite {S X E ε : Type} (a : Nat) (c : Prop) [Decidable c]
+    (t e z : Nat) :
+    mulDivDown (S := S) (X := X) (E := E) (ε := ε) a (if c then t else e) z =
+      if c then mulDivDown a t z else mulDivDown a e z :=
+  apply_ite (fun x => mulDivDown a x z) c t e
+
+/-- `x *?↓ (if c then t else e)` is an `ite` of two `*?↓`s. -/
+theorem hMulFixedDown_ite {S X E ε : Type} {a : Asset} {d : Nat}
+    (x : Amount a) (c : Prop) [Decidable c] (t e : Fixed d) :
+    HMulFixedDown.hMulFixedDown (S := S) (X := X) (E := E) (ε := ε)
+        x (if c then t else e) =
+      if c then HMulFixedDown.hMulFixedDown x t
+      else HMulFixedDown.hMulFixedDown x e :=
+  apply_ite (fun r => HMulFixedDown.hMulFixedDown x r) c t e
+
+end Lsc.Tx
+
+namespace Lsc.Amount
+
+/-- `Amount.raw` of a word-`ite` is an `ite` of the raw words. -/
+theorem raw_ite {a : Asset} (c : Prop) [Decidable c] (t e : Amount a) :
+    Amount.raw (if c then t else e) = if c then t.raw else e.raw :=
+  apply_ite Amount.raw c t e
+
+/-- `mulDivDown num (if c then t else e) y` is an `ite` of two `mulDivDown`s. -/
+theorem mulDivDown_ite {a b : Asset} {S X E ε : Type}
+    (num : Amount b) (c : Prop) [Decidable c] (t e y : Amount a) :
+    mulDivDown (S := S) (X := X) (E := E) (ε := ε) num (if c then t else e) y =
+      if c then mulDivDown num t y else mulDivDown num e y :=
+  apply_ite (fun x => mulDivDown num x y) c t e
+
+/-- `mulFixedDown x (if c then t else e)` is an `ite` of two `mulFixedDown`s. -/
+theorem mulFixedDown_ite {a : Asset} {d : Nat} {S X E ε : Type}
+    (x : Amount a) (c : Prop) [Decidable c] (t e : Fixed d) :
+    mulFixedDown (S := S) (X := X) (E := E) (ε := ε) x (if c then t else e) =
+      if c then mulFixedDown x t else mulFixedDown x e :=
+  apply_ite (fun r => mulFixedDown x r) c t e
+
+end Lsc.Amount
+
 /-!
 # reification
 
@@ -51,6 +94,11 @@ The translation follows the shapes Lean's `do` elaborator produces:
 
 * `bind op (fun x => k)`                          → `letOp` / `seq`
 * `bind (bind x k₁) k₂` (inlined helper mid-`do`) → reassociate to ANF, then `letOp` / `seq`
+* `bind (pure (e₁, e₂, …)) k` (inlined tuple return) → β-reduce; `Prod.mk` match /
+                                                      `fst`/`snd` substitute components so the
+                                                      tuple never needs to be an atom
+* `let x := if c then a else b; k`                 → substitute the `ite`; split at the
+                                                      primitive that consumes it (`apply_ite`)
 * `have __do_jp := fun y => rest; body`            → reify `rest` once, then substitute it
                                                       for every `__do_jp y` leaf of `body`
 * `ite c a b`, `pure v`, tail primitives          → `ite`, `ret`, `opTail`/`stmtTail`/`revertTail`
@@ -1096,6 +1144,114 @@ def assocBindRight (innerBind k γ : Expr) : MetaM Expr := do
     let composedK ← mkLambdaFVars #[a] body
     return mkAppN bindFn #[m, inst, α, γ, inner, composedK]
 
+/-- Payload of `pure v` / `CoeTail.coe v`. -/
+def purePayload? (x : Expr) : Option Expr :=
+  let x := x.consumeMData
+  if x.isAppOfArity ``Pure.pure 4 then some (x.getArg! 3)
+  else if x.isAppOfArity ``CoeTail.coe 4 then some (x.getArg! 3)
+  else none
+
+/-- Apply `n` arguments, β-reducing leading lambdas. -/
+def betaN (f : Expr) (xs : Array Expr) : Expr :=
+  if xs.isEmpty then f
+  else if f.isLambda then f.beta xs
+  else mkAppN f xs
+
+/-- One `Prod.mk` match / projection / ζ-redex, if `e` is one. -/
+def tryReduceProd? (e : Expr) : Option Expr :=
+  let e := e.consumeMData
+  if e.isAppOf ``Prod.fst then
+    let args := e.getAppArgs
+    if args.size ≥ 1 then
+      let p := args[args.size - 1]!.consumeMData
+      if p.isAppOfArity ``Prod.mk 4 then some (p.getArg! 2) else none
+    else none
+  else if e.isAppOf ``Prod.snd then
+    let args := e.getAppArgs
+    if args.size ≥ 1 then
+      let p := args[args.size - 1]!.consumeMData
+      if p.isAppOfArity ``Prod.mk 4 then some (p.getArg! 3) else none
+    else none
+  else if e.isAppOf ``Prod.casesOn || e.isAppOf ``Prod.recOn then
+    let args := e.getAppArgs
+    -- α, β, motive, t, alt, extras…
+    if args.size ≥ 5 then
+      let t := args[3]!.consumeMData
+      let alt := args[4]!
+      if t.isAppOfArity ``Prod.mk 4 then
+        some (mkAppN (betaN alt #[t.getArg! 2, t.getArg! 3]) (args.extract 5 args.size))
+      else none
+    else none
+  else if e.isAppOf ``Prod.rec then
+    let args := e.getAppArgs
+    -- α, β, motive, alt, t, extras…
+    if args.size ≥ 5 then
+      let alt := args[3]!
+      let t := args[4]!.consumeMData
+      if t.isAppOfArity ``Prod.mk 4 then
+        some (mkAppN (betaN alt #[t.getArg! 2, t.getArg! 3]) (args.extract 5 args.size))
+      else none
+    else none
+  else
+    match e with
+    | .proj _ 0 s =>
+      let s := s.consumeMData
+      if s.isAppOfArity ``Prod.mk 4 then some (s.getArg! 2) else none
+    | .proj _ 1 s =>
+      let s := s.consumeMData
+      if s.isAppOfArity ``Prod.mk 4 then some (s.getArg! 3) else none
+    | .letE _ _ v b _ =>
+      let v := v.consumeMData
+      if v.isAppOfArity ``Prod.mk 4 then some (b.instantiate1 v) else none
+    | _ => none
+
+/-- Exhaust `Prod.mk` matches, `fst`/`snd`, and `let p := (x, y)`. -/
+partial def substProd (e : Expr) (fuel : Nat := 64) : Expr :=
+  if fuel = 0 then e
+  else
+    let e := e.consumeMData
+    match tryReduceProd? e with
+    | some e' => substProd e' (fuel - 1)
+    | none =>
+      let e' := e.replace fun t => tryReduceProd? t
+      if e' == e then e else substProd e' (fuel - 1)
+
+/-- `pure (e₁, e₂, …) >>= k` as `k` with components substituted (`pure_bind`). -/
+def reduceTupleCont (k val : Expr) : MetaM Expr := do
+  let k ← ensureLambda k
+  return substProd (k.beta #[val])
+
+/-- `if c then t else e` on a word-like type, peeling `Amount.raw` / `mk`.
+Returns the condition and the two branches with the same wrappers as `e`. -/
+partial def wordIteArg? (e : Expr) : MetaM (Option (Expr × Expr × Expr)) := do
+  let e := e.consumeMData
+  if e.isAppOf ``Lsc.Amount.raw || e.isAppOf ``Lsc.Amount.ofWord
+      || e.isAppOf ``Lsc.Amount.mk then
+    match ← wordIteArg? e.appArg! with
+    | some (c, th, el) =>
+      let wrap (b : Expr) :=
+        mkAppN e.getAppFn (e.getAppArgs.set! (e.getAppArgs.size - 1) b)
+      return some (c, wrap th, wrap el)
+    | none => return none
+  else if let .proj n 0 s := e then
+    match ← wordIteArg? s with
+    | some (c, th, el) =>
+      return some (c, Expr.proj n 0 th, Expr.proj n 0 el)
+    | none => return none
+  else if e.isAppOfArity ``ite 5 then
+    let ty ← whnfR (← inferType e)
+    unless isWordLike ty || (← isAmountTy ty) do return none
+    return some (e.getArg! 1, e.getArg! 3, e.getArg! 4)
+  else return none
+
+/-- Index of the first word-like `ite` argument of an application, if any. -/
+def firstIteArg? (e : Expr) : MetaM (Option (Nat × Expr × Expr × Expr)) := do
+  let args := e.getAppArgs
+  for i in [:args.size] do
+    if let some (c, th, el) ← wordIteArg? args[i]! then
+      return some (i, c, th, el)
+  return none
+
 partial def reify (ci : ContractInfo) (t : RetTy) (env : Env t) (e : Expr)
     (inline? : Option Name := none) : MetaM (Core t) := do
   let e ← peelAmountWrap e.consumeMData
@@ -1111,6 +1267,10 @@ partial def reify (ci : ContractInfo) (t : RetTy) (env : Env t) (e : Expr)
       withLetDecl n ty v fun jpVar => do
         let jp : JoinPoint t := { fvar := jpVar.fvarId!, hasArg, depth := env.vars.length, body }
         reify ci t { env with jp := some jp } (b.instantiate1 jpVar) inline?
+    else if v.isAppOfArity ``ite 5 then
+      -- `let x := if c then a else b; k` is substitution of the `ite` (not a Core
+      -- join). The `ite` is split later, at the primitive that consumes it.
+      reify ci t env (substProd (b.instantiate1 v)) inline?
     else
       let (p, args) ← primOf env v
       withLetDecl n ty v fun x => do
@@ -1142,19 +1302,46 @@ partial def reify (ci : ContractInfo) (t : RetTy) (env : Env t) (e : Expr)
         let inline? := seen.orElse fun _ => inline?
         if x.isAppOfArity ``Bind.bind 6 then
           reify ci t env (← assocBindRight x k args[3]!) inline?
-        else if let some op ← opOf ci env x then
-          lambdaBoundedTelescope k 1 fun ys body => do
-            let kc ← reify ci t { env with vars := ys[0]!.fvarId! :: env.vars } body inline?
-            return .letOp op kc
-        else if let some s ← stmtOf ci env x then
-          lambdaBoundedTelescope k 1 fun _ body => do
-            let kc ← reify ci t env body inline?
-            return .seq s kc
-        else if let some n := x.getAppFn.constName? then
-          if isTryHead n then throwTryCall x
-          else throwInlineOr inline? x m!"reify: `{x0}` is not a contract primitive"
         else
-          throwInlineOr inline? x m!"reify: `{x0}` is not a contract primitive"
+          let prodPure? : Option Expr ← do
+            match purePayload? x with
+            | some val =>
+              if ← isProdTy (← inferType val) then pure (some val) else pure none
+            | none => pure none
+          if let some val := prodPure? then
+            -- `pure (e₁, e₂, …) >>= k` is substitution; the tuple is never an atom.
+            reify ci t env (← reduceTupleCont k val) inline?
+          else if x.isAppOfArity ``ite 5 then
+            -- `bind (if c then a else b) k` → Core.ite (`Tx.bind_ite`).
+            let c ← condOf env (x.getArg! 1)
+            let mkBind (x' : Expr) :=
+              mkAppN f #[args[0]!, args[1]!, args[2]!, args[3]!, x', k]
+            let th ← reify ci t env (mkBind (x.getArg! 3)) inline?
+            let el ← reify ci t env (mkBind (x.getArg! 4)) inline?
+            return .ite c th el
+          else if let some (i, c, th, el) ← firstIteArg? x then
+            -- `op (if c then a else b)` → split at this primitive, not at `let coeff := if`.
+            let c ← condOf env c
+            let xargs := x.getAppArgs
+            let mkBind (arg : Expr) :=
+              mkAppN f #[args[0]!, args[1]!, args[2]!, args[3]!,
+                mkAppN x.getAppFn (xargs.set! i arg), k]
+            let thc ← reify ci t env (mkBind th) inline?
+            let elc ← reify ci t env (mkBind el) inline?
+            return .ite c thc elc
+          else if let some op ← opOf ci env x then
+            lambdaBoundedTelescope k 1 fun ys body => do
+              let kc ← reify ci t { env with vars := ys[0]!.fvarId! :: env.vars } body inline?
+              return .letOp op kc
+          else if let some s ← stmtOf ci env x then
+            lambdaBoundedTelescope k 1 fun _ body => do
+              let kc ← reify ci t env body inline?
+              return .seq s kc
+          else if let some n := x.getAppFn.constName? then
+            if isTryHead n then throwTryCall x
+            else throwInlineOr inline? x m!"reify: `{x0}` is not a contract primitive"
+          else
+            throwInlineOr inline? x m!"reify: `{x0}` is not a contract primitive"
       | ``Pure.pure, 4 => return .ret (← retExprOf env t args[3]!)
       | ``CoeTail.coe, 4 => return .ret (← retExprOf env t args[3]!)
       | ``ite, 5 =>
@@ -1168,7 +1355,15 @@ partial def reify (ci : ContractInfo) (t : RetTy) (env : Env t) (e : Expr)
       | _, _ =>
         let (e', seen) ← deltaUnfold e
         let inline? := seen.orElse fun _ => inline?
-        if e' != e then
+        if let some (i, c, th, el) ← firstIteArg? e' then
+          -- Tail `op (if c then a else b)` — same split as the bind case.
+          let c ← condOf env c
+          let xargs := e'.getAppArgs
+          let mk (arg : Expr) := mkAppN e'.getAppFn (xargs.set! i arg)
+          let thc ← reify ci t env (mk th) inline?
+          let elc ← reify ci t env (mk el) inline?
+          return .ite c thc elc
+        else if e' != e then
           reify ci t env e' inline?
         else if let some op ← opOf ci env e then
           match opTailCore t op with
@@ -1182,7 +1377,14 @@ partial def reify (ci : ContractInfo) (t : RetTy) (env : Env t) (e : Expr)
           throwInlineOr inline? e m!"reify: `{e}` is outside the reifiable fragment"
     | _ =>
       let e' ← prepOp e
-      if e' != e then
+      if let some (i, c, th, el) ← firstIteArg? e' then
+        let c ← condOf env c
+        let xargs := e'.getAppArgs
+        let mk (arg : Expr) := mkAppN e'.getAppFn (xargs.set! i arg)
+        let thc ← reify ci t env (mk th) inline?
+        let elc ← reify ci t env (mk el) inline?
+        return .ite c thc elc
+      else if e' != e then
         reify ci t env e' inline?
       else if let some op ← opOf ci env e then
         match opTailCore t op with
@@ -1314,6 +1516,11 @@ def certifyDenote (fn : Name) (ci : ContractInfo) (lhs lhsRaw rhs coreE : Expr) 
     mkIdent ``Lsc.Tx.require_iff,
     mkIdent ``Lsc.Tx.pure_bind,
     mkIdent ``Lsc.Tx.bind_pure,
+    mkIdent ``Lsc.Tx.mulDivDown_ite,
+    mkIdent ``Lsc.Tx.hMulFixedDown_ite,
+    mkIdent ``Lsc.Amount.raw_ite,
+    mkIdent ``Lsc.Amount.mulDivDown_ite,
+    mkIdent ``Lsc.Amount.mulFixedDown_ite,
     mkIdent ``Lsc.Tx.map_pure,
     mkIdent ``Lsc.Tx.map_ite,
     mkIdent ``Lsc.Tx.bind_ite,
@@ -1494,7 +1701,7 @@ def certifyDenote (fn : Name) (ci : ContractInfo) (lhs lhsRaw rhs coreE : Expr) 
           Lsc.map_denote_opTailFlag, Lsc.map_denote_opTailAddr,
           Lsc.map_denote_stmtTail, Lsc.map_denote_revertTail,
           Lsc.Tx.map_pure, Lsc.Tx.natToBool_one])
-    simp only [$[$idsAmount:ident],*]
+    simp (config := { maxSteps := 20000 }) only [$[$idsAmount:ident],*]
     try (conv =>
       lhs
       simp (config := { maxSteps := 20000 }) only
@@ -1502,7 +1709,7 @@ def certifyDenote (fn : Name) (ci : ContractInfo) (lhs lhsRaw rhs coreE : Expr) 
           Lsc.Tx.map_discard_ofWord_pair, Lsc.Tx.map_pure_ofWord_pair,
           Lsc.Tx.map_bind_natToBool, Lsc.Tx.map_bind,
           Lsc.Tx.map_discard, Lsc.Tx.map_pure, Lsc.Tx.map_ite, Lsc.Tx.bind_ite])
-    try simp only [Lsc.list_getD_cons_zero, Lsc.list_getD_cons_one,
+    try simp (config := { maxSteps := 20000 }) only [Lsc.list_getD_cons_zero, Lsc.list_getD_cons_one,
       Lsc.list_getD_cons_two, Lsc.list_getD_cons_three, Lsc.list_getD_cons_four,
       Lsc.list_getD_cons_five, Lsc.list_getD_cons_six, Lsc.list_getD_cons_seven,
       Lsc.list_getD_cons_succ, Lsc.list_getD_cons_zero_app,
@@ -1515,7 +1722,7 @@ def certifyDenote (fn : Name) (ci : ContractInfo) (lhs lhsRaw rhs coreE : Expr) 
       Lsc.Atom.eval_var_1_addr, Lsc.Atom.eval_var_2, Lsc.Atom.eval_var_2_addr,
       Lsc.Atom.eval_var_3, Lsc.Atom.eval_var_3_addr, Lsc.Atom.eval_var_succ,
       Lsc.Atom.eval_var_succ_addr]
-    try simp only [Lsc.Tx.map_callAsNat_bool, Lsc.Tx.map_viewAsNat_bool,
+    try simp (config := { maxSteps := 20000 }) only [Lsc.Tx.map_callAsNat_bool, Lsc.Tx.map_viewAsNat_bool,
       Lsc.Tx.map_callAsNat_amount, Lsc.Tx.view_eq_map_viewAsNat,
       Lsc.Tx.bind_callAsNat_bool, Lsc.Tx.bind_viewAsNat_bool,
       Lsc.Tx.bind_callAsNat_amount, Lsc.Tx.bind_viewAsNat_amount,
@@ -1543,7 +1750,9 @@ def certifyDenote (fn : Name) (ci : ContractInfo) (lhs lhsRaw rhs coreE : Expr) 
       Lsc.Amount.as, Lsc.Amount.hMulFixedDown_def, Lsc.Amount.hMulFixedUp_def,
       Lsc.Amount.hMulDivDown_word, Lsc.Amount.hMulDivUp_word,
       Lsc.Tx.bind_assoc, Lsc.Tx.bind_assoc_pure, Lsc.Tx.discard_bind_pure,
-      Lsc.Tx.pure_bind, Lsc.Tx.bind_pure, Lsc.Tx.map_pure,
+      Lsc.Tx.pure_bind, Lsc.Tx.bind_pure, Lsc.Tx.mulDivDown_ite,
+      Lsc.Tx.hMulFixedDown_ite, Lsc.Amount.raw_ite, Lsc.Amount.mulDivDown_ite,
+      Lsc.Amount.mulFixedDown_ite, Lsc.Tx.map_pure,
       Lsc.Address.toWord, Lsc.Flag.off_eq_zero, Lsc.Flag.on_eq_one,
       Lsc.Tx.natToBool_one]
     try (exact Lsc.Tx.bind_load_getD_pair_addr_view_amount _ _ _)

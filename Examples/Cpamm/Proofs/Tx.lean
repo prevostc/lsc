@@ -1567,93 +1567,73 @@ private theorem protoMul_coeff {dx : Nat} :
 private theorem swap0_after_quote (dx : Amount asset0) (minOut : Amount asset1)
     (hpos : 0 < dx) (hr0 : 0 < w.self.reserve0.raw) (hr1 : 0 < w.self.reserve1.raw) :
     Tx.run (swap0for1 dx minOut) ctx w =
-      Tx.run (swapOut w.self.reserve0 w.self.reserve1 dx (coeffBps w.self)
-        fun out protoFee _lpFee => do
-          Tx.require (minOut ≤ out) .InsufficientOutput
-          Tx.require (0 < out) .ZeroOut
-          let taken ← dx -? protoFee
+      Tx.run (swapOut w.self.reserve0 w.self.reserve1 dx (coeffBps w.self) >>= fun p => do
+          Tx.require (minOut ≤ p.1) .InsufficientOutput
+          Tx.require (0 < p.1) .ZeroOut
+          let taken ← dx -? p.2
           let r0' ← w.self.reserve0 +? taken
           write reserve0 r0'
-          let r1' ← w.self.reserve1 -? out
+          let r1' ← w.self.reserve1 -? p.1
           write reserve1 r1'
           let acc ← read protocolFees0
-          let acc' ← acc +? protoFee
+          let acc' ← acc +? p.2
           write protocolFees0 acc'
           let who ← Tx.sender
           let me ← Tx.selfAddress
           let t0 ← read token0
           let t1 ← read token1
           safeTransferFrom t0 who me dx .TransferFailed
-          safeTransfer t1 who out .TransferFailed
-          Tx.emit (.Swap0for1 who dx out)
-          return out) ctx w := by
+          safeTransfer t1 who p.1 .TransferFailed
+          Tx.emit (.Swap0for1 who dx p.1)
+          return p.1) ctx w := by
   have hr0A : 0 < w.self.reserve0 := by simpa [Amount.lt_iff] using hr0
   have hr1A : 0 < w.self.reserve1 := by simpa [Amount.lt_iff] using hr1
   rw [swap0for1, run_req_true hpos, run_load_bind, run_load_bind,
     run_req_true hr0A, run_req_true hr1A, run_load_bind, run_load_bind]
-  rw [Tx.run_ite]
-  by_cases hft : w.self.feeTo = 0
-  · rw [if_pos hft]
-    simp only [Tx.pure_bind]
-    have hc : coeffBps w.self = 0 := by simp [coeffBps, hft]
-    rw [hc]
-  · rw [if_neg hft]
-    simp only [Tx.pure_bind]
-    have hc : coeffBps w.self = w.self.protocolShareBps := by simp [coeffBps, hft]
-    rw [hc]
+  simp [coeffBps]
 
 private theorem swap1_after_quote (dx : Amount asset1) (minOut : Amount asset0)
     (hpos : 0 < dx) (hr0 : 0 < w.self.reserve0.raw) (hr1 : 0 < w.self.reserve1.raw) :
     Tx.run (swap1for0 dx minOut) ctx w =
-      Tx.run (swapOut w.self.reserve1 w.self.reserve0 dx (coeffBps w.self)
-        fun out protoFee _lpFee => do
-          Tx.require (minOut ≤ out) .InsufficientOutput
-          Tx.require (0 < out) .ZeroOut
-          let taken ← dx -? protoFee
+      Tx.run (swapOut w.self.reserve1 w.self.reserve0 dx (coeffBps w.self) >>= fun p => do
+          Tx.require (minOut ≤ p.1) .InsufficientOutput
+          Tx.require (0 < p.1) .ZeroOut
+          let taken ← dx -? p.2
           let r1' ← w.self.reserve1 +? taken
           write reserve1 r1'
-          let r0' ← w.self.reserve0 -? out
+          let r0' ← w.self.reserve0 -? p.1
           write reserve0 r0'
           let acc ← read protocolFees1
-          let acc' ← acc +? protoFee
+          let acc' ← acc +? p.2
           write protocolFees1 acc'
           let who ← Tx.sender
           let me ← Tx.selfAddress
           let t1 ← read token1
           let t0 ← read token0
           safeTransferFrom t1 who me dx .TransferFailed
-          safeTransfer t0 who out .TransferFailed
-          Tx.emit (.Swap1for0 who dx out)
-          return out) ctx w := by
+          safeTransfer t0 who p.1 .TransferFailed
+          Tx.emit (.Swap1for0 who dx p.1)
+          return p.1) ctx w := by
   have hr0A : 0 < w.self.reserve0 := by simpa [Amount.lt_iff] using hr0
   have hr1A : 0 < w.self.reserve1 := by simpa [Amount.lt_iff] using hr1
   rw [swap1for0, run_req_true hpos, run_load_bind, run_load_bind,
     run_req_true hr0A, run_req_true hr1A, run_load_bind, run_load_bind]
-  rw [Tx.run_ite]
-  by_cases hft : w.self.feeTo = 0
-  · rw [if_pos hft]
-    simp only [Tx.pure_bind]
-    have hc : coeffBps w.self = 0 := by simp [coeffBps, hft]
-    rw [hc]
-  · rw [if_neg hft]
-    simp only [Tx.pure_bind]
-    have hc : coeffBps w.self = w.self.protocolShareBps := by simp [coeffBps, hft]
-    rw [hc]
+  simp [coeffBps]
 
 theorem swap0for1_reverts_on_fee_mul (dx : Amount asset0) (minOut : Amount asset1)
     (hpos : 0 < dx) (hr0 : 0 < w.self.reserve0.raw) (hr1 : 0 < w.self.reserve1.raw)
     (hfee : ¬ dx.raw * 9970 < wordBound) :
     Tx.run (swap0for1 dx minOut) ctx w = .error (.arith .overflow) := by
-  rw [swap0_after_quote dx minOut hpos hr0 hr1]
-  exact run_swapOut_fee_mul _ _ _ _ _ hfee
+  rw [swap0_after_quote dx minOut hpos hr0 hr1, Tx.run_bind,
+    run_swapOut_fee_mul _ _ _ _ hfee]
 
 theorem swap0for1_reverts_on_den (dx : Amount asset0) (minOut : Amount asset1)
     (hpos : 0 < dx) (hr0 : 0 < w.self.reserve0.raw) (hr1 : 0 < w.self.reserve1.raw)
     (hfee : dx.raw * 9970 < wordBound)
     (hden : ¬ w.self.reserve0.raw + dxFeeLess dx.raw < wordBound) :
     Tx.run (swap0for1 dx minOut) ctx w = .error (.arith .overflow) := by
-  rw [swap0_after_quote dx minOut hpos hr0 hr1]
-  exact run_swapOut_den _ _ _ _ _ hfee hden
+  rw [swap0_after_quote dx minOut hpos hr0 hr1, Tx.run_bind,
+    run_swapOut_den _ _ _ _ hfee hden]
 
 theorem swap0for1_reverts_on_out_mul (dx : Amount asset0) (minOut : Amount asset1)
     (hpos : 0 < dx) (hr0 : 0 < w.self.reserve0.raw) (hr1 : 0 < w.self.reserve1.raw)
@@ -1661,8 +1641,8 @@ theorem swap0for1_reverts_on_out_mul (dx : Amount asset0) (minOut : Amount asset
     (hden : w.self.reserve0.raw + dxFeeLess dx.raw < wordBound)
     (houtM : ¬ w.self.reserve1.raw * dxFeeLess dx.raw < wordBound) :
     Tx.run (swap0for1 dx minOut) ctx w = .error (.arith .overflow) := by
-  rw [swap0_after_quote dx minOut hpos hr0 hr1]
-  exact run_swapOut_out_mul _ _ _ _ _ hfee hden (swap0_denNe (dx := dx) hr0) houtM
+  rw [swap0_after_quote dx minOut hpos hr0 hr1, Tx.run_bind,
+    run_swapOut_out_mul _ _ _ _ hfee hden (swap0_denNe (dx := dx) hr0) houtM]
 
 theorem swap0for1_reverts_on_proto_mul (dx : Amount asset0) (minOut : Amount asset1)
     (hpos : 0 < dx) (hr0 : 0 < w.self.reserve0.raw) (hr1 : 0 < w.self.reserve1.raw)
@@ -1671,10 +1651,9 @@ theorem swap0for1_reverts_on_proto_mul (dx : Amount asset0) (minOut : Amount ass
     (houtM : w.self.reserve1.raw * dxFeeLess dx.raw < wordBound)
     (hprotoM : ¬ swapFee dx.raw * coeffOf w.self < wordBound) :
     Tx.run (swap0for1 dx minOut) ctx w = .error (.arith .overflow) := by
-  rw [swap0_after_quote dx minOut hpos hr0 hr1]
-  exact run_swapOut_proto_mul _ _ _ _ _
-    hfee hden (swap0_denNe (dx := dx) hr0) houtM
-    ((protoMul_coeff (dx := dx.raw)).not.mpr hprotoM)
+  rw [swap0_after_quote dx minOut hpos hr0 hr1, Tx.run_bind,
+    run_swapOut_proto_mul _ _ _ _ hfee hden (swap0_denNe (dx := dx) hr0) houtM
+      ((protoMul_coeff (dx := dx.raw)).not.mpr hprotoM)]
 
 theorem swap0for1_reverts_on_lp (dx : Amount asset0) (minOut : Amount asset1)
     (hpos : 0 < dx) (hr0 : 0 < w.self.reserve0.raw) (hr1 : 0 < w.self.reserve1.raw)
@@ -1684,10 +1663,9 @@ theorem swap0for1_reverts_on_lp (dx : Amount asset0) (minOut : Amount asset1)
     (hprotoM : swapFee dx.raw * coeffOf w.self < wordBound)
     (hlp : ¬ swapOutProto dx.raw (coeffBps w.self) ≤ swapFee dx.raw) :
     Tx.run (swap0for1 dx minOut) ctx w = .error (.arith .underflow) := by
-  rw [swap0_after_quote dx minOut hpos hr0 hr1]
-  exact run_swapOut_lp _ _ _ _ _
-    hfee hden (swap0_denNe (dx := dx) hr0) houtM
-    ((protoMul_coeff (dx := dx.raw)).mpr hprotoM) hlp
+  rw [swap0_after_quote dx minOut hpos hr0 hr1, Tx.run_bind,
+    run_swapOut_lp _ _ _ _ hfee hden (swap0_denNe (dx := dx) hr0) houtM
+      ((protoMul_coeff (dx := dx.raw)).mpr hprotoM) hlp]
 
 private theorem swap0_k (dx : Amount asset0) (minOut : Amount asset1)
     (hpos : 0 < dx) (hr0 : 0 < w.self.reserve0.raw) (hr1 : 0 < w.self.reserve1.raw)
@@ -1723,7 +1701,7 @@ private theorem swap0_k (dx : Amount asset0) (minOut : Amount asset1)
       (⟨swapOutProto dx.raw (coeffBps w.self)⟩ : Amount asset0) =
         ⟨protoOf w.self dx.raw⟩ := by
     simp [swapOutProto_coeff]
-  rw [swap0_after_quote dx minOut hpos hr0 hr1, run_swapOut _ _ _ _ _ hQ, hout, hpr]
+  rw [swap0_after_quote dx minOut hpos hr0 hr1, run_swapOut_bind _ _ _ _ _ hQ, hout, hpr]
 
 theorem swap0for1_reverts_on_min (dx : Amount asset0) (minOut : Amount asset1)
     (hpos : 0 < dx) (hr0 : 0 < w.self.reserve0.raw) (hr1 : 0 < w.self.reserve1.raw)
@@ -2033,16 +2011,16 @@ theorem swap1for0_reverts_on_fee_mul (dx : Amount asset1) (minOut : Amount asset
     (hpos : 0 < dx) (hr0 : 0 < w.self.reserve0.raw) (hr1 : 0 < w.self.reserve1.raw)
     (hfee : ¬ dx.raw * 9970 < wordBound) :
     Tx.run (swap1for0 dx minOut) ctx w = .error (.arith .overflow) := by
-  rw [swap1_after_quote dx minOut hpos hr0 hr1]
-  exact run_swapOut_fee_mul _ _ _ _ _ hfee
+  rw [swap1_after_quote dx minOut hpos hr0 hr1, Tx.run_bind,
+    run_swapOut_fee_mul _ _ _ _ hfee]
 
 theorem swap1for0_reverts_on_den (dx : Amount asset1) (minOut : Amount asset0)
     (hpos : 0 < dx) (hr0 : 0 < w.self.reserve0.raw) (hr1 : 0 < w.self.reserve1.raw)
     (hfee : dx.raw * 9970 < wordBound)
     (hden : ¬ w.self.reserve1.raw + dxFeeLess dx.raw < wordBound) :
     Tx.run (swap1for0 dx minOut) ctx w = .error (.arith .overflow) := by
-  rw [swap1_after_quote dx minOut hpos hr0 hr1]
-  exact run_swapOut_den _ _ _ _ _ hfee hden
+  rw [swap1_after_quote dx minOut hpos hr0 hr1, Tx.run_bind,
+    run_swapOut_den _ _ _ _ hfee hden]
 
 theorem swap1for0_reverts_on_out_mul (dx : Amount asset1) (minOut : Amount asset0)
     (hpos : 0 < dx) (hr0 : 0 < w.self.reserve0.raw) (hr1 : 0 < w.self.reserve1.raw)
@@ -2050,8 +2028,8 @@ theorem swap1for0_reverts_on_out_mul (dx : Amount asset1) (minOut : Amount asset
     (hden : w.self.reserve1.raw + dxFeeLess dx.raw < wordBound)
     (houtM : ¬ w.self.reserve0.raw * dxFeeLess dx.raw < wordBound) :
     Tx.run (swap1for0 dx minOut) ctx w = .error (.arith .overflow) := by
-  rw [swap1_after_quote dx minOut hpos hr0 hr1]
-  exact run_swapOut_out_mul _ _ _ _ _ hfee hden (swap1_denNe (dx := dx) hr1) houtM
+  rw [swap1_after_quote dx minOut hpos hr0 hr1, Tx.run_bind,
+    run_swapOut_out_mul _ _ _ _ hfee hden (swap1_denNe (dx := dx) hr1) houtM]
 
 theorem swap1for0_reverts_on_proto_mul (dx : Amount asset1) (minOut : Amount asset0)
     (hpos : 0 < dx) (hr0 : 0 < w.self.reserve0.raw) (hr1 : 0 < w.self.reserve1.raw)
@@ -2060,10 +2038,9 @@ theorem swap1for0_reverts_on_proto_mul (dx : Amount asset1) (minOut : Amount ass
     (houtM : w.self.reserve0.raw * dxFeeLess dx.raw < wordBound)
     (hprotoM : ¬ swapFee dx.raw * coeffOf w.self < wordBound) :
     Tx.run (swap1for0 dx minOut) ctx w = .error (.arith .overflow) := by
-  rw [swap1_after_quote dx minOut hpos hr0 hr1]
-  exact run_swapOut_proto_mul _ _ _ _ _
-    hfee hden (swap1_denNe (dx := dx) hr1) houtM
-    ((protoMul_coeff (dx := dx.raw)).not.mpr hprotoM)
+  rw [swap1_after_quote dx minOut hpos hr0 hr1, Tx.run_bind,
+    run_swapOut_proto_mul _ _ _ _ hfee hden (swap1_denNe (dx := dx) hr1) houtM
+      ((protoMul_coeff (dx := dx.raw)).not.mpr hprotoM)]
 
 theorem swap1for0_reverts_on_lp (dx : Amount asset1) (minOut : Amount asset0)
     (hpos : 0 < dx) (hr0 : 0 < w.self.reserve0.raw) (hr1 : 0 < w.self.reserve1.raw)
@@ -2073,9 +2050,9 @@ theorem swap1for0_reverts_on_lp (dx : Amount asset1) (minOut : Amount asset0)
     (hprotoM : swapFee dx.raw * coeffOf w.self < wordBound)
     (hlp : ¬ swapOutProto dx.raw (coeffBps w.self) ≤ swapFee dx.raw) :
     Tx.run (swap1for0 dx minOut) ctx w = .error (.arith .underflow) := by
-  rw [swap1_after_quote dx minOut hpos hr0 hr1]
-  exact run_swapOut_lp _ _ _ _ _
-    hfee hden (swap1_denNe (dx := dx) hr1) houtM ((protoMul_coeff (dx := dx.raw)).mpr hprotoM) hlp
+  rw [swap1_after_quote dx minOut hpos hr0 hr1, Tx.run_bind,
+    run_swapOut_lp _ _ _ _ hfee hden (swap1_denNe (dx := dx) hr1) houtM
+      ((protoMul_coeff (dx := dx.raw)).mpr hprotoM) hlp]
 
 private theorem swap1_k (dx : Amount asset1) (minOut : Amount asset0)
     (hpos : 0 < dx) (hr0 : 0 < w.self.reserve0.raw) (hr1 : 0 < w.self.reserve1.raw)
@@ -2111,7 +2088,7 @@ private theorem swap1_k (dx : Amount asset1) (minOut : Amount asset0)
       (⟨swapOutProto dx.raw (coeffBps w.self)⟩ : Amount asset1) =
         ⟨protoOf w.self dx.raw⟩ := by
     simp [swapOutProto_coeff]
-  rw [swap1_after_quote dx minOut hpos hr0 hr1, run_swapOut _ _ _ _ _ hQ, hout, hpr]
+  rw [swap1_after_quote dx minOut hpos hr0 hr1, run_swapOut_bind _ _ _ _ _ hQ, hout, hpr]
 
 theorem swap1for0_reverts_on_min (dx : Amount asset1) (minOut : Amount asset0)
     (hpos : 0 < dx) (hr0 : 0 < w.self.reserve0.raw) (hr1 : 0 < w.self.reserve1.raw)

@@ -85,6 +85,16 @@ Until it lands, apply `transport_claim_ext` / `transport_exists_claim_ext`
 from `Lsc/Compiler/TransportTheorems.lean`. Example `Proofs/Compile.lean`
 only witnesses `compileRuntime C.contract`.
 
+`@[lsc_inline]` helpers may return tuples; bind them with `let`:
+
+```lean
+@[lsc_inline] def swapOut … : M (Amount b × Amount a) := do
+  -- …
+  return (out, protoFee)
+
+let (out, protoFee) ← swapOut r0 r1 amountIn coeff
+```
+
 `#lsc_obligations` prints the security statements to prove. It does not
 import the security library.
 

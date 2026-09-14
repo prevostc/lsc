@@ -9,8 +9,8 @@ set_option linter.unusedSimpArgs false
 
 /-!
 `Tx.run` of the asset-polymorphic `swapOut` helper: success is the floor quote
-`⌊rOut · dxF / (rIn + dxF)⌋`, protocol take `⌊fee · share / BPS⌋`, and LP
-remainder `fee − proto`.
+`⌊rOut · dxF / (rIn + dxF)⌋` and protocol take `⌊fee · share / BPS⌋`. The LP
+remainder `fee − proto` is checked (and discarded) so an oversized take reverts.
 -/
 
 open Lsc Lsc.Syntax Lsc.Stdlib Cpamm Stdlib
@@ -110,7 +110,7 @@ def swapOutProto (dx : Nat) (share : Bps) : Nat :=
 def swapOutLp (dx : Nat) (share : Bps) : Nat :=
   swapFee dx - swapOutProto dx share
 
-/-- Arithmetic conditions under which `swapOut` reaches `k`. -/
+/-- Arithmetic conditions under which `swapOut` succeeds. -/
 structure SwapOutOk (rIn rOut dx : Nat) (share : Bps) : Prop where
   feeMul : dx * 9970 < wordBound
   den : rIn + dxFeeLess dx < wordBound
@@ -146,22 +146,20 @@ private theorem fee_raw {a : Asset} (amountIn : Amount a) :
   rfl
 
 /-- `swapOut` reverts on `amountIn * 9970` overflow. -/
-theorem run_swapOut_fee_mul {a b : Asset} {ρ : Type}
+theorem run_swapOut_fee_mul {a b : Asset}
     (rIn : Amount a) (rOut : Amount b) (amountIn : Amount a) (share : Bps)
-    (k : Amount b → Amount a → Amount a → M ρ)
     (h : ¬ amountIn.raw * 9970 < wordBound) :
-    Tx.run (swapOut rIn rOut amountIn share k) ctx w = .error (.arith .overflow) := by
+    Tx.run (swapOut rIn rOut amountIn share) ctx w = .error (.arith .overflow) := by
   unfold swapOut
   simp only [run_mulDivDown_word_bind]
   rw [if_neg word_10000_ne, if_neg h]
 
 /-- `swapOut` reverts when `rIn + dxF` overflows. -/
-theorem run_swapOut_den {a b : Asset} {ρ : Type}
+theorem run_swapOut_den {a b : Asset}
     (rIn : Amount a) (rOut : Amount b) (amountIn : Amount a) (share : Bps)
-    (k : Amount b → Amount a → Amount a → M ρ)
     (hfee : amountIn.raw * 9970 < wordBound)
     (hden : ¬ rIn.raw + dxFeeLess amountIn.raw < wordBound) :
-    Tx.run (swapOut rIn rOut amountIn share k) ctx w = .error (.arith .overflow) := by
+    Tx.run (swapOut rIn rOut amountIn share) ctx w = .error (.arith .overflow) := by
   unfold swapOut
   simp only [run_mulDivDown_word_bind]
   rw [if_neg word_10000_ne, if_pos hfee, dxF_eq]
@@ -169,14 +167,13 @@ theorem run_swapOut_den {a b : Asset} {ρ : Type}
   rw [if_neg hden]
 
 /-- `swapOut` reverts when the output product overflows. -/
-theorem run_swapOut_out_mul {a b : Asset} {ρ : Type}
+theorem run_swapOut_out_mul {a b : Asset}
     (rIn : Amount a) (rOut : Amount b) (amountIn : Amount a) (share : Bps)
-    (k : Amount b → Amount a → Amount a → M ρ)
     (hfee : amountIn.raw * 9970 < wordBound)
     (hden : rIn.raw + dxFeeLess amountIn.raw < wordBound)
     (hdenNe : rIn.raw + dxFeeLess amountIn.raw ≠ 0)
     (houtM : ¬ rOut.raw * dxFeeLess amountIn.raw < wordBound) :
-    Tx.run (swapOut rIn rOut amountIn share k) ctx w = .error (.arith .overflow) := by
+    Tx.run (swapOut rIn rOut amountIn share) ctx w = .error (.arith .overflow) := by
   unfold swapOut
   simp only [run_mulDivDown_word_bind]
   rw [if_neg word_10000_ne, if_pos hfee, dxF_eq]
@@ -186,15 +183,14 @@ theorem run_swapOut_out_mul {a b : Asset} {ρ : Type}
   rw [if_neg hdenNe, if_neg houtM]
 
 /-- `swapOut` reverts when `fee * share` overflows. -/
-theorem run_swapOut_proto_mul {a b : Asset} {ρ : Type}
+theorem run_swapOut_proto_mul {a b : Asset}
     (rIn : Amount a) (rOut : Amount b) (amountIn : Amount a) (share : Bps)
-    (k : Amount b → Amount a → Amount a → M ρ)
     (hfee : amountIn.raw * 9970 < wordBound)
     (hden : rIn.raw + dxFeeLess amountIn.raw < wordBound)
     (hdenNe : rIn.raw + dxFeeLess amountIn.raw ≠ 0)
     (houtM : rOut.raw * dxFeeLess amountIn.raw < wordBound)
     (hprotoM : ¬ swapFee amountIn.raw * share.raw < wordBound) :
-    Tx.run (swapOut rIn rOut amountIn share k) ctx w = .error (.arith .overflow) := by
+    Tx.run (swapOut rIn rOut amountIn share) ctx w = .error (.arith .overflow) := by
   have hdxFle : dxFeeLess amountIn.raw ≤ amountIn.raw := dxFeeLess_le' amountIn.raw
   unfold swapOut
   simp only [run_mulDivDown_word_bind]
@@ -212,16 +208,15 @@ theorem run_swapOut_proto_mul {a b : Asset} {ρ : Type}
   rw [if_neg hpm]
 
 /-- `swapOut` reverts when the protocol take exceeds the 0.3% fee. -/
-theorem run_swapOut_lp {a b : Asset} {ρ : Type}
+theorem run_swapOut_lp {a b : Asset}
     (rIn : Amount a) (rOut : Amount b) (amountIn : Amount a) (share : Bps)
-    (k : Amount b → Amount a → Amount a → M ρ)
     (hfee : amountIn.raw * 9970 < wordBound)
     (hden : rIn.raw + dxFeeLess amountIn.raw < wordBound)
     (hdenNe : rIn.raw + dxFeeLess amountIn.raw ≠ 0)
     (houtM : rOut.raw * dxFeeLess amountIn.raw < wordBound)
     (hprotoM : swapFee amountIn.raw * share.raw < wordBound)
     (hlp : ¬ swapOutProto amountIn.raw share ≤ swapFee amountIn.raw) :
-    Tx.run (swapOut rIn rOut amountIn share k) ctx w = .error (.arith .underflow) := by
+    Tx.run (swapOut rIn rOut amountIn share) ctx w = .error (.arith .underflow) := by
   have hdxFle : dxFeeLess amountIn.raw ≤ amountIn.raw := dxFeeLess_le' amountIn.raw
   unfold swapOut
   simp only [run_mulDivDown_word_bind]
@@ -243,15 +238,13 @@ theorem run_swapOut_lp {a b : Asset} {ρ : Type}
   simp only [run_hSub_bind]
   rw [if_neg (by simpa [swapFee, fee_raw] using hlp)]
 
-/-- When the arithmetic conditions hold, `swapOut` is `k` on the floor triple. -/
-theorem run_swapOut {a b : Asset} {ρ : Type}
+/-- When the arithmetic conditions hold, `swapOut` returns the floor pair. -/
+theorem run_swapOut {a b : Asset}
     (rIn : Amount a) (rOut : Amount b) (amountIn : Amount a) (share : Bps)
-    (k : Amount b → Amount a → Amount a → M ρ)
     (h : SwapOutOk rIn.raw rOut.raw amountIn.raw share) :
-    Tx.run (swapOut rIn rOut amountIn share k) ctx w =
-      Tx.run (k ⟨swapOutOut rIn.raw rOut.raw amountIn.raw⟩
-        ⟨swapOutProto amountIn.raw share⟩
-        ⟨swapOutLp amountIn.raw share⟩) ctx w := by
+    Tx.run (swapOut rIn rOut amountIn share) ctx w =
+      .ok ((⟨swapOutOut rIn.raw rOut.raw amountIn.raw⟩,
+        ⟨swapOutProto amountIn.raw share⟩), w) := by
   have hdxFle : dxFeeLess amountIn.raw ≤ amountIn.raw := dxFeeLess_le' amountIn.raw
   unfold swapOut
   simp only [run_mulDivDown_word_bind]
@@ -273,28 +266,36 @@ theorem run_swapOut {a b : Asset} {ρ : Type}
       simpa [swapFee] using proto_mulDown_share (a := a) amountIn.raw share]
   simp only [run_hSub_bind]
   rw [if_pos (by simpa [swapFee, fee_raw] using h.lp)]
-  simp [swapOutLp, swapFee]
+  simp [Tx.run_pure]
 
-/-- Success of `swapOut` with a pure triple is exactly the floor formulas. -/
+/-- `swapOut` after a bind is the continuation on the floor pair. -/
+theorem run_swapOut_bind {a b : Asset} {ρ : Type}
+    (rIn : Amount a) (rOut : Amount b) (amountIn : Amount a) (share : Bps)
+    (k : Amount b × Amount a → M ρ)
+    (h : SwapOutOk rIn.raw rOut.raw amountIn.raw share) :
+    Tx.run (swapOut rIn rOut amountIn share >>= k) ctx w =
+      Tx.run (k (⟨swapOutOut rIn.raw rOut.raw amountIn.raw⟩,
+        ⟨swapOutProto amountIn.raw share⟩)) ctx w := by
+  rw [Tx.run_bind, run_swapOut rIn rOut amountIn share h]
+
+/-- Success of `swapOut` is exactly the floor formulas. -/
 theorem run_swapOut_ok {a b : Asset} (rIn : Amount a) (rOut : Amount b)
     (amountIn : Amount a) (share : Bps)
-    {p : Amount b × Amount a × Amount a}
+    {p : Amount b × Amount a}
     {w' : World Storage ExtState Event} :
-    Tx.run (swapOut rIn rOut amountIn share fun o pf lp => pure (o, pf, lp)) ctx w =
-        .ok (p, w') ↔
+    Tx.run (swapOut rIn rOut amountIn share) ctx w = .ok (p, w') ↔
       SwapOutOk rIn.raw rOut.raw amountIn.raw share ∧
         p.1 = ⟨swapOutOut rIn.raw rOut.raw amountIn.raw⟩ ∧
-        p.2.1 = ⟨swapOutProto amountIn.raw share⟩ ∧
-        p.2.2 = ⟨swapOutLp amountIn.raw share⟩ ∧
+        p.2 = ⟨swapOutProto amountIn.raw share⟩ ∧
         w' = w := by
   constructor
   · intro hrun
     have hfee : amountIn.raw * 9970 < wordBound := by
       by_contra ht
-      exact Tx.run_ok_error hrun (run_swapOut_fee_mul rIn rOut amountIn share _ ht)
+      exact Tx.run_ok_error hrun (run_swapOut_fee_mul rIn rOut amountIn share ht)
     have hden : rIn.raw + dxFeeLess amountIn.raw < wordBound := by
       by_contra ht
-      exact Tx.run_ok_error hrun (run_swapOut_den rIn rOut amountIn share _ hfee ht)
+      exact Tx.run_ok_error hrun (run_swapOut_den rIn rOut amountIn share hfee ht)
     have hdenNe : rIn.raw + dxFeeLess amountIn.raw ≠ 0 := by
       by_contra ht
       unfold swapOut at hrun
@@ -308,32 +309,25 @@ theorem run_swapOut_ok {a b : Asset} (rIn : Amount a) (rOut : Amount b)
     have houtM : rOut.raw * dxFeeLess amountIn.raw < wordBound := by
       by_contra ht
       exact Tx.run_ok_error hrun
-        (run_swapOut_out_mul rIn rOut amountIn share _ hfee hden hdenNe ht)
+        (run_swapOut_out_mul rIn rOut amountIn share hfee hden hdenNe ht)
     have hprotoM : swapFee amountIn.raw * share.raw < wordBound := by
       by_contra ht
       exact Tx.run_ok_error hrun
-        (run_swapOut_proto_mul rIn rOut amountIn share _ hfee hden hdenNe houtM ht)
+        (run_swapOut_proto_mul rIn rOut amountIn share hfee hden hdenNe houtM ht)
     have hlp : swapOutProto amountIn.raw share ≤ swapFee amountIn.raw := by
       by_contra ht
       exact Tx.run_ok_error hrun
-        (run_swapOut_lp rIn rOut amountIn share _ hfee hden hdenNe houtM hprotoM ht)
+        (run_swapOut_lp rIn rOut amountIn share hfee hden hdenNe houtM hprotoM ht)
     have hok : SwapOutOk rIn.raw rOut.raw amountIn.raw share :=
       ⟨hfee, hden, hdenNe, houtM, hprotoM, hlp⟩
-    rw [run_swapOut (k := fun o pf lp => pure (o, pf, lp)) rIn rOut amountIn share hok,
-      Tx.run_pure] at hrun
+    rw [run_swapOut rIn rOut amountIn share hok] at hrun
     rcases hrun with ⟨rfl, rfl⟩
-    exact ⟨hok, rfl, rfl, rfl, rfl⟩
-  · intro ⟨hok, h1, h2, h3, hw⟩
+    exact ⟨hok, rfl, rfl, rfl⟩
+  · intro ⟨hok, h1, h2, hw⟩
     have hp : p =
         (⟨swapOutOut rIn.raw rOut.raw amountIn.raw⟩,
-          ⟨swapOutProto amountIn.raw share⟩,
-          ⟨swapOutLp amountIn.raw share⟩) := by
-      apply Prod.ext
-      · exact h1
-      · apply Prod.ext
-        · exact h2
-        · exact h3
-    rw [run_swapOut (k := fun o pf lp => pure (o, pf, lp)) rIn rOut amountIn share hok,
-      Tx.run_pure, hp, hw]
+          ⟨swapOutProto amountIn.raw share⟩) :=
+      Prod.ext h1 h2
+    rw [run_swapOut rIn rOut amountIn share hok, hp, hw]
 
 end Cpamm
