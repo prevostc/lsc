@@ -3,6 +3,7 @@
 #
 # Fails if:
 # - any Examples/*/Contract.lean contains a forbidden token
+#   (including nested `(← …)` binds)
 # - any Examples/*/Theorems.lean has a multi-line `by` proof body
 # - Examples/Misc exists
 #
@@ -36,6 +37,7 @@ CONTRACT_PATTERNS=(
   '[a-z]U([^A-Za-z0-9]|$)'
   'mulDivDown'
   'mulDivUp'
+  '\(←'
 )
 
 scan_contract() {
@@ -99,6 +101,7 @@ self_test() {
 
   mkdir -p "$tmp/good/Examples/Token/Proofs" \
            "$tmp/badc/Examples/Token" \
+           "$tmp/badnb/Examples/Token" \
            "$tmp/badt/Examples/Token" \
            "$tmp/misc/Examples/Misc" \
            "$tmp/misc/Examples/Token"
@@ -106,7 +109,9 @@ self_test() {
   cat > "$tmp/good/Examples/Token/Contract.lean" << 'EOF'
 /-- A tiny token. -/
 def transfer (to : Address) (amount : Amount tokenAsset) : M Bool := do
-  write balances[to] (← (← read balances[to]) +? amount)
+  let b ← read balances[to]
+  let b' ← b +? amount
+  write balances[to] b'
   return true
 
 lsc_contract Token transfer
@@ -124,6 +129,14 @@ def depositRaw (n : Amount a) : M Nat := pure n.raw
 EOF
   cat > "$tmp/badc/Examples/Token/Theorems.lean" << 'EOF'
 theorem ok : True := trivial
+EOF
+
+  cat > "$tmp/badnb/Examples/Token/Contract.lean" << 'EOF'
+def deposit : M Unit := do
+  write totalShares (← ts +? minted)
+EOF
+  cat > "$tmp/badnb/Examples/Token/Theorems.lean" << 'EOF'
+theorem ok : True := Proof.ok
 EOF
 
   cat > "$tmp/badt/Examples/Token/Contract.lean" << 'EOF'
@@ -155,6 +168,18 @@ EOF
     exit 1
   fi
   echo "self-test: Contract.lean forbidden tokens ok"
+
+  set +e
+  out="$(check_root "$tmp/badnb" 2>&1)"
+  rc=$?
+  set -e
+  if [ "$rc" -ne 1 ] || ! printf '%s\n' "$out" | grep -q '(←'; then
+    echo "self-test FAIL (nested bind): expected exit 1 mentioning (←" >&2
+    echo "exit=$rc" >&2
+    printf '%s\n' "$out" >&2
+    exit 1
+  fi
+  echo "self-test: nested (← bind rejected ok"
 
   set +e
   out="$(check_root "$tmp/badt" 2>&1)"

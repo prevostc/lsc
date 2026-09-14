@@ -49,9 +49,11 @@ def transfer (to : Address) (amount : Amount tokenAsset) : M Bool := do
   let src ← Tx.sender
   let b ← read balances[src]
   Tx.require (amount ≤ b) .InsufficientBalance
-  write balances[src] (← b -? amount)
+  let b' ← b -? amount
+  write balances[src] b'
   let r ← read balances[to]
-  write balances[to] (← r +? amount)
+  let r' ← r +? amount
+  write balances[to] r'
   Tx.emit (.Transfer src to amount)
   return true
 
@@ -70,10 +72,13 @@ def transferFrom (src to : Address) (amount : Amount tokenAsset) : M Bool := do
   Tx.require (amount ≤ a) .InsufficientAllowance
   let b ← read balances[src]
   Tx.require (amount ≤ b) .InsufficientBalance
-  write allowances[src, spender] (← a -? amount)
-  write balances[src] (← b -? amount)
+  let a' ← a -? amount
+  write allowances[src, spender] a'
+  let b' ← b -? amount
+  write balances[src] b'
   let r ← read balances[to]
-  write balances[to] (← r +? amount)
+  let r' ← r +? amount
+  write balances[to] r'
   Tx.emit (.Transfer src to amount)
   return true
 
@@ -83,9 +88,11 @@ def mint (to : Address) (amount : Amount tokenAsset) : M Unit := do
   let owner ← read owner
   Tx.require (caller = owner) .NotOwner
   let supply ← read totalSupply
-  write totalSupply (← supply +? amount)
+  let supply' ← supply +? amount
+  write totalSupply supply'
   let r ← read balances[to]
-  write balances[to] (← r +? amount)
+  let r' ← r +? amount
+  write balances[to] r'
   Tx.emit (.Transfer 0 to amount)
 
 /-- Burn `amount` from the sender. -/
@@ -93,9 +100,11 @@ def burn (amount : Amount tokenAsset) : M Unit := do
   let src ← Tx.sender
   let b ← read balances[src]
   if amount ≤ b then
-    write balances[src] (← b -? amount)
+    let b' ← b -? amount
+    write balances[src] b'
     let supply ← read totalSupply
-    write totalSupply (← supply -? amount)
+    let supply' ← supply -? amount
+    write totalSupply supply'
   else
     Tx.revert .InsufficientBalance
   Tx.emit (.Transfer src 0 amount)
