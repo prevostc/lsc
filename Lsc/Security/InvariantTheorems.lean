@@ -37,4 +37,32 @@ theorem inv_run_at {C : Spec S X E ε} {Inv : World S X E → Prop} {rely : X �
     Inv (run tr w) :=
   Proof.inv_run_at hC hE hw tr hW hR
 
+/-- `PreservesInv` follows from the per-entrypoint form. -/
+theorem PreservesInv.of_fns {C : Spec S X E ε} {Inv : World S X E → Prop}
+    (h : ∀ fn, PreservesInvFn C Inv fn) : PreservesInv C Inv :=
+  Proof.PreservesInv.of_fns h
+
+/-- Reduce `PreservesInvFn` to the success path: a revert leaves the world unchanged. -/
+theorem PreservesInvFn_of_ok {C : Spec S X E ε} {Inv : World S X E → Prop} {fn : C.Fn}
+    (hok : ∀ (args : C.Args fn) (ctx : Ctx) (w : World S X E) (a : C.Ret fn)
+        (w' : World S X E),
+      Inv w → Tx.run (C.exec fn args) ctx w = .ok (a, w') → Inv w') :
+    PreservesInvFn C Inv fn :=
+  Proof.PreservesInvFn_of_ok hok
+
+/-- `PreservesInvAt` follows from the per-entrypoint form at `self`. -/
+theorem PreservesInvAt.of_fns {C : Spec S X E ε} {Inv : World S X E → Prop} {self : Address}
+    (h : ∀ fn, PreservesInvFnAt C Inv self fn) : PreservesInvAt C Inv self :=
+  Proof.PreservesInvAt.of_fns h
+
+/-- Reduce `PreservesInvFnAt` to the success path: a revert leaves the world unchanged. -/
+theorem PreservesInvFnAt_of_ok {C : Spec S X E ε} {Inv : World S X E → Prop}
+    {self : Address} {fn : C.Fn}
+    (hok : ∀ (args : C.Args fn) (ctx : Ctx) (w : World S X E) (a : C.Ret fn)
+        (w' : World S X E),
+      ctx.self = self → ctx.sender ≠ self → Inv w →
+      Tx.run (C.exec fn args) ctx w = .ok (a, w') → Inv w') :
+    PreservesInvFnAt C Inv self fn :=
+  Proof.PreservesInvFnAt_of_ok hok
+
 end Lsc.Security

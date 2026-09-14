@@ -1,5 +1,6 @@
 import Stdlib.ERC20
 import Lsc.Lang.Inline
+import Lsc.Lang.TxTheorems
 
 /-!
 # SafeERC20 — bool-checked IERC20 wrappers

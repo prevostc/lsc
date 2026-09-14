@@ -2,7 +2,8 @@ import Lsc.Lang.WordProof
 
 /-!
 Checked-word theorems: success of an arithmetic primitive implies the
-expected result and an unchanged world.
+expected result and an unchanged world. Also the `Tx.run` unfolding lemmas
+for `mulDivDown` / `mulDivUp` / `pow10`.
 -/
 
 namespace Lsc
@@ -66,6 +67,47 @@ theorem mulDivUp_ok {a b c : Nat} {ctx : Ctx} {w : World S X E}
     c ≠ 0 ∧ a * b < wordBound ∧
       q = a * b / c + (if a * b % c = 0 then 0 else 1) ∧ a * b ≤ q * c ∧ w' = w :=
   Proof.mulDivUp_ok h
+
+namespace Tx
+
+/-- `Tx.run (mulDivDown a b c)` is the checked fused floor-divide: revert on
+zero divisor or when the product does not fit in a word. -/
+@[simp] theorem run_mulDivDown (a b c : Nat) (ctx : Ctx) (w : World S X E) :
+    run (mulDivDown (S := S) (X := X) (E := E) (ε := ε) a b c) ctx w =
+      if c = 0 then .error (.arith .divByZero)
+      else if a * b < wordBound then .ok (a * b / c, w)
+      else .error (.arith .overflow) :=
+  Proof.run_mulDivDown a b c ctx w
+
+/-- `Tx.run (mulDivUp a b c)` is the checked fused ceil-divide: revert on zero
+divisor or when the product does not fit in a word. -/
+@[simp] theorem run_mulDivUp (a b c : Nat) (ctx : Ctx) (w : World S X E) :
+    run (mulDivUp (S := S) (X := X) (E := E) (ε := ε) a b c) ctx w =
+      if c = 0 then .error (.arith .divByZero)
+      else if a * b < wordBound then .ok (a * b / c + (if a * b % c = 0 then 0 else 1), w)
+      else .error (.arith .overflow) :=
+  Proof.run_mulDivUp a b c ctx w
+
+/-- The `Nat` `mulDiv↓` instance is `Tx.mulDivDown`. -/
+@[simp] theorem hMulDivDown_nat (a b c : Nat) :
+    Lsc.Tx.HMulDivDown.hMulDivDown (S := S) (X := X) (E := E) (ε := ε) a b c =
+      mulDivDown a b c :=
+  Proof.hMulDivDown_nat a b c
+
+/-- The `Nat` `mulDiv↑` instance is `Tx.mulDivUp`. -/
+@[simp] theorem hMulDivUp_nat (a b c : Nat) :
+    Lsc.Tx.HMulDivUp.hMulDivUp (S := S) (X := X) (E := E) (ε := ε) a b c =
+      mulDivUp a b c :=
+  Proof.hMulDivUp_nat a b c
+
+/-- `Tx.run (pow10 d)` returns `10^d` or reverts when `d > 77`. -/
+@[simp] theorem run_pow10 (d : Nat) (ctx : Ctx) (w : World S X E) :
+    run (pow10 (S := S) (X := X) (E := E) (ε := ε) d) ctx w =
+      if d > pow10Max then .error (.arith .overflow)
+      else .ok (10 ^ d, w) :=
+  Proof.run_pow10 d ctx w
+
+end Tx
 
 /-- A successful `pow10 d` returns `10^d` with `d ≤ 77`, and does not change
 the world. -/

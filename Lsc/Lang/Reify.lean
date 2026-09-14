@@ -1,4 +1,5 @@
 import Lsc.Lang.Core
+import Lsc.Lang.CoreTheorems
 import Lsc.Lang.Contract
 import Lsc.Lang.ExtState
 import Lsc.Lang.Inline

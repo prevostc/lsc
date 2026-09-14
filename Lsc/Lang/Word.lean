@@ -94,36 +94,10 @@ def rescale (srcDec tgtDec : Nat) (r : Rounding) (a : Nat) : Tx S X E ε Nat :=
     | .down => mulDivDown a tgt src
     | .up => mulDivUp a tgt src
 
-@[simp] theorem run_mulDivDown (a b c : Nat) (ctx : Ctx) (w : World S X E) :
-    run (mulDivDown (S := S) (X := X) (E := E) (ε := ε) a b c) ctx w =
-      if c = 0 then .error (.arith .divByZero)
-      else if a * b < wordBound then .ok (a * b / c, w)
-      else .error (.arith .overflow) := rfl
-
-@[simp] theorem run_mulDivUp (a b c : Nat) (ctx : Ctx) (w : World S X E) :
-    run (mulDivUp (S := S) (X := X) (E := E) (ε := ε) a b c) ctx w =
-      if c = 0 then .error (.arith .divByZero)
-      else if a * b < wordBound then .ok (a * b / c + (if a * b % c = 0 then 0 else 1), w)
-      else .error (.arith .overflow) := rfl
-
 instance : Lsc.Tx.HMulDivDown Nat Nat Nat Nat where
   hMulDivDown := mulDivDown
 instance : Lsc.Tx.HMulDivUp Nat Nat Nat Nat where
   hMulDivUp := mulDivUp
-
-@[simp] theorem hMulDivDown_nat (a b c : Nat) :
-    Lsc.Tx.HMulDivDown.hMulDivDown (S := S) (X := X) (E := E) (ε := ε) a b c =
-      mulDivDown a b c :=
-  rfl
-@[simp] theorem hMulDivUp_nat (a b c : Nat) :
-    Lsc.Tx.HMulDivUp.hMulDivUp (S := S) (X := X) (E := E) (ε := ε) a b c =
-      mulDivUp a b c :=
-  rfl
-
-@[simp] theorem run_pow10 (d : Nat) (ctx : Ctx) (w : World S X E) :
-    run (pow10 (S := S) (X := X) (E := E) (ε := ε) d) ctx w =
-      if d > pow10Max then .error (.arith .overflow)
-      else .ok (10 ^ d, w) := rfl
 
 end Tx
 

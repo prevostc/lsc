@@ -1,7 +1,9 @@
 import Lsc.Compiler.EndToEnd
+import Lsc.Security.TraceTheorems
 import Lsc.Compiler.Proof.SpillPath
 import Lsc.Compiler.Proof.MemFootprint
 import Lsc.Compiler.Proof.MemFootprintLift
+import YulEvmCompiler.Optimizer.Implementation.MemorySpill
 
 set_option linter.unusedSimpArgs false
 set_option linter.unusedVariables false
@@ -17,9 +19,565 @@ open YulSemantics
 open YulSemantics.EVM
 open YulEvmCompiler
 open YulEvmCompiler.Optimizer
+open YulEvmCompiler.Optimizer.MemorySpill
+open YulEvmCompiler.Optimizer.MemorySpillSelect
+open YulEvmCompiler.Optimizer.MemorySpillStateSound
 open EvmSemantics.EVM (State Steps)
 
 namespace Proof
+
+theorem ofConv_conv (v : U256) : ofConv (conv v) = v := by
+  apply BitVec.eq_of_toNat_eq
+  rw [ofConv, conv_toNat, BitVec.toNat_ofNat, Nat.mod_eq_of_lt v.isLt]
+
+theorem committedState_halted (st0 st' : EvmState) :
+    (committedState st0 st').halted = st'.halted := by
+  unfold committedState
+  split <;> [rfl; split <;> rfl]
+
+theorem storage_eq_account {yst : EvmState} {s : State} (hm : StateMatch yst s) :
+    accountYulStorage s = yst.storage := by
+  funext k
+  have h := hm.stor k
+  simp only [accountYulStorage]
+  rw [← h, ofConv_conv]
+
+theorem storageRel_account {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
+    {κ σ} {yst : EvmState} {s : State}
+    (hs : storageRel c Γ κ σ yst.storage) (hm : StateMatch yst s) :
+    storageRel' c Γ κ σ s := by
+  simpa [storageRel', storage_eq_account hm] using hs
+
+theorem haltOK_of_success {t : RetTy} {v : t.denote} {yst : EvmState} {s : State}
+    (hs : haltSuccess t v yst.halted) (hHM : HaltedMatch yst s) : haltOK t v s := by
+  obtain ⟨hk, hhalt, hM⟩ := hHM
+  unfold haltSuccess at hs
+  unfold haltOK
+  split at hs
+  · next ht =>
+    rw [if_pos ht]
+    rw [hs] at hhalt
+    cases hhalt
+    simpa [HaltMatch] using hM
+  · next ht =>
+    rw [if_neg ht]
+    rw [hs] at hhalt
+    cases hhalt
+    simpa [HaltMatch] using hM
+
+theorem reverted_of_halted {yst : EvmState} {s : State} {bytes : List UInt8}
+    (h : yst.halted = some (.revert, bytes)) (hHM : HaltedMatch yst s) :
+    s.halt = .Reverted ∧ s.hReturn.toList = bytes := by
+  obtain ⟨hk, hhalt, hM⟩ := hHM
+  rw [h] at hhalt
+  cases hhalt
+  simpa [HaltMatch] using hM
+
+theorem obs_eq_of_commit {st0 st' stObs : EvmState} {k : HaltKind} {bs : List UInt8}
+    (hobs : stObs = committedState st0 st')
+    (hhalted : stObs.halted = st'.halted)
+    (hh : stObs.halted = some (k, bs)) (hk : k.commits = true) :
+    stObs = st' := by
+  have hh' : st'.halted = some (k, bs) := hhalted ▸ hh
+  rw [hobs, committedState_commit hh' hk]
+
+theorem obs_storage_rollback {st0 st' stObs : EvmState} {bytes : List UInt8}
+    (hobs : stObs = committedState st0 st')
+    (hhalted : stObs.halted = st'.halted)
+    (hh : stObs.halted = some (.revert, bytes)) :
+    stObs.storage = st0.storage := by
+  have hh' : st'.halted = some (.revert, bytes) := hhalted ▸ hh
+  rw [hobs, committedState_rollback hh' HaltKind.revert_commits]
+
+theorem halt_ne_running_of_HaltMatch {hk : YulSemantics.EVM.HaltKind × List UInt8}
+    {s : State} (h : HaltMatch hk s) : s.halt ≠ .Running := by
+  intro hrun
+  unfold HaltMatch at h
+  split at h
+  · cases (h.symm.trans hrun)
+  · cases (h.1.symm.trans hrun)
+  · cases (h.1.symm.trans hrun)
+  · cases (h.symm.trans hrun)
+  · cases (h.symm.trans hrun)
+  · cases (h.symm.trans hrun)
+  · cases (h.1.symm.trans hrun)
+
+theorem Halted_of_HaltedMatch {yst : EvmState} {s : State}
+    (h : HaltedMatch yst s) (hcs : s.callStack = []) : Halted s :=
+  ⟨by
+    obtain ⟨hk, _, hM⟩ := h
+    exact halt_ne_running_of_HaltMatch hM, hcs⟩
+
+theorem Halted_of_compile_out {s' : State} {yst' : EvmState} {o : Outcome}
+    (hcs : s'.callStack = [])
+    (hOut : (o = .normal ∧ s'.halt = .Success ∧ s'.hReturn = .empty) ∨
+            (o = .halt ∧ HaltedMatch yst' s')) : Halted s' := by
+  rcases hOut with ⟨_, hs, _⟩ | ⟨_, hHM⟩
+  · exact ⟨by simp [hs], hcs⟩
+  · exact Halted_of_HaltedMatch hHM hcs
+
+theorem postStorage_reverted {yst0 s'} (h : s'.halt = .Reverted) :
+    postStorage yst0 s' = yst0.storage := by simp [postStorage, h]
+
+theorem postStorage_commit {yst0 s'} (h : s'.halt ≠ .Reverted) :
+    postStorage yst0 s' = accountYulStorage s' := by
+  unfold postStorage
+  split
+  · next h' => exact absurd h' h
+  · rfl
+
+theorem postForeign_reverted {yst0 s'} (h : s'.halt = .Reverted) :
+    postForeign yst0 s' = evmForeign yst0 := by simp [postForeign, h]
+
+theorem postForeign_commit {yst0 s'} (h : s'.halt ≠ .Reverted) :
+    postForeign yst0 s' = accountForeign s' := by
+  unfold postForeign
+  split
+  · next h' => exact absurd h' h
+  · rfl
+
+theorem foreign_eq_account {yst : EvmState} {s : State} (hm : StateMatch yst s) :
+    accountForeign s = evmForeign yst := by
+  funext addr slot
+  have h := hm.externalCode.storage addr slot
+  simp only [accountForeign, evmForeign]
+  rw [← h, ofConv_conv]
+
+theorem obs_foreign_rollback {st0 st' stObs : EvmState} {bytes : List UInt8}
+    (hobs : stObs = committedState st0 st')
+    (hhalted : stObs.halted = st'.halted)
+    (hh : stObs.halted = some (.revert, bytes)) :
+    evmForeign stObs = evmForeign st0 := by
+  have hh' : st'.halted = some (.revert, bytes) := hhalted ▸ hh
+  rw [hobs, committedState_rollback hh' HaltKind.revert_commits]
+  rfl
+
+theorem setGas_gas (s g) : (setGas s g).gasAvailable = g := rfl
+
+theorem setGas_pc (s g) : (setGas s g).pc = s.pc := rfl
+
+theorem setGas_stack (s g) : (setGas s g).stack = s.stack := rfl
+
+theorem frameOK_setGas {code s g} (h : FrameOK code s) : FrameOK code (setGas s g) :=
+  ⟨h.hcode, h.codeSmall, h.fork, h.noPrecompile, h.callStack, h.running⟩
+
+theorem stateMatch_setGas {yst s g} (h : StateMatch yst s) :
+    StateMatch yst (setGas s g) := by
+  cases h
+  constructor <;> assumption
+
+theorem evmStartOK_setGas {is yst0 s0 g} (h : EvmStartOK is yst0 s0) :
+    EvmStartOK is yst0 (setGas s0 g) :=
+  ⟨frameOK_setGas h.1, stateMatch_setGas h.2.1, h.2.2.1, h.2.2.2⟩
+
+theorem evmCallRun_eq_of_start {is yst0 σ1 σ2 s0}
+    (h1 : EvmCallRun is yst0 σ1) (h2 : EvmCallRun is yst0 σ2)
+    (hs : EvmStartOK is yst0 s0) : σ1 = σ2 := by
+  obtain ⟨b1, hb1⟩ := h1
+  obtain ⟨b2, hb2⟩ := h2
+  let s0' := setGas s0 (s0.gasAvailable + b1 + b2)
+  have hs' : EvmStartOK is yst0 s0' := evmStartOK_setGas hs
+  have hgas1 : b1 ≤ s0'.gasAvailable := by
+    change b1 ≤ s0.gasAvailable + b1 + b2
+    omega
+  have hgas2 : b2 ≤ s0'.gasAvailable := by
+    change b2 ≤ s0.gasAvailable + b1 + b2
+    omega
+  obtain ⟨s', hS, hH⟩ := (hb1 s0' hs' hgas1).1
+  have e1 := (hb1 s0' hs' hgas1).2 s' hS hH
+  have e2 := (hb2 s0' hs' hgas2).2 s' hS hH
+  exact e1.trans e2.symm
+
+theorem EvmCallRun_of_ξ {is yst0 σ' ξ'} (h : EvmCallRunξ is yst0 σ' ξ') :
+    EvmCallRun is yst0 σ' := by
+  obtain ⟨b, hb⟩ := h
+  refine ⟨b, ?_⟩
+  intro s0 hstart hgas
+  obtain ⟨hex, huni⟩ := hb s0 hstart hgas
+  exact ⟨hex, fun s' hS hH => (huni s' hS hH).1⟩
+
+theorem evmCallRunξ_eq_of_start {is yst0 σ1 ξ1 σ2 ξ2 s0}
+    (h1 : EvmCallRunξ is yst0 σ1 ξ1) (h2 : EvmCallRunξ is yst0 σ2 ξ2)
+    (hs : EvmStartOK is yst0 s0) : σ1 = σ2 ∧ ξ1 = ξ2 := by
+  obtain ⟨b1, hb1⟩ := h1
+  obtain ⟨b2, hb2⟩ := h2
+  let s0' := setGas s0 (s0.gasAvailable + b1 + b2)
+  have hs' : EvmStartOK is yst0 s0' := evmStartOK_setGas hs
+  have hgas1 : b1 ≤ s0'.gasAvailable := by
+    change b1 ≤ s0.gasAvailable + b1 + b2
+    omega
+  have hgas2 : b2 ≤ s0'.gasAvailable := by
+    change b2 ≤ s0.gasAvailable + b1 + b2
+    omega
+  obtain ⟨s', hS, hH⟩ := (hb1 s0' hs' hgas1).1
+  have e1 := (hb1 s0' hs' hgas1).2 s' hS hH
+  have e2 := (hb2 s0' hs' hgas2).2 s' hS hH
+  exact ⟨e1.1.trans e2.1.symm, e1.2.trans e2.2.symm⟩
+
+theorem runtimeSrc_of_erased {c : ContractDef} {rt : YBlock} {is : List Instr}
+    {yst0 yst' : EvmState} {o : Outcome}
+    (hrt : runtimeBlock c = some rt)
+    (hcomp : compileBlock rt = some is)
+    (hrun : Run (evmWithExternal ExternalCalls.none ExternalCreates.none ExternalGas.any)
+      (eraseMemoryGuardStmts rt) yst0 [] yst' o) :
+    RuntimeCompileSrc (model := closedModel) rt is yst0 yst' o := by
+  let _model : ExternalModel := closedModel
+  cases compileBlock_elim hcomp with
+  | inl hce => exact .erased hce hrun
+  | inr h =>
+    obtain ⟨hne, hsp⟩ := h
+    obtain ⟨r, hr, hcr⟩ := compileSpilled_inv hsp
+    exact .spilled r hne hr hcr rfl (guardedExternals_none r.base r.reserved)
+      (GuardedRunOfErased hrt hr hrun)
+
+theorem ystF_agree {b : YBlock} {is : List Instr} {yst' ystF : EvmState}
+    (hcomp : compileBlock b = some is)
+    (hFe : compileErased b = some is → ystF = yst')
+    (hFs : ∀ r, compileErased b = none → spillRuntime? b = some r →
+      ScratchRel r.base r.reserved yst' ystF) :
+    ystF.storage = yst'.storage ∧ ystF.halted = yst'.halted := by
+  cases compileBlock_elim hcomp with
+  | inl hce =>
+    have heq := hFe hce
+    exact ⟨by rw [heq], by rw [heq]⟩
+  | inr h =>
+    obtain ⟨hne, hsp⟩ := h
+    obtain ⟨r, hr, _⟩ := compileSpilled_inv hsp
+    have hrel := hFs r hne hr
+    exact ⟨(ScratchRel.storage_eq hrel).symm,
+      (congrArg Obs.halted hrel.observables_eq).symm⟩
+
+theorem ystF_foreign {b : YBlock} {is : List Instr} {yst' ystF : EvmState}
+    (hcomp : compileBlock b = some is)
+    (hFe : compileErased b = some is → ystF = yst')
+    (hFs : ∀ r, compileErased b = none → spillRuntime? b = some r →
+      ScratchRel r.base r.reserved yst' ystF) :
+    evmForeign ystF = evmForeign yst' := by
+  cases compileBlock_elim hcomp with
+  | inl hce => rw [hFe hce]
+  | inr h =>
+    obtain ⟨hne, hsp⟩ := h
+    obtain ⟨r, hr, _⟩ := compileSpilled_inv hsp
+    have hrel := hFs r hne hr
+    have henv : ystF.env = yst'.env :=
+      (congrArg Obs.env hrel.observables_eq).symm
+    simp [evmForeign, henv]
+
+theorem HaltedMatch_of_ystF {yst' ystF : EvmState} {s' : State}
+    (hHM : HaltedMatch ystF s') (hh : ystF.halted = yst'.halted) :
+    HaltedMatch yst' s' := by
+  obtain ⟨hk, hy, hM⟩ := hHM
+  exact ⟨hk, hh ▸ hy, hM⟩
+
+theorem evmCallRun_of_correct {S X E ε : Type} (c : ContractDef)
+    (Γ : ContractSchema S X E ε)
+    (hΓ : Γ.st.Lawful c.fields) (hκ : KeccakSep c evmKeccak)
+    (hcf : ∀ f ∈ c.functions, CallFree f.core)
+    (hctor : ∀ f ∈ c.functions, f.kind ≠ .constructor)
+    (hlen : c.fields.length < wordBound)
+    (hbound : ∀ f ∈ c.functions, 4 + 32 * f.params.length < wordBound)
+    (rt : YBlock) (hrt : runtimeBlock c = some rt)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
+    (ctx : Ctx) (w : World S X E) (yst0 : EvmState)
+    (hctx : ctxRel ctx yst0) (hR : R c Γ evmKeccak w yst0)
+    (himm0 : ∀ k, yst0.env.immutable k = 0) :
+    ∃ σ', EvmCallRun is yst0 σ' ∧
+      match selectedFn c yst0.env.calldata with
+      | none => σ' = yst0.storage
+      | some f =>
+        match Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse) ctx w with
+        | .ok (_, w') => storageRel c Γ evmKeccak w'.self σ' ∧ WorldWF c Γ w'
+        | .error _ => σ' = yst0.storage := by
+  let _model : ExternalModel := closedModel
+  obtain ⟨stObs, hRC, hconcl⟩ :=
+    runtimeBlock_correct_callFree c Γ hΓ evmKeccak hκ hcf hctor hlen hbound rt hrt ctx w yst0 hctx hR
+  obtain ⟨yst', hrun, hobs⟩ := runCommitted_lift_run .none .none .any hRC
+  have himm : ∀ key, unpatchedImmutables key =
+      yst0.env.immutable (litValue (.string key)) := by
+    intro key
+    simp [unpatchedImmutables, himm0]
+  have hsrc := runtimeSrc_of_erased hrt hcomp hrun
+  have ⟨b, hb0⟩ :=
+    compileRuntime_correct (model := closedModel) ExternalsRealized.none hcomp himm hsrc
+  have hb : ∀ s0 : State,
+      FrameOK (assemble is) s0 → StateMatch yst0 s0 →
+      s0.pc = EvmSemantics.UInt256.ofNat 0 → s0.stack = [] →
+      b ≤ s0.gasAvailable →
+      ∃ s' ystF, Steps s0 s' ∧ s'.callStack = [] ∧ StateMatch ystF s' ∧
+        ((Outcome.halt = .normal ∧ s'.halt = .Success ∧ s'.hReturn = .empty) ∨
+         (Outcome.halt = .halt ∧ HaltedMatch yst' s')) ∧
+        yst'.storage = ystF.storage := by
+    intro s0 hOK hM hpc hstk hgas
+    obtain ⟨s', ystF, hSteps, hcs, hSM, hOut, hFe, hFs⟩ := hb0 s0 hOK hM hpc hstk hgas
+    have ⟨hstor, hhalt⟩ := ystF_agree hcomp hFe hFs
+    refine ⟨s', ystF, hSteps, hcs, hSM, ?_, hstor.symm⟩
+    rcases hOut with hN | ⟨_, hH⟩
+    · exact Or.inl hN
+    · exact Or.inr ⟨rfl, HaltedMatch_of_ystF hH hhalt⟩
+  have hhalted : stObs.halted = yst'.halted := by
+    rw [hobs, committedState_halted]
+  refine ⟨stObs.storage, ?_, ?_⟩
+  · refine ⟨b, ?_⟩
+    intro s0 hstart hgas
+    rcases hstart with ⟨hOK, hM, hpc, hstk⟩
+    obtain ⟨s', ystF, hSteps, hcs, hSM, hOut, hstor⟩ := hb s0 hOK hM hpc hstk hgas
+    have hH : Halted s' := Halted_of_compile_out hcs hOut
+    have hHM : HaltedMatch yst' s' := by
+      rcases hOut with ⟨hn, _⟩ | ⟨_, hH'⟩
+      · cases hn
+      · exact hH'
+    have hpost : stObs.storage = postStorage yst0 s' := by
+      cases hsel : selectedFn c yst0.env.calldata with
+      | none =>
+        simp only [hsel] at hconcl
+        obtain ⟨hh, _⟩ := hconcl
+        have hr := reverted_of_halted (bytes := []) (hhalted ▸ hh) hHM
+        rw [postStorage_reverted hr.1, obs_storage_rollback hobs hhalted hh]
+      | some f =>
+        simp only [hsel] at hconcl
+        cases htx : Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse) ctx w with
+        | ok prod =>
+          rcases prod with ⟨v, w'⟩
+          simp only [htx] at hconcl
+          obtain ⟨hsucc, _⟩ := hconcl
+          obtain ⟨k, bs, hh, hk⟩ := haltSuccess_commits hsucc
+          have heq : stObs = yst' := obs_eq_of_commit hobs hhalted hh hk
+          have hOK' := haltOK_of_success (heq ▸ hsucc) hHM
+          have hnr : s'.halt ≠ .Reverted := by
+            unfold haltOK at hOK'
+            split at hOK'
+            · intro h; cases (hOK'.symm.trans h)
+            · intro h; cases (hOK'.1.symm.trans h)
+          rw [postStorage_commit hnr, heq, hstor, storage_eq_account hSM]
+        | error e =>
+          simp only [htx] at hconcl
+          obtain ⟨bytes, hh, _, _⟩ := hconcl
+          have hr := reverted_of_halted (hhalted ▸ hh) hHM
+          rw [postStorage_reverted hr.1, obs_storage_rollback hobs hhalted hh]
+    refine ⟨⟨s', hSteps, hH⟩, ?_⟩
+    intro s'' hS'' hH''
+    rw [steps_halted_unique hS'' hSteps hH'' hH]
+    exact hpost
+  · cases hsel : selectedFn c yst0.env.calldata with
+    | none =>
+      simp only [hsel] at hconcl ⊢
+      obtain ⟨hh, _⟩ := hconcl
+      exact obs_storage_rollback hobs hhalted hh
+    | some f =>
+      simp only [hsel] at hconcl ⊢
+      cases htx : Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse) ctx w with
+      | ok prod =>
+        rcases prod with ⟨v, w'⟩
+        simp only [htx] at hconcl ⊢
+        obtain ⟨hsucc, hR'⟩ := hconcl
+        obtain ⟨k, bs, hh, hk⟩ := haltSuccess_commits hsucc
+        have heq : stObs = yst' := obs_eq_of_commit hobs hhalted hh hk
+        rcases hR' with ⟨hs, _, _, hwf'⟩
+        exact ⟨by simpa [heq] using hs, hwf'⟩
+      | error e =>
+        simp only [htx] at hconcl ⊢
+        obtain ⟨bytes, hh, _, _⟩ := hconcl
+        exact obs_storage_rollback hobs hhalted hh
+
+theorem coreRun_nil {S X E ε} {Γ : ContractSchema S X E ε} (w : World S X E) :
+    coreRun Γ [] w = w := rfl
+
+theorem coreRun_cons {S X E ε} {Γ : ContractSchema S X E ε}
+    (ctx : Ctx) (f : FnDef) (args : List Nat) (rest : List (Ctx × FnDef × List Nat))
+    (w : World S X E) :
+    coreRun Γ ((ctx, f, args) :: rest) w =
+    coreRun Γ rest
+      { Security.worldAfter (Core.denote Γ f.core args.reverse) ctx w with log := [] } := rfl
+
+theorem mkEvmState_halted (cd σ κ ctx) :
+    (mkEvmState cd σ κ ctx).halted = none := rfl
+
+theorem mkEvmState_immutable (cd σ κ ctx k) :
+    (mkEvmState cd σ κ ctx).env.immutable k = 0 := rfl
+
+theorem mkEvmState_storage (cd σ κ ctx) :
+    (mkEvmState cd σ κ ctx).storage = σ := rfl
+
+theorem mkEvmState_calldata (cd σ κ ctx) :
+    (mkEvmState cd σ κ ctx).env.calldata = cd := rfl
+
+theorem mkEvmState_keccak (cd σ κ ctx) :
+    (mkEvmState cd σ κ ctx).env.keccakOf = κ := rfl
+
+theorem mkEvmState_logs (cd σ κ ctx) :
+    (mkEvmState cd σ κ ctx).logs = [] := rfl
+
+theorem ctxRel_mkEvmState (cd : List UInt8) (σ : U256 → U256) (κ : List UInt8 → U256)
+    (ctx : Ctx) (hwf : CtxWF ctx) (hcd : cd.length < wordBound) :
+    ctxRel ctx (mkEvmState cd σ κ ctx) := by
+  refine ⟨rfl, rfl, rfl, rfl, rfl, ?_, mkEvmState_halted cd σ κ ctx, hcd, hwf⟩
+  simp [mkEvmState, EvmState.init]
+  rfl
+
+theorem logsRel_empty {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
+    {w : World S X E} {st : EvmState} (hlog : w.log = []) (hl : st.logs = []) :
+    logsRel c Γ w st := by
+  simp [logsRel, selfLogs, hlog, hl]
+
+theorem R_mkEvmState {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
+    (κ : List UInt8 → U256) (w : World S X E) (cd σ ctx)
+    (hs : storageRel c Γ κ w.self σ) (hlog : w.log = []) (hwf : WorldWF c Γ w) :
+    R c Γ κ w (mkEvmState cd σ κ ctx) :=
+  ⟨by simpa [mkEvmState_storage] using hs,
+    logsRel_empty hlog (mkEvmState_logs cd σ κ ctx),
+    mkEvmState_keccak cd σ κ ctx, hwf⟩
+
+theorem mkEvmState_eq_ext (cd σ κ ctx) :
+    mkEvmState cd σ κ ctx = mkEvmStateExt cd σ (fun _ _ => 0) κ ctx := by
+  simp [mkEvmState, mkEvmStateExt, EvmState.init]
+
+theorem ctxRel_mkEvmStateExt (cd : List UInt8) (σ : U256 → U256) (ξ : Foreign)
+    (κ : List UInt8 → U256) (ctx : Ctx) (hwf : CtxWF ctx) (hcd : cd.length < wordBound) :
+    ctxRel ctx (mkEvmStateExt cd σ ξ κ ctx) := by
+  refine ⟨rfl, rfl, rfl, rfl, rfl, ?_, mkEvmStateExt_halted cd σ ξ κ ctx, hcd, hwf⟩
+  simp [mkEvmStateExt, EvmState.init]
+  rfl
+
+theorem R_mkEvmStateExt {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
+    (κ : List UInt8 → U256) (w : World S X E) (cd σ ξ ctx)
+    (hs : storageRel c Γ κ w.self σ) (hlog : w.log = []) (hwf : WorldWF c Γ w) :
+    R c Γ κ w (mkEvmStateExt cd σ ξ κ ctx) :=
+  ⟨by simpa [mkEvmStateExt_storage] using hs,
+    logsRel_empty hlog (mkEvmStateExt_logs cd σ ξ κ ctx),
+    mkEvmStateExt_keccak cd σ ξ κ ctx, hwf⟩
+
+theorem WorldWF_log {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
+    {w : World S X E} (log' : List E) (h : WorldWF c Γ w) :
+    WorldWF c Γ { w with log := log' } := by
+  unfold WorldWF at h ⊢
+  exact h
+
+theorem WorldWF_of_self {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
+    {w w' : World S X E} (h : w.self = w'.self) (hwf : WorldWF c Γ w) :
+    WorldWF c Γ w' := by
+  unfold WorldWF at hwf ⊢
+  intro i fd hfd
+  simpa [h] using hwf i fd hfd
+
+theorem evmCallRun_fnCalldata {S X E ε : Type} (c : ContractDef)
+    (Γ : ContractSchema S X E ε)
+    (hΓ : Γ.st.Lawful c.fields) (hκ : KeccakSep c evmKeccak)
+    (hcf : ∀ f ∈ c.functions, CallFree f.core)
+    (hctor : ∀ f ∈ c.functions, f.kind ≠ .constructor)
+    (hlen : c.fields.length < wordBound)
+    (hbound : ∀ f ∈ c.functions, 4 + 32 * f.params.length < wordBound)
+    (hnd : selectorsNodup c = true)
+    (rt : YBlock) (hrt : runtimeBlock c = some rt)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
+    (ctx : Ctx) (f : FnDef) (args : List Nat) (w : World S X E)
+    (σ : U256 → U256)
+    (hf : f ∈ c.functions) (hk : f.kind ≠ .constructor)
+    (hlenA : args.length = f.params.length)
+    (hW : ∀ n ∈ args, n < wordBound)
+    (hctxWF : CtxWF ctx)
+    (hs : storageRel c Γ evmKeccak w.self σ)
+    (hlog : w.log = []) (hwf : WorldWF c Γ w)
+    (hcd : (fnCalldata f args).length < wordBound) :
+    let yst0 := mkEvmState (fnCalldata f args) σ evmKeccak ctx
+    ∃ σ', EvmCallRun is yst0 σ' ∧
+      (match Tx.run (Core.denote Γ f.core args.reverse) ctx w with
+        | .ok (_, w') => storageRel c Γ evmKeccak w'.self σ' ∧ WorldWF c Γ w'
+        | .error _ => σ' = σ) := by
+  intro yst0
+  have hsel : selectedFn c (fnCalldata f args) = some f :=
+    selectedFn_fnCalldata c f args hf hnd hlenA
+  have hdec : decodeArgs f (fnCalldata f args) = args :=
+    decodeArgs_fnCalldata f args hk hlenA hW
+  have hctx : ctxRel ctx yst0 := ctxRel_mkEvmState _ _ _ _ hctxWF hcd
+  have hR : R c Γ evmKeccak w yst0 := R_mkEvmState evmKeccak w _ σ ctx hs hlog hwf
+  have himm0 : ∀ k, yst0.env.immutable k = 0 := fun k => mkEvmState_immutable _ _ _ _ k
+  obtain ⟨σ', hRun, hpost⟩ :=
+    evmCallRun_of_correct c Γ hΓ hκ hcf hctor hlen hbound rt hrt is hcomp
+      ctx w yst0 hctx hR himm0
+  refine ⟨σ', hRun, ?_⟩
+  rw [← hdec]
+  rw [mkEvmState_calldata] at hpost
+  simp only [hsel] at hpost
+  rw [mkEvmState_storage] at hpost
+  exact hpost
+
+theorem bytecode_trace_transport {S X E ε : Type} (c : ContractDef)
+    (Γ : ContractSchema S X E ε)
+    (hΓ : Γ.st.Lawful c.fields) (hκ : KeccakSep c evmKeccak)
+    (hcf : ∀ f ∈ c.functions, CallFree f.core)
+    (hctor : ∀ f ∈ c.functions, f.kind ≠ .constructor)
+    (hlen : c.fields.length < wordBound)
+    (hbound : ∀ f ∈ c.functions, 4 + 32 * f.params.length < wordBound)
+    (hnd : selectorsNodup c = true)
+    (rt : YBlock) (hrt : runtimeBlock c = some rt)
+    (is : List Instr) (hcomp : compileBlock rt = some is)
+    (calls : List (Ctx × FnDef × List Nat))
+    (w : World S X E) (σ : U256 → U256)
+    (hs : storageRel c Γ evmKeccak w.self σ)
+    (hlog : w.log = []) (hwf : WorldWF c Γ w)
+    (hcalls : ∀ p ∈ calls,
+        p.2.1 ∈ c.functions ∧ p.2.1.kind ≠ .constructor ∧
+        p.2.2.length = p.2.1.params.length ∧ (∀ n ∈ p.2.2, n < wordBound) ∧
+        CtxWF p.1 ∧ (fnCalldata p.2.1 p.2.2).length < wordBound) :
+    ∃ σ', EvmTraceRun is (calls.map fun p => ⟨p.1, fnCalldata p.2.1 p.2.2⟩) σ σ' ∧
+      storageRel c Γ evmKeccak (coreRun Γ calls { w with log := [] }).self σ' ∧
+      WorldWF c Γ (coreRun Γ calls { w with log := [] }) := by
+  induction calls generalizing w σ with
+  | nil =>
+    refine ⟨σ, EvmTraceRun.nil σ, ?_, ?_⟩
+    · simpa [coreRun] using hs
+    · simpa [coreRun] using WorldWF_log [] hwf
+  | cons p rest ih =>
+    rcases p with ⟨ctx, f, args⟩
+    have hp := hcalls ⟨ctx, f, args⟩ (List.mem_cons.mpr (Or.inl rfl))
+    rcases hp with ⟨hf, hk, hlenA, hW, hctxWF, hcd⟩
+    have hrest : ∀ q ∈ rest, _ := fun q hq =>
+      hcalls q (List.mem_cons_of_mem _ hq)
+    let yst0 := mkEvmState (fnCalldata f args) σ evmKeccak ctx
+    obtain ⟨σ₁, h1, hpost⟩ :=
+      evmCallRun_fnCalldata c Γ hΓ hκ hcf hctor hlen hbound hnd rt hrt is hcomp
+        ctx f args { w with log := [] } σ hf hk hlenA hW hctxWF (by simpa using hs) rfl
+        (WorldWF_log [] hwf) hcd
+    let w1 : World S X E :=
+      let w' := Security.worldAfter (Core.denote Γ f.core args.reverse) ctx { w with log := [] }
+      { w' with log := [] }
+    have hs1 : storageRel c Γ evmKeccak w1.self σ₁ := by
+      dsimp [w1]
+      cases htx : Tx.run (Core.denote Γ f.core args.reverse) ctx { w with log := [] } with
+      | ok prod =>
+        rcases prod with ⟨_, w'⟩
+        have htx' : Tx.run (Core.denote Γ f.core args.reverse) ctx { w with log := [] } =
+            .ok (_, w') := htx
+        simp [htx'] at hpost
+        rw [Security.worldAfter_ok htx']
+        exact hpost.1
+      | error e =>
+        have htx' : Tx.run (Core.denote Γ f.core args.reverse) ctx { w with log := [] } =
+            .error e := htx
+        simp [htx'] at hpost
+        rw [Security.worldAfter_error htx']
+        simpa [hpost] using hs
+    have hwf1 : WorldWF c Γ w1 := by
+      dsimp [w1]
+      cases htx : Tx.run (Core.denote Γ f.core args.reverse) ctx { w with log := [] } with
+      | ok prod =>
+        rcases prod with ⟨_, w'⟩
+        have htx' : Tx.run (Core.denote Γ f.core args.reverse) ctx { w with log := [] } =
+            .ok (_, w') := htx
+        simp [htx'] at hpost
+        rw [Security.worldAfter_ok htx']
+        exact WorldWF_log [] hpost.2
+      | error e =>
+        have htx' : Tx.run (Core.denote Γ f.core args.reverse) ctx { w with log := [] } =
+            .error e := htx
+        simp [htx'] at hpost
+        rw [Security.worldAfter_error htx']
+        exact WorldWF_log [] hwf
+    obtain ⟨σ', htl, hs', hwf'⟩ := ih w1 σ₁ hs1 rfl hwf1 hrest
+    refine ⟨σ', EvmTraceRun.cons (yst0 := yst0)
+        (mkEvmState_calldata _ _ _ _) (mkEvmState_storage _ _ _ _) h1 htl, ?_, ?_⟩
+    · simpa [coreRun, w1] using hs'
+    · simpa [coreRun, w1] using hwf'
 
 /-- Spill branch of `bytecode_call_correct`. `GuardedRunOfErased` lifts the
 erased-dialect run to a `GuardedRun` of the resolved raw runtime. -/

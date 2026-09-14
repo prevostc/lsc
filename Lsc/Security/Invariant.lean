@@ -1,4 +1,5 @@
 import Lsc.Security.Trace
+import Lsc.Security.TraceTheorems
 
 namespace Lsc.Security
 
@@ -22,20 +23,6 @@ def PreservesInvFn (C : Spec S X E ε) (Inv : World S X E → Prop) (fn : C.Fn) 
   ∀ (args : C.Args fn) (ctx : Ctx) (w : World S X E),
     Inv w → Inv (worldAfter (C.exec fn args) ctx w)
 
-theorem PreservesInv.of_fns {C : Spec S X E ε} {Inv : World S X E → Prop}
-    (h : ∀ fn, PreservesInvFn C Inv fn) : PreservesInv C Inv := by
-  intro c w hc
-  simpa [step] using h c.fn c.args c.toCtx w hc
-
-/-- Reduce `PreservesInvFn` to the success path: a revert leaves the world unchanged. -/
-theorem PreservesInvFn_of_ok {C : Spec S X E ε} {Inv : World S X E → Prop} {fn : C.Fn}
-    (hok : ∀ (args : C.Args fn) (ctx : Ctx) (w : World S X E) (a : C.Ret fn)
-        (w' : World S X E),
-      Inv w → Tx.run (C.exec fn args) ctx w = .ok (a, w') → Inv w') :
-    PreservesInvFn C Inv fn := by
-  intro args ctx w hInv
-  exact worldAfter_preserves hInv (fun a w' h => hok args ctx w a w' hInv h)
-
 /-- `Inv` is preserved by a `rely`-conformant environment step. -/
 def PreservesInvEnv (_C : Spec S X E ε) (Inv : World S X E → Prop)
     (rely : X → X → Prop) : Prop :=
@@ -53,22 +40,5 @@ def PreservesInvFnAt (C : Spec S X E ε) (Inv : World S X E → Prop) (self : Ad
 def PreservesInvAt (C : Spec S X E ε) (Inv : World S X E → Prop) (self : Address) : Prop :=
   ∀ (c : Call C) (w : World S X E),
     c.target = self → c.sender ≠ self → Inv w → Inv (step (.call c) w)
-
-theorem PreservesInvAt.of_fns {C : Spec S X E ε} {Inv : World S X E → Prop} {self : Address}
-    (h : ∀ fn, PreservesInvFnAt C Inv self fn) : PreservesInvAt C Inv self := by
-  intro c w ht hs hc
-  simpa [step, Call.toCtx] using h c.fn c.args c.toCtx w ht hs hc
-
-/-- Reduce `PreservesInvFnAt` to the success path: a revert leaves the world unchanged. -/
-theorem PreservesInvFnAt_of_ok {C : Spec S X E ε} {Inv : World S X E → Prop}
-    {self : Address} {fn : C.Fn}
-    (hok : ∀ (args : C.Args fn) (ctx : Ctx) (w : World S X E) (a : C.Ret fn)
-        (w' : World S X E),
-      ctx.self = self → ctx.sender ≠ self → Inv w →
-      Tx.run (C.exec fn args) ctx w = .ok (a, w') → Inv w') :
-    PreservesInvFnAt C Inv self fn := by
-  intro args ctx w hself hsne hInv
-  exact worldAfter_preserves hInv
-    (fun a w' h => hok args ctx w a w' hself hsne hInv h)
 
 end Lsc.Security

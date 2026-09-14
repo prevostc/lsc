@@ -2,7 +2,12 @@ import Lsc.Lang.Tx
 import Lsc.Lang.Word
 import Lsc.Lang.Amount
 import Lsc.Lang.Interface
+import Lsc.Lang.WordTheorems
+import Lsc.Lang.AmountTheorems
+import Lsc.Lang.TxTheorems
+import Lsc.Lang.InterfaceTheorems
 import Lsc.Lang.Core
+import Lsc.Lang.CoreTheorems
 import Lsc.Lang.Spec
 import Lsc.Lang.Reify
 import Lsc.Lang.Contract
@@ -13,6 +18,7 @@ import Lsc.Compiler.Bytecode
 import Lsc.Compiler.Pipeline
 import Lsc.Compiler.Transport
 import Lsc.Security.Trace
+import Lsc.Security.TraceTheorems
 import Lsc.Security.Invariant
 import Lsc.Security.InvariantTheorems
 import Lsc.Security.Wealth

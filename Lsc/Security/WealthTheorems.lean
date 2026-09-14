@@ -87,4 +87,69 @@ theorem solvent_run_at {Inv : World S X E → Prop} {claim : Claim S X E}
     Solvent claim holdings self (run tr w) :=
   Proof.solvent_run_at hP hE hS hw tr hW hR
 
+/-- Updating a member of a finite support replaces its contribution in the sum. -/
+theorem sum_update_mem {α : Type} [DecidableEq α] (H : Finset α) (f : α → Nat) {i : α}
+    (hi : i ∈ H) (n : Nat) :
+    H.sum (Function.update f i n) + f i = H.sum f + n :=
+  Proof.sum_update_mem H f hi n
+
+/-- Updating a key outside a finite support does not change the sum. -/
+theorem sum_update_not_mem {α : Type} [DecidableEq α] (H : Finset α) (f : α → Nat) {i : α}
+    (hi : i ∉ H) (n : Nat) :
+    H.sum (Function.update f i n) = H.sum f :=
+  Proof.sum_update_not_mem H f hi n
+
+/-- `Claim.ofSelf` ignores `ext` and `log`. -/
+theorem Claim.ofSelf_congr (c : Address → S → Nat)
+    {w w' : World S X E} {a : Address} (h : w.self = w'.self) :
+    Claim.ofSelf (S := S) (X := X) (E := E) c a w =
+      Claim.ofSelf (S := S) (X := X) (E := E) c a w' :=
+  Proof.Claim.ofSelf_congr c h
+
+/-- Storage-only claims ignore `ext`, so any `rely` is claim-monotone. -/
+theorem ClaimMonoEnv.of_self (c : Address → S → Nat) (rely : X → X → Prop) :
+    ClaimMonoEnv (Claim.ofSelf (S := S) (X := X) (E := E) c) rely :=
+  Proof.ClaimMonoEnv.of_self c rely
+
+/-- `NoUnauthorizedDecrease` follows from the per-entrypoint form. -/
+theorem NoUnauthorizedDecrease.of_fns {Inv : World S X E → Prop} {claim : Claim S X E}
+    {Auth : AuthPred C} (h : ∀ fn, NoUnauthorizedDecreaseFn C Inv claim Auth fn) :
+    NoUnauthorizedDecrease C Inv claim Auth :=
+  Proof.NoUnauthorizedDecrease.of_fns h
+
+/-- Reduce `NoUnauthorizedDecreaseFn` to the success path: a revert cannot decrease `claim`. -/
+theorem NoUnauthorizedDecreaseFn_of_ok {Inv : World S X E → Prop} {claim : Claim S X E}
+    {Auth : AuthPred C} {fn : C.Fn}
+    (hok : ∀ (args : C.Args fn) (ctx : Ctx) (w : World S X E) (a : Address)
+        (ret : C.Ret fn) (w' : World S X E),
+      Inv w → Tx.run (C.exec fn args) ctx w = .ok (ret, w') →
+      claim a w' < claim a w →
+      Auth a (Call.ofCtx ctx fn args) w) :
+    NoUnauthorizedDecreaseFn C Inv claim Auth fn :=
+  Proof.NoUnauthorizedDecreaseFn_of_ok hok
+
+/-- `Conservation` follows from the per-entrypoint form. -/
+theorem Conservation.of_fns {Inv : World S X E → Prop} {claim : Claim S X E} {inflow : Inflow C}
+    (h : ∀ fn, ConservesFn C Inv claim inflow fn) : Conservation C Inv claim inflow :=
+  Proof.Conservation.of_fns h
+
+/-- Reduce `ConservesFn` to the success path: a revert is conservation with empty touch-set. -/
+theorem ConservesFn_of_ok {Inv : World S X E → Prop} {claim : Claim S X E}
+    {inflow : Inflow C} {fn : C.Fn}
+    (hok : ∀ (args : C.Args fn) (ctx : Ctx) (w : World S X E) (ret : C.Ret fn)
+        (w' : World S X E),
+      Inv w → Tx.run (C.exec fn args) ctx w = .ok (ret, w') →
+      ∃ T : Finset Address,
+        (∀ a, a ∉ T → claim a w' = claim a w) ∧
+        T.sum (fun a => claim a w') ≤
+          T.sum (fun a => claim a w) + inflow (Call.ofCtx ctx fn args) w) :
+    ConservesFn C Inv claim inflow fn :=
+  Proof.ConservesFn_of_ok hok
+
+/-- `Σ ⌊f a * num / den⌋ ≤ num` when `Σ f = den` and `den > 0`. -/
+theorem sum_mul_div_le {α : Type} [DecidableEq α] (H : Finset α) (f : α → Nat) (num den : Nat)
+    (hsum : H.sum f = den) (hpos : 0 < den) :
+    H.sum (fun a => f a * num / den) ≤ num :=
+  Proof.sum_mul_div_le H f num den hsum hpos
+
 end Lsc.Security

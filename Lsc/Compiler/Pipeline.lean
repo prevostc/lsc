@@ -26,10 +26,8 @@ Stages, in order. This module does not change them; it names them.
    the nested `"runtime"` slice (`constructorCode`).
 
 `compileContract` (alias `artifacts`) is the function `scripts/export_bytecode.lean`
-should call so compilation lives in one place. The exporter currently still
-inlines the same steps; wiring it is a follow-up (that script is owned by
-another change). Behaviour of `runtimeBlock` / `compileBlock` / `compileDeploy`
-is unchanged.
+calls so compilation lives in one place. Behaviour of `runtimeBlock` /
+`compileBlock` / `compileDeploy` is unchanged.
 -/
 
 namespace Lsc.Compiler

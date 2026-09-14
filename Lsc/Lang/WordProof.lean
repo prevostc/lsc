@@ -1,8 +1,46 @@
 import Lsc.Lang.Word
+import Lsc.Lang.TxProof
 
 /-!
-Proofs of the checked-word theorems. Statements live in `WordTheorems.lean`.
+Proofs of the checked-word theorems and `Tx.run` unfolding lemmas for
+`mulDiv` / `pow10`. Statements live in `WordTheorems.lean`.
 -/
+
+namespace Lsc.Tx.Proof
+
+variable {S X E ε : Type}
+
+theorem run_mulDivDown (a b c : Nat) (ctx : Ctx) (w : World S X E) :
+    run (mulDivDown (S := S) (X := X) (E := E) (ε := ε) a b c) ctx w =
+      if c = 0 then .error (.arith .divByZero)
+      else if a * b < wordBound then .ok (a * b / c, w)
+      else .error (.arith .overflow) :=
+  rfl
+
+theorem run_mulDivUp (a b c : Nat) (ctx : Ctx) (w : World S X E) :
+    run (mulDivUp (S := S) (X := X) (E := E) (ε := ε) a b c) ctx w =
+      if c = 0 then .error (.arith .divByZero)
+      else if a * b < wordBound then .ok (a * b / c + (if a * b % c = 0 then 0 else 1), w)
+      else .error (.arith .overflow) :=
+  rfl
+
+theorem hMulDivDown_nat (a b c : Nat) :
+    Lsc.Tx.HMulDivDown.hMulDivDown (S := S) (X := X) (E := E) (ε := ε) a b c =
+      mulDivDown a b c :=
+  rfl
+
+theorem hMulDivUp_nat (a b c : Nat) :
+    Lsc.Tx.HMulDivUp.hMulDivUp (S := S) (X := X) (E := E) (ε := ε) a b c =
+      mulDivUp a b c :=
+  rfl
+
+theorem run_pow10 (d : Nat) (ctx : Ctx) (w : World S X E) :
+    run (pow10 (S := S) (X := X) (E := E) (ε := ε) d) ctx w =
+      if d > pow10Max then .error (.arith .overflow)
+      else .ok (10 ^ d, w) :=
+  rfl
+
+end Lsc.Tx.Proof
 
 namespace Lsc.Proof
 
@@ -13,7 +51,7 @@ theorem addChecked_ok {a b : Nat} {ctx : Ctx} {w : World S X E}
     (h : Tx.run (Tx.addChecked (S := S) (X := X) (E := E) (ε := ε) a b) ctx w =
       .ok (q, w')) :
     q = a + b ∧ a + b < wordBound ∧ w' = w := by
-  simp [Tx.run_addChecked] at h
+  simp [Tx.Proof.run_addChecked] at h
   by_cases hfit : a + b < wordBound
   · simp [hfit] at h
     exact ⟨h.1.symm, hfit, h.2.symm⟩
@@ -24,7 +62,7 @@ theorem subChecked_ok {a b : Nat} {ctx : Ctx} {w : World S X E}
     (h : Tx.run (Tx.subChecked (S := S) (X := X) (E := E) (ε := ε) a b) ctx w =
       .ok (q, w')) :
     q = a - b ∧ b ≤ a ∧ w' = w := by
-  simp [Tx.run_subChecked] at h
+  simp [Tx.Proof.run_subChecked] at h
   by_cases hle : b ≤ a
   · simp [hle] at h
     exact ⟨h.1.symm, hle, h.2.symm⟩
@@ -35,7 +73,7 @@ theorem mulChecked_ok {a b : Nat} {ctx : Ctx} {w : World S X E}
     (h : Tx.run (Tx.mulChecked (S := S) (X := X) (E := E) (ε := ε) a b) ctx w =
       .ok (q, w')) :
     q = a * b ∧ a * b < wordBound ∧ w' = w := by
-  simp [Tx.run_mulChecked] at h
+  simp [Tx.Proof.run_mulChecked] at h
   by_cases hfit : a * b < wordBound
   · simp [hfit] at h
     exact ⟨h.1.symm, hfit, h.2.symm⟩
@@ -46,7 +84,7 @@ theorem divChecked_ok {a b : Nat} {ctx : Ctx} {w : World S X E}
     (h : Tx.run (Tx.divChecked (S := S) (X := X) (E := E) (ε := ε) a b) ctx w =
       .ok (q, w')) :
     q = a / b ∧ b ≠ 0 ∧ w' = w := by
-  simp [Tx.run_divChecked] at h
+  simp [Tx.Proof.run_divChecked] at h
   by_cases hb : b = 0
   · simp [hb] at h
   · simp [hb] at h
@@ -58,7 +96,7 @@ theorem mulDivDown_ok {a b c : Nat} {ctx : Ctx} {w : World S X E}
       .ok (q, w')) :
     c ≠ 0 ∧ a * b < wordBound ∧ q = a * b / c ∧ q * c ≤ a * b ∧
       a * b - q * c < c ∧ w' = w := by
-  simp [Tx.run_mulDivDown] at h
+  simp [Tx.Proof.run_mulDivDown] at h
   by_cases hc0 : c = 0
   · simp [hc0] at h
   · by_cases hfit : a * b < wordBound
@@ -81,7 +119,7 @@ theorem mulDivUp_ok {a b c : Nat} {ctx : Ctx} {w : World S X E}
       .ok (q, w')) :
     c ≠ 0 ∧ a * b < wordBound ∧
       q = a * b / c + (if a * b % c = 0 then 0 else 1) ∧ a * b ≤ q * c ∧ w' = w := by
-  simp [Tx.run_mulDivUp] at h
+  simp [Tx.Proof.run_mulDivUp] at h
   by_cases hc0 : c = 0
   · simp [hc0] at h
   · by_cases hfit : a * b < wordBound
@@ -111,7 +149,7 @@ theorem pow10_ok {d : Nat} {ctx : Ctx} {w : World S X E}
     {q : Nat} {w' : World S X E}
     (h : Tx.run (Tx.pow10 (S := S) (X := X) (E := E) (ε := ε) d) ctx w = .ok (q, w')) :
     d ≤ Tx.pow10Max ∧ q = 10 ^ d ∧ w' = w := by
-  simp [Tx.run_pow10] at h
+  simp [Tx.Proof.run_pow10] at h
   by_cases hbig : d > Tx.pow10Max
   · simp [hbig] at h
   · simp [hbig] at h
@@ -123,7 +161,7 @@ theorem rescale_id {d : Nat} {r : Rounding} {a : Nat} {ctx : Ctx} {w : World S X
       .ok (q, w')) :
     q = a ∧ w' = w := by
   unfold Tx.rescale at h
-  simp at h
+  simp [Tx.Proof.run_pure] at h
   exact ⟨h.1.symm, h.2.symm⟩
 
 end Lsc.Proof

@@ -1,4 +1,5 @@
 import Lsc.Compiler.EndToEnd
+import Lsc.Compiler.EndToEndTheorems
 import Lsc.Compiler.EvmDetDefs
 import Lsc.Compiler.ExtOracle
 import YulEvmCompiler.Optimizer.Implementation.MemorySpill
