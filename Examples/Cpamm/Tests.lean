@@ -87,6 +87,14 @@ end Cpamm
           && w'.self.protocolFees0 == 1 && w'.self.protocolFees1 == 0
     | _ => false)
 
+-- share > BPS: fee=1, proto=⌊1·20000/10000⌋=2 > fee → FeeTooHigh
+#guard
+  (match Lsc.Tx.run (Cpamm.swap0for1 100 0) Cpamm.smokeCtx
+      { Cpamm.smokePoolProto with
+        self := { Cpamm.smokePoolProto.self with protocolShareBps := 20000 } } with
+    | .error (.user .FeeTooHigh) => true
+    | _ => false)
+
 #guard
   (match Lsc.Tx.run (Cpamm.setProtocolShare 5000) Cpamm.smokeCtx Cpamm.smokePool with
     | .ok (_, w') => w'.self.protocolShareBps == 5000 && w'.self.protocolFees0 == 0

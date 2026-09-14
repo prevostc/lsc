@@ -131,15 +131,6 @@ theorem dxFeeLess_le (dx : Nat) : dxFeeLess dx ≤ dx := by
   simpa [dxFeeLess, Nat.mul_comm dx] using
     remove_le_reserves (BPS.raw - FEE_BPS) dx BPS.raw (Nat.sub_le _ _) BPS_pos
 
-theorem protoOf_le_dx (σ : Storage) (dx : Nat) (h : σ.protocolShareBps ≤ BPS) :
-    protoOf σ dx ≤ dx := by
-  unfold protoOf
-  split_ifs
-  · exact Nat.zero_le _
-  · exact Nat.le_trans
-      (share_le (swapFee dx) σ.protocolShareBps.raw BPS.raw (by simpa using h) (by decide))
-      (Nat.sub_le _ _)
-
 @[simp] theorem balSel0_eq : balSel0 = 0x70a08231 := by decide
 @[simp] theorem balSel1_eq : balSel1 = 0x70a08231 := by decide
 @[simp] theorem supplySel0_eq : supplySel0 = 0x18160ddd := by decide
@@ -1662,7 +1653,7 @@ theorem swap0for1_reverts_on_lp (dx : Amount asset0) (minOut : Amount asset1)
     (houtM : w.self.reserve1.raw * dxFeeLess dx.raw < wordBound)
     (hprotoM : swapFee dx.raw * coeffOf w.self < wordBound)
     (hlp : ¬ swapOutProto dx.raw (coeffBps w.self) ≤ swapFee dx.raw) :
-    Tx.run (swap0for1 dx minOut) ctx w = .error (.arith .underflow) := by
+    Tx.run (swap0for1 dx minOut) ctx w = .error (.user .FeeTooHigh) := by
   rw [swap0_after_quote dx minOut hpos hr0 hr1, Tx.run_bind,
     run_swapOut_lp _ _ _ _ hfee hden (swap0_denNe (dx := dx) hr0) houtM
       ((protoMul_coeff (dx := dx.raw)).mpr hprotoM) hlp]
@@ -2049,7 +2040,7 @@ theorem swap1for0_reverts_on_lp (dx : Amount asset1) (minOut : Amount asset0)
     (houtM : w.self.reserve0.raw * dxFeeLess dx.raw < wordBound)
     (hprotoM : swapFee dx.raw * coeffOf w.self < wordBound)
     (hlp : ¬ swapOutProto dx.raw (coeffBps w.self) ≤ swapFee dx.raw) :
-    Tx.run (swap1for0 dx minOut) ctx w = .error (.arith .underflow) := by
+    Tx.run (swap1for0 dx minOut) ctx w = .error (.user .FeeTooHigh) := by
   rw [swap1_after_quote dx minOut hpos hr0 hr1, Tx.run_bind,
     run_swapOut_lp _ _ _ _ hfee hden (swap1_denNe (dx := dx) hr1) houtM
       ((protoMul_coeff (dx := dx.raw)).mpr hprotoM) hlp]
@@ -2500,16 +2491,16 @@ namespace Proof
 
 theorem swap0for1_k {dx : Amount asset0} {minOut : Amount asset1}
     {out : Amount asset1} {w' : World Storage ExtState Event}
-    (h : Tx.run (swap0for1 dx minOut) ctx w = .ok (out, w'))
-    (hps : w.self.protocolShareBps ≤ BPS) :
+    (h : Tx.run (swap0for1 dx minOut) ctx w = .ok (out, w')) :
     w'.self.reserve0.raw * w'.self.reserve1.raw ≥
       w.self.reserve0.raw * w.self.reserve1.raw := by
   have hok := swap0for1_ok_of_run h
   have ⟨_, hσ, _, _⟩ := swap0for1_post dx minOut hok h
-  have hpsN : w.self.protocolShareBps.raw ≤ BPS.raw := by
-    simpa [Amount.le_iff] using hps
+  have hfee : protoTake w.self.feeTo w.self.protocolShareBps.raw (swapFee dx.raw) ≤
+      swapFee dx.raw := by
+    simpa [swapOutProto_coeff, protoOf_eq_take] using hok.lp
   have hk := swapQuote_k w.self.reserve0.raw w.self.reserve1.raw dx.raw
-    w.self.feeTo w.self.protocolShareBps.raw hok.r0 hpsN
+    w.self.feeTo w.self.protocolShareBps.raw hok.r0 hfee
   simp [hσ, swap0Post, Amount.raw_add, Amount.raw_sub, Amount.raw_ofWord,
     protoOf, protoTake, swapQuote, amountOut, amountOutF, swap0Out]
   change (_ : Nat) ≤ _
@@ -2517,16 +2508,16 @@ theorem swap0for1_k {dx : Amount asset0} {minOut : Amount asset1}
 
 theorem swap1for0_k {dx : Amount asset1} {minOut : Amount asset0}
     {out : Amount asset0} {w' : World Storage ExtState Event}
-    (h : Tx.run (swap1for0 dx minOut) ctx w = .ok (out, w'))
-    (hps : w.self.protocolShareBps ≤ BPS) :
+    (h : Tx.run (swap1for0 dx minOut) ctx w = .ok (out, w')) :
     w'.self.reserve0.raw * w'.self.reserve1.raw ≥
       w.self.reserve0.raw * w.self.reserve1.raw := by
   have hok := swap1for0_ok_of_run h
   have ⟨_, hσ, _, _⟩ := swap1for0_post dx minOut hok h
-  have hpsN : w.self.protocolShareBps.raw ≤ BPS.raw := by
-    simpa [Amount.le_iff] using hps
+  have hfee : protoTake w.self.feeTo w.self.protocolShareBps.raw (swapFee dx.raw) ≤
+      swapFee dx.raw := by
+    simpa [swapOutProto_coeff, protoOf_eq_take] using hok.lp
   have hk := swapQuote_k w.self.reserve1.raw w.self.reserve0.raw dx.raw
-    w.self.feeTo w.self.protocolShareBps.raw hok.r1 hpsN
+    w.self.feeTo w.self.protocolShareBps.raw hok.r1 hfee
   simp [hσ, swap1Post, Amount.raw_add, Amount.raw_sub, Amount.raw_ofWord]
   change (_ : Nat) ≤ _
   refine (Nat.mul_comm _ _).trans_le (le_trans hk ?_)

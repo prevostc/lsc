@@ -72,14 +72,13 @@ theorem protoTake_le_fee (feeTo ps fee : Nat) (h : ps ≤ BPS.raw) :
   · exact Nat.zero_le _
   · exact share_le fee ps BPS.raw h (by decide)
 
-/-- A successful quote never decreases `k`, provided the protocol share is at
-most 100% (so the take cannot exceed the 0.3% fee). -/
+/-- A successful quote never decreases `k` when the protocol take does not
+exceed the 0.3% fee (so net input is at least the fee-less notional). -/
 theorem swapQuote_k (rIn rOut dx feeTo pShareBps : Nat)
-    (hIn : 0 < rIn) (hps : pShareBps ≤ BPS.raw) :
+    (hIn : 0 < rIn)
+    (hfee : protoTake feeTo pShareBps (swapFee dx) ≤ swapFee dx) :
     (rIn + (dx - (swapQuote rIn rOut dx feeTo pShareBps).2)) *
       (rOut - (swapQuote rIn rOut dx feeTo pShareBps).1) ≥ rIn * rOut := by
-  have hfee : protoTake feeTo pShareBps (swapFee dx) ≤ swapFee dx :=
-    protoTake_le_fee feeTo pShareBps (swapFee dx) hps
   have hdxF : dxFeeLess dx ≤ dx := by
     simpa [dxFeeLess, Nat.mul_comm dx] using
       remove_le_reserves (BPS.raw - FEE_BPS) dx BPS.raw (Nat.sub_le _ _) (by decide)

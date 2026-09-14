@@ -72,7 +72,7 @@ abbrev M := Tx Storage ExtState Event Error
   let out ← rOut mulDiv↓ dxF / den
   let fee ← amountIn -? dxF
   let protoFee ← fee *?↓ share
-  let _ ← fee -? protoFee
+  Tx.require (protoFee ≤ fee) .FeeTooHigh
   return (out, protoFee)
 
 /-- Bind two distinct tokens and set the owner; protocol take starts disabled. -/

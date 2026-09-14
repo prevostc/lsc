@@ -9,8 +9,8 @@ set_option linter.unusedSimpArgs false
 
 /-!
 `Tx.run` of the asset-polymorphic `swapOut` helper: success is the floor quote
-`⌊rOut · dxF / (rIn + dxF)⌋` and protocol take `⌊fee · share / BPS⌋`. The LP
-remainder `fee − proto` is checked (and discarded) so an oversized take reverts.
+`⌊rOut · dxF / (rIn + dxF)⌋` and protocol take `⌊fee · share / BPS⌋`. An
+oversized take (`protoFee > fee`) reverts `FeeTooHigh`.
 -/
 
 open Lsc Lsc.Syntax Lsc.Stdlib Cpamm Stdlib
@@ -95,6 +95,18 @@ private theorem run_hSub_bind {α : Type} {a : Asset} (x y : Amount a)
   rw [Tx.run_bind, Amount.hSub_def, Amount.run_sub]
   split_ifs <;> rfl
 
+private theorem run_req_false {α : Type} {c : Prop} [Decidable c] {e : Error}
+    {k : Unit → Tx Storage ExtState Event Error α} (h : ¬c) :
+    Tx.run (Tx.require (S := Storage) (X := ExtState) (E := Event) c e >>= k) ctx w =
+      .error (.user e) := by
+  simp [Tx.run_bind, Tx.run_require, h]
+
+private theorem run_req_true {α : Type} {c : Prop} [Decidable c] {e : Error}
+    {k : Unit → Tx Storage ExtState Event Error α} (h : c) :
+    Tx.run (Tx.require (S := Storage) (X := ExtState) (E := Event) c e >>= k) ctx w =
+      Tx.run (k ()) ctx w := by
+  simp [Tx.run_bind, Tx.run_require, h]
+
 /-- `protocolShareBps` when `feeTo ≠ 0`, otherwise `0`. -/
 def coeffBps (σ : Storage) : Bps :=
   if σ.feeTo = 0 then 0 else σ.protocolShareBps
@@ -140,10 +152,6 @@ private theorem out_eq {a b : Asset} (rIn : Amount a) (rOut : Amount b)
         (rIn.raw + dxFeeLess amountIn.raw)⟩ : Amount b) =
       ⟨swapOutOut rIn.raw rOut.raw amountIn.raw⟩ := by
   simp [swapOutOut, amountOutF, dxFeeLess]
-
-private theorem fee_raw {a : Asset} (amountIn : Amount a) :
-    (⟨amountIn.raw - dxFeeLess amountIn.raw⟩ : Amount a).raw = swapFee amountIn.raw :=
-  rfl
 
 /-- `swapOut` reverts on `amountIn * 9970` overflow. -/
 theorem run_swapOut_fee_mul {a b : Asset}
@@ -216,7 +224,7 @@ theorem run_swapOut_lp {a b : Asset}
     (houtM : rOut.raw * dxFeeLess amountIn.raw < wordBound)
     (hprotoM : swapFee amountIn.raw * share.raw < wordBound)
     (hlp : ¬ swapOutProto amountIn.raw share ≤ swapFee amountIn.raw) :
-    Tx.run (swapOut rIn rOut amountIn share) ctx w = .error (.arith .underflow) := by
+    Tx.run (swapOut rIn rOut amountIn share) ctx w = .error (.user .FeeTooHigh) := by
   have hdxFle : dxFeeLess amountIn.raw ≤ amountIn.raw := dxFeeLess_le' amountIn.raw
   unfold swapOut
   simp only [run_mulDivDown_word_bind]
@@ -235,8 +243,10 @@ theorem run_swapOut_lp {a b : Asset}
   rw [show Amount.mulDown (⟨amountIn.raw - dxFeeLess amountIn.raw⟩ : Amount a) share =
         ⟨swapOutProto amountIn.raw share⟩ from by
       simpa [swapFee] using proto_mulDown_share (a := a) amountIn.raw share]
-  simp only [run_hSub_bind]
-  rw [if_neg (by simpa [swapFee, fee_raw] using hlp)]
+  have hn : ¬ ((⟨swapOutProto amountIn.raw share⟩ : Amount a) ≤
+      ⟨amountIn.raw - dxFeeLess amountIn.raw⟩) := by
+    simpa [swapFee] using hlp
+  exact run_req_false hn
 
 /-- When the arithmetic conditions hold, `swapOut` returns the floor pair. -/
 theorem run_swapOut {a b : Asset}
@@ -264,8 +274,10 @@ theorem run_swapOut {a b : Asset}
   rw [show Amount.mulDown (⟨amountIn.raw - dxFeeLess amountIn.raw⟩ : Amount a) share =
         ⟨swapOutProto amountIn.raw share⟩ from by
       simpa [swapFee] using proto_mulDown_share (a := a) amountIn.raw share]
-  simp only [run_hSub_bind]
-  rw [if_pos (by simpa [swapFee, fee_raw] using h.lp)]
+  have hle : (⟨swapOutProto amountIn.raw share⟩ : Amount a) ≤
+      ⟨amountIn.raw - dxFeeLess amountIn.raw⟩ := by
+    simpa [swapFee] using h.lp
+  rw [run_req_true hle]
   simp [Tx.run_pure]
 
 /-- `swapOut` after a bind is the continuation on the floor pair. -/

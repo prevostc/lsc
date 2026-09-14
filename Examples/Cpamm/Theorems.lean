@@ -17,29 +17,25 @@ section Tx
 variable (ctx : Ctx) (w : World Storage ExtState Event)
 
 /-- A successful `swap0for1` does not decrease the product of the two reserves.
-`protocolShareBps ≤ BPS` is required at `Tx.run` level: a stored share above
-100% can skim more than the 0.3% fee, so the input reserve can grow by less
-than the fee-less notional used to compute the output and `k` can fall.
-The pool maintains that bound after construction and `setProtocolShare`.
-Word overflow in the `mulDiv` intermediates reverts; that is not a 512-bit
-`mulDiv`. -/
+`swapOut` reverts if the protocol take would exceed the 0.3% fee, so the
+input reserve grows by at least the fee-less notional used to compute the
+output. Word overflow in the `mulDiv` intermediates reverts; that is not
+a 512-bit `mulDiv`. -/
 theorem swap0for1_k (dx : Amount asset0) (minOut : Amount asset1)
     {out : Amount asset1} {w' : World Storage ExtState Event}
-    (h : Tx.run (swap0for1 dx minOut) ctx w = .ok (out, w'))
-    (hps : w.self.protocolShareBps ≤ BPS) :
+    (h : Tx.run (swap0for1 dx minOut) ctx w = .ok (out, w')) :
     w'.self.reserve0.raw * w'.self.reserve1.raw ≥
       w.self.reserve0.raw * w.self.reserve1.raw :=
-  Proof.swap0for1_k h hps
+  Proof.swap0for1_k h
 
 /-- A successful `swap1for0` does not decrease the product of the two reserves.
-Same protocol-share bound as `swap0for1_k`. -/
+Same fee-bound as `swap0for1_k`. -/
 theorem swap1for0_k (dx : Amount asset1) (minOut : Amount asset0)
     {out : Amount asset0} {w' : World Storage ExtState Event}
-    (h : Tx.run (swap1for0 dx minOut) ctx w = .ok (out, w'))
-    (hps : w.self.protocolShareBps ≤ BPS) :
+    (h : Tx.run (swap1for0 dx minOut) ctx w = .ok (out, w')) :
     w'.self.reserve0.raw * w'.self.reserve1.raw ≥
       w.self.reserve0.raw * w.self.reserve1.raw :=
-  Proof.swap1for0_k h hps
+  Proof.swap1for0_k h
 
 /-- On a successful `swap0for1`, the token0 protocol bucket grows by exactly
 `proto` (zero when `feeTo = 0`, otherwise `⌊fee · protocolShareBps / BPS⌋` of
