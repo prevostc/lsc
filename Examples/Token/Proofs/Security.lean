@@ -10,6 +10,8 @@ set_option linter.unusedSimpArgs false
 
 open Lsc Lsc.Security Token
 
+attribute [local simp] Claim.ofSelf AuthPred.ofSelf
+
 namespace Token
 
 /-!
@@ -29,18 +31,19 @@ theorem inv_solvent (self : Address) (w : World Storage ExtState Event) (h : Inv
 /-! ### Auth reductions -/
 
 lemma Auth_transfer (a : Address) (ctx : Ctx) (dst : Address)
-    (n : Amount tokenAsset) (s : Storage) :
-    Auth a (Call.ofCtx ctx .transfer (dst, n)) s ↔ ctx.sender = a :=
+    (n : Amount tokenAsset) (w : World Storage ExtState Event) :
+    Auth a (Call.ofCtx ctx .transfer (dst, n)) w ↔ ctx.sender = a :=
   Iff.rfl
 
-lemma Auth_burn (a : Address) (ctx : Ctx) (n : Amount tokenAsset) (s : Storage) :
-    Auth a (Call.ofCtx ctx .burn n) s ↔ ctx.sender = a :=
+lemma Auth_burn (a : Address) (ctx : Ctx) (n : Amount tokenAsset)
+    (w : World Storage ExtState Event) :
+    Auth a (Call.ofCtx ctx .burn n) w ↔ ctx.sender = a :=
   Iff.rfl
 
 lemma Auth_transferFrom (a : Address) (ctx : Ctx) (src dst : Address)
-    (n : Amount tokenAsset) (s : Storage) :
-    Auth a (Call.ofCtx ctx .transferFrom (src, dst, n)) s ↔
-      src = a ∧ n ≤ s.allowances src ctx.sender :=
+    (n : Amount tokenAsset) (w : World Storage ExtState Event) :
+    Auth a (Call.ofCtx ctx .transferFrom (src, dst, n)) w ↔
+      src = a ∧ n ≤ w.self.allowances src ctx.sender :=
   Iff.rfl
 
 /-! ### Sum helpers for `Inv` -/
@@ -700,8 +703,10 @@ theorem token_no_unauthorized_extraction
     (tr : List (Step spec)) (w : World Storage ExtState Event) (a : Address)
     (hw : Inv w) (hR : RelyAlong (fun _ _ => True) tr w)
     (hA : NoAuthAlong Auth a tr w) :
-    claim a w.self ≤ claim a (run tr w).self :=
+    claim a w ≤ claim a (run tr w) :=
   no_unauthorized_extraction token_no_unauth token_preserves_inv token_inv_rely
+    (ClaimMonoEnv.of_self (fun a (s : Storage) => (s.balances a).raw)
+      (fun _ _ => True))
     tr w a hw hR hA
 
 theorem token_solvent (self : Address) (tr : List (Step spec)) (w : World Storage ExtState Event)

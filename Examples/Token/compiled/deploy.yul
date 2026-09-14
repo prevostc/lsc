@@ -1,12 +1,12 @@
 // selector → function  (hex and decimal; `switch` cases print decimal)
 //   0xa9059cbb  (2835717307)  transfer(address,uint256)
-//   0x095ea7b3  (157198259)  approve(address,uint256)
 //   0x23b872dd  (599290589)  transferFrom(address,address,uint256)
-//   0x40c10f19  (1086394137)  mint(address,uint256)
-//   0x42966c68  (1117154408)  burn(uint256)
+//   0x095ea7b3  (157198259)  approve(address,uint256)
+//   0x18160ddd  (404098525)  totalSupply()
 //   0x70a08231  (1889567281)  balanceOf(address)
 //   0xdd62ed3e  (3714247998)  allowance(address,address)
-//   0x18160ddd  (404098525)  totalSupply()
+//   0x40c10f19  (1086394137)  mint(address,uint256)
+//   0x42966c68  (1117154408)  burn(uint256)
 
 object "Token" {
     code {
@@ -77,29 +77,8 @@ object "Token" {
                     mstore(160, transfer_0)
                     mstore(192, transfer_1)
                     log1(128, 96, 100389287136786176327247604509743168900146139575972864366142685224231313322991)
-                    stop()
-                }
-            }
-            case 157198259 { // approve(address,uint256)
-                {
-                    if lt(calldatasize(), 68) {
-                        revert(0, 0)
-                    }
-                }
-                {
-                    let approve_0 := calldataload(4)
-                    let approve_1 := calldataload(36)
-                    let approve_2 := caller()
-                    mstore(0, approve_2)
-                    mstore(32, 3)
-                    mstore(32, keccak256(0, 64))
-                    mstore(0, approve_0)
-                    sstore(keccak256(0, 64), approve_1)
-                    mstore(128, approve_2)
-                    mstore(160, approve_0)
-                    mstore(192, approve_1)
-                    log1(128, 96, 63486140976153616755203102783360879283472101686154884697241723088393386309925)
-                    stop()
+                    mstore(128, 1)
+                    return(128, 32)
                 }
             }
             case 599290589 { // transferFrom(address,address,uint256)
@@ -165,7 +144,76 @@ object "Token" {
                     mstore(160, transferFrom_1)
                     mstore(192, transferFrom_2)
                     log1(128, 96, 100389287136786176327247604509743168900146139575972864366142685224231313322991)
-                    stop()
+                    mstore(128, 1)
+                    return(128, 32)
+                }
+            }
+            case 157198259 { // approve(address,uint256)
+                {
+                    if lt(calldatasize(), 68) {
+                        revert(0, 0)
+                    }
+                }
+                {
+                    let approve_0 := calldataload(4)
+                    let approve_1 := calldataload(36)
+                    let approve_2 := caller()
+                    mstore(0, approve_2)
+                    mstore(32, 3)
+                    mstore(32, keccak256(0, 64))
+                    mstore(0, approve_0)
+                    sstore(keccak256(0, 64), approve_1)
+                    mstore(128, approve_2)
+                    mstore(160, approve_0)
+                    mstore(192, approve_1)
+                    log1(128, 96, 63486140976153616755203102783360879283472101686154884697241723088393386309925)
+                    mstore(128, 1)
+                    return(128, 32)
+                }
+            }
+            case 404098525 { // totalSupply()
+                {
+                    if lt(calldatasize(), 4) {
+                        revert(0, 0)
+                    }
+                }
+                {
+                    let totalSupply_0 := sload(1)
+                    mstore(128, totalSupply_0)
+                    return(128, 32)
+                }
+            }
+            case 1889567281 { // balanceOf(address)
+                {
+                    if lt(calldatasize(), 36) {
+                        revert(0, 0)
+                    }
+                }
+                {
+                    let balanceOf_0 := calldataload(4)
+                    mstore(0, balanceOf_0)
+                    mstore(32, 2)
+                    let balanceOf_1 := sload(keccak256(0, 64))
+                    mstore(128, balanceOf_1)
+                    return(128, 32)
+                }
+            }
+            case 3714247998 { // allowance(address,address)
+                {
+                    if lt(calldatasize(), 68) {
+                        revert(0, 0)
+                    }
+                }
+                {
+                    let allowance_0 := calldataload(4)
+                    let allowance_1 := calldataload(36)
+                    mstore(0, allowance_0)
+                    mstore(32, 3)
+                    mstore(32, keccak256(0, 64))
+                    mstore(0, allowance_1)
+                    let allowance_2 := sload(keccak256(0, 64))
+                    mstore(128, allowance_2)
+                    return(128, 32)
                 }
             }
             case 1086394137 { // mint(address,uint256)
@@ -256,51 +304,6 @@ object "Token" {
                         log1(128, 96, 100389287136786176327247604509743168900146139575972864366142685224231313322991)
                         stop()
                     }
-                }
-            }
-            case 1889567281 { // balanceOf(address)
-                {
-                    if lt(calldatasize(), 36) {
-                        revert(0, 0)
-                    }
-                }
-                {
-                    let balanceOf_0 := calldataload(4)
-                    mstore(0, balanceOf_0)
-                    mstore(32, 2)
-                    let balanceOf_1 := sload(keccak256(0, 64))
-                    mstore(128, balanceOf_1)
-                    return(128, 32)
-                }
-            }
-            case 3714247998 { // allowance(address,address)
-                {
-                    if lt(calldatasize(), 68) {
-                        revert(0, 0)
-                    }
-                }
-                {
-                    let allowance_0 := calldataload(4)
-                    let allowance_1 := calldataload(36)
-                    mstore(0, allowance_0)
-                    mstore(32, 3)
-                    mstore(32, keccak256(0, 64))
-                    mstore(0, allowance_1)
-                    let allowance_2 := sload(keccak256(0, 64))
-                    mstore(128, allowance_2)
-                    return(128, 32)
-                }
-            }
-            case 404098525 { // totalSupply()
-                {
-                    if lt(calldatasize(), 4) {
-                        revert(0, 0)
-                    }
-                }
-                {
-                    let totalSupply_0 := sload(1)
-                    mstore(128, totalSupply_0)
-                    return(128, 32)
                 }
             }
             default {

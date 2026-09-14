@@ -1,8 +1,7 @@
 import Examples.Counter.Theorems
 import Examples.Token.Theorems
 import Examples.Vault.Theorems
--- slice 4: Cpamm restored when that example compiles on the oracle model.
--- import Examples.Cpamm.Theorems
+import Examples.Cpamm.Theorems
 import Lsc.Security.WealthTheorems
 import Lsc.Compiler.DispatchTheorems
 import Lsc.Compiler.CoreTheorems
@@ -46,7 +45,14 @@ axioms. `#guard_msgs` turns a widened footprint into a build error (see
 /-- info: 'Vault.vault_no_unauthorized_extraction' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms Vault.vault_no_unauthorized_extraction
 
--- slice 4: Cpamm example pins restored with that example.
+/-- info: 'Cpamm.swap0for1_k' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms Cpamm.swap0for1_k
+
+/-- info: 'Cpamm.cpamm_solvent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms Cpamm.cpamm_solvent
+
+/-- info: 'Cpamm.cpamm_no_unauthorized_extraction' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms Cpamm.cpamm_no_unauthorized_extraction
 
 /-- info: 'Lsc.Compiler.toYulFn_correct_callFree' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms Lsc.Compiler.toYulFn_correct_callFree

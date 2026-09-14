@@ -163,7 +163,7 @@ def ctrErr : Counter.Error → Nat
   | .Zero => 0
 
 def ctrW (n : Nat) : World Counter.Storage ExtState Counter.Event :=
-  { self := { count := n }, ext := default }
+  { self := { count := n }, ext := {} }
 
 def ctrSlots (n : Nat) : List (BitVec 256 × BitVec 256) :=
   [(u256 0, u256 n)]
@@ -234,8 +234,8 @@ def σ₁ : Token.Storage :=
 def σAllow : Token.Storage :=
   { σ₁ with allowances := fun a b => Amount.ofWord (allow₁₂ a b) }
 
-def w₁ : World Token.Storage ExtState Token.Event := { self := σ₁, ext := default }
-def wAllow : World Token.Storage ExtState Token.Event := { self := σAllow, ext := default }
+def w₁ : World Token.Storage ExtState Token.Event := { self := σ₁, ext := {} }
+def wAllow : World Token.Storage ExtState Token.Event := { self := σAllow, ext := {} }
 
 def ctxOwner : Ctx := { sender := 1, self := 7 }
 def ctx2 : Ctx := { sender := 2, self := 7 }
@@ -312,7 +312,7 @@ def tokenCtorOwner : Nat := 1
 def tokenCtorSupply : Nat := 1000
 def tokenW0 : World Token.Storage ExtState Token.Event :=
   { self := { owner := 0, totalSupply := 0, balances := fun _ => 0, allowances := fun _ _ => 0 }
-  , ext := default }
+  , ext := {} }
 def tokenCtxDeploy : Ctx := { sender := 1, self := 7 }
 def tokenW1 : World Token.Storage ExtState Token.Event :=
   match Tx.run (Token.constructor tokenCtorOwner (Amount.ofWord tokenCtorSupply))

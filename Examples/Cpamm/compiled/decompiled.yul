@@ -55,120 +55,112 @@ object "DecompiledContract" {
                                                         mstore(0x80, 0xbb2875c300000000000000000000000000000000000000000000000000000000)
                                                         if lt(0, mload(0x0120)) {
                                                             if eq(0, eq(sload(0x07), 0)) {
-                                                                if 0x2710 {
+                                                                if or(iszero(0x01), eq(div(mul(0x01, sload(0x08)), 0x01), sload(0x08))) {
                                                                     mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
-                                                                    mstore(0x84, 0x12)
-                                                                    if or(iszero(mload(0x0100)), eq(div(mul(mload(0x0100), 0x26f2), mload(0x0100)), 0x26f2)) {
+                                                                    mstore(0x84, 0x11)
+                                                                    if iszero(lt(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710))) {
                                                                         mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
                                                                         mstore(0x84, 0x11)
-                                                                        if iszero(lt(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710))) {
+                                                                        if 0x2710 {
                                                                             mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
-                                                                            mstore(0x84, 0x11)
-                                                                            if 0x2710 {
+                                                                            mstore(0x84, 0x12)
+                                                                            if or(iszero(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710))), eq(div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), mul(0x01, sload(0x08))), sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710))), mul(0x01, sload(0x08)))) {
                                                                                 mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
-                                                                                mstore(0x84, 0x12)
-                                                                                if or(iszero(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710))), eq(div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), sload(0x08)), sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710))), sload(0x08))) {
+                                                                                mstore(0x84, 0x11)
+                                                                                if iszero(lt(mload(0x0100), div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), mul(0x01, sload(0x08))), 0x2710))) {
                                                                                     mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
                                                                                     mstore(0x84, 0x11)
-                                                                                    if iszero(lt(mload(0x0100), div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), sload(0x08)), 0x2710))) {
+                                                                                    if iszero(lt(add(sload(0x02), sub(mload(0x0100), div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), mul(0x01, sload(0x08))), 0x2710))), sload(0x02))) {
                                                                                         mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
                                                                                         mstore(0x84, 0x11)
-                                                                                        if iszero(lt(add(sload(0x02), sub(mload(0x0100), div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), sload(0x08)), 0x2710))), sload(0x02))) {
+                                                                                        sstore(0x02, add(sload(0x02), sub(mload(0x0100), div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), mul(0x01, sload(0x08))), 0x2710))))
+                                                                                        if iszero(lt(sload(0x03), mload(0x0120))) {
                                                                                             mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
                                                                                             mstore(0x84, 0x11)
-                                                                                            sstore(0x02, add(sload(0x02), sub(mload(0x0100), div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), sload(0x08)), 0x2710))))
-                                                                                            if iszero(lt(sload(0x03), mload(0x0120))) {
+                                                                                            sstore(0x03, sub(sload(0x03), mload(0x0120)))
+                                                                                            if iszero(lt(add(sload(0x09), div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), mul(0x01, sload(0x08))), 0x2710)), sload(0x09))) {
                                                                                                 mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
                                                                                                 mstore(0x84, 0x11)
-                                                                                                sstore(0x03, sub(sload(0x03), mload(0x0120)))
-                                                                                                if iszero(lt(add(sload(0x09), div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), sload(0x08)), 0x2710)), sload(0x09))) {
-                                                                                                    mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
-                                                                                                    mstore(0x84, 0x11)
-                                                                                                    sstore(0x09, add(sload(0x09), div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), sload(0x08)), 0x2710)))
-                                                                                                    mstore(0x80, 0x23b872dd00000000000000000000000000000000000000000000000000000000)
-                                                                                                    mstore(0x84, caller())
-                                                                                                    mstore(0xa4, address())
-                                                                                                    mstore(0xc4, mload(0x0100))
-                                                                                                    call(0x0f4240, sload(0), 0, 0x80, 0x64, 0x80, 0x20)
-                                                                                                    if call(0x0f4240, sload(0), 0, 0x80, 0x64, 0x80, 0x20) { revert(0, 0); } else {
-                                                                                                        if or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 0x20)), eq(mload(0x80), 0x01))) {
-                                                                                                            if iszero(eq(0x01, 0)) { revert(0x80, 0x04); } else {
-                                                                                                                mstore(0x80, 0x90b8ec1800000000000000000000000000000000000000000000000000000000)
-                                                                                                                mstore(0x80, 0xa9059cbb00000000000000000000000000000000000000000000000000000000)
-                                                                                                                mstore(0x84, caller())
-                                                                                                                mstore(0xa4, mload(0x0120))
-                                                                                                                call(0x0f4240, sload(0x01), 0, 0x80, 0x44, 0x80, 0x20)
-                                                                                                                if call(0x0f4240, sload(0x01), 0, 0x80, 0x44, 0x80, 0x20) { revert(0, 0); } else {
-                                                                                                                    if or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 0x20)), eq(mload(0x80), 0x01))) {
-                                                                                                                        if iszero(eq(0x01, 0)) { revert(0, 0); } else {
-                                                                                                                            mstore(0x80, 0x90b8ec1800000000000000000000000000000000000000000000000000000000)
-                                                                                                                            mstore(0x80, caller())
-                                                                                                                            mstore(0xa0, mload(0x0100))
-                                                                                                                            mstore(0xc0, mload(0x0120))
-                                                                                                                            log1(0x80, 0x60, 0x268d208c45ec3d7213f545c4402b1bc7f11b332757a4e0d84ff4d37b90db1fca)
-                                                                                                                            mstore(0x80, mload(0x0120))
-                                                                                                                            return(0x80, 0x20)
-                                                                                                                            if 0x2710 {
+                                                                                                sstore(0x09, add(sload(0x09), div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), mul(0x01, sload(0x08))), 0x2710)))
+                                                                                                mstore(0x80, 0x23b872dd00000000000000000000000000000000000000000000000000000000)
+                                                                                                mstore(0x84, caller())
+                                                                                                mstore(0xa4, address())
+                                                                                                mstore(0xc4, mload(0x0100))
+                                                                                                call(0x0f4240, sload(0), 0, 0x80, 0x64, 0x80, 0x20)
+                                                                                                if call(0x0f4240, sload(0), 0, 0x80, 0x64, 0x80, 0x20) { revert(0, 0); } else {
+                                                                                                    if or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 0x20)), lt(returndatasize(), 0x40))) {
+                                                                                                        if eq(or(iszero(returndatasize()), iszero(iszero(mload(0x80)))), 0x01) { revert(0x80, 0x04); } else {
+                                                                                                            mstore(0x80, 0x90b8ec1800000000000000000000000000000000000000000000000000000000)
+                                                                                                            mstore(0x80, 0xa9059cbb00000000000000000000000000000000000000000000000000000000)
+                                                                                                            mstore(0x84, caller())
+                                                                                                            mstore(0xa4, mload(0x0120))
+                                                                                                            call(0x0f4240, sload(0x01), 0, 0x80, 0x44, 0x80, 0x20)
+                                                                                                            if call(0x0f4240, sload(0x01), 0, 0x80, 0x44, 0x80, 0x20) { revert(0, 0); } else {
+                                                                                                                if or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 0x20)), lt(returndatasize(), 0x40))) {
+                                                                                                                    if eq(or(iszero(returndatasize()), iszero(iszero(mload(0x80)))), 0x01) { revert(0, 0); } else {
+                                                                                                                        mstore(0x80, 0x90b8ec1800000000000000000000000000000000000000000000000000000000)
+                                                                                                                        mstore(0x80, caller())
+                                                                                                                        mstore(0xa0, mload(0x0100))
+                                                                                                                        mstore(0xc0, mload(0x0120))
+                                                                                                                        log1(0x80, 0x60, 0x268d208c45ec3d7213f545c4402b1bc7f11b332757a4e0d84ff4d37b90db1fca)
+                                                                                                                        mstore(0x80, mload(0x0120))
+                                                                                                                        return(0x80, 0x20)
+                                                                                                                        if or(iszero(0x01), eq(0, 0)) {
+                                                                                                                            mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
+                                                                                                                            mstore(0x84, 0x11)
+                                                                                                                            if iszero(lt(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710))) {
                                                                                                                                 mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
-                                                                                                                                mstore(0x84, 0x12)
-                                                                                                                                if or(iszero(mload(0x0100)), eq(div(mul(mload(0x0100), 0x26f2), mload(0x0100)), 0x26f2)) {
+                                                                                                                                mstore(0x84, 0x11)
+                                                                                                                                if 0x2710 {
                                                                                                                                     mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
-                                                                                                                                    mstore(0x84, 0x11)
-                                                                                                                                    if iszero(lt(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710))) {
+                                                                                                                                    mstore(0x84, 0x12)
+                                                                                                                                    if or(iszero(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710))), eq(div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), 0), sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710))), 0)) {
                                                                                                                                         mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
                                                                                                                                         mstore(0x84, 0x11)
-                                                                                                                                        if 0x2710 {
+                                                                                                                                        if iszero(lt(mload(0x0100), div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), 0), 0x2710))) {
                                                                                                                                             mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
-                                                                                                                                            mstore(0x84, 0x12)
-                                                                                                                                            if or(iszero(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710))), eq(div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), 0), sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710))), 0)) {
+                                                                                                                                            mstore(0x84, 0x11)
+                                                                                                                                            if iszero(lt(add(sload(0x02), sub(mload(0x0100), div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), 0), 0x2710))), sload(0x02))) {
                                                                                                                                                 mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
                                                                                                                                                 mstore(0x84, 0x11)
-                                                                                                                                                if iszero(lt(mload(0x0100), div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), 0), 0x2710))) {
+                                                                                                                                                sstore(0x02, add(sload(0x02), sub(mload(0x0100), div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), 0), 0x2710))))
+                                                                                                                                                if iszero(lt(sload(0x03), mload(0x0120))) {
                                                                                                                                                     mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
                                                                                                                                                     mstore(0x84, 0x11)
-                                                                                                                                                    if iszero(lt(add(sload(0x02), sub(mload(0x0100), div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), 0), 0x2710))), sload(0x02))) {
+                                                                                                                                                    sstore(0x03, sub(sload(0x03), mload(0x0120)))
+                                                                                                                                                    if iszero(lt(add(sload(0x09), div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), 0), 0x2710)), sload(0x09))) {
                                                                                                                                                         mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
                                                                                                                                                         mstore(0x84, 0x11)
-                                                                                                                                                        sstore(0x02, add(sload(0x02), sub(mload(0x0100), div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), 0), 0x2710))))
-                                                                                                                                                        if iszero(lt(sload(0x03), mload(0x0120))) {
-                                                                                                                                                            mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
-                                                                                                                                                            mstore(0x84, 0x11)
-                                                                                                                                                            sstore(0x03, sub(sload(0x03), mload(0x0120)))
-                                                                                                                                                            if iszero(lt(add(sload(0x09), div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), 0), 0x2710)), sload(0x09))) {
-                                                                                                                                                                mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
-                                                                                                                                                                mstore(0x84, 0x11)
-                                                                                                                                                                sstore(0x09, add(sload(0x09), div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), 0), 0x2710)))
-                                                                                                                                                                mstore(0x80, 0x23b872dd00000000000000000000000000000000000000000000000000000000)
-                                                                                                                                                                mstore(0x84, caller())
-                                                                                                                                                                mstore(0xa4, address())
-                                                                                                                                                                mstore(0xc4, mload(0x0100))
-                                                                                                                                                                call(0x0f4240, sload(0), 0, 0x80, 0x64, 0x80, 0x20)
-                                                                                                                                                                if call(0x0f4240, sload(0), 0, 0x80, 0x64, 0x80, 0x20) { revert(0, 0); } else {
-                                                                                                                                                                    if or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 0x20)), eq(mload(0x80), 0x01))) {
-                                                                                                                                                                        if iszero(eq(0x01, 0)) { revert(0x80, 0x04); } else {
-                                                                                                                                                                            mstore(0x80, 0x90b8ec1800000000000000000000000000000000000000000000000000000000)
-                                                                                                                                                                            mstore(0x80, 0xa9059cbb00000000000000000000000000000000000000000000000000000000)
-                                                                                                                                                                            mstore(0x84, caller())
-                                                                                                                                                                            mstore(0xa4, mload(0x0120))
-                                                                                                                                                                            call(0x0f4240, sload(0x01), 0, 0x80, 0x44, 0x80, 0x20)
-                                                                                                                                                                            if call(0x0f4240, sload(0x01), 0, 0x80, 0x44, 0x80, 0x20) { revert(0, 0); } else {
-                                                                                                                                                                                if or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 0x20)), eq(mload(0x80), 0x01))) {
-                                                                                                                                                                                    if iszero(eq(0x01, 0)) { revert(0, 0); } else {
-                                                                                                                                                                                        mstore(0x80, 0x90b8ec1800000000000000000000000000000000000000000000000000000000)
-                                                                                                                                                                                        mstore(0x80, caller())
-                                                                                                                                                                                        mstore(0xa0, mload(0x0100))
-                                                                                                                                                                                        mstore(0xc0, mload(0x0120))
-                                                                                                                                                                                        log1(0x80, 0x60, 0x268d208c45ec3d7213f545c4402b1bc7f11b332757a4e0d84ff4d37b90db1fca)
-                                                                                                                                                                                        mstore(0x80, mload(0x0120))
-                                                                                                                                                                                        return(0x80, 0x20)
-                                                                                                                                                                                        mstore(0x80, 0x1078b53300000000000000000000000000000000000000000000000000000000)
-                                                                                                                                                                                        mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
-                                                                                                                                                                                        mstore(0x84, 0x12)
-                                                                                                                                                                                        mstore(0x80, 0xf456040300000000000000000000000000000000000000000000000000000000)
-                                                                                                                                                                                        mstore(0x80, 0xf456040300000000000000000000000000000000000000000000000000000000)
-                                                                                                                                                                                        mstore(0x80, 0xf456040300000000000000000000000000000000000000000000000000000000)
-                                                                                                                                                                                    }
-                                                                                                                                                                                }
+                                                                                                                                                        sstore(0x09, add(sload(0x09), div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), 0), 0x2710)))
+                                                                                                                                                        mstore(0x80, 0x23b872dd00000000000000000000000000000000000000000000000000000000)
+                                                                                                                                                        mstore(0x84, caller())
+                                                                                                                                                        mstore(0xa4, address())
+                                                                                                                                                        mstore(0xc4, mload(0x0100))
+                                                                                                                                                        call(0x0f4240, sload(0), 0, 0x80, 0x64, 0x80, 0x20)
+                                                                                                                                                        if call(0x0f4240, sload(0), 0, 0x80, 0x64, 0x80, 0x20) { revert(0, 0); } else {
+                                                                                                                                                            if or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 0x20)), lt(returndatasize(), 0x40))) {
+                                                                                                                                                                if eq(or(iszero(returndatasize()), iszero(iszero(mload(0x80)))), 0x01) { revert(0x80, 0x04); } else {
+                                                                                                                                                                    mstore(0x80, 0x90b8ec1800000000000000000000000000000000000000000000000000000000)
+                                                                                                                                                                    mstore(0x80, 0xa9059cbb00000000000000000000000000000000000000000000000000000000)
+                                                                                                                                                                    mstore(0x84, caller())
+                                                                                                                                                                    mstore(0xa4, mload(0x0120))
+                                                                                                                                                                    call(0x0f4240, sload(0x01), 0, 0x80, 0x44, 0x80, 0x20)
+                                                                                                                                                                    if call(0x0f4240, sload(0x01), 0, 0x80, 0x44, 0x80, 0x20) { revert(0, 0); } else {
+                                                                                                                                                                        if or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 0x20)), lt(returndatasize(), 0x40))) {
+                                                                                                                                                                            if eq(or(iszero(returndatasize()), iszero(iszero(mload(0x80)))), 0x01) { revert(0, 0); } else {
+                                                                                                                                                                                mstore(0x80, 0x90b8ec1800000000000000000000000000000000000000000000000000000000)
+                                                                                                                                                                                mstore(0x80, caller())
+                                                                                                                                                                                mstore(0xa0, mload(0x0100))
+                                                                                                                                                                                mstore(0xc0, mload(0x0120))
+                                                                                                                                                                                log1(0x80, 0x60, 0x268d208c45ec3d7213f545c4402b1bc7f11b332757a4e0d84ff4d37b90db1fca)
+                                                                                                                                                                                mstore(0x80, mload(0x0120))
+                                                                                                                                                                                return(0x80, 0x20)
+                                                                                                                                                                                mstore(0x80, 0x1078b53300000000000000000000000000000000000000000000000000000000)
+                                                                                                                                                                                mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
+                                                                                                                                                                                mstore(0x84, 0x12)
+                                                                                                                                                                                mstore(0x80, 0xf456040300000000000000000000000000000000000000000000000000000000)
+                                                                                                                                                                                mstore(0x80, 0xf456040300000000000000000000000000000000000000000000000000000000)
+                                                                                                                                                                                mstore(0x80, 0xf456040300000000000000000000000000000000000000000000000000000000)
                                                                                                                                                                             }
                                                                                                                                                                         }
                                                                                                                                                                     }
@@ -212,7 +204,7 @@ object "DecompiledContract" {
             }
             
             /*
-            * @custom:signature    Unresolved_a1af5b9a() public payable returns (bytes memory)
+            * @custom:signature    collectProtocolFees() public payable returns (bytes memory)
             */
             case 0xa1af5b9a {
                 if iszero(lt(calldatasize(), 0x04)) { revert(0, 0); } else {
@@ -226,16 +218,16 @@ object "DecompiledContract" {
                             mstore(0xa4, sload(0x09))
                             call(0x0f4240, sload(0), 0, 0x80, 0x44, 0x80, 0x20)
                             if call(0x0f4240, sload(0), 0, 0x80, 0x44, 0x80, 0x20) { revert(0, 0); } else {
-                                if or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 0x20)), eq(mload(0x80), 0x01))) {
-                                    if iszero(eq(0x01, 0)) { revert(0x80, 0x04); } else {
+                                if or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 0x20)), lt(returndatasize(), 0x40))) {
+                                    if eq(or(iszero(returndatasize()), iszero(iszero(mload(0x80)))), 0x01) { revert(0x80, 0x04); } else {
                                         mstore(0x80, 0x90b8ec1800000000000000000000000000000000000000000000000000000000)
                                         mstore(0x80, 0xa9059cbb00000000000000000000000000000000000000000000000000000000)
                                         mstore(0x84, caller())
                                         mstore(0xa4, sload(0x0a))
                                         call(0x0f4240, sload(0x01), 0, 0x80, 0x44, 0x80, 0x20)
                                         if call(0x0f4240, sload(0x01), 0, 0x80, 0x44, 0x80, 0x20) { revert(0, 0); } else {
-                                            if or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 0x20)), eq(mload(0x80), 0x01))) {
-                                                if iszero(eq(0x01, 0)) { revert(0x80, 0x04); } else {
+                                            if or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 0x20)), lt(returndatasize(), 0x40))) {
+                                                if eq(or(iszero(returndatasize()), iszero(iszero(mload(0x80)))), 0x01) { revert(0x80, 0x04); } else {
                                                     mstore(0x80, 0x90b8ec1800000000000000000000000000000000000000000000000000000000)
                                                     mstore(0x80, caller())
                                                     mstore(0xa0, sload(0x09))
@@ -257,7 +249,7 @@ object "DecompiledContract" {
             }
             
             /*
-            * @custom:signature    Unresolved_1ad8b03b() public view returns (bytes memory)
+            * @custom:signature    protocolFees() public view returns (bytes memory)
             */
             case 0x1ad8b03b {
                 if iszero(lt(calldatasize(), 0x04)) { revert(0, 0); } else {
@@ -268,7 +260,7 @@ object "DecompiledContract" {
             }
             
             /*
-            * @custom:signature    Unresolved_9cd441da(uint256 arg0, uint256 arg1) public payable returns (uint256)
+            * @custom:signature    addLiquidity(uint256 arg0, uint256 arg1) public payable returns (uint256)
             * @param                arg0 ["uint256", "bytes32", "int256"]
             * @param                arg1 ["uint256", "bytes32", "int256"]
             */
@@ -278,6 +270,7 @@ object "DecompiledContract" {
                     mstore(0x0120, calldataload(0x24))
                     if lt(0, mload(0x0100)) {
                         if lt(0, mload(0x0120)) {
+                            mstore(0x0140, caller())
                             if eq(0, eq(sload(0x04), 0)) {
                                 if lt(0, sload(0x02)) {
                                     if lt(0, sload(0x03)) {
@@ -303,33 +296,33 @@ object "DecompiledContract" {
                                                                             mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
                                                                             mstore(0x84, 0x11)
                                                                             sstore(0x04, add(div(mul(sload(0x04), mload(0x0120)), sload(0x03)), sload(0x04)))
-                                                                            mstore(0, caller())
+                                                                            mstore(0, mload(0x0140))
                                                                             mstore(0x20, 0x05)
                                                                             if iszero(lt(add(div(mul(sload(0x04), mload(0x0120)), sload(0x03)), sload(sha3(0, 0x40))), div(mul(sload(0x04), mload(0x0120)), sload(0x03)))) {
                                                                                 mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
                                                                                 mstore(0x84, 0x11)
-                                                                                mstore(0, caller())
+                                                                                mstore(0, mload(0x0140))
                                                                                 mstore(0x20, 0x05)
                                                                                 sstore(sha3(0, 0x40), add(div(mul(sload(0x04), mload(0x0120)), sload(0x03)), sload(sha3(0, 0x40))))
                                                                                 mstore(0x80, 0x23b872dd00000000000000000000000000000000000000000000000000000000)
-                                                                                mstore(0x84, caller())
+                                                                                mstore(0x84, mload(0x0140))
                                                                                 mstore(0xa4, address())
                                                                                 mstore(0xc4, mload(0x0100))
                                                                                 call(0x0f4240, sload(0), 0, 0x80, 0x64, 0x80, 0x20)
                                                                                 if call(0x0f4240, sload(0), 0, 0x80, 0x64, 0x80, 0x20) { revert(0, 0); } else {
-                                                                                    if or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 0x20)), eq(mload(0x80), 0x01))) {
-                                                                                        if iszero(eq(0x01, 0)) { revert(0x80, 0x04); } else {
+                                                                                    if or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 0x20)), lt(returndatasize(), 0x40))) {
+                                                                                        if eq(or(iszero(returndatasize()), iszero(iszero(mload(0x80)))), 0x01) { revert(0x80, 0x04); } else {
                                                                                             mstore(0x80, 0x90b8ec1800000000000000000000000000000000000000000000000000000000)
                                                                                             mstore(0x80, 0x23b872dd00000000000000000000000000000000000000000000000000000000)
-                                                                                            mstore(0x84, caller())
+                                                                                            mstore(0x84, mload(0x0140))
                                                                                             mstore(0xa4, address())
                                                                                             mstore(0xc4, mload(0x0120))
                                                                                             call(0x0f4240, sload(0x01), 0, 0x80, 0x64, 0x80, 0x20)
                                                                                             if call(0x0f4240, sload(0x01), 0, 0x80, 0x64, 0x80, 0x20) { revert(0, 0); } else {
-                                                                                                if or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 0x20)), eq(mload(0x80), 0x01))) {
-                                                                                                    if iszero(eq(0x01, 0)) { revert(0x80, 0x04); } else {
+                                                                                                if or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 0x20)), lt(returndatasize(), 0x40))) {
+                                                                                                    if eq(or(iszero(returndatasize()), iszero(iszero(mload(0x80)))), 0x01) { revert(0x80, 0x04); } else {
                                                                                                         mstore(0x80, 0x90b8ec1800000000000000000000000000000000000000000000000000000000)
-                                                                                                        mstore(0x80, caller())
+                                                                                                        mstore(0x80, mload(0x0140))
                                                                                                         mstore(0xa0, mload(0x0100))
                                                                                                         mstore(0xc0, mload(0x0120))
                                                                                                         mstore(0xe0, div(mul(sload(0x04), mload(0x0120)), sload(0x03)))
@@ -350,33 +343,33 @@ object "DecompiledContract" {
                                                                                                                         mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
                                                                                                                         mstore(0x84, 0x11)
                                                                                                                         sstore(0x04, add(div(mul(sload(0x04), mload(0x0100)), sload(0x02)), sload(0x04)))
-                                                                                                                        mstore(0, caller())
+                                                                                                                        mstore(0, mload(0x0140))
                                                                                                                         mstore(0x20, 0x05)
                                                                                                                         if iszero(lt(add(div(mul(sload(0x04), mload(0x0100)), sload(0x02)), sload(sha3(0, 0x40))), div(mul(sload(0x04), mload(0x0100)), sload(0x02)))) {
                                                                                                                             mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
                                                                                                                             mstore(0x84, 0x11)
-                                                                                                                            mstore(0, caller())
+                                                                                                                            mstore(0, mload(0x0140))
                                                                                                                             mstore(0x20, 0x05)
                                                                                                                             sstore(sha3(0, 0x40), add(div(mul(sload(0x04), mload(0x0100)), sload(0x02)), sload(sha3(0, 0x40))))
                                                                                                                             mstore(0x80, 0x23b872dd00000000000000000000000000000000000000000000000000000000)
-                                                                                                                            mstore(0x84, caller())
+                                                                                                                            mstore(0x84, mload(0x0140))
                                                                                                                             mstore(0xa4, address())
                                                                                                                             mstore(0xc4, mload(0x0100))
                                                                                                                             call(0x0f4240, sload(0), 0, 0x80, 0x64, 0x80, 0x20)
                                                                                                                             if call(0x0f4240, sload(0), 0, 0x80, 0x64, 0x80, 0x20) { revert(0, 0); } else {
-                                                                                                                                if or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 0x20)), eq(mload(0x80), 0x01))) {
-                                                                                                                                    if iszero(eq(0x01, 0)) { revert(0x80, 0x04); } else {
+                                                                                                                                if or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 0x20)), lt(returndatasize(), 0x40))) {
+                                                                                                                                    if eq(or(iszero(returndatasize()), iszero(iszero(mload(0x80)))), 0x01) { revert(0x80, 0x04); } else {
                                                                                                                                         mstore(0x80, 0x90b8ec1800000000000000000000000000000000000000000000000000000000)
                                                                                                                                         mstore(0x80, 0x23b872dd00000000000000000000000000000000000000000000000000000000)
-                                                                                                                                        mstore(0x84, caller())
+                                                                                                                                        mstore(0x84, mload(0x0140))
                                                                                                                                         mstore(0xa4, address())
                                                                                                                                         mstore(0xc4, mload(0x0120))
                                                                                                                                         call(0x0f4240, sload(0x01), 0, 0x80, 0x64, 0x80, 0x20)
                                                                                                                                         if call(0x0f4240, sload(0x01), 0, 0x80, 0x64, 0x80, 0x20) { revert(0, 0); } else {
-                                                                                                                                            if or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 0x20)), eq(mload(0x80), 0x01))) {
-                                                                                                                                                if iszero(eq(0x01, 0)) { revert(0x80, 0x04); } else {
+                                                                                                                                            if or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 0x20)), lt(returndatasize(), 0x40))) {
+                                                                                                                                                if eq(or(iszero(returndatasize()), iszero(iszero(mload(0x80)))), 0x01) { revert(0x80, 0x04); } else {
                                                                                                                                                     mstore(0x80, 0x90b8ec1800000000000000000000000000000000000000000000000000000000)
-                                                                                                                                                    mstore(0x80, caller())
+                                                                                                                                                    mstore(0x80, mload(0x0140))
                                                                                                                                                     mstore(0xa0, mload(0x0100))
                                                                                                                                                     mstore(0xc0, mload(0x0120))
                                                                                                                                                     mstore(0xe0, div(mul(sload(0x04), mload(0x0100)), sload(0x02)))
@@ -390,55 +383,63 @@ object "DecompiledContract" {
                                                                                                                                                     mstore(0x84, 0x12)
                                                                                                                                                     mstore(0x80, 0xf456040300000000000000000000000000000000000000000000000000000000)
                                                                                                                                                     mstore(0x80, 0xf456040300000000000000000000000000000000000000000000000000000000)
-                                                                                                                                                    if lt(0, mload(0x0100)) {
-                                                                                                                                                        if iszero(lt(add(sload(0x02), mload(0x0100)), sload(0x02))) {
+                                                                                                                                                    if 0x01 {
+                                                                                                                                                        mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
+                                                                                                                                                        mstore(0x84, 0x12)
+                                                                                                                                                        if or(iszero(0x01), eq(div(mul(0x01, mload(0x0100)), 0x01), mload(0x0100))) {
                                                                                                                                                             mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
                                                                                                                                                             mstore(0x84, 0x11)
-                                                                                                                                                            sstore(0x02, add(sload(0x02), mload(0x0100)))
-                                                                                                                                                            if iszero(lt(add(sload(0x03), mload(0x0120)), sload(0x03))) {
-                                                                                                                                                                mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
-                                                                                                                                                                mstore(0x84, 0x11)
-                                                                                                                                                                sstore(0x03, add(sload(0x03), mload(0x0120)))
-                                                                                                                                                                if iszero(lt(add(mload(0x0100), sload(0x04)), mload(0x0100))) {
+                                                                                                                                                            if lt(0, div(mul(0x01, mload(0x0100)), 0x01)) {
+                                                                                                                                                                if iszero(lt(add(sload(0x02), mload(0x0100)), sload(0x02))) {
                                                                                                                                                                     mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
                                                                                                                                                                     mstore(0x84, 0x11)
-                                                                                                                                                                    sstore(0x04, add(mload(0x0100), sload(0x04)))
-                                                                                                                                                                    mstore(0, caller())
-                                                                                                                                                                    mstore(0x20, 0x05)
-                                                                                                                                                                    if iszero(lt(add(mload(0x0100), sload(sha3(0, 0x40))), mload(0x0100))) {
+                                                                                                                                                                    sstore(0x02, add(sload(0x02), mload(0x0100)))
+                                                                                                                                                                    if iszero(lt(add(sload(0x03), mload(0x0120)), sload(0x03))) {
                                                                                                                                                                         mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
                                                                                                                                                                         mstore(0x84, 0x11)
-                                                                                                                                                                        mstore(0, caller())
-                                                                                                                                                                        mstore(0x20, 0x05)
-                                                                                                                                                                        sstore(sha3(0, 0x40), add(mload(0x0100), sload(sha3(0, 0x40))))
-                                                                                                                                                                        mstore(0x80, 0x23b872dd00000000000000000000000000000000000000000000000000000000)
-                                                                                                                                                                        mstore(0x84, caller())
-                                                                                                                                                                        mstore(0xa4, address())
-                                                                                                                                                                        mstore(0xc4, mload(0x0100))
-                                                                                                                                                                        call(0x0f4240, sload(0), 0, 0x80, 0x64, 0x80, 0x20)
-                                                                                                                                                                        if call(0x0f4240, sload(0), 0, 0x80, 0x64, 0x80, 0x20) { revert(0, 0); } else {
-                                                                                                                                                                            if or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 0x20)), eq(mload(0x80), 0x01))) {
-                                                                                                                                                                                if iszero(eq(0x01, 0)) { revert(0x80, 0x04); } else {
-                                                                                                                                                                                    mstore(0x80, 0x90b8ec1800000000000000000000000000000000000000000000000000000000)
-                                                                                                                                                                                    mstore(0x80, 0x23b872dd00000000000000000000000000000000000000000000000000000000)
-                                                                                                                                                                                    mstore(0x84, caller())
-                                                                                                                                                                                    mstore(0xa4, address())
-                                                                                                                                                                                    mstore(0xc4, mload(0x0120))
-                                                                                                                                                                                    call(0x0f4240, sload(0x01), 0, 0x80, 0x64, 0x80, 0x20)
-                                                                                                                                                                                    if call(0x0f4240, sload(0x01), 0, 0x80, 0x64, 0x80, 0x20) { revert(0, 0); } else {
-                                                                                                                                                                                        if or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 0x20)), eq(mload(0x80), 0x01))) {
-                                                                                                                                                                                            if iszero(eq(0x01, 0)) { revert(0, 0); } else {
-                                                                                                                                                                                                mstore(0x80, 0x90b8ec1800000000000000000000000000000000000000000000000000000000)
-                                                                                                                                                                                                mstore(0x80, caller())
-                                                                                                                                                                                                mstore(0xa0, mload(0x0100))
-                                                                                                                                                                                                mstore(0xc0, mload(0x0120))
-                                                                                                                                                                                                mstore(0xe0, mload(0x0100))
-                                                                                                                                                                                                log1(0x80, 0x80, 0xbeb3885786d637a474cbc287c0a44587231633a077f0bd30354d5a4b18996fce)
-                                                                                                                                                                                                mstore(0x80, mload(0x0100))
-                                                                                                                                                                                                return(0x80, 0x20)
-                                                                                                                                                                                                mstore(0x80, 0x9811e0c700000000000000000000000000000000000000000000000000000000)
-                                                                                                                                                                                                mstore(0x80, 0xf456040300000000000000000000000000000000000000000000000000000000)
-                                                                                                                                                                                                mstore(0x80, 0xf456040300000000000000000000000000000000000000000000000000000000)
+                                                                                                                                                                        sstore(0x03, add(sload(0x03), mload(0x0120)))
+                                                                                                                                                                        if iszero(lt(add(div(mul(0x01, mload(0x0100)), 0x01), sload(0x04)), div(mul(0x01, mload(0x0100)), 0x01))) {
+                                                                                                                                                                            mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
+                                                                                                                                                                            mstore(0x84, 0x11)
+                                                                                                                                                                            sstore(0x04, add(div(mul(0x01, mload(0x0100)), 0x01), sload(0x04)))
+                                                                                                                                                                            mstore(0, mload(0x0140))
+                                                                                                                                                                            mstore(0x20, 0x05)
+                                                                                                                                                                            if iszero(lt(add(div(mul(0x01, mload(0x0100)), 0x01), sload(sha3(0, 0x40))), div(mul(0x01, mload(0x0100)), 0x01))) {
+                                                                                                                                                                                mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
+                                                                                                                                                                                mstore(0x84, 0x11)
+                                                                                                                                                                                mstore(0, mload(0x0140))
+                                                                                                                                                                                mstore(0x20, 0x05)
+                                                                                                                                                                                sstore(sha3(0, 0x40), add(div(mul(0x01, mload(0x0100)), 0x01), sload(sha3(0, 0x40))))
+                                                                                                                                                                                mstore(0x80, 0x23b872dd00000000000000000000000000000000000000000000000000000000)
+                                                                                                                                                                                mstore(0x84, mload(0x0140))
+                                                                                                                                                                                mstore(0xa4, address())
+                                                                                                                                                                                mstore(0xc4, mload(0x0100))
+                                                                                                                                                                                call(0x0f4240, sload(0), 0, 0x80, 0x64, 0x80, 0x20)
+                                                                                                                                                                                if call(0x0f4240, sload(0), 0, 0x80, 0x64, 0x80, 0x20) { revert(0, 0); } else {
+                                                                                                                                                                                    if or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 0x20)), lt(returndatasize(), 0x40))) {
+                                                                                                                                                                                        if eq(or(iszero(returndatasize()), iszero(iszero(mload(0x80)))), 0x01) { revert(0x80, 0x04); } else {
+                                                                                                                                                                                            mstore(0x80, 0x90b8ec1800000000000000000000000000000000000000000000000000000000)
+                                                                                                                                                                                            mstore(0x80, 0x23b872dd00000000000000000000000000000000000000000000000000000000)
+                                                                                                                                                                                            mstore(0x84, mload(0x0140))
+                                                                                                                                                                                            mstore(0xa4, address())
+                                                                                                                                                                                            mstore(0xc4, mload(0x0120))
+                                                                                                                                                                                            call(0x0f4240, sload(0x01), 0, 0x80, 0x64, 0x80, 0x20)
+                                                                                                                                                                                            if call(0x0f4240, sload(0x01), 0, 0x80, 0x64, 0x80, 0x20) { revert(0, 0); } else {
+                                                                                                                                                                                                if or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 0x20)), lt(returndatasize(), 0x40))) {
+                                                                                                                                                                                                    if eq(or(iszero(returndatasize()), iszero(iszero(mload(0x80)))), 0x01) { revert(0, 0); } else {
+                                                                                                                                                                                                        mstore(0x80, 0x90b8ec1800000000000000000000000000000000000000000000000000000000)
+                                                                                                                                                                                                        mstore(0x80, mload(0x0140))
+                                                                                                                                                                                                        mstore(0xa0, mload(0x0100))
+                                                                                                                                                                                                        mstore(0xc0, mload(0x0120))
+                                                                                                                                                                                                        mstore(0xe0, div(mul(0x01, mload(0x0100)), 0x01))
+                                                                                                                                                                                                        log1(0x80, 0x80, 0xbeb3885786d637a474cbc287c0a44587231633a077f0bd30354d5a4b18996fce)
+                                                                                                                                                                                                        mstore(0x80, div(mul(0x01, mload(0x0100)), 0x01))
+                                                                                                                                                                                                        return(0x80, 0x20)
+                                                                                                                                                                                                        mstore(0x80, 0x9811e0c700000000000000000000000000000000000000000000000000000000)
+                                                                                                                                                                                                        mstore(0x80, 0xf456040300000000000000000000000000000000000000000000000000000000)
+                                                                                                                                                                                                        mstore(0x80, 0xf456040300000000000000000000000000000000000000000000000000000000)
+                                                                                                                                                                                                    }
+                                                                                                                                                                                                }
                                                                                                                                                                                             }
                                                                                                                                                                                         }
                                                                                                                                                                                     }
@@ -486,7 +487,7 @@ object "DecompiledContract" {
             }
             
             /*
-            * @custom:signature    Unresolved_9c8f9f23(uint256 arg0) public payable returns (bytes memory)
+            * @custom:signature    removeLiquidity(uint256 arg0) public payable returns (bytes memory)
             * @param                arg0 ["uint256", "bytes32", "int256"]
             */
             case 0x9c8f9f23 {
@@ -530,16 +531,16 @@ object "DecompiledContract" {
                                                                         mstore(0xa4, div(mul(sload(0x02), calldataload(0x04)), sload(0x04)))
                                                                         call(0x0f4240, sload(0), 0, 0x80, 0x44, 0x80, 0x20)
                                                                         if call(0x0f4240, sload(0), 0, 0x80, 0x44, 0x80, 0x20) { revert(0, 0); } else {
-                                                                            if or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 0x20)), eq(mload(0x80), 0x01))) {
-                                                                                if iszero(eq(0x01, 0)) { revert(0x80, 0x04); } else {
+                                                                            if or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 0x20)), lt(returndatasize(), 0x40))) {
+                                                                                if eq(or(iszero(returndatasize()), iszero(iszero(mload(0x80)))), 0x01) { revert(0x80, 0x04); } else {
                                                                                     mstore(0x80, 0x90b8ec1800000000000000000000000000000000000000000000000000000000)
                                                                                     mstore(0x80, 0xa9059cbb00000000000000000000000000000000000000000000000000000000)
                                                                                     mstore(0x84, caller())
                                                                                     mstore(0xa4, div(mul(sload(0x03), calldataload(0x04)), sload(0x04)))
                                                                                     call(0x0f4240, sload(0x01), 0, 0x80, 0x44, 0x80, 0x20)
                                                                                     if call(0x0f4240, sload(0x01), 0, 0x80, 0x44, 0x80, 0x20) { revert(0, 0); } else {
-                                                                                        if or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 0x20)), eq(mload(0x80), 0x01))) {
-                                                                                            if iszero(eq(0x01, 0)) { revert(0, 0); } else {
+                                                                                        if or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 0x20)), lt(returndatasize(), 0x40))) {
+                                                                                            if eq(or(iszero(returndatasize()), iszero(iszero(mload(0x80)))), 0x01) { revert(0, 0); } else {
                                                                                                 mstore(0x80, 0x90b8ec1800000000000000000000000000000000000000000000000000000000)
                                                                                                 mstore(0x80, caller())
                                                                                                 mstore(0xa0, div(mul(sload(0x02), calldataload(0x04)), sload(0x04)))
@@ -624,120 +625,112 @@ object "DecompiledContract" {
                                                         mstore(0x80, 0xbb2875c300000000000000000000000000000000000000000000000000000000)
                                                         if lt(0, mload(0x0120)) {
                                                             if eq(0, eq(sload(0x07), 0)) {
-                                                                if 0x2710 {
+                                                                if or(iszero(0x01), eq(div(mul(0x01, sload(0x08)), 0x01), sload(0x08))) {
                                                                     mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
-                                                                    mstore(0x84, 0x12)
-                                                                    if or(iszero(mload(0x0100)), eq(div(mul(mload(0x0100), 0x26f2), mload(0x0100)), 0x26f2)) {
+                                                                    mstore(0x84, 0x11)
+                                                                    if iszero(lt(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710))) {
                                                                         mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
                                                                         mstore(0x84, 0x11)
-                                                                        if iszero(lt(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710))) {
+                                                                        if 0x2710 {
                                                                             mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
-                                                                            mstore(0x84, 0x11)
-                                                                            if 0x2710 {
+                                                                            mstore(0x84, 0x12)
+                                                                            if or(iszero(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710))), eq(div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), mul(0x01, sload(0x08))), sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710))), mul(0x01, sload(0x08)))) {
                                                                                 mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
-                                                                                mstore(0x84, 0x12)
-                                                                                if or(iszero(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710))), eq(div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), sload(0x08)), sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710))), sload(0x08))) {
+                                                                                mstore(0x84, 0x11)
+                                                                                if iszero(lt(mload(0x0100), div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), mul(0x01, sload(0x08))), 0x2710))) {
                                                                                     mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
                                                                                     mstore(0x84, 0x11)
-                                                                                    if iszero(lt(mload(0x0100), div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), sload(0x08)), 0x2710))) {
+                                                                                    if iszero(lt(add(sload(0x03), sub(mload(0x0100), div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), mul(0x01, sload(0x08))), 0x2710))), sload(0x03))) {
                                                                                         mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
                                                                                         mstore(0x84, 0x11)
-                                                                                        if iszero(lt(add(sload(0x03), sub(mload(0x0100), div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), sload(0x08)), 0x2710))), sload(0x03))) {
+                                                                                        sstore(0x03, add(sload(0x03), sub(mload(0x0100), div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), mul(0x01, sload(0x08))), 0x2710))))
+                                                                                        if iszero(lt(sload(0x02), mload(0x0120))) {
                                                                                             mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
                                                                                             mstore(0x84, 0x11)
-                                                                                            sstore(0x03, add(sload(0x03), sub(mload(0x0100), div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), sload(0x08)), 0x2710))))
-                                                                                            if iszero(lt(sload(0x02), mload(0x0120))) {
+                                                                                            sstore(0x02, sub(sload(0x02), mload(0x0120)))
+                                                                                            if iszero(lt(add(sload(0x0a), div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), mul(0x01, sload(0x08))), 0x2710)), sload(0x0a))) {
                                                                                                 mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
                                                                                                 mstore(0x84, 0x11)
-                                                                                                sstore(0x02, sub(sload(0x02), mload(0x0120)))
-                                                                                                if iszero(lt(add(sload(0x0a), div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), sload(0x08)), 0x2710)), sload(0x0a))) {
-                                                                                                    mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
-                                                                                                    mstore(0x84, 0x11)
-                                                                                                    sstore(0x0a, add(sload(0x0a), div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), sload(0x08)), 0x2710)))
-                                                                                                    mstore(0x80, 0x23b872dd00000000000000000000000000000000000000000000000000000000)
-                                                                                                    mstore(0x84, caller())
-                                                                                                    mstore(0xa4, address())
-                                                                                                    mstore(0xc4, mload(0x0100))
-                                                                                                    call(0x0f4240, sload(0x01), 0, 0x80, 0x64, 0x80, 0x20)
-                                                                                                    if call(0x0f4240, sload(0x01), 0, 0x80, 0x64, 0x80, 0x20) { revert(0, 0); } else {
-                                                                                                        if or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 0x20)), eq(mload(0x80), 0x01))) {
-                                                                                                            if iszero(eq(0x01, 0)) { revert(0x80, 0x04); } else {
-                                                                                                                mstore(0x80, 0x90b8ec1800000000000000000000000000000000000000000000000000000000)
-                                                                                                                mstore(0x80, 0xa9059cbb00000000000000000000000000000000000000000000000000000000)
-                                                                                                                mstore(0x84, caller())
-                                                                                                                mstore(0xa4, mload(0x0120))
-                                                                                                                call(0x0f4240, sload(0), 0, 0x80, 0x44, 0x80, 0x20)
-                                                                                                                if call(0x0f4240, sload(0), 0, 0x80, 0x44, 0x80, 0x20) { revert(0, 0); } else {
-                                                                                                                    if or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 0x20)), eq(mload(0x80), 0x01))) {
-                                                                                                                        if iszero(eq(0x01, 0)) { revert(0, 0); } else {
-                                                                                                                            mstore(0x80, 0x90b8ec1800000000000000000000000000000000000000000000000000000000)
-                                                                                                                            mstore(0x80, caller())
-                                                                                                                            mstore(0xa0, mload(0x0100))
-                                                                                                                            mstore(0xc0, mload(0x0120))
-                                                                                                                            log1(0x80, 0x60, 0xec43a82fae8c251f7aae4f79accf59c765bd798d597ccfd95beef20bf096cc9e)
-                                                                                                                            mstore(0x80, mload(0x0120))
-                                                                                                                            return(0x80, 0x20)
-                                                                                                                            if 0x2710 {
+                                                                                                sstore(0x0a, add(sload(0x0a), div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), mul(0x01, sload(0x08))), 0x2710)))
+                                                                                                mstore(0x80, 0x23b872dd00000000000000000000000000000000000000000000000000000000)
+                                                                                                mstore(0x84, caller())
+                                                                                                mstore(0xa4, address())
+                                                                                                mstore(0xc4, mload(0x0100))
+                                                                                                call(0x0f4240, sload(0x01), 0, 0x80, 0x64, 0x80, 0x20)
+                                                                                                if call(0x0f4240, sload(0x01), 0, 0x80, 0x64, 0x80, 0x20) { revert(0, 0); } else {
+                                                                                                    if or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 0x20)), lt(returndatasize(), 0x40))) {
+                                                                                                        if eq(or(iszero(returndatasize()), iszero(iszero(mload(0x80)))), 0x01) { revert(0x80, 0x04); } else {
+                                                                                                            mstore(0x80, 0x90b8ec1800000000000000000000000000000000000000000000000000000000)
+                                                                                                            mstore(0x80, 0xa9059cbb00000000000000000000000000000000000000000000000000000000)
+                                                                                                            mstore(0x84, caller())
+                                                                                                            mstore(0xa4, mload(0x0120))
+                                                                                                            call(0x0f4240, sload(0), 0, 0x80, 0x44, 0x80, 0x20)
+                                                                                                            if call(0x0f4240, sload(0), 0, 0x80, 0x44, 0x80, 0x20) { revert(0, 0); } else {
+                                                                                                                if or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 0x20)), lt(returndatasize(), 0x40))) {
+                                                                                                                    if eq(or(iszero(returndatasize()), iszero(iszero(mload(0x80)))), 0x01) { revert(0, 0); } else {
+                                                                                                                        mstore(0x80, 0x90b8ec1800000000000000000000000000000000000000000000000000000000)
+                                                                                                                        mstore(0x80, caller())
+                                                                                                                        mstore(0xa0, mload(0x0100))
+                                                                                                                        mstore(0xc0, mload(0x0120))
+                                                                                                                        log1(0x80, 0x60, 0xec43a82fae8c251f7aae4f79accf59c765bd798d597ccfd95beef20bf096cc9e)
+                                                                                                                        mstore(0x80, mload(0x0120))
+                                                                                                                        return(0x80, 0x20)
+                                                                                                                        if or(iszero(0x01), eq(0, 0)) {
+                                                                                                                            mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
+                                                                                                                            mstore(0x84, 0x11)
+                                                                                                                            if iszero(lt(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710))) {
                                                                                                                                 mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
-                                                                                                                                mstore(0x84, 0x12)
-                                                                                                                                if or(iszero(mload(0x0100)), eq(div(mul(mload(0x0100), 0x26f2), mload(0x0100)), 0x26f2)) {
+                                                                                                                                mstore(0x84, 0x11)
+                                                                                                                                if 0x2710 {
                                                                                                                                     mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
-                                                                                                                                    mstore(0x84, 0x11)
-                                                                                                                                    if iszero(lt(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710))) {
+                                                                                                                                    mstore(0x84, 0x12)
+                                                                                                                                    if or(iszero(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710))), eq(div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), 0), sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710))), 0)) {
                                                                                                                                         mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
                                                                                                                                         mstore(0x84, 0x11)
-                                                                                                                                        if 0x2710 {
+                                                                                                                                        if iszero(lt(mload(0x0100), div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), 0), 0x2710))) {
                                                                                                                                             mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
-                                                                                                                                            mstore(0x84, 0x12)
-                                                                                                                                            if or(iszero(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710))), eq(div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), 0), sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710))), 0)) {
+                                                                                                                                            mstore(0x84, 0x11)
+                                                                                                                                            if iszero(lt(add(sload(0x03), sub(mload(0x0100), div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), 0), 0x2710))), sload(0x03))) {
                                                                                                                                                 mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
                                                                                                                                                 mstore(0x84, 0x11)
-                                                                                                                                                if iszero(lt(mload(0x0100), div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), 0), 0x2710))) {
+                                                                                                                                                sstore(0x03, add(sload(0x03), sub(mload(0x0100), div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), 0), 0x2710))))
+                                                                                                                                                if iszero(lt(sload(0x02), mload(0x0120))) {
                                                                                                                                                     mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
                                                                                                                                                     mstore(0x84, 0x11)
-                                                                                                                                                    if iszero(lt(add(sload(0x03), sub(mload(0x0100), div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), 0), 0x2710))), sload(0x03))) {
+                                                                                                                                                    sstore(0x02, sub(sload(0x02), mload(0x0120)))
+                                                                                                                                                    if iszero(lt(add(sload(0x0a), div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), 0), 0x2710)), sload(0x0a))) {
                                                                                                                                                         mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
                                                                                                                                                         mstore(0x84, 0x11)
-                                                                                                                                                        sstore(0x03, add(sload(0x03), sub(mload(0x0100), div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), 0), 0x2710))))
-                                                                                                                                                        if iszero(lt(sload(0x02), mload(0x0120))) {
-                                                                                                                                                            mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
-                                                                                                                                                            mstore(0x84, 0x11)
-                                                                                                                                                            sstore(0x02, sub(sload(0x02), mload(0x0120)))
-                                                                                                                                                            if iszero(lt(add(sload(0x0a), div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), 0), 0x2710)), sload(0x0a))) {
-                                                                                                                                                                mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
-                                                                                                                                                                mstore(0x84, 0x11)
-                                                                                                                                                                sstore(0x0a, add(sload(0x0a), div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), 0), 0x2710)))
-                                                                                                                                                                mstore(0x80, 0x23b872dd00000000000000000000000000000000000000000000000000000000)
-                                                                                                                                                                mstore(0x84, caller())
-                                                                                                                                                                mstore(0xa4, address())
-                                                                                                                                                                mstore(0xc4, mload(0x0100))
-                                                                                                                                                                call(0x0f4240, sload(0x01), 0, 0x80, 0x64, 0x80, 0x20)
-                                                                                                                                                                if call(0x0f4240, sload(0x01), 0, 0x80, 0x64, 0x80, 0x20) { revert(0, 0); } else {
-                                                                                                                                                                    if or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 0x20)), eq(mload(0x80), 0x01))) {
-                                                                                                                                                                        if iszero(eq(0x01, 0)) { revert(0x80, 0x04); } else {
-                                                                                                                                                                            mstore(0x80, 0x90b8ec1800000000000000000000000000000000000000000000000000000000)
-                                                                                                                                                                            mstore(0x80, 0xa9059cbb00000000000000000000000000000000000000000000000000000000)
-                                                                                                                                                                            mstore(0x84, caller())
-                                                                                                                                                                            mstore(0xa4, mload(0x0120))
-                                                                                                                                                                            call(0x0f4240, sload(0), 0, 0x80, 0x44, 0x80, 0x20)
-                                                                                                                                                                            if call(0x0f4240, sload(0), 0, 0x80, 0x44, 0x80, 0x20) { revert(0, 0); } else {
-                                                                                                                                                                                if or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 0x20)), eq(mload(0x80), 0x01))) {
-                                                                                                                                                                                    if iszero(eq(0x01, 0)) { revert(0, 0); } else {
-                                                                                                                                                                                        mstore(0x80, 0x90b8ec1800000000000000000000000000000000000000000000000000000000)
-                                                                                                                                                                                        mstore(0x80, caller())
-                                                                                                                                                                                        mstore(0xa0, mload(0x0100))
-                                                                                                                                                                                        mstore(0xc0, mload(0x0120))
-                                                                                                                                                                                        log1(0x80, 0x60, 0xec43a82fae8c251f7aae4f79accf59c765bd798d597ccfd95beef20bf096cc9e)
-                                                                                                                                                                                        mstore(0x80, mload(0x0120))
-                                                                                                                                                                                        return(0x80, 0x20)
-                                                                                                                                                                                        mstore(0x80, 0x1078b53300000000000000000000000000000000000000000000000000000000)
-                                                                                                                                                                                        mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
-                                                                                                                                                                                        mstore(0x84, 0x12)
-                                                                                                                                                                                        mstore(0x80, 0xf456040300000000000000000000000000000000000000000000000000000000)
-                                                                                                                                                                                        mstore(0x80, 0xf456040300000000000000000000000000000000000000000000000000000000)
-                                                                                                                                                                                        mstore(0x80, 0xf456040300000000000000000000000000000000000000000000000000000000)
-                                                                                                                                                                                    }
-                                                                                                                                                                                }
+                                                                                                                                                        sstore(0x0a, add(sload(0x0a), div(mul(sub(mload(0x0100), div(mul(mload(0x0100), 0x26f2), 0x2710)), 0), 0x2710)))
+                                                                                                                                                        mstore(0x80, 0x23b872dd00000000000000000000000000000000000000000000000000000000)
+                                                                                                                                                        mstore(0x84, caller())
+                                                                                                                                                        mstore(0xa4, address())
+                                                                                                                                                        mstore(0xc4, mload(0x0100))
+                                                                                                                                                        call(0x0f4240, sload(0x01), 0, 0x80, 0x64, 0x80, 0x20)
+                                                                                                                                                        if call(0x0f4240, sload(0x01), 0, 0x80, 0x64, 0x80, 0x20) { revert(0, 0); } else {
+                                                                                                                                                            if or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 0x20)), lt(returndatasize(), 0x40))) {
+                                                                                                                                                                if eq(or(iszero(returndatasize()), iszero(iszero(mload(0x80)))), 0x01) { revert(0x80, 0x04); } else {
+                                                                                                                                                                    mstore(0x80, 0x90b8ec1800000000000000000000000000000000000000000000000000000000)
+                                                                                                                                                                    mstore(0x80, 0xa9059cbb00000000000000000000000000000000000000000000000000000000)
+                                                                                                                                                                    mstore(0x84, caller())
+                                                                                                                                                                    mstore(0xa4, mload(0x0120))
+                                                                                                                                                                    call(0x0f4240, sload(0), 0, 0x80, 0x44, 0x80, 0x20)
+                                                                                                                                                                    if call(0x0f4240, sload(0), 0, 0x80, 0x44, 0x80, 0x20) { revert(0, 0); } else {
+                                                                                                                                                                        if or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 0x20)), lt(returndatasize(), 0x40))) {
+                                                                                                                                                                            if eq(or(iszero(returndatasize()), iszero(iszero(mload(0x80)))), 0x01) { revert(0, 0); } else {
+                                                                                                                                                                                mstore(0x80, 0x90b8ec1800000000000000000000000000000000000000000000000000000000)
+                                                                                                                                                                                mstore(0x80, caller())
+                                                                                                                                                                                mstore(0xa0, mload(0x0100))
+                                                                                                                                                                                mstore(0xc0, mload(0x0120))
+                                                                                                                                                                                log1(0x80, 0x60, 0xec43a82fae8c251f7aae4f79accf59c765bd798d597ccfd95beef20bf096cc9e)
+                                                                                                                                                                                mstore(0x80, mload(0x0120))
+                                                                                                                                                                                return(0x80, 0x20)
+                                                                                                                                                                                mstore(0x80, 0x1078b53300000000000000000000000000000000000000000000000000000000)
+                                                                                                                                                                                mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
+                                                                                                                                                                                mstore(0x84, 0x12)
+                                                                                                                                                                                mstore(0x80, 0xf456040300000000000000000000000000000000000000000000000000000000)
+                                                                                                                                                                                mstore(0x80, 0xf456040300000000000000000000000000000000000000000000000000000000)
+                                                                                                                                                                                mstore(0x80, 0xf456040300000000000000000000000000000000000000000000000000000000)
                                                                                                                                                                             }
                                                                                                                                                                         }
                                                                                                                                                                     }
@@ -781,7 +774,7 @@ object "DecompiledContract" {
             }
             
             /*
-            * @custom:signature    Unresolved_ce9c0bb7(uint256 arg0) public payable
+            * @custom:signature    setProtocolShare(uint256 arg0) public payable
             * @param                arg0 ["uint256", "bytes32", "int256"]
             */
             case 0xce9c0bb7 {
@@ -799,7 +792,7 @@ object "DecompiledContract" {
             }
             
             /*
-            * @custom:signature    Unresolved_0902f1ac() public view returns (bytes memory)
+            * @custom:signature    getReserves() public view returns (bytes memory)
             */
             case 0x0902f1ac {
                 if iszero(lt(calldatasize(), 0x04)) { revert(0, 0); } else {

@@ -28,12 +28,11 @@ via `setFeeTo`.
 
 | File | Role |
 |------|------|
-| `Contract.lean` | Pool surface + `lsc_schema` |
+| `Contract.lean` | Pool surface + schema + contract |
 | `Spec.lean` | `claim`, `Auth`, `Inv`, `holdings0/1`, `cpammRely` |
 | `Theorems.lean` | Exported Tx and security theorems |
 | `Proofs/Tx.lean` | `Tx.run` lemmas |
 | `Proofs/Security.lean` | Invariant and authorisation |
-| `Proofs/Reify.lean` | Pair+CALL cores + `lsc_contract` (Reify workaround) |
 | `Proofs/Compile.lean` | Runtime `compileRuntime` non-vacuity `#guard` |
 | `Proofs/Math.lean` | Floor-product facts for `k` |
 | `Tests.lean` | Smoke `#guard`s |

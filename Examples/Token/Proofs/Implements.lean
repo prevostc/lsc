@@ -18,16 +18,18 @@ section
 variable (ctx : Ctx) (w : World Storage ExtState Event)
 
 @[simp] theorem impl_transfer (to : Address) (amount : Amount tokenAsset) :
-    Token.impl.transfer to amount ctx w = Tx.run (transfer to amount) ctx w :=
+    Token.impl.transfer to amount ctx w =
+      (Tx.run (transfer to amount) ctx w).toOption :=
   rfl
 
 @[simp] theorem impl_transferFrom (src to : Address) (amount : Amount tokenAsset) :
     Token.impl.transferFrom src to amount ctx w =
-      Tx.run (transferFrom src to amount) ctx w :=
+      (Tx.run (transferFrom src to amount) ctx w).toOption :=
   rfl
 
 @[simp] theorem impl_approve (spender : Address) (amount : Amount tokenAsset) :
-    Token.impl.approve spender amount ctx w = Tx.run (approve spender amount) ctx w :=
+    Token.impl.approve spender amount ctx w =
+      (Tx.run (approve spender amount) ctx w).toOption :=
   rfl
 
 @[simp] theorem impl_balanceOf (who : Address) (w : World Storage ExtState Event) :
@@ -141,8 +143,7 @@ theorem transferFrom_balance_protected (src to : Address) (amount : Amount token
 /-- `approve` never changes balances. -/
 theorem approve_balance_protected (spender : Address) (amount : Amount tokenAsset)
     {r : Bool} {w' : World Storage ExtState Event} (x : Address)
-    (h : Tx.run (approve spender amount) ctx w = .ok (r, w'))
-    (_hne : ctx.sender ≠ x) :
+    (h : Tx.run (approve spender amount) ctx w = .ok (r, w')) :
     w'.self.balances x + w.self.allowances x ctx.sender ≥ w.self.balances x := by
   have hr := Proof.approve_returns_true ctx w spender amount h
   subst hr
@@ -153,8 +154,7 @@ theorem approve_balance_protected (spender : Address) (amount : Amount tokenAsse
 /-- `mint` never decreases an existing balance. -/
 theorem mint_balance_protected (to : Address) (amount : Amount tokenAsset)
     {r : Unit} {w' : World Storage ExtState Event} (x : Address)
-    (h : Tx.run (mint to amount) ctx w = .ok (r, w'))
-    (_hne : ctx.sender ≠ x) :
+    (h : Tx.run (mint to amount) ctx w = .ok (r, w')) :
     w'.self.balances x + w.self.allowances x ctx.sender ≥ w.self.balances x := by
   cases r
   by_cases howner : ctx.sender = w.self.owner
@@ -203,8 +203,7 @@ theorem burn_balance_protected (amount : Amount tokenAsset)
 /-- Views leave the world unchanged. -/
 theorem balanceOf_balance_protected (who : Address)
     {r : Amount tokenAsset} {w' : World Storage ExtState Event} (x : Address)
-    (h : Tx.run (balanceOf who) ctx w = .ok (r, w'))
-    (_hne : ctx.sender ≠ x) :
+    (h : Tx.run (balanceOf who) ctx w = .ok (r, w')) :
     w'.self.balances x + w.self.allowances x ctx.sender ≥ w.self.balances x := by
   rw [balanceOf_returns_stored_balance ctx w who] at h
   cases h
@@ -212,8 +211,7 @@ theorem balanceOf_balance_protected (who : Address)
 
 theorem allowance_balance_protected (owner spender : Address)
     {r : Amount tokenAsset} {w' : World Storage ExtState Event} (x : Address)
-    (h : Tx.run (allowance owner spender) ctx w = .ok (r, w'))
-    (_hne : ctx.sender ≠ x) :
+    (h : Tx.run (allowance owner spender) ctx w = .ok (r, w')) :
     w'.self.balances x + w.self.allowances x ctx.sender ≥ w.self.balances x := by
   rw [allowance_returns_stored ctx w owner spender] at h
   cases h
@@ -221,8 +219,7 @@ theorem allowance_balance_protected (owner spender : Address)
 
 theorem totalSupply_balance_protected
     {r : Amount tokenAsset} {w' : World Storage ExtState Event} (x : Address)
-    (h : Tx.run totalSupply ctx w = .ok (r, w'))
-    (_hne : ctx.sender ≠ x) :
+    (h : Tx.run totalSupply ctx w = .ok (r, w')) :
     w'.self.balances x + w.self.allowances x ctx.sender ≥ w.self.balances x := by
   rw [totalSupply_returns_stored ctx w] at h
   cases h
@@ -235,45 +232,45 @@ namespace Proof
 theorem erc20 : IERC20.Spec Token.impl where
   transfer_moves := by
     intro to amount ctx w w' h
-    simp only [impl_transfer] at h
+    have hok := Tx.run_toOption_ok (by simpa [impl_transfer] using h)
     constructor
-    · have hc := transfer_conserves ctx w to amount h
+    · have hc := transfer_conserves ctx w to amount hok
       rw [amount_add_comm (w'.self.balances ctx.sender),
           amount_add_comm (w.self.balances ctx.sender)] at hc
       simpa [impl_balanceOf] using hc
     · constructor
       · intro hne
-        simpa [impl_balanceOf] using transfer_credits ctx w to amount h hne
+        simpa [impl_balanceOf] using transfer_credits ctx w to amount hok hne
       · intro x hx1 hx2
-        simpa [impl_balanceOf] using transfer_others ctx w to amount h x hx1 hx2
+        simpa [impl_balanceOf] using transfer_others ctx w to amount hok x hx1 hx2
   transfer_supply := by
     intro to amount ctx w r w' h
-    have hr := transfer_returns_true ctx w to amount (by simpa [impl_transfer] using h)
+    have hok := Tx.run_toOption_ok (by simpa [impl_transfer] using h)
+    have hr := transfer_returns_true ctx w to amount hok
     subst hr
-    simp only [impl_transfer] at h
     simpa [impl_totalSupply] using
-      transfer_preserves_totalSupply ctx w to amount h
+      transfer_preserves_totalSupply ctx w to amount hok
   transferFrom_moves := by
     intro src to amount ctx w w' h
-    simp only [impl_transferFrom] at h
+    have hok := Tx.run_toOption_ok (by simpa [impl_transferFrom] using h)
     constructor
-    · have hc := transferFrom_conserves ctx w src to amount h
+    · have hc := transferFrom_conserves ctx w src to amount hok
       rw [amount_add_comm (w'.self.balances src),
           amount_add_comm (w.self.balances src)] at hc
       simpa [impl_balanceOf] using hc
     · constructor
       · intro hne
-        simpa [impl_balanceOf] using transferFrom_credits ctx w src to amount h hne
+        simpa [impl_balanceOf] using transferFrom_credits ctx w src to amount hok hne
       · intro x hx1 hx2
-        simpa [impl_balanceOf] using transferFrom_others ctx w src to amount h x hx1 hx2
+        simpa [impl_balanceOf] using transferFrom_others ctx w src to amount hok x hx1 hx2
   transferFrom_allowance := by
     intro src to amount ctx w w' h _hne
-    simp only [impl_transferFrom] at h
-    simpa [impl_allowance] using transferFrom_allowance ctx w src to amount h
+    have hok := Tx.run_toOption_ok (by simpa [impl_transferFrom] using h)
+    simpa [impl_allowance] using transferFrom_allowance ctx w src to amount hok
   approve_sets := by
     intro spender amount ctx w w' h
-    simp only [impl_approve] at h
-    simpa [impl_allowance] using approve_sets ctx w spender amount h
+    have hok := Tx.run_toOption_ok (by simpa [impl_approve] using h)
+    simpa [impl_allowance] using approve_sets ctx w spender amount hok
   balance_protected := by
     intro ctx w w' x hstep hne
     rcases hstep with ⟨fn, args, r, hrun⟩
@@ -292,12 +289,12 @@ theorem erc20 : IERC20.Spec Token.impl where
       have hrun' : Tx.run (approve args.1 args.2) ctx w = .ok (r, w') := by
         simpa [Spec.exec, Token.spec, Token.entry] using hrun
       simpa [impl_balanceOf, impl_allowance] using
-        approve_balance_protected ctx w args.1 args.2 x hrun' hne
+        approve_balance_protected ctx w args.1 args.2 x hrun'
     | mint =>
       have hrun' : Tx.run (mint args.1 args.2) ctx w = .ok (r, w') := by
         simpa [Spec.exec, Token.spec, Token.entry] using hrun
       simpa [impl_balanceOf, impl_allowance] using
-        mint_balance_protected ctx w args.1 args.2 x hrun' hne
+        mint_balance_protected ctx w args.1 args.2 x hrun'
     | burn =>
       have hrun' : Tx.run (burn args) ctx w = .ok (r, w') := by
         simpa [Spec.exec, Token.spec, Token.entry] using hrun
@@ -307,17 +304,17 @@ theorem erc20 : IERC20.Spec Token.impl where
       have hrun' : Tx.run (balanceOf args) ctx w = .ok (r, w') := by
         simpa [Spec.exec, Token.spec, Token.entry] using hrun
       simpa [impl_balanceOf, impl_allowance] using
-        balanceOf_balance_protected ctx w args x hrun' hne
+        balanceOf_balance_protected ctx w args x hrun'
     | allowance =>
       have hrun' : Tx.run (allowance args.1 args.2) ctx w = .ok (r, w') := by
         simpa [Spec.exec, Token.spec, Token.entry] using hrun
       simpa [impl_balanceOf, impl_allowance] using
-        allowance_balance_protected ctx w args.1 args.2 x hrun' hne
+        allowance_balance_protected ctx w args.1 args.2 x hrun'
     | totalSupply =>
       have hrun' : Tx.run totalSupply ctx w = .ok (r, w') := by
         simpa [Spec.exec, Token.spec, Token.entry] using hrun
       simpa [impl_balanceOf, impl_allowance] using
-        totalSupply_balance_protected ctx w x hrun' hne
+        totalSupply_balance_protected ctx w x hrun'
 
 end Proof
 

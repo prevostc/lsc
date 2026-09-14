@@ -79,6 +79,7 @@ def ofWord (n : Word) : Amount a := ⟨n⟩
 @[simp] theorem raw_sub (x y : Amount a) : (x - y).raw = x.raw - y.raw := rfl
 @[simp] theorem raw_mul (x y : Amount a) : (x * y).raw = x.raw * y.raw := rfl
 @[simp] theorem raw_ofNat (n : Nat) : (OfNat.ofNat n : Amount a).raw = n := rfl
+@[simp] theorem raw_one : (1 : Amount a).raw = 1 := rfl
 @[simp] theorem raw_zero : (0 : Amount a).raw = 0 := rfl
 @[simp] theorem ofWord_eq_zero (n : Word) : (ofWord n : Amount a) = 0 ↔ n = 0 :=
   ⟨fun h => by
@@ -333,6 +334,12 @@ theorem mulDivUp_bind_ofWord {β : Type} (num : Amount b) (x y : Amount a)
     mulDivUp (S := S) (X := X) (E := E) (ε := ε) num x y >>= k =
       Tx.mulDivUp num.raw x.raw y.raw >>= fun n => k (ofWord n) := by
   simp [mulDivUp]
+
+/-- `require (0 < x)` is the Core word test `0 < x.raw`. -/
+@[simp] theorem require_pos (x : Amount a) (err : ε) :
+    Tx.require (S := S) (X := X) (E := E) (0 < x) err =
+      Tx.require (0 < x.raw) err :=
+  Tx.require_iff err (by simp [lt_iff])
 
 /-- `require (0 < ofWord n)` is the Core word test `0 < n`. -/
 @[simp] theorem require_lt_ofWord (n : Word) (err : ε) :

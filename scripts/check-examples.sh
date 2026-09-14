@@ -83,15 +83,9 @@ check_root() {
     fi
     shopt -s nullglob
     for f in Examples/*/Contract.lean; do
-      case "$f" in
-        Examples/Cpamm/*) continue ;;
-      esac
       scan_contract "$f" || status=1
     done
     for f in Examples/*/Theorems.lean; do
-      case "$f" in
-        Examples/Cpamm/*) continue ;;
-      esac
       scan_theorems "$f" || status=1
     done
     exit "$status"

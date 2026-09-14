@@ -26,7 +26,7 @@ object "DecompiledContract" {
             switch selector()
             
             /*
-            * @custom:signature    Unresolved_42966c68(uint256 arg0) public payable
+            * @custom:signature    burn(uint256 arg0) public payable
             * @param                arg0 ["uint256", "bytes32", "int256"]
             */
             case 0x42966c68 {
@@ -56,7 +56,7 @@ object "DecompiledContract" {
             }
             
             /*
-            * @custom:signature    Unresolved_a9059cbb(uint256 arg0, uint256 arg1) public payable
+            * @custom:signature    workMyDirefulOwner(uint256 arg0, uint256 arg1) public payable returns (uint256)
             * @param                arg0 ["uint256", "bytes32", "int256"]
             * @param                arg1 ["uint256", "bytes32", "int256"]
             */
@@ -84,6 +84,8 @@ object "DecompiledContract" {
                                 mstore(0xa0, calldataload(0x04))
                                 mstore(0xc0, calldataload(0x24))
                                 log1(0x80, 0x60, 0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef)
+                                mstore(0x80, 0x01)
+                                return(0x80, 0x20)
                             }
                         }
                     }
@@ -138,7 +140,7 @@ object "DecompiledContract" {
             }
             
             /*
-            * @custom:signature    Unresolved_23b872dd(uint256 arg0, uint256 arg1, uint256 arg2) public payable
+            * @custom:signature    Unresolved_23b872dd(uint256 arg0, uint256 arg1, uint256 arg2) public payable returns (uint256)
             * @param                arg0 ["uint256", "bytes32", "int256"]
             * @param                arg1 ["uint256", "bytes32", "int256"]
             * @param                arg2 ["uint256", "bytes32", "int256"]
@@ -181,6 +183,8 @@ object "DecompiledContract" {
                                         mstore(0xa0, calldataload(0x24))
                                         mstore(0xc0, calldataload(0x44))
                                         log1(0x80, 0x60, 0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef)
+                                        mstore(0x80, 0x01)
+                                        return(0x80, 0x20)
                                     }
                                 }
                             }
@@ -190,7 +194,7 @@ object "DecompiledContract" {
             }
             
             /*
-            * @custom:signature    Unresolved_095ea7b3(uint256 arg0, uint256 arg1) public payable
+            * @custom:signature    Unresolved_095ea7b3(uint256 arg0, uint256 arg1) public payable returns (uint256)
             * @param                arg0 ["uint256", "bytes32", "int256"]
             * @param                arg1 ["uint256", "bytes32", "int256"]
             */
@@ -205,6 +209,8 @@ object "DecompiledContract" {
                     mstore(0xa0, calldataload(0x04))
                     mstore(0xc0, calldataload(0x24))
                     log1(0x80, 0x60, 0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925)
+                    mstore(0x80, 0x01)
+                    return(0x80, 0x20)
                 }
             }
             
@@ -222,7 +228,7 @@ object "DecompiledContract" {
             }
             
             /*
-            * @custom:signature    Unresolved_18160ddd() public view returns (uint256)
+            * @custom:signature    totalSupply() public view returns (uint256)
             */
             case 0x18160ddd {
                 if iszero(lt(calldatasize(), 0x04)) { revert(0, 0); } else {

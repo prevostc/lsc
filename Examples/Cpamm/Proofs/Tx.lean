@@ -128,18 +128,10 @@ theorem protoOf_le_dx (σ : Storage) (dx : Nat) (h : σ.protocolShareBps ≤ BPS
       (share_le (swapFee dx) σ.protocolShareBps BPS h (by decide))
       (Nat.sub_le _ _)
 
-theorem pos_div_iff {a b : Nat} : 0 < a / b ↔ 0 < b ∧ b ≤ a := by
-  rw [Nat.pos_iff_ne_zero, ne_eq, Nat.div_eq_zero_iff]
-  omega
-
-private theorem not_pos_div {a b : Nat} (hb : 0 < b) (h : ¬ 0 < a / b) : ¬ b ≤ a := by
-  intro hba
-  exact h (pos_div_iff.mpr ⟨hb, hba⟩)
-
-@[simp] theorem balSel0_eq : balSel0 = 0x70a08231 := by native_decide
-@[simp] theorem balSel1_eq : balSel1 = 0x70a08231 := by native_decide
-@[simp] theorem supplySel0_eq : supplySel0 = 0x18160ddd := by native_decide
-@[simp] theorem supplySel1_eq : supplySel1 = 0x18160ddd := by native_decide
+@[simp] theorem balSel0_eq : balSel0 = 0x70a08231 := by decide
+@[simp] theorem balSel1_eq : balSel1 = 0x70a08231 := by decide
+@[simp] theorem supplySel0_eq : supplySel0 = 0x18160ddd := by decide
+@[simp] theorem supplySel1_eq : supplySel1 = 0x18160ddd := by decide
 
 theorem holdings0_view (self : Address) :
     holdings0 self w = (viewBal0 w.self.token0 self w.oracle w.ext).raw := by
@@ -195,17 +187,29 @@ theorem transfer_frame {a : Asset} {r : IERC20.Ref a}
 
 theorem impl_transferFrom {a : Asset} (r : IERC20.Ref a)
     (src dst : Address) (amt : Amount a) :
-    (r.impl w : IERC20.Impl a (World Storage ExtState Event) Error).transferFrom
-        src dst amt ctx w =
-      Tx.run (tfCall r src dst amt) ctx w :=
-  rfl
+    (r.impl w).transferFrom src dst amt ctx w =
+      (Tx.run (tfCall r src dst amt) ctx w).toOption := by
+  have h :
+      (r.impl w).transferFrom src dst amt ctx w =
+        (Tx.run (r.transferFrom src dst amt :
+          Tx Storage ExtState Event Unit Bool) ctx w).toOption :=
+    rfl
+  rw [h, tfCall]
+  simp only [IERC20.Ref.transferFrom]
+  exact Tx.run_call_toOption_err (ε := Unit) (ε' := Error) r.addr _ _ ctx w
 
 theorem impl_transfer {a : Asset} (r : IERC20.Ref a)
     (dst : Address) (amt : Amount a) :
-    (r.impl w : IERC20.Impl a (World Storage ExtState Event) Error).transfer
-        dst amt ctx w =
-      Tx.run (trCall r dst amt) ctx w :=
-  rfl
+    (r.impl w).transfer dst amt ctx w =
+      (Tx.run (trCall r dst amt) ctx w).toOption := by
+  have h :
+      (r.impl w).transfer dst amt ctx w =
+        (Tx.run (r.transfer dst amt :
+          Tx Storage ExtState Event Unit Bool) ctx w).toOption :=
+    rfl
+  rw [h, trCall]
+  simp only [IERC20.Ref.transfer]
+  exact Tx.run_call_toOption_err (ε := Unit) (ε' := Error) r.addr _ _ ctx w
 
 theorem transfer_run_ctx_irrel {a : Asset} {r : IERC20.Ref a}
     {dst : Address} {amt : Amount a} {ctx' : Ctx}
@@ -635,9 +639,7 @@ private theorem addLiq_after_mint (a0 : Amount asset0) (a1 : Amount asset1)
           Amount lpShare) =
           ⟨mintedShares w.self a0.raw a1.raw⟩ := by
       apply Amount.ext
-      simp [mintedShares, htsr]
-      rw [Amount.raw_ofNat (a := lpShare) 1, Amount.raw_ofNat (a := asset0) 1,
-        Nat.one_mul, Nat.div_one]
+      simp [mintedShares, htsr, Amount.raw_ofNat, Nat.one_mul, Nat.div_one]
     rw [hm, run_req_true hposM]
   · have htsr : w.self.totalShares.raw ≠ 0 := (Amount.ne_iff _ _).mp hts
     rcases hprod with h0 | ⟨hr0, hr1, hm0, hm1⟩
@@ -746,12 +748,12 @@ theorem setFeeTo_ok_of_run {recipient : Address} {w' : World Storage ExtState Ev
 theorem addLiquidity_reverts_on_nonpos0 (a0 : Amount asset0) (a1 : Amount asset1)
     (hpos : ¬ 0 < a0) :
     Tx.run (addLiquidity a0 a1) ctx w = .error (.user .Zero) := by
-  simp [addLiquidity, hpos]
+  rw [addLiquidity, run_req_false hpos]
 
 theorem addLiquidity_reverts_on_nonpos1 (a0 : Amount asset0) (a1 : Amount asset1)
     (hpos0 : 0 < a0) (hpos1 : ¬ 0 < a1) :
     Tx.run (addLiquidity a0 a1) ctx w = .error (.user .Zero) := by
-  simp [addLiquidity, hpos0, hpos1]
+  rw [addLiquidity, run_req_true hpos0, run_req_false hpos1]
 
 structure AddLiqOk (ctx : Ctx) (w : World Storage ExtState Event)
     (a0 : Amount asset0) (a1 : Amount asset1) : Prop where
@@ -775,7 +777,9 @@ theorem addLiquidity_reverts_on_zero_r0 (a0 : Amount asset0) (a1 : Amount asset1
     Tx.run (addLiquidity a0 a1) ctx w = .error (.user .Zero) := by
   have hne : ¬ w.self.totalShares = 0 := (Amount.ne_iff _ _).mpr hts
   have hz : ¬ 0 < w.self.reserve0 := by simpa [Amount.lt_iff] using hr0
-  simp [-run_safeTransferFrom, addLiquidity, hpos0, hpos1, hne, hts, hz]
+  rw [addLiquidity, run_req_true hpos0, run_req_true hpos1,
+    run_sender_bind, run_self_bind, run_load_bind, run_load_bind, run_load_bind,
+    Tx.run_ite, if_neg hne, run_req_false hz]
 
 theorem addLiquidity_reverts_on_zero_r1 (a0 : Amount asset0) (a1 : Amount asset1)
     (hpos0 : 0 < a0) (hpos1 : 0 < a1)
@@ -783,8 +787,11 @@ theorem addLiquidity_reverts_on_zero_r1 (a0 : Amount asset0) (a1 : Amount asset1
     (hr1 : ¬ 0 < w.self.reserve1.raw) :
     Tx.run (addLiquidity a0 a1) ctx w = .error (.user .Zero) := by
   have hne : ¬ w.self.totalShares = 0 := (Amount.ne_iff _ _).mpr hts
+  have hr0A : 0 < w.self.reserve0 := by simpa [Amount.lt_iff] using hr0
   have hz : ¬ 0 < w.self.reserve1 := by simpa [Amount.lt_iff] using hr1
-  simp [-run_safeTransferFrom, addLiquidity, hpos0, hpos1, hne, hts, hr0, hz]
+  rw [addLiquidity, run_req_true hpos0, run_req_true hpos1,
+    run_sender_bind, run_self_bind, run_load_bind, run_load_bind, run_load_bind,
+    Tx.run_ite, if_neg hne, run_req_true hr0A, run_req_false hz]
 
 theorem addLiquidity_reverts_on_mul0 (a0 : Amount asset0) (a1 : Amount asset1)
     (hpos0 : 0 < a0) (hpos1 : 0 < a1)
@@ -793,10 +800,13 @@ theorem addLiquidity_reverts_on_mul0 (a0 : Amount asset0) (a1 : Amount asset1)
     (hmul : ¬ w.self.totalShares.raw * a0.raw < wordBound) :
     Tx.run (addLiquidity a0 a1) ctx w = .error (.arith .overflow) := by
   have hne : ¬ w.self.totalShares = 0 := (Amount.ne_iff _ _).mpr hts
+  have hr0A : 0 < w.self.reserve0 := by simpa [Amount.lt_iff] using hr0
+  have hr1A : 0 < w.self.reserve1 := by simpa [Amount.lt_iff] using hr1
   have hr0n : w.self.reserve0.raw ≠ 0 := Nat.ne_of_gt hr0
-  have hr1n : w.self.reserve1.raw ≠ 0 := Nat.ne_of_gt hr1
-  simp [-run_safeTransferFrom, addLiquidity, hpos0, hpos1, hne, hts, hr0, hr1, hr0n,
-    hr1n, Amount.hMulDivDown_def, Amount.run_mulDivDown, hmul]
+  rw [addLiquidity, run_req_true hpos0, run_req_true hpos1,
+    run_sender_bind, run_self_bind, run_load_bind, run_load_bind, run_load_bind]
+  rw [Tx.run_ite, if_neg hne, run_req_true hr0A, run_req_true hr1A]
+  rw [run_mulDivDown_bind, if_neg hr0n, if_neg hmul]
 
 theorem addLiquidity_reverts_on_mul1 (a0 : Amount asset0) (a1 : Amount asset1)
     (hpos0 : 0 < a0) (hpos1 : 0 < a1)
@@ -806,10 +816,15 @@ theorem addLiquidity_reverts_on_mul1 (a0 : Amount asset0) (a1 : Amount asset1)
     (hmul : ¬ w.self.totalShares.raw * a1.raw < wordBound) :
     Tx.run (addLiquidity a0 a1) ctx w = .error (.arith .overflow) := by
   have hne : ¬ w.self.totalShares = 0 := (Amount.ne_iff _ _).mpr hts
+  have hr0A : 0 < w.self.reserve0 := by simpa [Amount.lt_iff] using hr0
+  have hr1A : 0 < w.self.reserve1 := by simpa [Amount.lt_iff] using hr1
   have hr0n : w.self.reserve0.raw ≠ 0 := Nat.ne_of_gt hr0
   have hr1n : w.self.reserve1.raw ≠ 0 := Nat.ne_of_gt hr1
-  simp [-run_safeTransferFrom, addLiquidity, hpos0, hpos1, hne, hts, hr0, hr1, hr0n,
-    hr1n, hm0, Amount.hMulDivDown_def, Amount.run_mulDivDown, hmul]
+  rw [addLiquidity, run_req_true hpos0, run_req_true hpos1,
+    run_sender_bind, run_self_bind, run_load_bind, run_load_bind, run_load_bind]
+  rw [Tx.run_ite, if_neg hne, run_req_true hr0A, run_req_true hr1A]
+  rw [run_mulDivDown_bind, if_neg hr0n, if_pos hm0]
+  rw [run_mulDivDown_bind, if_neg hr1n, if_neg hmul]
 
 theorem addLiquidity_reverts_on_zero_shares (a0 : Amount asset0) (a1 : Amount asset1)
     (hpos0 : 0 < a0) (hpos1 : 0 < a1)
@@ -822,8 +837,6 @@ theorem addLiquidity_reverts_on_zero_shares (a0 : Amount asset0) (a1 : Amount as
     Tx.run (addLiquidity a0 a1) ctx w = .error (.user .ZeroShares) := by
   have hreq : ¬ 0 < (⟨mintedShares w.self a0.raw a1.raw⟩ : Amount lpShare) := by
     simpa [Amount.lt_iff] using hminted
-  simp [-run_safeTransferFrom, addLiquidity, hpos0, hpos1,
-    Amount.hMulDivDown_def, Amount.run_mulDivDown]
   by_cases hts : w.self.totalShares = 0
   · have htsr : w.self.totalShares.raw = 0 := (Amount.eq_iff _ _).mp hts
     have : ¬ 0 < a0.raw := by simpa [mintedShares, htsr] using hminted
@@ -831,21 +844,37 @@ theorem addLiquidity_reverts_on_zero_shares (a0 : Amount asset0) (a1 : Amount as
   · have htsr : w.self.totalShares.raw ≠ 0 := (Amount.ne_iff _ _).mp hts
     rcases hprod with h0 | ⟨hr0, hr1, hm0, hm1⟩
     · exact (htsr h0).elim
-    · have hr0n : w.self.reserve0.raw ≠ 0 := Nat.ne_of_gt hr0
+    · have hr0A : 0 < w.self.reserve0 := by simpa [Amount.lt_iff] using hr0
+      have hr1A : 0 < w.self.reserve1 := by simpa [Amount.lt_iff] using hr1
+      have hr0n : w.self.reserve0.raw ≠ 0 := Nat.ne_of_gt hr0
       have hr1n : w.self.reserve1.raw ≠ 0 := Nat.ne_of_gt hr1
+      rw [addLiquidity, run_req_true hpos0, run_req_true hpos1,
+        run_sender_bind, run_self_bind, run_load_bind, run_load_bind, run_load_bind]
+      rw [Tx.run_ite, if_neg hts, run_req_true hr0A, run_req_true hr1A]
+      rw [run_mulDivDown_bind, if_neg hr0n, if_pos hm0]
+      rw [run_mulDivDown_bind, if_neg hr1n, if_pos hm1, Tx.run_ite]
       by_cases hle :
-          w.self.totalShares.raw * a0.raw / w.self.reserve0.raw ≤
-            w.self.totalShares.raw * a1.raw / w.self.reserve1.raw
-      · have hs0 : ¬ 0 <
-            w.self.totalShares.raw * a0.raw / w.self.reserve0.raw := by
-          simpa [mintedShares, htsr, hle] using hminted
-        have hreqN := not_pos_div hr0 hs0
-        simp [hts, htsr, hr0, hr1, hr0n, hr1n, hm0, hm1, hle, mintedShares, hreqN]
-      · have hs1 : ¬ 0 <
+          (⟨w.self.totalShares.raw * a0.raw / w.self.reserve0.raw⟩ :
+            Amount lpShare) ≤
+            ⟨w.self.totalShares.raw * a1.raw / w.self.reserve1.raw⟩
+      · have hle' : w.self.totalShares.raw * a0.raw / w.self.reserve0.raw ≤
             w.self.totalShares.raw * a1.raw / w.self.reserve1.raw := by
-          simpa [mintedShares, htsr, hle] using hminted
-        have hreqN := not_pos_div hr1 hs1
-        simp [hts, htsr, hr0, hr1, hr0n, hr1n, hm0, hm1, hle, mintedShares, hreqN]
+          simpa [Amount.le_iff] using hle
+        have hm :
+            (⟨w.self.totalShares.raw * a0.raw / w.self.reserve0.raw⟩ :
+              Amount lpShare) =
+              ⟨mintedShares w.self a0.raw a1.raw⟩ := by
+          simp [mintedShares, htsr, hle']
+        rw [if_pos hle, run_pure_bind, hm, run_req_false hreq]
+      · have hle' : ¬ w.self.totalShares.raw * a0.raw / w.self.reserve0.raw ≤
+            w.self.totalShares.raw * a1.raw / w.self.reserve1.raw := by
+          simpa [Amount.le_iff] using hle
+        have hm :
+            (⟨w.self.totalShares.raw * a1.raw / w.self.reserve1.raw⟩ :
+              Amount lpShare) =
+              ⟨mintedShares w.self a0.raw a1.raw⟩ := by
+          simp [mintedShares, htsr, hle']
+        rw [if_neg hle, run_pure_bind, hm, run_req_false hreq]
 
 theorem addLiquidity_reverts_on_one_overflow (a0 : Amount asset0) (a1 : Amount asset1)
     (hpos0 : 0 < a0) (hpos1 : 0 < a1)
@@ -1084,12 +1113,13 @@ theorem addLiquidity_call (a0 : Amount asset0) (a1 : Amount asset1)
 
 theorem removeLiquidity_reverts_on_nonpos (s : Amount lpShare) (hpos : ¬ 0 < s) :
     Tx.run (removeLiquidity s) ctx w = .error (.user .Zero) := by
-  simp [-run_safeTransfer, removeLiquidity, hpos]
+  rw [removeLiquidity, run_req_false hpos]
 
 theorem removeLiquidity_reverts_on_insufficient (s : Amount lpShare)
     (hpos : 0 < s) (hbal : ¬ s ≤ w.self.shares ctx.sender) :
     Tx.run (removeLiquidity s) ctx w = .error (.user .InsufficientShares) := by
-  simp [-run_safeTransfer, removeLiquidity, hpos, hbal]
+  rw [removeLiquidity, run_req_true hpos, run_sender_bind, run_loadMap_bind,
+    run_req_false hbal]
 
 theorem removeLiquidity_reverts_on_zero_supply (s : Amount lpShare)
     (hpos : 0 < s) (hbal : s ≤ w.self.shares ctx.sender)
@@ -1097,7 +1127,9 @@ theorem removeLiquidity_reverts_on_zero_supply (s : Amount lpShare)
     Tx.run (removeLiquidity s) ctx w = .error (.user .Zero) := by
   have hts' : ¬ 0 < w.self.totalShares := by
     simpa [Amount.lt_iff, Amount.raw_ofNat] using Nat.not_lt.mpr (Nat.le_of_eq hts)
-  simp [-run_safeTransfer, removeLiquidity, hpos, hbal, hts']
+  rw [removeLiquidity, run_req_true hpos, run_sender_bind, run_loadMap_bind,
+    run_req_true hbal, run_load_bind, run_load_bind, run_load_bind,
+    run_req_false hts']
 
 /-- `removeLiquidity` after the share/supply guards, at the first `mulDiv↓`.
 First action is `>>=`; the rest stays a `do` so later peels match. -/
@@ -2081,15 +2113,22 @@ theorem swap0for1_ok_of_run {dx : Amount asset0} {minOut : Amount asset1}
     (hrun : Tx.run (swap0for1 dx minOut) ctx w = .ok (out, w')) :
     Swap0Ok w dx minOut := by
   have hpos : 0 < dx := by
-    by_contra h; simp [-run_safeTransferFrom, -run_safeTransfer, swap0for1, h] at hrun
+    by_contra h
+    rw [swap0for1, run_req_false h] at hrun
+    cases hrun
   have hr0 : 0 < w.self.reserve0.raw := by
     by_contra h
     have hz : ¬ 0 < w.self.reserve0 := by simpa [Amount.lt_iff] using h
-    simp [-run_safeTransferFrom, -run_safeTransfer, swap0for1, hpos, hz] at hrun
+    rw [swap0for1, run_req_true hpos, run_load_bind, run_load_bind,
+      run_req_false hz] at hrun
+    cases hrun
   have hr1 : 0 < w.self.reserve1.raw := by
     by_contra h
     have hz : ¬ 0 < w.self.reserve1 := by simpa [Amount.lt_iff] using h
-    simp [-run_safeTransferFrom, -run_safeTransfer, swap0for1, hpos, hr0, hz] at hrun
+    have hr0A : 0 < w.self.reserve0 := by simpa [Amount.lt_iff] using hr0
+    rw [swap0for1, run_req_true hpos, run_load_bind, run_load_bind,
+      run_req_true hr0A, run_req_false hz] at hrun
+    cases hrun
   have hfee : dx.raw * 9970 < wordBound := by
     by_contra h
     exact Tx.run_ok_error hrun (swap0for1_reverts_on_fee_mul dx minOut hpos hr0 hr1 h)
@@ -2897,15 +2936,22 @@ theorem swap1for0_ok_of_run {dx : Amount asset1} {minOut : Amount asset0}
     (hrun : Tx.run (swap1for0 dx minOut) ctx w = .ok (out, w')) :
     Swap1Ok w dx minOut := by
   have hpos : 0 < dx := by
-    by_contra h; simp [-run_safeTransferFrom, -run_safeTransfer, swap1for0, h] at hrun
+    by_contra h
+    rw [swap1for0, run_req_false h] at hrun
+    cases hrun
   have hr0 : 0 < w.self.reserve0.raw := by
     by_contra h
     have hz : ¬ 0 < w.self.reserve0 := by simpa [Amount.lt_iff] using h
-    simp [-run_safeTransferFrom, -run_safeTransfer, swap1for0, hpos, hz] at hrun
+    rw [swap1for0, run_req_true hpos, run_load_bind, run_load_bind,
+      run_req_false hz] at hrun
+    cases hrun
   have hr1 : 0 < w.self.reserve1.raw := by
     by_contra h
     have hz : ¬ 0 < w.self.reserve1 := by simpa [Amount.lt_iff] using h
-    simp [-run_safeTransferFrom, -run_safeTransfer, swap1for0, hpos, hr0, hz] at hrun
+    have hr0A : 0 < w.self.reserve0 := by simpa [Amount.lt_iff] using hr0
+    rw [swap1for0, run_req_true hpos, run_load_bind, run_load_bind,
+      run_req_true hr0A, run_req_false hz] at hrun
+    cases hrun
   have hfee : dx.raw * 9970 < wordBound := by
     by_contra h
     exact Tx.run_ok_error hrun (swap1for0_reverts_on_fee_mul dx minOut hpos hr0 hr1 h)
@@ -3164,12 +3210,13 @@ theorem swap1for0_call (dx : Amount asset1) (minOut : Amount asset0)
 theorem collectProtocolFees_reverts_on_no_feeTo (h : w.self.feeTo = 0) :
     Tx.run collectProtocolFees ctx w = .error (.user .NoFeeTo) := by
   have : ¬ w.self.feeTo ≠ 0 := by simp [h]
-  simp [-run_safeTransfer, collectProtocolFees, this]
+  rw [collectProtocolFees, run_sender_bind, run_load_bind, run_req_false this]
 
 theorem collectProtocolFees_reverts_on_not_feeTo
     (hft : w.self.feeTo ≠ 0) (h : ctx.sender ≠ w.self.feeTo) :
     Tx.run collectProtocolFees ctx w = .error (.user .NotOwner) := by
-  simp [-run_safeTransfer, collectProtocolFees, hft, h]
+  rw [collectProtocolFees, run_sender_bind, run_load_bind, run_req_true hft,
+    run_req_false h]
 
 structure CollectOk (ctx : Ctx) (w : World Storage ExtState Event) : Prop where
   feeTo : w.self.feeTo ≠ 0
@@ -3316,12 +3363,11 @@ theorem swap1_protocol_fee {dx : Amount asset1} {minOut : Amount asset0}
 theorem collect_only_feeTo {p : Amount asset0 × Amount asset1}
     {w' : World Storage ExtState Event}
     (h : Tx.run collectProtocolFees ctx w = .ok (p, w')) :
-    ctx.sender = w.self.feeTo ∧
-      w'.self.protocolFees0 = 0 ∧ w'.self.protocolFees1 = 0 ∧
+    w'.self.protocolFees0 = 0 ∧ w'.self.protocolFees1 = 0 ∧
       w'.self.reserve0 = w.self.reserve0 ∧ w'.self.reserve1 = w.self.reserve1 := by
   have hok := collectProtocolFees_ok_of_run h
   have ⟨_, hσ, _, _⟩ := collectProtocolFees_post hok h
-  exact ⟨hok.sender, by simp [hσ, collectPost], by simp [hσ, collectPost],
+  exact ⟨by simp [hσ, collectPost], by simp [hσ, collectPost],
     by simp [hσ, collectPost], by simp [hσ, collectPost]⟩
 
 theorem addLiquidity_buckets {a0 : Amount asset0} {a1 : Amount asset1}
@@ -3359,6 +3405,16 @@ theorem setFeeTo_buckets {recipient : Address} {w' : World Storage ExtState Even
 theorem removeLiquidity_pro_rata {s : Amount lpShare}
     {p : Amount asset0 × Amount asset1} {w' : World Storage ExtState Event}
     (h : Tx.run (removeLiquidity s) ctx w = .ok (p, w')) :
+    w'.self.reserve0 = w.self.reserve0 - p.1 ∧
+      w'.self.reserve1 = w.self.reserve1 - p.2 := by
+  have hok := removeLiquidity_ok_of_run h
+  have ⟨hp, hσ, _, _⟩ := removeLiquidity_post s hok h
+  subst hp
+  simp [hσ, removeLiquidityPost, redeemed]
+
+theorem removeLiquidity_paid {s : Amount lpShare}
+    {p : Amount asset0 × Amount asset1} {w' : World Storage ExtState Event}
+    (h : Tx.run (removeLiquidity s) ctx w = .ok (p, w')) :
     p.1.raw = w.self.reserve0.raw * s.raw / w.self.totalShares.raw ∧
       p.2.raw = w.self.reserve1.raw * s.raw / w.self.totalShares.raw := by
   have hok := removeLiquidity_ok_of_run h
@@ -3366,6 +3422,17 @@ theorem removeLiquidity_pro_rata {s : Amount lpShare}
   simp [hp, redeemed, Amount.raw_ofWord]
 
 theorem addLiquidity_pro_rata {a0 : Amount asset0} {a1 : Amount asset1}
+    {n : Amount lpShare} {w' : World Storage ExtState Event}
+    (h : Tx.run (addLiquidity a0 a1) ctx w = .ok (n, w')) :
+    w'.self.shares ctx.sender = w.self.shares ctx.sender + n ∧
+      w'.self.totalShares = w.self.totalShares + n := by
+  have hok := addLiquidity_ok_of_run h
+  have ⟨hn, hσ, _, _⟩ := addLiquidity_post a0 a1 hok h
+  subst hn
+  simp [hσ, addLiquidityPost, Function.update, Amount.raw_add, Amount.raw_ofWord,
+    Nat.add_comm]
+
+theorem addLiquidity_minted {a0 : Amount asset0} {a1 : Amount asset1}
     {n : Amount lpShare} {w' : World Storage ExtState Event}
     (h : Tx.run (addLiquidity a0 a1) ctx w = .ok (n, w')) :
     n = Amount.ofWord (mintedShares w.self a0.raw a1.raw) := by

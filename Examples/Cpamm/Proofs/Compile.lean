@@ -1,5 +1,5 @@
 import Lsc.Compiler.Bytecode
-import Examples.Cpamm.Proofs.Reify
+import Examples.Cpamm.Contract
 
 /-!
 CPAMM runtime compiles (`compileRuntime`: erase, else powdr spill).

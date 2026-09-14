@@ -20,7 +20,7 @@ well-formed trace.
 
 | File | Role |
 |------|------|
-| `Contract.lean` | Token surface + `implements IERC20` |
+| `Contract.lean` | Token surface + schema + `lsc_contract` (`implements IERC20`) |
 | `Spec.lean` | `claim`, `Auth`, `Inv` |
 | `Theorems.lean` | Exported Tx, IERC20, and security theorems |
 | `Tests.lean` | Smoke `#guard`s |

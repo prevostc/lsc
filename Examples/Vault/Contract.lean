@@ -25,7 +25,6 @@ structure Storage where
   asset : Ref (IERC20 vaultAsset)
   owner : Address
   paused : Flag
-  totalAssets : Amount vaultAsset
   totalShares : Amount vShare
   shares : Mapping Address (Amount vShare)
 
@@ -56,14 +55,16 @@ def constructor (owner tok : Address) : M Unit := do
   write asset { addr := tok }
   write paused Flag.off
 
-/-- Deposit `assets` and mint floor-pro-rata shares (1:1 if empty). -/
+/-- Deposit `assets` and mint floor-pro-rata shares against the live token
+balance (1:1 if empty). -/
 def deposit (assets : Amount vaultAsset) : M (Amount vShare) := do
   let p ← read paused
   Tx.require (p = Flag.off) .Paused
   Tx.require (0 < assets) .Zero
   let who ← Tx.sender
   let me ← Tx.selfAddress
-  let ta ← read totalAssets
+  let tok ← read asset
+  let ta ← tok.balanceOf me
   let ts ← read totalShares
   let oneA : Amount vaultAsset := 1
   let oneS : Amount vShare := 1
@@ -73,16 +74,14 @@ def deposit (assets : Amount vaultAsset) : M (Amount vShare) := do
     else
       ts mulDiv↓ assets / ta
   Tx.require (0 < minted) .ZeroShares
-  write totalAssets (← ta +? assets)
   write totalShares (← ts +? minted)
   let bal ← read shares[who]
   write shares[who] (← bal +? minted)
-  let tok ← read asset
   safeTransferFrom tok who me assets .TransferFailed
   Tx.emit (.Deposit who assets minted)
   return minted
 
-/-- Burn `sharesIn` and pay the floor-pro-rata assets. -/
+/-- Burn `sharesIn` and pay the floor-pro-rata of the live token balance. -/
 def withdraw (sharesIn : Amount vShare) : M (Amount vaultAsset) := do
   let p ← read paused
   Tx.require (p = Flag.off) .Paused
@@ -90,21 +89,23 @@ def withdraw (sharesIn : Amount vShare) : M (Amount vaultAsset) := do
   let who ← Tx.sender
   let bal ← read shares[who]
   Tx.require (sharesIn ≤ bal) .InsufficientShares
-  let ta ← read totalAssets
+  let me ← Tx.selfAddress
+  let tok ← read asset
+  let ta ← tok.balanceOf me
   let ts ← read totalShares
   let assetsOut ← ta mulDiv↓ sharesIn / ts
   Tx.require (0 < assetsOut) .ZeroAssets
   write shares[who] (← bal -? sharesIn)
   write totalShares (← ts -? sharesIn)
-  write totalAssets (← ta -? assetsOut)
-  let tok ← read asset
   safeTransfer tok who assetsOut .TransferFailed
   Tx.emit (.Withdraw who assetsOut sharesIn)
   return assetsOut
 
 /-- Shares `deposit` would mint (no state change, no token pull). -/
 def previewDeposit (assets : Amount vaultAsset) : M (Amount vShare) := do
-  let ta ← read totalAssets
+  let me ← Tx.selfAddress
+  let tok ← read asset
+  let ta ← tok.balanceOf me
   let ts ← read totalShares
   let oneA : Amount vaultAsset := 1
   let oneS : Amount vShare := 1
@@ -115,7 +116,9 @@ def previewDeposit (assets : Amount vaultAsset) : M (Amount vShare) := do
 
 /-- Assets `withdraw` would return. -/
 def previewRedeem (sharesIn : Amount vShare) : M (Amount vaultAsset) := do
-  let ta ← read totalAssets
+  let me ← Tx.selfAddress
+  let tok ← read asset
+  let ta ← tok.balanceOf me
   let ts ← read totalShares
   ta mulDiv↓ sharesIn / ts
 
@@ -139,6 +142,8 @@ def unpause : M Unit := do
 def isPaused : M Flag := read paused
 
 end Vault
+
+set_option maxHeartbeats 20000000
 
 lsc_schema Vault
 lsc_contract Vault constructor deposit withdraw previewDeposit previewRedeem

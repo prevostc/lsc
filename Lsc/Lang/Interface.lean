@@ -280,6 +280,30 @@ theorem run_call_none (addr : Address) (sel : Nat) (args : List Word)
     Tx.run (call (ε := ε) (α := α) addr sel args) ctx w = .error .callFailed := by
   simp [run_call, h]
 
+/-- `toOption` of a CALL is the decoded oracle payload (or `none`). Independent
+of the user-error type. -/
+theorem run_call_toOption (addr : Address) (sel : Nat) (args : List Word)
+    (ctx : Ctx) (w : World S X E) :
+    (run (call (ε := ε) (α := α) addr sel args) ctx w).toOption =
+      match w.oracle.call addr sel args w.ext with
+      | none => none
+      | some (rets, x') =>
+        match AbiRetType.decode (α := α) rets with
+        | none => none
+        | some v => some (v, { w with ext := x' }) := by
+  simp only [run_call]
+  split
+  · rfl
+  · split <;> rfl
+
+/-- `toOption` of a CALL ignores the user-error type. `I.Impl.ofRef` runs the
+CALL at `ε := Unit`; a contract body uses the contract's `Error`. -/
+theorem run_call_toOption_err {ε' : Type} (addr : Address) (sel : Nat)
+    (args : List Word) (ctx : Ctx) (w : World S X E) :
+    (run (call (ε := ε) (α := α) addr sel args) ctx w).toOption =
+      (run (call (ε := ε') (α := α) addr sel args) ctx w).toOption := by
+  rw [run_call_toOption, run_call_toOption]
+
 /-- A successful view: the oracle payload decoded and the world is unchanged. -/
 theorem run_view_ok {addr : Address} {sel : Nat} {args : List Word}
     {ctx : Ctx} {w : World S X E} {v : α} {w' : World S X E}
@@ -551,6 +575,16 @@ theorem map_viewAsNat_amount {a : Asset} (addr : Address) (sel : Nat)
   | [_] => rfl
   | _ :: _ :: _ => rfl
 
+/-- Certificate direction: surface `view` is Core `ofWord <$> viewAsNat`.
+Lets `bind_map` + `raw_ofWord` turn an intermediate `ta.raw` into the Core
+word (live `balanceOf` feeding `mulDiv`). -/
+theorem view_eq_map_viewAsNat {a : Asset} (addr : Address) (sel : Nat)
+    (args : List Word) :
+    view (α := Amount a) addr sel args =
+      Amount.ofWord (a := a) <$>
+        viewAsNat (S := S) (X := X) (E := E) (ε := ε) .word addr sel args :=
+  (map_viewAsNat_amount addr sel args).symm
+
 /-- Bind form of `map_viewAsNat_amount`. -/
 theorem bind_viewAsNat_amount {a : Asset} (addr : Address) (sel : Nat)
     (args : List Word) :
@@ -559,6 +593,15 @@ theorem bind_viewAsNat_amount {a : Asset} (addr : Address) (sel : Nat)
       view (α := Amount a) addr sel args := by
   rw [← map_eq_pure_bind]
   exact map_viewAsNat_amount addr sel args
+
+/-- Surface `view` then `k ta.raw` is Core `viewAsNat` then `k n`.
+Simp-oriented: the surface mentions `Amount a`, so `a` is inferable. -/
+theorem bind_viewAsNat_raw {a : Asset} {β : Type} (addr : Address) (sel : Nat)
+    (args : List Word) (k : Nat → Tx S X E ε β) :
+    view (α := Amount a) addr sel args >>= (fun ta => k ta.raw) =
+      viewAsNat (S := S) (X := X) (E := E) (ε := ε) .word addr sel args >>= k := by
+  rw [← map_viewAsNat_amount (a := a), bind_map]
+  rfl
 
 /-- Bind form of `map_callAsNat_amount`. -/
 theorem bind_callAsNat_amount {a : Asset} (addr : Address) (sel : Nat)

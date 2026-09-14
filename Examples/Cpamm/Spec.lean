@@ -1,6 +1,6 @@
 import Mathlib.Algebra.BigOperators.Group.Finset.Basic
 import Lsc.Security.Wealth
-import Examples.Cpamm.Proofs.Reify
+import Examples.Cpamm.Contract
 import Stdlib.ERC20
 
 /-!
@@ -9,7 +9,8 @@ CPAMM spec: `claim` is LP share count; `Auth` is the victim's own
 each reserve plus that token's protocol bucket covered by the pool's live
 token balance. `k` is a swap fact, not `Inv`. Between our transactions,
 `cpammRely` lets `ext` change except that neither pool balance falls and
-each token's `totalSupply` view stays the same.
+each token's `totalSupply` view stays the same — that is `ClaimMonoEnv`
+for the share-count claim.
 -/
 
 open Lsc Lsc.Stdlib Lsc.Security Cpamm
@@ -17,23 +18,27 @@ open Lsc Lsc.Stdlib Lsc.Security Cpamm
 namespace Cpamm
 
 /-- LP share count of `a`. -/
-def claim (a : Address) (σ : Storage) : Nat := (σ.shares a).raw
+def claim : Claim Storage ExtState Event :=
+  Claim.ofSelf fun a s => (s.shares a).raw
 
 /-- Floor-pro-rata token0 claim of `a`. Zero when the supply is empty. -/
-def claim0 (a : Address) (σ : Storage) : Nat :=
-  if σ.totalShares = 0 then 0
-  else (σ.shares a).raw * σ.reserve0.raw / σ.totalShares.raw
+def claim0 : Claim Storage ExtState Event :=
+  Claim.ofSelf fun a σ =>
+    if σ.totalShares = 0 then 0
+    else (σ.shares a).raw * σ.reserve0.raw / σ.totalShares.raw
 
 /-- Floor-pro-rata token1 claim of `a`. Zero when the supply is empty. -/
-def claim1 (a : Address) (σ : Storage) : Nat :=
-  if σ.totalShares = 0 then 0
-  else (σ.shares a).raw * σ.reserve1.raw / σ.totalShares.raw
+def claim1 : Claim Storage ExtState Event :=
+  Claim.ofSelf fun a σ =>
+    if σ.totalShares = 0 then 0
+    else (σ.shares a).raw * σ.reserve1.raw / σ.totalShares.raw
 
 /-- Only a `removeLiquidity` by `a` itself may decrease `claim a`. -/
-def Auth (a : Address) (c : Call spec) (_s : Storage) : Prop :=
-  match c.fn, c.args with
-  | .removeLiquidity, _ => c.sender = a
-  | _, _ => False
+def Auth : AuthPred spec :=
+  AuthPred.ofSelf fun a c _s =>
+    match c.fn, c.args with
+    | .removeLiquidity, _ => c.sender = a
+    | _, _ => False
 
 /-- `addLiquidity` is the only inflow of share-count; it is `0` on revert. -/
 def inflow (c : Call spec) (w : World Storage ExtState Event) : Nat :=
@@ -46,15 +51,11 @@ def inflow (c : Call spec) (w : World Storage ExtState Event) : Nat :=
 
 /-- Live token0 balance of the pool, from the bound token's view. -/
 def holdings0 (self : Address) (w : World Storage ExtState Event) : Nat :=
-  let T : IERC20.Impl asset0 (World Storage ExtState Event) Error :=
-    w.self.token0.impl w
-  (T.balanceOf self w).raw
+  ((w.self.token0.impl w).balanceOf self w).raw
 
 /-- Live token1 balance of the pool, from the bound token's view. -/
 def holdings1 (self : Address) (w : World Storage ExtState Event) : Nat :=
-  let T : IERC20.Impl asset1 (World Storage ExtState Event) Error :=
-    w.self.token1.impl w
-  (T.balanceOf self w).raw
+  ((w.self.token1.impl w).balanceOf self w).raw
 
 def InvStorage (σ : Storage) : Prop :=
   ∃ H : Finset Address,
@@ -74,8 +75,8 @@ def Inv (self : Address) (w : World Storage ExtState Event) : Prop :=
 def CoversLpsAndProtocol (self : Address) (w : World Storage ExtState Event) : Prop :=
   ∃ H : Finset Address,
     (∀ a, a ∉ H → w.self.shares a = 0) ∧
-    H.sum (fun a => claim0 a w.self) + w.self.protocolFees0.raw ≤ holdings0 self w ∧
-    H.sum (fun a => claim1 a w.self) + w.self.protocolFees1.raw ≤ holdings1 self w
+    H.sum (fun a => claim0 a w) + w.self.protocolFees0.raw ≤ holdings0 self w ∧
+    H.sum (fun a => claim1 a w) + w.self.protocolFees1.raw ≤ holdings1 self w
 
 /-- `balanceOf` / `totalSupply` selectors. -/
 def balSel0 : Nat := Interface.selector (I := IERC20 asset0) "balanceOf"

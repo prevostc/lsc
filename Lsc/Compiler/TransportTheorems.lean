@@ -183,20 +183,23 @@ theorem transport_trace_ext (T : TransportSetup S ExtState E ε)
     hNR Inv hP hInvR hInvL hw hE
 
 /-- After any halted calldata list against bytecode that CALLs out, an
-account's protocol claim as stored on chain is no lower than it started,
-provided that account authorised no decoded call and the protocol
-never lowers a claim except when authorised. This is the lemma Vault
+account's protocol claim is no lower than it started, provided that
+account authorised no decoded call and the protocol never lowers a
+claim except when authorised. `claim` is world-indexed; a storage-only
+measure is `Claim.ofSelf` (then `hC` holds). This is the lemma Vault
 and AMM bytecode anti-extraction use. Reentrancy is not modelled
 (`NoReentry`); everything else about the callee is adversarial. -/
 theorem transport_claim_ext (T : TransportSetup S ExtState E ε)
     (Xpkg : TransportBindings S E ε T)
-    (Inv : World S ExtState E → Prop) (claim : Claim S) (Auth : AuthPred T.spec)
+    (Inv : World S ExtState E → Prop) (claim : Claim S ExtState E)
+    (Auth : AuthPred T.spec)
     (self : Address) (a : Address)
     (hN : NoUnauthorizedDecrease T.spec Inv claim Auth)
     (hP : PreservesInvAt T.spec Inv self)
     (hInvR : InvReframe Inv Xpkg.oracle)
     (hInvL : ∀ w (log : List E), Inv w → Inv { w with log := log })
     (hAirr : ∀ tr w w', NoAuthAlong Auth a tr w ↔ NoAuthAlong Auth a tr w')
+    (hC : ∀ w w' x, w.self = w'.self → claim x w = claim x w')
     (calls : List EvmCall)
     (w : World S ExtState E) (σ : U256 → U256) (ξ : Foreign)
     (σ' : U256 → U256) (ξ' : Foreign)
@@ -214,9 +217,9 @@ theorem transport_claim_ext (T : TransportSetup S ExtState E ε)
       ExtAgree self w'.ext
         (mkEvmStateExt ([] : List UInt8) σ' ξ' evmKeccak (dummyCtx self)) ∧
       Inv w' ∧
-      claim a w.self ≤ claim a w'.self :=
+      claim a w ≤ claim a w' :=
   Proof.transport_claim_ext T Xpkg Inv claim Auth self a hN hP hInvR hInvL hAirr
-    calls w σ ξ σ' ξ' hs hlog hwf hWF hOr hNR hA hw hE
+    hC calls w σ ξ σ' ξ' hs hlog hwf hWF hOr hNR hA hw hE
 
 /-- A well-formed high-level trace against a contract that CALLs out has
 some EVM execution of the encoded calldata whose post-storage matches a
@@ -250,17 +253,21 @@ theorem transport_exists_ext (T : TransportSetup S ExtState E ε)
 /-- Encoding a high-level trace and running it on bytecode that CALLs out
 cannot decrease an account's claim when that account authorised no call
 in the trace. Combines `transport_exists_ext` with claim monotonicity;
-Vault's `_exists` bytecode theorems use this. Reentrancy is not modelled
+`claim` is world-indexed (`Claim.ofSelf` for a storage-only measure).
+Example authors apply this to a high-level anti-extraction theorem; the
+compiler already quantifies over all contracts. Reentrancy is not modelled
 (`NoReentry`). -/
 theorem transport_exists_claim_ext (T : TransportSetup S ExtState E ε)
     (Xpkg : TransportBindings S E ε T)
-    (Inv : World S ExtState E → Prop) (claim : Claim S) (Auth : AuthPred T.spec)
+    (Inv : World S ExtState E → Prop) (claim : Claim S ExtState E)
+    (Auth : AuthPred T.spec)
     (self a : Address)
     (hN : NoUnauthorizedDecrease T.spec Inv claim Auth)
     (hP : PreservesInvAt T.spec Inv self)
     (hInvR : InvReframe Inv Xpkg.oracle)
     (hInvL : ∀ w (log : List E), Inv w → Inv { w with log := log })
     (hAirr : ∀ tr w w', NoAuthAlong Auth a tr w ↔ NoAuthAlong Auth a tr w')
+    (hC : ∀ w w' x, w.self = w'.self → claim x w = claim x w')
     (tr : List (Step T.spec)) (w : World S ExtState E)
     (σ : U256 → U256) (ξ : Foreign)
     (hs : storageRel T.c T.Γ evmKeccak w.self σ)
@@ -276,9 +283,9 @@ theorem transport_exists_claim_ext (T : TransportSetup S ExtState E ε)
       ExtAgree self w'.ext
         (mkEvmStateExt ([] : List UInt8) σ' ξ' evmKeccak (dummyCtx self)) ∧
       Inv w' ∧
-      claim a w.self ≤ claim a w'.self :=
+      claim a w ≤ claim a w' :=
   Proof.transport_exists_claim_ext T Xpkg Inv claim Auth self a hN hP hInvR hInvL
-    hAirr tr w σ ξ hs hwf hb hW hw hA hOr hNR
+    hAirr hC tr w σ ξ hs hwf hb hW hw hA hOr hNR
 
 /-- When EVM storage matches a high-level world, a scalar slot's EVM word
 is that world's field packed as a 256-bit word. Read total supply, owner,

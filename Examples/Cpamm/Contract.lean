@@ -258,7 +258,9 @@ def protocolFees : M (Amount asset0 × Amount asset1) := do
 
 end Cpamm
 
-set_option maxHeartbeats 20000000
+set_option maxHeartbeats 40000000
 
 lsc_schema Cpamm
+lsc_contract Cpamm constructor addLiquidity removeLiquidity swap0for1 swap1for0
+  setProtocolShare setFeeTo collectProtocolFees getReserves sharesOf protocolFees
 

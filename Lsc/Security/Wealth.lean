@@ -33,6 +33,13 @@ abbrev Claim (S X E : Type) := Address → World S X E → Nat
 abbrev Claim.ofSelf {S X E : Type} (c : Address → S → Nat) : Claim S X E :=
   fun a w => c a w.self
 
+/-- `Claim.ofSelf` ignores `ext` and `log`. -/
+theorem Claim.ofSelf_congr (c : Address → S → Nat)
+    {w w' : World S X E} {a : Address} (h : w.self = w'.self) :
+    Claim.ofSelf (S := S) (X := X) (E := E) c a w =
+      Claim.ofSelf (S := S) (X := X) (E := E) c a w' := by
+  simp [Claim.ofSelf, h]
+
 /-- Permission to decrease `claim a`. Evaluated in the **pre-state**. -/
 abbrev AuthPred (C : Spec S X E ε) := Address → Call C → World S X E → Prop
 

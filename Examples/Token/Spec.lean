@@ -11,17 +11,19 @@ open Lsc Lsc.Security Token
 
 namespace Token
 
-/-- `claim a` is `a`'s ERC-20 balance. -/
-def claim (a : Address) (s : Storage) : Nat := (s.balances a).raw
+/-- `claim a w` is `a`'s ERC-20 balance. -/
+def claim : Claim Storage ExtState Event :=
+  Claim.ofSelf fun a s => (s.balances a).raw
 
 /-- Tight permission: mint/approve/views never decrease `claim`, so `Auth` is false.
 `transferFrom` is allowance-aware so reverting spam still satisfies `NoAuthAlong`. -/
-def Auth (a : Address) (c : Call spec) (s : Storage) : Prop :=
-  match c.fn, c.args with
-  | .transfer, _ => c.sender = a
-  | .burn, _ => c.sender = a
-  | .transferFrom, (src, _, amount) => src = a ∧ amount ≤ s.allowances src c.sender
-  | _, _ => False
+def Auth : AuthPred spec :=
+  AuthPred.ofSelf fun a c s =>
+    match c.fn, c.args with
+    | .transfer, _ => c.sender = a
+    | .burn, _ => c.sender = a
+    | .transferFrom, (src, _, amount) => src = a ∧ amount ≤ s.allowances src c.sender
+    | _, _ => False
 
 /-- Mint is the only inflow; it is `0` on revert. -/
 def inflow (c : Call spec) (w : World Storage ExtState Event) : Nat :=

@@ -282,16 +282,19 @@ theorem transport_trace_ext (T : TransportSetup S ExtState E ε)
         exact ⟨w', hs', hwf', hAgr', hInv'⟩
 
 /-- S2 claim transport: `NoUnauthorizedDecrease` along the reframed fold
-from `transport_trace_ext`, when `Auth`/`Inv` ignore log. -/
+from `transport_trace_ext`, when `Auth`/`Inv` ignore log and `claim`
+depends only on storage (`Claim.ofSelf`). -/
 theorem transport_claim_ext (T : TransportSetup S ExtState E ε)
     (Xpkg : TransportBindings S E ε T)
-    (Inv : World S ExtState E → Prop) (claim : Claim S) (Auth : AuthPred T.spec)
+    (Inv : World S ExtState E → Prop) (claim : Claim S ExtState E)
+    (Auth : AuthPred T.spec)
     (self : Address) (a : Address)
     (hN : NoUnauthorizedDecrease T.spec Inv claim Auth)
     (hP : PreservesInvAt T.spec Inv self)
     (hInvR : InvReframe Inv Xpkg.oracle)
     (hInvL : ∀ w (log : List E), Inv w → Inv { w with log := log })
     (hAirr : ∀ tr w w', NoAuthAlong Auth a tr w ↔ NoAuthAlong Auth a tr w')
+    (hC : ∀ w w' x, w.self = w'.self → claim x w = claim x w')
     (calls : List EvmCall)
     (w : World S ExtState E) (σ : U256 → U256) (ξ : Foreign)
     (σ' : U256 → U256) (ξ' : Foreign)
@@ -309,14 +312,14 @@ theorem transport_claim_ext (T : TransportSetup S ExtState E ε)
       ExtAgree self w'.ext
         (mkEvmStateExt ([] : List UInt8) σ' ξ' evmKeccak (dummyCtx self)) ∧
       Inv w' ∧
-      claim a w.self ≤ claim a w'.self := by
+      claim a w ≤ claim a w' := by
   clear hOr
   induction calls generalizing w σ ξ σ' ξ' with
   | nil =>
     cases hE
     let w0 := reframeExt (S := S) (E := E) Xpkg.oracle
       { w with log := ([] : List E) } ([] : List UInt8) σ ξ (dummyCtx self)
-    refine ⟨w0, ?_, ?_, ?_, ?_, Nat.le_refl _⟩
+    refine ⟨w0, ?_, ?_, ?_, ?_, Nat.le_of_eq (hC w w0 a (by simp [w0]))⟩
     · simpa [w0] using hs
     · exact WorldWF_of_self (w := { w with log := ([] : List E) }) (by simp [w0])
         (WorldWF_log ([] : List E) hwf)
@@ -359,15 +362,19 @@ theorem transport_claim_ext (T : TransportSetup S ExtState E ε)
         rcases hpost with ⟨hs1, hwf1, stObs, _hσ, _hξobs, _hAgrObs⟩
         let w1 : World S ExtState E := { step (.call c) wF with log := [] }
         have hwFInv : Inv wF := hInvR w call.calldata σ ξ call.ctx hw
-        have ⟨hna, hAtl⟩ : ¬ Auth a c w.self ∧
+        have ⟨hna, hAtl⟩ : ¬ Auth a c w ∧
             NoAuthAlong Auth a (decodeTrace T rest) (step (.call c) w) := by
           simpa [decodeTrace, hdec, NoAuthAlong] using hA
-        have hle1 : claim a w.self ≤ claim a w1.self := by
-          have hna' : ¬ Auth a c wF.self := by simpa [wF] using hna
-          have hnot : ¬ claim a w1.self < claim a w.self := by
+        have hle1 : claim a w ≤ claim a w1 := by
+          have hna' : ¬ Auth a c wF :=
+            ((hAirr [.call c] w wF).mp ⟨hna, trivial⟩).1
+          have hcw : claim a w = claim a wF := hC w wF a (by simp [wF])
+          have hcw1 : claim a w1 = claim a (step (.call c) wF) :=
+            hC w1 (step (.call c) wF) a (by simp [w1])
+          have hnot : ¬ claim a w1 < claim a w := by
             intro hlt
-            have hlt' : claim a (step (.call c) wF).self < claim a wF.self := by
-              simpa [w1, wF] using hlt
+            have hlt' : claim a (step (.call c) wF) < claim a wF := by
+              simpa [hcw1, hcw] using hlt
             exact hna' (hN c wF a hwFInv hlt')
           exact Nat.le_of_not_lt hnot
         have ⟨htgtc, hsend⟩ := decodeCall_ctx T hdec
@@ -458,13 +465,15 @@ theorem transport_exists_ext (T : TransportSetup S ExtState E ε)
 /-- Forward S2 with claim monotonicity along the reframed fold of `encodeCalls`. -/
 theorem transport_exists_claim_ext (T : TransportSetup S ExtState E ε)
     (Xpkg : TransportBindings S E ε T)
-    (Inv : World S ExtState E → Prop) (claim : Claim S) (Auth : AuthPred T.spec)
+    (Inv : World S ExtState E → Prop) (claim : Claim S ExtState E)
+    (Auth : AuthPred T.spec)
     (self a : Address)
     (hN : NoUnauthorizedDecrease T.spec Inv claim Auth)
     (hP : PreservesInvAt T.spec Inv self)
     (hInvR : InvReframe Inv Xpkg.oracle)
     (hInvL : ∀ w (log : List E), Inv w → Inv { w with log := log })
     (hAirr : ∀ tr w w', NoAuthAlong Auth a tr w ↔ NoAuthAlong Auth a tr w')
+    (hC : ∀ w w' x, w.self = w'.self → claim x w = claim x w')
     (tr : List (Step T.spec)) (w : World S ExtState E)
     (σ : U256 → U256) (ξ : Foreign)
     (hs : storageRel T.c T.Γ evmKeccak w.self σ)
@@ -480,13 +489,14 @@ theorem transport_exists_claim_ext (T : TransportSetup S ExtState E ε)
       ExtAgree self w'.ext
         (mkEvmStateExt ([] : List UInt8) σ' ξ' evmKeccak (dummyCtx self)) ∧
       Inv w' ∧
-      claim a w.self ≤ claim a w'.self := by
+      claim a w ≤ claim a w' := by
   clear hOr
   induction tr generalizing w σ ξ with
   | nil =>
     let w0 := reframeExt (S := S) (E := E) Xpkg.oracle
       { w with log := ([] : List E) } ([] : List UInt8) σ ξ (dummyCtx self)
-    refine ⟨σ, ξ, w0, EvmTraceRunExt.nil σ ξ, ?_, ?_, ?_, ?_, Nat.le_refl _⟩
+    refine ⟨σ, ξ, w0, EvmTraceRunExt.nil σ ξ, ?_, ?_, ?_, ?_,
+      Nat.le_of_eq (hC w w0 a (by simp [w0]))⟩
     · simpa [w0] using hs
     · exact WorldWF_of_self (w := { w with log := ([] : List E) }) (by simp [w0])
         (WorldWF_log ([] : List E) hwf)
@@ -526,12 +536,16 @@ theorem transport_exists_claim_ext (T : TransportSetup S ExtState E ε)
       rcases hpost with ⟨hs1, hwf1, stObs, _hσ, _hξobs, _hAgrObs⟩
       have hwFInv : Inv wF :=
         hInvR wL (encodeCall T c).calldata σ ξ c.toCtx (hInvL w [] hw)
-      have hle1 : claim a w.self ≤ claim a w1.self := by
-        have hna' : ¬ Auth a c wF.self := by simpa [wF, wL] using hna
-        have hnot : ¬ claim a w1.self < claim a w.self := by
+      have hle1 : claim a w ≤ claim a w1 := by
+        have hna' : ¬ Auth a c wF :=
+          ((hAirr [.call c] w wF).mp ⟨hna, trivial⟩).1
+        have hcw : claim a w = claim a wF := hC w wF a (by simp [wF, wL])
+        have hcw1 : claim a w1 = claim a (step (.call c) wF) :=
+          hC w1 (step (.call c) wF) a (by simp [w1])
+        have hnot : ¬ claim a w1 < claim a w := by
           intro hlt
-          have hlt' : claim a (step (.call c) wF).self < claim a wF.self := by
-            simpa [w1, wF, wL] using hlt
+          have hlt' : claim a (step (.call c) wF) < claim a wF := by
+            simpa [hcw1, hcw] using hlt
           exact hna' (hN c wF a hwFInv hlt')
         exact Nat.le_of_not_lt hnot
       have hw1 : Inv w1 :=

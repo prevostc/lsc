@@ -2,8 +2,10 @@
 
 Single-asset vault: binds one typed ERC-20, mints shares on `deposit`, burns
 on `withdraw`. Pause flag. First mint is 1:1; later mints/redeems floor.
-Accounting uses a stored `totalAssets` cache for the rate; live token
-balance is `holdings`. Token pull/push after storage writes.
+The exchange rate is the live token balance (`holdings`); there is no
+cached `totalAssets`. Token pull/push after storage writes. Donations raise
+everyone's claim pro-rata; first-depositor inflation is not prevented by
+this contract.
 
 **Proved:** a successful deposit credits shares and raises live holdings (when
 the caller is not the vault). A successful withdraw burns shares and lowers
@@ -15,7 +17,7 @@ fall and the token's `totalSupply` view stays the same.
 
 | File | Role |
 |------|------|
-| `Contract.lean` | Vault surface + schema |
+| `Contract.lean` | Vault surface + schema + `lsc_contract` |
 | `Spec.lean` | `claim`, `Auth`, `Inv`, `holdings`, `vaultRely` |
 | `Theorems.lean` | Exported Tx deltas and security theorems |
 | `Proofs/Tx.lean` | `Tx.run` lemmas for deposit/withdraw/pause |

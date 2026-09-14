@@ -5,8 +5,6 @@ import Examples.Token.Proofs.Security
 import Examples.Token.Proofs.Implements
 import Examples.Token.Contract
 
-set_option linter.unusedVariables false
-
 /-!
 Token theorems: local conservation of `transfer` / `transferFrom`, `approve`
 sets allowance, the ERC20 conformance theorem, and spec-level anti-extraction
@@ -79,12 +77,13 @@ an allowance she had granted, judged against the allowance stored at that
 moment. Other users may transfer, mint, approve, or burn their own tokens in
 any order; those actions cannot debit Alice. Views, `approve`, and `mint`
 never decrease an existing balance, and a reverted call leaves every balance
-unchanged. The starting balances must already sum to total supply. -/
+unchanged. The starting balances must already sum to total supply. Environment
+steps cannot change a storage-only claim. -/
 theorem token_no_unauthorized_extraction
     (tr : List (Step spec)) (w : World Storage ExtState Event) (a : Address)
     (hw : Inv w) (hR : RelyAlong (fun _ _ => True) tr w)
     (hA : NoAuthAlong Auth a tr w) :
-    claim a w.self ≤ claim a (run tr w).self :=
+    claim a w ≤ claim a (run tr w) :=
   Proof.token_no_unauthorized_extraction tr w a hw hR hA
 
 /-- After any well-formed sequence of Token calls, recorded balances still

@@ -26,7 +26,8 @@ In `Lsc.Lang.Amount`: `run_add` / `run_sub` / `run_mulScalar` / `run_divScalar`
 / `run_mulDivDown` / `run_mulDivUp`.
 
 In `Lsc.Lang.Interface`: `run_call` / `run_view` / `run_tryCall` / `run_tryView`,
-plus `run_call_ok` / `run_call_none` / `run_view_ok` / `run_view_none`.
+plus `run_call_ok` / `run_call_none` / `run_view_ok` / `run_view_none`, and
+`run_call_toOption` / `run_call_toOption_err` (`I.Impl.ofRef` uses `ε := Unit`).
 
 Schema-level aliases below match `Core.denote` of `Op.load` / `Stmt.store`.
 -/

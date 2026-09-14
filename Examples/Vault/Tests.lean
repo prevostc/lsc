@@ -13,7 +13,7 @@ def smokeOracle : Oracle ExtState where
   call _addr sel _args ext :=
     if sel == 0x23b872dd || sel == 0xa9059cbb then some ([1], ext) else none
   view _addr sel _args _ext :=
-    if sel == 0x70a08231 then [0] else []
+    if sel == 0x70a08231 then [100] else []
 
 def smokeCtx : Ctx := { sender := 2, self := 1 }
 
@@ -22,7 +22,6 @@ def smokeEmpty : World Storage ExtState Event where
     asset := ⟨10⟩
     owner := 2
     paused := Flag.off
-    totalAssets := 0
     totalShares := 0
     shares := fun _ => 0 }
   ext := default
@@ -33,7 +32,6 @@ def smokeFilled : World Storage ExtState Event where
     asset := ⟨10⟩
     owner := 2
     paused := Flag.off
-    totalAssets := 100
     totalShares := 100
     shares := fun a => if a = (2 : Address) then 100 else 0 }
   ext := default
