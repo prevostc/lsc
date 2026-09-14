@@ -52,18 +52,33 @@ def Inv (w : World Storage ExtState Event) : Prop :=
   InvStorage w.self
 
 /-- `balanceOf` / `totalSupply` selectors of the vault asset (IERC20 ABI). -/
-def balSel : Nat := 0x70a08231
-def supplySel : Nat := 0x18160ddd
+def balSel : Nat := Interface.selector (I := IERC20 vaultAsset) "balanceOf"
+def supplySel : Nat := Interface.selector (I := IERC20 vaultAsset) "totalSupply"
 
-/-- Oracle `balanceOf` of `who` at the bound token. -/
+/-- World whose `impl` views read `oracle` at `x`. Storage besides `asset`
+is unused: `IERC20.Impl` views depend on `addr`, `oracle`, and `ext`. -/
+def viewWorld (asset : IERC20.Ref vaultAsset) (oracle : Oracle ExtState)
+    (x : ExtState) : World Storage ExtState Event where
+  self := {
+    asset := asset
+    owner := 0
+    paused := Flag.off
+    totalShares := 0
+    shares := fun _ => 0 }
+  ext := x
+  oracle := oracle
+
+/-- Live `balanceOf` of `who` at the bound token, through `IERC20.Impl`. -/
 def viewBal (asset : IERC20.Ref vaultAsset) (who : Address)
     (oracle : Oracle ExtState) (x : ExtState) : Amount vaultAsset :=
-  decodeOrDefault (oracle.view asset.addr balSel [AbiType.encode who] x)
+  (asset.impl (viewWorld asset oracle x)).balanceOf who
+    (viewWorld asset oracle x)
 
-/-- Oracle `totalSupply` of the bound token. -/
+/-- Live `totalSupply` of the bound token, through `IERC20.Impl`. -/
 def viewSupply (asset : IERC20.Ref vaultAsset)
     (oracle : Oracle ExtState) (x : ExtState) : Word :=
-  decodeOrDefault (oracle.view asset.addr supplySel [] x)
+  ((asset.impl (viewWorld asset oracle x)).totalSupply
+    (viewWorld asset oracle x)).raw
 
 /-- Between our transactions the outside world may change `ext` arbitrarily,
 except that this vault's token balance does not decrease and the token's

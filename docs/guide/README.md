@@ -2,17 +2,17 @@
 
 For people who write or audit contracts in Lsc. The sources of truth for
 syntax are `Examples/Counter/Contract.lean`, `Examples/Token/Contract.lean`,
-`Examples/Vault/Contract.lean`, `Examples/Amm/Contract.lean`, and
-`Examples/Cpamm/Contract.lean` (CPAMM: constant-product AMM with LP fee and
-protocol-fee switch).
+`Examples/Vault/Contract.lean`, and `Examples/Cpamm/Contract.lean`.
 
-- [Writing a contract](CONTRACTS.md) — `lsc_schema`, `lsc_reify`, `lsc_contract`
+- [Writing a contract](CONTRACTS.md) — `lsc_schema`, `lsc_contract`, `Amount`
 - [Security model](SECURITY.md) — unauthorised extraction, solvency, the adversary
-- [External calls](EXTERNAL_CALLS.md) — `IERC20` bindings and what is assumed
+- [External calls](EXTERNAL_CALLS.md) — `IERC20.Ref` / `I.Impl` / `I.Spec`
 - [What is trusted](TRUST.md) — foundations and hypotheses, in words
-- [AMM walkthrough](AMM.md) — a constant-product pool with two tokens;
-  CPAMM (constant-product AMM with LP fee and protocol-fee switch) is
-  `Examples/Cpamm`
+- [Cpamm walkthrough](AMM.md) — constant-product AMM with LP fee and protocol-fee switch
+
+Compile with `Lsc.Compiler.compileContract` (`Lsc/Compiler/Pipeline.lean`) →
+`Artifacts {runtimeHex, deployHex, abi, yul, …}`;
+`scripts/export_bytecode.lean` writes `Examples/*/compiled/`.
 
 Every guarantee's `*Theorems.lean` file — and each `Examples/<Name>/Theorems.lean` —
 is readable top to bottom because each theorem is explained in prose first.

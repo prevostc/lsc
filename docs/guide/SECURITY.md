@@ -9,25 +9,25 @@ than it holds**.
 For each contract:
 
 - **Invariant** — what must stay true (Token: balances sum to total supply
-  on a finite support; Vault: share accounting, and the vault's token
-  balance covers `totalAssets`; AMM: each reserve is covered by the
-  corresponding token balance, plus share accounting).
+  on a finite support; Vault: share accounting; Cpamm: each reserve plus
+  protocol bucket is covered by the live token balance, plus share
+  accounting).
 - **Claim** — what the protocol owes each account (Token: ERC-20 balance;
-  Vault: pro-rata redeemable assets; AMM: LP share count for extraction,
+  Vault: pro-rata redeemable assets; Cpamm: LP share count for extraction,
   pro-rata reserves for solvency).
 - **Auth** — who may reduce whose claim (Token: sender of `transfer`/`burn`,
   or a `transferFrom` within allowance; Vault: only that account's
-  `withdraw`; AMM: only that account's `removeLiquidity`).
+  `withdraw`; Cpamm: only that account's `removeLiquidity`).
 - **Holdings** — assets the contract actually controls (Token: recorded
-  total supply; Vault/AMM: ghost ERC-20 balance of the contract).
+  total supply; Vault/Cpamm: live `tok.balanceOf` via `IERC20.Impl`).
 
 `lsc_contract` generates per-entrypoint obligations: the invariant is
 preserved; a claim falls only when `Auth` says so; optionally, claims are
 conserved up to inflow. Conservation is optional when solvency already
 follows from the invariant (Vault: floor-rounded pro-rata claims are not
 conservative per step; solvency is the statement that matters). One extra
-obligation: the invariant is preserved by environment steps that obey the
-token `Rely`.
+obligation: the invariant is preserved by environment steps that obey
+`vaultRely` / `cpammRely` (live token `balanceOf` does not fall).
 
 ## What the generic theorems say
 
@@ -37,7 +37,7 @@ If those local facts hold, then:
   unrestricted theorem does not require the caller to differ from the
   contract.
 - If the invariant implies solvency, solvency still holds after any
-  well-formed trace. Vault and AMM use the `_at` variants, which do
+  well-formed trace. Vault and Cpamm use the `_at` variants, which do
   require well-formedness (caller ≠ contract), because their invariant
   talks about this contract's token balance.
 - The invariant itself still holds along a well-formed trace.
@@ -49,17 +49,15 @@ steps; deployment from empty storage is a separate `init` fact when proved.
 
 Any addresses may call any entrypoint with any arguments, in any order,
 interleaved with honest calls. Between our calls, the environment may
-update external ghosts only in ways the token `Rely` allows (our token
-balance does not fall; `decimals` stay put). Well-formedness — callers
-are not the contract itself — is required for invariant and solvency
-preservation and for the `_at` extraction theorems (Vault, AMM), not for
-Token-style unrestricted extraction.
+update `ext` only in ways `vaultRely` / `cpammRely` allow (our token
+`balanceOf` does not fall; `totalSupply` stays put). Well-formedness —
+callers are not the contract itself — is required for invariant and
+solvency preservation and for the `_at` extraction theorems (Vault,
+Cpamm), not for Token-style unrestricted extraction.
 
-Token, Vault, and AMM instantiate this at the spec. Token and Vault also
-have it on compiled runtime bytecode. AMM has unauthorised-extraction on
-bytecode; solvency stays at the spec. Vault's bytecode solvency is read
-from EVM storage after a fault-oracle fold of the external calls, not
-from the high-level `Security.run` post-world.
+Token, Vault, and Cpamm instantiate this at the spec. The compiler lifts
+a trace fact onto bytecode with `transport_claim_ext` /
+`transport_exists_claim_ext`; examples do not ship `*_bytecode_*` theorems.
 
 ## Out of scope
 
@@ -71,7 +69,7 @@ scope: they are treated as a failed external call that reverts us.
 
 `claim` measures what the protocol owes, not the caller's external wallet.
 A deposit that would mint zero shares is a caller loss the claim does not
-see; Vault and AMM `require` a positive mint/burn to exclude that.
+see; Vault and Cpamm `require` a positive mint/burn to exclude that.
 
 ---
 

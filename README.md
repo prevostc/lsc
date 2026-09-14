@@ -8,21 +8,33 @@ exhaustive functional correctness. See `docs/PROJECT_GOAL.md`.
 ## What you get
 
 Under the assumptions in `docs/guide/TRUST.md` and `docs/guide/EXTERNAL_CALLS.md`,
-compiled **runtime** bytecode cannot reduce an account's protocol claim unless
-that account authorised the call, and the contract stays solvent relative to
-the assets it controls. Token and Vault have both facts at bytecode. AMM has
-unauthorised-extraction at bytecode and solvency at the spec. Counter is a
-compiler demo. Constructors that call out, and CREATE with appended constructor
-arguments, are outside the EVM deploy theorem.
+a well-formed trace cannot reduce an account's protocol claim unless that account
+authorised the call, and the contract stays solvent relative to the assets it
+controls. Token, Vault, and Cpamm prove those facts at `Tx.run` / trace level
+(`token_no_unauthorized_extraction`, `vault_no_unauthorized_extraction`,
+`cpamm_no_unauthorized_extraction`, and the matching solvency theorems, pinned
+in `Checks.lean`). The compiler lifts a trace fact onto bytecode with
+`transport_claim_ext` / `transport_exists_claim_ext`
+(`Lsc/Compiler/TransportTheorems.lean`); examples do not ship per-contract
+`*_bytecode_*` theorems. Counter is a compiler demo. Constructors that call out,
+and CREATE with appended constructor arguments, are outside the EVM deploy
+theorem.
 
 ## Writing a contract
 
 A contract is a storage structure, events, errors, and `do` blocks using
-`read` / `write`, checked arithmetic (`+?`, `-?`, …), and `Binding` calls to a
-declared `IERC20` when the contract talks to an external token. `lsc_schema`,
-`lsc_reify`, and `lsc_contract` assemble the schema and the contract object.
-Start from `Examples/Counter/Contract.lean`, then Token, Vault, Amm, and
-CPAMM (constant-product AMM with LP fee and protocol-fee switch).
+`read` / `write`, checked arithmetic (`+?`, `-?`, `mulDiv↓` / `mulDiv↑`), and
+typed `I.Ref` calls when the contract talks to an external token (`let tok ←
+read asset; tok.balanceOf me`, `safeTransferFrom`). `lsc_schema` and
+`lsc_contract` assemble the schema and the contract object.
+`lsc_contract … implements IERC20 …` emits `C.impl`; Token proves
+`theorem erc20 : IERC20.Spec Token.impl`. Start from
+`Examples/Counter/Contract.lean`, then Token, Vault, and Cpamm.
+
+Compile with `Lsc.Compiler.compileContract` (`Lsc/Compiler/Pipeline.lean`): it
+returns `Artifacts` (`runtimeHex`, `deployHex`, `abi`, `yul`, `asm`,
+`deployYul`, `selectors`). `scripts/export_bytecode.lean` writes those into
+`Examples/*/compiled/`.
 
 ## Build
 

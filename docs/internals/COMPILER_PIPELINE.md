@@ -22,4 +22,4 @@ Proof chain: [`PROOF_CHAIN.md`](PROOF_CHAIN.md).
 - **Compiles in solc, rejected here** — `Bytecode.compileBlock`: erasure needs `DUP17+` → spill; `memoryguard` marker; `gas()` only via fused `gasCall`.
 - **Runtime hex ≠ `compileRuntime`** — `Pipeline.compileRuntimeArtifacts` follows the exporter (`compileAsmBlock` then `lowerProg`), not `compile`'s peephole wrapper; deploy hex is `compileDeploy`.
 - **Deploy / constructor args** — `constructor_correct` at Yul; EVM `bytecode_deploy_correct` has no trailing CREATE args (`DeployTheorems`).
-- **CALL / token ghosts** — `Externals.lean`, `ExtOracleTheorems` (`toCalls_total`); glue in `EndToEndExtTheorems`.
+- **CALL / `ExtOracle`** — `Externals.lean`, `ExtOracleTheorems` (`toCalls_total`); glue in `EndToEndExtTheorems`; transport in `TransportTheorems`.

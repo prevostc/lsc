@@ -1,62 +1,62 @@
-# AMM walkthrough
+# Cpamm walkthrough
 
-`Examples/Amm/Contract.lean` is a constant-product pool with two `IERC20` bindings
-and no fee. It is the multi-token example: same security story as Vault,
-two callees instead of one.
+`Examples/Cpamm/Contract.lean` is a constant-product pool with two
+`Ref (IERC20 …)` tokens, a 0.3% LP swap fee, and an owner-settable
+protocol-fee switch. It is the multi-token example: same security story
+as Vault, two callees instead of one.
 
 ## Design
 
-Storage holds `token0Ref` / `token1Ref`, `reserve0` / `reserve1`,
-`totalShares`, and `shares`. Amounts are indexed by the asset they
-denominate (`Amount token0`, `Amount lpShare`). The constructor requires
-the two tokens to differ and stores the binding addresses; it does not
-cache decimals (this pool never converts between assets).
+Storage holds `token0` / `token1`, `reserve0` / `reserve1`, `totalShares`,
+`shares`, `owner`, `feeTo`, `protocolShareBps`, and `protocolFees0/1`.
+Amounts are indexed by the asset they denominate (`Amount asset0`,
+`Amount lpShare`). The constructor requires the two tokens to differ and
+stores the ref addresses.
 
 The first LP mint is `a0` (no square root, no loop). Later mints are
-`min(⌊a0·S/r0⌋, ⌊a1·S/r1⌋)`. Swaps use the Uniswap floor
-`⌊dx·r_out/(r_in+dx)⌋`, so `k = r0·r1` cannot drop on a successful swap.
-`k` is a swap fact, not part of the invariant: `removeLiquidity` floors
-and can decrease `k`. Rounding favours the pool.
+`min(⌊a0·S/r0⌋, ⌊a1·S/r1⌋)`. Swaps use the 0.3%-fee notional
+`⌊dx · 9970 / 10000⌋` on the curve; when `feeTo ≠ 0`, a protocol share of
+that fee is skimmed into `protocolFees*` and never enters `k`. Rounding
+favours the pool. `k` is a swap fact, not part of the invariant:
+`removeLiquidity` floors and can decrease `k`.
 
 External calls run after requires and storage updates:
 
 ```lean
-write shares[who] bal'
--- …
-Binding.safeTransferFrom token0B who me a0 .TransferFailed
-Binding.safeTransferFrom token1B who me a1 .TransferFailed
+let t0 ← read token0
+let t1 ← read token1
+safeTransferFrom t0 who me a0 .TransferFailed
+safeTransferFrom t1 who me a1 .TransferFailed
 ```
 
-That CEI order is sound here because conforming tokens are assumed not to
-reenter our storage ([External calls](EXTERNAL_CALLS.md)).
+That CEI order is sound here because reentrancy is not modelled
+([External calls](EXTERNAL_CALLS.md)).
 
 ## What is proved
 
-The invariant: each reserve is ≤ the pool's ghost balance of that token,
-and share balances sum to `totalShares`.
+The invariant: each reserve plus that token's protocol bucket is covered
+by the pool's live `balanceOf`, share balances sum to `totalShares`, and
+`protocolShareBps ≤ BPS`.
 
-Solvency (spec): every LP's pro-rata `⌊s·r_i/S⌋` is covered by the
-corresponding ghost balance.
+Solvency (spec): every LP's pro-rata `⌊s·r_i/S⌋` plus the protocol
+buckets is covered by live holdings (`cpamm_solvent`).
 
-Unauthorised extraction (spec, Yul, and bytecode): an address's **share
-count** never falls unless that address called `removeLiquidity`. Swaps
-and adding liquidity do not decrease another LP's share count. Other
-contracts cannot see the pool's private memory, which is true of the EVM.
-The compiler may have used either the erase path or powdr spill
-(`compileBlock`).
+Unauthorised extraction (spec): an address's **share count** never falls
+unless that address called `removeLiquidity` (`cpamm_no_unauthorized_extraction`).
+Swaps and adding liquidity do not decrease another LP's share count.
+Successful swaps do not decrease `reserve0 · reserve1` (`swap0for1_k`,
+`swap1for0_k`) when `protocolShareBps ≤ BPS`.
 
-Assumed, not proved in the AMM file: the `IERC20` model, `Rely`, and
-conformance of both tokens; well-formed traces (`sender ≠ self`); the two
-token addresses remain distinct.
+Assumed, not proved in the Cpamm file: both tokens are distinct conforming
+ERC-20s per `IERC20.Spec`; a CALL on one does not change the other's
+`balanceOf` / `totalSupply` views; well-formed traces (`sender ≠ self`);
+no reentrancy; no fee-on-transfer. Between calls neither pool balance may
+fall (`cpammRely`). Bytecode trust is the compiler's `transport_claim_ext`
+/ `transport_exists_claim_ext`, not a per-example bytecode theorem.
 
-The constructor is outside S2 runtime (it writes the token slots). There
-is no AMM bytecode solvency theorem; solvency stays at the spec.
+The constructor is outside S2 runtime (it writes the token slots).
 
 ---
 
-For the curious: the theorems behind this are `amm_no_unauthorized_extraction`
-and `amm_bytecode_no_unauthorized_extraction` (`amm_solvent` at the spec).
-
-CPAMM (constant-product AMM with LP fee and protocol-fee switch) is
-`Examples/Cpamm/Contract.lean`: same two-token shape, plus a 0.3% LP fee and
-an owner-settable protocol-fee switch.
+For the curious: the theorems behind this are `cpamm_no_unauthorized_extraction`
+and `cpamm_solvent` (`Examples/Cpamm/Theorems.lean`).

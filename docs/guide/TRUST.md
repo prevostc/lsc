@@ -10,8 +10,8 @@ repo.
   `Classical.choice`, and `Quot.sound`. There is no `sorry`, no
   `native_decide` / `bv_decide`, and no project-specific axiom. CI prints
   the footprint in `Checks`.
-- The language spec (`Tx`, external call, the core interpreter, the
-  `IERC20` may-model). Reviewed, not proved.
+- The language spec (`Tx`, `Oracle`, `Core.denote`, `IERC20` / `IERC20.Spec`).
+  Reviewed, not proved.
 - powdr's EVM semantics (relational, conformance-tested) and Yul
   semantics (adequacy proved by its authors), plus the Yul-to-EVM
   compiler: fork `prevostc/yul-compiler` at `30230e1`, which differs
@@ -37,15 +37,14 @@ compiler accepted the contract. Worlds, contexts, ABI arguments, and
 addresses used as keys fit in a 256-bit word; keccak keys do not collide
 with scalar slots.
 
-For contracts that call out: every successful `CALL` from us to a bound
-address conforms to `IERC20` as in [External calls](EXTERNAL_CALLS.md);
-the CALL oracle is memory-blind (other contracts cannot see this
-contract's private memory, which is true of the EVM) and always returns
-(the opcode always returns a success flag and data); powdr's external
-model is inhabited. The compiler may have used either the erase path or
-powdr spill. The bytecode proof existentially picks a fault oracle so
-core and Yul agree on each external outcome. Security statements remain
-"for every starting world".
+For contracts that call out: theorems that mention the token take
+`IERC20.Spec` as in [External calls](EXTERNAL_CALLS.md); the CALL oracle
+is memory-blind (other contracts cannot see this contract's private
+memory, which is true of the EVM) and is a function of the request and
+observable world. The compiler may have used either the erase path or
+powdr spill. Reentrancy is not modelled. Security statements remain
+"for every starting world". Example authors apply `transport_claim_ext`
+/ `transport_exists_claim_ext` rather than per-contract bytecode theorems.
 
 Other contracts are modelled as deterministic functions of the call and
 the on-chain state they can see: the same call against the same
@@ -81,7 +80,7 @@ Yul constructors follow the Solidity CREATE convention (arguments as a
 suffix of `env.code`). The EVM deploy theorem starts from init code with
 empty calldata and no trailing bytes, so **appended constructor arguments
 are not in that EVM model**. Runtime theorems exclude constructors.
-Vault/AMM constructors that `CALL` are out of scope.
+Vault/Cpamm constructors that `CALL` are out of scope.
 
 No bytecode-level reentrancy lock is emitted. Core outside the supported
 fragment (including most `letPure`, nested pair returns, and unusual

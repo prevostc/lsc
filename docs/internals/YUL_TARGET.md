@@ -77,8 +77,8 @@ Decisions for `Lsc/Compiler` fixed by the study of `yul-semantics`, `evm_semanti
   cannot take external calls in creation code, `decimals` is a constructor argument.
 - Dispatcher → `if lt(calldatasize(), 4) { revert(0,0) }` then
   `switch shr(224, calldataload(0))` with one `case <selector>` per entrypoint and `default { revert(0,0) }`.
-- Reentrancy: **no lock is emitted** (no `tload`/`tstore`). Reentrancy is excluded by the
-  `NoInterfere` clause of `Conforms` on bound interfaces (`TRUSTED_COMPUTING_BASE.md`). An
+- Reentrancy: **no lock is emitted** (no `tload`/`tstore`). Reentrancy is not
+  modelled; S2 theorems take `ExtOracle.NoReentry` (`TRUSTED_COMPUTING_BASE.md`). An
   emitted transient-slot lock with a bytecode-level proof is future work.
 - Never emitted: `for`, `delegatecall`, `selfdestruct`, `create`, `gas`, `datasize`/`dataoffset`
   outside the constructor.
@@ -90,6 +90,6 @@ Decisions for `Lsc/Compiler` fixed by the study of `yul-semantics`, `evm_semanti
 - EVM: `EvmSemantics.stepF` iterated until halt; calldata in `executionEnv.calldata`, storage in
   `accountMap`.
 - Differential harness: `scripts/difftest.sh` — `Tx.run` vs anvil (revm) on `compileRuntime`
-  bytecode for Counter and Token (same cases as `Examples/Misc/YulTests.lean`).
+  bytecode for Counter and Token (`Lsc/Compiler/YulTests.lean`).
 - Nested `map2` hashes inner `keccak256(0,64)`
   into `[32]` before `mstore(0, k₂)`, so the read does not see a clobbered `[0]`.

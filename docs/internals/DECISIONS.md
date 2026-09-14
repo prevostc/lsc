@@ -167,6 +167,8 @@ the compiled contract, the decoded Tx-level trace `tr` satisfies `Wf`, and
 `run tr w` is `storageRel`-related to the final EVM storage. Every Tx-level
 trace theorem then holds of the bytecode by a generic `lift`, so
 `Examples/*/Proofs/EndToEnd.lean` and all `*_bytecode_*` theorems are deleted.
+Landed names: `transport_claim_ext` / `transport_exists_claim_ext`
+(`Lsc/Compiler/TransportTheorems.lean`).
 All per-contract obligations are decidable or emitted by `lsc_contract`
 (`C.refines`). Two semantics changes make S2 exact: the external-call fault
 bits become the adversary's per-call choice `Step.call c fo` (not

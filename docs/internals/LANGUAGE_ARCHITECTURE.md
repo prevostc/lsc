@@ -15,41 +15,38 @@ Core  --toYul (ours)-->  Yul AST (powdr yul-semantics)  --powdr compile_correct-
 - A contract function is an ordinary Lean definition in `Tx S X E ε α :=
   ReaderT Ctx (StateT (World S X E) (Except (Err ε))) α`. Users write `do` blocks; theorems are
   stated about the function itself (`Tx.run f ctx w = …`), never about an AST.
-  `World S X E` carries storage `self`, external ghosts `ext : X`, `log`, and the fault
-  oracle `faults`/`ncalls` (`INTERFACE_MODEL.md`).
+  `World S X E` carries storage `self`, external state `ext : X` (compiled contracts use
+  the fixed `Lsc.ExtState`), `log`, and the callee `oracle` (`INTERFACE_MODEL.md`).
 - Arithmetic is checked by default (`+?`, `-?`, `*?`, `/?` revert on overflow/underflow/zero);
-  wrapping ops are explicit and rare.
-- Units are types: `Amount τ s` is a newtype over `ℕ` tagged with an asset marker `τ` and a scale
-  `s`. It must be a `structure` (a `def` lets defeq accept unit mixing). Mixed-unit arithmetic is a
-  type error; conversions require an explicit rounding mode. For external assets `s` is an
-  opaque symbol (unit safety needs only distinctness). `rescale` and `Amount.one` take runtime
-  scale words; the reifier rejects a symbolic scale where it would emit a literal. The IERC20
-  shim does not live in `Amount.lean`.
+  fused `mulDiv↓` / `mulDiv↑` are the floor/ceil ops. Wrapping ops are explicit and rare.
+- Units are types: `structure Amount (a : Asset) where raw : Word` (`Lsc/Lang/Amount.lean`).
+  `Asset` is `{name : Lean.Name, decimals? : Option Nat}` — `some d` when static (LP shares),
+  `none` when decimals are only known on chain. `abbrev Fixed d := Amount (Asset.fixed d)`
+  (`Asset.fixed d := ⟨`fixed, some d⟩`; named scales in `Stdlib/Scales.lean`). It must be a
+  `structure` (an abbrev would unify every amount back to `Word`). Same-asset `+? -?`;
+  `*? /?` only against a `Word` scalar. Mixed-unit arithmetic is a type error.
 - Storage is a Lean `structure`; mappings are `K → V` with default zero (≤ 2 keys).
-- Reentrancy is excluded by `NoInterfere` on bound interfaces (our storage/transient
-  unchanged). No `tload`/`tstore` lock is emitted (`YUL_TARGET.md`,
-  `TRUSTED_COMPUTING_BASE.md`). `@[reentrant]` opt-out is deferred until a use case needs it.
+- Reentrancy during a call is not modelled (`self` is unchanged). No `tload`/`tstore` lock
+  is emitted (`YUL_TARGET.md`, `TRUSTED_COMPUTING_BASE.md`).
 - Not in the language: loops, inline assembly, `delegatecall`, `selfdestruct`, untyped low-level
-  calls, dynamic arrays/bytes in storage. External calls go only through a `Binding` of a
-  declared `Interface` (see `INTERFACE_MODEL.md`).
+  calls, dynamic arrays/bytes in storage. External calls go only through an `I.Ref` of a
+  declared interface (`deriving Interface`; see `INTERFACE_MODEL.md`).
 
 ## Core: the only IR
 
 - Loop-free ANF over words with de Bruijn locals; compiler denotation `Core.denote : Core → List ℕ →
   Tx …`. Storage fields, events and errors are indices into a generated schema.
-  `ContractSchema.ext` supplies `call : Nat → Nat → List Nat → Tx`. Core gains exactly
-  `Op.call b m args` and `Stmt.call b m args`. `Amount a` is a one-field
-  structure erased to a word by Reify (not an abbrev: that would unify every
-  amount back to `Word`). `Fixed d` is `Amount (Asset.fixed d)`.
-- The reifier (`lsc_reify`, MetaM) is **untrusted**: every run emits `f.core_denote`,
+  There is no binding table: `Op.call` / `Stmt.call` carry a target `Atom`, selector,
+  args, and `AbiRet`. `Amount a` is erased to a word by Reify.
+- The reifier (`lsc_contract` / `lsc_reify`, MetaM) is **untrusted**: every run emits `f.core_denote`,
   kernel-checked — `Core.denote schema f.core args = f args`. The proof is `rfl`
   when the sides are definitionally equal, otherwise
   the `Tx` monad laws (`bind` is not definitionally associative). A propositional
   certificate is not a trust extension: a reifier bug is still a build error. Rejections
   carry a positioned message naming the offending subterm.
-- `Core.effects` (reads/writes/emits/`calls : List (binding × method)`) with a generic frame
-  theorem replaces per-function `f_preserves_x` proofs. The frame includes: no `store` to
-  field `f` in any entrypoint ⇒ `f` immutable (bound addresses).
+- `Core.effects` (reads/writes/emits/`calls`/`views` : lists of field or selector `Nat`)
+  with a generic frame theorem replaces per-function `f_preserves_x` proofs. The frame
+  includes: no `store` to field `f` in any entrypoint ⇒ `f` immutable (bound addresses).
 - No typed Core, no optimisation passes, no gas IR: powdr ships a verified Yul optimiser.
 
 ## Arithmetic domains (Q/R/N)
@@ -63,12 +60,10 @@ Core  --toYul (ours)-->  Yul AST (powdr yul-semantics)  --powdr compile_correct-
 
 ## Proof UX
 
-- Primary automation is the `run_*` simp normal form over `Tx.run` plus `omega`; this closes
-  Token/Vault theorems in 9–16 lines. `mvcgen'` specs are added only if the Token gate shows the
-  need.
+- Primary automation is the `run_*` simp normal form over `Tx.run` plus `omega`.
 - `lsc_contract` generates the statements of the per-entrypoint security obligations
   (invariant preservation, authorisation, conservation) plus the per-contract `Inv`
-  preserved by `Rely`; AI fills the proofs; frame obligations are discharged generically from
+  preserved by `RelyAlong`; AI fills the proofs; frame obligations are discharged generically from
   `Core.effects`.
 
 ## Backend
@@ -79,9 +74,11 @@ Core  --toYul (ours)-->  Yul AST (powdr yul-semantics)  --powdr compile_correct-
   No `tload`/`tstore` lock is emitted.
 - Core → Yul is the compiler theorem this repo owns, in two strata (`DECISIONS.md`):
   `toYulFn_correct_callFree` (S1, closed model) and `toYulFn_correct_ext` (S2, backward
-  simulation, existential fault oracle). Dispatchers:
+  simulation). Dispatchers:
   `runtimeBlock_correct_callFree` / `runtimeBlock_correct_ext`. Yul → bytecode is powdr's
   `compile_correct` / `compileObject_correct` (Apache-2.0, pinned commit).
+- Public compile entry: `Lsc.Compiler.compileContract` (`Pipeline.lean`) →
+  `Artifacts {runtimeHex, deployHex, abi, yul, …}`.
 
 ## Lake libraries
 
@@ -89,8 +86,9 @@ Lake packages the meaning of programs separately from compilation: `LscSemantics
 is `Lsc.Lang`, `Lsc.Security`, and `Lsc.Util` (Tx monad, World, Core and its
 denotation, security trace framework); `Lsc` depends on it and is `Lsc.Compiler`
 plus the remaining `Lsc.*` modules (how programs compile and why that is correct).
-Module names are unchanged. `scripts/check-layering.sh` forbids semantics files
-from importing `Lsc.Compiler.*` and `Lsc/` from importing `Examples.*` or `Stdlib.*`.
+`Stdlib` sits between `Lsc` and `Examples`. Module names are unchanged.
+`scripts/check-layering.sh` forbids semantics files from importing `Lsc.Compiler.*`
+and `Lsc/` from importing `Examples.*` or `Stdlib.*`.
 
 ## Toolchain
 

@@ -8,46 +8,42 @@ footprint. Tasks should read APIs, not proofs.
 
 Lake libraries (`lakefile.lean`): `LscSemantics` (`Lsc.Lang`, `Lsc.Security`,
 `Lsc.Util`) → `Lsc` (`Lsc.Compiler`, `Lsc.Compiler.Proof`, `Lsc.Compiler.Transport`,
-`Lsc.Tools`, barrel `Lsc.lean`) → `Stdlib` (`Stdlib.ERC20`,
-`Stdlib.Scales`, `Stdlib.SafeERC20`, barrel `Stdlib.lean`) → `Examples`
-(`Examples.Counter.*`, `Examples.Token.*`, `Examples.Vault.*`, `Examples.Amm.*`,
-`Examples.Cpamm.*`, `Examples.Misc.*`). Import direction is strictly downward.
+`Lsc.Tools`, barrel `Lsc.lean`) → `Stdlib` (`Stdlib.ERC20`, `Stdlib.Scales`,
+`Stdlib.SafeERC20`, barrel `Stdlib.lean`) → `Examples`
+(`Examples.Counter.*`, `Examples.Token.*`, `Examples.Vault.*`,
+`Examples.Cpamm.*`) → `Checks`. Import direction is strictly downward.
 
 ## `Lsc/Lang` — the language
 
-- `Tx.lean` — `Tx S X E ε`, `World S X E`, `Ctx`, `Err` (including `callFailed`),
-  primitives, the `run_*` simp normal form, monad laws (`bind_assoc` and friends)
-  for reifier certificates. Language specification.
-- `Interface.lean` — `Interface`, `Binding`, `Tx.call` / `Tx.callUnit`, `run_call`.
-  Bindings are explicit constants.
-- `Word.lean` — `Word`, checked `+? -? *? /?`, `mulDivDown` / `Up` / `pow10`.
+- `Tx.lean` — `Tx S X E ε`, `World S X E`, `Ctx`, `Oracle`, `Err` (including
+  `callFailed`), primitives, `Lsc.Syntax` `read` / `write`. Language specification.
+  `TxTheorems.lean` / `TxProof.lean` — `run_*` peeling lemmas and monad laws.
+- `Interface.lean` — `Fn` / `View`, `Interface`, `Tx.call` / `Tx.view` /
+  `Tx.tryCall`, `decodeOrDefault`, `I.Ref` macro. `InterfaceDeriving.lean`
+  generates `I.Ref` / `I.Impl` / `Impl.ofRef`. `InterfaceTheorems.lean` /
+  `InterfaceProof.lean` — `run_call` / `run_view` and certificate lemmas.
+- `Word.lean` — `Word`, `Flag`, checked `+? -? *? /?`, `mulDivDown` / `Up` /
+  `pow10`. `WordTheorems.lean` / `WordProof.lean` for `Tx.run` lemmas.
 - `Amount.lean` — `Asset`, `Amount a` (one-field; not an abbrev), `Fixed d`,
   same-asset `+? -?`, scalar `*? /?`, dimensional `mulDivDown` / `Up`.
-  `Ref I a` lives with bindings. Named scales (`mulDown`, `rescale`) are in
-  `Stdlib/Scales.lean`.
+  Named scales (`WAD`, `mulDown`, `rescale`) are in `Stdlib/Scales.lean`.
+- `ExtState.lean` — the fixed compiled `World.ext` type.
 - `Core.lean` — `Core` (`Op.call`, `Stmt.call`), `Core.denote` (words;
   Reify erases `Amount` / `Fixed`), `Core.effects`.
-  `ContractSchema.ext` supplies `call : Nat → Nat → List Nat → Tx`.
-- `CoreTheorems.lean` / `CoreProof.lean` — `Op.effects_frame`,
-  `Stmt.effects_frame_on`, `effects_frame_on` / `effects_frame` /
-  `effects_frame_map1` / `effects_frame_map2`.
-- `Spec.lean` — `Entry`, `Spec` (finite family of `Tx` entrypoints). Language-level
-  so `Reify` can generate it without depending on `Lsc.Security`.
+  `CoreTheorems.lean` / `CoreProof.lean` — `effects_frame` family.
+- `Spec.lean` — `Entry`, `Spec` (finite family of `Tx` entrypoints).
 - `Reify.lean` — `lsc_schema`, `lsc_reify`, `lsc_contract` (MetaM, untrusted).
   Exports `f.core`, `f.core_denote`, `C.contract`, `C.Fn` / `C.entry` / `C.spec`,
-  `#lsc_obligations C`. Bytecode transport glue generation is in progress
-  (`DECISIONS.md`).
-- `Contract.lean` — `ContractDef` (including `bindings : List BindingDef`),
-  `FnDef`, ABI signatures, keccak selectors.
-- `Syntax/` — `read` / `write` and related command/elab (`Commands`, `Grammar`,
-  `ElabStmt`, `ElabExpr`, `Params`, `CrossCall`).
+  `C.impl` from `implements`. `#lsc_obligations C`.
+- `Contract.lean` — `ContractDef`, `FnDef`, ABI signatures, keccak selectors.
+- `Inline.lean` — `@[lsc_inline]` for stdlib helpers mid-`do`.
 
 ## `Lsc/Security` — the security model
 
 - `Trace.lean` — `Call`, `Step` (`call` / `env`), `Wf` (`target = self` and
   `sender ≠ self`), `run`, revert-frame lemmas.
 - `Invariant.lean` — `Inv : World S X E → Prop`, `RelyAlong`,
-  `PreservesInv` / `PreservesInvEnv`.
+  `PreservesInv` / `PreservesInvEnv` / `PreservesInvAt`.
 - `InvariantTheorems.lean` / `InvariantProof.lean` — `inv_run`, `inv_run_at`.
 - `Wealth.lean` — `claim`, `Auth`, `holdings`, `Solvent`.
 - `WealthTheorems.lean` / `WealthProof.lean` — `no_unauthorized_extraction`,
@@ -59,17 +55,15 @@ Depends only on `Lsc/Lang`.
 
 Does not import `Examples`. `Lsc` does not import `Stdlib`.
 
-- `ERC20.lean` — IERC20 may-model: `Ghost` (`balances` + `decimals`), `Method`,
-  `model`, `Rely`, `IERC20`, `IERC20.Ref`, `Binding.*` aliases. Namespace stays
-  `Lsc.Stdlib` / `Lsc.Binding`. No allowances / `totalSupply` in the ghost.
-- `Scales.lean` — `WAD`, `RAY`, `USDC_SCALE`, `Q96`, `E8`; derived `Amount`
-  ops (`mulDown` / `rescale` / `convert`, …) still named `Lsc.Amount.*`.
-- `SafeERC20.lean` — spec-level `safeTransfer` / `safeTransferFrom` /
-  `safeApprove` (`checkOk`); `@[lsc_inline]`, usable mid-`do`.
-- `Tests.lean` — reify of stdlib helpers, including a compound helper mid-`do`.
+- `ERC20.lean` — `structure IERC20 (a : Asset)` (`deriving Interface`) and
+  `IERC20.Spec T`. Namespace `Lsc.Stdlib`.
+- `Scales.lean` — `WAD`, `RAY`, `USDC_SCALE`, `Q96`, `E8`; `Fixed` helpers.
+- `SafeERC20.lean` — `safeTransfer` / `safeTransferFrom` / `safeApprove`
+  (`@[lsc_inline]`).
+- Tests: `Tests.lean`, `InterfaceTests.lean`, `ReifyInterfaceTests.lean`,
+  `ReifyVaultLikeTests.lean`.
 
-Protocol instances (Token, Vault, AMM, CPAMM, Counter) live under `Examples/`,
-not stdlib.
+Protocol instances (Token, Vault, Cpamm, Counter) live under `Examples/`.
 
 ## `Lsc/Compiler` — Core → Yul → bytecode
 
@@ -77,107 +71,65 @@ Guarantee theorems sit in `Lsc/Compiler/<Name>Theorems.lean`; proofs in
 `Lsc/Compiler/Proof/<Name>Proof.lean` unless noted. `*Defs.lean` hold
 statement-level structures.
 
-- `Yul.lean` — `toYulFn`, `runtimeBlock`, `deployObject` (powdr yul-semantics
-  AST), `printYul`. Does not emit `tload` / `tstore`.
+- `Pipeline.lean` — `compileContract` / `Artifacts`.
+- `Yul.lean` — `toYulFn`, `runtimeBlock`, `deployObject`, `printYul`.
 - `YulExec.lean` — executable harness on powdr's Yul interpreter.
-- `Bytecode.lean` — `compileRuntime` / `compileDeploy` through powdr's verified
-  compiler.
-- `Correctness.lean` — `R`, `logsRel` / `selfLogs`, `mkEvmState` / `mkEvmStateExt`,
-  `RunCommittedExt`, `ToYulFnCorrectExt`, `RuntimeBlockCorrectExt`.
-- `Externals.lean` — `yulD`, `Abs`, `ofState_foreign`, `Foreign` / `evmForeign`,
-  `NoInterfere`, `decodeRet`, `RX`, `Conforms`, `Realizes`, `CallsTotal`,
-  `BindWF`. Bytecode glue must use `gas := .none`. Never imported by `Lsc/Lang`.
-- `CoreDefs.lean` / `CoreTheorems.lean` — `M1Frag` / `CallFree`;
-  `toYulFn_correct_callFree`. Proof: `Proof/CoreProof.lean`.
-- `CoreExtSimDefs.lean` / `CoreExtSimTheorems.lean` — `core_sim_ext_callFree`,
-  `toYulFn_correct_ext`, `toYulFn_correct_ext_one` (`hS2 : S2Frag f.core`).
+- `Bytecode.lean` — `compileRuntime` / `compileDeploy` through powdr.
+- `Correctness.lean` — `R`, `logsRel`, `mkEvmState` / `mkEvmStateExt`.
+- `Externals.lean` — thin re-export; `Conforms` / `Abs` deleted.
+  `ExtOracle.lean` / `ExtOracleTheorems.lean` — `ExtOracle`, `Oracle.ofExt`,
+  `toCalls`, `toCalls_total`, `ExtOracle.NoReentry`. Never imported by `Lsc/Lang`.
+- `CoreTheorems.lean` — `toYulFn_correct_callFree`. Proof: `Proof/CoreProof.lean`.
+- `CoreExtSimTheorems.lean` — `core_sim_ext_callFree`, `toYulFn_correct_ext`.
   Proof: `Proof/CoreExtSimProof.lean`.
-- `DispatchDefs.lean` / `DispatchTheorems.lean` — `runtimeBlock_correct_callFree`.
-  Proof: `Proof/DispatchProof.lean`.
-- `DispatchExtDefs.lean` / `DispatchExtTheorems.lean` — `runtimeBlock_correct_ext`.
-  Proof: `Proof/DispatchExtProof.lean`.
-- `EndToEnd.lean` / `EndToEndTheorems.lean` / `EndToEndProof.lean` — S1 glue
-  (`EvmCallRun`); `bytecode_call_correct`, `bytecode_trace_all`. Directly
-  imports `Security`.
-- `EndToEndExt.lean` / `EndToEndExtDefs.lean` / `EndToEndExtTheorems.lean` /
-  `EndToEndExtProof.lean` — S2 glue (`EvmCallRunExt` / `EvmTraceRunExtAll`);
-  `bytecode_call_correct_ext`, `evmCallRunExtAll_of_progress` over a
-  memory-blind `ExtOracle` and `compileBlock` (erase or powdr spill). Imports
-  `EndToEnd`, so it sees `Security`.
-- `ExtOracle.lean` — `ExtOracle` / `toCalls` / `CallsMemoryBlind`; spill
-  `GuardedExternals` for free.
-- `Transport.lean` / `TransportTheorems.lean` / `TransportProof.lean` —
-  `transport_trace` / `_exists` and S2 `_ext` / `_claim_ext` variants.
-- `Transport/Defs.lean` — `TransportCodec` / `TransportSetup` / `TransportBindings`,
-  `decodeTrace` / `CallsWF`.
-- `Transport/Step.lean` — per-call `transport_step` / `transport_step_ext`.
-- `Transport/Abi.lean`, `Transport/Slots.lean` — ABI length lemmas;
-  `storageRel_scalar_toNat` / `storageRel_map1_toNat`.
-- `EvmDetDefs.lean` / `EvmDetTheorems.lean` — `Halted`; `steps_halted_unique`.
-  Proof: `Proof/EvmDetProof.lean`.
-- `ProgressCoreTheorems.lean` — `yul_progress`. Proof: `Proof/ProgressCoreProof.lean`.
-- `ConstructorDefs.lean` / `ConstructorTheorems.lean` — `constructor_correct`,
-  `deployBlock_correct`. Proof: `Proof/ConstructorProof.lean`.
-- `DeployTheorems.lean` / `DeployProof.lean` — `bytecode_deploy_correct`
-  (powdr `compileObject_correct`; init frame has no appended constructor args).
+- `DispatchTheorems.lean` — `runtimeBlock_correct_callFree`.
+- `DispatchExtTheorems.lean` — `runtimeBlock_correct_ext`.
+- `EndToEndTheorems.lean` — S1 `bytecode_call_correct`, `bytecode_trace_all`.
+- `EndToEndExtTheorems.lean` — S2 `bytecode_call_correct_ext`,
+  `evmCallRunExtAll_of_progress`.
+- `TransportTheorems.lean` — `transport_trace` / `_exists` and S2 `_ext` /
+  `transport_claim_ext` / `transport_exists_claim_ext`.
+- `Transport/Defs.lean`, `Transport/Abi.lean` — `TransportSetup`,
+  `TransportBindings`, ABI length lemmas.
+- `ProgressCoreTheorems.lean` — `yul_progress`.
+- `ConstructorTheorems.lean` — `constructor_correct`, `deployBlock_correct`.
+- `DeployTheorems.lean` — `bytecode_deploy_correct`.
+- `EvmDetTheorems.lean` — `steps_halted_unique`.
 
 Depends on `Lsc/Lang` (`Core`, `Interface`) and powdr; never on `Lsc/Security`
 except `EndToEnd*.lean`.
 
 ### `Lsc/Compiler/Proof` — internal lemma libraries
 
-Helpers nobody outside the proof tree should import. Grouped by role:
-
-- Words / memory / env / layout: `Words`, `Memory`, `Env`, `Layout`.
-- Mapping slots: `Maps`, `Maps2`.
-- Emitter and M1 ops: `Emit`, `Ops`, `OpsMore`, `OpsToken`, `OpsArith`,
-  `OpsMulDiv`, `OpsCtx`.
-- Calldata / constructor prologue: `Calldata`, `ConstructorPrologue`,
-  `ObjectExtra`.
-- EVM lift / descend: `Lift`, `Descend`.
-- S2 call simulation: `CoreExt`, `CallState`, `AbiCall`, `Call`, `CallFwd`,
-  `CallBwd`, `Oracle`, `OfState`, `BindEnvs`, `CoreExtCall`.
-- S2 progress infrastructure: `Progress`.
+Helpers nobody outside the proof tree should import: `Words`, `Memory`,
+`Env`, `Layout`, `Maps`, `Maps2`, `Emit`, `Ops*`, `Calldata`,
+`ConstructorPrologue`, `Lift`, `Descend`, `CoreExt`, `Call*`, `Oracle`,
+`Progress`, `MemFootprint*`, `Spill*`, `GasLift`, `NoGas`, `Erase`.
 
 ## `Lsc/Tools` and `Lsc/Util`
 
-- `Tools/AbiJson.lean` — ABI JSON.
-- `Util/OpenPrivate.lean` — test/util helper.
-- EVM differential harness: `scripts/difftest.sh` (Lean `Tx.run` vs anvil/revm
-  on `compileRuntime` / `compileDeploy` bytecode). Interpreter tests:
-  `Examples/Misc/YulTests.lean`.
+- `Tools/AbiJson.lean`, `Tools/Disasm.lean`.
+- `Util/OpenPrivate.lean`.
+- EVM differential harness: `scripts/difftest.sh`.
 
 ## `Examples` — separate Lake library
 
-Example contracts, Tx-level proofs, security theorems, compiler instances,
-and bytecode-level theorems. Do not treat `Lsc/Examples/` (if present on
-disk) as this library.
-
-Naming (each protocol is a directory; modules are `Examples.C.Role`):
+Each protocol is a directory (`Examples/AGENTS.md`):
 
 | Role | Files |
 |------|--------|
 | Contract | `Examples/C/Contract.lean` |
-| Spec | `Spec.lean` (`Inv`, `claim`, `Auth`, bindings/codec) |
+| Spec | `Spec.lean` (`Inv`, `claim`, `Auth`, `holdings`) |
 | Exported theorems | `Theorems.lean` |
-| Proofs | `Proofs/Tx.lean`, `Proofs/Security.lean`, `Proofs/Compile.lean`, `Proofs/EndToEnd.lean` |
+| Proofs | `Proofs/Tx.lean`, `Proofs/Security.lean`, `Proofs/Compile.lean`, `Proofs/Implements.lean` |
 
-- **Counter** — `Examples/Counter/`. `counter_correct`, `counter_dispatch_correct`;
-  no Security / bytecode theorem.
-- **Token** — `Examples/Token/`. S1. `token_no_unauthorized_extraction`, `token_solvent`;
-  `token_correct`, `token_dispatch_correct`;
-  `token_bytecode_no_unauthorized_extraction`, `token_bytecode_solvent`,
-  `token_deploy_then_no_unauthorized_extraction`.
-- **Vault** — `Examples/Vault/`. S2, one `IERC20`. `vault_no_unauthorized_extraction`,
-  `vault_solvent`; `vault_correct_ext`;
-  `vault_bytecode_no_unauthorized_extraction`, `vault_bytecode_solvent`,
-  `vault_abs_nonvacuous`.
-- **AMM** — `Examples/Amm/`. S2, two `IERC20`. `amm_no_unauthorized_extraction`, `amm_solvent`;
-  `amm_correct_ext`; `amm_bytecode_no_unauthorized_extraction` (no bytecode
-  solvency theorem).
-- **CPAMM** — `Examples/Cpamm/`. Constant-product AMM with LP fee and protocol-fee
-  switch. Tx-level `k` / protocol-fee / pro-rata theorems; spec anti-extraction
-  and solvency in `Proofs/Security.lean`.
-- `Examples/Misc/AmountDemo.lean` — Amount-typed surface demo.
-- `Examples/Misc/AmountDemo.lean` — Amount-typed surface demo.
-- `Examples/Misc/YulTests.lean` — interpreter harness.
+- **Counter** — `Examples/Counter/`. Tx deltas (`increment_adds`, …); no wealth theorem.
+- **Token** — `Examples/Token/`. S1. `token_no_unauthorized_extraction`,
+  `token_solvent`, `erc20` (`IERC20.Spec Token.impl`).
+- **Vault** — `Examples/Vault/`. S2, one `IERC20.Ref`. `vault_no_unauthorized_extraction`,
+  `vault_solvent`.
+- **Cpamm** — `Examples/Cpamm/`. S2, two `IERC20.Ref`. `swap0for1_k`,
+  `cpamm_no_unauthorized_extraction`, `cpamm_solvent`.
+
+`Checks.lean` imports `Examples.<Name>.Theorems` only. Bytecode transport is
+the compiler family in `TransportTheorems.lean`, not per-example theorems.

@@ -4,7 +4,7 @@ Closed ERC-20: `transfer`, `approve`, `transferFrom`, `mint`, `burn`, and the
 views `totalSupply`, `balanceOf`, `allowance`. No external calls. Storage: owner,
 total supply, balances, and nested allowances.
 
-`lsc_contract Token … implements IERC20 tokenAsset` checks names and signatures
+`lsc_contract Token … implements IERC20 Token.tokenAsset` checks names and signatures
 against `IERC20` and emits `Token.impl`. `Token.erc20` proves every field of
 `IERC20.Spec` of that implementation: transfers conserve the two balances and
 never change supply; `transferFrom` spends allowance when the caller is not

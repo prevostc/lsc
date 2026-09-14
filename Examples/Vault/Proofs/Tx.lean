@@ -3,6 +3,7 @@ import Examples.Vault.Spec
 import Stdlib.SafeERC20
 import Lsc.Lang.TxTheorems
 import Lsc.Lang.AmountTheorems
+import Lsc.Lang.InterfaceTheorems
 
 set_option linter.unusedSimpArgs false
 set_option maxHeartbeats 800000
@@ -92,11 +93,13 @@ private theorem run_storeMap_shares {α : Type} (who : Address) (v : Nat)
               (Function.update (fun i => (w.self.shares i).raw) who v k) } } := by
   rw [Tx.run_bind, Tx.run_storeMap]
 
+@[simp] theorem balSel_eq : balSel = 0x70a08231 := by decide
+@[simp] theorem supplySel_eq : supplySel = 0x18160ddd := by decide
+
 theorem impl_balanceOf (r : IERC20.Ref vaultAsset) (who : Address)
     (w₀ : World Storage ExtState Event) :
     (r.impl w₀).balanceOf who w₀ = viewBal r who w₀.oracle w₀.ext := by
-  unfold IERC20.Ref.impl viewBal
-  rfl
+  simp [IERC20.Ref.impl, IERC20.Impl.ofRef, viewBal, viewWorld]
 
 theorem holdings_view (self : Address) :
     holdings self w = (viewBal w.self.asset self w.oracle w.ext).raw := by
@@ -106,7 +109,7 @@ theorem holdings_congr (self : Address) {w w' : World Storage ExtState Event}
     (ha : w'.self.asset.addr = w.self.asset.addr)
     (ho : w'.oracle = w.oracle) (hx : w'.ext = w.ext) :
     holdings self w' = holdings self w := by
-  simp [holdings, impl_balanceOf, viewBal, ha, ho, hx]
+  simp [holdings, IERC20.Ref.impl, IERC20.Impl.ofRef, ha, ho, hx]
 
 theorem transferFrom_frame {r : IERC20.Ref vaultAsset}
     {src dst : Address} {amt : Amount vaultAsset} {b : Bool}
@@ -381,6 +384,13 @@ def viewBal? (r : IERC20.Ref vaultAsset) (who : Address)
   AbiRetType.decode (α := Amount vaultAsset)
     (w₀.oracle.view r.addr balSel [AbiType.encode who] w₀.ext)
 
+theorem viewBal?_eq (r : IERC20.Ref vaultAsset) (who : Address)
+    (w₀ : World Storage ExtState Event) :
+    viewBal? r who w₀ =
+      AbiRetType.decode (α := Amount vaultAsset)
+        (w₀.oracle.view r.addr (0x70a08231) [AbiType.encode who] w₀.ext) := by
+  simp [viewBal?, balSel_eq]
+
 private theorem run_balanceOf (r : IERC20.Ref vaultAsset) (who : Address)
     (w₀ : World Storage ExtState Event) :
     Tx.run (r.balanceOf who : Tx Storage ExtState Event Error (Amount vaultAsset))
@@ -388,7 +398,8 @@ private theorem run_balanceOf (r : IERC20.Ref vaultAsset) (who : Address)
       match viewBal? r who w₀ with
       | none => .error .callFailed
       | some v => .ok (v, w₀) := by
-  simp only [IERC20.Ref.balanceOf, Tx.run_view, viewBal?, balSel, Tx.encode_address]
+  simp only [IERC20.Ref.balanceOf, Tx.run_view, viewBal?, balSel_eq,
+    Tx.encode_address]
   generalize hrets : w₀.oracle.view r.addr (0x70a08231) [who.toWord] w₀.ext = rets
   cases AbiRetType.decode (α := Amount vaultAsset) rets <;> rfl
 
@@ -407,7 +418,8 @@ theorem viewBal?_some_holdings (self : Address)
     {ta : Amount vaultAsset}
     (h : viewBal? w.self.asset self w = some ta) :
     holdings self w = ta.raw := by
-  simp only [holdings_view, viewBal, decodeOrDefault, viewBal?] at h ⊢
+  simp only [holdings_view, viewBal, viewWorld, IERC20.Ref.impl, IERC20.Impl.ofRef,
+    decodeOrDefault, viewBal?, balSel_eq] at h ⊢
   rw [h]
   rfl
 
