@@ -252,6 +252,11 @@ Three-slice plan:
 
 - **8A** (this): emit the lock; happy-path S1/S2 proofs close; `lock_cleared_on_commit`
   and unlocked functions emit no `tstore`.
-- **8B**: `lock_held_reverts` — if slot 0 is set, every entry reverts.
+- **8B** (done): `lock_held_reverts_yul`, `lock_held_reverts_yul_of_run`,
+  `lock_held_reverts_yul_open`, `lock_held_reverts_evm` in `LockTheorems.lean`,
+  plus `exec_lockCheck_halt_inv` for open-dialect inversion of the prologue.
+  Held lock ⇒ prologue revert with empty data and unchanged committed storage /
+  transient / logs at Yul; the same at assembled bytecode under
+  `compile_correct`'s start hypotheses. `hNR` is still assumed on S1/S2 glue.
 - **8C**: derive `NoReentry` from the lock, drop `hNR`, human re-pin of `Checks.lean`.
-  `TRUSTED_COMPUTING_BASE.md` / `PROOF_CHAIN.md` wait until C.
+  `TRUSTED_COMPUTING_BASE.md` waits until C.

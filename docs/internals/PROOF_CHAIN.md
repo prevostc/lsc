@@ -34,6 +34,17 @@ ship `*_bytecode_*` theorems (DECISIONS 2026-09-12).
 | Security (examples) | `cpamm_no_unauthorized_extraction`, `cpamm_solvent`, `swap0for1_k` | `Examples/Cpamm/Theorems.lean` | proved | S2 | Cpamm |
 | Deploy | `constructor_correct`, `bytecode_deploy_correct` | `ConstructorTheorems.lean`, `DeployTheorems.lean` | Yul ctor proved; EVM args gap | S1 | Token constructor (call-free) |
 
+Compiled runtimes begin with `if tload(0) { revert(0,0) }`. When that
+slot is set, `lock_held_reverts_yul` / `_open` (`LockTheorems.lean`)
+prove the memoryguard-erased `runtimeBlock` reverts with empty data and
+unchanged committed storage, transient storage, and logs (no call
+oracle). `lock_held_reverts_evm` lifts that through `compile_correct` to
+assembled bytecode: a matching start frame (`FrameOK`, `StateMatch`,
+`pc = 0`, empty stack) halts in revert with the executing account's
+storage and transient storage, and the log series, agreeing with the
+Yul start. S2 glue still takes `hNR : ExtOracle.NoReentry`; dropping it
+is slice 8C.
+
 S1 is the call-free fragment (`CallFree` / `M1Frag`). S2 is `S2Frag`
 (`CallFree` plus `Op.call` / `Stmt.call`) for contracts that CALL out.
 Link 1 is `Core.denote schema f.core args = f args`. `Amount a` / `Fixed d`
