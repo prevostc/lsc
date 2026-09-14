@@ -48,12 +48,14 @@ steps; deployment from empty storage is a separate `init` fact when proved.
 ## What the adversary may do
 
 Any addresses may call any entrypoint with any arguments, in any order,
-interleaved with honest calls. Between our calls, the environment may
-update `ext` only in ways `vaultRely` / `cpammRely` allow (our token
-`balanceOf` does not fall; `totalSupply` stays put). Well-formedness —
-callers are not the contract itself — is required for invariant and
-solvency preservation and for the `_at` extraction theorems (Vault,
-Cpamm), not for Token-style unrestricted extraction.
+interleaved with honest calls — sandwich of *our* calls is this
+quantifier (`run` in `Trace.lean`, `no_unauthorized_extraction`). Between our
+calls, the environment may update `ext` only in ways `vaultRely` /
+`cpammRely` allow (our token `balanceOf` does not fall; `totalSupply`
+stays put). Well-formedness — callers are not the contract itself — is
+required for invariant and solvency preservation and for the `_at`
+extraction theorems (Vault, Cpamm), not for Token-style unrestricted
+extraction.
 
 Token, Vault, and Cpamm instantiate this at the spec. The compiler lifts
 a trace fact onto bytecode with `transport_claim_ext` /
@@ -61,9 +63,10 @@ a trace fact onto bytecode with `transport_claim_ext` /
 
 ## Out of scope
 
-Private-key compromise, block-producer ordering / MEV, gas griefing of
-*our* execution, and token behaviour excluded by the external-call
-hypotheses (fee-on-transfer, down-rebasing, ERC-777 hooks). Blacklist,
+Private-key compromise, block-producer ordering across *other* contracts,
+gas griefing of *our* execution, and token behaviour excluded by the
+external-call hypotheses (fee-on-transfer, down-rebasing, ERC-777 hooks).
+Blacklist,
 pause, revert-on-zero, callee out-of-gas, and allowance shortfall are in
 scope: they are treated as a failed external call that reverts us.
 

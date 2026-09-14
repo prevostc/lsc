@@ -42,9 +42,10 @@ For contracts that call out: theorems that mention the token take
 is memory-blind (other contracts cannot see this contract's private
 memory, which is true of the EVM) and is a function of the request and
 observable world. The compiler may have used either the erase path or
-powdr spill. Reentrancy is not modelled. Security statements remain
-"for every starting world". Example authors apply `transport_claim_ext`
-/ `transport_exists_claim_ext` rather than per-contract bytecode theorems.
+powdr spill. S2/transport theorems still take `hNR : ExtOracle.NoReentry`.
+Security statements remain "for every starting world". Example authors
+apply `transport_claim_ext` / `transport_exists_claim_ext` rather than
+per-contract bytecode theorems.
 
 Other contracts are modelled as deterministic functions of the call and
 the on-chain state they can see: the same call against the same
@@ -82,7 +83,13 @@ empty calldata and no trailing bytes, so **appended constructor arguments
 are not in that EVM model**. Runtime theorems exclude constructors.
 Vault/Cpamm constructors that `CALL` are out of scope.
 
-No bytecode-level reentrancy lock is emitted. Core outside the supported
+The runtime emits `if tload(0) { revert(0,0) }` on every entry
+(`lockCheckStmt`); functions with `locks f` (`hasExtCall ∧ ¬ isPureRead`)
+`tstore(0,1)` after the size guard and `tstore(0,0)` before committing
+`return`/`stop`. Held lock ⇒ revert, empty returndata, committed
+storage/transient/logs unchanged (`lock_held_reverts_yul`,
+`lock_held_reverts_yul_open`, `lock_held_reverts_evm`; no oracle
+hypothesis). Dropping `hNR` is slice 8C. Core outside the supported
 fragment (including most `letPure`, nested pair returns, and unusual
 require/revert/emit arities) is not compiled. Bytecode glue talks about
 word-level core; Vault's Amount ABI is identified with the reifier

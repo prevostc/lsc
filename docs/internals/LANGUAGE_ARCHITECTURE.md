@@ -29,8 +29,11 @@ Core  --toYul (ours)-->  Yul AST (powdr yul-semantics)  --powdr compile_correct-
   `*? /?` only against a `Word` scalar; `*?↓` / `*?↑` only against a `Fixed d` (a non-fixed
   `Amount b` is a type error). Mixed-unit arithmetic is a type error.
 - Storage is a Lean `structure`; mappings are `K → V` with default zero (≤ 2 keys).
-- Reentrancy during a call is not modelled (`self` is unchanged). No `tload`/`tstore` lock
-  is emitted (`YUL_TARGET.md`, `TRUSTED_COMPUTING_BASE.md`).
+- Reentrancy during a call is not modelled at Tx (`self` is unchanged). The
+  runtime emits `if tload(0) { revert(0,0) }` on every entry; `locks f`
+  acquire/release the slot. Held-lock revert is proved (`lock_held_reverts_*`);
+  S2/transport still take `NoReentry` until 8C (`YUL_TARGET.md`,
+  `TRUSTED_COMPUTING_BASE.md`).
 - Not in the language: loops, inline assembly, `delegatecall`, `selfdestruct`, untyped low-level
   calls, dynamic arrays/bytes in storage. External calls go only through an `I.Ref` of a
   declared interface (`deriving Interface`; see `INTERFACE_MODEL.md`).
@@ -74,7 +77,8 @@ Core  --toYul (ours)-->  Yul AST (powdr yul-semantics)  --powdr compile_correct-
 - `toYul : ContractDef → Yul object` (dispatcher, ABI decode/encode, error and Panic encoding,
   Solidity-style storage layout with keccak mapping slots, `Op.call` /
   `Stmt.call` lowering with a literal gas word because powdr rejects `gas()`).
-  No `tload`/`tstore` lock is emitted.
+  Lock emitted (`lockCheckStmt`; `locks f` `tstore(0,1)` / `tstore(0,0)`);
+  held-lock revert proved; `NoReentry` remains until 8C.
 - Core → Yul is the compiler theorem this repo owns, in two strata (`DECISIONS.md`):
   `toYulFn_correct_callFree` (S1, closed model) and `toYulFn_correct_ext` (S2, backward
   simulation). Dispatchers:

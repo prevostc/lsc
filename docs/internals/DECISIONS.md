@@ -160,6 +160,10 @@ discharges the S2 `Conforms` assumption when the callee is a proved Lsc
 contract, so multi-contract systems compose by theorem rather than trust.
 Decimals are read at construction and cached, never type-level.
 
+**Status (2026-09-14):** `implements_to_conforms` is decided, not yet in
+Lean (no such theorem in `Lsc/` or `Examples/`; `Conforms` was deleted,
+`Lsc/Compiler/Externals.lean`).
+
 ## 2026-09-12 — Bytecode transport is one trace-refinement theorem per stratum; examples carry no bytecode proofs
 
 Bytecode transport becomes `refines_S1` / `refines_S2`: for any EVM trace of
@@ -191,6 +195,12 @@ tokens remains a stated assumption (`NoInterfere`) and becomes a theorem
 for Lsc callees via `implements`. Per-asset solvency stays the exported
 solvency statement; the product measure is used for the extraction theorem
 only.
+
+**Status (2026-09-14):** own-call fairness is decided, not yet in Lean (no
+such theorem in `Lsc/` or `Examples/`). **Superseded:** first mint is
+`a0.as lpShare` (`Examples/Cpamm/Contract.lean`); no `min(a0,a1)`, no dead
+shares. Share-inflation protection is open (Vault README: inflation not
+prevented; no virtual offset / dead shares in code).
 
 ## 2026-09-13 — Interfaces are signature structures + Spec theorems; callee = oracle
 
@@ -259,4 +269,4 @@ Three-slice plan:
   transient / logs at Yul; the same at assembled bytecode under
   `compile_correct`'s start hypotheses. `hNR` is still assumed on S1/S2 glue.
 - **8C**: derive `NoReentry` from the lock, drop `hNR`, human re-pin of `Checks.lean`.
-  `TRUSTED_COMPUTING_BASE.md` waits until C.
+  TCB now records emit + held-lock revert; dropping `hNR` still waits for C.

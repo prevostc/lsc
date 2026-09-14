@@ -100,8 +100,11 @@ the modelled world, which no real deployment can exhibit. The previous extra
 hypothesis that the CALL oracle always returns a result is now a fact of this
 model rather than an assumption.
 
-Out of scope (stated in `TRUSTED_COMPUTING_BASE.md`): private-key compromise, block-producer
-ordering/MEV, gas griefing of *our* execution, and token behaviours excluded by
+Ordering of *our* entrypoints (including sandwich of those calls) is the
+trace quantifier (`run` in `Trace.lean`, `WealthTheorems`). Out of scope (stated in
+`TRUSTED_COMPUTING_BASE.md`): private-key compromise, block-producer
+ordering across other contracts, gas griefing of *our* execution, and
+token behaviours excluded by
 `IERC20.Spec` (fee-on-transfer, down-rebasing, ERC777 hooks). Blacklist,
 pause, revert-on-zero, callee OOG, and allowance shortfall are in scope via the fault oracle.
 
@@ -110,8 +113,10 @@ pause, revert-on-zero, callee OOG, and allowance shortfall are in scope via the 
 By construction (the reifiable fragment): no silent overflow (checked ops revert);
 `Amount` is a `structure` so units do not mix by defeq; revert discards the world;
 no inline assembly, `delegatecall`, `selfdestruct` or untyped calls; external calls go
-only through an `I.Ref`. Reentrancy is not modelled (`self` unchanged — see
-`TRUSTED_COMPUTING_BASE.md`). Proved: `effects_frame` from `Core.effects`;
+only through an `I.Ref`. Reentrancy during a call is not modelled at Tx
+(`self` unchanged); lock emitted + held-lock revert proved; `NoReentry`
+remains until 8C (`TRUSTED_COMPUTING_BASE.md`). Proved: `effects_frame`
+from `Core.effects`;
 ABI/dispatcher `runtimeBlock_correct_callFree` / `runtimeBlock_correct_ext`.
 
 ## Stdlib vs examples

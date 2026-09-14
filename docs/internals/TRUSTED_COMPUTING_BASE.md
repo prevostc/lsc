@@ -66,14 +66,17 @@ Other contracts cannot see this contract's private memory or `msize`,
 which is true of the EVM. Wrapping with `toCalls` yields `ExternalCalls`
 that is scratch-insensitive on every reservation interval (needed by
 powdr's spill theorem) and total (`toCalls_total`). The oracle is a
-function of the request and the observable world. `NoReentry` is the only
-assumption about the callee (reentrancy is not modelled). Example theorems
-that mention the token take `IERC20.Spec`. S1 uses a closed model instead.
+function of the request and the observable world. `NoReentry` (`hNR`) is
+still the only callee hypothesis of the S2/transport theorems (slice 8C
+drops it). Example theorems that mention the token take `IERC20.Spec`.
+S1 uses a closed model instead.
 
 **(e) Adversary scope** (`SECURITY_MODEL.md`): any call sequence from any
-addresses, `env` steps under `RelyAlong`, `sender ≠ self`. Excludes private-key
-compromise, block-producer ordering/MEV, gas griefing of our execution, and
-token behaviours excluded by `IERC20.Spec`.
+addresses, `env` steps under `RelyAlong`, `sender ≠ self`. Ordering of
+*our* entrypoints (including sandwich of those calls) is the trace
+quantifier. Excludes private-key compromise, block-producer ordering
+across other contracts, gas griefing of our execution, and token
+behaviours excluded by `IERC20.Spec`.
 
 ## Modelling assumptions
 
@@ -102,7 +105,12 @@ Not derived from powdr:
   Runtime theorems exclude constructors (`hctor`). Vault/Cpamm constructors
   with `call` are out of scope.
 
-- Bytecode-level reentrancy lock (not emitted).
+- Reentrancy: lock emitted (`runtimeBlock` / `lockCheckStmt`; `locks f`
+  acquire/release). Held lock ⇒ revert, empty returndata, committed
+  storage/transient/logs unchanged (`lock_held_reverts_yul` /
+  `lock_held_reverts_yul_open` / `lock_held_reverts_evm`; no oracle).
+  `hNR : ExtOracle.NoReentry` remains on S2/transport until 8C
+  (nested-frame `compile_correct`, code-at-self pin, isolation lemma).
 - Core outside `S2Frag` (e.g. wrapping `letPure` other than `id`, nested pair
   returns, `require`/`revert`/`emit` arities other than 0/1/3/4).
 - Amount-typed compiler in general: bytecode glue is `Core.denote` (Nat).

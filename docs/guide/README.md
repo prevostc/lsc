@@ -8,6 +8,7 @@ syntax are `Examples/Counter/Contract.lean`, `Examples/Token/Contract.lean`,
 - [Security model](SECURITY.md) — unauthorised extraction, solvency, the adversary
 - [External calls](EXTERNAL_CALLS.md) — `IERC20.Ref` / `I.Impl` / `I.Spec`
 - [What is trusted](TRUST.md) — foundations and hypotheses, in words
+- [Audit coverage](AUDIT_COVERAGE.md) — SWC/OWASP cut: proved, assumed, open
 - [Cpamm walkthrough](AMM.md) — constant-product AMM with LP fee and protocol-fee switch
 
 Compile with `Lsc.Compiler.compileContract` (`Lsc/Compiler/Pipeline.lean`) →
