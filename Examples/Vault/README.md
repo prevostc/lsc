@@ -1,24 +1,25 @@
 # Vault
 
-Single-asset vault: binds one `IERC20`, mints shares on `deposit`, burns on
-`withdraw`. Pause flag. First mint is 1:1; later mints/redeems floor.
-Token pull/push after accounting.
+Single-asset vault: binds one typed ERC-20, mints shares on `deposit`, burns
+on `withdraw`. Pause flag. First mint is 1:1; later mints/redeems floor.
+Accounting uses a stored `totalAssets` cache for the rate; live token
+balance is `holdings`. Token pull/push after storage writes.
 
-**Proved:** an address's redeemable assets never fall unless that address
-called `withdraw`. Other depositors, pause/unpause, and views cannot debit
-it. Assumed, not proved: the asset token behaves like a conforming ERC-20;
-between calls the vault's token balance does not fall. The vault stays
-solvent vs that token balance. Both facts at `Tx.run` and on compiled S2
-runtime bytecode. The constructor binds the asset and sets the owner; it
-does not CALL `decimals`.
+**Proved:** a successful deposit credits shares and raises live holdings (when
+the caller is not the vault). A successful withdraw burns shares and lowers
+holdings. An address's redeemable assets never fall unless that address
+called `withdraw`. The vault stays solvent vs its live token balance.
+Assumed of the token: it is a conforming ERC-20 per `IERC20.Spec`; no
+reentrancy is modelled. Between calls the vault's token balance does not
+fall and the token's `totalSupply` view stays the same.
 
 | File | Role |
 |------|------|
-| `Contract.lean` | Vault surface + `lsc_contract` |
-| `Spec.lean` | `claim`, `Auth`, `Inv`, codec, bytecode readers |
-| `Theorems.lean` | Exported security, compiler, and bytecode theorems |
+| `Contract.lean` | Vault surface + schema |
+| `Spec.lean` | `claim`, `Auth`, `Inv`, `holdings`, `vaultRely` |
+| `Theorems.lean` | Exported Tx deltas and security theorems |
 | `Proofs/Tx.lean` | `Tx.run` lemmas for deposit/withdraw/pause |
 | `Proofs/Security.lean` | Invariant and authorisation instances |
-| `Proofs/Compile.lean` | S2 `toYulFn_correct_ext` proofs |
-| `Proofs/EndToEnd.lean` | Bytecode transport glue and proofs |
+| `Proofs/Compile.lean` | Runtime `compileRuntime` witness |
+| `Tests.lean` | Smoke `#guard`s |
 | `compiled/` | Yul, labelled Asm, bytecode, ABI, heimdall decompile |

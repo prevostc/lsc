@@ -1,8 +1,7 @@
--- slice 4: Example imports restored when Examples compile on the oracle model.
--- import Examples.Counter.Theorems
--- import Examples.Token.Theorems
--- import Examples.Vault.Theorems
--- import Examples.Amm.Theorems
+import Examples.Counter.Theorems
+import Examples.Token.Theorems
+import Examples.Vault.Theorems
+-- slice 4: Cpamm restored when that example compiles on the oracle model.
 -- import Examples.Cpamm.Theorems
 import Lsc.Security.WealthTheorems
 import Lsc.Compiler.DispatchTheorems
@@ -26,7 +25,28 @@ axioms. `#guard_msgs` turns a widened footprint into a build error (see
 /-- info: 'Lsc.Security.no_unauthorized_extraction' depends on axioms: [propext] -/
 #guard_msgs in #print axioms Lsc.Security.no_unauthorized_extraction
 
--- slice 4: Counter / Token / Vault / Amm / Cpamm example pins.
+/-- info: 'Counter.increment_adds' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms Counter.increment_adds
+
+/-- info: 'Token.transfer_conserves' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms Token.transfer_conserves
+
+/-- info: 'Token.token_no_unauthorized_extraction' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms Token.token_no_unauthorized_extraction
+
+/-- info: 'Token.token_solvent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms Token.token_solvent
+
+/-- info: 'Token.erc20' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms Token.erc20
+
+/-- info: 'Vault.vault_solvent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms Vault.vault_solvent
+
+/-- info: 'Vault.vault_no_unauthorized_extraction' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms Vault.vault_no_unauthorized_extraction
+
+-- slice 4: Cpamm example pins restored with that example.
 
 /-- info: 'Lsc.Compiler.toYulFn_correct_callFree' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms Lsc.Compiler.toYulFn_correct_callFree

@@ -16,7 +16,7 @@ open Lsc
 
 /-- The ERC20 interface: the functions you can call. Field types are the ABI. -/
 structure IERC20 (a : Asset) where
-  totalSupply  : View Word
+  totalSupply  : View (Amount a)
   balanceOf    : View (Address → Amount a)
   allowance    : View (Address → Address → Amount a)
   transfer     : Fn (Address → Amount a → Bool)

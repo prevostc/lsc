@@ -16,6 +16,10 @@ jobs:
         run: |
           scripts/check-theorem-docs.sh --self-test
           scripts/check-theorem-docs.sh
+      - name: Check Examples layout
+        run: |
+          scripts/check-examples.sh --self-test
+          scripts/check-examples.sh
       - name: Check library layering
         run: scripts/check-layering.sh
       - name: Install elan

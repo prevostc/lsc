@@ -1,5 +1,4 @@
 import Lsc.Security.Wealth
-import Lsc.Compiler.Transport.Defs
 import Examples.Token.Contract
 
 /-!
@@ -9,8 +8,6 @@ finite-support conservation of balances against `totalSupply`.
 -/
 
 open Lsc Lsc.Security Token
-
-lsc_codec Token
 
 namespace Token
 

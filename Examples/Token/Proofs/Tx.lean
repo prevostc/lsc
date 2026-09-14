@@ -58,7 +58,7 @@ theorem balanceOf_returns_stored_balance (who : Address) :
   simp [balanceOf]
 
 theorem totalSupply_returns_stored :
-    Tx.run totalSupply ctx w = .ok (w.self.totalSupply.raw, w) := by
+    Tx.run totalSupply ctx w = .ok (w.self.totalSupply, w) := by
   simp [totalSupply]
 
 theorem allowance_returns_stored (owner spender : Address) :
@@ -89,7 +89,7 @@ theorem transfer_ok (to : Address) (amount : Amount tokenAsset)
     Tx.run (transfer to amount) ctx w =
       .ok (true, { w with self := transferPost w.self ctx.sender to amount, log := w.log ++ [.Transfer ctx.sender to amount] }) := by
   simp only [debit, Amount.le_iff, Amount.raw_add, Amount.raw_sub, Amount.update_raw_apply] at hsub hadd
-  simp [transfer, transferU, hsub, hadd]
+  simp [transfer, hsub, hadd]
   simp [transferPost, debit, credit, Amount.update2_raw,
     Amount.ofWord_update_lookup, Amount.ofWord_raw]
 
@@ -145,9 +145,9 @@ theorem transfer_preserves_allowances (to : Address) (amount : Amount tokenAsset
       cases h; rfl
     · have hle : amount.raw ≤ (w.self.balances ctx.sender).raw := hsub
       simp only [debit_credit_raw] at hadd
-      simp [transfer, transferU, hle, hadd] at h
+      simp [transfer, hle, hadd] at h
   · have hle : ¬ amount.raw ≤ (w.self.balances ctx.sender).raw := hsub
-    simp [transfer, transferU, hle] at h
+    simp [transfer, hle] at h
 
 /-- Frame: `transfer` never touches `totalSupply`, whatever happens. -/
 theorem transfer_preserves_totalSupply (to : Address) (amount : Amount tokenAsset)
@@ -160,14 +160,14 @@ theorem transfer_preserves_totalSupply (to : Address) (amount : Amount tokenAsse
       cases h; rfl
     · have hle : amount.raw ≤ (w.self.balances ctx.sender).raw := hsub
       simp only [debit_credit_raw] at hadd
-      simp [transfer, transferU, hle, hadd] at h
+      simp [transfer, hle, hadd] at h
   · have hle : ¬ amount.raw ≤ (w.self.balances ctx.sender).raw := hsub
-    simp [transfer, transferU, hle] at h
+    simp [transfer, hle] at h
 
 theorem transfer_reverts_on_insufficient_balance (to : Address) (amount : Amount tokenAsset)
     (h : w.self.balances ctx.sender < amount) :
     Tx.run (transfer to amount) ctx w = .error (.user .InsufficientBalance) := by
-  simp [transfer, transferU, Amount.not_le_of_gt h]
+  simp [transfer, Amount.not_le_of_gt h]
 
 theorem transfer_reverts_on_overflow (to : Address) (amount : Amount tokenAsset)
     (hsub : amount ≤ w.self.balances ctx.sender)
@@ -175,7 +175,7 @@ theorem transfer_reverts_on_overflow (to : Address) (amount : Amount tokenAsset)
     Tx.run (transfer to amount) ctx w = .error (.arith .overflow) := by
   have hle : amount.raw ≤ (w.self.balances ctx.sender).raw := hsub
   simp only [debit_credit_raw] at hadd
-  simp [transfer, transferU, hle, Nat.not_lt.mpr hadd]
+  simp [transfer, hle, Nat.not_lt.mpr hadd]
 
 /-! ### mint -/
 
@@ -280,19 +280,19 @@ theorem transferFrom_ok (src to : Address) (amount : Amount tokenAsset)
   have hallow' : amount.raw ≤ (w.self.allowances src ctx.sender).raw := hallow
   have hsub' : amount.raw ≤ (w.self.balances src).raw := hsub
   simp only [debit_credit_raw] at hadd
-  simp [transferFrom, transferFromU, hallow', hsub', hadd]
+  simp [transferFrom, hallow', hsub', hadd]
   simp [transferFromPost, debit, credit, Amount.update_nested_raw,
     Amount.update2_raw, Amount.ofWord_update_lookup, Amount.ofWord_raw]
 
 theorem transferFrom_reverts_on_insufficient_allowance (src to : Address) (amount : Amount tokenAsset)
     (h : w.self.allowances src ctx.sender < amount) :
     Tx.run (transferFrom src to amount) ctx w = .error (.user .InsufficientAllowance) := by
-  simp [transferFrom, transferFromU, Amount.not_le_of_gt h]
+  simp [transferFrom, Amount.not_le_of_gt h]
 
 theorem transferFrom_reverts_on_insufficient_balance (src to : Address) (amount : Amount tokenAsset)
     (hallow : amount ≤ w.self.allowances src ctx.sender) (h : w.self.balances src < amount) :
     Tx.run (transferFrom src to amount) ctx w = .error (.user .InsufficientBalance) := by
-  simp [transferFrom, transferFromU, hallow, Amount.not_le_of_gt h]
+  simp [transferFrom, hallow, Amount.not_le_of_gt h]
 
 theorem transferFrom_decrements_allowance (src to : Address) (amount : Amount tokenAsset)
     (hallow : amount ≤ w.self.allowances src ctx.sender)
@@ -387,7 +387,7 @@ theorem transferFrom_reverts_on_overflow (src to : Address) (amount : Amount tok
   have hallow' : amount.raw ≤ (w.self.allowances src ctx.sender).raw := hallow
   have hsub' : amount.raw ≤ (w.self.balances src).raw := hsub
   simp only [debit_credit_raw] at hadd
-  simp [transferFrom, transferFromU, hallow', hsub', Nat.not_lt.mpr hadd]
+  simp [transferFrom, hallow', hsub', Nat.not_lt.mpr hadd]
 
 /-! ### burn -/
 

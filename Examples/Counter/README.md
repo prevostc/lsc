@@ -3,16 +3,17 @@
 Minimal stateful contract: one `count` word. `increment` / `incrementBy` /
 `decrement` / `get`. No external calls.
 
-**Proved:** each runtime function compiles to Yul that matches the high-level
-model (`counter_correct`, `counter_dispatch_correct`). No wealth theorem.
+**Proved:** a successful `increment` adds one; `incrementBy n` adds `n`;
+`decrement` saturates at zero; `get` returns the stored word and does not
+change state. No wealth theorem.
 
 | File | Role |
 |------|------|
 | `Contract.lean` | Storage, events, functions, `lsc_contract` |
-| `Spec.lean` | Runtime `FnDef`s used by the compiler theorems |
-| `Theorems.lean` | Exported compiler instance theorems |
-| `Proofs/Tx.lean` | No Tx-level wealth lemmas |
+| `Spec.lean` | No wealth predicates |
+| `Theorems.lean` | Exported Tx-level deltas |
+| `Tests.lean` | Smoke `#guard`s |
+| `Proofs/Tx.lean` | `Tx.run` deltas |
 | `Proofs/Security.lean` | No security theorems |
-| `Proofs/Compile.lean` | Call-free `toYulFn` proofs |
-| `Proofs/EndToEnd.lean` | No bytecode wealth theorems |
+| `Proofs/Compile.lean` | Runtime `compileRuntime` witness |
 | `compiled/` | Yul, labelled Asm, bytecode, ABI, heimdall decompile |

@@ -610,7 +610,7 @@ theorem callFree_preserves_ghost {S X E ε} {Γ : ContractSchema S X E ε} {t}
   | letOp op k ih =>
     intro h env w v w' hok
     have ⟨hop, hk⟩ := m1frag_letOp.mp h
-    simp [Core.denote] at hok
+    simp only [Core.denote] at hok
     change Tx.run (Lsc.Op.denote Γ env op >>= fun x => Core.denote Γ k (x :: env))
         ctx w = .ok (v, w') at hok
     rw [Tx.run_bind] at hok
@@ -624,7 +624,7 @@ theorem callFree_preserves_ghost {S X E ε} {Γ : ContractSchema S X E ε} {t}
   | seq s k ih =>
     intro h env w v w' hok
     have ⟨hs, hk⟩ := m1frag_seq.mp h
-    simp [Core.denote] at hok
+    simp only [Core.denote] at hok
     change Tx.run (Lsc.Stmt.denote Γ env s >>= fun _ => Core.denote Γ k env)
         ctx w = .ok (v, w') at hok
     rw [Tx.run_bind] at hok

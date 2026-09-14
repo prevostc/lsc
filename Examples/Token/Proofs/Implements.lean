@@ -46,7 +46,7 @@ variable (ctx : Ctx) (w : World Storage ExtState Event)
   rw [allowance_returns_stored { sender := 0 } w owner spender]
 
 @[simp] theorem impl_totalSupply (w : World Storage ExtState Event) :
-    Token.impl.totalSupply w = w.self.totalSupply.raw := by
+    Token.impl.totalSupply w = w.self.totalSupply := by
   change (match Tx.run totalSupply { sender := (0 : Address) } w with
     | .ok (v, _) => v
     | .error _ => default) = _
@@ -220,7 +220,7 @@ theorem allowance_balance_protected (owner spender : Address)
   exact ge_self_add _ _
 
 theorem totalSupply_balance_protected
-    {r : Word} {w' : World Storage ExtState Event} (x : Address)
+    {r : Amount tokenAsset} {w' : World Storage ExtState Event} (x : Address)
     (h : Tx.run totalSupply ctx w = .ok (r, w'))
     (_hne : ctx.sender ≠ x) :
     w'.self.balances x + w.self.allowances x ctx.sender ≥ w.self.balances x := by
@@ -251,8 +251,8 @@ theorem erc20 : IERC20.Spec Token.impl where
     have hr := transfer_returns_true ctx w to amount (by simpa [impl_transfer] using h)
     subst hr
     simp only [impl_transfer] at h
-    simpa [impl_totalSupply] using congrArg Amount.raw
-      (transfer_preserves_totalSupply ctx w to amount h)
+    simpa [impl_totalSupply] using
+      transfer_preserves_totalSupply ctx w to amount h
   transferFrom_moves := by
     intro src to amount ctx w w' h
     simp only [impl_transferFrom] at h

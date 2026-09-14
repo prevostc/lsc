@@ -8,10 +8,8 @@ Writes `Examples/<C>/compiled/{runtime,deploy}.{hex,yul}`, `runtime.asm`,
 `abi.json`, `selectors.json` (heimdall decompile is the shell wrapper), and
 prints JSON on stdout (BEGIN_LSC_EXPORT … END_LSC_EXPORT) for `scripts/difftest.sh`.
 
-Does not import `Examples.Misc.YulTests` (that file's `#eval`/`#guard` would re-run the
-Yul interpreter). Case lists, senders, and mapping slots follow YulTests.
-Amm cases are view-only (`getReserves` / `sharesOf` / `quote0for1`); constructor and
-swaps CALL out and are not expected to match anvil without token fixtures.
+Does not import example Tests files (their `#eval`/`#guard` would re-run).
+Case lists, senders, and mapping slots follow the old interpreter fixtures.
 Vault and CPAMM are exported for artifacts only (no Tx.run cases); constructors CALL out.
 -/
 import Lsc.Compiler.Bytecode
@@ -22,7 +20,6 @@ import YulEvmCompiler.Compile
 import YulEvmCompiler.Optimizer.Implementation.MemorySpill
 import Examples.Counter.Contract
 import Examples.Token.Contract
-import Examples.Amm.Contract
 import Examples.Vault.Contract
 import Examples.Cpamm.Contract
 import Lsc.Tools.AbiJson
@@ -142,13 +139,14 @@ def wordOutcome {S X E ε : Type}
   | .error (.arith a) => ("revert", panicBytes (arithPanicCode a), pre)
   | .error .callFailed => ("revert", [], pre)
 
-def pairOutcome {S X E ε : Type}
+def boolOutcome {S X E ε : Type}
     (c : ContractDef) (errIdx : ε → Nat)
-    (tx : Except (Err ε) ((Nat × Nat) × World S X E))
+    (tx : Except (Err ε) (Bool × World S X E))
     (pre postOk : List (BitVec 256 × BitVec 256)) :
     String × List UInt8 × List (BitVec 256 × BitVec 256) :=
   match tx with
-  | .ok ((a, b), _) => ("ok", abiBytes [a, b], postOk)
+  | .ok (true, _) => ("ok", abiBytes [1], postOk)
+  | .ok (false, _) => ("ok", abiBytes [0], postOk)
   | .error (.user e) => ("revert", customErrorBytes c (errIdx e) [], pre)
   | .error (.arith a) => ("revert", panicBytes (arithPanicCode a), pre)
   | .error .callFailed => ("revert", [], pre)
@@ -164,8 +162,8 @@ def mkCase (c : ContractDef) (name fname : String) (args : List Nat) (sender : N
 def ctrErr : Counter.Error → Nat
   | .Zero => 0
 
-def ctrW (n : Nat) : World Counter.Storage Unit Counter.Event :=
-  { self := { count := n }, ext := () }
+def ctrW (n : Nat) : World Counter.Storage ExtState Counter.Event :=
+  { self := { count := n }, ext := default }
 
 def ctrSlots (n : Nat) : List (BitVec 256 × BitVec 256) :=
   [(u256 0, u256 n)]
@@ -173,7 +171,7 @@ def ctrSlots (n : Nat) : List (BitVec 256 × BitVec 256) :=
 def ctx1 : Ctx := { sender := 1, self := 7 }
 
 def ctrUnit (name fname : String) (args : List Nat) (count : Nat)
-    (tx : Except (Err Counter.Error) (Unit × World Counter.Storage Unit Counter.Event)) : Case :=
+    (tx : Except (Err Counter.Error) (Unit × World Counter.Storage ExtState Counter.Event)) : Case :=
   let pre := ctrSlots count
   let postOk :=
     match tx with
@@ -183,7 +181,7 @@ def ctrUnit (name fname : String) (args : List Nat) (count : Nat)
     (unitOutcome Counter.contract ctrErr tx pre postOk) pre
 
 def ctrWord (name fname : String) (args : List Nat) (count : Nat)
-    (tx : Except (Err Counter.Error) (Nat × World Counter.Storage Unit Counter.Event)) : Case :=
+    (tx : Except (Err Counter.Error) (Nat × World Counter.Storage ExtState Counter.Event)) : Case :=
   let pre := ctrSlots count
   let postOk :=
     match tx with
@@ -236,14 +234,14 @@ def σ₁ : Token.Storage :=
 def σAllow : Token.Storage :=
   { σ₁ with allowances := fun a b => Amount.ofWord (allow₁₂ a b) }
 
-def w₁ : World Token.Storage Unit Token.Event := { self := σ₁, ext := () }
-def wAllow : World Token.Storage Unit Token.Event := { self := σAllow, ext := () }
+def w₁ : World Token.Storage ExtState Token.Event := { self := σ₁, ext := default }
+def wAllow : World Token.Storage ExtState Token.Event := { self := σAllow, ext := default }
 
 def ctxOwner : Ctx := { sender := 1, self := 7 }
 def ctx2 : Ctx := { sender := 2, self := 7 }
 
 def tokUnit (name fname : String) (args : List Nat) (ctx : Ctx) (σ : Token.Storage)
-    (tx : Except (Err Token.Error) (Unit × World Token.Storage Unit Token.Event)) : Case :=
+    (tx : Except (Err Token.Error) (Unit × World Token.Storage ExtState Token.Event)) : Case :=
   let pre := tokSlots σ
   let postOk :=
     match tx with
@@ -252,8 +250,18 @@ def tokUnit (name fname : String) (args : List Nat) (ctx : Ctx) (σ : Token.Stor
   mkCase Token.contract name fname args ctx.sender
     (unitOutcome Token.contract tokErr tx pre postOk) pre
 
+def tokBool (name fname : String) (args : List Nat) (ctx : Ctx) (σ : Token.Storage)
+    (tx : Except (Err Token.Error) (Bool × World Token.Storage ExtState Token.Event)) : Case :=
+  let pre := tokSlots σ
+  let postOk :=
+    match tx with
+    | .ok (_, w') => tokSlots w'.self
+    | .error _ => pre
+  mkCase Token.contract name fname args ctx.sender
+    (boolOutcome Token.contract tokErr tx pre postOk) pre
+
 def tokWord (name fname : String) (args : List Nat) (ctx : Ctx) (σ : Token.Storage)
-    (tx : Except (Err Token.Error) (Nat × World Token.Storage Unit Token.Event)) : Case :=
+    (tx : Except (Err Token.Error) (Nat × World Token.Storage ExtState Token.Event)) : Case :=
   let pre := tokSlots σ
   let postOk :=
     match tx with
@@ -263,13 +271,13 @@ def tokWord (name fname : String) (args : List Nat) (ctx : Ctx) (σ : Token.Stor
     (wordOutcome Token.contract tokErr tx pre postOk) pre
 
 def tokenCases : List Case :=
-  [ tokUnit "transfer_ok" "transfer" [2, 100] ctxOwner σ₁
+  [ tokBool "transfer_ok" "transfer" [2, 100] ctxOwner σ₁
       (Tx.run (Token.transfer 2 100) ctxOwner w₁)
-  , tokUnit "transfer_revert" "transfer" [2, 2000] ctxOwner σ₁
+  , tokBool "transfer_revert" "transfer" [2, 2000] ctxOwner σ₁
       (Tx.run (Token.transfer 2 2000) ctxOwner w₁)
-  , tokUnit "approve_ok" "approve" [2, 50] ctxOwner σ₁
+  , tokBool "approve_ok" "approve" [2, 50] ctxOwner σ₁
       (Tx.run (Token.approve 2 50) ctxOwner w₁)
-  , tokUnit "transferFrom_ok" "transferFrom" [1, 3, 40] ctx2 σAllow
+  , tokBool "transferFrom_ok" "transferFrom" [1, 3, 40] ctx2 σAllow
       (Tx.run (Token.transferFrom 1 3 40) ctx2 wAllow)
   , tokUnit "mint_ok" "mint" [2, 25] ctxOwner σ₁
       (Tx.run (Token.mint 2 25) ctxOwner w₁)
@@ -285,51 +293,6 @@ def tokenCases : List Case :=
       ((Tx.run (Token.allowance 1 2) ctxOwner wAllow).map fun (n, w) => (n.raw, w))
   , tokWord "totalSupply" "totalSupply" [] ctxOwner σ₁
       ((Tx.run Token.totalSupply ctxOwner w₁).map fun (n, w) => (n.raw, w)) ]
-
-/-! ## Amm (view-only cases; swaps/ctor CALL out) -/
-
-def ammErr : Amm.Error → Nat
-  | .Zero => 0
-  | .ZeroShares => 1
-  | .ZeroOut => 2
-  | .InsufficientShares => 3
-  | .InsufficientOutput => 4
-  | .SameToken => 5
-  | .TransferFailed => 6
-
-def ammAddrs : List Nat := [0, 2]
-
-def ammSlots (σ : Amm.Storage) : List (BitVec 256 × BitVec 256) :=
-  [(u256 0, u256 σ.token0Ref.addr), (u256 1, u256 σ.token1Ref.addr),
-    (u256 2, u256 σ.reserve0.raw), (u256 3, u256 σ.reserve1.raw),
-    (u256 4, u256 σ.totalShares.raw)] ++
-    ammAddrs.map (fun a => (mapSlot1 keccakOf 5 a, u256 (σ.shares a).raw))
-
-def ammWord (name fname : String) (args : List Nat)
-    (tx : Except (Err Amm.Error) (Nat × World Amm.Storage Amm.Ext Amm.Event)) : Case :=
-  let pre := ammSlots Amm.smokePool.self
-  mkCase Amm.contract name fname args Amm.smokeCtx.sender
-    (wordOutcome Amm.contract ammErr tx pre pre) pre
-
-def ammPair (name fname : String) (args : List Nat)
-    (tx : Except (Err Amm.Error) ((Nat × Nat) × World Amm.Storage Amm.Ext Amm.Event)) : Case :=
-  let pre := ammSlots Amm.smokePool.self
-  mkCase Amm.contract name fname args Amm.smokeCtx.sender
-    (pairOutcome Amm.contract ammErr tx pre pre) pre
-
-def ammCases : List Case :=
-  [ ammPair "getReserves" "getReserves" []
-      ((Tx.run Amm.getReserves Amm.smokeCtx Amm.smokePool).map
-        fun ((a, b), w) => ((a.raw, b.raw), w))
-  , ammWord "sharesOf" "sharesOf" [2]
-      ((Tx.run (Amm.sharesOf 2) Amm.smokeCtx Amm.smokePool).map
-        fun (n, w) => (n.raw, w))
-  , ammWord "quote0for1_ok" "quote0for1" [100]
-      ((Tx.run (Amm.quote0for1 100) Amm.smokeCtx Amm.smokePool).map
-        fun (n, w) => (n.raw, w))
-  , ammWord "quote0for1_zero" "quote0for1" [0]
-      ((Tx.run (Amm.quote0for1 0) Amm.smokeCtx Amm.smokePool).map
-        fun (n, w) => (n.raw, w)) ]
 
 def contractJson (name : String) (c : ContractDef) (art : Artifacts) (cases : List Case)
     (ctorCalldata : Option (List UInt8) := none)
@@ -347,11 +310,11 @@ def contractJson (name : String) (c : ContractDef) (art : Artifacts) (cases : Li
 
 def tokenCtorOwner : Nat := 1
 def tokenCtorSupply : Nat := 1000
-def tokenW0 : World Token.Storage Unit Token.Event :=
+def tokenW0 : World Token.Storage ExtState Token.Event :=
   { self := { owner := 0, totalSupply := 0, balances := fun _ => 0, allowances := fun _ _ => 0 }
-  , ext := () }
+  , ext := default }
 def tokenCtxDeploy : Ctx := { sender := 1, self := 7 }
-def tokenW1 : World Token.Storage Unit Token.Event :=
+def tokenW1 : World Token.Storage ExtState Token.Event :=
   match Tx.run (Token.constructor tokenCtorOwner (Amount.ofWord tokenCtorSupply))
     tokenCtxDeploy tokenW0 with
   | .ok (_, w) => w
@@ -365,13 +328,12 @@ def tokenCtorChecks : List Case :=
       ((Tx.run Token.totalSupply tokenCtxDeploy tokenW1).map
         fun (n, w) => (n.raw, w)) ]
 
-/-- Fixed `anvil_setCode` address. YulTests uses `Ctx.self = 7`, but `0x07` is the
-ECMUL precompile on a real EVM; Counter/Token do not read `ADDRESS`. -/
+/-- Fixed `anvil_setCode` address. `Ctx.self = 7` would be the ECMUL precompile
+on a real EVM; Counter/Token do not read `ADDRESS`. -/
 def runtimeAddress : String := addrHex 0xC0DE
 
 def counterArt := compileContract Counter.contract
 def tokenArt := compileContract Token.contract
-def ammArt := compileContract Amm.contract
 def vaultArt := compileContract Vault.contract
 def cpammArt := compileContract Cpamm.contract
 
@@ -383,8 +345,6 @@ def exportJson : String :=
       contractJson "Token" Token.contract tokenArt tokenCases
         (some (ctorCalldata [tokenCtorOwner, tokenCtorSupply]))
         tokenCtorChecks,
-      contractJson "Amm" Amm.contract ammArt ammCases
-        (some (ctorCalldata [10, 11])),
       contractJson "Vault" Vault.contract vaultArt []
         (some (ctorCalldata [1, 10])),
       contractJson "Cpamm" Cpamm.contract cpammArt []
@@ -395,7 +355,6 @@ def exportJson : String :=
 def main : IO Unit := do
   writeContract "Counter" Counter.contract counterArt
   writeContract "Token" Token.contract tokenArt
-  writeContract "Amm" Amm.contract ammArt
   writeContract "Vault" Vault.contract vaultArt
   writeContract "Cpamm" Cpamm.contract cpammArt
   IO.println "BEGIN_LSC_EXPORT"

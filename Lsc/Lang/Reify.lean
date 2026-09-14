@@ -2287,8 +2287,11 @@ def mkCoreEqAlt (ns fn : Name) : MetaM (TSyntax ``Lean.Parser.Tactic.inductionAl
           rw [$specExec:ident]
           apply $coreDenote)
     else
+      -- Flag/Nat/Unit views: `simp only` can leave `worldAfter f = worldAfter f`.
+      -- `all_goals try rfl` is a no-op when simp already closed.
       `(Lean.Parser.Tactic.tacticSeq|
-          simp only [$coreDenote:ident, $specExec:ident])
+          simp only [$coreDenote:ident, $specExec:ident]
+          all_goals try rfl)
   let tac ←
     match n with
     | 0 =>

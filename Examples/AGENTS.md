@@ -2,21 +2,37 @@
 
 Exactly:
 
-- `Contract.lean` — the contract only
-- `Spec.lean` — invariant, claim, authorisation predicates, and any
-  binding/`TransportSetup` definitions — what we claim, no theorems
-- `Theorems.lean` — every exposed theorem (Tx-level, security, compiler
-  instance, bytecode); plain-language docstring and a one-line body referencing
-  `Proofs/…`
-- `Proofs/` — `Tx.lean`, `Security.lean`, `Compile.lean`, `EndToEnd.lean`, plus
-  helpers. Nothing outside `Proofs/` contains proof code beyond one-line
-  references. Compile witnesses stay in `Proofs/Compile.lean`
-- optional `Tests.lean` — executable smoke `#guard`s
-- `README.md` — what the contract does, what is proved in prose, one line per
-  file
-- `compiled/` — Yul, labelled Asm, bytecode, ABI, heimdall decompile; written
-  in place by `scripts/export_bytecode.sh`, not copied from `out/`
+- `Contract.lean` — module docstring (what the contract does, for a Solidity
+  developer, ≤8 lines); `Asset` constants; `Storage`, `Event`, `Error`; the
+  user-facing functions, each with a one-line docstring; the single
+  `lsc_contract` line. FORBIDDEN: `theorem`, `lemma`, `example`, `instance`,
+  `@[simp]`, `#guard`, `#eval`, `#check`, `#guard_msgs`, any
+  `.core`/`core_denote`/`Core.*`/`Spec.exec` mention, `Amount.ofWord`/`.raw`/
+  word-level plumbing, helper duplicates (`*Raw`, `*U`, `*Unit`, `*Impl`
+  suffixes), named arithmetic where an operator exists (`+? -? *? /?`,
+  `mulDiv↓`/`mulDiv↑`).
+- `Spec.lean` — invariant, rely, authorisation/value predicates, named world
+  readers (e.g. `holdings w`). No theorems, no proofs.
+- `Theorems.lean` — every exposed theorem about the *contract*: Tx-level
+  deltas, security, `implements` conformance. Plain-language docstring on
+  each; body is a one-line reference into `Proofs/`. NO compiler/bytecode
+  theorems: the compiler's theorems quantify over all contracts, per-contract
+  instances add nothing.
+- `Proofs/` — `Tx.lean`, `Security.lean`, `Implements.lean` (when the contract
+  implements an interface), `Compile.lean` (only the
+  `#guard (compileRuntime C.contract).isSome` witness and, if a contract needs
+  the memory-spill path, a comment saying so), plus helper files. All proof
+  code lives here.
+- `Tests.lean` — executable smoke `#guard`s, `#eval`s, negative `#guard_msgs`.
+- `README.md` — what it does, what is proved (prose, no Lean names beyond
+  theorem names), what is assumed of external contracts, one line per file.
+- `compiled/` — generated artefacts (unchanged policy).
 
-`Checks.lean` imports `Examples.<Name>.Theorems` only. This is the example-level
-instance of the Theorems/Proof split in `Lsc/AGENTS.md`; the docstring checker
-treats `Theorems.lean` as a Theorems file (glob `*Theorems.lean` matches).
+`Checks.lean` imports `Examples.<Name>.Theorems` only. This is the
+example-level instance of the Theorems/Proof split in `Lsc/AGENTS.md`; the
+docstring checker treats `Theorems.lean` as a Theorems file (glob
+`*Theorems.lean` matches).
+
+Theorem hygiene per root `AGENTS.md` (success as hypothesis, delta form, no
+unnecessary hypotheses, no edge-case exclusions unless genuinely false).
+`scripts/check-examples.sh` enforces the Contract/Theorems layout.

@@ -252,6 +252,7 @@ theorem transfer_auth : NoUnauthorizedDecreaseFn spec Inv claim Auth .transfer :
         by_cases ht : a = dst
         · subst ht
           simp [credit, debit, Function.update_of_ne (Ne.symm hs)] at hdec
+          exact (Nat.not_lt.mpr (Nat.le_add_right _ _) hdec).elim
         · simp [credit_other _ ht, debit_other _ (Ne.symm hs)] at hdec
       · have hrun := transfer_reverts_on_overflow ctx w dst amount hsub (Nat.not_lt.mp hadd)
         simp [worldAfter, hrun] at hdec
@@ -276,6 +277,7 @@ theorem transferFrom_auth : NoUnauthorizedDecreaseFn spec Inv claim Auth .transf
           by_cases ht : a = dst
           · subst ht
             simp [credit, debit, Function.update_of_ne (Ne.symm ha)] at hdec
+            exact (Nat.not_lt.mpr (Nat.le_add_right _ _) hdec).elim
           · simp [credit_other _ ht, debit_other _ (Ne.symm ha)] at hdec
         · have hrun := transferFrom_reverts_on_overflow ctx w src dst amount hallow hsub
             (Nat.not_lt.mp hadd)
@@ -314,6 +316,7 @@ theorem mint_auth : NoUnauthorizedDecreaseFn spec Inv claim Auth .mint := by
         by_cases ht : a = dst
         · subst ht
           simp [credit] at hdec
+          exact (Nat.not_lt.mpr (Nat.le_add_right _ _) hdec).elim
         · simp [credit_other _ ht] at hdec
       · have hrun := mint_reverts_on_balance_overflow ctx w dst amount howner hsupply
           (Nat.not_lt.mp hadd)

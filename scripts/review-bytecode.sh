@@ -4,12 +4,12 @@
 # view; decompiled.sol is heimdall's recovered Solidity (selectors with a
 # 0x00 high byte stay missing).
 #
-# Usage: scripts/review-bytecode.sh [Counter|Token|Vault|Amm|Cpamm|all]
+# Usage: scripts/review-bytecode.sh [Counter|Token|Vault|Cpamm|all]
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export PATH="${HOME}/.foundry/bin:${HOME}/.bifrost/bin:${PATH}"
 
-CONTRACTS=(Counter Token Vault Amm Cpamm)
+CONTRACTS=(Counter Token Vault Cpamm)
 TARGET="${1:-all}"
 # shellcheck source=heimdall_decompile.sh
 source scripts/heimdall_decompile.sh
@@ -62,12 +62,12 @@ review_one() {
 }
 
 case "$TARGET" in
-  Counter|Token|Vault|Amm|Cpamm) review_one "$TARGET" ;;
+  Counter|Token|Vault|Cpamm) review_one "$TARGET" ;;
   all)
     for c in "${CONTRACTS[@]}"; do review_one "$c"; done
     ;;
   *)
-    echo "Usage: $0 [Counter|Token|Vault|Amm|Cpamm|all]" >&2
+    echo "Usage: $0 [Counter|Token|Vault|Cpamm|all]" >&2
     exit 1
     ;;
 esac
