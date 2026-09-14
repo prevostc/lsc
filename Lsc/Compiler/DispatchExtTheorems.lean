@@ -37,9 +37,10 @@ theorem runtimeBlock_correct_ext {S E ε : Type}
     (hctx : ctxRel ctx st0) (hR : R c Γ κ w st0)
     (hAgr : ExtAgree ctx.self w.ext st0)
     (hOr : w.oracle = Oracle.ofExt o)
-    (hNR : ExtOracle.NoReentry o ctx.self) :
+    (hNR : ExtOracle.NoReentry o ctx.self)
+    (hLock : LockFree st0) :
     RuntimeBlockCorrectExt c Γ κ o yul ctx w st0 :=
   Proof.runtimeBlock_correct_ext c Γ hΓ κ hκ o hctor hS2 hlen hbound yul hyul
-    ctx w st0 hctx hR hAgr hOr hNR
+    ctx w st0 hctx hR hAgr hOr hNR hLock
 
 end Lsc.Compiler

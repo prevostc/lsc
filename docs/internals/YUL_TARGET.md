@@ -75,11 +75,17 @@ Decisions for `Lsc/Compiler` fixed by the study of `yul-semantics`, `evm_semanti
 - Constructor-time `call` (e.g. caching `decimals`) is subject to verification against powdr's
   deploy theorem (`compileObject_correct` / `evmWithExternal` in init code). If that theorem
   cannot take external calls in creation code, `decimals` is a constructor argument.
-- Dispatcher → `if lt(calldatasize(), 4) { revert(0,0) }` then
+- Dispatcher → `if tload(0) { revert(0,0) }` (every entry, including views and
+  `default`), then `if lt(calldatasize(), 4) { revert(0,0) }`, then
   `switch shr(224, calldataload(0))` with one `case <selector>` per entrypoint and `default { revert(0,0) }`.
-- Reentrancy: **no lock is emitted** (no `tload`/`tstore`). Reentrancy is not
-  modelled; S2 theorems take `ExtOracle.NoReentry` (`TRUSTED_COMPUTING_BASE.md`). An
-  emitted transient-slot lock with a bytecode-level proof is future work.
+  A case that `locks f` (`hasExtCall ∧ ¬ isPureRead`) inserts `tstore(0,1)` after the
+  per-function size guard; committing `return`/`stop` is prefixed with `tstore(0,0)`.
+  Pure-read views (including those with an outgoing `staticcall`) and call-free mutators
+  do not write the slot. `require`/`revert`/call-failed paths rely on Yul/EVM rollback.
+  Slot `0` is the only `tstore` Lsc emits; the constructor (`toYulCtor`) is unchanged.
+- Reentrancy: the lock is emitted as above. S2 theorems still take `ExtOracle.NoReentry`
+  (`TRUSTED_COMPUTING_BASE.md`) until slice 8C derives it from the lock. Slice 8B is
+  `lock_held_reverts`.
 - Never emitted: `for`, `delegatecall`, `selfdestruct`, `create`, `gas`, `datasize`/`dataoffset`
   outside the constructor.
 

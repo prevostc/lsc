@@ -278,7 +278,8 @@ theorem core_progress_callFree {S X E ε} {c : ContractDef} {Γ : ContractSchema
     (hwf : coreWF c core = true)
     (hn : identsNodup tag (env.length + coreExtraDepth core) = true)
     (hinv : Inv tag Γ c κ ctx w env V st)
-    {e' : Emit} (hem : emitCore tag c {} env.length haltUnit core = some e') :
+    {clearLock : Bool} {e' : Emit}
+    (hem : emitCore tag c {} env.length haltUnit core clearLock = some e') :
     ∃ V' st', ExecStmts (yulD calls) (List.replicate n []) V st e'.stmts V' st' .halt := by
   have hS1 :=
     core_sim (tag := tag) (c := c) (Γ := Γ) (κ := κ) (ctx := ctx) hhalt hΓ hκ hlen core hM1
@@ -293,10 +294,10 @@ theorem core_progress_callFree {S X E ε} {c : ContractDef} {Γ : ContractSchema
     obtain ⟨V', st', _, hexec, _, _⟩ := hS1
     exact ⟨V', st', execStmts_lift_nils hexec⟩
 
-theorem emitCore_seq_split {c : ContractDef} {halt : Bool} {t : RetTy}
+theorem emitCore_seq_split {c : ContractDef} {halt : Bool} {clearLock : Bool} {t : RetTy}
     {s : Lsc.Stmt} {k : Core t} {e' : Emit} {d : Nat}
-    (hem : emitCore tag c {} d halt (.seq s k) = some e') :
-    ∃ e0, emitCore tag c {} d halt k = some e0 ∧
+    (hem : emitCore tag c {} d halt (.seq s k) clearLock = some e') :
+    ∃ e0, emitCore tag c {} d halt k clearLock = some e0 ∧
       e'.stmts = (emitStmt tag c {} d s).stmts ++ e0.stmts :=
   emitCore_prefix tag hem
 
@@ -790,6 +791,51 @@ theorem exec_memoryGuardErased_nils {calls : ExternalCalls} {n : Nat}
     (exec_memoryGuardErased (List.replicate n []) V st)
   rwa [funEnvCast_replicate_nil] at h
 
+theorem exec_lockCheck_ok_nils {calls : ExternalCalls} {n : Nat}
+    {V : VEnv evm} {st : EvmState} (h : LockFree st) :
+    ExecStmt (yulD calls) (List.replicate n []) V st lockCheckStmt V st .normal := by
+  have h' := execStmt_lift (calls := calls) .none .none
+    (exec_lockCheck_ok (List.replicate n []) V st h)
+  rwa [funEnvCast_replicate_nil] at h'
+
+theorem exec_lockCheck_halt_nils {calls : ExternalCalls} {n : Nat}
+    {V : VEnv evm} {st : EvmState} (h : ¬ LockFree st) :
+    ExecStmt (yulD calls) (List.replicate n []) V st lockCheckStmt V
+      { touchMemory st 0 0 with halted := some (.revert, []) } .halt := by
+  have h' := execStmt_lift (calls := calls) .none .none
+    (exec_lockCheck_halt (List.replicate n []) V st h)
+  rwa [funEnvCast_replicate_nil] at h'
+
+theorem exec_lockSetStmt_nils {calls : ExternalCalls} {n : Nat}
+    {V : VEnv evm} {st : EvmState} (hstatic : st.env.static = false) :
+    ExecStmt (yulD calls) (List.replicate n []) V st lockSetStmt V
+      (stTstore st (BitVec.ofNat 256 reentrancyLockSlot) 1) .normal := by
+  have h' := execStmt_lift (calls := calls) .none .none
+    (exec_lockSetStmt (List.replicate n []) V st hstatic)
+  rwa [funEnvCast_replicate_nil] at h'
+
+theorem exec_lockClearStmt_nils {calls : ExternalCalls} {n : Nat}
+    {V : VEnv evm} {st : EvmState} (hstatic : st.env.static = false) :
+    ExecStmt (yulD calls) (List.replicate n []) V st lockClearStmt V
+      (stTstore st (BitVec.ofNat 256 reentrancyLockSlot) 0) .normal := by
+  have h' := execStmt_lift (calls := calls) .none .none
+    (exec_lockClearStmt (List.replicate n []) V st hstatic)
+  rwa [funEnvCast_replicate_nil] at h'
+
+theorem execStmts_maybe_lockClear_nils {calls : ExternalCalls} {n : Nat}
+    {V : VEnv evm} {st : EvmState} {rest : YBlock}
+    {V' : VEnv evm} {st' : EvmState} {o : Outcome}
+    (clearLock : Bool) (hstatic : st.env.static = false)
+    (h : ExecStmts (yulD calls) (List.replicate n []) V
+      (stAfterLockClear clearLock st) rest V' st' o) :
+    ExecStmts (yulD calls) (List.replicate n []) V st
+      ((if clearLock then [lockClearStmt] else []) ++ rest) V' st' o := by
+  cases clearLock with
+  | false => simpa [stAfterLockClear] using h
+  | true =>
+    simpa [stAfterLockClear] using
+      Step.seqCons (exec_lockClearStmt_nils (calls := calls) (n := n) hstatic) h
+
 theorem exec_cons_normal_open {calls : ExternalCalls}
     {funs : FunEnv (yulD calls)} {V : VEnv (yulD calls)} {st : EvmState}
     {s : YulSemantics.Stmt YOp} {V1 : VEnv (yulD calls)} {st1 : EvmState}
@@ -802,6 +848,7 @@ theorem exec_cons_normal_open {calls : ExternalCalls}
 theorem hoist_erased_runtime_open (calls : ExternalCalls) (guard : YBlock)
     (sel : YExpr) (cases : List (YulSemantics.Literal × YBlock)) :
     hoist (yulD calls) (memoryGuardErased ::
+      lockCheckStmt ::
       [.block guard, .switch sel cases (some [revert00])]) = [] :=
   hoist_yulD_of_evm (hoist_erased_runtime guard sel cases)
 

@@ -16,13 +16,18 @@ live inside the block so `restore` drops them; the Core result variable is
 declared outside and assigned inside. `toYulFn` does **not** return `none` on
 calls.
 
-Not emitted in this slice: `tload`/`tstore` (reentrancy lock), `for`,
-`delegatecall`, `selfdestruct`, `create`. `ite` is `switch` (Yul `if` has no
-else). Dispatcher is `switch shr(224, calldataload(0))`. Sub-expressions are
-nested Yul builtins (no flatten / `t_i` temps); `{ … }` wraps `if` bodies,
-`switch` cases, and external-call temps. `toYulFn` requires `coreWF` and
-`Nodup` `identV` names (`{f.name}_{i}`, unique across the dispatcher
-`switch`); `runtimeBlock` requires unique selectors.
+Every runtime entry checks `tload(0)` and reverts if the slot is set.
+Mutating functions with an outgoing CALL/STATICCALL (`locks f`) `tstore(0,1)`
+after the per-function size guard and `tstore(0,0)` before each committing
+`return`/`stop`. Pure-read views (including those with `Op.view`) and
+call-free mutators do not write the lock. Constructor (`toYulCtor`) is
+unchanged. Not emitted: `for`, `delegatecall`, `selfdestruct`, `create`.
+`ite` is `switch` (Yul `if` has no else). Dispatcher is
+`switch shr(224, calldataload(0))`. Sub-expressions are nested Yul builtins
+(no flatten / `t_i` temps); `{ … }` wraps `if` bodies, `switch` cases, and
+external-call temps. `toYulFn` requires `coreWF` and `Nodup` `identV` names
+(`{f.name}_{i}`, unique across the dispatcher `switch`); `runtimeBlock`
+requires unique selectors.
 -/
 
 namespace Lsc.Compiler
@@ -124,6 +129,16 @@ and ABI packing starts at `abiPtr`. A 3-arg `transferFrom` ends at 228; a
 Constructor is not guarded (`datacopy(0, …)` would smash scratch). -/
 def memoryGuardK : Nat := 256
 
+/-- EIP-1153 transient slot for the reentrancy lock. Disjoint from persistent
+storage; Lsc emits no other `tstore`. -/
+def reentrancyLockSlot : Nat := 0
+
+/-- Mutating functions with any outgoing CALL/STATICCALL take the lock.
+Pure-read views with an outgoing `staticcall` do not: they have no
+inconsistent window and must stay honest `view`s (STATICCALL-callable). -/
+def locks (f : FnDef) : Bool :=
+  Core.hasExtCall f.core && !Core.isPureRead f.core
+
 /-- Aligned ABI words at `abiPtr` fit in `[0, memoryGuardK)`. Equivalent to `n ≤ 4`. -/
 def fitsGuardWords (n : Nat) : Bool := decide (abiPtr + 32 * n ≤ memoryGuardK)
 
@@ -154,6 +169,25 @@ def revert00 : YStmt :=
 
 def stopStmt : YStmt :=
   YulSemantics.Stmt.exprStmt (bop YulSemantics.EVM.Op.stop [])
+
+/-- `if tload(0) { revert(0,0) }`. Every runtime entry, including views and
+the default selector. -/
+def lockCheckStmt : YStmt :=
+  .cond (bop YulSemantics.EVM.Op.tload [lit reentrancyLockSlot]) [revert00]
+
+/-- `tstore(0, 1)` — acquire. Only in `entryCase` of a locking function. -/
+def lockSetStmt : YStmt :=
+  .exprStmt (bop YulSemantics.EVM.Op.tstore [lit reentrancyLockSlot, lit 1])
+
+/-- `tstore(0, 0)` — release. Prefixed on every committing `return`/`stop`
+of a locking function. Revert paths rely on EVM/Yul rollback. -/
+def lockClearStmt : YStmt :=
+  .exprStmt (bop YulSemantics.EVM.Op.tstore [lit reentrancyLockSlot, lit 0])
+
+/-- Empty when `locks f` is false, so non-locking `entryCase` is
+definitionally the historical `[block guard, block body]`. -/
+def lockSetPrefix (f : FnDef) : YBlock :=
+  if locks f then [lockSetStmt] else []
 
 /-- Canonical constructor from `YulSemantics.EVM.constructorCode`. Nested `dataoffset` /
 `datasize` are required by powdr's object layout. -/
@@ -385,6 +419,9 @@ def emitCustomError (c : ContractDef) (e : Emit) (err : Nat) (args : List YExpr)
   let (e, _) := args.foldl (fun (e, i) a =>
     (emitDo e YulSemantics.EVM.Op.mstore [lit (abiAfterSel + 32 * i), a], i + 1)) (e, 0)
   emitDo e YulSemantics.EVM.Op.revert [lit abiPtr, lit (4 + 32 * args.length)]
+
+def emitLockClear (e : Emit) : Emit :=
+  e.push lockClearStmt
 
 def emitReturnWords (e : Emit) (xs : List YExpr) : Emit :=
   match xs with
@@ -634,33 +671,40 @@ def emitStmt (tag : String) (c : ContractDef) (e : Emit) (depth : Nat) : Lsc.Stm
   | .view t sel args ret =>
     emitExtCall tag e depth t sel args ret true none
 
-def emitRet (tag : String) (e : Emit) (depth : Nat) (haltUnit : Bool) : {t : RetTy} → RetExpr t → Emit
-  | _, .unit => emitReturnUnit e haltUnit
-  | _, r => emitReturnWords e ((retAtoms r).map (atomE tag depth))
+def emitRet (tag : String) (e : Emit) (depth : Nat) (haltUnit : Bool)
+    {t : RetTy} (r : RetExpr t) (clearLock : Bool := false) : Emit :=
+  let e := if clearLock then emitLockClear e else e
+  match r with
+  | .unit => emitReturnUnit e haltUnit
+  | _ => emitReturnWords e ((retAtoms r).map (atomE tag depth))
 
-def emitCore (tag : String) (c : ContractDef) (e : Emit) (depth : Nat) (haltUnit : Bool) :
-    {t : RetTy} → Core t → Option Emit
-  | _, .ret r => some (emitRet tag e depth haltUnit r)
-  | _, .opTail op => do
+def emitCore (tag : String) (c : ContractDef) (e : Emit) (depth : Nat) (haltUnit : Bool)
+    {t : RetTy} (core : Core t) (clearLock : Bool := false) : Option Emit :=
+  match core with
+  | .ret r => some (emitRet tag e depth haltUnit r clearLock)
+  | .opTail op => do
       let e ← emitLetOp tag c e depth op
-      some (emitRet tag e (depth + 1) haltUnit (.word (.var 0)))
-  | _, .opTailAddr op => do
+      some (emitRet tag e (depth + 1) haltUnit (.word (.var 0)) clearLock)
+  | .opTailAddr op => do
       let e ← emitLetOp tag c e depth op
-      some (emitRet tag e (depth + 1) haltUnit (.addr (.var 0)))
-  | _, .opTailFlag op => do
+      some (emitRet tag e (depth + 1) haltUnit (.addr (.var 0)) clearLock)
+  | .opTailFlag op => do
       let e ← emitLetOp tag c e depth op
-      some (emitRet tag e (depth + 1) haltUnit (.flag (.var 0)))
-  | _, .stmtTail s => some (emitReturnUnit (emitStmt tag c e depth s) haltUnit)
-  | _, .revertTail err args => some (emitCustomError c e err (args.map (atomE tag depth)))
-  | _, .letOp op k => do
+      some (emitRet tag e (depth + 1) haltUnit (.flag (.var 0)) clearLock)
+  | .stmtTail s =>
+      let e := emitStmt tag c e depth s
+      some (emitReturnUnit (if clearLock then emitLockClear e else e) haltUnit)
+  | .revertTail err args => some (emitCustomError c e err (args.map (atomE tag depth)))
+  | .letOp op k => do
       let e ← emitLetOp tag c e depth op
-      emitCore tag c e (depth + 1) haltUnit k
-  | _, .seq s k => emitCore tag c (emitStmt tag c e depth s) depth haltUnit k
-  | _, .letPure p args k =>
-      emitCore tag c (emitLet e (identV tag depth) (emitPrim tag depth p args)) (depth + 1) haltUnit k
-  | _, .ite cond a b => do
-      let eA ← emitCore tag c {} depth haltUnit a
-      let eB ← emitCore tag c {} depth haltUnit b
+      emitCore tag c e (depth + 1) haltUnit k clearLock
+  | .seq s k => emitCore tag c (emitStmt tag c e depth s) depth haltUnit k clearLock
+  | .letPure p args k =>
+      emitCore tag c (emitLet e (identV tag depth) (emitPrim tag depth p args))
+        (depth + 1) haltUnit k clearLock
+  | .ite cond a b => do
+      let eA ← emitCore tag c {} depth haltUnit a clearLock
+      let eB ← emitCore tag c {} depth haltUnit b clearLock
       some (e.push (.switch (emitCond tag depth cond)
         [(YulSemantics.Literal.number 0, eB.stmts)] (some eA.stmts)))
 
@@ -677,7 +721,7 @@ def toYulFn (c : ContractDef) (f : FnDef) : Option YBlock :=
     let offset := if f.kind = .constructor then 0 else 4
     let haltUnit := f.kind ≠ .constructor
     let e := emitParams f.name {} offset f.params.length
-    (emitCore f.name c e f.params.length haltUnit f.core).map Emit.stmts
+    (emitCore f.name c e f.params.length haltUnit f.core (locks f)).map Emit.stmts
 
 /-- Compile a constructor: args from the init-code suffix (`emitCtorParams`), unit
 `ret` falls through (no `stop()`), so `deployObject` can append `constructorCode`. -/
@@ -689,14 +733,14 @@ def toYulCtor (c : ContractDef) (f : FnDef) : Option YBlock :=
       f.params.length false f.core).map
       Emit.stmts
 
-/-- `if lt(calldatasize(), 4+32n) { revert(0,0) }` then the function body, as two blocks
-inside the selector `switch` case. -/
+/-- `if lt(calldatasize(), 4+32n) { revert(0,0) }`, then `tstore(0,1)` when
+`locks f`, then the function body. Non-locking cases stay two blocks. -/
 def entryCase (c : ContractDef) (f : FnDef) : Option (YulSemantics.Literal × YBlock) := do
   let body ← toYulFn c f
   let min := 4 + 32 * f.params.length
   let guard := (emitGuardLt {} min).stmts
   some (YulSemantics.Literal.number f.selector,
-    [YulSemantics.Stmt.block guard, YulSemantics.Stmt.block body])
+    YulSemantics.Stmt.block guard :: lockSetPrefix f ++ [YulSemantics.Stmt.block body])
 
 /-- Discarded `memoryguard(k)` marker (`if memoryguard(k) {}`). powdr collects
 any `.call "memoryguard" [lit k]`; the dialect has no `pop`, and a truthiness
@@ -712,7 +756,8 @@ def memoryGuardErased : YStmt :=
 /-- Dispatcher + every non-constructor function. Size-check is its own block; the
 selector is a nested expression so it does not occupy a live stack slot in the cases.
 The leading `memoryguard` is a compile-time marker for powdr spilling; Core→Yul
-(`toYulFn`) does not emit it. -/
+(`toYulFn`) does not emit it. The lock check sits after the marker and before the
+calldata-size guard so every selector, including `default`, sees it. -/
 def runtimeBlock (c : ContractDef) : Option YBlock :=
   if !selectorsNodup c then none
   else do
@@ -721,6 +766,7 @@ def runtimeBlock (c : ContractDef) : Option YBlock :=
     let sel := bop YulSemantics.EVM.Op.shr
       [lit 224, bop YulSemantics.EVM.Op.calldataload [lit 0]]
     some (memoryGuardStmt ::
+      lockCheckStmt ::
       [YulSemantics.Stmt.block guard,
         YulSemantics.Stmt.switch sel cases (some [revert00])])
 

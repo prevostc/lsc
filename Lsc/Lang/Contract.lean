@@ -16,7 +16,7 @@ the assembly command rather than derived.
 
 namespace Lsc
 
-/-- ABI types the surface can expose. `Nat`/`Amount τ s` are `uint256`, `Address` is
+/-- ABI types the surface can expose. `Nat`/`Amount a` are `uint256`, `Address` is
 `address`, `Flag` is `bool`. -/
 inductive AbiTy
   | uint256

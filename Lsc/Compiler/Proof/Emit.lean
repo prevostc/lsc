@@ -267,49 +267,182 @@ theorem emitStmt_acc (c : ContractDef) (e : Emit) (d : Nat) (s : Lsc.Stmt) :
   | view t sel args ret =>
     simp only [emitStmt]; exact emitExtCall_acc tag e _ t sel args ret true none
 
-theorem emitRet_acc tag (e : Emit) (d : Nat) (halt : Bool) {t} (r : RetExpr t) :
-    emitRet tag e d halt r = { acc := (emitRet tag {} d halt r).acc ++ e.acc } := by
+theorem emitLockClear_acc (e : Emit) :
+    emitLockClear e = { acc := lockClearStmt :: e.acc } := rfl
+
+theorem emitLockClear_stmts (e : Emit) :
+    (emitLockClear e).stmts = e.stmts ++ [lockClearStmt] :=
+  Emit.stmts_push e lockClearStmt
+
+/-- Unit halt with optional lock-clear, grouped so `append_inv` peels the body. -/
+theorem emitReturnUnit_lock_if (e : Emit) (clearLock : Bool) :
+    (emitReturnUnit (if clearLock then emitLockClear e else e) true).stmts =
+      e.stmts ++ ((if clearLock then [lockClearStmt] else []) ++ [stopStmt]) := by
+  cases clearLock with
+  | false => simp [emitReturnUnit_true]
+  | true => simp [emitLockClear_stmts, emitReturnUnit_true]
+
+theorem emitRet_acc_unlocked tag (e : Emit) (d : Nat) (halt : Bool)
+    {t} (r : RetExpr t) :
+    emitRet tag e d halt r false =
+      { acc := (emitRet tag {} d halt r false).acc ++ e.acc } := by
   cases r with
   | unit => simp only [emitRet]; exact emitReturnUnit_acc _ _
   | word _ | addr _ | flag _ | pair _ _ => simp only [emitRet]; exact emitReturnWords_acc _ _
+
+theorem emitRet_lock_eq tag (e : Emit) (d : Nat) (halt : Bool)
+    {t} (r : RetExpr t) :
+    emitRet tag e d halt r true = emitRet tag (emitLockClear e) d halt r false := rfl
+
+theorem emitRet_acc tag (e : Emit) (d : Nat) (halt : Bool)
+    {t} (r : RetExpr t) (clearLock : Bool := false) :
+    emitRet tag e d halt r clearLock =
+      { acc := (emitRet tag {} d halt r clearLock).acc ++ e.acc } := by
+  cases clearLock with
+  | false => exact emitRet_acc_unlocked tag e d halt r
+  | true =>
+    rw [emitRet_lock_eq, emitRet_lock_eq tag {} d halt r]
+    rw [emitRet_acc_unlocked tag (emitLockClear e) d halt r]
+    rw [emitRet_acc_unlocked tag (emitLockClear {}) d halt r]
+    simp [emitLockClear_acc, List.append_assoc]
 
 theorem emitRet_word_stmts (e : Emit) (d : Nat) (halt : Bool) (a : Atom) :
     (emitRet tag e d halt (.word a)).stmts =
       e.stmts ++ (emitReturnWords {} [atomE tag d a]).stmts := by
   rw [emitRet_acc tag e d halt (.word a), Emit.cat_stmts]
-  simp only [emitRet, retAtoms, List.map_cons, List.map_nil]
+  simp [emitRet, retAtoms, List.map_cons, List.map_nil]
 
 theorem emitRet_addr_stmts (e : Emit) (d : Nat) (halt : Bool) (a : Atom) :
     (emitRet tag e d halt (.addr a)).stmts =
       e.stmts ++ (emitReturnWords {} [atomE tag d a]).stmts := by
   rw [emitRet_acc tag e d halt (.addr a), Emit.cat_stmts]
-  simp only [emitRet, retAtoms, List.map_cons, List.map_nil]
+  simp [emitRet, retAtoms, List.map_cons, List.map_nil]
 
 theorem emitRet_flag_stmts (e : Emit) (d : Nat) (halt : Bool) (a : Atom) :
     (emitRet tag e d halt (.flag a)).stmts =
       e.stmts ++ (emitReturnWords {} [atomE tag d a]).stmts := by
   rw [emitRet_acc tag e d halt (.flag a), Emit.cat_stmts]
-  simp only [emitRet, retAtoms, List.map_cons, List.map_nil]
+  simp [emitRet, retAtoms, List.map_cons, List.map_nil]
 
-theorem emitCore_acc tag {c : ContractDef} {halt : Bool} {t : RetTy} :
+private theorem emitReturnWords_lockClear_stmts (xs : List YExpr) :
+    (emitReturnWords (emitLockClear {}) xs).stmts =
+      [lockClearStmt] ++ (emitReturnWords {} xs).stmts := by
+  have h := congrArg Emit.stmts (emitReturnWords_acc (emitLockClear {}) xs)
+  simpa [Emit.cat_stmts, emitLockClear_stmts, Emit.stmts_nil] using h
+
+theorem emitRet_word_stmts_lock (e : Emit) (d : Nat) (halt : Bool) (a : Atom) :
+    (emitRet tag e d halt (.word a) true).stmts =
+      e.stmts ++ [lockClearStmt] ++ (emitReturnWords {} [atomE tag d a]).stmts := by
+  rw [emitRet_acc tag e d halt (.word a) true, Emit.cat_stmts]
+  simp [emitRet, emitReturnWords_lockClear_stmts, retAtoms, List.map_cons, List.map_nil,
+    List.append_assoc]
+
+theorem emitRet_addr_stmts_lock (e : Emit) (d : Nat) (halt : Bool) (a : Atom) :
+    (emitRet tag e d halt (.addr a) true).stmts =
+      e.stmts ++ [lockClearStmt] ++ (emitReturnWords {} [atomE tag d a]).stmts := by
+  rw [emitRet_acc tag e d halt (.addr a) true, Emit.cat_stmts]
+  simp [emitRet, emitReturnWords_lockClear_stmts, retAtoms, List.map_cons, List.map_nil,
+    List.append_assoc]
+
+theorem emitRet_flag_stmts_lock (e : Emit) (d : Nat) (halt : Bool) (a : Atom) :
+    (emitRet tag e d halt (.flag a) true).stmts =
+      e.stmts ++ [lockClearStmt] ++ (emitReturnWords {} [atomE tag d a]).stmts := by
+  rw [emitRet_acc tag e d halt (.flag a) true, Emit.cat_stmts]
+  simp [emitRet, emitReturnWords_lockClear_stmts, retAtoms, List.map_cons, List.map_nil,
+    List.append_assoc]
+
+theorem emitRet_word_stmts_if (e : Emit) (d : Nat) (halt : Bool) (a : Atom)
+    (clearLock : Bool) :
+    (emitRet tag e d halt (.word a) clearLock).stmts =
+      e.stmts ++ ((if clearLock then [lockClearStmt] else []) ++
+        (emitReturnWords {} [atomE tag d a]).stmts) := by
+  cases clearLock with
+  | false =>
+    simpa using emitRet_word_stmts tag e d halt a
+  | true =>
+    have h := emitRet_word_stmts_lock tag e d halt a
+    simpa [List.append_assoc] using h
+
+theorem emitRet_addr_stmts_if (e : Emit) (d : Nat) (halt : Bool) (a : Atom)
+    (clearLock : Bool) :
+    (emitRet tag e d halt (.addr a) clearLock).stmts =
+      e.stmts ++ ((if clearLock then [lockClearStmt] else []) ++
+        (emitReturnWords {} [atomE tag d a]).stmts) := by
+  cases clearLock with
+  | false =>
+    simpa using emitRet_addr_stmts tag e d halt a
+  | true =>
+    have h := emitRet_addr_stmts_lock tag e d halt a
+    simpa [List.append_assoc] using h
+
+theorem emitRet_flag_stmts_if (e : Emit) (d : Nat) (halt : Bool) (a : Atom)
+    (clearLock : Bool) :
+    (emitRet tag e d halt (.flag a) clearLock).stmts =
+      e.stmts ++ ((if clearLock then [lockClearStmt] else []) ++
+        (emitReturnWords {} [atomE tag d a]).stmts) := by
+  cases clearLock with
+  | false =>
+    simpa using emitRet_flag_stmts tag e d halt a
+  | true =>
+    have h := emitRet_flag_stmts_lock tag e d halt a
+    simpa [List.append_assoc] using h
+
+theorem emitRet_pair_ww_stmts (e : Emit) (d : Nat) (halt : Bool) (a b : Atom) :
+    (emitRet tag e d halt (.pair (.word a) (.word b))).stmts =
+      e.stmts ++ (emitReturnWords {} [atomE tag d a, atomE tag d b]).stmts := by
+  rw [emitRet_acc tag e d halt (.pair (.word a) (.word b)), Emit.cat_stmts]
+  simp [emitRet, retAtoms, List.map_cons, List.map_nil]
+
+theorem emitRet_pair_ww_stmts_lock (e : Emit) (d : Nat) (halt : Bool) (a b : Atom) :
+    (emitRet tag e d halt (.pair (.word a) (.word b)) true).stmts =
+      e.stmts ++ [lockClearStmt] ++
+        (emitReturnWords {} [atomE tag d a, atomE tag d b]).stmts := by
+  rw [emitRet_acc tag e d halt (.pair (.word a) (.word b)) true, Emit.cat_stmts]
+  simp [emitRet, emitReturnWords_lockClear_stmts, retAtoms, List.map_cons, List.map_nil,
+    List.append_assoc]
+
+theorem emitRet_pair_ww_stmts_if (e : Emit) (d : Nat) (halt : Bool) (a b : Atom)
+    (clearLock : Bool) :
+    (emitRet tag e d halt (.pair (.word a) (.word b)) clearLock).stmts =
+      e.stmts ++ ((if clearLock then [lockClearStmt] else []) ++
+        (emitReturnWords {} [atomE tag d a, atomE tag d b]).stmts) := by
+  cases clearLock with
+  | false =>
+    simpa using emitRet_pair_ww_stmts tag e d halt a b
+  | true =>
+    have h := emitRet_pair_ww_stmts_lock tag e d halt a b
+    simpa [List.append_assoc] using h
+
+theorem emitCore_acc tag {c : ContractDef} {halt : Bool} {clearLock : Bool} {t : RetTy} :
     ∀ (core : Core t) (e : Emit) (d : Nat),
-      emitCore tag c e d halt core = (emitCore tag c {} d halt core).map fun e0 =>
-        { acc := e0.acc ++ e.acc } := by
+      emitCore tag c e d halt core clearLock =
+        (emitCore tag c {} d halt core clearLock).map fun e0 =>
+          { acc := e0.acc ++ e.acc } := by
   intro core
   induction core with
-  | ret r => intro e d; simp only [emitCore]; rw [emitRet_acc]; rfl
+  | ret r => intro e d; simp only [emitCore]; rw [emitRet_acc tag e d halt r clearLock]; rfl
   | opTail op | opTailAddr op | opTailFlag op =>
     intro e d
     simp only [emitCore]
     rw [emitLetOp_acc]
     cases emitLetOp tag c {} d op with
     | none => simp
-    | some e0 => simp only [Option.map_some, Bind.bind, Option.bind]; rw [emitRet_acc]; rfl
+    | some e0 =>
+      simp only [Option.map_some, Bind.bind, Option.bind]
+      rw [emitRet_acc tag { acc := e0.acc ++ e.acc } (d + 1) halt _ clearLock]
+      rw [emitRet_acc tag e0 (d + 1) halt _ clearLock]
+      simp [List.append_assoc]
   | stmtTail s =>
     intro e d
     simp only [emitCore, Option.map_some]
-    rw [emitStmt_acc, emitReturnUnit_acc, emitReturnUnit_acc (emitStmt tag c {} d s)]
-    simp [List.append_assoc]
+    split_ifs with hcl
+    · rw [emitStmt_acc]
+      rw [emitLockClear_acc, emitLockClear_acc (emitStmt tag c {} d s)]
+      rw [emitReturnUnit_acc, emitReturnUnit_acc
+        { acc := lockClearStmt :: (emitStmt tag c {} d s).acc }]
+      simp [List.append_assoc]
+    · rw [emitStmt_acc, emitReturnUnit_acc, emitReturnUnit_acc (emitStmt tag c {} d s)]
+      simp [List.append_assoc]
   | revertTail err args =>
     intro e d; simp only [emitCore, Option.map_some]; exact congrArg some (emitCustomError_acc _ _ _ _)
   | letOp op k ih =>
@@ -321,7 +454,7 @@ theorem emitCore_acc tag {c : ContractDef} {halt : Bool} {t : RetTy} :
     | some e0 =>
       simp only [Option.map_some, Bind.bind, Option.bind]
       rw [ih { acc := e0.acc ++ e.acc } (d + 1), ih e0 (d + 1)]
-      cases emitCore tag c {} (d + 1) halt k with
+      cases emitCore tag c {} (d + 1) halt k clearLock with
       | none => simp
       | some _ => simp [List.append_assoc]
   | seq s k ih =>
@@ -329,7 +462,7 @@ theorem emitCore_acc tag {c : ContractDef} {halt : Bool} {t : RetTy} :
     simp only [emitCore]
     rw [emitStmt_acc]
     rw [ih { acc := (emitStmt tag c {} d s).acc ++ e.acc } d, ih (emitStmt tag c {} d s) d]
-    cases emitCore tag c {} d halt k with
+    cases emitCore tag c {} d halt k clearLock with
     | none => simp
     | some _ => simp [List.append_assoc]
   | letPure p args k ih =>
@@ -338,32 +471,34 @@ theorem emitCore_acc tag {c : ContractDef} {halt : Bool} {t : RetTy} :
     rw [emitLet_acc]
     rw [ih { acc := (emitLet {} (identV tag d) (emitPrim tag d p args)).acc ++ e.acc } (d + 1),
       ih (emitLet {} (identV tag d) (emitPrim tag d p args)) (d + 1)]
-    cases emitCore tag c {} (d + 1) halt k with
+    cases emitCore tag c {} (d + 1) halt k clearLock with
     | none => simp
     | some _ => simp [List.append_assoc]
   | ite cond a b =>
     intro e d
     simp only [emitCore]
-    cases emitCore tag c {} d halt a with
+    cases emitCore tag c {} d halt a clearLock with
     | none => simp
     | some _ =>
-      cases emitCore tag c {} d halt b with
+      cases emitCore tag c {} d halt b clearLock with
       | none => simp
       | some _ => simp [Emit.push]
 
-theorem emitCore_prefix {c halt t} {core : Core t}
-    {e e' : Emit} {d : Nat} (hem : emitCore tag c e d halt core = some e') :
-    ∃ e0, emitCore tag c {} d halt core = some e0 ∧ e'.stmts = e.stmts ++ e0.stmts := by
-  have h := emitCore_acc tag (c := c) (halt := halt) core e d
+theorem emitCore_prefix {c halt clearLock t} {core : Core t}
+    {e e' : Emit} {d : Nat} (hem : emitCore tag c e d halt core clearLock = some e') :
+    ∃ e0, emitCore tag c {} d halt core clearLock = some e0 ∧
+      e'.stmts = e.stmts ++ e0.stmts := by
+  have h := emitCore_acc tag (c := c) (halt := halt) (clearLock := clearLock) core e d
   rw [h] at hem
-  cases h0 : emitCore tag c {} d halt core with
+  cases h0 : emitCore tag c {} d halt core clearLock with
   | none => simp [h0] at hem
   | some e0 =>
     simp [h0] at hem
     exact ⟨e0, rfl, by cases hem; exact Emit.cat_stmts e e0⟩
 
-theorem emitCore_some tag {c halt t} (core : Core t) (e : Emit) (d : Nat) :
-    ∃ e', emitCore tag c e d halt core = some e' := by
+theorem emitCore_some tag {c halt t} (core : Core t) (e : Emit) (d : Nat)
+    (clearLock : Bool := false) :
+    ∃ e', emitCore tag c e d halt core clearLock = some e' := by
   induction core generalizing e d with
   | ret _ => simp [emitCore]
   | opTail op | opTailAddr op | opTailFlag op =>
@@ -389,7 +524,9 @@ theorem emitCore_some tag {c halt t} (core : Core t) (e : Emit) (d : Nat) :
 @[simp] theorem notFunDef_switch {c cases d} : notFunDef (.switch c cases d) = true := rfl
 @[simp] theorem notFunDef_assign {xs e} : notFunDef (.assign xs e) = true := rfl
 @[simp] theorem notFunDef_block {b} : notFunDef (.block b) = true := rfl
-@[simp] theorem notFunDef_stop : notFunDef stopStmt = true := rfl
+@[simp] theorem notFunDef_lockClear : notFunDef lockClearStmt = true := rfl
+@[simp] theorem notFunDef_lockSet : notFunDef lockSetStmt = true := rfl
+@[simp] theorem notFunDef_lockCheck : notFunDef lockCheckStmt = true := rfl
 
 def Emit.noFun (e : Emit) : Prop := ∀ s ∈ e.acc, notFunDef s = true
 
@@ -407,6 +544,9 @@ theorem noFun_push {e : Emit} {s : YStmt} (he : e.noFun) (hs : notFunDef s = tru
   rcases ht with rfl | ht
   · exact hs
   · exact he t ht
+
+theorem noFun_lockClear {e : Emit} (he : e.noFun) : (emitLockClear e).noFun :=
+  noFun_push he rfl
 
 theorem noFun_do {e op args} (he : e.noFun) : (emitDo e op args).noFun := noFun_push he rfl
 theorem noFun_let {e n x} (he : e.noFun) : (emitLet e n x).noFun := noFun_push he rfl
@@ -542,32 +682,44 @@ theorem noFun_stmt tag (c : ContractDef) (e : Emit) (d : Nat) (s : Lsc.Stmt) (he
   | view t sel args ret =>
     simp only [emitStmt]; exact noFun_extCall tag e _ t sel args ret true none he
 
-theorem noFun_ret tag (e : Emit) (d : Nat) (halt : Bool) {t} (r : RetExpr t) (he : e.noFun) :
-    (emitRet tag e d halt r).noFun := by
-  cases r with
-  | unit =>
-    cases halt with
-    | false => simpa [emitRet, emitReturnUnit] using he
-    | true => simp only [emitRet, emitReturnUnit]; exact noFun_push he rfl
-  | word _ | addr _ | flag _ | pair _ _ => simp only [emitRet]; exact noFun_returnWords _ _ he
+theorem noFun_ret tag (e : Emit) (d : Nat) (halt : Bool)
+    {t} (r : RetExpr t) (clearLock : Bool := false) (he : e.noFun) :
+    (emitRet tag e d halt r clearLock).noFun := by
+  cases clearLock with
+  | false =>
+    cases r with
+    | unit =>
+      cases halt with
+      | false => simpa [emitRet, emitReturnUnit] using he
+      | true => simp only [emitRet, emitReturnUnit]; exact noFun_push he rfl
+    | word _ | addr _ | flag _ | pair _ _ => simp only [emitRet]; exact noFun_returnWords _ _ he
+  | true =>
+    cases r with
+    | unit =>
+      cases halt with
+      | false => simpa [emitRet, emitReturnUnit] using noFun_lockClear he
+      | true => simp only [emitRet, emitReturnUnit]; exact noFun_push (noFun_lockClear he) rfl
+    | word _ | addr _ | flag _ | pair _ _ =>
+      simp only [emitRet]; exact noFun_returnWords _ _ (noFun_lockClear he)
 
-theorem noFun_core tag {c halt t} :
+theorem noFun_core tag {c halt clearLock t} :
     ∀ (core : Core t) (e : Emit) (d : Nat) {e' : Emit},
-      emitCore tag c e d halt core = some e' → e.noFun → e'.noFun := by
+      emitCore tag c e d halt core clearLock = some e' → e.noFun → e'.noFun := by
   intro core
   induction core with
   | ret r =>
-    intro e d e' hem he; simp [emitCore] at hem; cases hem; exact noFun_ret tag e d halt r he
+    intro e d e' hem he; simp [emitCore] at hem; cases hem; exact noFun_ret tag e d halt r clearLock he
   | opTail op | opTailAddr op | opTailFlag op =>
     intro e d e' hem he
     simp [emitCore] at hem
     obtain ⟨e1, h1⟩ := emitLetOp_some tag c e d op
     simp [h1] at hem; cases hem
-    exact noFun_ret tag e1 (d + 1) halt _ (noFun_letOp tag c e d op he h1)
+    exact noFun_ret tag e1 (d + 1) halt _ clearLock (noFun_letOp tag c e d op he h1)
   | stmtTail s =>
     intro e d e' hem he
     simp [emitCore] at hem; cases hem
-    exact noFun_ret tag _ d halt .unit (noFun_stmt tag c e d s he)
+    exact noFun_ret tag (emitStmt tag c e d s) d halt .unit clearLock
+      (noFun_stmt tag c e d s he)
   | revertTail err args =>
     intro e d e' hem he
     simp [emitCore] at hem; cases hem
@@ -589,13 +741,15 @@ theorem noFun_core tag {c halt t} :
   | ite cond a b =>
     intro e d e' hem he
     simp [emitCore] at hem
-    obtain ⟨eA, hA⟩ := emitCore_some tag (c := c) (halt := halt) a ({} : Emit) d
-    obtain ⟨eB, hB⟩ := emitCore_some tag (c := c) (halt := halt) b ({} : Emit) d
+    obtain ⟨eA, hA⟩ := emitCore_some tag (c := c) (halt := halt) (clearLock := clearLock)
+      a ({} : Emit) d
+    obtain ⟨eB, hB⟩ := emitCore_some tag (c := c) (halt := halt) (clearLock := clearLock)
+      b ({} : Emit) d
     simp [hA, hB] at hem; cases hem
     exact noFun_push he rfl
 
-theorem hoist_emitCore tag {c halt t} {core : Core t} {e' d}
-    (hem : emitCore tag c {} d halt core = some e') :
+theorem hoist_emitCore tag {c halt clearLock t} {core : Core t} {e' d}
+    (hem : emitCore tag c {} d halt core clearLock = some e') :
     hoist evm e'.stmts = [] :=
   hoist_nil_of (Emit.noFun_stmts (noFun_core tag core {} d hem noFun_nil))
 
@@ -708,9 +862,31 @@ theorem noExt_keccak064 : noExtExpr keccak064 = true :=
 theorem noExt_stop : noExtStmt stopStmt = true :=
   noExt_bop (op := YulSemantics.EVM.Op.stop) rfl noExtExprs_nil
 
+theorem noExt_lockClearStmt : noExtStmt lockClearStmt = true :=
+  noExt_bop (op := YulSemantics.EVM.Op.tstore) rfl
+    (noExtExprs_cons_true (noExt_lit _) (noExtExprs_cons_true (noExt_lit _) noExtExprs_nil))
+
+theorem noExt_maybeLock (clearLock : Bool) :
+    noExtBlock (if clearLock then [lockClearStmt] else []) = true := by
+  cases clearLock <;> simp [noExtBlock, noExtStmts, noExt_lockClearStmt]
+
+theorem noExt_lockSetStmt : noExtStmt lockSetStmt = true :=
+  noExt_bop (op := YulSemantics.EVM.Op.tstore) rfl
+    (noExtExprs_cons_true (noExt_lit _) (noExtExprs_cons_true (noExt_lit _) noExtExprs_nil))
+
 theorem noExt_revert00 : noExtStmt revert00 = true :=
   noExt_bop (op := YulSemantics.EVM.Op.revert) rfl
     (noExtExprs_cons_true (noExt_lit _) (noExtExprs_cons_true (noExt_lit _) noExtExprs_nil))
+
+theorem noExt_lockCheckStmt : noExtStmt lockCheckStmt = true := by
+  unfold lockCheckStmt noExtStmt
+  rw [noExt_bop (op := YulSemantics.EVM.Op.tload) rfl
+    (noExtExprs_cons_true (noExt_lit _) noExtExprs_nil)]
+  simp [noExtStmts, noExt_revert00]
+
+theorem noExt_lockClear (e : Emit) (he : noExtBlock e.stmts = true) :
+    noExtBlock (emitLockClear e).stmts = true :=
+  noExt_push he noExt_lockClearStmt
 
 theorem noExt_switch {e : Emit} {cnd : YExpr} {cases : List (YulSemantics.Literal × YBlock)}
     {dflt : Option YBlock}
@@ -989,16 +1165,29 @@ theorem noExt_atomEs tag (d : Nat) (as : List Atom) :
   obtain ⟨a, _, rfl⟩ := List.mem_map.mp hx
   exact noExt_atomE tag d a
 
-theorem noExt_ret (e : Emit) (d : Nat) (halt : Bool) {t} (r : RetExpr t)
-    (he : noExtBlock e.stmts = true) :
-    noExtBlock (emitRet tag e d halt r).stmts = true := by
-  cases r with
-  | unit => simp only [emitRet]; exact noExt_returnUnit e halt he
-  | word a | addr a | flag a =>
-    simp only [emitRet]
-    exact noExt_returnWords e _ he (noExt_atomEs tag d _)
-  | pair a b =>
-    simp only [emitRet]
-    exact noExt_returnWords e _ he (noExt_atomEs tag d _)
+theorem noExt_ret (e : Emit) (d : Nat) (halt : Bool)
+    {t} (r : RetExpr t)
+    (he : noExtBlock e.stmts = true)
+    (clearLock : Bool := false) :
+    noExtBlock (emitRet tag e d halt r clearLock).stmts = true := by
+  cases clearLock with
+  | false =>
+    cases r with
+    | unit => simp only [emitRet]; exact noExt_returnUnit e halt he
+    | word a | addr a | flag a =>
+      simp only [emitRet]
+      exact noExt_returnWords e _ he (noExt_atomEs tag d _)
+    | pair a b =>
+      simp only [emitRet]
+      exact noExt_returnWords e _ he (noExt_atomEs tag d _)
+  | true =>
+    cases r with
+    | unit => simp only [emitRet]; exact noExt_returnUnit _ halt (noExt_lockClear e he)
+    | word a | addr a | flag a =>
+      simp only [emitRet]
+      exact noExt_returnWords _ _ (noExt_lockClear e he) (noExt_atomEs tag d _)
+    | pair a b =>
+      simp only [emitRet]
+      exact noExt_returnWords _ _ (noExt_lockClear e he) (noExt_atomEs tag d _)
 
 end Lsc.Compiler

@@ -303,27 +303,27 @@ theorem noExt_stmt_m1 {c : ContractDef} {e : Emit} {d : Nat} {s : Lsc.Stmt}
       exact noExt_customError c e err [] he (fun _ hx => by cases hx)
   | call _ _ _ _ | view _ _ _ _ => exact (show False from hM1).elim
 
-theorem noExt_core_callFree {c halt t} {core : Core t} (hM1 : CallFree core) :
+theorem noExt_core_callFree {c halt clearLock t} {core : Core t} (hM1 : CallFree core) :
     ∀ (e : Emit) (d : Nat) {e' : Emit},
-      emitCore tag c e d halt core = some e' →
+      emitCore tag c e d halt core clearLock = some e' →
       noExtBlock e.stmts = true → noExtBlock e'.stmts = true := by
   revert hM1
   induction core with
   | ret r =>
     intro hM1 e d e' hem he
     simp [emitCore] at hem; cases hem
-    exact noExt_ret tag e d halt r he
+    exact noExt_ret tag e d halt r he clearLock
   | opTail op | opTailAddr op | opTailFlag op =>
     intro hM1 e d e' hem he
     simp [emitCore] at hem
     obtain ⟨e1, h1⟩ := emitLetOp_some tag c e d op
     simp [h1] at hem; cases hem
     have hop : M1Op op := by simpa [CallFree, M1Frag] using hM1
-    exact noExt_ret tag e1 (d + 1) halt _ (noExt_letOp_m1 tag hop he h1)
+    exact noExt_ret tag e1 (d + 1) halt _ (noExt_letOp_m1 tag hop he h1) clearLock
   | stmtTail s =>
     intro hM1 e d e' hem he
     simp [emitCore] at hem; cases hem
-    exact noExt_ret tag _ d halt .unit (noExt_stmt_m1 tag (by simpa [CallFree, M1Frag] using hM1) he)
+    exact noExt_ret tag _ d halt .unit (noExt_stmt_m1 tag (by simpa [CallFree, M1Frag] using hM1) he) clearLock
   | revertTail err args =>
     intro hM1 e d e' hem he
     have hnil : args.length = 0 := by simpa [CallFree, M1Frag] using hM1
@@ -353,8 +353,10 @@ theorem noExt_core_callFree {c halt t} {core : Core t} (hM1 : CallFree core) :
     intro hM1 e d e' hem he
     have ⟨_, ha, hb⟩ := m1frag_ite.mp hM1
     simp [emitCore] at hem
-    obtain ⟨eA, hA⟩ := emitCore_some tag (c := c) (halt := halt) a ({} : Emit) d
-    obtain ⟨eB, hB⟩ := emitCore_some tag (c := c) (halt := halt) b ({} : Emit) d
+    obtain ⟨eA, hA⟩ := emitCore_some tag (c := c) (halt := halt) (clearLock := clearLock)
+      a ({} : Emit) d
+    obtain ⟨eB, hB⟩ := emitCore_some tag (c := c) (halt := halt) (clearLock := clearLock)
+      b ({} : Emit) d
     simp [hA, hB] at hem; cases hem
     exact noExt_switch he (noExt_emitCond tag d cond)
       (by
@@ -683,5 +685,15 @@ theorem ExtAgree_tstore {self : Address} {x : Lsc.ExtState} {st : EvmState}
   congr
   ext a k
   by_cases hkey : accountKey a = accountKey (BitVec.ofNat 256 self) <;> simp [hkey, updAccount]
+
+theorem ExtAgree_stAfterLockClear {self : Address} {x : Lsc.ExtState} {st : EvmState}
+    (clearLock : Bool)
+    (h : ExtAgree self x st)
+    (haddr : st.env.address = BitVec.ofNat 256 self) :
+    ExtAgree self x (stAfterLockClear clearLock st) := by
+  cases clearLock with
+  | false => simpa [stAfterLockClear] using h
+  | true =>
+    simpa [stAfterLockClear, stTstore] using ExtAgree_tstore h haddr
 
 end Lsc.Compiler

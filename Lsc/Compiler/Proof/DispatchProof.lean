@@ -70,8 +70,21 @@ theorem hoist_revert00 : hoist evm [revert00] = [] := by simp [hoist, revert00]
 theorem hoist_guardLt (n : Nat) : hoist evm (emitGuardLt {} n).stmts = [] := by
   simp [emitGuardLt_stmts, hoist]
 
-theorem hoist_two_blocks (a b : YBlock) :
-    hoist evm [.block a, .block b] = [] := by simp [hoist]
+theorem hoist_lockSetPrefix (f : FnDef) : hoist evm (lockSetPrefix f) = [] := by
+  cases hlocks : locks f
+  · simp [lockSetPrefix, hlocks, hoist]
+  · simp [lockSetPrefix, hlocks, hoist, lockSetStmt]
+
+theorem hoist_entryCaseBody (f : FnDef) (guard body : YBlock) :
+    hoist evm
+      (YulSemantics.Stmt.block guard ::
+        lockSetPrefix f ++ [YulSemantics.Stmt.block body]) = [] := by
+  cases hlocks : locks f
+  · simp [lockSetPrefix, hlocks, hoist]
+  · simp [lockSetPrefix, hlocks, hoist, lockSetStmt]
+
+theorem hoist_two_blocks (g b : YBlock) :
+    hoist evm [.block g, .block b] = [] := by simp [hoist]
 
 theorem hoist_runtime (guard : YBlock) (sel : YExpr)
     (cases : List (YulSemantics.Literal × YBlock)) :
@@ -91,6 +104,10 @@ def stAfterGuard (st : EvmState) : EvmState := st
 
 theorem memOnly_stAfterGuard (st : EvmState) : MemOnly st (stAfterGuard st) := by
   simp [MemOnly, stAfterGuard]
+
+theorem LockFree_stAfterGuard {st : EvmState} (h : LockFree st) :
+    LockFree (stAfterGuard st) := by
+  simpa [stAfterGuard] using h
 
 theorem memoryGuardK_ne_zero :
     evm.litValue (.number memoryGuardK) ≠ Dialect.zero evm := by
@@ -113,8 +130,9 @@ theorem exec_memoryGuardErased (funs : FunEnv evm) (V : VEnv evm) (st : EvmState
 theorem hoist_erased_runtime (guard : YBlock) (sel : YExpr)
     (cases : List (YulSemantics.Literal × YBlock)) :
     hoist evm (memoryGuardErased ::
+      lockCheckStmt ::
       [.block guard, .switch sel cases (some [revert00])]) = [] := by
-  simp [hoist, memoryGuardErased]
+  simp [hoist, memoryGuardErased, lockCheckStmt]
 
 theorem exec_cons_normal {funs V st s V1 st1 rest V' st' o}
     (h1 : ExecStmt evm funs V st s V1 st1 .normal)
@@ -124,6 +142,7 @@ theorem exec_cons_normal {funs V st s V1 st1 rest V' st' o}
 
 def erasedRuntime (cases : List (YulSemantics.Literal × YBlock)) : YBlock :=
   memoryGuardErased ::
+    lockCheckStmt ::
     [YulSemantics.Stmt.block (emitGuardLt {} 4).stmts,
       YulSemantics.Stmt.switch
         (bop Op.shr [lit 224, bop Op.calldataload [lit 0]])
@@ -154,6 +173,22 @@ theorem revert00_exec (funs : FunEnv evm) (V : VEnv evm) (st : EvmState) :
       (Step.argsCons (Step.argsCons Step.argsNil Step.lit) Step.lit) ?_))
     halt_ne_normal
   simp only [step_revert, litToNat 0 zero_lt_wordBound, readBytes_zero]
+
+theorem exec_lockCheck_halt (funs : FunEnv evm) (V : VEnv evm) (st : EvmState)
+    (h : ¬ LockFree st) :
+    ExecStmt evm funs V st lockCheckStmt V
+      { touchMemory st 0 0 with halted := some (.revert, []) } .halt := by
+  have he := eval_tload funs V st reentrancyLockSlot
+  have hne : st.transient (BitVec.ofNat 256 reentrancyLockSlot) ≠ Dialect.zero evm := by
+    intro hz
+    exact h (by simpa [LockFree, Dialect.zero, litValue] using hz)
+  have inner :
+      ExecStmts evm (hoist evm [revert00] :: funs) V st [revert00] V
+        { touchMemory st 0 0 with halted := some (.revert, []) } .halt := by
+    simp [hoist]
+    exact revert00_exec _ _ _
+  refine Step.ifTrue (D := evm) he hne ?_
+  simpa [restore] using Step.block (D := evm) inner
 
 theorem exec_block_halt {funs V st body V' st'}
     (hh : hoist evm body = [])
@@ -216,8 +251,8 @@ theorem guardLt_ok {funs V st n}
 theorem entryCase_inv {c f p} (h : entryCase c f = some p) :
     ∃ body, toYulFn c f = some body ∧
       p = (YulSemantics.Literal.number f.selector,
-        [YulSemantics.Stmt.block (emitGuardLt {} (4 + 32 * f.params.length)).stmts,
-          YulSemantics.Stmt.block body]) := by
+        YulSemantics.Stmt.block (emitGuardLt {} (4 + 32 * f.params.length)).stmts ::
+          lockSetPrefix f ++ [YulSemantics.Stmt.block body]) := by
   simp [entryCase, Bind.bind, Option.bind] at h
   cases hb : toYulFn c f <;> simp [hb] at h
   exact ⟨_, rfl, by cases h; rfl⟩
@@ -251,9 +286,9 @@ theorem selectSwitch_mapM {c : ContractDef} {sel : Nat} (hsel : sel < wordBound)
       | some f =>
           ∃ body, toYulFn c f = some body ∧
             selectSwitch evm (BitVec.ofNat 256 sel) cases (some [revert00]) =
-              [YulSemantics.Stmt.block
-                (emitGuardLt {} (4 + 32 * f.params.length)).stmts,
-                YulSemantics.Stmt.block body]
+              YulSemantics.Stmt.block
+                (emitGuardLt {} (4 + 32 * f.params.length)).stmts ::
+                lockSetPrefix f ++ [YulSemantics.Stmt.block body]
   | [], cases, hmap => by
     simp [List.mapM_nil] at hmap
     subst cases
@@ -359,7 +394,7 @@ theorem runtimeBlock_correct_callFree {S X E ε : Type} (c : ContractDef)
     (hbound : ∀ f ∈ c.functions, 4 + 32 * f.params.length < wordBound)
     (yul : YBlock) (hyul : runtimeBlock c = some yul)
     (ctx : Ctx) (w : World S X E) (st0 : EvmState)
-    (hctx : ctxRel ctx st0) (hR : R c Γ κ w st0) :
+    (hctx : ctxRel ctx st0) (hR : R c Γ κ w st0) (hLock : LockFree st0) :
     RuntimeBlockCorrectCallFree c Γ κ yul ctx w st0 := by
   simp only [RuntimeBlockCorrectCallFree]
   obtain ⟨_, cases, hmap, hy⟩ := runtimeBlock_inv hyul
@@ -372,6 +407,9 @@ theorem runtimeBlock_correct_callFree {S X E ε : Type} (c : ContractDef)
   set stA : EvmState := stAfterGuard st0
   have hG : ExecStmt evm [[]] [] st0 memoryGuardErased [] stA .normal :=
     exec_memoryGuardErased [[]] [] st0
+  have hLockA : LockFree stA := LockFree_stAfterGuard hLock
+  have hLockChk : ExecStmt evm [[]] [] stA lockCheckStmt [] stA .normal :=
+    exec_lockCheck_ok [[]] [] stA hLockA
   have hMO := memOnly_stAfterGuard st0
   have hctxA := ctxRel_memOnly hctx hMO
   have hRA := R_memOnly hR hMO
@@ -393,7 +431,7 @@ theorem runtimeBlock_correct_callFree {S X E ε : Type} (c : ContractDef)
     rw [restore_self] at hblk
     have hexec :
         ExecStmts evm [[]] [] st0 (erasedRuntime cases) [] stRev .halt :=
-      exec_cons_normal hG (exec_head_halt hblk)
+      exec_cons_normal hG (exec_cons_normal hLockChk (exec_head_halt hblk))
     have hRC := obs_revert (yul := erasedRuntime cases) hR
       (run_of_exec hhoist hexec) hhRev
     refine ⟨committedState st0 stRev, hRC.1, ?_⟩
@@ -415,7 +453,7 @@ theorem runtimeBlock_correct_callFree {S X E ε : Type} (c : ContractDef)
         simpa [hfind] using hswM
       have hswStmt := switch_halt_nil hselE hswEq hoist_revert00
         (revert00_exec [[], []] [] stA)
-      have hexec := exec_cons_normal hG (exec_pair_halt hblk4 hswStmt)
+      have hexec := exec_cons_normal hG (exec_cons_normal hLockChk (exec_pair_halt hblk4 hswStmt))
       have hRC := obs_revert (yul := erasedRuntime cases) hR
         (run_of_exec hhoist hexec) hhRev
       refine ⟨committedState st0 stRev, hRC.1, ?_⟩
@@ -428,10 +466,12 @@ theorem runtimeBlock_correct_callFree {S X E ε : Type} (c : ContractDef)
           ∃ body, toYulFn c f = some body ∧
             selectSwitch evm (BitVec.ofNat 256 (calldataSelector cd))
               cases (some [revert00]) =
-                [YulSemantics.Stmt.block
-                  (emitGuardLt {} (4 + 32 * f.params.length)).stmts,
-                  YulSemantics.Stmt.block body] := by
+                YulSemantics.Stmt.block
+                  (emitGuardLt {} (4 + 32 * f.params.length)).stmts ::
+                  lockSetPrefix f ++ [YulSemantics.Stmt.block body] := by
         simpa [hfind] using hswM
+      have hlocks : locks f = false := locks_eq_false_of_callFree (hcf f hfmem)
+      simp [lockSetPrefix, hlocks] at hswEq
       set caseBody : YBlock :=
         [YulSemantics.Stmt.block (emitGuardLt {} (4 + 32 * f.params.length)).stmts,
           YulSemantics.Stmt.block body]
@@ -448,7 +488,7 @@ theorem runtimeBlock_correct_callFree {S X E ε : Type} (c : ContractDef)
         have hcase : ExecStmts evm [[], []] [] stA caseBody [] stRev .halt :=
           exec_head_halt hblkF
         have hswStmt := switch_halt_nil hselE hswEq hcaseH hcase
-        have hexec := exec_cons_normal hG (exec_pair_halt hblk4 hswStmt)
+        have hexec := exec_cons_normal hG (exec_cons_normal hLockChk (exec_pair_halt hblk4 hswStmt))
         have hRC := obs_revert (yul := erasedRuntime cases) hR
           (run_of_exec hhoist hexec) hhRev
         refine ⟨committedState st0 stRev, hRC.1, ?_⟩
@@ -482,7 +522,7 @@ theorem runtimeBlock_correct_callFree {S X E ε : Type} (c : ContractDef)
           have hcase : ExecStmts evm [[], []] [] stA caseBody [] st' .halt :=
             exec_pair_halt hblkF hbodyStmt
           have hswStmt := switch_halt_nil hselE hswEq hcaseH hcase
-          have hexec := exec_cons_normal hG (exec_pair_halt hblk4 hswStmt)
+          have hexec := exec_cons_normal hG (exec_cons_normal hLockChk (exec_pair_halt hblk4 hswStmt))
           have hRun := run_of_exec hhoist hexec
           obtain ⟨k, bs, hh, hk⟩ := haltSuccess_commits hsucc
           refine ⟨st', ⟨st', hRun, (committedState_commit hh hk).symm⟩, ?_⟩
@@ -501,7 +541,7 @@ theorem runtimeBlock_correct_callFree {S X E ε : Type} (c : ContractDef)
           have hcase : ExecStmts evm [[], []] [] stA caseBody [] st' .halt :=
             exec_pair_halt hblkF hbodyStmt
           have hswStmt := switch_halt_nil hselE hswEq hcaseH hcase
-          have hexec := exec_cons_normal hG (exec_pair_halt hblk4 hswStmt)
+          have hexec := exec_cons_normal hG (exec_cons_normal hLockChk (exec_pair_halt hblk4 hswStmt))
           have hRun := run_of_exec hhoist hexec
           refine ⟨committedState st0 st', ⟨st', hRun, rfl⟩, ?_⟩
           rw [hsome]

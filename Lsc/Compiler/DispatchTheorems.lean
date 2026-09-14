@@ -30,8 +30,8 @@ theorem runtimeBlock_correct_callFree {S X E ε : Type} (c : ContractDef)
     (hbound : ∀ f ∈ c.functions, 4 + 32 * f.params.length < wordBound)
     (yul : YBlock) (hyul : runtimeBlock c = some yul)
     (ctx : Ctx) (w : World S X E) (st0 : EvmState)
-    (hctx : ctxRel ctx st0) (hR : R c Γ κ w st0) :
+    (hctx : ctxRel ctx st0) (hR : R c Γ κ w st0) (hLock : LockFree st0) :
     RuntimeBlockCorrectCallFree c Γ κ yul ctx w st0 :=
-  Proof.runtimeBlock_correct_callFree c Γ hΓ κ hκ hcf hctor hlen hbound yul hyul ctx w st0 hctx hR
+  Proof.runtimeBlock_correct_callFree c Γ hΓ κ hκ hcf hctor hlen hbound yul hyul ctx w st0 hctx hR hLock
 
 end Lsc.Compiler

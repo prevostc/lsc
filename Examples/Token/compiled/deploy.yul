@@ -29,6 +29,9 @@ object "Token" {
         code {
             if memoryguard(256) {
             }
+            if tload(0) {
+                revert(0, 0)
+            }
             {
                 if lt(calldatasize(), 4) {
                     revert(0, 0)

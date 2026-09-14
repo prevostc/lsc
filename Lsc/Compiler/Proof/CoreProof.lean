@@ -145,6 +145,34 @@ theorem execStmts_stop_after {funs V st ss V1 st1}
       { st1 with halted := some (.stop, []) } .halt :=
   execStmts_append h (stop_sim funs V1 st1)
 
+/-- Post-state of an optional lock-clear: identity when `clearLock` is false. -/
+def stAfterLockClear (clearLock : Bool) (st : EvmState) : EvmState :=
+  if clearLock then stTstore st (BitVec.ofNat 256 reentrancyLockSlot) 0 else st
+
+theorem memOnly_stAfterLockClear (clearLock : Bool) (st : EvmState) :
+    MemOnly st (stAfterLockClear clearLock st) := by
+  cases clearLock with
+  | false => simp [stAfterLockClear, MemOnly]
+  | true => simpa [stAfterLockClear] using memOnly_tstore st _ _
+
+theorem execStmts_maybe_lockClear {funs V st rest V' st' o}
+    (clearLock : Bool) (hstatic : st.env.static = false)
+    (h : ExecStmts evm funs V (stAfterLockClear clearLock st) rest V' st' o) :
+    ExecStmts evm funs V st
+      ((if clearLock then [lockClearStmt] else []) ++ rest) V' st' o := by
+  cases clearLock with
+  | false => simpa [stAfterLockClear] using h
+  | true =>
+    simpa [stAfterLockClear] using execStmts_lockClear_cons hstatic h
+
+theorem execStmts_maybeLock {funs : FunEnv evm} {V : VEnv evm} {st : EvmState}
+    (clearLock : Bool) (hstatic : st.env.static = false) :
+    ExecStmts evm funs V st (if clearLock then [lockClearStmt] else [])
+      V (stAfterLockClear clearLock st) .normal := by
+  cases clearLock with
+  | false => simpa [stAfterLockClear] using (Step.seqNil : ExecStmts evm funs V st [] V st .normal)
+  | true => simpa [stAfterLockClear] using execStmts_lockClear funs V st hstatic
+
 theorem stmt_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx} {w : World S X E} {env V st} {s : Lsc.Stmt}
     (funs : FunEnv evm) (hinv : Inv tag Γ c κ ctx w env V st)
@@ -294,7 +322,8 @@ theorem core_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
       (hwf : coreWF c core = true)
       (hn : identsNodup tag (env.length + coreExtraDepth core) = true)
       (hinv : Inv tag Γ c κ ctx w env V st)
-      {e' : Emit} (hem : emitCore tag c {} env.length haltUnit core = some e'),
+      {clearLock : Bool} {e' : Emit}
+      (hem : emitCore tag c {} env.length haltUnit core clearLock = some e'),
       match Tx.run (Core.denote Γ core env) ctx w with
       | .ok (v, w') =>
           ∃ V' st', ExecStmts evm funs V st e'.stmts V' st' .halt ∧
@@ -306,16 +335,29 @@ theorem core_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
   revert hM1
   induction core with
   | ret r =>
-    intro hM1 w env V st funs hwf hn hinv e' hem
+    intro hM1 w env V st funs hwf hn hinv clearLock e' hem
     cases r with
     | unit =>
-      simp only [emitCore, emitRet, hhalt, emitReturnUnit_true, Emit.stmts_nil] at hem
+      simp only [emitCore] at hem
       cases hem
+      have hstatic := ctxRel_static hinv.ctxr
+      have hs : (emitRet tag {} env.length haltUnit RetExpr.unit clearLock).stmts =
+          (if clearLock then [lockClearStmt] else []) ++ [stopStmt] := by
+        cases clearLock with
+        | false =>
+          simp [emitRet, hhalt, emitReturnUnit_true, Emit.stmts_nil]
+        | true =>
+          simp [emitRet_lock_eq, emitLockClear_stmts, Emit.stmts_nil, emitRet, hhalt,
+            emitReturnUnit_true]
       rw [Core.denote, Tx.run_pure]
-      refine ⟨V, { st with halted := some (.stop, []) }, stop_sim funs V st, rfl, ?_⟩
-      exact R_halted_update hinv.rel _
+      refine ⟨V,
+        { stAfterLockClear clearLock st with halted := some (.stop, []) }, ?_, rfl, ?_⟩
+      · rw [hs]
+        exact execStmts_maybe_lockClear clearLock hstatic
+          (stop_sim funs V (stAfterLockClear clearLock st))
+      · exact R_halted_update (R_memOnly hinv.rel (memOnly_stAfterLockClear clearLock st)) _
     | word a =>
-      simp only [emitCore, emitRet] at hem
+      simp only [emitCore] at hem
       cases hem
       have hn0 : identsNodup tag env.length = true :=
         identsNodup_mono tag (by simp [coreExtraDepth]) hn
@@ -323,12 +365,18 @@ theorem core_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
         simp [coreWF, retWF, Bool.and_eq_true] at hwf
         exact hwf.1
       have hv := atom_eval_lt hinv.wf hwfA
-      have he := eval_atom tag funs (st := st) hinv.venv hn0 a
-      obtain ⟨st', hexec, hh, hR'⟩ := return_word_sim funs V hv he hinv.rel
+      have hstatic := ctxRel_static hinv.ctxr
+      have hMO := memOnly_stAfterLockClear clearLock st
+      have he := eval_atom tag funs (st := stAfterLockClear clearLock st)
+        (Inv_memOnly tag hinv hMO).venv hn0 a
+      obtain ⟨st', hexec, hh, hR'⟩ :=
+        return_word_sim funs V hv he (R_memOnly hinv.rel hMO)
       rw [Core.denote, Tx.run_pure]
-      exact ⟨V, st', hexec, haltSuccess_word hh, hR'⟩
+      refine ⟨V, st', ?_, haltSuccess_word hh, hR'⟩
+      rw [emitRet_word_stmts_if tag {} env.length haltUnit a clearLock, Emit.stmts_nil]
+      exact execStmts_maybe_lockClear clearLock hstatic hexec
     | addr a =>
-      simp only [emitCore, emitRet] at hem
+      simp only [emitCore] at hem
       cases hem
       have hn0 : identsNodup tag env.length = true :=
         identsNodup_mono tag (by simp [coreExtraDepth]) hn
@@ -336,12 +384,18 @@ theorem core_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
         simp [coreWF, retWF, Bool.and_eq_true] at hwf
         exact hwf.1
       have hv := atom_eval_lt hinv.wf hwfA
-      have he := eval_atom tag funs (st := st) hinv.venv hn0 a
-      obtain ⟨st', hexec, hh, hR'⟩ := return_word_sim funs V hv he hinv.rel
+      have hstatic := ctxRel_static hinv.ctxr
+      have hMO := memOnly_stAfterLockClear clearLock st
+      have he := eval_atom tag funs (st := stAfterLockClear clearLock st)
+        (Inv_memOnly tag hinv hMO).venv hn0 a
+      obtain ⟨st', hexec, hh, hR'⟩ :=
+        return_word_sim funs V hv he (R_memOnly hinv.rel hMO)
       rw [Core.denote, Tx.run_pure]
-      exact ⟨V, st', hexec, haltSuccess_addr hh, hR'⟩
+      refine ⟨V, st', ?_, haltSuccess_addr hh, hR'⟩
+      rw [emitRet_addr_stmts_if tag {} env.length haltUnit a clearLock, Emit.stmts_nil]
+      exact execStmts_maybe_lockClear clearLock hstatic hexec
     | flag a =>
-      simp only [emitCore, emitRet] at hem
+      simp only [emitCore] at hem
       cases hem
       have hn0 : identsNodup tag env.length = true :=
         identsNodup_mono tag (by simp [coreExtraDepth]) hn
@@ -349,16 +403,22 @@ theorem core_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
         simp [coreWF, retWF, Bool.and_eq_true] at hwf
         exact hwf.1
       have hv := atom_eval_lt hinv.wf hwfA
-      have he := eval_atom tag funs (st := st) hinv.venv hn0 a
-      obtain ⟨st', hexec, hh, hR'⟩ := return_word_sim funs V hv he hinv.rel
+      have hstatic := ctxRel_static hinv.ctxr
+      have hMO := memOnly_stAfterLockClear clearLock st
+      have he := eval_atom tag funs (st := stAfterLockClear clearLock st)
+        (Inv_memOnly tag hinv hMO).venv hn0 a
+      obtain ⟨st', hexec, hh, hR'⟩ :=
+        return_word_sim funs V hv he (R_memOnly hinv.rel hMO)
       rw [Core.denote, Tx.run_pure]
-      exact ⟨V, st', hexec, haltSuccess_flag hh, hR'⟩
+      refine ⟨V, st', ?_, haltSuccess_flag hh, hR'⟩
+      rw [emitRet_flag_stmts_if tag {} env.length haltUnit a clearLock, Emit.stmts_nil]
+      exact execStmts_maybe_lockClear clearLock hstatic hexec
     | pair x y =>
       cases x with
       | word a =>
         cases y with
         | word b =>
-          simp only [emitCore, emitRet, retAtoms, List.map_cons, List.map_nil] at hem
+          simp only [emitCore] at hem
           cases hem
           have hn0 : identsNodup tag env.length = true :=
             identsNodup_mono tag (by simp [coreExtraDepth]) hn
@@ -367,20 +427,34 @@ theorem core_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
             exact hwf.1
           have hv0 := atom_eval_lt hinv.wf hwfA
           have hv1 := atom_eval_lt hinv.wf hwfB
-          have he0 := eval_atom tag funs (st := st) hinv.venv hn0 a
+          have hstatic := ctxRel_static hinv.ctxr
+          have hMO := memOnly_stAfterLockClear clearLock st
+          have he0 := eval_atom tag funs (st := stAfterLockClear clearLock st)
+            (Inv_memOnly tag hinv hMO).venv hn0 a
           obtain ⟨st', hexec, hh, hR'⟩ :=
             return_pair_sim funs V hv0 hv1 he0
-              (fun st' => eval_atom tag funs (st := st') hinv.venv hn0 b) hinv.rel
+              (fun st' => eval_atom tag funs (st := st')
+                (Inv_memOnly tag hinv hMO).venv hn0 b) (R_memOnly hinv.rel hMO)
           rw [Core.denote, Tx.run_pure]
-          exact ⟨V, st', hexec, haltSuccess_pair_ww hh, hR'⟩
+          refine ⟨V, st', ?_, haltSuccess_pair_ww hh, hR'⟩
+          rw [emitRet_pair_ww_stmts_if tag {} env.length haltUnit a b clearLock, Emit.stmts_nil]
+          exact execStmts_maybe_lockClear clearLock hstatic hexec
         | _ => simp [M1Frag] at hM1
       | _ => simp [M1Frag] at hM1
   | stmtTail s =>
-    intro hM1 w env V st funs hwf hn hinv e' hem
-    simp only [emitCore, hhalt, emitReturnUnit_true] at hem
+    intro hM1 w env V st funs hwf hn hinv clearLock e' hem
+    simp only [emitCore] at hem
+    rw [hhalt] at hem
     cases hem
     have hn0 : identsNodup tag env.length = true :=
       identsNodup_mono tag (by simp [coreExtraDepth]) hn
+    have hs :
+        (emitReturnUnit
+          (if clearLock then emitLockClear (emitStmt tag c {} env.length s)
+            else emitStmt tag c {} env.length s) true).stmts =
+          (emitStmt tag c {} env.length s).stmts ++
+            ((if clearLock then [lockClearStmt] else []) ++ [stopStmt]) :=
+      emitReturnUnit_lock_if (emitStmt tag c {} env.length s) clearLock
     have hsim := stmt_sim tag funs hinv hΓ hκ hlen (show M1Stmt s by simpa [M1Frag] using hM1)
       (show stmtWF c s = true by simpa [coreWF] using hwf) hn0
     cases hrun : Tx.run (Core.denote Γ (.stmtTail s) env) ctx w with
@@ -388,20 +462,24 @@ theorem core_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
       simp only [RetTy.denote, Core.denote] at hrun
       rw [hrun] at hsim
       obtain ⟨st1, hexec, hinv1⟩ := hsim
+      have hstatic := ctxRel_static hinv1.ctxr
       simp only [except_ok_prod]
-      refine ⟨V, { st1 with halted := some (.stop, []) },
-        (by simpa [emitReturnUnit_true] using execStmts_stop_after hexec),
-        rfl, R_halted_update hinv1.rel _⟩
+      refine ⟨V, { stAfterLockClear clearLock st1 with halted := some (.stop, []) }, ?_,
+        rfl, R_halted_update (R_memOnly hinv1.rel (memOnly_stAfterLockClear clearLock st1)) _⟩
+      rw [hs]
+      exact execStmts_append hexec
+        (execStmts_maybe_lockClear clearLock hstatic
+          (stop_sim funs V (stAfterLockClear clearLock st1)))
     | error err =>
       simp only [RetTy.denote, Core.denote] at hrun
       rw [hrun] at hsim
       obtain ⟨V', st', bytes, hexec, hh, herr⟩ := hsim
       simp only [except_error_prod]
-      refine ⟨V', st', bytes,
-        (by simpa [emitReturnUnit_true] using
-          execStmts_append_halt (ss2 := [stopStmt]) hexec), hh, herr⟩
+      refine ⟨V', st', bytes, ?_, hh, herr⟩
+      rw [hs]
+      exact execStmts_append_halt hexec
   | letOp op k ih =>
-    intro hM1 w env V st funs hwf hn hinv e' hem
+    intro hM1 w env V st funs hwf hn hinv clearLock e' hem
     have ⟨hop, hk⟩ := m1frag_letOp.mp hM1
     have ⟨hopWF, hkWF⟩ := coreWF_letOp.mp hwf
     simp only [Core.denote, Tx.run_bind]
@@ -451,7 +529,7 @@ theorem core_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
         rw [hst]
         exact execStmts_append_halt hexec
   | seq s k ih =>
-    intro hM1 w env V st funs hwf hn hinv e' hem
+    intro hM1 w env V st funs hwf hn hinv clearLock e' hem
     have ⟨hs, hk⟩ := m1frag_seq.mp hM1
     have ⟨hsWF, hkWF⟩ := coreWF_seq.mp hwf
     simp only [Core.denote, Tx.run_bind]
@@ -494,7 +572,7 @@ theorem core_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
       rw [hst]
       exact execStmts_append_halt hexec
   | opTail op =>
-    intro hM1 w env V st funs hwf hn hinv e' hem
+    intro hM1 w env V st funs hwf hn hinv clearLock e' hem
     simp only [Core.denote, RetTy.denote]
     simp only [emitCore] at hem
     cases hE : emitLetOp tag c {} env.length op with
@@ -507,9 +585,10 @@ theorem core_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
       have hn1 : identsNodup tag (env.length + 1) = true :=
         identsNodup_mono tag (by simp [coreExtraDepth]) hn
       have hretE :
-          (emitRet tag e1 (env.length + 1) haltUnit (.word (.var 0))).stmts =
-            e1.stmts ++ (emitReturnWords {} [atomE tag (env.length + 1) (.var 0)]).stmts :=
-        emitRet_word_stmts tag _ _ _ _
+          (emitRet tag e1 (env.length + 1) haltUnit (.word (.var 0)) clearLock).stmts =
+            e1.stmts ++ ((if clearLock then [lockClearStmt] else []) ++
+              (emitReturnWords {} [atomE tag (env.length + 1) (.var 0)]).stmts) :=
+        emitRet_word_stmts_if tag _ _ _ _ _
       cases hopr : Tx.run (Op.denote Γ env op) ctx w with
       | ok p =>
         have hsim := op_sim tag funs hinv hΓ hκ hlen hop hopWF hn1
@@ -520,13 +599,17 @@ theorem core_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
         simp only [except_ok_prod]
         have hn0 : identsNodup tag (v :: env).length = true := by
           simpa using hn1
-        have he := eval_atom tag funs (st := st1) hinv1.venv hn0 (.var 0)
+        have hstatic := ctxRel_static hinv1.ctxr
+        have hMO := memOnly_stAfterLockClear clearLock st1
+        have he := eval_atom tag funs (st := stAfterLockClear clearLock st1)
+          (Inv_memOnly tag hinv1 hMO).venv hn0 (.var 0)
         have hv : v < wordBound := hinv1.wf v (by simp)
         obtain ⟨st', hret, hh, hR'⟩ :=
-          return_word_sim funs ((identV tag env.length, BitVec.ofNat 256 v) :: V) hv he hinv1.rel
+          return_word_sim funs ((identV tag env.length, BitVec.ofNat 256 v) :: V) hv he
+            (R_memOnly hinv1.rel hMO)
         refine ⟨(identV tag env.length, BitVec.ofNat 256 v) :: V, st', ?_, haltSuccess_word hh, hR'⟩
         rw [hretE]
-        exact execStmts_append hexec hret
+        exact execStmts_append hexec (execStmts_maybe_lockClear clearLock hstatic hret)
       | error err =>
         have hsim := op_sim tag funs hinv hΓ hκ hlen hop hopWF hn1
         rw [hopr] at hsim
@@ -537,7 +620,7 @@ theorem core_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
         rw [hretE]
         exact execStmts_append_halt hexec
   | letPure p args k ih =>
-    intro hM1 w env V st funs hwf hn hinv e' hem
+    intro hM1 w env V st funs hwf hn hinv clearLock e' hem
     have ⟨hp, hargs, hk⟩ := m1frag_letPure.mp hM1
     subst hp
     have ⟨a, hargs'⟩ := length_eq_one.mp hargs
@@ -585,15 +668,17 @@ theorem core_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
       simp only [emitLet, Emit.stmts_push, Emit.stmts_nil, List.nil_append]
       exact execStmts_append (Step.seqCons hlet Step.seqNil) hexeck
   | ite cond a b iha ihb =>
-    intro hM1 w env V st funs hwf hn hinv e' hem
+    intro hM1 w env V st funs hwf hn hinv clearLock e' hem
     have ⟨hC, ha, hb⟩ := m1frag_ite.mp hM1
     have hwf' := hwf
     simp [coreWF, Bool.and_eq_true] at hwf'
     obtain ⟨⟨hcWF, haWF⟩, hbWF⟩ := hwf'
     simp only [Core.denote]
     simp only [emitCore] at hem
-    obtain ⟨eA, hA⟩ := emitCore_some tag (c := c) (halt := haltUnit) a ({} : Emit) env.length
-    obtain ⟨eB, hB⟩ := emitCore_some tag (c := c) (halt := haltUnit) b ({} : Emit) env.length
+    obtain ⟨eA, hA⟩ := emitCore_some tag (c := c) (halt := haltUnit) (clearLock := clearLock)
+      a ({} : Emit) env.length
+    obtain ⟨eB, hB⟩ := emitCore_some tag (c := c) (halt := haltUnit) (clearLock := clearLock)
+      b ({} : Emit) env.length
     simp [hA, hB] at hem
     cases hem
     have hn0 : identsNodup tag env.length = true :=
@@ -651,8 +736,7 @@ theorem core_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
         refine ⟨restore V V', st', bytes, ?_, hh, herr⟩
         exact exec_switch_halt hcond hsel (hoist_emitCore tag hB) hexec
   | opTailAddr op =>
-    intro hM1 w env V st funs hwf hn hinv e' hem
-    simp only [Core.denote, RetTy.denote, Address]
+    intro hM1 w env V st funs hwf hn hinv clearLock e' hem
     simp only [emitCore] at hem
     cases hE : emitLetOp tag c {} env.length op with
     | none => simp [hE] at hem
@@ -664,9 +748,12 @@ theorem core_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
       have hn1 : identsNodup tag (env.length + 1) = true :=
         identsNodup_mono tag (by simp [coreExtraDepth]) hn
       have hretE :
-          (emitRet tag e1 (env.length + 1) haltUnit (.addr (.var 0))).stmts =
-            e1.stmts ++ (emitReturnWords {} [atomE tag (env.length + 1) (.var 0)]).stmts :=
-        emitRet_addr_stmts tag _ _ _ _
+          (emitRet tag e1 (env.length + 1) haltUnit (.addr (.var 0)) clearLock).stmts =
+            e1.stmts ++ ((if clearLock then [lockClearStmt] else []) ++
+              (emitReturnWords {} [atomE tag (env.length + 1) (.var 0)]).stmts) :=
+        emitRet_addr_stmts_if tag _ _ _ _ _
+      have hden : Tx.run (Core.denote Γ (.opTailAddr op) env) ctx w =
+          Tx.run (Op.denote Γ env op) ctx w := rfl
       cases hopr : Tx.run (Op.denote Γ env op) ctx w with
       | ok p =>
         have hsim := op_sim tag funs hinv hΓ hκ hlen hop hopWF hn1
@@ -674,28 +761,33 @@ theorem core_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
         simp only [hE] at hsim
         obtain ⟨st1, hexec, hinv1⟩ := hsim
         rcases p with ⟨v, w'⟩
+        rw [hden, hopr]
         simp only [except_ok_prod]
         have hn0 : identsNodup tag (v :: env).length = true := by
           simpa using hn1
-        have he := eval_atom tag funs (st := st1) hinv1.venv hn0 (.var 0)
+        have hstatic := ctxRel_static hinv1.ctxr
+        have hMO := memOnly_stAfterLockClear clearLock st1
+        have he := eval_atom tag funs (st := stAfterLockClear clearLock st1)
+          (Inv_memOnly tag hinv1 hMO).venv hn0 (.var 0)
         have hv : v < wordBound := hinv1.wf v (by simp)
         obtain ⟨st', hret, hh, hR'⟩ :=
-          return_word_sim funs ((identV tag env.length, BitVec.ofNat 256 v) :: V) hv he hinv1.rel
+          return_word_sim funs ((identV tag env.length, BitVec.ofNat 256 v) :: V) hv he
+            (R_memOnly hinv1.rel hMO)
         refine ⟨(identV tag env.length, BitVec.ofNat 256 v) :: V, st', ?_, haltSuccess_addr hh, hR'⟩
         rw [hretE]
-        exact execStmts_append hexec hret
+        exact execStmts_append hexec (execStmts_maybe_lockClear clearLock hstatic hret)
       | error err =>
         have hsim := op_sim tag funs hinv hΓ hκ hlen hop hopWF hn1
         rw [hopr] at hsim
         simp only [hE] at hsim
         obtain ⟨V', st', bytes, hexec, hh, herr⟩ := hsim
+        rw [hden, hopr]
         simp only [except_error_prod]
         refine ⟨V', st', bytes, ?_, hh, herr⟩
         rw [hretE]
         exact execStmts_append_halt hexec
   | opTailFlag op =>
-    intro hM1 w env V st funs hwf hn hinv e' hem
-    simp only [Core.denote, RetTy.denote, Flag]
+    intro hM1 w env V st funs hwf hn hinv clearLock e' hem
     simp only [emitCore] at hem
     cases hE : emitLetOp tag c {} env.length op with
     | none => simp [hE] at hem
@@ -707,9 +799,12 @@ theorem core_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
       have hn1 : identsNodup tag (env.length + 1) = true :=
         identsNodup_mono tag (by simp [coreExtraDepth]) hn
       have hretE :
-          (emitRet tag e1 (env.length + 1) haltUnit (.flag (.var 0))).stmts =
-            e1.stmts ++ (emitReturnWords {} [atomE tag (env.length + 1) (.var 0)]).stmts :=
-        emitRet_flag_stmts tag _ _ _ _
+          (emitRet tag e1 (env.length + 1) haltUnit (.flag (.var 0)) clearLock).stmts =
+            e1.stmts ++ ((if clearLock then [lockClearStmt] else []) ++
+              (emitReturnWords {} [atomE tag (env.length + 1) (.var 0)]).stmts) :=
+        emitRet_flag_stmts_if tag _ _ _ _ _
+      have hden : Tx.run (Core.denote Γ (.opTailFlag op) env) ctx w =
+          Tx.run (Op.denote Γ env op) ctx w := rfl
       cases hopr : Tx.run (Op.denote Γ env op) ctx w with
       | ok p =>
         have hsim := op_sim tag funs hinv hΓ hκ hlen hop hopWF hn1
@@ -717,27 +812,33 @@ theorem core_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
         simp only [hE] at hsim
         obtain ⟨st1, hexec, hinv1⟩ := hsim
         rcases p with ⟨v, w'⟩
+        rw [hden, hopr]
         simp only [except_ok_prod]
         have hn0 : identsNodup tag (v :: env).length = true := by
           simpa using hn1
-        have he := eval_atom tag funs (st := st1) hinv1.venv hn0 (.var 0)
+        have hstatic := ctxRel_static hinv1.ctxr
+        have hMO := memOnly_stAfterLockClear clearLock st1
+        have he := eval_atom tag funs (st := stAfterLockClear clearLock st1)
+          (Inv_memOnly tag hinv1 hMO).venv hn0 (.var 0)
         have hv : v < wordBound := hinv1.wf v (by simp)
         obtain ⟨st', hret, hh, hR'⟩ :=
-          return_word_sim funs ((identV tag env.length, BitVec.ofNat 256 v) :: V) hv he hinv1.rel
+          return_word_sim funs ((identV tag env.length, BitVec.ofNat 256 v) :: V) hv he
+            (R_memOnly hinv1.rel hMO)
         refine ⟨(identV tag env.length, BitVec.ofNat 256 v) :: V, st', ?_, haltSuccess_flag hh, hR'⟩
         rw [hretE]
-        exact execStmts_append hexec hret
+        exact execStmts_append hexec (execStmts_maybe_lockClear clearLock hstatic hret)
       | error err =>
         have hsim := op_sim tag funs hinv hΓ hκ hlen hop hopWF hn1
         rw [hopr] at hsim
         simp only [hE] at hsim
         obtain ⟨V', st', bytes, hexec, hh, herr⟩ := hsim
+        rw [hden, hopr]
         simp only [except_error_prod]
         refine ⟨V', st', bytes, ?_, hh, herr⟩
         rw [hretE]
         exact execStmts_append_halt hexec
   | revertTail err args =>
-    intro hM1 w env V st funs hwf hn hinv e' hem
+    intro hM1 w env V st funs hwf hn hinv clearLock e' hem
     have hnil : args.length = 0 := by simpa [M1Frag] using hM1
     match args with
     | _ :: _ => cases hnil
@@ -756,7 +857,7 @@ theorem toYulFn_inv {c f yul} (h : toYulFn c f = some yul) (hk : f.kind ≠ .con
     coreWF c f.core = true ∧
     identsNodup f.name (maxDepth f) = true ∧
     ∃ e, emitCore f.name c (emitParams f.name {} 4 f.params.length)
-        f.params.length true f.core = some e ∧
+        f.params.length true f.core (locks f) = some e ∧
       yul = e.stmts := by
   unfold toYulFn at h
   have hwfB : coreWF c f.core = true := by
@@ -777,7 +878,8 @@ theorem toYulFn_inv {c f yul} (h : toYulFn c f = some yul) (hk : f.kind ≠ .con
     simp [hk]
   have hhalt : decide (f.kind ≠ FnKind.constructor) = true := by simp [hk]
   simp [hwfB, hnodB, hoffset, hhalt] at h
-  obtain ⟨e, hem⟩ := emitCore_some (tag := f.name) (c := c) (halt := true) f.core
+  obtain ⟨e, hem⟩ := emitCore_some (tag := f.name) (c := c) (halt := true)
+    (clearLock := locks f) f.core
     (emitParams f.name {} 4 f.params.length) f.params.length
   simp [hem] at h
   exact ⟨hwfB, hnodB, e, hem, by cases h; rfl⟩
@@ -800,6 +902,8 @@ theorem toYulFn_execStmts_callFree {S X E ε : Type} (c : ContractDef)
           ExecStmts evm funs [] st0 yul V' st' .halt ∧
             st'.halted = some (.revert, bytes) ∧ haltError c Γ e bytes := by
   have ⟨hwf, hnod, e, hem, hy⟩ := toYulFn_inv hyul hf
+  have hlocks : locks f = false := locks_eq_false_of_callFree hM1
+  rw [hlocks] at hem
   subst hy
   set args := decodeArgs f st0.env.calldata
   have hargs : args = decodeArgs f st0.env.calldata := rfl

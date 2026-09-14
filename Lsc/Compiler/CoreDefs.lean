@@ -133,4 +133,66 @@ theorem callFree_of_all {c : ContractDef}
     ∀ f ∈ c.functions, CallFree f.core :=
   fun f hf => (callFreeB_eq f.core).mp ((List.all_eq_true.mp h) f hf)
 
+theorem M1Op_noExtCall (op : Lsc.Op) (h : M1Op op) :
+    (Op.effects op).calls = [] ∧ (Op.effects op).views = [] := by
+  cases op <;> try simp [Op.effects]
+  all_goals cases h
+
+theorem M1Stmt_noExtCall (s : Lsc.Stmt) (h : M1Stmt s) :
+    (Stmt.effects s).calls = [] ∧ (Stmt.effects s).views = [] := by
+  cases s <;> try simp [Stmt.effects]
+  all_goals cases h
+
+theorem M1Frag_noExtCall {t} (core : Core t) (h : M1Frag core) :
+    (Core.effects core).calls = [] ∧ (Core.effects core).views = [] := by
+  induction core with
+  | ret r =>
+    simp [Core.effects]
+  | opTail op | opTailAddr op | opTailFlag op =>
+    have hop : M1Op op := by simpa [M1Frag] using h
+    simpa [Core.effects] using M1Op_noExtCall op hop
+  | stmtTail s =>
+    have hs : M1Stmt s := by simpa [M1Frag] using h
+    simpa [Core.effects] using M1Stmt_noExtCall s hs
+  | revertTail _ args =>
+    simp [Core.effects]
+  | letOp op k ih =>
+    have ⟨hop, hk⟩ := (by simpa [M1Frag] using h : M1Op op ∧ M1Frag k)
+    have ⟨hc, hv⟩ := M1Op_noExtCall op hop
+    have ⟨hc', hv'⟩ := ih hk
+    simp [Core.effects, Effects.append, hc, hv, hc', hv']
+  | seq s k ih =>
+    have ⟨hs, hk⟩ := (by simpa [M1Frag] using h : M1Stmt s ∧ M1Frag k)
+    have ⟨hc, hv⟩ := M1Stmt_noExtCall s hs
+    have ⟨hc', hv'⟩ := ih hk
+    simp [Core.effects, Effects.append, hc, hv, hc', hv']
+  | letPure p args k ih =>
+    have ⟨_, _, hk⟩ :=
+      (by simpa [M1Frag] using h : p = .id ∧ args.length = 1 ∧ M1Frag k)
+    simpa [Core.effects] using ih hk
+  | ite c a b iha ihb =>
+    have ⟨_, ha, hb⟩ :=
+      (by simpa [M1Frag] using h : M1Cond c ∧ M1Frag a ∧ M1Frag b)
+    have ⟨hc, hv⟩ := iha ha
+    have ⟨hc', hv'⟩ := ihb hb
+    simp [Core.effects, Effects.append, hc, hv, hc', hv']
+
+theorem CallFree_not_hasExtCall {t} {core : Core t} (h : CallFree core) :
+    Core.hasExtCall core = false := by
+  have ⟨hc, hv⟩ := M1Frag_noExtCall core h
+  simp [Core.hasExtCall, hc, hv]
+
+theorem locks_eq_false_of_callFree {f : FnDef} (h : CallFree f.core) :
+    locks f = false := by
+  simp [locks, CallFree_not_hasExtCall h]
+
+/-- Non-locking functions emit no `tstore(0,1)` prefix. -/
+theorem lockSetPrefix_nil_of_unlocked {f : FnDef} (h : locks f = false) :
+    lockSetPrefix f = [] := by
+  simp [lockSetPrefix, h]
+
+theorem lockSetPrefix_nil_of_callFree {f : FnDef} (h : CallFree f.core) :
+    lockSetPrefix f = [] :=
+  lockSetPrefix_nil_of_unlocked (locks_eq_false_of_callFree h)
+
 end Lsc.Compiler

@@ -76,7 +76,8 @@ def SimExt {S E ε : Type}
     (hAgr : ExtAgree ctx.self w.ext st)
     (hOr : w.oracle = Oracle.ofExt o)
     (hNR : ExtOracle.NoReentry o ctx.self)
-    {e' : Emit} (hem : emitCore tag c {} env.length haltUnit core = some e')
+    {clearLock : Bool} {e' : Emit}
+    (hem : emitCore tag c {} env.length haltUnit core clearLock = some e')
     {V' : VEnv (yulD (toCalls o))} {st' : EvmState} {out : Outcome}
     (hexec : ExecStmts (yulD (toCalls o)) funs V st e'.stmts V' st' out),
     match Tx.run (Core.denote Γ core env) ctx w with
@@ -178,10 +179,12 @@ theorem sim_ext_op_call_return {S E ε : Type} {t : RetTy}
     (hAgr : ExtAgree ctx.self w.ext st)
     (hOr : w.oracle = Oracle.ofExt o)
     (hNR : ExtOracle.NoReentry o ctx.self)
-    {e1 : Emit} (hE : emitLetOp tag c {} env.length (.call target sel args ret) = some e1)
+    {clearLock : Bool} {e1 : Emit}
+    (hE : emitLetOp tag c {} env.length (.call target sel args ret) = some e1)
     {V' : VEnv (yulD (toCalls o))} {st' : EvmState} {out : Outcome}
     (hexec : ExecStmts (yulD (toCalls o)) funs V st
-      (e1.stmts ++ (emitReturnWords {} [atomE tag (env.length + 1) (.var 0)]).stmts)
+      (e1.stmts ++ ((if clearLock then [lockClearStmt] else []) ++
+        (emitReturnWords {} [atomE tag (env.length + 1) (.var 0)]).stmts))
       V' st' out) :
     match Tx.run (Core.denote Γ core env) ctx w with
     | .ok (v, w') =>
@@ -226,17 +229,26 @@ theorem sim_ext_op_call_return {S E ε : Type} {t : RetTy}
       rcases p with ⟨v, w0⟩
       simp only [hrun, except_ok_prod] at hbit
       obtain ⟨-, hVeq, hInv0, hAgr0⟩ := hbit
+      have hstatic := ctxRel_static hInv0.ctxr
+      have hrest' :=
+        s1_match_prefix_ok hfuns (noExt_maybeLock clearLock) hrest
+          (execStmts_maybeLock clearLock hstatic)
+      have hMO := memOnly_stAfterLockClear clearLock st1
+      have hInv1 := Inv_memOnly tag hInv0 hMO
+      have haddr0 := ctxRel_address hInv0.ctxr
+      have hAgr1 := ExtAgree_stAfterLockClear clearLock hAgr0 haddr0
       have hn0 : identsNodup tag (v :: env).length = true := by simpa using hn1
-      have he := eval_atom tag (funEnvUncast (toCalls o) funs) (st := st1) hVeq hn0 (.var 0)
+      have he := eval_atom tag (funEnvUncast (toCalls o) funs)
+        (st := stAfterLockClear clearLock st1) hVeq hn0 (.var 0)
       have hv : v < wordBound := hInv0.wf v (by simp)
       obtain ⟨_stR, hret, hh, hR'⟩ :=
-        return_word_sim (funEnvUncast (toCalls o) funs) V1 hv he hInv0.rel
+        return_word_sim (funEnvUncast (toCalls o) funs) V1 hv he hInv1.rel
       have hnoRet := noExt_returnVar tag (env.length + 1)
-      have hdesc := execStmts_descend hfuns hnoRet hrest
+      have hdesc := execStmts_descend hfuns hnoRet hrest'
       obtain ⟨hVeq', hsteq, hoeq⟩ := execStmts_det_evm hdesc hret
       subst hVeq'; subst hsteq; subst hoeq
-      have haddr := ctxRel_address hInv0.ctxr
-      have hAgr' := ExtAgree_noExt hAgr0 haddr hfuns hnoRet hrest
+      have haddr := ctxRel_address hInv1.ctxr
+      have hAgr' := ExtAgree_noExt hAgr1 haddr hfuns hnoRet hrest'
       rw [hokCore hrun]
       simp only [except_ok_prod]
       exact ⟨trivial, hsucc hh, hR', hAgr'⟩
@@ -265,10 +277,12 @@ theorem sim_ext_op_view_return {S E ε : Type} {t : RetTy}
     (hAgr : ExtAgree ctx.self w.ext st)
     (hOr : w.oracle = Oracle.ofExt o)
     (hNR : ExtOracle.NoReentry o ctx.self)
-    {e1 : Emit} (hE : emitLetOp tag c {} env.length (.view target sel args ret) = some e1)
+    {clearLock : Bool} {e1 : Emit}
+    (hE : emitLetOp tag c {} env.length (.view target sel args ret) = some e1)
     {V' : VEnv (yulD (toCalls o))} {st' : EvmState} {out : Outcome}
     (hexec : ExecStmts (yulD (toCalls o)) funs V st
-      (e1.stmts ++ (emitReturnWords {} [atomE tag (env.length + 1) (.var 0)]).stmts)
+      (e1.stmts ++ ((if clearLock then [lockClearStmt] else []) ++
+        (emitReturnWords {} [atomE tag (env.length + 1) (.var 0)]).stmts))
       V' st' out) :
     match Tx.run (Core.denote Γ core env) ctx w with
     | .ok (v, w') =>
@@ -313,17 +327,26 @@ theorem sim_ext_op_view_return {S E ε : Type} {t : RetTy}
       rcases p with ⟨v, w0⟩
       simp only [hrun, except_ok_prod] at hbit
       obtain ⟨-, hVeq, hInv0, hAgr0⟩ := hbit
+      have hstatic := ctxRel_static hInv0.ctxr
+      have hrest' :=
+        s1_match_prefix_ok hfuns (noExt_maybeLock clearLock) hrest
+          (execStmts_maybeLock clearLock hstatic)
+      have hMO := memOnly_stAfterLockClear clearLock st1
+      have hInv1 := Inv_memOnly tag hInv0 hMO
+      have haddr0 := ctxRel_address hInv0.ctxr
+      have hAgr1 := ExtAgree_stAfterLockClear clearLock hAgr0 haddr0
       have hn0 : identsNodup tag (v :: env).length = true := by simpa using hn1
-      have he := eval_atom tag (funEnvUncast (toCalls o) funs) (st := st1) hVeq hn0 (.var 0)
+      have he := eval_atom tag (funEnvUncast (toCalls o) funs)
+        (st := stAfterLockClear clearLock st1) hVeq hn0 (.var 0)
       have hv : v < wordBound := hInv0.wf v (by simp)
       obtain ⟨_stR, hret, hh, hR'⟩ :=
-        return_word_sim (funEnvUncast (toCalls o) funs) V1 hv he hInv0.rel
+        return_word_sim (funEnvUncast (toCalls o) funs) V1 hv he hInv1.rel
       have hnoRet := noExt_returnVar tag (env.length + 1)
-      have hdesc := execStmts_descend hfuns hnoRet hrest
+      have hdesc := execStmts_descend hfuns hnoRet hrest'
       obtain ⟨hVeq', hsteq, hoeq⟩ := execStmts_det_evm hdesc hret
       subst hVeq'; subst hsteq; subst hoeq
-      have haddr := ctxRel_address hInv0.ctxr
-      have hAgr' := ExtAgree_noExt hAgr0 haddr hfuns hnoRet hrest
+      have haddr := ctxRel_address hInv1.ctxr
+      have hAgr' := ExtAgree_noExt hAgr1 haddr hfuns hnoRet hrest'
       rw [hokCore hrun]
       simp only [except_ok_prod]
       exact ⟨trivial, hsucc hh, hR', hAgr'⟩
@@ -335,7 +358,7 @@ theorem sim_ext_seq_call {S E ε : Type} {t : RetTy}
     {k : Core t} {target : Atom} {sel : Nat} {args : List Atom} {ret : AbiRet}
     (ih : SimExt tag c Γ κ o ctx haltUnit k) :
     SimExt tag c Γ κ o ctx haltUnit (.seq (.call target sel args ret) k) := by
-  intro w env V st funs hfuns hwf hn hinv hAgr hOr hNR e' hem V' st' out hexec
+  intro w env V st funs hfuns hwf hn hinv hAgr hOr hNR clearLock e' hem V' st' out hexec
   have ⟨hsWF, hkWF⟩ := coreWF_seq.mp hwf
   simp only [emitCore] at hem
   obtain ⟨e0, h0, hst⟩ := emitCore_prefix tag hem
@@ -389,7 +412,7 @@ theorem sim_ext_seq_view {S E ε : Type} {t : RetTy}
     {k : Core t} {target : Atom} {sel : Nat} {args : List Atom} {ret : AbiRet}
     (ih : SimExt tag c Γ κ o ctx haltUnit k) :
     SimExt tag c Γ κ o ctx haltUnit (.seq (.view target sel args ret) k) := by
-  intro w env V st funs hfuns hwf hn hinv hAgr hOr hNR e' hem V' st' out hexec
+  intro w env V st funs hfuns hwf hn hinv hAgr hOr hNR clearLock e' hem V' st' out hexec
   have ⟨hsWF, hkWF⟩ := coreWF_seq.mp hwf
   simp only [emitCore] at hem
   obtain ⟨e0, h0, hst⟩ := emitCore_prefix tag hem
@@ -436,11 +459,11 @@ theorem sim_ext_seq_view {S E ε : Type} {t : RetTy}
       simp only [Core.denote, Tx.run_bind, hrun]
       exact hsim
 
-theorem emitCore_letOp_split {c : ContractDef} {halt : Bool} {t : RetTy}
+theorem emitCore_letOp_split {c : ContractDef} {halt : Bool} {clearLock : Bool} {t : RetTy}
     {op : Lsc.Op} {k : Core t} {e' : Emit} {d : Nat}
-    (hem : emitCore tag c {} d halt (.letOp op k) = some e') :
+    (hem : emitCore tag c {} d halt (.letOp op k) clearLock = some e') :
     ∃ e1 e0, emitLetOp tag c {} d op = some e1 ∧
-      emitCore tag c {} (d + 1) halt k = some e0 ∧
+      emitCore tag c {} (d + 1) halt k clearLock = some e0 ∧
       e'.stmts = e1.stmts ++ e0.stmts := by
   simp only [emitCore] at hem
   cases hE : emitLetOp tag c {} d op with
@@ -457,7 +480,7 @@ theorem sim_ext_letOp_call {S E ε : Type} {t : RetTy}
     {k : Core t} {target : Atom} {sel : Nat} {args : List Atom} {ret : AbiRet}
     (ih : SimExt tag c Γ κ o ctx haltUnit k) :
     SimExt tag c Γ κ o ctx haltUnit (.letOp (.call target sel args ret) k) := by
-  intro w env V st funs hfuns hwf hn hinv hAgr hOr hNR e' hem V' st' out hexec
+  intro w env V st funs hfuns hwf hn hinv hAgr hOr hNR clearLock e' hem V' st' out hexec
   have ⟨hopWF0, hkWF⟩ := coreWF_letOp.mp hwf
   obtain ⟨e1, e0, hE, h0, hst⟩ := emitCore_letOp_split tag hem
   rw [hst] at hexec
@@ -521,7 +544,7 @@ theorem sim_ext_letOp_view {S E ε : Type} {t : RetTy}
     {k : Core t} {target : Atom} {sel : Nat} {args : List Atom} {ret : AbiRet}
     (ih : SimExt tag c Γ κ o ctx haltUnit k) :
     SimExt tag c Γ κ o ctx haltUnit (.letOp (.view target sel args ret) k) := by
-  intro w env V st funs hfuns hwf hn hinv hAgr hOr hNR e' hem V' st' out hexec
+  intro w env V st funs hfuns hwf hn hinv hAgr hOr hNR clearLock e' hem V' st' out hexec
   have ⟨hopWF0, hkWF⟩ := coreWF_letOp.mp hwf
   obtain ⟨e1, e0, hE, h0, hst⟩ := emitCore_letOp_split tag hem
   rw [hst] at hexec
@@ -582,9 +605,9 @@ theorem sim_ext_letOp_view {S E ε : Type} {t : RetTy}
 theorem sim_ext_letOp_m1 {S E ε : Type} {t : RetTy}
     {c : ContractDef} {Γ : ContractSchema S ExtState E ε} {κ : List UInt8 → U256}
     {ctx : Ctx} {haltUnit : Bool} {o : ExtOracle}
+    {op : Lsc.Op} {k : Core t}
     (hΓ : Γ.st.Lawful c.fields) (hκ : KeccakSep c κ)
     (hlen : c.fields.length < wordBound)
-    {op : Lsc.Op} {k : Core t}
     (hM1 : M1Op op)
     (ih : SimExt tag c Γ κ o ctx haltUnit k)
     {w : World S ExtState E} {env : List Nat}
@@ -598,9 +621,9 @@ theorem sim_ext_letOp_m1 {S E ε : Type} {t : RetTy}
     (hAgr : ExtAgree ctx.self w.ext st)
     (hOr : w.oracle = Oracle.ofExt o)
     (hNR : ExtOracle.NoReentry o ctx.self)
-    {e1 e0 : Emit}
+    {clearLock : Bool} {e1 e0 : Emit}
     (hE : emitLetOp tag c {} env.length op = some e1)
-    (h0 : emitCore tag c {} (env.length + 1) haltUnit k = some e0)
+    (h0 : emitCore tag c {} (env.length + 1) haltUnit k clearLock = some e0)
     {V' : VEnv (yulD (toCalls o))} {st' : EvmState} {out : Outcome}
     (hexec : ExecStmts (yulD (toCalls o)) funs V st (e1.stmts ++ e0.stmts) V' st' out) :
     match Tx.run (Core.denote Γ (.letOp op k) env) ctx w with
@@ -665,9 +688,9 @@ theorem sim_ext_letOp_m1 {S E ε : Type} {t : RetTy}
 theorem sim_ext_seq_m1 {S E ε : Type} {t : RetTy}
     {c : ContractDef} {Γ : ContractSchema S ExtState E ε} {κ : List UInt8 → U256}
     {ctx : Ctx} {haltUnit : Bool} {o : ExtOracle}
+    {s : Lsc.Stmt} {k : Core t}
     (hΓ : Γ.st.Lawful c.fields) (hκ : KeccakSep c κ)
     (hlen : c.fields.length < wordBound)
-    {s : Lsc.Stmt} {k : Core t}
     (hM1 : M1Stmt s)
     (ih : SimExt tag c Γ κ o ctx haltUnit k)
     {w : World S ExtState E} {env : List Nat}
@@ -681,7 +704,7 @@ theorem sim_ext_seq_m1 {S E ε : Type} {t : RetTy}
     (hAgr : ExtAgree ctx.self w.ext st)
     (hOr : w.oracle = Oracle.ofExt o)
     (hNR : ExtOracle.NoReentry o ctx.self)
-    {e0 : Emit} (h0 : emitCore tag c {} env.length haltUnit k = some e0)
+    {clearLock : Bool} {e0 : Emit} (h0 : emitCore tag c {} env.length haltUnit k clearLock = some e0)
     {V' : VEnv (yulD (toCalls o))} {st' : EvmState} {out : Outcome}
     (hexec : ExecStmts (yulD (toCalls o)) funs V st
       ((emitStmt tag c {} env.length s).stmts ++ e0.stmts) V' st' out) :
@@ -746,11 +769,11 @@ theorem sim_ext_stmtTail_call {S E ε : Type}
     {target : Atom} {sel : Nat} {args : List Atom} {ret : AbiRet}
     (hhalt : haltUnit = true) :
     SimExt tag c Γ κ o ctx haltUnit (.stmtTail (.call target sel args ret)) := by
-  intro w env V st funs hfuns hwf hn hinv hAgr hOr hNR e' hem V' st' out hexec
+  intro w env V st funs hfuns hwf hn hinv hAgr hOr hNR clearLock e' hem V' st' out hexec
   simp only [emitCore] at hem
   rw [hhalt] at hem
   cases hem
-  rw [emitReturnUnit_true] at hexec
+  rw [emitReturnUnit_lock_if] at hexec
   have hpair :=
     stmtWF_call (c := c) (t := target) (sel := sel) (args := args) (ret := ret)
       (by simpa [coreWF] using hwf)
@@ -787,20 +810,29 @@ theorem sim_ext_stmtTail_call {S E ε : Type}
       rcases p with ⟨_, w0⟩
       simp only [hrun, except_ok_prod] at hbit
       obtain ⟨-, hVeq, hInv0, hAgr0⟩ := hbit
-      have hstopE := stop_sim (funEnvUncast (toCalls o) funs) V1 st1
+      have hstatic := ctxRel_static hInv0.ctxr
+      have hMO := memOnly_stAfterLockClear clearLock st1
+      have hInv1 := Inv_memOnly tag hInv0 hMO
+      have haddr0 := ctxRel_address hInv0.ctxr
+      have hAgr1 := ExtAgree_stAfterLockClear clearLock hAgr0 haddr0
+      have hrest' :=
+        s1_match_prefix_ok hfuns (noExt_maybeLock clearLock) hrest
+          (execStmts_maybeLock clearLock hstatic)
       have hnoStop : noExtBlock [stopStmt] = true := by
         simp [noExtBlock, noExtStmts, noExt_stop]
-      have hdesc := execStmts_descend hfuns hnoStop hrest
-      obtain ⟨hVeq', hsteq, hoeq⟩ := execStmts_det_evm hdesc hstopE
+      have hdesc := execStmts_descend hfuns hnoStop hrest'
+      obtain ⟨hVeq', hsteq, hoeq⟩ := execStmts_det_evm hdesc
+        (stop_sim (funEnvUncast (toCalls o) funs) V1 (stAfterLockClear clearLock st1))
       subst hVeq'; subst hsteq; subst hoeq
-      have haddr := ctxRel_address hInv0.ctxr
-      have hAgr' := ExtAgree_noExt hAgr0 haddr hfuns hnoStop hrest
+      have haddr := ctxRel_address hInv1.ctxr
+      have hAgr' := ExtAgree_noExt hAgr1 haddr hfuns hnoStop hrest'
       have htx :
           Tx.run (Core.denote Γ (.stmtTail (.call target sel args ret)) env) ctx w =
             .ok ((), w0) := hrun
       rw [htx]
       simp only [except_ok_prod]
-      exact ⟨trivial, haltSuccess_unit_stop rfl, R_halted_update hInv0.rel _, hAgr'⟩
+      exact ⟨trivial, haltSuccess_unit_stop rfl,
+        R_halted_update hInv1.rel _, hAgr'⟩
 
 /-- View as `stmtTail`. -/
 theorem sim_ext_stmtTail_view {S E ε : Type}
@@ -809,11 +841,11 @@ theorem sim_ext_stmtTail_view {S E ε : Type}
     {target : Atom} {sel : Nat} {args : List Atom} {ret : AbiRet}
     (hhalt : haltUnit = true) :
     SimExt tag c Γ κ o ctx haltUnit (.stmtTail (.view target sel args ret)) := by
-  intro w env V st funs hfuns hwf hn hinv hAgr hOr hNR e' hem V' st' out hexec
+  intro w env V st funs hfuns hwf hn hinv hAgr hOr hNR clearLock e' hem V' st' out hexec
   simp only [emitCore] at hem
   rw [hhalt] at hem
   cases hem
-  rw [emitReturnUnit_true] at hexec
+  rw [emitReturnUnit_lock_if] at hexec
   have hpair :=
     stmtWF_view (c := c) (t := target) (sel := sel) (args := args) (ret := ret)
       (by simpa [coreWF] using hwf)
@@ -850,19 +882,28 @@ theorem sim_ext_stmtTail_view {S E ε : Type}
       rcases p with ⟨_, w0⟩
       simp only [hrun, except_ok_prod] at hbit
       obtain ⟨-, hVeq, hInv0, hAgr0⟩ := hbit
-      have hstopE := stop_sim (funEnvUncast (toCalls o) funs) V1 st1
+      have hstatic := ctxRel_static hInv0.ctxr
+      have hMO := memOnly_stAfterLockClear clearLock st1
+      have hInv1 := Inv_memOnly tag hInv0 hMO
+      have haddr0 := ctxRel_address hInv0.ctxr
+      have hAgr1 := ExtAgree_stAfterLockClear clearLock hAgr0 haddr0
+      have hrest' :=
+        s1_match_prefix_ok hfuns (noExt_maybeLock clearLock) hrest
+          (execStmts_maybeLock clearLock hstatic)
       have hnoStop : noExtBlock [stopStmt] = true := by
         simp [noExtBlock, noExtStmts, noExt_stop]
-      have hdesc := execStmts_descend hfuns hnoStop hrest
-      obtain ⟨hVeq', hsteq, hoeq⟩ := execStmts_det_evm hdesc hstopE
+      have hdesc := execStmts_descend hfuns hnoStop hrest'
+      obtain ⟨hVeq', hsteq, hoeq⟩ := execStmts_det_evm hdesc
+        (stop_sim (funEnvUncast (toCalls o) funs) V1 (stAfterLockClear clearLock st1))
       subst hVeq'; subst hsteq; subst hoeq
-      have haddr := ctxRel_address hInv0.ctxr
-      have hAgr' := ExtAgree_noExt hAgr0 haddr hfuns hnoStop hrest
+      have haddr := ctxRel_address hInv1.ctxr
+      have hAgr' := ExtAgree_noExt hAgr1 haddr hfuns hnoStop hrest'
       have htx :
           Tx.run (Core.denote Γ (.stmtTail (.view target sel args ret)) env) ctx w =
             .ok ((), w0) := hrun
       rw [htx]
       simp only [except_ok_prod]
-      exact ⟨trivial, haltSuccess_unit_stop rfl, R_halted_update hInv0.rel _, hAgr'⟩
+      exact ⟨trivial, haltSuccess_unit_stop rfl,
+        R_halted_update hInv1.rel _, hAgr'⟩
 
 end Lsc.Compiler

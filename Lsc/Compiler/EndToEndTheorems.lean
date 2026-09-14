@@ -216,7 +216,7 @@ theorem evmCallRun_of_correct {S X E ε : Type} (c : ContractDef)
     (is : List Instr) (hcomp : compileBlock rt = some is)
     (ctx : Ctx) (w : World S X E) (yst0 : EvmState)
     (hctx : ctxRel ctx yst0) (hR : R c Γ evmKeccak w yst0)
-    (himm0 : ∀ k, yst0.env.immutable k = 0) :
+    (himm0 : ∀ k, yst0.env.immutable k = 0) (hLock : LockFree yst0) :
     ∃ σ', EvmCallRun is yst0 σ' ∧
       match selectedFn c yst0.env.calldata with
       | none => σ' = yst0.storage
@@ -224,7 +224,7 @@ theorem evmCallRun_of_correct {S X E ε : Type} (c : ContractDef)
         match Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse) ctx w with
         | .ok (_, w') => storageRel c Γ evmKeccak w'.self σ' ∧ WorldWF c Γ w'
         | .error _ => σ' = yst0.storage :=
-  Proof.evmCallRun_of_correct c Γ hΓ hκ hcf hctor hlen hbound rt hrt is hcomp ctx w yst0 hctx hR himm0
+  Proof.evmCallRun_of_correct c Γ hΓ hκ hcf hctor hlen hbound rt hrt is hcomp ctx w yst0 hctx hR himm0 hLock
 
 /-- The empty encoded-call fold is the identity on worlds. -/
 theorem coreRun_nil {S X E ε} {Γ : ContractSchema S X E ε} (w : World S X E) :
@@ -390,10 +390,10 @@ theorem bytecode_call_correct {S X E ε : Type} (c : ContractDef)
     (is : List Instr) (hcomp : compileBlock rt = some is)
     (ctx : Ctx) (w : World S X E) (yst0 : EvmState)
     (hctx : ctxRel ctx yst0) (hR : R c Γ evmKeccak w yst0)
-    (himm0 : ∀ k, yst0.env.immutable k = 0) :
+    (himm0 : ∀ k, yst0.env.immutable k = 0) (hLock : LockFree yst0) :
     BytecodeCallCorrect c Γ evmKeccak ctx w yst0 is :=
   Proof.bytecode_call_correct c Γ hΓ hκ hcf hctor hlen hbound rt hrt is hcomp
-    ctx w yst0 hctx hR himm0
+    ctx w yst0 hctx hR himm0 hLock
 
 /-- After any halted sequence of well-formed EVM calls against compiled
 call-free runtime, the ending storage is exactly the storage the

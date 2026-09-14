@@ -76,6 +76,11 @@ def rawSelectedWF (c : ContractDef) : Bool :=
       | none => selectedWF (frames b) []
       | some sel => selectedWF (frames b) sel
 
+def toyRuntimeHas (needle : String) : Bool :=
+  match runtimeBlock YulTestsToy.contract with
+  | none => false
+  | some b => decide (1 < (String.splitOn (printYul b) needle).length)
+
 #guard (runtimeBlock YulTestsToy.contract).isSome
 #guard (compileRuntime YulTestsToy.contract).isSome
 #guard (deployObject YulTestsToy.contract).isSome
@@ -83,5 +88,7 @@ def rawSelectedWF (c : ContractDef) : Bool :=
 #guard toyCtorHas "codecopy"
 #guard toyCtorHas "codesize"
 #guard rawSelectedWF YulTestsToy.contract
+#guard toyRuntimeHas "tload"
+#guard !toyRuntimeHas "tstore"
 
 end Lsc.Compiler.YulTests

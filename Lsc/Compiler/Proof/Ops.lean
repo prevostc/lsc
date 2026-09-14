@@ -122,6 +122,9 @@ theorem step_shl (st : EvmState) (shift val : U256) :
 theorem step_sload (st : EvmState) (k : U256) :
     stepOp Op.sload [k] st = some (.ok [st.storage k] st) := rfl
 
+theorem step_tload (st : EvmState) (k : U256) :
+    stepOp Op.tload [k] st = some (.ok [st.transient k] st) := rfl
+
 theorem evm_litValue_number (n : Nat) :
     evm.litValue (.number n) = BitVec.ofNat 256 n := rfl
 
@@ -131,6 +134,15 @@ theorem step_sstore (st : EvmState) (k v : U256) (h : st.env.static = false) :
         storage := upd st.storage k v
         env := { st.env with
           storageOf := updAccount st.env.storageOf st.env.address k v } }) := by
+  simp only [stepOp, guardStatic, h]
+  rw [if_neg Bool.false_ne_true]
+
+theorem step_tstore (st : EvmState) (k v : U256) (h : st.env.static = false) :
+    stepOp Op.tstore [k, v] st = some (.ok []
+      { st with
+        transient := upd st.transient k v
+        env := { st.env with
+          transientOf := updAccount st.env.transientOf st.env.address k v } }) := by
   simp only [stepOp, guardStatic, h]
   rw [if_neg Bool.false_ne_true]
 
@@ -155,6 +167,116 @@ theorem stop_sim (funs : FunEnv evm) (V : VEnv evm) (st : EvmState) :
     ExecStmts evm funs V st [stopStmt] V { st with halted := some (.stop, []) } .halt :=
   Step.seqStop (Step.exprStmtHalt (Step.builtinHalt Step.argsNil (step_stop _)))
     halt_ne_normal
+
+/-- Post-state of a local `tstore(k, v)`. -/
+def stTstore (st : EvmState) (k v : U256) : EvmState :=
+  { st with
+    transient := upd st.transient k v
+    env := { st.env with
+      transientOf := updAccount st.env.transientOf st.env.address k v } }
+
+theorem memOnly_tstore (st : EvmState) (k v : U256) : MemOnly st (stTstore st k v) := by
+  simp [MemOnly, stTstore]
+
+theorem LockFree_tstore_zero (st : EvmState) :
+    LockFree (stTstore st (BitVec.ofNat 256 reentrancyLockSlot) 0) := by
+  simp [LockFree, stTstore, upd, reentrancyLockSlot]
+
+theorem LockFree_init : LockFree EvmState.init := rfl
+
+theorem LockFree_mkEvmStateExt (cd σ ξ κ ctx) :
+    LockFree (mkEvmStateExt cd σ ξ κ ctx) := rfl
+
+theorem eval_tload (funs : FunEnv evm) (V : VEnv evm) (st : EvmState) (n : Nat) :
+    EvalExpr evm funs V st (bop Op.tload [lit n])
+      (.vals [st.transient (BitVec.ofNat 256 n)] st) :=
+  Step.builtinOk (Step.argsCons Step.argsNil Step.lit)
+    (by simp [evm_litValue_number, litValue_number, step_tload])
+
+theorem tstore_exec (funs : FunEnv evm) (V : VEnv evm) (st : EvmState)
+    (k v : Nat) (hstatic : st.env.static = false) :
+    ExecStmts evm funs V st
+      [.exprStmt (bop Op.tstore [lit k, lit v])] V
+      (stTstore st (BitVec.ofNat 256 k) (BitVec.ofNat 256 v)) .normal :=
+  Step.seqCons
+    (Step.exprStmt (Step.builtinOk
+      (Step.argsCons (Step.argsCons Step.argsNil Step.lit) Step.lit)
+      (by
+        simp only [evm_litValue_number, step_tstore st _ _ hstatic]
+        rfl)))
+    Step.seqNil
+
+theorem lockClear_sim (funs : FunEnv evm) (V : VEnv evm) (st : EvmState)
+    (hstatic : st.env.static = false) :
+    ExecStmts evm funs V st [lockClearStmt] V
+      (stTstore st (BitVec.ofNat 256 reentrancyLockSlot) 0) .normal := by
+  simpa [lockClearStmt, reentrancyLockSlot] using
+    tstore_exec funs V st reentrancyLockSlot 0 hstatic
+
+theorem lockSet_sim (funs : FunEnv evm) (V : VEnv evm) (st : EvmState)
+    (hstatic : st.env.static = false) :
+    ExecStmts evm funs V st [lockSetStmt] V
+      (stTstore st (BitVec.ofNat 256 reentrancyLockSlot) 1) .normal := by
+  simpa [lockSetStmt, reentrancyLockSlot] using
+    tstore_exec funs V st reentrancyLockSlot 1 hstatic
+
+/-- Committing unlock: `tstore(0,0)` leaves slot 0 clear. Slice B/C. -/
+theorem lock_cleared_on_commit (funs : FunEnv evm) (V : VEnv evm) (st : EvmState)
+    (hstatic : st.env.static = false) :
+    ExecStmts evm funs V st [lockClearStmt] V
+      (stTstore st (BitVec.ofNat 256 reentrancyLockSlot) 0) .normal ∧
+    LockFree (stTstore st (BitVec.ofNat 256 reentrancyLockSlot) 0) :=
+  ⟨lockClear_sim funs V st hstatic, LockFree_tstore_zero st⟩
+
+theorem exec_lockSetStmt (funs : FunEnv evm) (V : VEnv evm) (st : EvmState)
+    (hstatic : st.env.static = false) :
+    ExecStmt evm funs V st lockSetStmt V
+      (stTstore st (BitVec.ofNat 256 reentrancyLockSlot) 1) .normal :=
+  Step.exprStmt (Step.builtinOk
+    (Step.argsCons (Step.argsCons Step.argsNil Step.lit) Step.lit)
+    (by
+      simp only [lockSetStmt, evm_litValue_number, reentrancyLockSlot,
+        step_tstore st _ _ hstatic]
+      rfl))
+
+theorem exec_lockClearStmt (funs : FunEnv evm) (V : VEnv evm) (st : EvmState)
+    (hstatic : st.env.static = false) :
+    ExecStmt evm funs V st lockClearStmt V
+      (stTstore st (BitVec.ofNat 256 reentrancyLockSlot) 0) .normal :=
+  Step.exprStmt (Step.builtinOk
+    (Step.argsCons (Step.argsCons Step.argsNil Step.lit) Step.lit)
+    (by
+      simp only [lockClearStmt, evm_litValue_number, reentrancyLockSlot,
+        step_tstore st _ _ hstatic]
+      rfl))
+
+theorem execStmts_lockClear (funs : FunEnv evm) (V : VEnv evm) (st : EvmState)
+    (hstatic : st.env.static = false) :
+    ExecStmts evm funs V st [lockClearStmt] V
+      (stTstore st (BitVec.ofNat 256 reentrancyLockSlot) 0) .normal :=
+  Step.seqCons (exec_lockClearStmt funs V st hstatic) Step.seqNil
+
+theorem execStmts_lockClear_stop (funs : FunEnv evm) (V : VEnv evm) (st : EvmState)
+    (hstatic : st.env.static = false) :
+    ExecStmts evm funs V st [lockClearStmt, stopStmt] V
+      { stTstore st (BitVec.ofNat 256 reentrancyLockSlot) 0 with
+        halted := some (.stop, []) } .halt :=
+  Step.seqCons (exec_lockClearStmt funs V st hstatic)
+    (stop_sim funs V (stTstore st (BitVec.ofNat 256 reentrancyLockSlot) 0))
+
+theorem execStmts_lockClear_cons {funs : FunEnv evm} {V : VEnv evm} {st : EvmState}
+    {rest : YBlock} {V' : VEnv evm} {st' : EvmState} {o : Outcome}
+    (hstatic : st.env.static = false)
+    (h : ExecStmts evm funs V
+      (stTstore st (BitVec.ofNat 256 reentrancyLockSlot) 0) rest V' st' o) :
+    ExecStmts evm funs V st (lockClearStmt :: rest) V' st' o :=
+  Step.seqCons (exec_lockClearStmt funs V st hstatic) h
+
+theorem exec_lockCheck_ok (funs : FunEnv evm) (V : VEnv evm) (st : EvmState)
+    (h : LockFree st) :
+    ExecStmt evm funs V st lockCheckStmt V st .normal := by
+  refine Step.ifFalse (D := evm) (eval_tload funs V st reentrancyLockSlot) ?_
+  simpa [LockFree, reentrancyLockSlot, Dialect.zero, litValue] using h
 
 /-- Overflow / underflow Panic block. Revert path exposes only `halted`. -/
 theorem panic_sim (funs : FunEnv evm) (V : VEnv evm) (st : EvmState) (code : Nat)

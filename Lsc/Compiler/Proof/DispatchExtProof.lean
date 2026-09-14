@@ -340,6 +340,38 @@ theorem R_committed_guard {S X E ε} {c : ContractDef} {Γ : ContractSchema S X 
       exact ⟨hs.symm, hl.symm, hcaller.symm, hv.symm, ht.symm, hn.symm, ha.symm,
         hst.symm, hk.symm, hcd.symm, rfl⟩
 
+/-- `committedState` along a `MemOnly` start-state: storage-relevant `R` is
+preserved because rollback restores the start state and success ignores it. -/
+theorem R_committed_of_memOnly {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
+    {κ} {w : World S X E} {st0 st1 st' : EvmState}
+    (hMO : MemOnly st0 st1)
+    (hR : R c Γ κ w (committedState st1 st')) :
+    R c Γ κ w (committedState st0 st') := by
+  cases hhalt : st'.halted with
+  | none =>
+    have h1 : committedState st1 st' = st' := by simp [committedState, hhalt]
+    have h2 : committedState st0 st' = st' := by simp [committedState, hhalt]
+    rw [h2]; rwa [h1] at hR
+  | some p =>
+    rcases p with ⟨k, bytes⟩
+    by_cases hc : k.commits = true
+    · have h1 : committedState st1 st' = st' := by
+        simp [committedState, hhalt, hc]
+      have h2 : committedState st0 st' = st' := by simp [committedState, hhalt, hc]
+      rw [h2]; rwa [h1] at hR
+    · have h1 : committedState st1 st' =
+          { st1 with halted := st'.halted, returndata := st'.returndata } := by
+        simp [committedState, hhalt, hc]
+      have h2 : committedState st0 st' =
+          { st0 with halted := st'.halted, returndata := st'.returndata } := by
+        simp [committedState, hhalt, hc]
+      rw [h2]
+      apply R_memOnly (st := committedState st1 st') hR
+      rw [h1]
+      rcases hMO with ⟨hs, hl, hcaller, hv, ht, hn, ha, hst, hk, hcd, _⟩
+      exact ⟨hs.symm, hl.symm, hcaller.symm, hv.symm, ht.symm, hn.symm, ha.symm,
+        hst.symm, hk.symm, hcd.symm, rfl⟩
+
 theorem committedState_halted_eq (st0 st' : EvmState) :
     (committedState st0 st').halted = st'.halted := by
   unfold committedState
@@ -358,6 +390,31 @@ theorem exec_memoryGuardErased_inv {calls : ExternalCalls} {funs : FunEnv (yulD 
     o = .normal ∧ V' = V ∧ st' = stAfterGuard st := by
   have hdesc := execStmt_descend hfuns noExt_memoryGuardErased h
   have hfwd := exec_memoryGuardErased (funEnvUncast calls funs) V st
+  have heq := step_det_evm hfwd hdesc
+  injection heq with hV hst ho
+  exact ⟨ho.symm, hV.symm, hst.symm⟩
+
+theorem exec_lockCheck_inv {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
+    {V : VEnv (yulD calls)} {st : EvmState}
+    {V' : VEnv (yulD calls)} {st' : EvmState} {o : Outcome}
+    (hfuns : noExtFuns funs = true) (hLock : LockFree st)
+    (h : ExecStmt (yulD calls) funs V st lockCheckStmt V' st' o) :
+    o = .normal ∧ V' = V ∧ st' = st := by
+  have hdesc := execStmt_descend hfuns noExt_lockCheckStmt h
+  have hfwd := exec_lockCheck_ok (funEnvUncast calls funs) V st hLock
+  have heq := step_det_evm hfwd hdesc
+  injection heq with hV hst ho
+  exact ⟨ho.symm, hV.symm, hst.symm⟩
+
+theorem exec_lockSet_inv {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
+    {V : VEnv (yulD calls)} {st : EvmState}
+    {V' : VEnv (yulD calls)} {st' : EvmState} {o : Outcome}
+    (hfuns : noExtFuns funs = true) (hstatic : st.env.static = false)
+    (h : ExecStmt (yulD calls) funs V st lockSetStmt V' st' o) :
+    o = .normal ∧ V' = V ∧
+      st' = stTstore st (BitVec.ofNat 256 reentrancyLockSlot) 1 := by
+  have hdesc := execStmt_descend hfuns noExt_lockSetStmt h
+  have hfwd := exec_lockSetStmt (funEnvUncast calls funs) V st hstatic
   have heq := step_det_evm hfwd hdesc
   injection heq with hV hst ho
   exact ⟨ho.symm, hV.symm, hst.symm⟩
@@ -408,7 +465,8 @@ theorem runtimeBlock_correct_ext {S E ε : Type}
     (hctx : ctxRel ctx st0) (hR : R c Γ κ w st0)
     (hAgr : ExtAgree ctx.self w.ext st0)
     (hOr : w.oracle = Oracle.ofExt o)
-    (hNR : ExtOracle.NoReentry o ctx.self) :
+    (hNR : ExtOracle.NoReentry o ctx.self)
+    (hLock : LockFree st0) :
     RuntimeBlockCorrectExt c Γ κ o yul ctx w st0 := by
   intro st' out hrun
   obtain ⟨_, cases, hmap, hy⟩ := runtimeBlock_inv hyul
@@ -440,6 +498,7 @@ theorem runtimeBlock_correct_ext {S E ε : Type}
     have hctxA := ctxRel_memOnly hctx hMO
     have hRA := R_memOnly hR hMO
     have hAgrA := ExtAgree_stAfterGuard hAgr
+    have hLockA : LockFree stA := hstA0.symm ▸ hLock
     have hcdA : (stAfterGuard st0).env.calldata = cd := by
       rcases hMO with ⟨_, _, _, _, _, _, _, _, _, hcd', _⟩
       exact hcd'
@@ -447,6 +506,16 @@ theorem runtimeBlock_correct_ext {S E ε : Type}
     have hselA : calldataSelector (stAfterGuard st0).env.calldata =
         calldataSelector cd := by
       simp [hcdA]
+    cases execStmts_cons_inv hrest with
+    | inr hstopL =>
+      obtain ⟨hneL, hLhalt⟩ := hstopL
+      exact (hneL (exec_lockCheck_inv hfuns0 (by simpa [hstA0] using hLockA) hLhalt).1).elim
+    | inl hokL =>
+    obtain ⟨VL, stL0, hchk, hrest⟩ := hokL
+    have hLinv := exec_lockCheck_inv hfuns0 (by simpa [hstA0] using hLockA) hchk
+    obtain ⟨_, hVL, hstL⟩ := hLinv
+    subst hVL
+    rw [show stL0 = st0 from hstA0 ▸ hstL] at hrest
     cases execStmts_cons_inv hrest with
     | inr hstop =>
       obtain ⟨hne, hguard⟩ := hstop
@@ -504,18 +573,18 @@ theorem runtimeBlock_correct_ext {S E ε : Type}
           obtain ⟨body, hyF, hswEq⟩ : ∃ body, toYulFn c f = some body ∧
               selectSwitch evm (BitVec.ofNat 256 (calldataSelector cd))
                 cases (some [revert00]) =
-                [YulSemantics.Stmt.block
-                  (emitGuardLt {} (4 + 32 * f.params.length)).stmts,
-                  YulSemantics.Stmt.block body] := by
+                YulSemantics.Stmt.block
+                  (emitGuardLt {} (4 + 32 * f.params.length)).stmts ::
+                  lockSetPrefix f ++ [YulSemantics.Stmt.block body] := by
             simpa [hfind] using hswM
           rw [hswEq] at hb
           have hfmem : f ∈ c.functions := mem_of_find? hfind
           obtain ⟨Vb2, hcase, hV2⟩ := exec_block_inv hb
           have hhcase : hoist (yulD (toCalls o))
-              [YulSemantics.Stmt.block
-                (emitGuardLt {} (4 + 32 * f.params.length)).stmts,
-                YulSemantics.Stmt.block body] = [] :=
-            hoist_yulD_of_evm (calls := toCalls o) (hoist_two_blocks _ _)
+              (YulSemantics.Stmt.block
+                (emitGuardLt {} (4 + 32 * f.params.length)).stmts ::
+                lockSetPrefix f ++ [YulSemantics.Stmt.block body]) = [] :=
+            hoist_yulD_of_evm (calls := toCalls o) (hoist_entryCaseBody f _ _)
           rw [hhcase] at hcase
           have hfuns1 : noExtFuns
               ([] :: ([] :: []) : FunEnv (yulD (toCalls o))) = true :=
@@ -547,39 +616,106 @@ theorem runtimeBlock_correct_ext {S E ε : Type}
                 ⟨_, ⟨hVeqF, hstF⟩⟩
               subst hVeqF
               rw [hstF] at hrestF
-              have hbodyStmt := execStmts_singleton_inv hrestF
-              obtain ⟨Vb3, hss, _⟩ := exec_block_inv hbodyStmt
-              have hhf := hoist_yulD_of_evm (calls := toCalls o)
-                (toYulFn_hoist hyF (hctor f hfmem))
-              rw [hhf] at hss
-              have hss' :
-                  ExecStmts (yulD (toCalls o)) [[]] [] (stAfterGuard st0)
-                    body Vb3 st' out :=
-                execStmts_of_dropEmpty (by simp [dropEmpty]) hss
-              have hRun :
-                  Run (yulD (toCalls o)) body (stAfterGuard st0) [] st' out :=
-                run_of_execStmts_open hhf hss'
               have hsome : selectedFn c cd = some f :=
                 selectedFn_some_of hshort hfind hshortF
-              have hfn := toYulFn_correct_ext (c := c) (Γ := Γ) hΓ κ hκ o f
-                (hctor f hfmem) (hS2 f hfmem) hlen (hbound f hfmem) body hyF
-                ctx w (stAfterGuard st0) hctxA hRA hAgrA hOr hNR
-              have hconcl := hfn st' out hRun
-              simp only [hsome]
-              rw [hcdA] at hconcl
-              cases htx : Tx.run (Core.denote Γ f.core (decodeArgs f cd).reverse)
-                  ctx w with
-              | ok p =>
-                rcases p with ⟨v, w'⟩
-                simp only [htx] at hconcl ⊢
-                obtain ⟨ho, hsucc, hR', hAgr'⟩ := hconcl
-                exact ⟨ho, haltSuccess_committed_guard hsucc,
-                  R_committed_guard hMO hR', ExtAgree_committed_guard hAgr'⟩
-              | error err =>
-                simp only [htx] at hconcl ⊢
-                obtain ⟨bytes, ho, hh, herr, hR'⟩ := hconcl
-                exact ⟨bytes, ho, by simpa [committedState_halted_eq] using hh,
-                  herr, R_committed_guard hMO hR'⟩
+              by_cases hlocks : locks f
+              · have hpre : lockSetPrefix f = [lockSetStmt] := by
+                  simp [lockSetPrefix, hlocks]
+                simp [hpre] at hrestF
+                cases execStmts_cons_inv hrestF with
+                | inr hstopS =>
+                  obtain ⟨hneS, hset⟩ := hstopS
+                  exact (hneS (exec_lockSet_inv hfuns1
+                    (ctxRel_static hctxA) hset).1).elim
+                | inl hokS =>
+                  obtain ⟨VS, stS, hset, hrestB⟩ := hokS
+                  have hsetI := exec_lockSet_inv hfuns1 (ctxRel_static hctxA) hset
+                  obtain ⟨_, hVS, hstS⟩ := hsetI
+                  subst hVS
+                  rw [hstS] at hrestB
+                  have hbodyStmt := execStmts_singleton_inv hrestB
+                  obtain ⟨Vb3, hss, _⟩ := exec_block_inv hbodyStmt
+                  have hhf := hoist_yulD_of_evm (calls := toCalls o)
+                    (toYulFn_hoist hyF (hctor f hfmem))
+                  rw [hhf] at hss
+                  set stL := stTstore (stAfterGuard st0)
+                    (BitVec.ofNat 256 reentrancyLockSlot) 1
+                  have hss' :
+                      ExecStmts (yulD (toCalls o)) [[]] [] stL
+                        body Vb3 st' out :=
+                    execStmts_of_dropEmpty (by simp [dropEmpty]) hss
+                  have hRun :
+                      Run (yulD (toCalls o)) body stL [] st' out :=
+                    run_of_execStmts_open hhf hss'
+                  have hMOL := memOnly_tstore (stAfterGuard st0)
+                    (BitVec.ofNat 256 reentrancyLockSlot) 1
+                  have hctxL := ctxRel_memOnly hctxA hMOL
+                  have hRL := R_memOnly hRA hMOL
+                  have hAgrL := ExtAgree_tstore (slot := BitVec.ofNat 256 reentrancyLockSlot)
+                    (val := 1) hAgrA (ctxRel_address hctxA)
+                  have hfn := toYulFn_correct_ext (c := c) (Γ := Γ) hΓ κ hκ o f
+                    (hctor f hfmem) (hS2 f hfmem) hlen (hbound f hfmem) body hyF
+                    ctx w stL hctxL hRL (by simpa [stL, stTstore] using hAgrL)
+                    hOr hNR
+                  have hMO_L : MemOnly st0 stL := by
+                    simpa [stL, stAfterGuard] using
+                      memOnly_tstore st0 (BitVec.ofNat 256 reentrancyLockSlot) 1
+                  have hconcl := hfn st' out hRun
+                  simp only [hsome]
+                  have hcdL : stL.env.calldata = cd := by
+                    simp [stL, stTstore, hcdA]
+                  rw [hcdL] at hconcl
+                  cases htx : Tx.run (Core.denote Γ f.core (decodeArgs f cd).reverse)
+                      ctx w with
+                  | ok p =>
+                    rcases p with ⟨v, w'⟩
+                    simp only [htx] at hconcl ⊢
+                    obtain ⟨ho, hsucc, hR', hAgr'⟩ := hconcl
+                    obtain ⟨k, bs, hh, hk⟩ := haltSuccess_commits hsucc
+                    have hh' : st'.halted = some (k, bs) := by
+                      simpa [committedState_halted_eq] using hh
+                    rw [committedState_commit (st0 := st0) hh' hk]
+                    rw [committedState_commit (st0 := stL) hh' hk] at hR' hAgr'
+                    exact ⟨ho, by simpa [committedState_halted_eq] using hsucc,
+                      hR', hAgr'⟩
+                  | error err =>
+                    simp only [htx] at hconcl ⊢
+                    obtain ⟨bytes, ho, hh, herr, hR'⟩ := hconcl
+                    exact ⟨bytes, ho, by simpa [committedState_halted_eq] using hh,
+                      herr, R_committed_of_memOnly hMO_L hR'⟩
+              · have hpre : lockSetPrefix f = [] := by simp [lockSetPrefix, hlocks]
+                simp [hpre] at hrestF
+                have hbodyStmt := execStmts_singleton_inv hrestF
+                obtain ⟨Vb3, hss, _⟩ := exec_block_inv hbodyStmt
+                have hhf := hoist_yulD_of_evm (calls := toCalls o)
+                  (toYulFn_hoist hyF (hctor f hfmem))
+                rw [hhf] at hss
+                have hss' :
+                    ExecStmts (yulD (toCalls o)) [[]] [] (stAfterGuard st0)
+                      body Vb3 st' out :=
+                  execStmts_of_dropEmpty (by simp [dropEmpty]) hss
+                have hRun :
+                    Run (yulD (toCalls o)) body (stAfterGuard st0) [] st' out :=
+                  run_of_execStmts_open hhf hss'
+                have hfn := toYulFn_correct_ext (c := c) (Γ := Γ) hΓ κ hκ o f
+                  (hctor f hfmem) (hS2 f hfmem) hlen (hbound f hfmem) body hyF
+                  ctx w (stAfterGuard st0) hctxA hRA hAgrA hOr hNR
+                have hconcl := hfn st' out hRun
+                simp only [hsome]
+                rw [hcdA] at hconcl
+                cases htx : Tx.run (Core.denote Γ f.core (decodeArgs f cd).reverse)
+                    ctx w with
+                | ok p =>
+                  rcases p with ⟨v, w'⟩
+                  simp only [htx] at hconcl ⊢
+                  obtain ⟨ho, hsucc, hR', hAgr'⟩ := hconcl
+                  exact ⟨ho, haltSuccess_committed_guard hsucc,
+                    R_committed_guard hMO hR', ExtAgree_committed_guard hAgr'⟩
+                | error err =>
+                  simp only [htx] at hconcl ⊢
+                  obtain ⟨bytes, ho, hh, herr, hR'⟩ := hconcl
+                  exact ⟨bytes, ho, by simpa [committedState_halted_eq] using hh,
+                    herr, R_committed_guard hMO hR'⟩
 
 end Proof
 

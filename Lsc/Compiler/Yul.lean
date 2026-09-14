@@ -13,13 +13,15 @@ live inside the block so `restore` drops them; the Core result variable is
 declared outside and assigned inside. `toYulFn` does **not** return `none` on
 calls.
 
-Not emitted in this slice: `tload`/`tstore` (reentrancy lock), `for`,
-`delegatecall`, `selfdestruct`, `create`. `ite` is `switch` (Yul `if` has no
-else). Dispatcher is `switch shr(224, calldataload(0))`. Sub-expressions are
-nested Yul builtins (no flatten / `t_i` temps); `{ … }` wraps `if` bodies,
-`switch` cases, and external-call temps. `toYulFn` requires `coreWF` and
-`Nodup` `identV` names (`{f.name}_{i}`, unique across the dispatcher
-`switch`); `runtimeBlock` requires unique selectors.
+Every runtime entry checks `tload(0)` and reverts if set. Locking functions
+(`hasExtCall ∧ ¬ isPureRead`) `tstore(0,1)` on entry and `tstore(0,0)` on
+committing exits. Not emitted: `for`, `delegatecall`, `selfdestruct`, `create`.
+`ite` is `switch` (Yul `if` has no else). Dispatcher is
+`switch shr(224, calldataload(0))`. Sub-expressions are nested Yul builtins
+(no flatten / `t_i` temps); `{ … }` wraps `if` bodies, `switch` cases, and
+external-call temps. `toYulFn` requires `coreWF` and `Nodup` `identV` names
+(`{f.name}_{i}`, unique across the dispatcher `switch`); `runtimeBlock`
+requires unique selectors.
 
 Definitions are in `YulDefs`; well-formedness and `noExt*` lemmas in
 `YulTheorems`.

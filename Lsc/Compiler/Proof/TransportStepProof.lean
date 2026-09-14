@@ -35,9 +35,12 @@ theorem transport_step (T : TransportSetup S X E ε)
   have hR : R T.c T.Γ evmKeccak w yst0 :=
     R_mkEvmState evmKeccak w cd σ ctx hs hlog hwf
   have himm0 : ∀ k, yst0.env.immutable k = 0 := fun k => mkEvmState_immutable _ _ _ _ k
+  have hLock : LockFree yst0 := by
+    simp only [yst0, mkEvmState]
+    rfl
   obtain ⟨σ', hRun, hpost⟩ :=
     evmCallRun_of_correct T.c T.Γ T.lawful T.hκ hcf T.hctor T.hlen T.hbound
-      T.rt T.hrt T.is T.hcomp ctx w yst0 hctx hR himm0
+      T.rt T.hrt T.is T.hcomp ctx w yst0 hctx hR himm0 hLock
   refine ⟨σ', hRun, ?_⟩
   rw [mkEvmState_calldata] at hpost
   cases hsel : selectedFn T.c cd with
@@ -95,10 +98,11 @@ theorem transport_step_ext (T : TransportSetup S ExtState E ε)
     R_mkEvmStateExt evmKeccak w cd σ ξ ctx hs hlog hwf
   have himm0 : ∀ k, yst0.env.immutable k = 0 :=
     fun k => mkEvmStateExt_immutable _ _ _ _ _ k
+  have hLock : LockFree yst0 := LockFree_mkEvmStateExt _ _ _ _ _
   obtain ⟨σ', ξ', hRun, hpost⟩ :=
     evmCallRun_of_correct_ext T.c T.Γ T.lawful T.hκ
       Xpkg.oracle Xpkg.hCalls T.hctor Xpkg.hS2 T.hlen T.hbound
-      T.rt T.hrt T.is T.hcomp ctx w yst0 hctx hR hAgr hOr hNR himm0
+      T.rt T.hrt T.is T.hcomp ctx w yst0 hctx hR hAgr hOr hNR himm0 hLock
   refine ⟨σ', ξ', hRun, ?_⟩
   rw [mkEvmStateExt_calldata] at hpost
   cases hsel : selectedFn T.c cd with

@@ -280,7 +280,7 @@ theorem evmCallRun_of_correct {S X E ε : Type} (c : ContractDef)
     (is : List Instr) (hcomp : compileBlock rt = some is)
     (ctx : Ctx) (w : World S X E) (yst0 : EvmState)
     (hctx : ctxRel ctx yst0) (hR : R c Γ evmKeccak w yst0)
-    (himm0 : ∀ k, yst0.env.immutable k = 0) :
+    (himm0 : ∀ k, yst0.env.immutable k = 0) (hLock : LockFree yst0) :
     ∃ σ', EvmCallRun is yst0 σ' ∧
       match selectedFn c yst0.env.calldata with
       | none => σ' = yst0.storage
@@ -290,7 +290,7 @@ theorem evmCallRun_of_correct {S X E ε : Type} (c : ContractDef)
         | .error _ => σ' = yst0.storage := by
   let _model : ExternalModel := closedModel
   obtain ⟨stObs, hRC, hconcl⟩ :=
-    runtimeBlock_correct_callFree c Γ hΓ evmKeccak hκ hcf hctor hlen hbound rt hrt ctx w yst0 hctx hR
+    runtimeBlock_correct_callFree c Γ hΓ evmKeccak hκ hcf hctor hlen hbound rt hrt ctx w yst0 hctx hR hLock
   obtain ⟨yst', hrun, hobs⟩ := runCommitted_lift_run .none .none .any hRC
   have himm : ∀ key, unpatchedImmutables key =
       yst0.env.immutable (litValue (.string key)) := by
@@ -491,9 +491,12 @@ theorem evmCallRun_fnCalldata {S X E ε : Type} (c : ContractDef)
   have hctx : ctxRel ctx yst0 := ctxRel_mkEvmState _ _ _ _ hctxWF hcd
   have hR : R c Γ evmKeccak w yst0 := R_mkEvmState evmKeccak w _ σ ctx hs hlog hwf
   have himm0 : ∀ k, yst0.env.immutable k = 0 := fun k => mkEvmState_immutable _ _ _ _ k
+  have hLock : LockFree yst0 := by
+    simp only [yst0, mkEvmState]
+    rfl
   obtain ⟨σ', hRun, hpost⟩ :=
     evmCallRun_of_correct c Γ hΓ hκ hcf hctor hlen hbound rt hrt is hcomp
-      ctx w yst0 hctx hR himm0
+      ctx w yst0 hctx hR himm0 hLock
   refine ⟨σ', hRun, ?_⟩
   rw [← hdec]
   rw [mkEvmState_calldata] at hpost
@@ -593,7 +596,7 @@ theorem bytecode_call_correct_spill {S X E ε : Type} (c : ContractDef)
     (hsp : compileSpilled rt = some is)
     (ctx : Ctx) (w : World S X E) (yst0 : EvmState)
     (hctx : ctxRel ctx yst0) (hR : R c Γ evmKeccak w yst0)
-    (himm0 : ∀ k, yst0.env.immutable k = 0)
+    (himm0 : ∀ k, yst0.env.immutable k = 0) (hLock : LockFree yst0)
     (hG : ∀ {yst' : EvmState} {r : YulEvmCompiler.Optimizer.MemorySpillSelect.Result},
       spillRuntime? rt = some r →
       Run (evmWithExternal ExternalCalls.none ExternalCreates.none ExternalGas.any)
@@ -604,7 +607,7 @@ theorem bytecode_call_correct_spill {S X E ε : Type} (c : ContractDef)
   let _model : ExternalModel := closedModel
   simp only [BytecodeCallCorrect]
   obtain ⟨stObs, hRC, hconcl⟩ :=
-    runtimeBlock_correct_callFree c Γ hΓ evmKeccak hκ hcf hctor hlen hbound rt hrt ctx w yst0 hctx hR
+    runtimeBlock_correct_callFree c Γ hΓ evmKeccak hκ hcf hctor hlen hbound rt hrt ctx w yst0 hctx hR hLock
   obtain ⟨yst', hrun, hobs⟩ := runCommitted_lift_run .none .none .any hRC
   have himm : ∀ key, unpatchedImmutables key =
       yst0.env.immutable (litValue (.string key)) := by
@@ -673,14 +676,14 @@ theorem bytecode_call_correct {S X E ε : Type} (c : ContractDef)
     (is : List Instr) (hcomp : compileBlock rt = some is)
     (ctx : Ctx) (w : World S X E) (yst0 : EvmState)
     (hctx : ctxRel ctx yst0) (hR : R c Γ evmKeccak w yst0)
-    (himm0 : ∀ k, yst0.env.immutable k = 0) :
+    (himm0 : ∀ k, yst0.env.immutable k = 0) (hLock : LockFree yst0) :
     BytecodeCallCorrect c Γ evmKeccak ctx w yst0 is := by
   cases compileBlock_elim hcomp with
   | inl hce =>
     let _model : ExternalModel := closedModel
     simp only [BytecodeCallCorrect]
     obtain ⟨stObs, hRC, hconcl⟩ :=
-      runtimeBlock_correct_callFree c Γ hΓ evmKeccak hκ hcf hctor hlen hbound rt hrt ctx w yst0 hctx hR
+      runtimeBlock_correct_callFree c Γ hΓ evmKeccak hκ hcf hctor hlen hbound rt hrt ctx w yst0 hctx hR hLock
     obtain ⟨yst', hrun, hobs⟩ := runCommitted_lift_run .none .none .any hRC
     have himm : ∀ key, unpatchedImmutables key =
         yst0.env.immutable (litValue (.string key)) := by
@@ -729,7 +732,7 @@ theorem bytecode_call_correct {S X E ε : Type} (c : ContractDef)
   | inr h =>
     obtain ⟨hne, hsp⟩ := h
     exact bytecode_call_correct_spill c Γ hΓ hκ hcf hctor hlen hbound rt hrt is hne hsp
-      ctx w yst0 hctx hR himm0 fun hr hrun => GuardedRunOfErased hrt hr hrun
+      ctx w yst0 hctx hR himm0 hLock fun hr hrun => GuardedRunOfErased hrt hr hrun
 
 theorem bytecode_trace_all {S X E ε : Type} (c : ContractDef)
     (Γ : ContractSchema S X E ε)

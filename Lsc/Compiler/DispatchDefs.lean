@@ -12,10 +12,11 @@ open YulSemantics
 open YulSemantics.EVM
 open Lsc
 
-/-- Dispatcher for the S1 call-free fragment: size guard, selector `switch`, then
-the selected function's Yul (or `revert(0,0)`). The `Run` is of the
-memoryguard-erased block (`if k {}` then the dispatcher): the raw AST
-contains a parser-level `memoryguard` call that is not a Yul function. -/
+/-- Dispatcher for the S1 call-free fragment: lock check, size guard, selector
+`switch`, then the selected function's Yul (or `revert(0,0)`). The `Run` is of
+the memoryguard-erased block (`if k {}` then the dispatcher): the raw AST
+contains a parser-level `memoryguard` call that is not a Yul function.
+The start state must be `LockFree` (happy path, slice 8A). -/
 def RuntimeBlockCorrectCallFree {S X E ε : Type} (c : ContractDef)
     (Γ : ContractSchema S X E ε) (κ : List UInt8 → U256)
     (yul : YBlock) (ctx : Ctx) (w : World S X E) (st0 : EvmState) : Prop :=
@@ -30,12 +31,14 @@ def RuntimeBlockCorrectCallFree {S X E ε : Type} (c : ContractDef)
         ∃ bytes, stObs.halted = some (.revert, bytes) ∧
           haltError c Γ e bytes ∧ R c Γ κ w stObs
 
-/-- `runtimeBlock` is a `memoryguard` marker, a calldata-size guard, and a selector
-`switch`. Used by the dispatcher proofs and by ABI transport (selector uniqueness). -/
+/-- `runtimeBlock` is a `memoryguard` marker, a transient-lock check, a
+calldata-size guard, and a selector `switch`. Used by the dispatcher proofs
+and by ABI transport (selector uniqueness). -/
 theorem runtimeBlock_inv {c yul} (h : runtimeBlock c = some yul) :
     selectorsNodup c = true ∧
     ∃ cases, c.functions.mapM (entryCase c) = some cases ∧
       yul = memoryGuardStmt ::
+        lockCheckStmt ::
         [YulSemantics.Stmt.block (emitGuardLt {} 4).stmts,
           YulSemantics.Stmt.switch
             (bop Op.shr [lit 224, bop Op.calldataload [lit 0]])

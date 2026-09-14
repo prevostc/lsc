@@ -46,10 +46,11 @@ theorem bytecode_call_correct_ext {S E ε : Type}
     (hAgr : ExtAgree ctx.self w.ext yst0)
     (hOr : w.oracle = Oracle.ofExt o)
     (hNR : ExtOracle.NoReentry o ctx.self)
-    (himm0 : ∀ k, yst0.env.immutable k = 0) :
+    (himm0 : ∀ k, yst0.env.immutable k = 0)
+    (hLock : LockFree yst0) :
     BytecodeCallCorrectExt c Γ evmKeccak o ctx w yst0 rt is :=
   Proof.bytecode_call_correct_ext c Γ hΓ hκ o hCalls hctor hS2
-    hlen hbound rt hrt is hcomp ctx w yst0 hctx hR hAgr hOr hNR himm0
+    hlen hbound rt hrt is hcomp ctx w yst0 hctx hR hAgr hOr hNR himm0 hLock
 
 /-- Given a memory-blind CALL oracle, there is a matching EVM execution of
 compiled runtime whose post-storage (and foreign storage) is the unique
@@ -74,9 +75,10 @@ theorem evmCallRunExtAll_of_progress {S E ε : Type}
     (hAgr : ExtAgree ctx.self w.ext yst0)
     (hOr : w.oracle = Oracle.ofExt o)
     (hNR : ExtOracle.NoReentry o ctx.self)
-    (himm0 : ∀ k, yst0.env.immutable k = 0) :
+    (himm0 : ∀ k, yst0.env.immutable k = 0)
+    (hLock : LockFree yst0) :
     ∃ σ' ξ', EvmCallRunExtAll c Γ evmKeccak o ctx w is yst0 σ' ξ' :=
   Proof.evmCallRunExtAll_of_progress c Γ hΓ hκ o hCalls
-    hctor hS2 hlen hbound rt hrt is hcomp ctx w yst0 hctx hR hAgr hOr hNR himm0
+    hctor hS2 hlen hbound rt hrt is hcomp ctx w yst0 hctx hR hAgr hOr hNR himm0 hLock
 
 end Lsc.Compiler

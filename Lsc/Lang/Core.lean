@@ -654,6 +654,12 @@ def Core.isPureRead {t : RetTy} (c : Core t) : Bool :=
   let e := Core.effects c
   e.writes.isEmpty && e.emits.isEmpty && e.calls.isEmpty
 
+/-- The body contains `Op.call` / `Stmt.call` / `Op.view` / `Stmt.view`.
+Not `¬ CallFree`: that also excludes emits. Used by the reentrancy lock. -/
+def Core.hasExtCall {t : RetTy} (c : Core t) : Bool :=
+  let e := Core.effects c
+  !e.calls.isEmpty || !e.views.isEmpty
+
 theorem Op.effects_writes (op : Op) : (Op.effects op).writes = [] := by
   cases op <;> rfl
 

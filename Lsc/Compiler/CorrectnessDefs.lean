@@ -29,6 +29,13 @@ abbrev Foreign := U256 → U256 → U256
 /-- Projection of an `EvmState` onto foreign persistent storage. -/
 def evmForeign (st : EvmState) : Foreign := st.env.storageOf
 
+/-- Transient slot `reentrancyLockSlot` is clear, so the runtime prologue
+`if tload(0) { revert(0,0) }` falls through. `mkEvmStateExt` / `EvmState.init`
+satisfy this; it is not part of `ctxRel` / `R` (those hold during a locking
+body, where the slot is 1). -/
+def LockFree (st : EvmState) : Prop :=
+  st.transient (BitVec.ofNat 256 reentrancyLockSlot) = 0
+
 /-- Context words fit in an EVM word. -/
 def CtxWF (ctx : Ctx) : Prop :=
   let sender : Nat := ctx.sender

@@ -660,21 +660,40 @@ theorem noYulCall_emitStmt tag (c : ContractDef) (e : Emit) (d : Nat) (s : Lsc.S
     simp only [emitStmt]
     exact noYulCall_emitExtCall tag e d t sel args ret true none he
 
-theorem noYulCall_emitRet tag (e : Emit) (d : Nat) (halt : Bool) {t} (r : RetExpr t)
+theorem noYulCall_emitRet tag (e : Emit) (d : Nat) (halt : Bool)
+    {t} (r : RetExpr t) (clearLock : Bool := false)
     (he : noYulCallStmts e.stmts = true) :
-    noYulCallStmts (emitRet tag e d halt r).stmts = true := by
-  cases r with
-  | unit =>
-    simp only [emitRet]
-    exact noYulCall_emitReturnUnit e halt he
-  | word a | addr a | flag a =>
-    simp only [emitRet, retAtoms, List.map_cons, List.map_nil]
-    exact noYulCall_emitReturnWords e [atomE tag d a] he
-      (by simp [noYulCallExprs, noYulCall_atom])
-  | pair x y =>
-    simp only [emitRet]
-    exact noYulCall_emitReturnWords e ((retAtoms x ++ retAtoms y).map (atomE tag d)) he
-      (noYulCallExprs_map_atom tag d _)
+    noYulCallStmts (emitRet tag e d halt r clearLock).stmts = true := by
+  cases clearLock with
+  | false =>
+    cases r with
+    | unit =>
+      simp only [emitRet]
+      exact noYulCall_emitReturnUnit e halt he
+    | word a | addr a | flag a =>
+      simp only [emitRet, retAtoms, List.map_cons, List.map_nil]
+      exact noYulCall_emitReturnWords e [atomE tag d a] he
+        (by simp [noYulCallExprs, noYulCall_atom])
+    | pair x y =>
+      simp only [emitRet]
+      exact noYulCall_emitReturnWords e ((retAtoms x ++ retAtoms y).map (atomE tag d)) he
+        (noYulCallExprs_map_atom tag d _)
+  | true =>
+    have he' : noYulCallStmts (emitLockClear e).stmts = true := by
+      simp [emitLockClear_stmts, noYulCallStmts_append, he, noYulCallStmts, noYulCallStmt,
+        lockClearStmt, noYulCall_bop, noYulCallExprs, noYulCallExpr, lit]
+    cases r with
+    | unit =>
+      simp only [emitRet]
+      exact noYulCall_emitReturnUnit _ halt he'
+    | word a | addr a | flag a =>
+      simp only [emitRet, retAtoms, List.map_cons, List.map_nil]
+      exact noYulCall_emitReturnWords _ [atomE tag d a] he'
+        (by simp [noYulCallExprs, noYulCall_atom])
+    | pair x y =>
+      simp only [emitRet]
+      exact noYulCall_emitReturnWords _ ((retAtoms x ++ retAtoms y).map (atomE tag d)) he'
+        (noYulCallExprs_map_atom tag d _)
 
 theorem noYulCall_emitParams tag (e : Emit) (offset n : Nat)
     (he : noYulCallStmts e.stmts = true) :
@@ -686,15 +705,17 @@ theorem noYulCall_emitParams tag (e : Emit) (offset n : Nat)
     simp [noYulCallStmts_append, noYulCallStmts, ih e he, noYulCallStmt,
       noYulCall_bop, noYulCallExprs, noYulCallExpr, lit]
 
-theorem noYulCall_emitCore tag (c : ContractDef) (halt : Bool) {t} (core : Core t) :
+theorem noYulCall_emitCore tag (c : ContractDef) (halt : Bool)
+    {clearLock : Bool} {t} (core : Core t) :
     ∀ (e : Emit) (d : Nat), noYulCallStmts e.stmts = true →
-      ∀ e', emitCore tag c e d halt core = some e' → noYulCallStmts e'.stmts = true := by
+      ∀ e', emitCore tag c e d halt core clearLock = some e' →
+        noYulCallStmts e'.stmts = true := by
   induction core with
   | ret r =>
     intro e d he e' h
     simp only [emitCore] at h
     cases h
-    exact noYulCall_emitRet tag e d halt r he
+    exact noYulCall_emitRet tag e d halt r clearLock he
   | opTail op | opTailAddr op | opTailFlag op =>
     intro e d he e' h
     simp only [emitCore, Bind.bind, Option.bind, Pure.pure] at h
@@ -704,12 +725,20 @@ theorem noYulCall_emitCore tag (c : ContractDef) (halt : Bool) {t} (core : Core 
       simp [hop] at h
       have he1 := noYulCall_emitLetOp tag c e d op he hop
       cases h
-      exact noYulCall_emitRet tag e1 (d + 1) halt _ he1
+      exact noYulCall_emitRet tag e1 (d + 1) halt _ clearLock he1
   | stmtTail s =>
     intro e d he e' h
     simp only [emitCore] at h
     cases h
-    exact noYulCall_emitReturnUnit (emitStmt tag c e d s) halt (noYulCall_emitStmt tag c e d s he)
+    cases clearLock with
+    | false =>
+      exact noYulCall_emitReturnUnit (emitStmt tag c e d s) halt
+        (noYulCall_emitStmt tag c e d s he)
+    | true =>
+      exact noYulCall_emitReturnUnit (emitLockClear (emitStmt tag c e d s)) halt (by
+        simp [emitLockClear_stmts, noYulCallStmts_append, noYulCall_emitStmt tag c e d s he,
+          noYulCallStmts, noYulCallStmt, lockClearStmt, noYulCall_bop, noYulCallExprs,
+          noYulCallExpr, lit])
   | revertTail err args =>
     intro e d he e' h
     simp only [emitCore] at h
@@ -736,11 +765,11 @@ theorem noYulCall_emitCore tag (c : ContractDef) (halt : Bool) {t} (core : Core 
   | ite cond a b iha ihb =>
     intro e d he e' h
     simp only [emitCore, Bind.bind, Option.bind, Pure.pure] at h
-    cases ha : emitCore tag c {} d halt a with
+    cases ha : emitCore tag c {} d halt a clearLock with
     | none => simp [ha] at h
     | some eA =>
       simp [ha] at h
-      cases hb : emitCore tag c {} d halt b with
+      cases hb : emitCore tag c {} d halt b clearLock with
       | none => simp [hb] at h
       | some eB =>
         simp [hb] at h
@@ -763,12 +792,24 @@ theorem toYulFn_noYulCall {c f yul} (h : toYulFn c f = some yul) :
     noYulCall_nilEmit
   exact noYulCall_emitCore f.name c (f.kind ≠ .constructor) f.core _ f.params.length hp _ hem
 
+theorem noYulCall_lockSetStmt : noYulCallStmt lockSetStmt = true := by
+  simp [lockSetStmt, noYulCallStmt, noYulCall_bop, noYulCallExprs, noYulCallExpr, lit]
+
+theorem noYulCall_lockCheckStmt : noYulCallStmt lockCheckStmt = true := by
+  simp [lockCheckStmt, noYulCallStmt, noYulCall_bop, noYulCallExprs, noYulCallExpr, lit,
+    noYulCallStmts, noYulCall_revert00]
+
+theorem noYulCall_lockSetPrefix (f : FnDef) : noYulCallStmts (lockSetPrefix f) = true := by
+  simp [lockSetPrefix]
+  split <;> simp [noYulCallStmts, noYulCall_lockSetStmt]
+
 theorem entryCase_noYulCall {c f p} (h : entryCase c f = some p) :
     noYulCallStmts p.2 = true := by
   simp [entryCase, Bind.bind, Option.bind] at h
   cases hb : toYulFn c f <;> simp [hb] at h
   cases h
-  simp [noYulCallStmts, noYulCallStmt, noYulCall_guardLt, toYulFn_noYulCall hb]
+  simp [noYulCallStmts, noYulCallStmt, noYulCall_guardLt, noYulCallStmts_append,
+    noYulCall_lockSetPrefix f, toYulFn_noYulCall hb]
 
 theorem mapM_entryCase_noYulCall {c : ContractDef} :
     ∀ {fs : List FnDef} {cases : List (Literal × YBlock)},
@@ -799,14 +840,16 @@ theorem noYulCall_dispatchTail (guard : YBlock) (sel : YExpr)
     (hg : noYulCallStmts guard = true) (hs : noYulCallExpr sel = true)
     (hc : noYulCallCases cases = true) :
     noYulCallStmts
-      [YulSemantics.Stmt.block guard,
-        YulSemantics.Stmt.switch sel cases (some [revert00])] = true := by
-  simp [noYulCallStmts, noYulCallStmt, hg, hs, hc, noYulCall_revert00]
+      (lockCheckStmt ::
+        [YulSemantics.Stmt.block guard,
+          YulSemantics.Stmt.switch sel cases (some [revert00])]) = true := by
+  simp [noYulCallStmts, noYulCallStmt, noYulCall_lockCheckStmt, hg, hs, hc, noYulCall_revert00]
 
 theorem erase_runtimeBlock {c yul} (h : runtimeBlock c = some yul) :
     ∃ cases, c.functions.mapM (entryCase c) = some cases ∧
       eraseMemoryGuardStmts yul =
         memoryGuardErased ::
+          lockCheckStmt ::
           [YulSemantics.Stmt.block (emitGuardLt {} 4).stmts,
             YulSemantics.Stmt.switch
               (bop Op.shr [lit 224, bop Op.calldataload [lit 0]])

@@ -569,22 +569,42 @@ theorem staticSafe_emitStmt (c : ContractDef) (e : Emit) (d : Nat) (s : Lsc.Stmt
     exact staticSafe_emitExtCall tag e d t sel args ret true none he
       (callWF_fits t args (stmtWF_view hwf).1)
 
-theorem staticSafe_emitRet (e : Emit) (d : Nat) (halt : Bool) {t} (r : RetExpr t)
+theorem staticSafe_emitRet (e : Emit) (d : Nat) (halt : Bool)
+    {t} (r : RetExpr t) (clearLock : Bool := false)
     (he : staticSafeStmts memoryGuardK e.stmts = true)
     (hn : (retAtoms r).length ≤ 4) :
-    staticSafeStmts memoryGuardK (emitRet tag e d halt r).stmts = true := by
-  cases r with
-  | unit =>
-    simp only [emitRet]
-    exact staticSafe_emitReturnUnit e halt he
-  | word a | addr a | flag a =>
-    simp only [emitRet, retAtoms, List.map_cons, List.map_nil] at hn ⊢
-    exact staticSafe_emitReturnWords e _ he
-      (by simp [staticSafeExprs, staticSafe_atomE]) (by simp)
-  | pair x y =>
-    simp only [emitRet]
-    exact staticSafe_emitReturnWords e ((retAtoms x ++ retAtoms y).map (atomE tag d)) he
-      (staticSafeExprs_map_atom _ _ _ _) (by simpa [List.length_map, retAtoms] using hn)
+    staticSafeStmts memoryGuardK (emitRet tag e d halt r clearLock).stmts = true := by
+  cases clearLock with
+  | false =>
+    cases r with
+    | unit =>
+      simp only [emitRet]
+      exact staticSafe_emitReturnUnit e halt he
+    | word a | addr a | flag a =>
+      simp only [emitRet, retAtoms, List.map_cons, List.map_nil] at hn ⊢
+      exact staticSafe_emitReturnWords e _ he
+        (by simp [staticSafeExprs, staticSafe_atomE]) (by simp)
+    | pair x y =>
+      simp only [emitRet]
+      exact staticSafe_emitReturnWords e ((retAtoms x ++ retAtoms y).map (atomE tag d)) he
+        (staticSafeExprs_map_atom _ _ _ _) (by simpa [List.length_map, retAtoms] using hn)
+  | true =>
+    have he' : staticSafeStmts memoryGuardK (emitLockClear e).stmts = true := by
+      simp [emitLockClear_stmts, staticSafeStmts_append, he, staticSafeStmts,
+        staticSafeStmt, lockClearStmt, bop, staticSafeExpr, staticSafeOp, staticSafeExprs,
+        lit]
+    cases r with
+    | unit =>
+      simp only [emitRet]
+      exact staticSafe_emitReturnUnit _ halt he'
+    | word a | addr a | flag a =>
+      simp only [emitRet, retAtoms, List.map_cons, List.map_nil] at hn ⊢
+      exact staticSafe_emitReturnWords _ _ he'
+        (by simp [staticSafeExprs, staticSafe_atomE]) (by simp)
+    | pair x y =>
+      simp only [emitRet]
+      exact staticSafe_emitReturnWords _ ((retAtoms x ++ retAtoms y).map (atomE tag d)) he'
+        (staticSafeExprs_map_atom _ _ _ _) (by simpa [List.length_map, retAtoms] using hn)
 
 theorem staticSafe_emitParams (e : Emit) (offset n : Nat)
     (he : staticSafeStmts memoryGuardK e.stmts = true) :
@@ -601,17 +621,18 @@ theorem coreWF_ret_fits {c t} {r : RetExpr t}
   simp [coreWF, Bool.and_eq_true, fitsGuardWords_iff] at h
   exact h.2
 
-theorem staticSafe_emitCore (c : ContractDef) (halt : Bool) {t} (core : Core t)
+theorem staticSafe_emitCore (c : ContractDef) (halt : Bool)
+    {clearLock : Bool} {t} (core : Core t)
     (hwf : coreWF c core = true) :
     ∀ (e : Emit) (d : Nat), staticSafeStmts memoryGuardK e.stmts = true →
-      ∀ e', emitCore tag c e d halt core = some e' →
+      ∀ e', emitCore tag c e d halt core clearLock = some e' →
         staticSafeStmts memoryGuardK e'.stmts = true := by
   induction core with
   | ret r =>
     intro e d he e' h
     simp only [emitCore] at h
     cases h
-    exact staticSafe_emitRet tag e d halt r he (coreWF_ret_fits hwf)
+    exact staticSafe_emitRet tag e d halt r clearLock he (coreWF_ret_fits hwf)
   | opTail op | opTailAddr op | opTailFlag op =>
     intro e d he e' h
     simp only [emitCore, Bind.bind, Option.bind, Pure.pure] at h
@@ -622,14 +643,21 @@ theorem staticSafe_emitCore (c : ContractDef) (halt : Bool) {t} (core : Core t)
       have hopWF : opWF c op = true := by simpa [coreWF] using hwf
       have he1 := staticSafe_emitLetOp tag c e d op he hopWF hop
       cases h
-      exact staticSafe_emitRet tag e1 (d + 1) halt _ he1 (by simp [retAtoms])
+      exact staticSafe_emitRet tag e1 (d + 1) halt _ clearLock he1 (by simp [retAtoms])
   | stmtTail s =>
     intro e d he e' h
     simp only [emitCore] at h
     cases h
     have hsWF : stmtWF c s = true := by simpa [coreWF] using hwf
-    exact staticSafe_emitReturnUnit (emitStmt tag c e d s) halt
-      (staticSafe_emitStmt tag c e d s he hsWF)
+    cases clearLock with
+    | false =>
+      exact staticSafe_emitReturnUnit (emitStmt tag c e d s) halt
+        (staticSafe_emitStmt tag c e d s he hsWF)
+    | true =>
+      exact staticSafe_emitReturnUnit (emitLockClear (emitStmt tag c e d s)) halt (by
+        simp [emitLockClear_stmts, staticSafeStmts_append,
+          staticSafe_emitStmt tag c e d s he hsWF, staticSafeStmts, staticSafeStmt,
+          lockClearStmt, bop, staticSafeExpr, staticSafeOp, staticSafeExprs, lit])
   | revertTail err args =>
     intro e d he e' h
     simp only [emitCore] at h
@@ -675,11 +703,11 @@ theorem staticSafe_emitCore (c : ContractDef) (halt : Bool) {t} (core : Core t)
       simp [coreWF, Bool.and_eq_true] at hwf; exact hwf.1.2
     have hbWF : coreWF c b = true := by
       simp [coreWF, Bool.and_eq_true] at hwf; exact hwf.2
-    cases ha : emitCore tag c {} d halt a with
+    cases ha : emitCore tag c {} d halt a clearLock with
     | none => simp [ha] at h
     | some eA =>
       simp [ha] at h
-      cases hb : emitCore tag c {} d halt b with
+      cases hb : emitCore tag c {} d halt b clearLock with
       | none => simp [hb] at h
       | some eB =>
         simp [hb] at h
@@ -711,12 +739,32 @@ theorem staticSafe_guardLt (n : Nat) :
     staticSafeStmt_cond, staticSafe_revert00, bop, staticSafeExpr_builtin, staticSafeOp,
     staticSafeExprs, lit, staticSafe_nilEmit]
 
+theorem staticSafe_lockSetStmt :
+    staticSafeStmt memoryGuardK lockSetStmt = true := by
+  simp [lockSetStmt, staticSafeStmt, bop, staticSafeExpr, staticSafeOp, staticSafeExprs, lit]
+
+theorem staticSafe_tload (n : Nat) :
+    staticSafeExpr memoryGuardK (bop Op.tload [lit n]) = true := by
+  simp [bop, staticSafeExpr_builtin, staticSafeOp, staticSafeExprs, lit]
+
+theorem staticSafe_lockCheckStmt :
+    staticSafeStmt memoryGuardK lockCheckStmt = true := by
+  simp [lockCheckStmt, staticSafeStmt_cond, staticSafe_tload, staticSafeStmts,
+    staticSafe_revert00]
+
+theorem staticSafe_lockSetPrefix (f : FnDef) :
+    staticSafeStmts memoryGuardK (lockSetPrefix f) = true := by
+  cases hlocks : locks f
+  · simp [lockSetPrefix, hlocks, staticSafeStmts]
+  · simp [lockSetPrefix, hlocks, staticSafeStmts, staticSafe_lockSetStmt]
+
 theorem staticSafe_entryCase {c f p} (h : entryCase c f = some p) :
     staticSafeStmts memoryGuardK p.2 = true := by
   simp [entryCase, Bind.bind, Option.bind] at h
   cases hb : toYulFn c f <;> simp [hb] at h
   cases h
-  simp [staticSafeStmts, staticSafeStmt, staticSafe_guardLt, staticSafe_toYulFn hb]
+  simp [staticSafeStmts, staticSafeStmt, staticSafe_guardLt, staticSafeStmts_append,
+    staticSafe_lockSetPrefix f, staticSafe_toYulFn hb]
 
 theorem staticSafe_mapM_entryCase {c : ContractDef} :
     ∀ {fs : List FnDef} {cases : List (Literal × YBlock)},
@@ -759,7 +807,7 @@ theorem staticSafe_erase_runtime {c yul} (h : runtimeBlock c = some yul) :
   obtain ⟨cases, hmap, hE⟩ := erase_runtimeBlock h
   rw [hE]
   simp [staticSafeStmts, staticSafeStmt_cond, staticSafeStmt_block, staticSafeStmt_switch,
-    memoryGuardErased]
+    memoryGuardErased, staticSafe_lockCheckStmt]
   exact ⟨staticSafe_guardLt 4,
     ⟨⟨staticSafe_selector, staticSafe_mapM_entryCase hmap⟩, staticSafe_revert00 memoryGuardK⟩⟩
 
@@ -769,7 +817,8 @@ theorem staticSafe_resolve_runtime {c yul} (h : runtimeBlock c = some yul)
       (resolveMemoryGuardStmts memoryGuardK reserved yul) = true := by
   obtain ⟨cases, hmap, hR⟩ := resolve_runtimeBlock h reserved
   rw [hR]
-  simp [staticSafeStmts, staticSafeStmt_cond, staticSafeStmt_block, staticSafeStmt_switch]
+  simp [staticSafeStmts, staticSafeStmt_cond, staticSafeStmt_block, staticSafeStmt_switch,
+    staticSafe_lockCheckStmt]
   exact ⟨staticSafe_guardLt 4,
     ⟨⟨staticSafe_selector, staticSafe_mapM_entryCase hmap⟩, staticSafe_revert00 memoryGuardK⟩⟩
 

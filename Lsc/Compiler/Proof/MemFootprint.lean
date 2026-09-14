@@ -387,6 +387,7 @@ theorem resolve_runtimeBlock {c yul} (h : runtimeBlock c = some yul)
     ∃ cs, c.functions.mapM (entryCase c) = some cs ∧
       resolveMemoryGuardStmts memoryGuardK reserved yul =
         .cond (lit reserved) [] ::
+          lockCheckStmt ::
           [YulSemantics.Stmt.block (emitGuardLt {} 4).stmts,
             YulSemantics.Stmt.switch
               (bop Op.shr [lit 224, bop Op.calldataload [lit 0]])

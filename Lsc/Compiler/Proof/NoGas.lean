@@ -520,20 +520,38 @@ theorem noGas_emitStmt tag (c : ContractDef) (e : Emit) (d : Nat) (s : Lsc.Stmt)
     simp only [emitStmt]
     exact noGas_emitExtCall tag e d t sel args ret true none he
 
-theorem noGas_emitRet tag (e : Emit) (d : Nat) (halt : Bool) {t} (r : RetExpr t)
+theorem noGas_emitRet tag (e : Emit) (d : Nat) (halt : Bool)
+    {t} (r : RetExpr t) (clearLock : Bool := false)
     (he : noGasStmts e.stmts = true) :
-    noGasStmts (emitRet tag e d halt r).stmts = true := by
-  cases r with
-  | unit =>
-    simp [emitRet]
-    exact noGas_emitReturnUnit e halt he
-  | word a | addr a | flag a =>
-    simp [emitRet]
-    exact noGas_emitReturnWords e _ he (noGasExprs_map_atom tag d _)
-  | pair x y =>
-    simp [emitRet]
-    exact noGas_emitReturnWords e ((retAtoms x ++ retAtoms y).map (atomE tag d)) he
-      (noGasExprs_map_atom tag d _)
+    noGasStmts (emitRet tag e d halt r clearLock).stmts = true := by
+  cases clearLock with
+  | false =>
+    cases r with
+    | unit =>
+      simp [emitRet]
+      exact noGas_emitReturnUnit e halt he
+    | word a | addr a | flag a =>
+      simp [emitRet]
+      exact noGas_emitReturnWords e _ he (noGasExprs_map_atom tag d _)
+    | pair x y =>
+      simp [emitRet]
+      exact noGas_emitReturnWords e ((retAtoms x ++ retAtoms y).map (atomE tag d)) he
+        (noGasExprs_map_atom tag d _)
+  | true =>
+    have he' : noGasStmts (emitLockClear e).stmts = true := by
+      simp [emitLockClear_stmts, noGasStmts_append, he, noGasStmts, noGasStmt,
+        lockClearStmt, bop, noGasExpr, noGasOp, noGasExprs, lit]
+    cases r with
+    | unit =>
+      simp [emitRet]
+      exact noGas_emitReturnUnit _ halt he'
+    | word a | addr a | flag a =>
+      simp [emitRet]
+      exact noGas_emitReturnWords _ _ he' (noGasExprs_map_atom tag d _)
+    | pair x y =>
+      simp [emitRet]
+      exact noGas_emitReturnWords _ ((retAtoms x ++ retAtoms y).map (atomE tag d)) he'
+        (noGasExprs_map_atom tag d _)
 
 theorem noGas_emitParams tag (e : Emit) (offset n : Nat)
     (he : noGasStmts e.stmts = true) :
@@ -545,15 +563,17 @@ theorem noGas_emitParams tag (e : Emit) (offset n : Nat)
     simp [noGasStmts_append, noGasStmts, ih e he, noGasStmt, bop, noGasExpr, noGasOp,
       noGasExprs, lit]
 
-theorem noGas_emitCore tag (c : ContractDef) (halt : Bool) {t} (core : Core t) :
+theorem noGas_emitCore tag (c : ContractDef) (halt : Bool)
+    {clearLock : Bool} {t} (core : Core t) :
     ∀ (e : Emit) (d : Nat), noGasStmts e.stmts = true →
-      ∀ e', emitCore tag c e d halt core = some e' → noGasStmts e'.stmts = true := by
+      ∀ e', emitCore tag c e d halt core clearLock = some e' →
+        noGasStmts e'.stmts = true := by
   induction core with
   | ret r =>
     intro e d he e' h
     simp only [emitCore] at h
     cases h
-    exact noGas_emitRet tag e d halt r he
+    exact noGas_emitRet tag e d halt r clearLock he
   | opTail op | opTailAddr op | opTailFlag op =>
     intro e d he e' h
     simp only [emitCore, Bind.bind, Option.bind, Pure.pure] at h
@@ -563,12 +583,18 @@ theorem noGas_emitCore tag (c : ContractDef) (halt : Bool) {t} (core : Core t) :
       simp [hop] at h
       have he1 := noGas_emitLetOp tag c e d op he hop
       cases h
-      exact noGas_emitRet tag e1 (d + 1) halt _ he1
+      exact noGas_emitRet tag e1 (d + 1) halt _ clearLock he1
   | stmtTail s =>
     intro e d he e' h
     simp only [emitCore] at h
     cases h
-    exact noGas_emitReturnUnit (emitStmt tag c e d s) halt (noGas_emitStmt tag c e d s he)
+    cases clearLock with
+    | false =>
+      exact noGas_emitReturnUnit (emitStmt tag c e d s) halt (noGas_emitStmt tag c e d s he)
+    | true =>
+      exact noGas_emitReturnUnit (emitLockClear (emitStmt tag c e d s)) halt (by
+        simp [emitLockClear_stmts, noGasStmts_append, noGas_emitStmt tag c e d s he,
+          noGasStmts, noGasStmt, lockClearStmt, bop, noGasExpr, noGasOp, noGasExprs, lit])
   | revertTail err args =>
     intro e d he e' h
     simp only [emitCore] at h
@@ -595,11 +621,11 @@ theorem noGas_emitCore tag (c : ContractDef) (halt : Bool) {t} (core : Core t) :
   | ite cond a b iha ihb =>
     intro e d he e' h
     simp only [emitCore, Bind.bind, Option.bind, Pure.pure] at h
-    cases ha : emitCore tag c {} d halt a with
+    cases ha : emitCore tag c {} d halt a clearLock with
     | none => simp [ha] at h
     | some eA =>
       simp [ha] at h
-      cases hb : emitCore tag c {} d halt b with
+      cases hb : emitCore tag c {} d halt b clearLock with
       | none => simp [hb] at h
       | some eB =>
         simp [hb] at h
@@ -608,6 +634,19 @@ theorem noGas_emitCore tag (c : ContractDef) (halt : Bool) {t} (core : Core t) :
         have hB := ihb {} d noGas_nilEmit _ hb
         exact noGas_emit_push e _ he (by
           simp [noGasStmt, noGas_emitCond tag d cond, noGasCases, noGasStmts, noGasDflt, hA, hB])
+
+theorem noGas_lockSetStmt : noGasStmt lockSetStmt = true := by
+  simp [lockSetStmt, noGasStmt, bop, noGasExpr, noGasOp, noGasExprs, lit]
+
+theorem noGas_tload (n : Nat) : noGasExpr (bop Op.tload [lit n]) = true := by
+  simp [bop, noGasExpr, noGasOp, noGasExprs, lit]
+
+theorem noGas_lockCheckStmt : noGasStmt lockCheckStmt = true := by
+  simp [lockCheckStmt, noGasStmt, noGas_tload, noGasStmts, noGas_revert00]
+
+theorem noGas_lockSetPrefix (f : FnDef) : noGasStmts (lockSetPrefix f) = true := by
+  simp [lockSetPrefix]
+  split <;> simp [noGasStmts, noGas_lockSetStmt]
 
 theorem toYulFn_noGas {c f yul} (h : toYulFn c f = some yul) :
     noGasStmts yul = true := by
@@ -627,7 +666,8 @@ theorem entryCase_noGas {c f p} (h : entryCase c f = some p) :
   simp [entryCase, Bind.bind, Option.bind] at h
   cases hb : toYulFn c f <;> simp [hb] at h
   cases h
-  simp [noGasStmts, noGasStmt, noGas_guardLt, toYulFn_noGas hb]
+  simp [noGasStmts, noGasStmt, noGas_guardLt, noGasStmts_append, noGas_lockSetPrefix f,
+    toYulFn_noGas hb]
 
 theorem mapM_entryCase_noGas {c : ContractDef} :
     ∀ {fs : List FnDef} {cases : List (Literal × YBlock)},
@@ -660,8 +700,8 @@ theorem noGas_runtimeBlock {c yul} (h : runtimeBlock c = some yul) :
     noGasStmts yul = true := by
   obtain ⟨_, cases, hmap, hyul⟩ := runtimeBlock_inv h
   subst yul
-  simp [noGasStmts, noGas_memoryGuardStmt, noGasStmt, noGas_guardLt 4, noGas_selector,
-    mapM_entryCase_noGas hmap, noGasDflt, noGas_revert00]
+  simp [noGasStmts, noGas_memoryGuardStmt, noGas_lockCheckStmt, noGasStmt, noGas_guardLt 4,
+    noGas_selector, mapM_entryCase_noGas hmap, noGasDflt, noGas_revert00]
 
 /-! ## Spill rewrite preserves `noGasStmts` -/
 

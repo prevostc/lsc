@@ -35,7 +35,8 @@ theorem evmCallRun_of_correct_ext {S E ε : Type}
     (hAgr : ExtAgree ctx.self w.ext yst0)
     (hOr : w.oracle = Oracle.ofExt o)
     (hNR : ExtOracle.NoReentry o ctx.self)
-    (himm0 : ∀ k, yst0.env.immutable k = 0) :
+    (himm0 : ∀ k, yst0.env.immutable k = 0)
+    (hLock : LockFree yst0) :
     ∃ σ' ξ', EvmCallRunξ is yst0 σ' ξ' ∧
       match selectedFn c yst0.env.calldata with
       | none => σ' = yst0.storage ∧ ξ' = evmForeign yst0
@@ -52,7 +53,7 @@ theorem evmCallRun_of_correct_ext {S E ε : Type}
       ctx w yst0 hctx hR hNR
   have ⟨hpred, hEvm⟩ :=
     bytecode_call_correct_ext c Γ hΓ hκ o hCalls hctor hS2
-      hlen hbound rt hrt is hcomp ctx w yst0 hctx hR hAgr hOr hNR himm0
+      hlen hbound rt hrt is hcomp ctx w yst0 hctx hR hAgr hOr hNR himm0 hLock
       st' out hrun
   set stObs := committedState yst0 st'
   refine ⟨stObs.storage, evmForeign stObs, hEvm, ?_⟩
@@ -127,9 +128,10 @@ theorem evmCallRun_fnCalldata_ext {S E ε : Type}
   have hctx : ctxRel ctx yst0 := ctxRel_mkEvmStateExt _ _ _ _ _ hctxWF hcd
   have hR : R c Γ evmKeccak w yst0 := R_mkEvmStateExt evmKeccak w _ σ ξ ctx hs hlog hwf
   have himm0 : ∀ k, yst0.env.immutable k = 0 := fun k => mkEvmStateExt_immutable _ _ _ _ _ k
+  have hLock : LockFree yst0 := LockFree_mkEvmStateExt _ _ _ _ _
   obtain ⟨σ', ξ', hRun, hpost⟩ :=
     evmCallRun_of_correct_ext c Γ hΓ hκ o hCalls hctor hS2
-      hlen hbound rt hrt is hcomp ctx w yst0 hctx hR hAgr hOr hNR himm0
+      hlen hbound rt hrt is hcomp ctx w yst0 hctx hR hAgr hOr hNR himm0 hLock
   refine ⟨σ', ξ', hRun, ?_⟩
   rw [mkEvmStateExt_calldata] at hpost
   simp only [hsel] at hpost

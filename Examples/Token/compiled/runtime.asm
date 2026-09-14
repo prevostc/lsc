@@ -13,15 +13,23 @@
     PUSH 0x0100
     ISZERO
     POP
-    PUSH 0x04
-    CALLDATASIZE
-    LT
+    PUSH 0x00
+    TLOAD
     ISZERO
     JUMPI L1
     PUSH 0x00
     PUSH 0x00
     REVERT
 L1:    // JUMPDEST
+    PUSH 0x04
+    CALLDATASIZE
+    LT
+    ISZERO
+    JUMPI L2
+    PUSH 0x00
+    PUSH 0x00
+    REVERT
+L2:    // JUMPDEST
     PUSH 0x00
     CALLDATALOAD
     PUSH 0xe0
@@ -29,51 +37,51 @@ L1:    // JUMPDEST
     DUP1
     PUSH 0xa9059cbb    // selector: transfer(address,uint256)
     EQ
-    JUMPI L3
+    JUMPI L4
     DUP1
     PUSH 0x23b872dd    // selector: transferFrom(address,address,uint256)
     EQ
-    JUMPI L8
+    JUMPI L9
     DUP1
     PUSH 0x095ea7b3    // selector: approve(address,uint256)
     EQ
-    JUMPI L15
+    JUMPI L16
     DUP1
     PUSH 0x18160ddd    // selector: totalSupply()
     EQ
-    JUMPI L17
+    JUMPI L18
     DUP1
     PUSH 0x70a08231    // selector: balanceOf(address)
     EQ
-    JUMPI L19
+    JUMPI L20
     DUP1
     PUSH 0xdd62ed3e    // selector: allowance(address,address)
     EQ
-    JUMPI L21
+    JUMPI L22
     DUP1
     PUSH 0x40c10f19    // selector: mint(address,uint256)
     EQ
-    JUMPI L23
+    JUMPI L24
     DUP1
     PUSH 0x42966c68    // selector: burn(uint256)
     EQ
-    JUMPI L28
+    JUMPI L29
     POP
     PUSH 0x00
     PUSH 0x00
     REVERT
-    JUMP L2
-L3:    // JUMPDEST
+    JUMP L3
+L4:    // JUMPDEST
     POP
     PUSH 0x44
     CALLDATASIZE
     LT
     ISZERO
-    JUMPI L4
+    JUMPI L5
     PUSH 0x00
     PUSH 0x00
     REVERT
-L4:    // JUMPDEST
+L5:    // JUMPDEST
     PUSH 0x04
     CALLDATALOAD
     PUSH 0x24
@@ -93,7 +101,7 @@ L4:    // JUMPDEST
     DUP2
     LT
     ISZERO
-    JUMPI L5
+    JUMPI L6
     PUSH 0xf4d678b8    // selector: InsufficientBalance()
     PUSH 0xe0
     SHL
@@ -102,12 +110,12 @@ L4:    // JUMPDEST
     PUSH 0x04
     PUSH 0x80
     REVERT
-L5:    // JUMPDEST
+L6:    // JUMPDEST
     DUP3
     DUP2
     LT
     ISZERO
-    JUMPI L6
+    JUMPI L7
     PUSH 0x4e487b71
     PUSH 0xe0
     SHL
@@ -119,7 +127,7 @@ L5:    // JUMPDEST
     PUSH 0x24
     PUSH 0x80
     REVERT
-L6:    // JUMPDEST
+L7:    // JUMPDEST
     DUP3
     DUP2
     SUB
@@ -151,7 +159,7 @@ L6:    // JUMPDEST
     DUP2
     LT
     ISZERO
-    JUMPI L7
+    JUMPI L8
     PUSH 0x4e487b71
     PUSH 0xe0
     SHL
@@ -163,7 +171,7 @@ L6:    // JUMPDEST
     PUSH 0x24
     PUSH 0x80
     REVERT
-L7:    // JUMPDEST
+L8:    // JUMPDEST
     DUP7
     PUSH 0x00
     MSTORE
@@ -201,18 +209,18 @@ L7:    // JUMPDEST
     POP
     POP
     POP
-    JUMP L2
-L8:    // JUMPDEST
+    JUMP L3
+L9:    // JUMPDEST
     POP
     PUSH 0x64
     CALLDATASIZE
     LT
     ISZERO
-    JUMPI L9
+    JUMPI L10
     PUSH 0x00
     PUSH 0x00
     REVERT
-L9:    // JUMPDEST
+L10:    // JUMPDEST
     PUSH 0x04
     CALLDATALOAD
     PUSH 0x24
@@ -242,7 +250,7 @@ L9:    // JUMPDEST
     DUP2
     LT
     ISZERO
-    JUMPI L10
+    JUMPI L11
     PUSH 0x13be252b    // selector: InsufficientAllowance()
     PUSH 0xe0
     SHL
@@ -251,7 +259,7 @@ L9:    // JUMPDEST
     PUSH 0x04
     PUSH 0x80
     REVERT
-L10:    // JUMPDEST
+L11:    // JUMPDEST
     DUP5
     PUSH 0x00
     MSTORE
@@ -266,7 +274,7 @@ L10:    // JUMPDEST
     DUP2
     LT
     ISZERO
-    JUMPI L11
+    JUMPI L12
     PUSH 0xf4d678b8    // selector: InsufficientBalance()
     PUSH 0xe0
     SHL
@@ -275,12 +283,12 @@ L10:    // JUMPDEST
     PUSH 0x04
     PUSH 0x80
     REVERT
-L11:    // JUMPDEST
+L12:    // JUMPDEST
     DUP4
     DUP3
     LT
     ISZERO
-    JUMPI L12
+    JUMPI L13
     PUSH 0x4e487b71
     PUSH 0xe0
     SHL
@@ -292,7 +300,7 @@ L11:    // JUMPDEST
     PUSH 0x24
     PUSH 0x80
     REVERT
-L12:    // JUMPDEST
+L13:    // JUMPDEST
     DUP4
     DUP3
     SUB
@@ -319,7 +327,7 @@ L12:    // JUMPDEST
     DUP3
     LT
     ISZERO
-    JUMPI L13
+    JUMPI L14
     PUSH 0x4e487b71
     PUSH 0xe0
     SHL
@@ -331,7 +339,7 @@ L12:    // JUMPDEST
     PUSH 0x24
     PUSH 0x80
     REVERT
-L13:    // JUMPDEST
+L14:    // JUMPDEST
     DUP5
     DUP3
     SUB
@@ -363,7 +371,7 @@ L13:    // JUMPDEST
     DUP2
     LT
     ISZERO
-    JUMPI L14
+    JUMPI L15
     PUSH 0x4e487b71
     PUSH 0xe0
     SHL
@@ -375,7 +383,7 @@ L13:    // JUMPDEST
     PUSH 0x24
     PUSH 0x80
     REVERT
-L14:    // JUMPDEST
+L15:    // JUMPDEST
     DUP9
     PUSH 0x00
     MSTORE
@@ -416,18 +424,18 @@ L14:    // JUMPDEST
     POP
     POP
     POP
-    JUMP L2
-L15:    // JUMPDEST
+    JUMP L3
+L16:    // JUMPDEST
     POP
     PUSH 0x44
     CALLDATASIZE
     LT
     ISZERO
-    JUMPI L16
+    JUMPI L17
     PUSH 0x00
     PUSH 0x00
     REVERT
-L16:    // JUMPDEST
+L17:    // JUMPDEST
     PUSH 0x04
     CALLDATALOAD
     PUSH 0x24
@@ -474,18 +482,18 @@ L16:    // JUMPDEST
     POP
     POP
     POP
-    JUMP L2
-L17:    // JUMPDEST
+    JUMP L3
+L18:    // JUMPDEST
     POP
     PUSH 0x04
     CALLDATASIZE
     LT
     ISZERO
-    JUMPI L18
+    JUMPI L19
     PUSH 0x00
     PUSH 0x00
     REVERT
-L18:    // JUMPDEST
+L19:    // JUMPDEST
     PUSH 0x01
     SLOAD
     DUP1
@@ -495,18 +503,18 @@ L18:    // JUMPDEST
     PUSH 0x80
     RETURN
     POP
-    JUMP L2
-L19:    // JUMPDEST
+    JUMP L3
+L20:    // JUMPDEST
     POP
     PUSH 0x24
     CALLDATASIZE
     LT
     ISZERO
-    JUMPI L20
+    JUMPI L21
     PUSH 0x00
     PUSH 0x00
     REVERT
-L20:    // JUMPDEST
+L21:    // JUMPDEST
     PUSH 0x04
     CALLDATALOAD
     DUP1
@@ -527,18 +535,18 @@ L20:    // JUMPDEST
     RETURN
     POP
     POP
-    JUMP L2
-L21:    // JUMPDEST
+    JUMP L3
+L22:    // JUMPDEST
     POP
     PUSH 0x44
     CALLDATASIZE
     LT
     ISZERO
-    JUMPI L22
+    JUMPI L23
     PUSH 0x00
     PUSH 0x00
     REVERT
-L22:    // JUMPDEST
+L23:    // JUMPDEST
     PUSH 0x04
     CALLDATALOAD
     PUSH 0x24
@@ -570,18 +578,18 @@ L22:    // JUMPDEST
     POP
     POP
     POP
-    JUMP L2
-L23:    // JUMPDEST
+    JUMP L3
+L24:    // JUMPDEST
     POP
     PUSH 0x44
     CALLDATASIZE
     LT
     ISZERO
-    JUMPI L24
+    JUMPI L25
     PUSH 0x00
     PUSH 0x00
     REVERT
-L24:    // JUMPDEST
+L25:    // JUMPDEST
     PUSH 0x04
     CALLDATALOAD
     PUSH 0x24
@@ -592,7 +600,7 @@ L24:    // JUMPDEST
     DUP1
     DUP3
     EQ
-    JUMPI L25
+    JUMPI L26
     PUSH 0x30cd7471    // selector: NotOwner()
     PUSH 0xe0
     SHL
@@ -601,7 +609,7 @@ L24:    // JUMPDEST
     PUSH 0x04
     PUSH 0x80
     REVERT
-L25:    // JUMPDEST
+L26:    // JUMPDEST
     PUSH 0x01
     SLOAD
     DUP4
@@ -611,7 +619,7 @@ L25:    // JUMPDEST
     DUP2
     LT
     ISZERO
-    JUMPI L26
+    JUMPI L27
     PUSH 0x4e487b71
     PUSH 0xe0
     SHL
@@ -623,7 +631,7 @@ L25:    // JUMPDEST
     PUSH 0x24
     PUSH 0x80
     REVERT
-L26:    // JUMPDEST
+L27:    // JUMPDEST
     DUP1
     PUSH 0x01
     SSTORE
@@ -644,7 +652,7 @@ L26:    // JUMPDEST
     DUP2
     LT
     ISZERO
-    JUMPI L27
+    JUMPI L28
     PUSH 0x4e487b71
     PUSH 0xe0
     SHL
@@ -656,7 +664,7 @@ L26:    // JUMPDEST
     PUSH 0x24
     PUSH 0x80
     REVERT
-L27:    // JUMPDEST
+L28:    // JUMPDEST
     DUP8
     PUSH 0x00
     MSTORE
@@ -690,18 +698,18 @@ L27:    // JUMPDEST
     POP
     POP
     POP
-    JUMP L2
-L28:    // JUMPDEST
+    JUMP L3
+L29:    // JUMPDEST
     POP
     PUSH 0x24
     CALLDATASIZE
     LT
     ISZERO
-    JUMPI L29
+    JUMPI L30
     PUSH 0x00
     PUSH 0x00
     REVERT
-L29:    // JUMPDEST
+L30:    // JUMPDEST
     PUSH 0x04
     CALLDATALOAD
     CALLER
@@ -722,13 +730,13 @@ L29:    // JUMPDEST
     DUP1
     PUSH 0x00
     EQ
-    JUMPI L31
+    JUMPI L32
     POP
     DUP3
     DUP2
     LT
     ISZERO
-    JUMPI L32
+    JUMPI L33
     PUSH 0x4e487b71
     PUSH 0xe0
     SHL
@@ -740,7 +748,7 @@ L29:    // JUMPDEST
     PUSH 0x24
     PUSH 0x80
     REVERT
-L32:    // JUMPDEST
+L33:    // JUMPDEST
     DUP3
     DUP2
     SUB
@@ -761,7 +769,7 @@ L32:    // JUMPDEST
     DUP2
     LT
     ISZERO
-    JUMPI L33
+    JUMPI L34
     PUSH 0x4e487b71
     PUSH 0xe0
     SHL
@@ -773,7 +781,7 @@ L32:    // JUMPDEST
     PUSH 0x24
     PUSH 0x80
     REVERT
-L33:    // JUMPDEST
+L34:    // JUMPDEST
     DUP5
     DUP2
     SUB
@@ -797,8 +805,8 @@ L33:    // JUMPDEST
     POP
     POP
     POP
-    JUMP L30
-L31:    // JUMPDEST
+    JUMP L31
+L32:    // JUMPDEST
     POP
     PUSH 0xf4d678b8    // selector: InsufficientBalance()
     PUSH 0xe0
@@ -822,8 +830,8 @@ L31:    // JUMPDEST
     PUSH 0x80
     LOG1
     STOP
-L30:    // JUMPDEST
+L31:    // JUMPDEST
     POP
     POP
     POP
-L2:    // JUMPDEST
+L3:    // JUMPDEST

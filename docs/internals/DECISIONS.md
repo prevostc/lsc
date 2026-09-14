@@ -209,3 +209,49 @@ during a call is not modelled (`self` unchanged) — next architecture step.
 use the single type `Lsc.ExtState` (the memory-blind observable state of
 every account other than the executing one). The compiler `ExtView` is
 that type.
+
+## 2026-09-14 — Transient reentrancy lock (slice 8A emit + happy path)
+
+The compiled runtime uses an EIP-1153 lock at transient slot `0`
+(`reentrancyLockSlot`). Pinned `yul-semantics` / `yul-compiler` /
+`evm-semantics` already have `tload`/`tstore` (`opTable`, `StateMatch.tstor`,
+`StepRunning.tload/tstore`, 100 gas, revert rolls transient back). Lsc's
+emitter treats them as local ops (`bop` / `emitDo`, `noExtOp`, `staticSafeOp`).
+Lsc emits no other `tstore`; the namespace is disjoint from storage.
+
+Emitted shape in `runtimeBlock` (after `memoryguard`, before the calldatasize
+guard):
+
+```
+if tload(0) { revert(0,0) }              // every entry, including views and default
+if lt(calldatasize(), 4) { revert(0,0) }
+switch shr(224, calldataload(0))
+case <sel> {
+  if lt(calldatasize(), 4+32n) { revert(0,0) }
+  tstore(0, 1)                          // only if locks f
+  <decode + body>                       // committing return/stop prefixed by tstore(0,0)
+}
+default { revert(0,0) }
+```
+
+`locks f := hasExtCall f ∧ ¬ isPureRead f`, where `hasExtCall` is
+`effects.calls ≠ [] ∨ effects.views ≠ []` (`Op.call`/`Op.view`/`Stmt.call`/
+`Stmt.view`) — **not** `¬ CallFree`, which also excludes emits — and
+`isPureRead` is the existing `FnKind.view` predicate (`Core.isPureRead`).
+Pure-read views with an outgoing staticcall have no inconsistent window and
+must stay honest `view`s callable via STATICCALL. Mutating functions with any
+outgoing call/staticcall lock (read-only reentrancy). Do not clear on
+`require`/`revert`/callFailed: EVM/Yul rollback restores transient storage.
+Constructor (`toYulCtor`) is unchanged.
+
+Start states (`EvmState.init` / `mkEvmStateExt`) have `transient 0 = 0`.
+The relation `R`/`ctxRel`/`StateMatch` is not extended; `LockFree` is a
+separate start-state fact. `hNR : ExtOracle.NoReentry` is kept in 8A.
+
+Three-slice plan:
+
+- **8A** (this): emit the lock; happy-path S1/S2 proofs close; `lock_cleared_on_commit`
+  and unlocked functions emit no `tstore`.
+- **8B**: `lock_held_reverts` — if slot 0 is set, every entry reverts.
+- **8C**: derive `NoReentry` from the lock, drop `hNR`, human re-pin of `Checks.lean`.
+  `TRUSTED_COMPUTING_BASE.md` / `PROOF_CHAIN.md` wait until C.
