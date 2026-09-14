@@ -15,9 +15,11 @@ open Lsc Lsc.Stdlib Lsc.Security Vault
 
 namespace Vault
 
+abbrev AssetImpl := IERC20.Impl vaultAsset (WorldView ExtState)
+
 /-- Underlying-token balance of the vault, from the bound token's view. -/
 def holdings (self : Address) (w : World Storage ExtState Event) : Nat :=
-  ((w.self.asset.impl w).balanceOf self w).raw
+  (w.self.asset.impl.balanceOf self w.view).raw
 
 /-- Redeemable assets of `a`. Zero when the supply is empty. Pro-rata of the
 live token balance at this world. -/
@@ -55,29 +57,15 @@ def Inv (w : World Storage ExtState Event) : Prop :=
 def balSel : Nat := Interface.selector (I := IERC20 vaultAsset) "balanceOf"
 def supplySel : Nat := Interface.selector (I := IERC20 vaultAsset) "totalSupply"
 
-/-- Dummy `World` so `Impl` views can run: they take a `World` but ignore `self`. -/
-def viewWorld (asset : IERC20.Ref vaultAsset) (oracle : Oracle ExtState)
-    (x : ExtState) : World Storage ExtState Event where
-  self := {
-    asset := asset
-    owner := 0
-    paused := Flag.off
-    totalShares := 0
-    shares := fun _ => 0 }
-  ext := x
-  oracle := oracle
-
 /-- Live `balanceOf` of `who` at the bound token, through `IERC20.Impl`. -/
 def viewBal (asset : IERC20.Ref vaultAsset) (who : Address)
     (oracle : Oracle ExtState) (x : ExtState) : Amount vaultAsset :=
-  (asset.impl (viewWorld asset oracle x)).balanceOf who
-    (viewWorld asset oracle x)
+  asset.impl.balanceOf who { oracle, ext := x }
 
 /-- Live `totalSupply` of the bound token, through `IERC20.Impl`. -/
 def viewSupply (asset : IERC20.Ref vaultAsset)
     (oracle : Oracle ExtState) (x : ExtState) : Word :=
-  ((asset.impl (viewWorld asset oracle x)).totalSupply
-    (viewWorld asset oracle x)).raw
+  (asset.impl.totalSupply { oracle, ext := x }).raw
 
 /-- Between our transactions the outside world may change `ext` arbitrarily,
 except that this vault's token balance does not decrease and the token's

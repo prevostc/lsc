@@ -8,7 +8,7 @@ CPAMM theorems: swap `k` non-decrease, protocol-fee accounting, pro-rata
 redemption, share-count anti-extraction, and LP+protocol solvency.
 -/
 
-open Lsc Lsc.Stdlib Lsc.Security Cpamm
+open Lsc Lsc.Stdlib Lsc.Security Cpamm Stdlib
 
 namespace Cpamm
 
@@ -88,7 +88,7 @@ theorem removeLiquidity_buckets (s : Amount lpShare)
   Proof.removeLiquidity_buckets h
 
 /-- `setProtocolShare` does not touch either protocol-fee bucket. -/
-theorem setProtocolShare_buckets (bps : Word) {w' : World Storage ExtState Event}
+theorem setProtocolShare_buckets (bps : Bps) {w' : World Storage ExtState Event}
     (h : Tx.run (setProtocolShare bps) ctx w = .ok ((), w')) :
     w'.self.protocolFees0 = w.self.protocolFees0 ∧
       w'.self.protocolFees1 = w.self.protocolFees1 :=
@@ -150,8 +150,8 @@ theorem cpamm_solvent (self : Address) (tr : List (Step spec))
     (w : World Storage ExtState Event)
     (hW : Wf self tr)
     (hR : RelyAlong (cpammRely self w.self.token0 w.self.token1 w.oracle) tr w)
-    (hT0 : IERC20.Spec (w.self.token0.impl w))
-    (hT1 : IERC20.Spec (w.self.token1.impl w))
+    (hT0 : IERC20.Spec (w.self.token0.impl : Token0Impl))
+    (hT1 : IERC20.Spec (w.self.token1.impl : Token1Impl))
     (hInd : TokensIndependent w.self.token0 w.self.token1 w.oracle)
     (h : Inv self w) :
     CoversLpsAndProtocol self (run tr w) :=
@@ -169,8 +169,8 @@ theorem cpamm_no_unauthorized_extraction (self : Address)
     (tr : List (Step spec)) (w : World Storage ExtState Event) (a : Address)
     (hw : Inv self w) (hW : Wf self tr)
     (hR : RelyAlong (cpammRely self w.self.token0 w.self.token1 w.oracle) tr w)
-    (hT0 : IERC20.Spec (w.self.token0.impl w))
-    (hT1 : IERC20.Spec (w.self.token1.impl w))
+    (hT0 : IERC20.Spec (w.self.token0.impl : Token0Impl))
+    (hT1 : IERC20.Spec (w.self.token1.impl : Token1Impl))
     (hInd : TokensIndependent w.self.token0 w.self.token1 w.oracle)
     (hA : NoAuthAlong Auth a tr w) :
     claim a w ≤ claim a (run tr w) :=

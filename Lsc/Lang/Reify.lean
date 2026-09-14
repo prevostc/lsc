@@ -471,6 +471,16 @@ partial def atomOf (env : Env t) (e : Expr) : MetaM Atom := do
       || e.isAppOf ``Lsc.Address.toWord
       || e.isAppOf ``Lsc.AbiType.encode then
     return (← atomOf env e.appArg!)
+  if e.isAppOf ``Lsc.Amount.as then
+    let n := e.getAppNumArgs
+    if n ≥ 2 then
+      return (← atomOf env (e.getArg! (n - 2)))
+  -- Named `Amount` constants (`BPS`, `WAD`, `RAY`) unfold to `Amount.mk`.
+  if e.isConst then
+    let ty ← whnfD (← inferType e)
+    if ty.isAppOf ``Lsc.Amount then
+      if let some e' ← unfoldDefinition? e then
+        return (← atomOf env e')
   if e.isConstOf ``Bool.true then return .lit 1
   if e.isConstOf ``Bool.false then return .lit 0
   if let some n := e.getAppFn.constName? then
@@ -646,12 +656,14 @@ def isTryHead : Name → Bool
 def isSurfaceOp : Name → Bool
   | ``Lsc.Tx.HAddChecked.hAdd | ``Lsc.Tx.HSubChecked.hSub
   | ``Lsc.Tx.HMulChecked.hMul | ``Lsc.Tx.HDivChecked.hDiv
-  | ``Lsc.Tx.HMulDivDown.hMulDivDown | ``Lsc.Tx.HMulDivUp.hMulDivUp => true
+  | ``Lsc.Tx.HMulDivDown.hMulDivDown | ``Lsc.Tx.HMulDivUp.hMulDivUp
+  | ``Lsc.Tx.HMulFixedDown.hMulFixedDown | ``Lsc.Tx.HMulFixedUp.hMulFixedUp => true
   | .str (.str `Lsc "Amount") s =>
       s == "add" || s == "sub" || s == "mulScalar" || s == "divScalar"
         || s == "mulDivDown" || s == "mulDivUp" || s == "rescale"
+        || s == "mulFixedDown" || s == "mulFixedUp" || s == "as"
   | .str (.str `Lsc "Fixed") s =>
-      s == "mulDown" || s == "mulUp" || s == "divDown" || s == "divUp"
+      s == "divDown" || s == "divUp"
   | n =>
       isRefMethod n ||
         match n with
@@ -659,7 +671,7 @@ def isSurfaceOp : Name → Bool
             let s := p.getString!
             s.startsWith "instHAdd" || s.startsWith "instHSub"
               || s.startsWith "instHMul" || s.startsWith "instHDiv"
-              || s.startsWith "instHMulDiv"
+              || s.startsWith "instHMulDiv" || s.startsWith "instHMulFixed"
         | _ => false
 
 /-- `Rounding` must be a literal constructor so the reifier can pick `mulDivDown` vs `mulDivUp`. -/
@@ -1406,8 +1418,17 @@ def certifyDenote (fn : Name) (ci : ContractInfo) (lhs lhsRaw rhs coreE : Expr) 
     mkIdent ``Lsc.Amount.divScalar,
     mkIdent ``Lsc.Amount.mulDivDown,
     mkIdent ``Lsc.Amount.mulDivUp,
+    mkIdent ``Lsc.Amount.mulFixedDown,
+    mkIdent ``Lsc.Amount.mulFixedUp,
     mkIdent ``Lsc.Amount.hMulDivDown_def,
     mkIdent ``Lsc.Amount.hMulDivUp_def,
+    mkIdent ``Lsc.Amount.hMulDivDown_word,
+    mkIdent ``Lsc.Amount.hMulDivUp_word,
+    mkIdent ``Lsc.Amount.hMulFixedDown_def,
+    mkIdent ``Lsc.Amount.hMulFixedUp_def,
+    mkIdent ``Lsc.Amount.as,
+    mkIdent ``Lsc.Amount.as_eq_ofWord,
+    mkIdent ``Lsc.Amount.raw_as,
     mkIdent ``Lsc.Amount.eq_iff,
     mkIdent ``Lsc.Amount.ne_iff,
     mkIdent ``Lsc.Amount.lt_iff,
@@ -1428,6 +1449,8 @@ def certifyDenote (fn : Name) (ci : ContractInfo) (lhs lhsRaw rhs coreE : Expr) 
     mkIdent ``Lsc.Tx.HDivChecked.hDiv,
     mkIdent ``Lsc.Tx.HMulDivDown.hMulDivDown,
     mkIdent ``Lsc.Tx.HMulDivUp.hMulDivUp,
+    mkIdent ``Lsc.Tx.HMulFixedDown.hMulFixedDown,
+    mkIdent ``Lsc.Tx.HMulFixedUp.hMulFixedUp,
     mkIdent ``Lsc.Amount.raw,
     mkIdent ``Lsc.Prim.eval_id,
     mkIdent ``Lsc.RetExpr.eval_word,
@@ -1511,8 +1534,11 @@ def certifyDenote (fn : Name) (ci : ContractInfo) (lhs lhsRaw rhs coreE : Expr) 
       Lsc.Amount.mulDivDown_bind_ofWord, Lsc.Amount.mulDivUp_bind_ofWord,
       Lsc.Amount.require_lt_ofWord, Lsc.Amount.require_pos, Lsc.Amount.require_le_ofWord,
       Lsc.Amount.require_eq_zero_ofWord, Lsc.Amount.ite_eq_zero_ofWord,
+      Lsc.Amount.as_eq_ofWord, Lsc.Amount.raw_as,
       Lsc.Amount.raw_ofNat, Lsc.Amount.raw_one, Lsc.Amount.raw_zero,
-      Lsc.Amount.raw_ofWord,
+      Lsc.Amount.raw_ofWord, Lsc.Amount.as_eq_ofWord, Lsc.Amount.raw_as,
+      Lsc.Amount.as, Lsc.Amount.hMulFixedDown_def, Lsc.Amount.hMulFixedUp_def,
+      Lsc.Amount.hMulDivDown_word, Lsc.Amount.hMulDivUp_word,
       Lsc.Tx.bind_assoc, Lsc.Tx.bind_assoc_pure, Lsc.Tx.discard_bind_pure,
       Lsc.Tx.pure_bind, Lsc.Tx.bind_pure, Lsc.Tx.map_pure,
       Lsc.Address.toWord, Lsc.Flag.off_eq_zero, Lsc.Flag.on_eq_one,
@@ -1746,6 +1772,13 @@ def ctorIdent (fn : Name) : Ident :=
 /-- Render a closed type as a term; keep `Amount`/`Address` folded. -/
 partial def exprToTerm (e : Expr) : MetaM Term := do
   let e := (← instantiateMVars e).consumeMData
+  -- Numerals (`4`, `OfNat.ofNat …`) must be quoted as raw nats. Re-elaborating
+  -- `OfNat.ofNat Nat` as an `Asset.fixed` argument otherwise fills `n` with
+  -- the type `Nat` (`Fixed d` / `Bps` parameters).
+  if let some n := natLit? e then
+    return quote n
+  if let some n ← closedNat? e then
+    return quote n
   if let some n := e.constName? then
     return ⟨mkIdent n⟩
   if e.isApp then

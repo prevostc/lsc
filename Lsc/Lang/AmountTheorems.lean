@@ -112,6 +112,25 @@ theorem mulDivUp_bind_ofWord {β : Type} (num : Amount b) (x y : Amount a)
       Tx.mulDivUp num.raw x.raw y.raw >>= fun n => k (ofWord n) :=
   Proof.mulDivUp_bind_ofWord num x y k
 
+/-- `Tx.run (x *?↓ r)` succeeds iff the product fits in a word; then the
+result is the total `x *↓ r` and the world is unchanged. The divisor `10^d`
+is never zero. -/
+theorem run_mulFixedDown {d : Nat} (x : Amount a) (r : Fixed d)
+    (ctx : Ctx) (w : World S X E) {v : Amount a} {w' : World S X E} :
+    Tx.run (mulFixedDown (S := S) (X := X) (E := E) (ε := ε) x r) ctx w =
+        .ok (v, w') ↔
+      x.raw * r.raw < wordBound ∧ v = mulDown x r ∧ w' = w :=
+  Proof.run_mulFixedDown x r ctx w
+
+/-- `Tx.run (x *?↑ r)` succeeds iff the product fits in a word; then the
+result is the total `x *↑ r` and the world is unchanged. -/
+theorem run_mulFixedUp {d : Nat} (x : Amount a) (r : Fixed d)
+    (ctx : Ctx) (w : World S X E) {v : Amount a} {w' : World S X E} :
+    Tx.run (mulFixedUp (S := S) (X := X) (E := E) (ε := ε) x r) ctx w =
+        .ok (v, w') ↔
+      x.raw * r.raw < wordBound ∧ v = mulUp x r ∧ w' = w :=
+  Proof.run_mulFixedUp x r ctx w
+
 /-- `require (0 < x)` is the Core word test `0 < x.raw`. -/
 @[simp] theorem require_pos (x : Amount a) (err : ε) :
     Tx.require (S := S) (X := X) (E := E) (0 < x) err =

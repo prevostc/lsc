@@ -135,9 +135,9 @@ def emitMethodSig (m : DerivedMethod) : TermElabM Term := do
 def mkWorldBinders : TermElabM (TSyntax ``Parser.Term.bracketedBinder) :=
   toBracketed <$> `(implicitBinderF| {S X E ε : Type})
 
-/-- `Impl` / `ofRef` / `Ref.impl` do not mention `ε` (Fn fields are `Option`). -/
-def mkWorldBindersNoε : TermElabM (TSyntax ``Parser.Term.bracketedBinder) :=
-  toBracketed <$> `(implicitBinderF| {S X E : Type})
+/-- `Impl.ofRef` / `Ref.impl` quantify only over the oracle's `X`. -/
+def mkXBinder : TermElabM (TSyntax ``Parser.Term.bracketedBinder) :=
+  toBracketed <$> `(implicitBinderF| {X : Type})
 
 def mkArgBinders (m : DerivedMethod) :
     TermElabM (Array (TSyntax ``Parser.Term.bracketedBinder)) :=
@@ -187,15 +187,15 @@ def implFieldType (m : DerivedMethod) : TermElabM Term := do
 def ofRefViewBody (m : DerivedMethod) : TermElabM Term := do
   let enc ← encodeList m
   let sel := quote m.sel
-  `(fun $(m.argIdents)* w =>
-      Lsc.decodeOrDefault (w.oracle.view r.addr $sel $enc w.ext))
+  `(fun $(m.argIdents)* v =>
+      Lsc.decodeOrDefault (v.oracle.view r.addr $sel $enc v.ext))
 
-def ofRefFnBody (structName : Name) (_hdr : IfaceHeader) (m : DerivedMethod) :
+def ofRefFnBody (_structName : Name) (_hdr : IfaceHeader) (m : DerivedMethod) :
     TermElabM Term := do
-  let f := rootIdent (structName ++ `Ref ++ m.fieldName)
-  `(fun $(m.argIdents)* ctx w =>
-      (Lsc.Tx.run ($f r $(m.argIdents)* : Lsc.Tx S X E Unit $(m.retTy))
-        ctx w).toOption)
+  let enc ← encodeList m
+  let sel := quote m.sel
+  `(fun $(m.argIdents)* _ctx v =>
+      Lsc.WorldView.callDecode (α := $(m.retTy)) v r.addr $sel $enc)
 
 def deriveOne (structName : Name) : CommandElabM Unit := do
   unless isStructure (← getEnv) structName do
@@ -245,9 +245,7 @@ def deriveOne (structName : Name) : CommandElabM Unit := do
   let tryApp ← liftTermElabM `($tryId $hdr.paramIdents*)
   let rB : TSyntax ``Parser.Term.bracketedBinder :=
     ← toBracketed <$> `(explicitBinderF| (r : $refApp))
-  let worldB ← liftTermElabM mkWorldBindersNoε
-  let wB : TSyntax ``Parser.Term.bracketedBinder :=
-    ← toBracketed <$> `(explicitBinderF| (_w : Lsc.World S X E))
+  let xB ← liftTermElabM mkXBinder
   elabCommand <| ← `(
     def $tryFn $hdr.paramImplBinders:bracketedBinder* (r : $refApp) : $tryApp :=
       ⟨r.addr⟩)
@@ -257,19 +255,19 @@ def deriveOne (structName : Name) : CommandElabM Unit := do
         let n := mkIdent m.fieldName
         let body ← if m.isView then ofRefViewBody m else ofRefFnBody structName hdr m
         `(Parser.Term.structInstField| $n:ident := $body)
-  let ofRefBinds := hdr.paramImplBinders.push worldB |>.push rB
+  let ofRefBinds := hdr.paramImplBinders.push xB |>.push rB
   elabCommand <| ← `(
     def $ofRefId $ofRefBinds:bracketedBinder* :
-        $implId $hdr.paramIdents* (Lsc.World S X E) where
+        $implId $hdr.paramIdents* (Lsc.WorldView X) where
       $[$instFields]*
-      step := fun _ctx w w' =>
+      step := fun _ctx v v' =>
         ∃ sel args rets x',
-          w.oracle.call r.addr sel args w.ext = some (rets, x') ∧
-          w' = { w with ext := x' })
-  let implBinds := hdr.paramImplBinders ++ #[worldB, rB, wB]
+          v.oracle.call r.addr sel args v.ext = some (rets, x') ∧
+          v' = { v with ext := x' })
+  let implBinds := hdr.paramImplBinders ++ #[xB, rB]
   elabCommand <| ← `(
     def $implFn $implBinds:bracketedBinder* :
-        $implId $hdr.paramIdents* (Lsc.World S X E) :=
+        $implId $hdr.paramIdents* (Lsc.WorldView X) :=
       $ofRefId r)
 
 def deriveInterface (declNames : Array Name) : CommandElabM Bool := do

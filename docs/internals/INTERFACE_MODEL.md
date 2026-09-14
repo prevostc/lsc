@@ -12,7 +12,8 @@ reads. Reentrancy during a call is not modelled (`self` unchanged).
 ## Types
 
 `World S X E` — `self : S`, `ext : X` (compiled contracts: `Lsc.ExtState`),
-`log`, `oracle : Oracle X`.
+`log`, `oracle : Oracle X`. `WorldView X` is `{ ext, oracle }`: what an external
+`I.Impl` of a `Ref` actually reads.
 
 `Tx S X E ε α := ReaderT Ctx (StateT (World S X E) (Except (Err ε))) α`.
 `Err` includes `callFailed`.
@@ -38,10 +39,14 @@ let ta ← tok.balanceOf me
 safeTransferFrom tok who me assets .TransferFailed
 ```
 
-`asset.impl w` is `I.Impl.ofRef asset`. View fields of `Impl` are total
-(`decodeOrDefault`). Fn fields are `Option` (no error parameter): a successful
-`Tx.run` is that `some` via `Tx.run_ok_toOption`. `Tx.call` / `Tx.view` take an
-address and selector; the typed methods supply both from the `Ref`.
+`asset.impl` is `I.Impl.ofRef asset` over `WorldView` (no dummy `World`). View
+fields of a `Ref` Impl take that view (`balanceOf who v`) and are total
+(`decodeOrDefault`). Fn fields take `Ctx` and a `WorldView` and return `Option`
+(no error parameter): a successful `Tx.run` on the full `World` is that `some`
+on `w.view` via `oracle.call`, with the post-view `{ v with ext := x' }`.
+`Tx.call` / `Tx.view` take an address and selector; the typed methods supply
+both from the `Ref`. A contract that *is* the interface (Token) still has
+`C.impl` over `World`.
 
 Files: `Lsc/Lang/Interface.lean`, `Lsc/Lang/InterfaceDeriving.lean`;
 `Stdlib/ERC20.lean` (`IERC20`, `IERC20.Spec`); `Stdlib/SafeERC20.lean`.
@@ -57,8 +62,8 @@ theorem erc20 : IERC20.Spec Token.impl
 ```
 
 Vault/Cpamm theorems that mention the token take
-`hT : IERC20.Spec (w.self.asset.impl w)` (or both tokens). Live holdings are
-`(w.self.asset.impl w).balanceOf self w`. Between our calls, `vaultRely` /
+`hT : IERC20.Spec w.self.asset.impl` (or both tokens). Live holdings are
+`tok.impl.balanceOf me w.view`. Between our calls, `vaultRely` /
 `cpammRely` constrain `ext` so that those `balanceOf` views do not fall and
 each token's `totalSupply` view stays the same.
 

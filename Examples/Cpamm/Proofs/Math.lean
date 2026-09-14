@@ -1,6 +1,8 @@
 import Mathlib.Tactic.SplitIfs
 import Examples.Cpamm.Spec
 
+open Stdlib
+
 /-!
 CPAMM floor-product facts. Duplicated from the fee-less Amm example on
 purpose: Cpamm must not import `Examples.Amm.Proofs`.
@@ -63,24 +65,24 @@ theorem swapQuote_proto (rIn rOut dx feeTo pShareBps : Nat) :
       protoTake feeTo pShareBps (swapFee dx) :=
   rfl
 
-theorem protoTake_le_fee (feeTo ps fee : Nat) (h : ps ≤ BPS) :
+theorem protoTake_le_fee (feeTo ps fee : Nat) (h : ps ≤ BPS.raw) :
     protoTake feeTo ps fee ≤ fee := by
   unfold protoTake
   split_ifs
   · exact Nat.zero_le _
-  · exact share_le fee ps BPS h (by decide)
+  · exact share_le fee ps BPS.raw h (by decide)
 
 /-- A successful quote never decreases `k`, provided the protocol share is at
 most 100% (so the take cannot exceed the 0.3% fee). -/
 theorem swapQuote_k (rIn rOut dx feeTo pShareBps : Nat)
-    (hIn : 0 < rIn) (hps : pShareBps ≤ BPS) :
+    (hIn : 0 < rIn) (hps : pShareBps ≤ BPS.raw) :
     (rIn + (dx - (swapQuote rIn rOut dx feeTo pShareBps).2)) *
       (rOut - (swapQuote rIn rOut dx feeTo pShareBps).1) ≥ rIn * rOut := by
   have hfee : protoTake feeTo pShareBps (swapFee dx) ≤ swapFee dx :=
     protoTake_le_fee feeTo pShareBps (swapFee dx) hps
   have hdxF : dxFeeLess dx ≤ dx := by
     simpa [dxFeeLess, Nat.mul_comm dx] using
-      remove_le_reserves (BPS - FEE_BPS) dx BPS (Nat.sub_le _ _) (by decide)
+      remove_le_reserves (BPS.raw - FEE_BPS) dx BPS.raw (Nat.sub_le _ _) (by decide)
   have hnet : dxFeeLess dx ≤ dx - protoTake feeTo pShareBps (swapFee dx) := by
     have h1 : protoTake feeTo pShareBps (swapFee dx) ≤ dx - dxFeeLess dx := by
       simpa [swapFee] using hfee

@@ -3,8 +3,9 @@
 Lsc does not let you pass an arbitrary address to `CALL`. You declare an
 **interface** (`structure IERC20 (a : Asset) … deriving Interface`) and store
 an `I.Ref` (`{ addr : Address }`). `deriving Interface` generates the method
-table, typed calls, `I.Impl`, and `Impl.ofRef`. `asset.impl w` is that
-`Impl`. `I.Spec` is a user-written `Prop` over `T : I.Impl …` (success as
+table, typed calls, `I.Impl`, and `Impl.ofRef`. `asset.impl` is that
+`Impl` over `WorldView` (oracle plus `ext`). `I.Spec` is a user-written
+`Prop` over `T : I.Impl …` (success as
 hypothesis, state delta as conclusion). The callee is the world's `Oracle`;
 a `Spec` hypothesis restricts it. Reentrancy during a call is not modelled
 (`self` is unchanged).
@@ -42,7 +43,7 @@ change `totalSupply`; `transferFrom` spends allowance when `sender ≠ src`;
 `approve` writes the allowance; nobody can lower your balance except you or
 a spender you approved.
 
-Live holdings in Vault/Cpamm specs are `tok.impl w` / `.balanceOf`, not a
+Live holdings in Vault/Cpamm specs are `tok.impl.balanceOf me w.view`, not a
 hand-decoded `oracle.view`. Token itself implements the interface:
 `lsc_contract Token … implements IERC20 Token.tokenAsset` emits
 `Token.impl`, and `theorem erc20 : IERC20.Spec Token.impl`.
@@ -54,7 +55,7 @@ balance is not.
 
 ## What is assumed, not proved
 
-Theorems that mention the token take `hT : IERC20.Spec (w.self.asset.impl w)`
+Theorems that mention the token take `hT : IERC20.Spec (w.self.asset.impl : AssetImpl)`
 (or both tokens, for Cpamm). Failed calls are `.callFailed` and revert us.
 USDT-style missing return values are treated as success (`boolOpt`).
 Fee-on-transfer and reentrancy are outside `IERC20.Spec` as stated.

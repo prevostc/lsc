@@ -2,6 +2,7 @@ import Lsc.Lang.Word
 import Lsc.Lang.Reify
 import Stdlib.ERC20
 import Stdlib.SafeERC20
+import Stdlib.Scales
 
 /-!
 # CPAMM — constant-product AMM with LP fee and protocol-fee switch
@@ -12,12 +13,10 @@ into `protocolFees*` and never enters `k`. External calls run after storage
 writes; reentrancy is not modelled.
 -/
 
-open Lsc Lsc.Syntax Lsc.Stdlib
+open Lsc Lsc.Syntax Lsc.Stdlib Stdlib
 
 namespace Cpamm
 
-/-- Basis-point denominator. -/
-def BPS : Nat := 10000
 /-- Immutable swap fee: 30 bps = 0.3% of `amountIn`. -/
 def FEE_BPS : Nat := 30
 
@@ -34,7 +33,7 @@ structure Storage where
   shares : Mapping Address (Amount lpShare)
   owner : Address
   feeTo : Address
-  protocolShareBps : Word
+  protocolShareBps : Bps
   protocolFees0 : Amount asset0
   protocolFees1 : Amount asset1
 
@@ -45,7 +44,7 @@ inductive Event
       (sharesIn : Amount lpShare)
   | Swap0for1 (who : Address) (a0 : Amount asset0) (a1 : Amount asset1)
   | Swap1for0 (who : Address) (a1 : Amount asset1) (a0 : Amount asset0)
-  | ProtocolShareSet (bps : Word)
+  | ProtocolShareSet (bps : Bps)
   | FeeToSet (who : Address)
   | ProtocolFeesCollected (who : Address) (a0 : Amount asset0) (a1 : Amount asset1)
   deriving DecidableEq, Repr
@@ -83,7 +82,7 @@ def addLiquidity (a0 : Amount asset0) (a1 : Amount asset1) : M (Amount lpShare) 
   let ts ← read totalShares
   let minted ←
     if ts = 0 then
-      (1 : Amount lpShare) mulDiv↓ a0 / (1 : Amount asset0)
+      pure (a0.as lpShare)
     else do
       Tx.require (0 < r0) .Zero
       Tx.require (0 < r1) .Zero
@@ -144,17 +143,16 @@ def swap0for1 (amountIn : Amount asset0) (minOut : Amount asset1) : M (Amount as
   let r1 ← read reserve1
   Tx.require (0 < r0) .Zero
   Tx.require (0 < r1) .Zero
-  let dxF ← amountIn mulDiv↓ (9970 : Amount asset0) / (10000 : Amount asset0)
+  let dxF ← amountIn mulDiv↓ 9970 / 10000
   let den ← r0 +? dxF
   let out ← r1 mulDiv↓ dxF / den
   Tx.require (minOut ≤ out) .InsufficientOutput
   Tx.require (0 < out) .ZeroOut
   let ft ← read feeTo
   let ps ← read protocolShareBps
-  let coeffW ← if ft = 0 then pure (0 : Word) else pure ps
-  let coeff ← (1 : Amount asset0) *? coeffW
+  let coeff : Bps ← if ft = 0 then pure (0 : Bps) else pure ps
   let fee ← amountIn -? dxF
-  let proto ← fee mulDiv↓ coeff / (10000 : Amount asset0)
+  let proto ← fee *?↓ coeff
   let taken ← amountIn -? proto
   let r0' ← r0 +? taken
   write reserve0 r0'
@@ -179,17 +177,16 @@ def swap1for0 (amountIn : Amount asset1) (minOut : Amount asset0) : M (Amount as
   let r1 ← read reserve1
   Tx.require (0 < r0) .Zero
   Tx.require (0 < r1) .Zero
-  let dxF ← amountIn mulDiv↓ (9970 : Amount asset1) / (10000 : Amount asset1)
+  let dxF ← amountIn mulDiv↓ 9970 / 10000
   let den ← r1 +? dxF
   let out ← r0 mulDiv↓ dxF / den
   Tx.require (minOut ≤ out) .InsufficientOutput
   Tx.require (0 < out) .ZeroOut
   let ft ← read feeTo
   let ps ← read protocolShareBps
-  let coeffW ← if ft = 0 then pure (0 : Word) else pure ps
-  let coeff ← (1 : Amount asset1) *? coeffW
+  let coeff : Bps ← if ft = 0 then pure (0 : Bps) else pure ps
   let fee ← amountIn -? dxF
-  let proto ← fee mulDiv↓ coeff / (10000 : Amount asset1)
+  let proto ← fee *?↓ coeff
   let taken ← amountIn -? proto
   let r1' ← r1 +? taken
   write reserve1 r1'
@@ -208,7 +205,7 @@ def swap1for0 (amountIn : Amount asset1) (minOut : Amount asset0) : M (Amount as
   pure out
 
 /-- Owner sets the protocol's share of the swap fee, in bps of that fee. -/
-def setProtocolShare (bps : Word) : M Unit := do
+def setProtocolShare (bps : Bps) : M Unit := do
   let who ← Tx.sender
   let own ← read owner
   Tx.require (who = own) .NotOwner

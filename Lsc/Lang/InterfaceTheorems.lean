@@ -78,13 +78,23 @@ theorem run_call_toOption (addr : Address) (sel : Nat) (args : List Word)
         | some v => some (v, { w with ext := x' }) :=
   by apply Proof.run_call_toOption
 
-/-- `toOption` of a CALL ignores the user-error type. `I.Impl.ofRef` runs the
-CALL at `ε := Unit`; a contract body uses the contract's `Error`. -/
+/-- `toOption` of a CALL ignores the user-error type. A contract body uses the
+contract's `Error`; `I.Impl.ofRef` reconstructs the same oracle CALL on a
+`WorldView` without threading `ε`. -/
 theorem run_call_toOption_err {ε' : Type} (addr : Address) (sel : Nat)
     (args : List Word) (ctx : Ctx) (w : World S X E) :
     (run (call (ε := ε) (α := α) addr sel args) ctx w).toOption =
       (run (call (ε := ε') (α := α) addr sel args) ctx w).toOption :=
   by apply Proof.run_call_toOption_err
+
+/-- `WorldView.callDecode` on `w.view` is `Tx.run (call …)` mapped onto the
+view. Independent of the user-error type. -/
+theorem callDecode_view (addr : Address) (sel : Nat) (args : List Word)
+    (ctx : Ctx) (w : World S X E) :
+    WorldView.callDecode (α := α) w.view addr sel args =
+      (Tx.run (call (ε := ε) (α := α) addr sel args) ctx w).toOption.map
+        (Prod.map id World.view) :=
+  Proof.callDecode_view addr sel args ctx w
 
 /-- A successful view: the oracle payload decoded and the world is unchanged. -/
 theorem run_view_ok {addr : Address} {sel : Nat} {args : List Word}

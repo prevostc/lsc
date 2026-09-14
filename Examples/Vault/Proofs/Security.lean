@@ -21,7 +21,7 @@ and `IERC20.Spec`. Well-formed traces use `PreservesInvFnAt`
 def InvT (asset : IERC20.Ref vaultAsset)
     (oracle : Oracle ExtState) (w : World Storage ExtState Event) : Prop :=
   Inv w ∧ w.self.asset = asset ∧ w.oracle = oracle ∧
-    IERC20.Spec (asset.impl w)
+    IERC20.Spec (asset.impl : AssetImpl)
 
 /-! ### Environment -/
 
@@ -312,42 +312,48 @@ private theorem holdings_add_of_transferFrom
     (self : Address) {ctx : Ctx} {w w1 : World Storage ExtState Event}
     {assets : Amount vaultAsset}
     (hself : ctx.self = self) (hsne : ctx.sender ≠ self)
-    (hT : IERC20.Spec (w.self.asset.impl w))
+    (hT : IERC20.Spec (w.self.asset.impl : AssetImpl))
     (hcall : Tx.run (tfCall w.self.asset ctx.sender ctx.self assets) ctx w =
       .ok (true, w1)) :
     holdings self w1 = holdings self w + assets.raw := by
   subst hself
-  have hmoves := hT.transferFrom_moves (ctx := ctx) (w := w) (w' := w1)
-    (by simpa [impl_transferFrom] using Tx.run_ok_toOption hcall)
+  have hmoves := hT.transferFrom_moves (ctx := ctx) (w := w.view) (w' := w1.view)
+    (by
+      have hopt := Tx.run_ok_toOption hcall
+      have := congrArg (Option.map (Prod.map id World.view)) hopt
+      simpa [impl_transferFrom] using this)
   have hdst := hmoves.2.1 hsne
   have hframe := transferFrom_frame (by simpa [tfCall] using hcall)
-  simpa [holdings, IERC20.Ref.impl, Amount.raw_add, hframe.1, hframe.2.1] using
+  simpa [holdings, IERC20.Ref.impl, Amount.raw_add, hframe.1, hframe.2.1,
+    World.view] using
     congrArg Amount.raw hdst
 
 private theorem holdings_sub_of_transfer
     (self : Address) {ctx : Ctx} {w wCall w1 : World Storage ExtState Event}
     {amt : Amount vaultAsset}
     (hself : ctx.self = self) (hsne : ctx.sender ≠ self)
-    (hT : IERC20.Spec (w.self.asset.impl w))
+    (hT : IERC20.Spec (w.self.asset.impl : AssetImpl))
     (ha : wCall.self.asset = w.self.asset) (ho : wCall.oracle = w.oracle)
     (hx : wCall.ext = w.ext)
     (hcall : Tx.run (trCall w.self.asset ctx.sender amt) ctx wCall =
       .ok (true, w1)) :
     holdings self w1 + amt.raw = holdings self w := by
   subst hself
-  have hTcall : IERC20.Spec (wCall.self.asset.impl wCall) := by
+  have hTcall : IERC20.Spec (wCall.self.asset.impl : AssetImpl) := by
     simpa [IERC20.Ref.impl, ha] using hT
   have hrunT :
-      (wCall.self.asset.impl wCall).transfer
-        ctx.sender amt { ctx with sender := ctx.self } wCall =
-        some (true, w1) := by
+      wCall.self.asset.impl.transfer
+        ctx.sender amt { ctx with sender := ctx.self } wCall.view =
+        some (true, w1.view) := by
     have htr' :
         Tx.run (trCall w.self.asset ctx.sender amt)
           { ctx with sender := ctx.self } wCall = .ok (true, w1) := by
       rw [← transfer_run_ctx_irrel (r := w.self.asset) (dst := ctx.sender)
           (amt := amt) (ctx' := { ctx with sender := ctx.self }) (w₀ := wCall)]
       simpa using hcall
-    simpa [impl_transfer, ha] using Tx.run_ok_toOption htr'
+    have hopt := Tx.run_ok_toOption htr'
+    have := congrArg (Option.map (Prod.map id World.view)) hopt
+    simpa [impl_transfer, ha] using this
   have hmoves := hTcall.transfer_moves hrunT
   have hto := hmoves.2.1 hsne.symm
   have hsumr := congrArg Amount.raw hmoves.1
@@ -394,7 +400,7 @@ theorem deposit_preserves_inv :
     have hok := deposit_ok_of_run hrun
     obtain ⟨_, hσ, hor, _⟩ := deposit_post assets hok hrun
     obtain ⟨w1, htf, hself1, hor1, _, hext, _⟩ := deposit_call assets hok hrun
-    have hT' : IERC20.Spec (w.self.asset.impl w) := by
+    have hT' : IERC20.Spec (w.self.asset.impl : AssetImpl) := by
       simpa [IERC20.Ref.impl, ha] using hT
     refine ⟨by
         simp [Inv, hσ]
@@ -488,7 +494,7 @@ private theorem claim_le_deposit_run (assets : Amount vaultAsset)
     {ctx : Ctx} {w w' : World Storage ExtState Event} {n : Amount vShare}
     {a : Address}
     (hself : ctx.self = self) (hsne : ctx.sender ≠ self)
-    (hT : IERC20.Spec (w.self.asset.impl w))
+    (hT : IERC20.Spec (w.self.asset.impl : AssetImpl))
     (hrun : Tx.run (deposit assets) ctx w = .ok (n, w')) :
     claim self a w ≤ claim self a w' := by
   subst hself
@@ -517,7 +523,7 @@ private theorem claim_le_withdraw_run (sharesIn : Amount vShare)
     (hself : ctx.self = self) (hsne : ctx.sender ≠ self)
     (hneA : ctx.sender ≠ a)
     (hInv : Inv w)
-    (hT : IERC20.Spec (w.self.asset.impl w))
+    (hT : IERC20.Spec (w.self.asset.impl : AssetImpl))
     (hrun : Tx.run (withdraw sharesIn) ctx w = .ok (n, w')) :
     claim self a w ≤ claim self a w' := by
   subst hself
@@ -557,7 +563,7 @@ private theorem claim_le_call (c : Call spec)
     (hna : ¬ Auth a c w) :
     claim self a w ≤ claim self a (step (.call c) w) := by
   obtain ⟨hInv, ha, ho, hT⟩ := hInvT
-  have hT' : IERC20.Spec (w.self.asset.impl w) := by
+  have hT' : IERC20.Spec (w.self.asset.impl : AssetImpl) := by
     simpa [IERC20.Ref.impl, ha] using hT
   rcases c with ⟨sender, value, ts, bn, target, fn, args⟩
   let ctx : Ctx :=
@@ -614,7 +620,7 @@ theorem vault_solvent (self : Address) (tr : List (Step spec))
     (w : World Storage ExtState Event)
     (hW : Wf self tr)
     (hR : RelyAlong (vaultRely self w.self.asset w.oracle) tr w)
-    (hT : IERC20.Spec (w.self.asset.impl w))
+    (hT : IERC20.Spec (w.self.asset.impl : AssetImpl))
     (h : Inv w) :
     Solvent (claim self) holdings self (run tr w) :=
   solvent_run_at
@@ -627,7 +633,7 @@ theorem vault_no_unauthorized_extraction (self : Address)
     (tr : List (Step spec)) (w : World Storage ExtState Event) (a : Address)
     (hw : Inv w) (hW : Wf self tr)
     (hR : RelyAlong (vaultRely self w.self.asset w.oracle) tr w)
-    (hT : IERC20.Spec (w.self.asset.impl w))
+    (hT : IERC20.Spec (w.self.asset.impl : AssetImpl))
     (hA : NoAuthAlong Auth a tr w) :
     claim self a w ≤ claim self a (run tr w) := by
   let asset := w.self.asset

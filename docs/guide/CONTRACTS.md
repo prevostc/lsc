@@ -2,9 +2,19 @@
 
 A contract is ordinary Lean: a storage structure, events, errors, and
 functions in the `Tx` monad. There is no separate grammar. `read` / `write`
-are macros over storage; `+?` / `-?` / `*?` / `/?` revert on overflow,
-underflow, or division by zero; `mulDiv↓` / `mulDiv↑` are the fused
-floor/ceil ops; control flow is Lean `do` / `let` / `if`.
+are macros over storage. Control flow is Lean `do` / `let` / `if`.
+
+Checked arithmetic (revert on overflow, underflow, or division by zero):
+
+| Surface | Meaning |
+|---|---|
+| `x +? y`, `x -? y` | same-asset add/sub |
+| `x *? k`, `x /? k` | scale by a `Word` |
+| `x mulDiv↓ y / z`, `x mulDiv↑ y / z` | fused `⌊x·y/z⌋` / `⌈x·y/z⌉`; `y`/`z` may be two `Amount`s or two `Word`s |
+| `x *?↓ r`, `x *?↑ r` | scale `x : Amount a` by `r : Fixed d` (`⌊x·r/10^d⌋` / ceil) |
+| `x.as b` | 1:1 retag to asset `b` (same raw word) |
+
+Units in `Stdlib/Scales.lean`: `Wad`/`Ray`/`Bps` (`Fixed 18/27/4`) and constants `WAD`/`RAY`/`BPS`.
 
 ## A minimal contract
 

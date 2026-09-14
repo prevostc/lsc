@@ -1,5 +1,6 @@
 import Lean
 import Lsc.Lang.Word
+import Lsc.Lang.Inline
 
 /-!
 # Asset-indexed amounts
@@ -9,8 +10,9 @@ contract-level closed constant; bindings and storage fields are typed by
 it. `Amount a` is a one-field structure (an abbrev would unify every
 amount back to `Word`). Same-asset `+? -?`; `*? /?` only against a `Word`
 scalar; `mulDivDown` / `Up` take a numerator of asset `b` and a ratio of
-two `a`s. The fused ops are written `num mulDiv↓ x / y` and
-`num mulDiv↑ x / y` (same as the named functions; not `*?` then `/?`).
+two `a`s, or two `Word`s (scale 0). The fused ops are written
+`num mulDiv↓ x / y` and `num mulDiv↑ x / y`. `x *?↓ r` / `x *?↑ r`
+scale by a `Fixed d`. `x.as b` is the 1:1 retag.
 
 `Fixed d` is dimensionless fixed-point with static decimals.
 -/
@@ -70,6 +72,32 @@ instance : Mul (Amount a) where
 /-- Tag a raw word as an amount. Boundary use only. -/
 def ofWord (n : Word) : Amount a := ⟨n⟩
 
+/-- 1:1 retag: same raw word, new asset. The only explicit unit conversion. -/
+def as (x : Amount a) (b : Asset) : Amount b := ⟨x.raw⟩
+
+/-- Total `⌊x * y / z⌋` on raw words (Lean: `n / 0 = 0`). -/
+def floorMulDiv (x y z : Nat) : Nat := x * y / z
+
+/-- Total `⌈x * y / z⌉` on raw words (`z = 0` yields 0). -/
+def ceilMulDiv (x y z : Nat) : Nat :=
+  x * y / z + if z = 0 ∨ x * y % z = 0 then 0 else 1
+
+/-- Total `⌊x.raw * r.raw / 10^d⌋`. -/
+def mulDown {d : Nat} (x : Amount a) (r : Fixed d) : Amount a :=
+  ⟨floorMulDiv x.raw r.raw (Word.scale d)⟩
+
+/-- Total `⌈x.raw * r.raw / 10^d⌉`. -/
+def mulUp {d : Nat} (x : Amount a) (r : Fixed d) : Amount a :=
+  ⟨ceilMulDiv x.raw r.raw (Word.scale d)⟩
+
+@[simp] theorem raw_as (x : Amount a) (b : Asset) : (x.as b).raw = x.raw := rfl
+@[simp] theorem as_eq_ofWord (x : Amount a) (b : Asset) : x.as b = ofWord x.raw := rfl
+@[simp] theorem as_ofWord (n : Word) (b : Asset) :
+    (ofWord n : Amount a).as b = ofWord n := rfl
+@[simp] theorem mulDown_raw {d : Nat} (x : Amount a) (r : Fixed d) :
+    (mulDown x r).raw = x.raw * r.raw / Word.scale d := rfl
+@[simp] theorem mulUp_raw {d : Nat} (x : Amount a) (r : Fixed d) :
+    (mulUp x r).raw = ceilMulDiv x.raw r.raw (Word.scale d) := rfl
 @[simp] theorem raw_mk (n : Word) : (⟨n⟩ : Amount a).raw = n := rfl
 @[simp] theorem mk_raw (x : Amount a) : (⟨x.raw⟩ : Amount a) = x := rfl
 @[simp] theorem raw_ofWord (n : Word) : (ofWord n : Amount a).raw = n := rfl
@@ -195,6 +223,16 @@ def mulDivDown (num : Amount b) (x y : Amount a) : Tx S X E ε (Amount b) :=
 def mulDivUp (num : Amount b) (x y : Amount a) : Tx S X E ε (Amount b) :=
   ofWord <$> Tx.mulDivUp num.raw x.raw y.raw
 
+/-- `⌊x * r / 10^d⌋`. Reverts on product overflow; `10^d ≠ 0`. -/
+@[lsc_inline]
+def mulFixedDown {d : Nat} (x : Amount a) (r : Fixed d) : Tx S X E ε (Amount a) :=
+  mulDivDown x r (ofWord (Word.scale d))
+
+/-- `⌈x * r / 10^d⌉`. Reverts on product overflow; `10^d ≠ 0`. -/
+@[lsc_inline]
+def mulFixedUp {d : Nat} (x : Amount a) (r : Fixed d) : Tx S X E ε (Amount a) :=
+  mulDivUp x r (ofWord (Word.scale d))
+
 instance : Tx.HAddChecked (Amount a) (Amount a) (Amount a) where
   hAdd := add
 instance : Tx.HSubChecked (Amount a) (Amount a) (Amount a) where
@@ -207,6 +245,17 @@ instance : Tx.HMulDivDown (Amount b) (Amount a) (Amount a) (Amount b) where
   hMulDivDown := mulDivDown
 instance : Tx.HMulDivUp (Amount b) (Amount a) (Amount a) (Amount b) where
   hMulDivUp := mulDivUp
+/-- Scale-0 ratio: `num mulDiv↓ 9970 / 10000` with plain `Word`s. -/
+instance (priority := 2000) : Tx.HMulDivDown (Amount b) Word Word (Amount b) where
+  hMulDivDown num x y :=
+    mulDivDown (a := Asset.fixed 0) num (ofWord x) (ofWord y)
+instance (priority := 2000) : Tx.HMulDivUp (Amount b) Word Word (Amount b) where
+  hMulDivUp num x y :=
+    mulDivUp (a := Asset.fixed 0) num (ofWord x) (ofWord y)
+instance {d : Nat} : Tx.HMulFixedDown (Amount a) (Fixed d) (Amount a) where
+  hMulFixedDown := mulFixedDown
+instance {d : Nat} : Tx.HMulFixedUp (Amount a) (Fixed d) (Amount a) where
+  hMulFixedUp := mulFixedUp
 
 variable {S X E ε : Type}
 
@@ -226,7 +275,28 @@ variable {S X E ε : Type}
     Tx.HMulDivUp.hMulDivUp (S := S) (X := X) (E := E) (ε := ε) num x y =
       mulDivUp num x y :=
   rfl
+@[simp] theorem hMulDivDown_word (num : Amount b) (x y : Word) :
+    Tx.HMulDivDown.hMulDivDown (S := S) (X := X) (E := E) (ε := ε) num x y =
+      mulDivDown (a := Asset.fixed 0) num (ofWord x) (ofWord y) :=
+  rfl
+@[simp] theorem hMulDivUp_word (num : Amount b) (x y : Word) :
+    Tx.HMulDivUp.hMulDivUp (S := S) (X := X) (E := E) (ε := ε) num x y =
+      mulDivUp (a := Asset.fixed 0) num (ofWord x) (ofWord y) :=
+  rfl
+@[simp] theorem hMulFixedDown_def {d : Nat} (x : Amount a) (r : Fixed d) :
+    Tx.HMulFixedDown.hMulFixedDown (S := S) (X := X) (E := E) (ε := ε) x r =
+      mulFixedDown x r :=
+  rfl
+@[simp] theorem hMulFixedUp_def {d : Nat} (x : Amount a) (r : Fixed d) :
+    Tx.HMulFixedUp.hMulFixedUp (S := S) (X := X) (E := E) (ε := ε) x r =
+      mulFixedUp x r :=
+  rfl
 
 end Amount
+
+namespace Syntax
+scoped infixl:70 " *↓ " => Lsc.Amount.mulDown
+scoped infixl:70 " *↑ " => Lsc.Amount.mulUp
+end Syntax
 
 end Lsc

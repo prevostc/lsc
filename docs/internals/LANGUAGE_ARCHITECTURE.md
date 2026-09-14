@@ -18,13 +18,16 @@ Core  --toYul (ours)-->  Yul AST (powdr yul-semantics)  --powdr compile_correct-
   `World S X E` carries storage `self`, external state `ext : X` (compiled contracts use
   the fixed `Lsc.ExtState`), `log`, and the callee `oracle` (`INTERFACE_MODEL.md`).
 - Arithmetic is checked by default (`+?`, `-?`, `*?`, `/?` revert on overflow/underflow/zero);
-  fused `mulDiv↓` / `mulDiv↑` are the floor/ceil ops. Wrapping ops are explicit and rare.
+  fused `mulDiv↓` / `mulDiv↑` are `⌊x·y/z⌋` / `⌈x·y/z⌉` (`y`/`z` two `Amount`s or two `Word`s).
+  `x *?↓ r` / `x *?↑ r` scale an `Amount` by a `Fixed d` (`⌊x·r/10^d⌋` / ceil). `x.as b` is the
+  1:1 retag. Wrapping ops are explicit and rare.
 - Units are types: `structure Amount (a : Asset) where raw : Word` (`Lsc/Lang/Amount.lean`).
   `Asset` is `{name : Lean.Name, decimals? : Option Nat}` — `some d` when static (LP shares),
   `none` when decimals are only known on chain. `abbrev Fixed d := Amount (Asset.fixed d)`
   (`Asset.fixed d := ⟨`fixed, some d⟩`; named scales in `Stdlib/Scales.lean`). It must be a
   `structure` (an abbrev would unify every amount back to `Word`). Same-asset `+? -?`;
-  `*? /?` only against a `Word` scalar. Mixed-unit arithmetic is a type error.
+  `*? /?` only against a `Word` scalar; `*?↓` / `*?↑` only against a `Fixed d` (a non-fixed
+  `Amount b` is a type error). Mixed-unit arithmetic is a type error.
 - Storage is a Lean `structure`; mappings are `K → V` with default zero (≤ 2 keys).
 - Reentrancy during a call is not modelled (`self` is unchanged). No `tload`/`tstore` lock
   is emitted (`YUL_TARGET.md`, `TRUSTED_COMPUTING_BASE.md`).

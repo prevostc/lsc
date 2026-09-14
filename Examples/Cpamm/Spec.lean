@@ -2,6 +2,7 @@ import Mathlib.Algebra.BigOperators.Group.Finset.Basic
 import Lsc.Security.Wealth
 import Examples.Cpamm.Contract
 import Stdlib.ERC20
+import Stdlib.Scales
 
 /-!
 CPAMM spec: `claim` is LP share count; `Auth` is the victim's own
@@ -13,9 +14,12 @@ each token's `totalSupply` view stays the same — that is `ClaimMonoEnv`
 for the share-count claim.
 -/
 
-open Lsc Lsc.Stdlib Lsc.Security Cpamm
+open Lsc Lsc.Stdlib Lsc.Security Cpamm Stdlib
 
 namespace Cpamm
+
+abbrev Token0Impl := IERC20.Impl asset0 (WorldView ExtState)
+abbrev Token1Impl := IERC20.Impl asset1 (WorldView ExtState)
 
 /-- LP share count of `a`. -/
 def claim : Claim Storage ExtState Event :=
@@ -51,11 +55,11 @@ def inflow (c : Call spec) (w : World Storage ExtState Event) : Nat :=
 
 /-- Live token0 balance of the pool, from the bound token's view. -/
 def holdings0 (self : Address) (w : World Storage ExtState Event) : Nat :=
-  ((w.self.token0.impl w).balanceOf self w).raw
+  (w.self.token0.impl.balanceOf self w.view).raw
 
 /-- Live token1 balance of the pool, from the bound token's view. -/
 def holdings1 (self : Address) (w : World Storage ExtState Event) : Nat :=
-  ((w.self.token1.impl w).balanceOf self w).raw
+  (w.self.token1.impl.balanceOf self w.view).raw
 
 def InvStorage (σ : Storage) : Prop :=
   ∃ H : Finset Address,
@@ -84,25 +88,25 @@ def balSel1 : Nat := Interface.selector (I := IERC20 asset1) "balanceOf"
 def supplySel0 : Nat := Interface.selector (I := IERC20 asset0) "totalSupply"
 def supplySel1 : Nat := Interface.selector (I := IERC20 asset1) "totalSupply"
 
-/-- Oracle `balanceOf` of `who` at the bound token0. -/
+/-- Live `balanceOf` of `who` at the bound token0, through `IERC20.Impl`. -/
 def viewBal0 (t0 : IERC20.Ref asset0) (who : Address)
     (oracle : Oracle ExtState) (x : ExtState) : Amount asset0 :=
-  decodeOrDefault (oracle.view t0.addr balSel0 [AbiType.encode who] x)
+  t0.impl.balanceOf who { oracle, ext := x }
 
-/-- Oracle `balanceOf` of `who` at the bound token1. -/
+/-- Live `balanceOf` of `who` at the bound token1, through `IERC20.Impl`. -/
 def viewBal1 (t1 : IERC20.Ref asset1) (who : Address)
     (oracle : Oracle ExtState) (x : ExtState) : Amount asset1 :=
-  decodeOrDefault (oracle.view t1.addr balSel1 [AbiType.encode who] x)
+  t1.impl.balanceOf who { oracle, ext := x }
 
-/-- Oracle `totalSupply` of the bound token0. -/
+/-- Live `totalSupply` of the bound token0, through `IERC20.Impl`. -/
 def viewSupply0 (t0 : IERC20.Ref asset0)
     (oracle : Oracle ExtState) (x : ExtState) : Word :=
-  decodeOrDefault (oracle.view t0.addr supplySel0 [] x)
+  (t0.impl.totalSupply { oracle, ext := x }).raw
 
-/-- Oracle `totalSupply` of the bound token1. -/
+/-- Live `totalSupply` of the bound token1, through `IERC20.Impl`. -/
 def viewSupply1 (t1 : IERC20.Ref asset1)
     (oracle : Oracle ExtState) (x : ExtState) : Word :=
-  decodeOrDefault (oracle.view t1.addr supplySel1 [] x)
+  (t1.impl.totalSupply { oracle, ext := x }).raw
 
 /-- Between our transactions the outside world may change `ext` arbitrarily,
 except that neither pool token balance falls and each token's `totalSupply`
@@ -128,17 +132,17 @@ def TokensIndependent (t0 : IERC20.Ref asset0) (t1 : IERC20.Ref asset1)
       ∀ sel' args',
         oracle.view t0.addr sel' args' x' = oracle.view t0.addr sel' args' x)
 
-/-- Fee-less notional input `⌊dx · (BPS − FEE_BPS) / BPS⌋`. -/
+/-- Fee-less notional input `⌊dx · (BPS.raw − FEE_BPS) / BPS.raw⌋`. -/
 def dxFeeLess (dx : Nat) : Nat :=
-  dx * (BPS - FEE_BPS) / BPS
+  dx * (BPS.raw - FEE_BPS) / BPS.raw
 
 /-- Swap fee `dx − dxF`. -/
 def swapFee (dx : Nat) : Nat :=
   dx - dxFeeLess dx
 
-/-- Protocol take: zero when `feeTo = 0`, else `⌊fee · protocolShareBps / BPS⌋`. -/
+/-- Protocol take: zero when `feeTo = 0`, else `⌊fee · protocolShareBps / BPS.raw⌋`. -/
 def protoTake (feeTo protocolShareBps fee : Nat) : Nat :=
-  if (feeTo : Nat) = 0 then 0 else fee * protocolShareBps / BPS
+  if (feeTo : Nat) = 0 then 0 else fee * protocolShareBps / BPS.raw
 
 def amountOutF (rIn rOut dx : Nat) : Nat :=
   let dxF := dxFeeLess dx

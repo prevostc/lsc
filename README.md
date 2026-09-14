@@ -23,10 +23,19 @@ theorem.
 ## Writing a contract
 
 A contract is a storage structure, events, errors, and `do` blocks using
-`read` / `write`, checked arithmetic (`+?`, `-?`, `mulDiv↓` / `mulDiv↑`), and
+`read` / `write`, checked arithmetic, named scales (`Wad`/`Ray`/`Bps`), and
 typed `I.Ref` calls when the contract talks to an external token (`let tok ←
-read asset; tok.balanceOf me`, `safeTransferFrom`). `lsc_schema` and
-`lsc_contract` assemble the schema and the contract object.
+read asset; tok.balanceOf me`, `safeTransferFrom`).
+
+| Surface | Meaning |
+|---|---|
+| `x +? y`, `x -? y` | same-asset add/sub |
+| `x *? k`, `x /? k` | scale by a `Word` |
+| `x mulDiv↓ y / z`, `x mulDiv↑ y / z` | fused `⌊x·y/z⌋` / `⌈x·y/z⌉`; `y`/`z` may be two `Amount`s or two `Word`s |
+| `x *?↓ r`, `x *?↑ r` | scale `x : Amount a` by `r : Fixed d` (`⌊x·r/10^d⌋` / ceil) |
+| `x.as b` | 1:1 retag to asset `b` (same raw word) |
+
+`lsc_schema` and `lsc_contract` assemble the schema and the contract object.
 `lsc_contract … implements IERC20 …` emits `C.impl`; Token proves
 `theorem erc20 : IERC20.Spec Token.impl`. Start from
 `Examples/Counter/Contract.lean`, then Token, Vault, and Cpamm.

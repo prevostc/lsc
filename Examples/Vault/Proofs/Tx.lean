@@ -98,8 +98,8 @@ private theorem run_storeMap_shares {α : Type} (who : Address) (v : Nat)
 
 theorem impl_balanceOf (r : IERC20.Ref vaultAsset) (who : Address)
     (w₀ : World Storage ExtState Event) :
-    (r.impl w₀).balanceOf who w₀ = viewBal r who w₀.oracle w₀.ext := by
-  simp [IERC20.Ref.impl, IERC20.Impl.ofRef, viewBal, viewWorld]
+    r.impl.balanceOf who w₀.view = viewBal r who w₀.oracle w₀.ext := by
+  simp [IERC20.Ref.impl, IERC20.Impl.ofRef, viewBal, World.view]
 
 theorem holdings_view (self : Address) :
     holdings self w = (viewBal w.self.asset self w.oracle w.ext).raw := by
@@ -109,7 +109,7 @@ theorem holdings_congr (self : Address) {w w' : World Storage ExtState Event}
     (ha : w'.self.asset.addr = w.self.asset.addr)
     (ho : w'.oracle = w.oracle) (hx : w'.ext = w.ext) :
     holdings self w' = holdings self w := by
-  simp [holdings, IERC20.Ref.impl, IERC20.Impl.ofRef, ha, ho, hx]
+  simp [holdings, IERC20.Ref.impl, IERC20.Impl.ofRef, ha, ho, hx, World.view]
 
 theorem transferFrom_frame {r : IERC20.Ref vaultAsset}
     {src dst : Address} {amt : Amount vaultAsset} {b : Bool}
@@ -145,29 +145,21 @@ theorem transfer_frame {r : IERC20.Ref vaultAsset}
 
 theorem impl_transferFrom (r : IERC20.Ref vaultAsset)
     (src dst : Address) (amt : Amount vaultAsset) :
-    (r.impl w).transferFrom src dst amt ctx w =
-      (Tx.run (tfCall r src dst amt) ctx w).toOption := by
-  have h :
-      (r.impl w).transferFrom src dst amt ctx w =
-        (Tx.run (r.transferFrom src dst amt :
-          Tx Storage ExtState Event Unit Bool) ctx w).toOption :=
-    rfl
-  rw [h, tfCall]
-  simp only [IERC20.Ref.transferFrom]
-  exact Tx.run_call_toOption_err (ε := Unit) (ε' := Error) r.addr _ _ ctx w
+    r.impl.transferFrom src dst amt ctx w.view =
+      (Tx.run (tfCall r src dst amt) ctx w).toOption.map
+        (Prod.map id World.view) := by
+  simp only [IERC20.Ref.impl, IERC20.Impl.ofRef, IERC20.Ref.transferFrom, tfCall]
+  exact Tx.callDecode_view (α := Bool) (ε := Error) r.addr (0x23b872dd : Nat)
+    [AbiType.encode src, AbiType.encode dst, AbiType.encode amt] ctx w
 
 theorem impl_transfer (r : IERC20.Ref vaultAsset)
     (dst : Address) (amt : Amount vaultAsset) :
-    (r.impl w).transfer dst amt ctx w =
-      (Tx.run (trCall r dst amt) ctx w).toOption := by
-  have h :
-      (r.impl w).transfer dst amt ctx w =
-        (Tx.run (r.transfer dst amt :
-          Tx Storage ExtState Event Unit Bool) ctx w).toOption :=
-    rfl
-  rw [h, trCall]
-  simp only [IERC20.Ref.transfer]
-  exact Tx.run_call_toOption_err (ε := Unit) (ε' := Error) r.addr _ _ ctx w
+    r.impl.transfer dst amt ctx w.view =
+      (Tx.run (trCall r dst amt) ctx w).toOption.map
+        (Prod.map id World.view) := by
+  simp only [IERC20.Ref.impl, IERC20.Impl.ofRef, IERC20.Ref.transfer, trCall]
+  exact Tx.callDecode_view (α := Bool) (ε := Error) r.addr (0xa9059cbb : Nat)
+    [AbiType.encode dst, AbiType.encode amt] ctx w
 
 theorem transfer_run_ctx_irrel {r : IERC20.Ref vaultAsset}
     {dst : Address} {amt : Amount vaultAsset} {ctx' : Ctx}
@@ -233,6 +225,11 @@ private theorem run_self_bind {α : Type}
 private theorem run_pure {α : Type} {a : α} :
     Tx.run (pure a : Tx Storage ExtState Event Error α) ctx w = .ok (a, w) :=
   Tx.run_pure a ctx w
+
+private theorem run_pure_bind {α β : Type} (a : α)
+    (k : α → Tx Storage ExtState Event Error β) :
+    Tx.run (pure a >>= k) ctx w = Tx.run (k a) ctx w := by
+  simp [Tx.run_bind, Tx.run_pure]
 
 private theorem run_emit_bind {α : Type} {ev : Event}
     {k : Unit → Tx Storage ExtState Event Error α} :
@@ -306,27 +303,7 @@ private theorem not_pos_div {a b : Nat} (hb : 0 < b) (h : ¬ 0 < a / b) : ¬ b �
   intro hba
   exact h (pos_div_iff.mpr ⟨hb, hba⟩)
 
-private theorem empty_mul {assets : Amount vaultAsset} (h : assets.raw < wordBound) :
-    (1 : Amount vShare).raw * assets.raw < wordBound := by
-  rw [Amount.raw_ofNat, Nat.one_mul]
-  exact h
-
-private theorem empty_mul_not {assets : Amount vaultAsset}
-    (h : ¬ assets.raw < wordBound) :
-    ¬ (1 : Amount vShare).raw * assets.raw < wordBound := by
-  rw [Amount.raw_ofNat, Nat.one_mul]
-  exact h
-
-private theorem empty_mint_pos {assets : Amount vaultAsset} (h : 0 < assets) :
-    0 < (1 : Amount vShare).raw ∧
-      (1 : Amount vShare).raw ≤ (1 : Amount vShare).raw * assets.raw := by
-  have h0 : 0 < assets.raw := by simpa [Amount.lt_iff] using h
-  rw [Amount.raw_ofNat, Nat.one_mul]
-  exact ⟨Nat.succ_pos 0, Nat.succ_le_of_lt h0⟩
-
-private theorem not_oneA_zero : ¬ (1 : Amount vaultAsset).raw = 0 := by simp
-
-/-- `oneS mulDiv↓ assets / oneA` and `ts mulDiv↓ assets / ta`. Closed; no CALL. -/
+/-- `ts mulDiv↓ assets / ta`. Closed; no CALL. -/
 private theorem run_mulDivDown_ts {α : Type}
     (num : Amount vShare) (x y : Amount vaultAsset)
     (k : Amount vShare → Tx Storage ExtState Event Error α) :
@@ -418,7 +395,7 @@ theorem viewBal?_some_holdings (self : Address)
     {ta : Amount vaultAsset}
     (h : viewBal? w.self.asset self w = some ta) :
     holdings self w = ta.raw := by
-  simp only [holdings_view, viewBal, viewWorld, IERC20.Ref.impl, IERC20.Impl.ofRef,
+  simp only [holdings_view, viewBal, IERC20.Ref.impl, IERC20.Impl.ofRef,
     decodeOrDefault, viewBal?, balSel_eq] at h ⊢
   rw [h]
   rfl
@@ -438,34 +415,6 @@ private theorem run_storeMap_bind {α : Type} {K V : Type} [DecidableEq K]
         { w with self := upd w.self (Function.update (proj w.self) key v) } := by
   rw [Tx.run_bind, Tx.run_storeMap]
 
-/-- 1:1 `mulDiv↓` when the product fits. -/
-private theorem run_oneS_mulDiv {α : Type} (assets : Amount vaultAsset)
-    (k : Amount vShare → Tx Storage ExtState Event Error α)
-    (hfit : assets.raw < wordBound) :
-    Tx.run (Tx.HMulDivDown.hMulDivDown (S := Storage) (X := ExtState) (E := Event)
-        (ε := Error) (1 : Amount vShare) assets (1 : Amount vaultAsset) >>= k)
-        ctx w =
-      Tx.run (k ⟨assets.raw⟩) ctx w := by
-  simp only [run_mulDivDown_ts]
-  rw [if_neg not_oneA_zero, if_pos (empty_mul hfit)]
-  have hval :
-      (⟨(1 : Amount vShare).raw * assets.raw / (1 : Amount vaultAsset).raw⟩ :
-        Amount vShare) = ⟨assets.raw⟩ := by
-    apply Amount.ext
-    rw [Amount.raw_ofNat (a := vShare) 1, Amount.raw_ofNat (a := vaultAsset) 1,
-      Nat.one_mul, Nat.div_one]
-  rw [hval]
-
-private theorem run_oneS_mulDiv_overflow {α : Type} (assets : Amount vaultAsset)
-    (k : Amount vShare → Tx Storage ExtState Event Error α)
-    (hfit : ¬ assets.raw < wordBound) :
-    Tx.run (Tx.HMulDivDown.hMulDivDown (S := Storage) (X := ExtState) (E := Event)
-        (ε := Error) (1 : Amount vShare) assets (1 : Amount vaultAsset) >>= k)
-        ctx w =
-      .error (.arith .overflow) := by
-  simp only [run_mulDivDown_ts]
-  rw [if_neg not_oneA_zero, if_neg (empty_mul_not hfit)]
-
 private theorem run_rate_mulDiv {α : Type}
     (ts : Amount vShare) (assets ta : Amount vaultAsset)
     (k : Amount vShare → Tx Storage ExtState Event Error α)
@@ -484,8 +433,6 @@ private theorem deposit_head (assets : Amount vaultAsset)
       | none => .error .callFailed
       | some ta =>
         Tx.run (
-          have oneA : Amount vaultAsset := 1
-          have oneS : Amount vShare := 1
           have jp : Amount vShare → Tx Storage ExtState Event Error (Amount vShare) :=
             fun minted => do
               Tx.require (0 < minted) Error.ZeroShares
@@ -502,8 +449,7 @@ private theorem deposit_head (assets : Amount vaultAsset)
               Tx.emit (.Deposit ctx.sender assets minted)
               pure minted
           if w.self.totalShares = 0 then do
-            let minted ← Tx.HMulDivDown.hMulDivDown (S := Storage) (X := ExtState)
-              (E := Event) (ε := Error) oneS assets oneA
+            let minted ← pure (assets.as vShare)
             jp minted
           else do
             let minted ← Tx.HMulDivDown.hMulDivDown (S := Storage) (X := ExtState)
@@ -521,8 +467,6 @@ private theorem deposit_head_some (assets : Amount vaultAsset)
     (hview : viewBal? w.self.asset ctx.self w = some ta) :
     Tx.run (deposit assets) ctx w =
       Tx.run (
-        have oneA : Amount vaultAsset := 1
-        have oneS : Amount vShare := 1
         have jp : Amount vShare → Tx Storage ExtState Event Error (Amount vShare) :=
           fun minted => do
             Tx.require (0 < minted) Error.ZeroShares
@@ -539,8 +483,7 @@ private theorem deposit_head_some (assets : Amount vaultAsset)
             Tx.emit (.Deposit ctx.sender assets minted)
             pure minted
         if w.self.totalShares = 0 then do
-          let minted ← Tx.HMulDivDown.hMulDivDown (S := Storage) (X := ExtState)
-            (E := Event) (ε := Error) oneS assets oneA
+          let minted ← pure (assets.as vShare)
           jp minted
         else do
           let minted ← Tx.HMulDivDown.hMulDivDown (S := Storage) (X := ExtState)
@@ -562,7 +505,6 @@ private theorem deposit_after_mint (assets : Amount vaultAsset)
     (hprod :
       w.self.totalShares.raw = 0 ∨
         (ta.raw ≠ 0 ∧ w.self.totalShares.raw * assets.raw < wordBound))
-    (hfit : w.self.totalShares.raw = 0 → assets.raw < wordBound)
     (hminted : 0 < mintedShares w.self.totalShares ta assets) :
     Tx.run (deposit assets) ctx w =
       Tx.run (do
@@ -586,10 +528,10 @@ private theorem deposit_after_mint (assets : Amount vaultAsset)
   rw [deposit_head_some assets hp hpos hview, Tx.run_ite]
   by_cases hts : w.self.totalShares = 0
   · have htsr : w.self.totalShares.raw = 0 := (Amount.eq_iff _ _).mp hts
-    rw [if_pos hts, run_oneS_mulDiv (hfit := hfit htsr)]
-    have hm : (⟨assets.raw⟩ : Amount vShare) =
+    rw [if_pos hts, run_pure_bind]
+    have hm : assets.as vShare =
         ⟨mintedShares w.self.totalShares ta assets⟩ := by
-      simp [mintedShares, htsr]
+      simp [mintedShares, htsr, Amount.raw_as]
     rw [hm, run_req_true hposM]
   · have htsr : w.self.totalShares.raw ≠ 0 := (Amount.ne_iff _ _).mp hts
     rcases hprod with h0 | ⟨hta, hmul⟩
@@ -728,11 +670,8 @@ private theorem previewDeposit_head (assets : Amount vaultAsset) :
       | none => .error .callFailed
       | some ta =>
         Tx.run (
-          have oneA : Amount vaultAsset := 1
-          have oneS : Amount vShare := 1
           if w.self.totalShares = 0 then
-            Tx.HMulDivDown.hMulDivDown (S := Storage) (X := ExtState) (E := Event)
-              (ε := Error) oneS assets oneA
+            pure (assets.as vShare)
           else
             Tx.HMulDivDown.hMulDivDown (S := Storage) (X := ExtState) (E := Event)
               (ε := Error) w.self.totalShares assets ta) ctx w := by
@@ -760,8 +699,9 @@ theorem previewDeposit_success_world {assets : Amount vaultAsset}
   rw [previewDeposit_head] at h
   split at h
   · cases h
-  · simp [Amount.hMulDivDown_def, Amount.run_mulDivDown, Tx.run_ite] at h
-    split_ifs at h <;> (cases h; rfl)
+  · simp [Tx.run_ite, Amount.hMulDivDown_def, Amount.run_mulDivDown,
+      Tx.run_pure] at h
+    split_ifs at h <;> (try cases h; try rfl)
 
 theorem previewRedeem_success_world {sharesIn : Amount vShare}
     {n : Amount vaultAsset} {w' : World Storage ExtState Event}
@@ -846,15 +786,6 @@ theorem deposit_reverts_on_zero_shares (assets : Amount vaultAsset)
       apply run_req_false
       simpa [mintedShares, hts, htsr, Amount.lt_iff] using hminted
 
-theorem deposit_reverts_on_one_overflow (assets : Amount vaultAsset)
-    {ta : Amount vaultAsset}
-    (hp : w.self.paused = Flag.off) (hpos : 0 < assets)
-    (hview : viewBal? w.self.asset ctx.self w = some ta)
-    (hts : w.self.totalShares = 0) (hfit : ¬ assets.raw < wordBound) :
-    Tx.run (deposit assets) ctx w = .error (.arith .overflow) := by
-  rw [deposit_head_some assets hp hpos hview, Tx.run_ite, if_pos hts]
-  rw [run_oneS_mulDiv_overflow (hfit := hfit)]
-
 theorem deposit_reverts_on_add_shares (assets : Amount vaultAsset)
     {ta : Amount vaultAsset}
     (hp : w.self.paused = Flag.off) (hpos : 0 < assets)
@@ -862,12 +793,11 @@ theorem deposit_reverts_on_add_shares (assets : Amount vaultAsset)
     (hprod :
       w.self.totalShares.raw = 0 ∨
         (ta.raw ≠ 0 ∧ w.self.totalShares.raw * assets.raw < wordBound))
-    (hfit : w.self.totalShares.raw = 0 → assets.raw < wordBound)
     (hminted : 0 < mintedShares w.self.totalShares ta assets)
     (haddS : ¬ w.self.totalShares.raw +
       mintedShares w.self.totalShares ta assets < wordBound) :
     Tx.run (deposit assets) ctx w = .error (.arith .overflow) := by
-  rw [deposit_after_mint assets hp hpos hview hprod hfit hminted]
+  rw [deposit_after_mint assets hp hpos hview hprod hminted]
   simp only [run_hAdd_bind]
   rw [if_neg haddS]
 
@@ -878,14 +808,13 @@ theorem deposit_reverts_on_add_bal (assets : Amount vaultAsset)
     (hprod :
       w.self.totalShares.raw = 0 ∨
         (ta.raw ≠ 0 ∧ w.self.totalShares.raw * assets.raw < wordBound))
-    (hfit : w.self.totalShares.raw = 0 → assets.raw < wordBound)
     (hminted : 0 < mintedShares w.self.totalShares ta assets)
     (haddS : w.self.totalShares.raw +
       mintedShares w.self.totalShares ta assets < wordBound)
     (haddB : ¬ (w.self.shares ctx.sender).raw +
       mintedShares w.self.totalShares ta assets < wordBound) :
     Tx.run (deposit assets) ctx w = .error (.arith .overflow) := by
-  rw [deposit_after_mint assets hp hpos hview hprod hfit hminted]
+  rw [deposit_after_mint assets hp hpos hview hprod hminted]
   simp only [run_hAdd_bind]
   rw [if_pos haddS, run_store_bind, run_loadMap_bind]
   simp only [run_hAdd_bind]
@@ -901,7 +830,6 @@ structure DepositOk (ctx : Ctx) (w : World Storage ExtState Event)
   prod :
     w.self.totalShares.raw = 0 ∨
       (ta.raw ≠ 0 ∧ w.self.totalShares.raw * assets.raw < wordBound)
-  mintFit : w.self.totalShares.raw = 0 → assets.raw < wordBound
   addShares : w.self.totalShares.raw +
     mintedShares w.self.totalShares ta assets < wordBound
   addBal : (w.self.shares ctx.sender).raw +
@@ -928,8 +856,8 @@ theorem deposit_to_tail (assets : Amount vaultAsset) (h : DepositOk ctx w assets
           Tx Storage ExtState Event Error (Amount vShare)))
         ctx (depositTailWorld w ctx.sender
           (mintedShares w.self.totalShares h.ta assets)) := by
-  rcases h with ⟨ta, hp, hpos, hview, hminted, hprod, hfit, haddS, haddB⟩
-  rw [deposit_after_mint assets hp hpos hview hprod hfit hminted]
+  rcases h with ⟨ta, hp, hpos, hview, hminted, hprod, haddS, haddB⟩
+  rw [deposit_after_mint assets hp hpos hview hprod hminted]
   simp only [run_hAdd_bind]
   rw [if_pos haddS, run_store_ts, run_loadMap_bind]
   simp only [run_hAdd_bind]
@@ -966,23 +894,17 @@ def deposit_ok_of_run {assets : Amount vaultAsset} {n : Amount vShare}
       by_contra h
       exact Tx.run_ok_error hrun
         (deposit_reverts_on_zero_shares assets hp hpos hview hprod h)
-    have hfit : w.self.totalShares.raw = 0 → assets.raw < wordBound := by
-      intro hts0
-      by_contra hnb
-      have hts : w.self.totalShares = 0 := (Amount.eq_iff _ _).mpr hts0
-      exact Tx.run_ok_error hrun
-        (deposit_reverts_on_one_overflow assets hp hpos hview hts hnb)
     have haddS : w.self.totalShares.raw +
         mintedShares w.self.totalShares ta assets < wordBound := by
       by_contra h
       exact Tx.run_ok_error hrun
-        (deposit_reverts_on_add_shares assets hp hpos hview hprod hfit hminted h)
+        (deposit_reverts_on_add_shares assets hp hpos hview hprod hminted h)
     have haddB : (w.self.shares ctx.sender).raw +
         mintedShares w.self.totalShares ta assets < wordBound := by
       by_contra h
       exact Tx.run_ok_error hrun
-        (deposit_reverts_on_add_bal assets hp hpos hview hprod hfit hminted haddS h)
-    exact ⟨ta, hp, hpos, hview, hminted, hprod, hfit, haddS, haddB⟩
+        (deposit_reverts_on_add_bal assets hp hpos hview hprod hminted haddS h)
+    exact ⟨ta, hp, hpos, hview, hminted, hprod, haddS, haddB⟩
 
 /-- Exact storage / log / oracle of a successful `deposit`. -/
 theorem deposit_post (assets : Amount vaultAsset) {n : Amount vShare}
@@ -1322,18 +1244,21 @@ theorem deposit_shares {assets : Amount vaultAsset} {minted : Amount vShare}
 
 theorem deposit_holdings {assets : Amount vaultAsset} {minted : Amount vShare}
     {w' : World Storage ExtState Event}
-    (hT : IERC20.Spec (w.self.asset.impl w))
+    (hT : IERC20.Spec (w.self.asset.impl : AssetImpl))
     (hne : ctx.sender ≠ ctx.self)
     (h : Tx.run (deposit assets) ctx w = .ok (minted, w')) :
     holdings ctx.self w' = holdings ctx.self w + assets.raw := by
   have hok := deposit_ok_of_run h
   have ⟨w1, htf, hself1, hor1, _, hext, hor⟩ := deposit_call assets hok h
   have ⟨_, hσ, _, _⟩ := deposit_post assets hok h
-  have hmoves := hT.transferFrom_moves (ctx := ctx) (w := w) (w' := w1)
-    (by simpa [impl_transferFrom] using Tx.run_ok_toOption htf)
+  have hmoves := hT.transferFrom_moves (ctx := ctx) (w := w.view) (w' := w1.view)
+    (by
+      have hopt := Tx.run_ok_toOption htf
+      have := congrArg (Option.map (Prod.map id World.view)) hopt
+      simpa [impl_transferFrom] using this)
   have hdst := hmoves.2.1 hne
   have hbal : holdings ctx.self w1 = holdings ctx.self w + assets.raw := by
-    simpa [holdings, IERC20.Ref.impl, Amount.raw_add, hself1, hor1] using
+    simpa [holdings, IERC20.Ref.impl, Amount.raw_add, hself1, hor1, World.view] using
       congrArg Amount.raw hdst
   have heqH : holdings ctx.self w' = holdings ctx.self w1 :=
     holdings_congr ctx.self (by simp [hσ, depositPost, hself1])
@@ -1352,7 +1277,7 @@ theorem withdraw_shares {sharesIn : Amount vShare} {paid : Amount vaultAsset}
 
 theorem withdraw_holdings {sharesIn : Amount vShare} {paid : Amount vaultAsset}
     {w' : World Storage ExtState Event}
-    (hT : IERC20.Spec (w.self.asset.impl w))
+    (hT : IERC20.Spec (w.self.asset.impl : AssetImpl))
     (hne : ctx.sender ≠ ctx.self)
     (h : Tx.run (withdraw sharesIn) ctx w = .ok (paid, w')) :
     holdings ctx.self w' + paid.raw = holdings ctx.self w := by
@@ -1364,13 +1289,13 @@ theorem withdraw_holdings {sharesIn : Amount vShare} {paid : Amount vaultAsset}
   set amt := Amount.ofWord (redeemedAssets w.self.totalShares hok.ta sharesIn)
   let wCall : World Storage ExtState Event :=
     withdrawTailWorld w ctx.sender sharesIn
-  have hTcall : IERC20.Spec (wCall.self.asset.impl wCall) := by
+  have hTcall : IERC20.Spec (wCall.self.asset.impl : AssetImpl) := by
     dsimp [wCall, withdrawTailWorld, withdrawPost]
     simpa [IERC20.Ref.impl] using hT
   have hrunT :
-      (wCall.self.asset.impl wCall).transfer
-        ctx.sender amt { ctx with sender := ctx.self } wCall =
-        some (true, w1) := by
+      wCall.self.asset.impl.transfer
+        ctx.sender amt { ctx with sender := ctx.self } wCall.view =
+        some (true, w1.view) := by
     dsimp [wCall, withdrawTailWorld, withdrawPost]
     have htr' :
         Tx.run (trCall w.self.asset ctx.sender amt)
@@ -1379,7 +1304,9 @@ theorem withdraw_holdings {sharesIn : Amount vShare} {paid : Amount vaultAsset}
           (amt := amt) (ctx' := { ctx with sender := ctx.self }) (w₀ := wCall)]
       simpa [wCall, amt, withdrawTailWorld] using htr
     dsimp [wCall, withdrawTailWorld, withdrawPost] at htr' ⊢
-    simpa [impl_transfer, amt] using Tx.run_ok_toOption htr'
+    have hopt := Tx.run_ok_toOption htr'
+    have := congrArg (Option.map (Prod.map id World.view)) hopt
+    simpa [impl_transfer, amt] using this
   have hmoves := hTcall.transfer_moves hrunT
   have hto := hmoves.2.1 hne.symm
   have hsumr := congrArg Amount.raw hmoves.1

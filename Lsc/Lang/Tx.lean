@@ -78,6 +78,24 @@ structure World (S X E : Type) where
   log : List E := []
   oracle : Oracle X := {}
 
+/-- Oracle plus `ext`: what an external `I.Impl` view actually reads. -/
+structure WorldView (X : Type) where
+  ext : X
+  oracle : Oracle X := {}
+
+namespace World
+variable {S X E : Type}
+/-- Restrict a world to the oracle/`ext` pair `I.Impl` views of a `Ref` use. -/
+def view (w : World S X E) : WorldView X where
+  ext := w.ext
+  oracle := w.oracle
+@[simp] theorem view_ext (w : World S X E) : w.view.ext = w.ext := rfl
+@[simp] theorem view_oracle (w : World S X E) : w.view.oracle = w.oracle := rfl
+@[simp] theorem view_set_ext (w : World S X E) (x' : X) :
+    ({ w with ext := x' } : World S X E).view =
+      { ext := x', oracle := w.oracle } := rfl
+end World
+
 /-- Reasons an arithmetic primitive reverts (Solidity `Panic` codes 0x11/0x12). -/
 inductive ArithError
   | overflow
@@ -199,13 +217,24 @@ instance : HDivChecked Nat Nat Nat where
   hDiv := divChecked
 
 /-- Fused checked `⌊a * b / c⌋`. One operation, not `*?` then `/?`.
-Instances: `Nat` (`Tx.mulDivDown`) and `Amount` (`Amount.mulDivDown`). -/
+Instances: `Nat` (`Tx.mulDivDown`) and `Amount` (`Amount.mulDivDown`),
+plus `Amount b` with a `Word`/`Word` ratio (scale 0). -/
 class HMulDivDown (α β γ : Type) (δ : outParam Type) where
   hMulDivDown {S X E ε : Type} : α → β → γ → Tx S X E ε δ
 
 /-- Fused checked `⌈a * b / c⌉`. -/
 class HMulDivUp (α β γ : Type) (δ : outParam Type) where
   hMulDivUp {S X E ε : Type} : α → β → γ → Tx S X E ε δ
+
+/-- Scale by a dimensionless `Fixed d`: `⌊x * r / 10^d⌋`.
+`Amount a *?↓ Fixed d` (and `Fixed d *?↓ Fixed d'`) is an instance;
+`Amount a *?↓ Amount b` for a non-fixed `b` is not. -/
+class HMulFixedDown (α β : Type) (γ : outParam Type) where
+  hMulFixedDown {S X E ε : Type} : α → β → Tx S X E ε γ
+
+/-- Scale by a dimensionless `Fixed d`: `⌈x * r / 10^d⌉`. -/
+class HMulFixedUp (α β : Type) (γ : outParam Type) where
+  hMulFixedUp {S X E ε : Type} : α → β → Tx S X E ε γ
 
 /-! ### Wrapping arithmetic (pure, exactly the EVM) -/
 
@@ -240,6 +269,7 @@ syntax; their elaborators live in `Lsc.Lang.Interface` so they can wrap
 * `write f v`, `write f[k] v`, `write f[k₁, k₂] v` — storage writes
 * `a +? b`, `a -? b`, `a *? b`, `a /? b` — checked arithmetic (monadic, bind with `←`)
 * `a mulDiv↓ b / c`, `a mulDiv↑ b / c` — fused checked mulDiv (one op, not `*?` then `/?`)
+* `a *?↓ r`, `a *?↑ r` — scale an amount by a `Fixed d` (`⌊a * r / 10^d⌋` / ceil)
 * `a +↻ b`, `a -↻ b`, `a *↻ b` — wrapping arithmetic (pure)
 -/
 namespace Syntax
@@ -255,6 +285,8 @@ scoped infixl:65 " +? " => Lsc.Tx.HAddChecked.hAdd
 scoped infixl:65 " -? " => Lsc.Tx.HSubChecked.hSub
 scoped infixl:70 " *? " => Lsc.Tx.HMulChecked.hMul
 scoped infixl:70 " /? " => Lsc.Tx.HDivChecked.hDiv
+scoped infixl:70 " *?↓ " => Lsc.Tx.HMulFixedDown.hMulFixedDown
+scoped infixl:70 " *?↑ " => Lsc.Tx.HMulFixedUp.hMulFixedUp
 scoped infixl:65 " +↻ " => Lsc.Tx.addWrap
 scoped infixl:65 " -↻ " => Lsc.Tx.subWrap
 scoped infixl:70 " *↻ " => Lsc.Tx.mulWrap

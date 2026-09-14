@@ -26,8 +26,8 @@ namespace Cpamm
 def InvT (self : Address) (t0 : IERC20.Ref asset0) (t1 : IERC20.Ref asset1)
     (oracle : Oracle ExtState) (w : World Storage ExtState Event) : Prop :=
   Inv self w ∧ w.self.token0 = t0 ∧ w.self.token1 = t1 ∧ w.oracle = oracle ∧
-    IERC20.Spec (t0.impl w) ∧
-    IERC20.Spec (t1.impl w) ∧
+    IERC20.Spec (t0.impl : Token0Impl) ∧
+    IERC20.Spec (t1.impl : Token1Impl) ∧
     TokensIndependent t0 t1 oracle
 
 private theorem sub_add_cancel_add {r dx proto fees : Nat} (h : proto ≤ dx) :
@@ -231,16 +231,19 @@ private theorem holdings0_add_of_transferFrom
     (self : Address) {ctx : Ctx} {w w1 : World Storage ExtState Event}
     {amt : Amount asset0}
     (hself : ctx.self = self) (hsne : ctx.sender ≠ self)
-    (hT : IERC20.Spec (w.self.token0.impl w))
+    (hT : IERC20.Spec (w.self.token0.impl : Token0Impl))
     (hcall : Tx.run (tfCall w.self.token0 ctx.sender ctx.self amt) ctx w =
       .ok (true, w1)) :
     holdings0 self w1 = holdings0 self w + amt.raw := by
   subst hself
-  have hmoves := hT.transferFrom_moves (ctx := ctx) (w := w) (w' := w1)
-    (by simpa [impl_transferFrom] using Tx.run_ok_toOption hcall)
+  have hmoves := hT.transferFrom_moves (ctx := ctx) (w := w.view) (w' := w1.view)
+    (by
+      have hopt := Tx.run_ok_toOption hcall
+      have := congrArg (Option.map (Prod.map id World.view)) hopt
+      simpa [impl_transferFrom] using this)
   have hdst := hmoves.2.1 hsne
   have hframe := transferFrom_frame hcall
-  simp [holdings0, IERC20.Ref.impl] at hdst ⊢
+  simp [holdings0, IERC20.Ref.impl, World.view] at hdst ⊢
   simp [hframe.1, hframe.2.1] at hdst ⊢
   simpa [Amount.raw_add] using congrArg Amount.raw hdst
 
@@ -248,16 +251,19 @@ private theorem holdings1_add_of_transferFrom
     (self : Address) {ctx : Ctx} {w w1 : World Storage ExtState Event}
     {amt : Amount asset1}
     (hself : ctx.self = self) (hsne : ctx.sender ≠ self)
-    (hT : IERC20.Spec (w.self.token1.impl w))
+    (hT : IERC20.Spec (w.self.token1.impl : Token1Impl))
     (hcall : Tx.run (tfCall w.self.token1 ctx.sender ctx.self amt) ctx w =
       .ok (true, w1)) :
     holdings1 self w1 = holdings1 self w + amt.raw := by
   subst hself
-  have hmoves := hT.transferFrom_moves (ctx := ctx) (w := w) (w' := w1)
-    (by simpa [impl_transferFrom] using Tx.run_ok_toOption hcall)
+  have hmoves := hT.transferFrom_moves (ctx := ctx) (w := w.view) (w' := w1.view)
+    (by
+      have hopt := Tx.run_ok_toOption hcall
+      have := congrArg (Option.map (Prod.map id World.view)) hopt
+      simpa [impl_transferFrom] using this)
   have hdst := hmoves.2.1 hsne
   have hframe := transferFrom_frame hcall
-  simp [holdings1, IERC20.Ref.impl] at hdst ⊢
+  simp [holdings1, IERC20.Ref.impl, World.view] at hdst ⊢
   simp [hframe.1, hframe.2.1] at hdst ⊢
   simpa [Amount.raw_add] using congrArg Amount.raw hdst
 
@@ -265,24 +271,25 @@ private theorem holdings0_sub_of_transfer
     (self : Address) {ctx : Ctx} {wCall w1 : World Storage ExtState Event}
     {amt : Amount asset0}
     (hself : ctx.self = self) (hsne : ctx.sender ≠ self)
-    (hT : IERC20.Spec (wCall.self.token0.impl wCall))
+    (hT : IERC20.Spec (wCall.self.token0.impl : Token0Impl))
     (hcall : Tx.run (trCall wCall.self.token0 ctx.sender amt) ctx wCall =
       .ok (true, w1)) :
     holdings0 self w1 + amt.raw = holdings0 self wCall := by
   subst hself
   have hrunT :
-      (wCall.self.token0.impl wCall).transfer
-        ctx.sender amt { ctx with sender := ctx.self } wCall =
-        some (true, w1) := by
+      wCall.self.token0.impl.transfer
+        ctx.sender amt { ctx with sender := ctx.self } wCall.view =
+        some (true, w1.view) := by
     have htr' :
         Tx.run (trCall wCall.self.token0 ctx.sender amt)
           { ctx with sender := ctx.self } wCall = .ok (true, w1) := by
       rw [← transfer_run_ctx_irrel (r := wCall.self.token0) (dst := ctx.sender)
           (amt := amt) (ctx' := { ctx with sender := ctx.self }) (w₀ := wCall)]
       exact hcall
+    have hopt := Tx.run_ok_toOption htr'
+    have := congrArg (Option.map (Prod.map id World.view)) hopt
     simpa [impl_transfer (r := wCall.self.token0)
-        (ctx := { ctx with sender := ctx.self }) (w := wCall)] using
-      Tx.run_ok_toOption htr'
+        (ctx := { ctx with sender := ctx.self }) (w := wCall)] using this
   have hmoves := hT.transfer_moves hrunT
   have hto := hmoves.2.1 hsne.symm
   have hsumr := congrArg Amount.raw hmoves.1
@@ -291,7 +298,7 @@ private theorem holdings0_sub_of_transfer
   have htor := congrArg Amount.raw hto
   simp [Amount.raw_add] at htor
   have hframe := transfer_frame (w := wCall) hcall
-  simp [holdings0, IERC20.Ref.impl, hframe.1, hframe.2.1] at hsumr htor ⊢
+  simp [holdings0, IERC20.Ref.impl, hframe.1, hframe.2.1, World.view] at hsumr htor ⊢
   rw [htor] at hsumr
   rw [Nat.add_assoc, Nat.add_comm amt.raw] at hsumr
   exact Nat.add_left_cancel hsumr
@@ -300,24 +307,25 @@ private theorem holdings1_sub_of_transfer
     (self : Address) {ctx : Ctx} {wCall w1 : World Storage ExtState Event}
     {amt : Amount asset1}
     (hself : ctx.self = self) (hsne : ctx.sender ≠ self)
-    (hT : IERC20.Spec (wCall.self.token1.impl wCall))
+    (hT : IERC20.Spec (wCall.self.token1.impl : Token1Impl))
     (hcall : Tx.run (trCall wCall.self.token1 ctx.sender amt) ctx wCall =
       .ok (true, w1)) :
     holdings1 self w1 + amt.raw = holdings1 self wCall := by
   subst hself
   have hrunT :
-      (wCall.self.token1.impl wCall).transfer
-        ctx.sender amt { ctx with sender := ctx.self } wCall =
-        some (true, w1) := by
+      wCall.self.token1.impl.transfer
+        ctx.sender amt { ctx with sender := ctx.self } wCall.view =
+        some (true, w1.view) := by
     have htr' :
         Tx.run (trCall wCall.self.token1 ctx.sender amt)
           { ctx with sender := ctx.self } wCall = .ok (true, w1) := by
       rw [← transfer_run_ctx_irrel (r := wCall.self.token1) (dst := ctx.sender)
           (amt := amt) (ctx' := { ctx with sender := ctx.self }) (w₀ := wCall)]
       exact hcall
+    have hopt := Tx.run_ok_toOption htr'
+    have := congrArg (Option.map (Prod.map id World.view)) hopt
     simpa [impl_transfer (r := wCall.self.token1)
-        (ctx := { ctx with sender := ctx.self }) (w := wCall)] using
-      Tx.run_ok_toOption htr'
+        (ctx := { ctx with sender := ctx.self }) (w := wCall)] using this
   have hmoves := hT.transfer_moves hrunT
   have hto := hmoves.2.1 hsne.symm
   have hsumr := congrArg Amount.raw hmoves.1
@@ -326,7 +334,7 @@ private theorem holdings1_sub_of_transfer
   have htor := congrArg Amount.raw hto
   simp [Amount.raw_add] at htor
   have hframe := transfer_frame (w := wCall) hcall
-  simp [holdings1, IERC20.Ref.impl, hframe.1, hframe.2.1] at hsumr htor ⊢
+  simp [holdings1, IERC20.Ref.impl, hframe.1, hframe.2.1, World.view] at hsumr htor ⊢
   rw [htor] at hsumr
   rw [Nat.add_assoc, Nat.add_comm amt.raw] at hsumr
   exact Nat.add_left_cancel hsumr
@@ -372,15 +380,14 @@ theorem addLiquidity_preserves_inv :
     obtain ⟨_, hσ, hor, _⟩ := addLiquidity_post a0 a1 hok hrun
     obtain ⟨w1, w2, htf0, htf1, hs1, ho1, hl1, hs2, ho2, hext, _, hσ'⟩ :=
       addLiquidity_call a0 a1 hok hrun
-    have hT0' : IERC20.Spec (w.self.token0.impl w) := by
+    have hT0' : IERC20.Spec (w.self.token0.impl : Token0Impl) := by
       simpa [IERC20.Ref.impl, ht0] using hT0
     have hhold0 := holdings0_add_of_transferFrom self hself hsne hT0' htf0
     have hIndw : TokensIndependent w.self.token0 w.self.token1 w.oracle := by
       simpa [ht0, ht1, ho] using hInd
     have hframe1 := holdings1_frame_token0 self (w := w) (w1 := w1) hIndw
       (transferFrom_call_addr htf0) hs1 ho1
-    have hT1' : IERC20.Spec
-        (({ w with ext := w1.ext }.self.token1.impl { w with ext := w1.ext })) := by
+    have hT1' : IERC20.Spec (w.self.token1.impl : Token1Impl) := by
       simpa [IERC20.Ref.impl, ht1] using hT1
     have hhold1 := holdings1_add_of_transferFrom self
       (w := { w with ext := w1.ext }) hself hsne hT1' (by simpa [ht1] using htf1)
@@ -428,12 +435,11 @@ theorem removeLiquidity_preserves_inv :
       removeLiquidity_call s hok hrun
     set out0 := Amount.ofWord (redeemed w.self s.raw).1
     set out1 := Amount.ofWord (redeemed w.self s.raw).2
-    have hT0' : IERC20.Spec (w.self.token0.impl w) := by
+    have hT0' : IERC20.Spec (w.self.token0.impl : Token0Impl) := by
       simpa [IERC20.Ref.impl, ht0] using hT0
     have hhold0 := holdings0_sub_of_transfer self hself hsne hT0'
       (wCall := w) (by simpa [out0] using htr0)
-    have hT1call : IERC20.Spec
-        (({ w with ext := w1.ext }.self.token1.impl { w with ext := w1.ext })) := by
+    have hT1call : IERC20.Spec (w.self.token1.impl : Token1Impl) := by
       simpa [IERC20.Ref.impl, ht1] using hT1
     have hhold1 := holdings1_sub_of_transfer self hself hsne hT1call
       (wCall := { w with ext := w1.ext }) (by simpa [out1] using htr1)
@@ -486,15 +492,14 @@ theorem swap0for1_preserves_inv :
     obtain ⟨w1, w2, htf0, htr1, hs1, ho1, hl1, hs2, ho2, hext, _, _⟩ :=
       swap0for1_call dx minOut hok hrun
     set amt := Amount.ofWord (amountOut w.self.reserve0.raw w.self.reserve1.raw dx.raw)
-    have hT0' : IERC20.Spec (w.self.token0.impl w) := by
+    have hT0' : IERC20.Spec (w.self.token0.impl : Token0Impl) := by
       simpa [IERC20.Ref.impl, ht0] using hT0
     have hhold0 := holdings0_add_of_transferFrom self hself hsne hT0' htf0
     have hIndw : TokensIndependent w.self.token0 w.self.token1 w.oracle := by
       simpa [ht0, ht1, ho] using hInd
     have hframe1 := holdings1_frame_token0 self (w := w) (w1 := w1) hIndw
       (transferFrom_call_addr htf0) hs1 ho1
-    have hT1call : IERC20.Spec
-        (({ w with ext := w1.ext }.self.token1.impl { w with ext := w1.ext })) := by
+    have hT1call : IERC20.Spec (w.self.token1.impl : Token1Impl) := by
       simpa [IERC20.Ref.impl, ht1] using hT1
     have hhold1 := holdings1_sub_of_transfer self hself hsne hT1call
       (wCall := { w with ext := w1.ext }) (by simpa [amt] using htr1)
@@ -551,15 +556,14 @@ theorem swap1for0_preserves_inv :
     obtain ⟨w1, w2, htf1, htr0, hs1, ho1, hl1, hs2, ho2, hext, _, _⟩ :=
       swap1for0_call dx minOut hok hrun
     set amt := Amount.ofWord (amountOut w.self.reserve1.raw w.self.reserve0.raw dx.raw)
-    have hT1' : IERC20.Spec (w.self.token1.impl w) := by
+    have hT1' : IERC20.Spec (w.self.token1.impl : Token1Impl) := by
       simpa [IERC20.Ref.impl, ht1] using hT1
     have hhold1 := holdings1_add_of_transferFrom self hself hsne hT1' htf1
     have hIndw : TokensIndependent w.self.token0 w.self.token1 w.oracle := by
       simpa [ht0, ht1, ho] using hInd
     have hframe0 := holdings0_frame_token1 self (w := w) (w1 := w1) hIndw
       (transferFrom_call_addr htf1) hs1 ho1
-    have hT0call : IERC20.Spec
-        (({ w with ext := w1.ext }.self.token0.impl { w with ext := w1.ext })) := by
+    have hT0call : IERC20.Spec (w.self.token0.impl : Token0Impl) := by
       simpa [IERC20.Ref.impl, ht0] using hT0
     have hhold0 := holdings0_sub_of_transfer self hself hsne hT0call
       (wCall := { w with ext := w1.ext }) (by simpa [amt] using htr0)
@@ -612,7 +616,7 @@ theorem setProtocolShare_preserves_inv :
   PreservesInvFnAt_of_ok fun bps ctx w _n w' _hself _hsne hInvT hrun => by
     obtain ⟨_, hle, rfl⟩ := setProtocolShare_ok_of_run hrun
     obtain ⟨⟨h0, h1, hst, _⟩, ht0, ht1, ho, hT0, hT1, hInd⟩ := hInvT
-    exact ⟨⟨h0, h1, hst, by simpa [BPS] using hle⟩, ht0, ht1, ho, hT0, hT1, hInd⟩
+    exact ⟨⟨h0, h1, hst, hle⟩, ht0, ht1, ho, hT0, hT1, hInd⟩
 
 theorem setFeeTo_preserves_inv :
     PreservesInvFnAt spec (InvT self t0 t1 oracle) self .setFeeTo :=
@@ -628,12 +632,11 @@ theorem collectProtocolFees_preserves_inv :
     obtain ⟨_, hσ, hor, _⟩ := collectProtocolFees_post hok hrun
     obtain ⟨w1, w2, htr0, htr1, hs1, ho1, hl1, hs2, ho2, hext, _, _⟩ :=
       collectProtocolFees_call hok hrun
-    have hT0' : IERC20.Spec (w.self.token0.impl w) := by
+    have hT0' : IERC20.Spec (w.self.token0.impl : Token0Impl) := by
       simpa [IERC20.Ref.impl, ht0] using hT0
     have hhold0 := holdings0_sub_of_transfer self hself hsne hT0'
       (wCall := w) htr0
-    have hT1call : IERC20.Spec
-        (({ w with ext := w1.ext }.self.token1.impl { w with ext := w1.ext })) := by
+    have hT1call : IERC20.Spec (w.self.token1.impl : Token1Impl) := by
       simpa [IERC20.Ref.impl, ht1] using hT1
     have hhold1 := holdings1_sub_of_transfer self hself hsne hT1call
       (wCall := { w with ext := w1.ext }) htr1
@@ -835,8 +838,8 @@ theorem cpamm_no_unauthorized_extraction (self : Address)
     (tr : List (Step spec)) (w : World Storage ExtState Event) (a : Address)
     (hw : Inv self w) (hW : Wf self tr)
     (hR : RelyAlong (cpammRely self w.self.token0 w.self.token1 w.oracle) tr w)
-    (hT0 : IERC20.Spec (w.self.token0.impl w))
-    (hT1 : IERC20.Spec (w.self.token1.impl w))
+    (hT0 : IERC20.Spec (w.self.token0.impl : Token0Impl))
+    (hT1 : IERC20.Spec (w.self.token1.impl : Token1Impl))
     (hInd : TokensIndependent w.self.token0 w.self.token1 w.oracle)
     (hA : NoAuthAlong Auth a tr w) :
     claim a w ≤ claim a (run tr w) :=
@@ -852,8 +855,8 @@ theorem cpamm_solvent (self : Address) (tr : List (Step spec))
     (w : World Storage ExtState Event)
     (hW : Wf self tr)
     (hR : RelyAlong (cpammRely self w.self.token0 w.self.token1 w.oracle) tr w)
-    (hT0 : IERC20.Spec (w.self.token0.impl w))
-    (hT1 : IERC20.Spec (w.self.token1.impl w))
+    (hT0 : IERC20.Spec (w.self.token0.impl : Token0Impl))
+    (hT1 : IERC20.Spec (w.self.token1.impl : Token1Impl))
     (hInd : TokensIndependent w.self.token0 w.self.token1 w.oracle)
     (h : Inv self w) :
     CoversLpsAndProtocol self (run tr w) :=

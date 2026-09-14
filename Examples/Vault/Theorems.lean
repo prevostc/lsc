@@ -32,7 +32,7 @@ because a conforming self-`transferFrom` is a no-op on the vault's balance, so
 the holdings delta is genuinely false there. -/
 theorem deposit_holdings (assets : Amount vaultAsset)
     {minted : Amount vShare} {w' : World Storage ExtState Event}
-    (hT : IERC20.Spec (w.self.asset.impl w))
+    (hT : IERC20.Spec (w.self.asset.impl : AssetImpl))
     (hne : ctx.sender ≠ ctx.self)
     (h : Tx.run (deposit assets) ctx w = .ok (minted, w')) :
     holdings ctx.self w' = holdings ctx.self w + assets.raw :=
@@ -54,7 +54,7 @@ is excluded because a conforming self-`transfer` is a no-op on the vault's
 balance, so the holdings delta is genuinely false there. -/
 theorem withdraw_holdings (sharesIn : Amount vShare)
     {paid : Amount vaultAsset} {w' : World Storage ExtState Event}
-    (hT : IERC20.Spec (w.self.asset.impl w))
+    (hT : IERC20.Spec (w.self.asset.impl : AssetImpl))
     (hne : ctx.sender ≠ ctx.self)
     (h : Tx.run (withdraw sharesIn) ctx w = .ok (paid, w')) :
     holdings ctx.self w' + paid.raw = holdings ctx.self w :=
@@ -72,7 +72,7 @@ theorem vault_solvent (self : Address) (tr : List (Step spec))
     (w : World Storage ExtState Event)
     (hW : Wf self tr)
     (hR : RelyAlong (vaultRely self w.self.asset w.oracle) tr w)
-    (hT : IERC20.Spec (w.self.asset.impl w))
+    (hT : IERC20.Spec (w.self.asset.impl : AssetImpl))
     (h : Inv w) :
     Solvent (claim self) holdings self (run tr w) :=
   Proof.vault_solvent self tr w hW hR hT h
@@ -89,7 +89,7 @@ theorem vault_no_unauthorized_extraction (self : Address)
     (tr : List (Step spec)) (w : World Storage ExtState Event) (a : Address)
     (hw : Inv w) (hW : Wf self tr)
     (hR : RelyAlong (vaultRely self w.self.asset w.oracle) tr w)
-    (hT : IERC20.Spec (w.self.asset.impl w))
+    (hT : IERC20.Spec (w.self.asset.impl : AssetImpl))
     (hA : NoAuthAlong Auth a tr w) :
     claim self a w ≤ claim self a (run tr w) :=
   Proof.vault_no_unauthorized_extraction self tr w a hw hW hR hT hA

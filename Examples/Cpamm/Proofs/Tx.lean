@@ -5,6 +5,8 @@ import Examples.Cpamm.Proofs.Math
 import Stdlib.SafeERC20
 import Lsc.Lang.TxTheorems
 import Lsc.Lang.AmountTheorems
+import Lsc.Lang.WordTheorems
+import Lsc.Lang.InterfaceTheorems
 import Lsc.Security.Wealth
 
 set_option linter.unusedSimpArgs false
@@ -15,7 +17,7 @@ CPAMM `Tx.run` lemmas. External CALLs are opaque; success lemmas recover
 storage, logs, and the oracle, and use `IERC20.Spec` for holdings.
 -/
 
-open Lsc Lsc.Syntax Lsc.Stdlib Lsc.Security Cpamm
+open Lsc Lsc.Syntax Lsc.Stdlib Lsc.Security Cpamm Stdlib
 
 attribute [local simp] Amount.eq_iff Amount.ne_iff Amount.lt_iff Amount.le_iff
 
@@ -65,11 +67,11 @@ def removeLiquidityPost (σ : Storage) (who : Address) (s : Nat) : Storage :=
 def amountOut (rIn rOut dx : Nat) : Nat := amountOutF rIn rOut dx
 
 def coeffOf (σ : Storage) : Nat :=
-  if (σ.feeTo : Nat) = 0 then 0 else σ.protocolShareBps
+  if (σ.feeTo : Nat) = 0 then 0 else σ.protocolShareBps.raw
 
 def protoOf (σ : Storage) (dx : Nat) : Nat :=
   if (σ.feeTo : Nat) = 0 then 0
-  else swapFee dx * σ.protocolShareBps / BPS
+  else swapFee dx * σ.protocolShareBps.raw / BPS.raw
 
 /-- Storage after a successful `swap0for1`. -/
 def swap0Post (σ : Storage) (dx proto out : Nat) : Storage :=
@@ -89,7 +91,7 @@ def collectPost (σ : Storage) : Storage :=
   { σ with protocolFees0 := 0, protocolFees1 := 0 }
 
 theorem protoOf_eq_take (σ : Storage) (dx : Nat) :
-    protoOf σ dx = protoTake σ.feeTo σ.protocolShareBps (swapFee dx) :=
+    protoOf σ dx = protoTake σ.feeTo σ.protocolShareBps.raw (swapFee dx) :=
   rfl
 
 theorem protoOf_of_eq {σ : Storage} {dx : Nat} (h : σ.feeTo = 0) :
@@ -98,7 +100,7 @@ theorem protoOf_of_eq {σ : Storage} {dx : Nat} (h : σ.feeTo = 0) :
   unfold protoOf; rw [if_pos h']
 
 theorem protoOf_of_ne {σ : Storage} {dx : Nat} (h : σ.feeTo ≠ 0) :
-    protoOf σ dx = swapFee dx * σ.protocolShareBps / BPS := by
+    protoOf σ dx = swapFee dx * σ.protocolShareBps.raw / BPS.raw := by
   have h' : ¬ (σ.feeTo : Nat) = 0 := h
   unfold protoOf; rw [if_neg h']
 
@@ -107,17 +109,17 @@ theorem coeffOf_of_eq {σ : Storage} (h : σ.feeTo = 0) : coeffOf σ = 0 := by
   unfold coeffOf; rw [if_pos h']
 
 theorem coeffOf_of_ne {σ : Storage} (h : σ.feeTo ≠ 0) :
-    coeffOf σ = σ.protocolShareBps := by
+    coeffOf σ = σ.protocolShareBps.raw := by
   have h' : ¬ (σ.feeTo : Nat) = 0 := h
   unfold coeffOf; rw [if_neg h']
 
-theorem BPS_eq : BPS = 10000 := rfl
-theorem BPS_pos : 0 < BPS := by decide
+theorem BPS_eq : BPS.raw = 10000 := rfl
+theorem BPS_pos : 0 < BPS.raw := by decide
 theorem dxFeeLess_lit (dx : Nat) : dxFeeLess dx = dx * 9970 / 10000 := rfl
 
 theorem dxFeeLess_le (dx : Nat) : dxFeeLess dx ≤ dx := by
   simpa [dxFeeLess, Nat.mul_comm dx] using
-    remove_le_reserves (BPS - FEE_BPS) dx BPS (Nat.sub_le _ _) BPS_pos
+    remove_le_reserves (BPS.raw - FEE_BPS) dx BPS.raw (Nat.sub_le _ _) BPS_pos
 
 theorem protoOf_le_dx (σ : Storage) (dx : Nat) (h : σ.protocolShareBps ≤ BPS) :
     protoOf σ dx ≤ dx := by
@@ -125,7 +127,7 @@ theorem protoOf_le_dx (σ : Storage) (dx : Nat) (h : σ.protocolShareBps ≤ BPS
   split_ifs
   · exact Nat.zero_le _
   · exact Nat.le_trans
-      (share_le (swapFee dx) σ.protocolShareBps BPS h (by decide))
+      (share_le (swapFee dx) σ.protocolShareBps.raw BPS.raw (by simpa using h) (by decide))
       (Nat.sub_le _ _)
 
 @[simp] theorem balSel0_eq : balSel0 = 0x70a08231 := by decide
@@ -135,23 +137,23 @@ theorem protoOf_le_dx (σ : Storage) (dx : Nat) (h : σ.protocolShareBps ≤ BPS
 
 theorem holdings0_view (self : Address) :
     holdings0 self w = (viewBal0 w.self.token0 self w.oracle w.ext).raw := by
-  simp [holdings0, viewBal0, IERC20.Ref.impl, IERC20.Impl.ofRef, balSel0_eq]
+  simp [holdings0, viewBal0, IERC20.Ref.impl, IERC20.Impl.ofRef, World.view]
 
 theorem holdings1_view (self : Address) :
     holdings1 self w = (viewBal1 w.self.token1 self w.oracle w.ext).raw := by
-  simp [holdings1, viewBal1, IERC20.Ref.impl, IERC20.Impl.ofRef, balSel1_eq]
+  simp [holdings1, viewBal1, IERC20.Ref.impl, IERC20.Impl.ofRef, World.view]
 
 theorem holdings0_congr (self : Address) {w w' : World Storage ExtState Event}
     (ha : w'.self.token0.addr = w.self.token0.addr)
     (ho : w'.oracle = w.oracle) (hx : w'.ext = w.ext) :
     holdings0 self w' = holdings0 self w := by
-  simp [holdings0, IERC20.Ref.impl, IERC20.Impl.ofRef, ha, ho, hx]
+  simp [holdings0, IERC20.Ref.impl, IERC20.Impl.ofRef, ha, ho, hx, World.view]
 
 theorem holdings1_congr (self : Address) {w w' : World Storage ExtState Event}
     (ha : w'.self.token1.addr = w.self.token1.addr)
     (ho : w'.oracle = w.oracle) (hx : w'.ext = w.ext) :
     holdings1 self w' = holdings1 self w := by
-  simp [holdings1, IERC20.Ref.impl, IERC20.Impl.ofRef, ha, ho, hx]
+  simp [holdings1, IERC20.Ref.impl, IERC20.Impl.ofRef, ha, ho, hx, World.view]
 
 theorem transferFrom_frame {a : Asset} {r : IERC20.Ref a}
     {src dst : Address} {amt : Amount a} {b : Bool}
@@ -187,29 +189,21 @@ theorem transfer_frame {a : Asset} {r : IERC20.Ref a}
 
 theorem impl_transferFrom {a : Asset} (r : IERC20.Ref a)
     (src dst : Address) (amt : Amount a) :
-    (r.impl w).transferFrom src dst amt ctx w =
-      (Tx.run (tfCall r src dst amt) ctx w).toOption := by
-  have h :
-      (r.impl w).transferFrom src dst amt ctx w =
-        (Tx.run (r.transferFrom src dst amt :
-          Tx Storage ExtState Event Unit Bool) ctx w).toOption :=
-    rfl
-  rw [h, tfCall]
-  simp only [IERC20.Ref.transferFrom]
-  exact Tx.run_call_toOption_err (ε := Unit) (ε' := Error) r.addr _ _ ctx w
+    r.impl.transferFrom src dst amt ctx w.view =
+      (Tx.run (tfCall r src dst amt) ctx w).toOption.map
+        (Prod.map id World.view) := by
+  simp only [IERC20.Ref.impl, IERC20.Impl.ofRef, IERC20.Ref.transferFrom, tfCall]
+  exact Tx.callDecode_view (α := Bool) (ε := Error) r.addr (0x23b872dd : Nat)
+    [AbiType.encode src, AbiType.encode dst, AbiType.encode amt] ctx w
 
 theorem impl_transfer {a : Asset} (r : IERC20.Ref a)
     (dst : Address) (amt : Amount a) :
-    (r.impl w).transfer dst amt ctx w =
-      (Tx.run (trCall r dst amt) ctx w).toOption := by
-  have h :
-      (r.impl w).transfer dst amt ctx w =
-        (Tx.run (r.transfer dst amt :
-          Tx Storage ExtState Event Unit Bool) ctx w).toOption :=
-    rfl
-  rw [h, trCall]
-  simp only [IERC20.Ref.transfer]
-  exact Tx.run_call_toOption_err (ε := Unit) (ε' := Error) r.addr _ _ ctx w
+    r.impl.transfer dst amt ctx w.view =
+      (Tx.run (trCall r dst amt) ctx w).toOption.map
+        (Prod.map id World.view) := by
+  simp only [IERC20.Ref.impl, IERC20.Impl.ofRef, IERC20.Ref.transfer, trCall]
+  exact Tx.callDecode_view (α := Bool) (ε := Error) r.addr (0xa9059cbb : Nat)
+    [AbiType.encode dst, AbiType.encode amt] ctx w
 
 theorem transfer_run_ctx_irrel {a : Asset} {r : IERC20.Ref a}
     {dst : Address} {amt : Amount a} {ctx' : Ctx}
@@ -335,6 +329,48 @@ private theorem run_mulDivDown_bind {α : Type} {a b : Asset}
   rw [Tx.run_bind, Amount.hMulDivDown_def, Amount.run_mulDivDown]
   split_ifs <;> rfl
 
+private theorem run_mulDivDown_word_bind {α : Type} {b : Asset}
+    (num : Amount b) (x y : Word)
+    (k : Amount b → Tx Storage ExtState Event Error α) :
+    Tx.run (Tx.HMulDivDown.hMulDivDown (S := Storage) (X := ExtState) (E := Event)
+        (ε := Error) num x y >>= k) ctx w =
+      if y = 0 then .error (.arith .divByZero)
+      else if num.raw * x < wordBound then
+        Tx.run (k ⟨num.raw * x / y⟩) ctx w
+      else .error (.arith .overflow) := by
+  rw [Tx.run_bind, Amount.hMulDivDown_word, Amount.run_mulDivDown]
+  by_cases h0 : (Amount.ofWord (a := Asset.fixed 0) y).raw = 0
+  · rw [if_pos h0]
+    simp [Amount.raw_ofWord] at h0
+    simp [h0]
+  · rw [if_neg h0]
+    simp [Amount.raw_ofWord] at h0
+    by_cases hfit : num.raw * (Amount.ofWord (a := Asset.fixed 0) x).raw < wordBound
+    · rw [if_pos hfit]
+      simp [Amount.raw_ofWord] at hfit
+      simp [h0, hfit]
+    · rw [if_neg hfit]
+      simp [Amount.raw_ofWord] at hfit
+      simp [h0, hfit]
+
+private theorem run_mulFixedDown_bind {α : Type} {a : Asset} {d : Nat}
+    (x : Amount a) (r : Fixed d)
+    (k : Amount a → Tx Storage ExtState Event Error α) :
+    Tx.run (Tx.HMulFixedDown.hMulFixedDown (S := Storage) (X := ExtState)
+        (E := Event) (ε := Error) x r >>= k) ctx w =
+      if x.raw * r.raw < wordBound then Tx.run (k (Amount.mulDown x r)) ctx w
+      else .error (.arith .overflow) := by
+  have hden : (Amount.ofWord (Word.scale d) : Amount (Asset.fixed d)).raw ≠ 0 := by
+    simpa [Amount.raw_ofWord] using
+      (Nat.pos_iff_ne_zero.mp (Nat.pow_pos (by decide : 0 < 10)) : Word.scale d ≠ 0)
+  rw [Tx.run_bind, Amount.hMulFixedDown_def, Amount.mulFixedDown, Amount.run_mulDivDown]
+  rw [if_neg hden]
+  by_cases hfit : x.raw * r.raw < wordBound
+  · rw [if_pos hfit]
+    simp [hfit, Amount.mulDown, Amount.floorMulDiv, Amount.raw_ofWord]
+  · rw [if_neg hfit]
+    simp [hfit]
+
 private theorem run_hAdd_bind {α : Type} {a : Asset} (x y : Amount a)
     (k : Amount a → Tx Storage ExtState Event Error α) :
     Tx.run (Tx.HAddChecked.hAdd (S := Storage) (X := ExtState) (E := Event)
@@ -376,15 +412,6 @@ private theorem run_storeMap_bind {α : Type} (who : Address) (v : Amount lpShar
               Amount.ofWord (Function.update (fun k => (w.self.shares k).raw)
                 who v.raw k) } } := by
   rw [Tx.run_bind, Tx.run_storeMap]
-
-private theorem run_hMul_bind {α : Type} {a : Asset} (x : Amount a) (k : Word)
-    (cont : Amount a → Tx Storage ExtState Event Error α) :
-    Tx.run (Tx.HMulChecked.hMul (S := Storage) (X := ExtState) (E := Event)
-        (ε := Error) x k >>= cont) ctx w =
-      if x.raw * k < wordBound then Tx.run (cont ⟨x.raw * k⟩) ctx w
-      else .error (.arith .overflow) := by
-  rw [Tx.run_bind, Amount.hMul_def, Amount.run_mulScalar]
-  split_ifs <;> rfl
 
 private theorem run_read_token0 {α : Type}
     (k : IERC20.Ref asset0 → Tx Storage ExtState Event Error α) :
@@ -533,23 +560,7 @@ private theorem ok_of_safeTR_bind {α : Type} {a : Asset}
     · rcases transfer_frame (w := w₀) hcall with ⟨hs, ho, hl⟩
       exact ⟨w1, hcall, hs, ho, hl, hrun⟩
 
-private theorem one_asset0_ne : (1 : Amount asset0).raw ≠ 0 := by
-  simp [Amount.raw_ofNat]
-
-private theorem one_asset1_ne : (1 : Amount asset1).raw ≠ 0 := by
-  simp [Amount.raw_ofNat]
-
-private theorem raw_9970 {a : Asset} : (9970 : Amount a).raw = 9970 :=
-  Amount.raw_ofNat 9970
-
-private theorem raw_10000 {a : Asset} : (10000 : Amount a).raw = 10000 :=
-  Amount.raw_ofNat 10000
-
-private theorem one_bps_ne : (10000 : Amount asset0).raw ≠ 0 := by
-  simp [Amount.raw_ofNat]
-
-private theorem one_bps1_ne : (10000 : Amount asset1).raw ≠ 0 := by
-  simp [Amount.raw_ofNat]
+private theorem word_10000_ne : (10000 : Word) ≠ 0 := by decide
 
 private theorem wordBound_pos : 0 < wordBound :=
   Nat.pow_pos (by decide)
@@ -557,41 +568,22 @@ private theorem wordBound_pos : 0 < wordBound :=
 private theorem swapFee_sub (dx : Nat) : swapFee dx = dx - dxFeeLess dx :=
   rfl
 
-/-- `1 *? 0` never overflows. -/
-private theorem hMul_zero_lt {a : Asset} :
-    (1 : Amount a).raw * (0 : Word) < wordBound := by
-  simp [Amount.raw_ofNat]
+private theorem proto_mulDown {_a : Asset} (dx : Nat) (ps : Bps) :
+    Amount.mulDown (⟨dx - dxFeeLess dx⟩ : Amount _a) ps =
+      ⟨(dx - dxFeeLess dx) * ps.raw / BPS.raw⟩ := by
+  apply Amount.ext
+  simp [Amount.mulDown_raw, Amount.raw_mk]
+  rfl
+
+private theorem proto_mulDown_zero (dx : Nat) {_a : Asset} :
+    Amount.mulDown (⟨dx - dxFeeLess dx⟩ : Amount _a) (0 : Bps) = ⟨0⟩ := by
+  apply Amount.ext
+  simp [Amount.mulDown_raw]
+
+private theorem proto_prod_zero (dx : Nat) :
+    (dx - dxFeeLess dx) * (0 : Bps).raw < wordBound := by
+  simp [Amount.raw_zero]
   exact wordBound_pos
-
-/-- Protocol-fee `mulDiv` numerator, matching the peeled `dx -? dxF` residual. -/
-private theorem proto_num (dx : Nat) (ps : Word) :
-    (dx - dxFeeLess dx) * ((1 : Amount asset0).raw * ps) =
-      swapFee dx * ((1 : Amount asset0).raw * ps) := by
-  simp [swapFee, Amount.raw_ofNat]
-
-private theorem proto_num1 (dx : Nat) (ps : Word) :
-    (dx - dxFeeLess dx) * ((1 : Amount asset1).raw * ps) =
-      swapFee dx * ((1 : Amount asset1).raw * ps) := by
-  simp [swapFee, Amount.raw_ofNat]
-
-private theorem addLiq_empty_mul {a0 : Amount asset0}
-    (h : a0.raw < wordBound) :
-    (1 : Amount lpShare).raw * a0.raw < wordBound := by
-  rw [Amount.raw_ofNat, Nat.one_mul]
-  exact h
-
-private theorem addLiq_empty_mul_not {a0 : Amount asset0}
-    (h : ¬ a0.raw < wordBound) :
-    ¬ (1 : Amount lpShare).raw * a0.raw < wordBound := by
-  rw [Amount.raw_ofNat, Nat.one_mul]
-  exact h
-
-private theorem addLiq_empty_mint_pos {a0 : Amount asset0} (h : 0 < a0) :
-    0 < (1 : Amount lpShare).raw ∧
-      (1 : Amount lpShare).raw ≤ (1 : Amount lpShare).raw * a0.raw := by
-  have h0 : 0 < a0.raw := by simpa [Amount.lt_iff] using h
-  rw [Amount.raw_ofNat, Nat.one_mul]
-  exact ⟨Nat.succ_pos 0, Nat.succ_le_of_lt h0⟩
 
 /-- `addLiquidity` after a successful mint, at the first `+?`. -/
 private theorem addLiq_after_mint (a0 : Amount asset0) (a1 : Amount asset1)
@@ -601,7 +593,6 @@ private theorem addLiq_after_mint (a0 : Amount asset0) (a1 : Amount asset1)
         (0 < w.self.reserve0.raw ∧ 0 < w.self.reserve1.raw ∧
           w.self.totalShares.raw * a0.raw < wordBound ∧
           w.self.totalShares.raw * a1.raw < wordBound))
-    (hfit : w.self.totalShares.raw = 0 → a0.raw < wordBound)
     (hminted : 0 < mintedShares w.self a0.raw a1.raw) :
     Tx.run (addLiquidity a0 a1) ctx w =
       Tx.run (do
@@ -629,17 +620,13 @@ private theorem addLiq_after_mint (a0 : Amount asset0) (a1 : Amount asset1)
     run_sender_bind, run_self_bind, run_load_bind, run_load_bind, run_load_bind]
   rw [Tx.run_ite]
   by_cases hts : w.self.totalShares = 0
-  · have h1 := addLiq_empty_mul (hfit ((Amount.eq_iff _ _).mp hts))
-    have htsr : w.self.totalShares.raw = 0 := (Amount.eq_iff _ _).mp hts
+  · have htsr : w.self.totalShares.raw = 0 := (Amount.eq_iff _ _).mp hts
     rw [if_pos hts]
-    simp only [run_mulDivDown_bind]
-    rw [if_neg one_asset0_ne, if_pos h1]
-    have hm :
-        (⟨(1 : Amount lpShare).raw * a0.raw / (1 : Amount asset0).raw⟩ :
-          Amount lpShare) =
+    simp only [Tx.pure_bind]
+    have hm : a0.as lpShare =
           ⟨mintedShares w.self a0.raw a1.raw⟩ := by
       apply Amount.ext
-      simp [mintedShares, htsr, Amount.raw_ofNat, Nat.one_mul, Nat.div_one]
+      simp [mintedShares, htsr, Amount.raw_as]
     rw [hm, run_req_true hposM]
   · have htsr : w.self.totalShares.raw ≠ 0 := (Amount.ne_iff _ _).mp hts
     rcases hprod with h0 | ⟨hr0, hr1, hm0, hm1⟩
@@ -694,7 +681,7 @@ theorem protocolFees_ok :
       .ok ((w.self.protocolFees0, w.self.protocolFees1), w) := by
   simp [protocolFees]
 
-theorem setProtocolShare_ok (bps : Word)
+theorem setProtocolShare_ok (bps : Bps)
     (hown : ctx.sender = w.self.owner) (hle : bps ≤ BPS) :
     Tx.run (setProtocolShare bps) ctx w =
       .ok ((), { w with
@@ -702,12 +689,12 @@ theorem setProtocolShare_ok (bps : Word)
         log := w.log ++ [.ProtocolShareSet bps] }) := by
   simp [setProtocolShare, hown, hle]
 
-theorem setProtocolShare_only_owner (bps : Word)
+theorem setProtocolShare_only_owner (bps : Bps)
     (h : ctx.sender ≠ w.self.owner) :
     Tx.run (setProtocolShare bps) ctx w = .error (.user .NotOwner) := by
   simp [setProtocolShare, h]
 
-theorem setProtocolShare_ok_of_run {bps : Word} {w' : World Storage ExtState Event}
+theorem setProtocolShare_ok_of_run {bps : Bps} {w' : World Storage ExtState Event}
     (hrun : Tx.run (setProtocolShare bps) ctx w = .ok ((), w')) :
     ctx.sender = w.self.owner ∧ bps ≤ BPS ∧
       w' = { w with
@@ -765,7 +752,6 @@ structure AddLiqOk (ctx : Ctx) (w : World Storage ExtState Event)
       (0 < w.self.reserve0.raw ∧ 0 < w.self.reserve1.raw ∧
         w.self.totalShares.raw * a0.raw < wordBound ∧
         w.self.totalShares.raw * a1.raw < wordBound)
-  emptyFit : w.self.totalShares.raw = 0 → a0.raw < wordBound
   add0 : w.self.reserve0.raw + a0.raw < wordBound
   add1 : w.self.reserve1.raw + a1.raw < wordBound
   addS : mintedShares w.self a0.raw a1.raw + w.self.totalShares.raw < wordBound
@@ -876,16 +862,6 @@ theorem addLiquidity_reverts_on_zero_shares (a0 : Amount asset0) (a1 : Amount as
           simp [mintedShares, htsr, hle']
         rw [if_neg hle, run_pure_bind, hm, run_req_false hreq]
 
-theorem addLiquidity_reverts_on_one_overflow (a0 : Amount asset0) (a1 : Amount asset1)
-    (hpos0 : 0 < a0) (hpos1 : 0 < a1)
-    (hts : w.self.totalShares = 0) (hfit : ¬ a0.raw < wordBound) :
-    Tx.run (addLiquidity a0 a1) ctx w = .error (.arith .overflow) := by
-  rw [addLiquidity, run_req_true hpos0, run_req_true hpos1,
-    run_sender_bind, run_self_bind, run_load_bind, run_load_bind, run_load_bind]
-  rw [Tx.run_ite, if_pos hts]
-  simp only [run_mulDivDown_bind]
-  rw [if_neg one_asset0_ne, if_neg (addLiq_empty_mul_not hfit)]
-
 theorem addLiquidity_reverts_on_add_r0 (a0 : Amount asset0) (a1 : Amount asset1)
     (hpos0 : 0 < a0) (hpos1 : 0 < a1)
     (hminted : 0 < mintedShares w.self a0.raw a1.raw)
@@ -894,10 +870,9 @@ theorem addLiquidity_reverts_on_add_r0 (a0 : Amount asset0) (a1 : Amount asset1)
         (0 < w.self.reserve0.raw ∧ 0 < w.self.reserve1.raw ∧
           w.self.totalShares.raw * a0.raw < wordBound ∧
           w.self.totalShares.raw * a1.raw < wordBound))
-    (hfit : w.self.totalShares.raw = 0 → a0.raw < wordBound)
     (hadd : ¬ w.self.reserve0.raw + a0.raw < wordBound) :
     Tx.run (addLiquidity a0 a1) ctx w = .error (.arith .overflow) := by
-  rw [addLiq_after_mint a0 a1 hpos0 hpos1 hprod hfit hminted]
+  rw [addLiq_after_mint a0 a1 hpos0 hpos1 hprod hminted]
   simp only [run_hAdd_bind]
   rw [if_neg hadd]
 
@@ -909,11 +884,10 @@ theorem addLiquidity_reverts_on_add_r1 (a0 : Amount asset0) (a1 : Amount asset1)
         (0 < w.self.reserve0.raw ∧ 0 < w.self.reserve1.raw ∧
           w.self.totalShares.raw * a0.raw < wordBound ∧
           w.self.totalShares.raw * a1.raw < wordBound))
-    (hfit : w.self.totalShares.raw = 0 → a0.raw < wordBound)
     (hadd0 : w.self.reserve0.raw + a0.raw < wordBound)
     (hadd : ¬ w.self.reserve1.raw + a1.raw < wordBound) :
     Tx.run (addLiquidity a0 a1) ctx w = .error (.arith .overflow) := by
-  rw [addLiq_after_mint a0 a1 hpos0 hpos1 hprod hfit hminted]
+  rw [addLiq_after_mint a0 a1 hpos0 hpos1 hprod hminted]
   simp only [run_hAdd_bind]
   rw [if_pos hadd0, run_store_bind]
   simp only [run_hAdd_bind]
@@ -927,12 +901,11 @@ theorem addLiquidity_reverts_on_add_ts (a0 : Amount asset0) (a1 : Amount asset1)
         (0 < w.self.reserve0.raw ∧ 0 < w.self.reserve1.raw ∧
           w.self.totalShares.raw * a0.raw < wordBound ∧
           w.self.totalShares.raw * a1.raw < wordBound))
-    (hfit : w.self.totalShares.raw = 0 → a0.raw < wordBound)
     (hadd0 : w.self.reserve0.raw + a0.raw < wordBound)
     (hadd1 : w.self.reserve1.raw + a1.raw < wordBound)
     (hadd : ¬ mintedShares w.self a0.raw a1.raw + w.self.totalShares.raw < wordBound) :
     Tx.run (addLiquidity a0 a1) ctx w = .error (.arith .overflow) := by
-  rw [addLiq_after_mint a0 a1 hpos0 hpos1 hprod hfit hminted]
+  rw [addLiq_after_mint a0 a1 hpos0 hpos1 hprod hminted]
   simp only [run_hAdd_bind]
   rw [if_pos hadd0, run_store_bind]
   simp only [run_hAdd_bind]
@@ -948,14 +921,13 @@ theorem addLiquidity_reverts_on_add_bal (a0 : Amount asset0) (a1 : Amount asset1
         (0 < w.self.reserve0.raw ∧ 0 < w.self.reserve1.raw ∧
           w.self.totalShares.raw * a0.raw < wordBound ∧
           w.self.totalShares.raw * a1.raw < wordBound))
-    (hfit : w.self.totalShares.raw = 0 → a0.raw < wordBound)
     (hadd0 : w.self.reserve0.raw + a0.raw < wordBound)
     (hadd1 : w.self.reserve1.raw + a1.raw < wordBound)
     (haddS : mintedShares w.self a0.raw a1.raw + w.self.totalShares.raw < wordBound)
     (hadd : ¬ mintedShares w.self a0.raw a1.raw + (w.self.shares ctx.sender).raw <
         wordBound) :
     Tx.run (addLiquidity a0 a1) ctx w = .error (.arith .overflow) := by
-  rw [addLiq_after_mint a0 a1 hpos0 hpos1 hprod hfit hminted]
+  rw [addLiq_after_mint a0 a1 hpos0 hpos1 hprod hminted]
   simp only [run_hAdd_bind]
   rw [if_pos hadd0, run_store_bind]
   simp only [run_hAdd_bind]
@@ -996,30 +968,25 @@ theorem addLiquidity_ok_of_run {a0 : Amount asset0} {a1 : Amount asset1}
   have hminted : 0 < mintedShares w.self a0.raw a1.raw := by
     by_contra h
     exact Tx.run_ok_error hrun (addLiquidity_reverts_on_zero_shares a0 a1 hpos0 hpos1 hprod h)
-  have hempty : w.self.totalShares.raw = 0 → a0.raw < wordBound := by
-    intro hts0
-    by_contra hnb
-    have hts : w.self.totalShares = 0 := (Amount.eq_iff _ _).mpr hts0
-    exact Tx.run_ok_error hrun (addLiquidity_reverts_on_one_overflow a0 a1 hpos0 hpos1 hts hnb)
   have hadd0 : w.self.reserve0.raw + a0.raw < wordBound := by
     by_contra h
     exact Tx.run_ok_error hrun
-      (addLiquidity_reverts_on_add_r0 a0 a1 hpos0 hpos1 hminted hprod hempty h)
+      (addLiquidity_reverts_on_add_r0 a0 a1 hpos0 hpos1 hminted hprod h)
   have hadd1 : w.self.reserve1.raw + a1.raw < wordBound := by
     by_contra h
     exact Tx.run_ok_error hrun
-      (addLiquidity_reverts_on_add_r1 a0 a1 hpos0 hpos1 hminted hprod hempty hadd0 h)
+      (addLiquidity_reverts_on_add_r1 a0 a1 hpos0 hpos1 hminted hprod hadd0 h)
   have haddS : mintedShares w.self a0.raw a1.raw + w.self.totalShares.raw < wordBound := by
     by_contra h
     exact Tx.run_ok_error hrun
-      (addLiquidity_reverts_on_add_ts a0 a1 hpos0 hpos1 hminted hprod hempty hadd0 hadd1 h)
+      (addLiquidity_reverts_on_add_ts a0 a1 hpos0 hpos1 hminted hprod hadd0 hadd1 h)
   have haddB : mintedShares w.self a0.raw a1.raw + (w.self.shares ctx.sender).raw <
       wordBound := by
     by_contra h
     exact Tx.run_ok_error hrun
-      (addLiquidity_reverts_on_add_bal a0 a1 hpos0 hpos1 hminted hprod hempty
+      (addLiquidity_reverts_on_add_bal a0 a1 hpos0 hpos1 hminted hprod
         hadd0 hadd1 haddS h)
-  exact ⟨hpos0, hpos1, hminted, hprod, hempty, hadd0, hadd1, haddS, haddB⟩
+  exact ⟨hpos0, hpos1, hminted, hprod, hadd0, hadd1, haddS, haddB⟩
 
 /-- Reduce a well-formed `addLiquidity` to the two token pulls + emit on post-storage. -/
 theorem addLiquidity_to_tail (a0 : Amount asset0) (a1 : Amount asset1)
@@ -1034,8 +1001,8 @@ theorem addLiquidity_to_tail (a0 : Amount asset0) (a1 : Amount asset1)
         Tx.emit (.AddLiquidity ctx.sender a0 a1 minted) >>= fun _ =>
         (pure minted : Tx Storage ExtState Event Error (Amount lpShare)))
         ctx { w with self := addLiquidityPost w.self ctx.sender a0.raw a1.raw } := by
-  rcases h with ⟨hpos0, hpos1, hminted, hprod, hempty, hadd0, hadd1, haddS, haddB⟩
-  rw [addLiq_after_mint a0 a1 hpos0 hpos1 hprod hempty hminted]
+  rcases h with ⟨hpos0, hpos1, hminted, hprod, hadd0, hadd1, haddS, haddB⟩
+  rw [addLiq_after_mint a0 a1 hpos0 hpos1 hprod hminted]
   simp only [run_hAdd_bind]
   rw [if_pos hadd0, run_store_bind]
   simp only [run_hAdd_bind]
@@ -1538,7 +1505,6 @@ structure Swap0Ok (w : World Storage ExtState Event)
   outMul : w.self.reserve1.raw * dxFeeLess dx.raw < wordBound
   min : minOut.raw ≤ swap0Out w.self dx.raw
   outPos : 0 < swap0Out w.self dx.raw
-  coeffFit : (1 : Nat) * coeffOf w.self < wordBound
   protoMul : swapFee dx.raw * coeffOf w.self < wordBound
   taken : protoOf w.self dx.raw ≤ dx.raw
   add0 : w.self.reserve0.raw + (dx.raw - protoOf w.self dx.raw) < wordBound
@@ -1555,7 +1521,6 @@ structure Swap1Ok (w : World Storage ExtState Event)
   outMul : w.self.reserve0.raw * dxFeeLess dx.raw < wordBound
   min : minOut.raw ≤ swap1Out w.self dx.raw
   outPos : 0 < swap1Out w.self dx.raw
-  coeffFit : (1 : Nat) * coeffOf w.self < wordBound
   protoMul : swapFee dx.raw * coeffOf w.self < wordBound
   taken : protoOf w.self dx.raw ≤ dx.raw
   add1 : w.self.reserve1.raw + (dx.raw - protoOf w.self dx.raw) < wordBound
@@ -1567,7 +1532,7 @@ private theorem swap0_after_res (dx : Amount asset0) (minOut : Amount asset1)
     Tx.run (swap0for1 dx minOut) ctx w =
       Tx.run (
         Tx.HMulDivDown.hMulDivDown (S := Storage) (X := ExtState) (E := Event)
-          (ε := Error) dx (9970 : Amount asset0) (10000 : Amount asset0) >>=
+          (ε := Error) dx (9970 : Word) (10000 : Word) >>=
         fun dxF => do
           let den ← w.self.reserve0 +? dxF
           let out ← w.self.reserve1 mulDiv↓ dxF / den
@@ -1575,10 +1540,9 @@ private theorem swap0_after_res (dx : Amount asset0) (minOut : Amount asset1)
           Tx.require (0 < out) .ZeroOut
           let ft ← read feeTo
           let ps ← read protocolShareBps
-          let coeffW ← if ft = 0 then pure (0 : Word) else pure ps
-          let coeff ← (1 : Amount asset0) *? coeffW
+          let coeff : Bps ← if ft = 0 then pure (0 : Bps) else pure ps
           let fee ← dx -? dxF
-          let proto ← fee mulDiv↓ coeff / (10000 : Amount asset0)
+          let proto ← fee *?↓ coeff
           let taken ← dx -? proto
           let r0' ← w.self.reserve0 +? taken
           write reserve0 r0'
@@ -1605,26 +1569,20 @@ theorem swap0for1_reverts_on_fee_mul (dx : Amount asset0) (minOut : Amount asset
     (hpos : 0 < dx) (hr0 : 0 < w.self.reserve0.raw) (hr1 : 0 < w.self.reserve1.raw)
     (hfee : ¬ dx.raw * 9970 < wordBound) :
     Tx.run (swap0for1 dx minOut) ctx w = .error (.arith .overflow) := by
-  have hfee' : ¬ dx.raw * (9970 : Amount asset0).raw < wordBound := by
-    rw [raw_9970]; exact hfee
   rw [swap0_after_res dx minOut hpos hr0 hr1]
-  simp only [run_mulDivDown_bind]
-  rw [if_neg one_bps_ne, if_neg hfee']
+  simp only [run_mulDivDown_word_bind]
+  rw [if_neg word_10000_ne, if_neg hfee]
 
 theorem swap0for1_reverts_on_den (dx : Amount asset0) (minOut : Amount asset1)
     (hpos : 0 < dx) (hr0 : 0 < w.self.reserve0.raw) (hr1 : 0 < w.self.reserve1.raw)
     (hfee : dx.raw * 9970 < wordBound)
     (hden : ¬ w.self.reserve0.raw + dxFeeLess dx.raw < wordBound) :
     Tx.run (swap0for1 dx minOut) ctx w = .error (.arith .overflow) := by
-  have hfee' : dx.raw * (9970 : Amount asset0).raw < wordBound := by
-    rw [raw_9970]; exact hfee
   have hdxFeq :
-      (⟨dx.raw * (9970 : Amount asset0).raw / (10000 : Amount asset0).raw⟩ :
-        Amount asset0) = ⟨dxFeeLess dx.raw⟩ := by
-    rw [raw_9970, raw_10000]; rfl
+      (⟨dx.raw * 9970 / 10000⟩ : Amount asset0) = ⟨dxFeeLess dx.raw⟩ := rfl
   rw [swap0_after_res dx minOut hpos hr0 hr1]
-  simp only [run_mulDivDown_bind]
-  rw [if_neg one_bps_ne, if_pos hfee']
+  simp only [run_mulDivDown_word_bind]
+  rw [if_neg word_10000_ne, if_pos hfee]
   rw [hdxFeq]
   simp only [run_hAdd_bind]
   rw [if_neg hden]
@@ -1635,18 +1593,14 @@ theorem swap0for1_reverts_on_out_mul (dx : Amount asset0) (minOut : Amount asset
     (hden : w.self.reserve0.raw + dxFeeLess dx.raw < wordBound)
     (houtM : ¬ w.self.reserve1.raw * dxFeeLess dx.raw < wordBound) :
     Tx.run (swap0for1 dx minOut) ctx w = .error (.arith .overflow) := by
-  have hfee' : dx.raw * (9970 : Amount asset0).raw < wordBound := by
-    rw [raw_9970]; exact hfee
   have hdxFeq :
-      (⟨dx.raw * (9970 : Amount asset0).raw / (10000 : Amount asset0).raw⟩ :
-        Amount asset0) = ⟨dxFeeLess dx.raw⟩ := by
-    rw [raw_9970, raw_10000]; rfl
+      (⟨dx.raw * 9970 / 10000⟩ : Amount asset0) = ⟨dxFeeLess dx.raw⟩ := rfl
   have hdenn :
       (⟨w.self.reserve0.raw + dxFeeLess dx.raw⟩ : Amount asset0).raw ≠ 0 :=
     Nat.ne_of_gt (Nat.add_pos_left hr0 _)
   rw [swap0_after_res dx minOut hpos hr0 hr1]
-  simp only [run_mulDivDown_bind]
-  rw [if_neg one_bps_ne, if_pos hfee']
+  simp only [run_mulDivDown_word_bind]
+  rw [if_neg word_10000_ne, if_pos hfee]
   rw [hdxFeq]
   simp only [run_hAdd_bind]
   rw [if_pos hden]
@@ -1660,12 +1614,8 @@ theorem swap0for1_reverts_on_min (dx : Amount asset0) (minOut : Amount asset1)
     (houtM : w.self.reserve1.raw * dxFeeLess dx.raw < wordBound)
     (hmin : ¬ minOut.raw ≤ swap0Out w.self dx.raw) :
     Tx.run (swap0for1 dx minOut) ctx w = .error (.user .InsufficientOutput) := by
-  have hfee' : dx.raw * (9970 : Amount asset0).raw < wordBound := by
-    rw [raw_9970]; exact hfee
   have hdxFeq :
-      (⟨dx.raw * (9970 : Amount asset0).raw / (10000 : Amount asset0).raw⟩ :
-        Amount asset0) = ⟨dxFeeLess dx.raw⟩ := by
-    rw [raw_9970, raw_10000]; rfl
+      (⟨dx.raw * 9970 / 10000⟩ : Amount asset0) = ⟨dxFeeLess dx.raw⟩ := rfl
   have hdenn :
       (⟨w.self.reserve0.raw + dxFeeLess dx.raw⟩ : Amount asset0).raw ≠ 0 :=
     Nat.ne_of_gt (Nat.add_pos_left hr0 _)
@@ -1677,8 +1627,8 @@ theorem swap0for1_reverts_on_min (dx : Amount asset0) (minOut : Amount asset1)
   have hreq : ¬ minOut ≤ (⟨swap0Out w.self dx.raw⟩ : Amount asset1) := by
     simpa [Amount.le_iff] using hmin
   rw [swap0_after_res dx minOut hpos hr0 hr1]
-  simp only [run_mulDivDown_bind]
-  rw [if_neg one_bps_ne, if_pos hfee']
+  simp only [run_mulDivDown_word_bind]
+  rw [if_neg word_10000_ne, if_pos hfee]
   rw [hdxFeq]
   simp only [run_hAdd_bind]
   rw [if_pos hden]
@@ -1693,12 +1643,8 @@ theorem swap0for1_reverts_on_zero_out (dx : Amount asset0) (minOut : Amount asse
     (hmin : minOut.raw ≤ swap0Out w.self dx.raw)
     (houtP : ¬ 0 < swap0Out w.self dx.raw) :
     Tx.run (swap0for1 dx minOut) ctx w = .error (.user .ZeroOut) := by
-  have hfee' : dx.raw * (9970 : Amount asset0).raw < wordBound := by
-    rw [raw_9970]; exact hfee
   have hdxFeq :
-      (⟨dx.raw * (9970 : Amount asset0).raw / (10000 : Amount asset0).raw⟩ :
-        Amount asset0) = ⟨dxFeeLess dx.raw⟩ := by
-    rw [raw_9970, raw_10000]; rfl
+      (⟨dx.raw * 9970 / 10000⟩ : Amount asset0) = ⟨dxFeeLess dx.raw⟩ := rfl
   have hdenn :
       (⟨w.self.reserve0.raw + dxFeeLess dx.raw⟩ : Amount asset0).raw ≠ 0 :=
     Nat.ne_of_gt (Nat.add_pos_left hr0 _)
@@ -1712,8 +1658,8 @@ theorem swap0for1_reverts_on_zero_out (dx : Amount asset0) (minOut : Amount asse
   have hreq : ¬ 0 < (⟨swap0Out w.self dx.raw⟩ : Amount asset1) := by
     simpa [Amount.lt_iff] using houtP
   rw [swap0_after_res dx minOut hpos hr0 hr1]
-  simp only [run_mulDivDown_bind]
-  rw [if_neg one_bps_ne, if_pos hfee']
+  simp only [run_mulDivDown_word_bind]
+  rw [if_neg word_10000_ne, if_pos hfee]
   rw [hdxFeq]
   simp only [run_hAdd_bind]
   rw [if_pos hden]
@@ -1731,10 +1677,9 @@ private theorem swap0_after_out_req (dx : Amount asset0) (minOut : Amount asset1
       Tx.run (do
         let ft ← read feeTo
         let ps ← read protocolShareBps
-        let coeffW ← if ft = 0 then pure (0 : Word) else pure ps
-        let coeff ← (1 : Amount asset0) *? coeffW
+        let coeff : Bps ← if ft = 0 then pure (0 : Bps) else pure ps
         let fee ← dx -? (⟨dxFeeLess dx.raw⟩ : Amount asset0)
-        let proto ← fee mulDiv↓ coeff / (10000 : Amount asset0)
+        let proto ← fee *?↓ coeff
         let taken ← dx -? proto
         let r0' ← w.self.reserve0 +? taken
         write reserve0 r0'
@@ -1753,12 +1698,8 @@ private theorem swap0_after_out_req (dx : Amount asset0) (minOut : Amount asset1
         Tx.emit (.Swap0for1 who dx ⟨swap0Out w.self dx.raw⟩)
         pure (⟨swap0Out w.self dx.raw⟩ : Amount asset1)
         : M (Amount asset1)) ctx w := by
-  have hfee' : dx.raw * (9970 : Amount asset0).raw < wordBound := by
-    rw [raw_9970]; exact hfee
   have hdxFeq :
-      (⟨dx.raw * (9970 : Amount asset0).raw / (10000 : Amount asset0).raw⟩ :
-        Amount asset0) = ⟨dxFeeLess dx.raw⟩ := by
-    rw [raw_9970, raw_10000]; rfl
+      (⟨dx.raw * 9970 / 10000⟩ : Amount asset0) = ⟨dxFeeLess dx.raw⟩ := rfl
   have hdenn :
       (⟨w.self.reserve0.raw + dxFeeLess dx.raw⟩ : Amount asset0).raw ≠ 0 :=
     Nat.ne_of_gt (Nat.add_pos_left hr0 _)
@@ -1772,36 +1713,13 @@ private theorem swap0_after_out_req (dx : Amount asset0) (minOut : Amount asset1
   have houtA : 0 < (⟨swap0Out w.self dx.raw⟩ : Amount asset1) := by
     simpa [Amount.lt_iff] using houtP
   rw [swap0_after_res dx minOut hpos hr0 hr1]
-  simp only [run_mulDivDown_bind]
-  rw [if_neg one_bps_ne, if_pos hfee']
+  simp only [run_mulDivDown_word_bind]
+  rw [if_neg word_10000_ne, if_pos hfee]
   rw [hdxFeq]
   simp only [run_hAdd_bind]
   rw [if_pos hden]
   simp only [run_mulDivDown_bind]
   rw [if_neg hdenn, if_pos houtM, houtEq, run_req_true hminA, run_req_true houtA]
-
-theorem swap0for1_reverts_on_coeff (dx : Amount asset0) (minOut : Amount asset1)
-    (hpos : 0 < dx) (hr0 : 0 < w.self.reserve0.raw) (hr1 : 0 < w.self.reserve1.raw)
-    (hfee : dx.raw * 9970 < wordBound)
-    (hden : w.self.reserve0.raw + dxFeeLess dx.raw < wordBound)
-    (houtM : w.self.reserve1.raw * dxFeeLess dx.raw < wordBound)
-    (hmin : minOut.raw ≤ swap0Out w.self dx.raw)
-    (houtP : 0 < swap0Out w.self dx.raw)
-    (hcoeff : ¬ (1 : Nat) * coeffOf w.self < wordBound) :
-    Tx.run (swap0for1 dx minOut) ctx w = .error (.arith .overflow) := by
-  by_cases hft : w.self.feeTo = 0
-  · have : (1 : Nat) * coeffOf w.self < wordBound := by
-      rw [coeffOf_of_eq hft, Nat.one_mul]
-      exact wordBound_pos
-    exact (hcoeff this).elim
-  · have hce : coeffOf w.self = w.self.protocolShareBps := coeffOf_of_ne hft
-    have h1 : (1 : Amount asset0).raw = 1 := Amount.raw_ofNat 1
-    have hcoeff' : ¬ (1 : Amount asset0).raw * w.self.protocolShareBps < wordBound := by
-      simpa [h1, hce] using hcoeff
-    rw [swap0_after_out_req dx minOut hpos hr0 hr1 hfee hden houtM hmin houtP,
-      run_load_bind, run_load_bind, Tx.run_ite, if_neg hft, run_pure_bind]
-    simp only [run_hMul_bind]
-    rw [if_neg hcoeff']
 
 theorem swap0for1_reverts_on_proto_mul (dx : Amount asset0) (minOut : Amount asset1)
     (hpos : 0 < dx) (hr0 : 0 < w.self.reserve0.raw) (hr1 : 0 < w.self.reserve1.raw)
@@ -1810,7 +1728,6 @@ theorem swap0for1_reverts_on_proto_mul (dx : Amount asset0) (minOut : Amount ass
     (houtM : w.self.reserve1.raw * dxFeeLess dx.raw < wordBound)
     (hmin : minOut.raw ≤ swap0Out w.self dx.raw)
     (houtP : 0 < swap0Out w.self dx.raw)
-    (hcoeff : (1 : Nat) * coeffOf w.self < wordBound)
     (hprotoM : ¬ swapFee dx.raw * coeffOf w.self < wordBound) :
     Tx.run (swap0for1 dx minOut) ctx w = .error (.arith .overflow) := by
   have hdxFle : dxFeeLess dx.raw ≤ dx.raw := dxFeeLess_le dx.raw
@@ -1819,21 +1736,16 @@ theorem swap0for1_reverts_on_proto_mul (dx : Amount asset0) (minOut : Amount ass
       rw [coeffOf_of_eq hft, Nat.mul_zero]
       exact wordBound_pos
     exact (hprotoM this).elim
-  · have hce : coeffOf w.self = w.self.protocolShareBps := coeffOf_of_ne hft
-    have h1 : (1 : Amount asset0).raw = 1 := Amount.raw_ofNat 1
-    have hcoeff' : (1 : Amount asset0).raw * w.self.protocolShareBps < wordBound := by
-      simpa [h1, hce] using hcoeff
+  · have hce : coeffOf w.self = w.self.protocolShareBps.raw := coeffOf_of_ne hft
     have hpm : ¬ (dx.raw - dxFeeLess dx.raw) *
-        ((1 : Amount asset0).raw * w.self.protocolShareBps) < wordBound := by
-      simpa [h1, hce, swapFee] using hprotoM
+        w.self.protocolShareBps.raw < wordBound := by
+      simpa [hce, swapFee] using hprotoM
     rw [swap0_after_out_req dx minOut hpos hr0 hr1 hfee hden houtM hmin houtP,
       run_load_bind, run_load_bind, Tx.run_ite, if_neg hft, run_pure_bind]
-    simp only [run_hMul_bind]
-    rw [if_pos hcoeff']
     simp only [run_hSub_bind]
     rw [if_pos hdxFle]
-    simp only [run_mulDivDown_bind]
-    rw [if_neg one_bps_ne, if_neg hpm]
+    simp only [run_mulFixedDown_bind]
+    rw [if_neg hpm]
 
 theorem swap0for1_reverts_on_taken (dx : Amount asset0) (minOut : Amount asset1)
     (hpos : 0 < dx) (hr0 : 0 < w.self.reserve0.raw) (hr1 : 0 < w.self.reserve1.raw)
@@ -1842,7 +1754,6 @@ theorem swap0for1_reverts_on_taken (dx : Amount asset0) (minOut : Amount asset1)
     (houtM : w.self.reserve1.raw * dxFeeLess dx.raw < wordBound)
     (hmin : minOut.raw ≤ swap0Out w.self dx.raw)
     (houtP : 0 < swap0Out w.self dx.raw)
-    (hcoeff : (1 : Nat) * coeffOf w.self < wordBound)
     (hprotoM : swapFee dx.raw * coeffOf w.self < wordBound)
     (htaken : ¬ protoOf w.self dx.raw ≤ dx.raw) :
     Tx.run (swap0for1 dx minOut) ctx w = .error (.arith .underflow) := by
@@ -1852,29 +1763,23 @@ theorem swap0for1_reverts_on_taken (dx : Amount asset0) (minOut : Amount asset1)
       rw [protoOf_of_eq hft]
       exact Nat.zero_le _
     exact (htaken this).elim
-  · have hce : coeffOf w.self = w.self.protocolShareBps := coeffOf_of_ne hft
+  · have hce : coeffOf w.self = w.self.protocolShareBps.raw := coeffOf_of_ne hft
     have hpeq : protoOf w.self dx.raw =
-        swapFee dx.raw * w.self.protocolShareBps / BPS := protoOf_of_ne hft
-    have h1 : (1 : Amount asset0).raw = 1 := Amount.raw_ofNat 1
-    have hcoeff' : (1 : Amount asset0).raw * w.self.protocolShareBps < wordBound := by
-      simpa [h1, hce] using hcoeff
+        swapFee dx.raw * w.self.protocolShareBps.raw / BPS.raw := protoOf_of_ne hft
     have hpm : (dx.raw - dxFeeLess dx.raw) *
-        ((1 : Amount asset0).raw * w.self.protocolShareBps) < wordBound := by
-      simpa [h1, hce, swapFee] using hprotoM
+        w.self.protocolShareBps.raw < wordBound := by
+      simpa [hce, swapFee] using hprotoM
     have hpr :
-        (⟨(dx.raw - dxFeeLess dx.raw) *
-            ((1 : Amount asset0).raw * w.self.protocolShareBps) /
-            (10000 : Amount asset0).raw⟩ : Amount asset0) =
+        Amount.mulDown (⟨dx.raw - dxFeeLess dx.raw⟩ : Amount asset0)
+          w.self.protocolShareBps =
           ⟨protoOf w.self dx.raw⟩ := by
-      simp [h1, Amount.raw_ofNat, hpeq, BPS, swapFee, raw_10000]
+      simpa [proto_mulDown, hpeq, swapFee, BPS_eq]
     rw [swap0_after_out_req dx minOut hpos hr0 hr1 hfee hden houtM hmin houtP,
       run_load_bind, run_load_bind, Tx.run_ite, if_neg hft, run_pure_bind]
-    simp only [run_hMul_bind]
-    rw [if_pos hcoeff']
     simp only [run_hSub_bind]
     rw [if_pos hdxFle]
-    simp only [run_mulDivDown_bind]
-    rw [if_neg one_bps_ne, if_pos hpm, hpr]
+    simp only [run_mulFixedDown_bind]
+    rw [if_pos hpm, hpr]
     simp only [run_hSub_bind]
     rw [if_neg htaken]
 
@@ -1885,7 +1790,6 @@ theorem swap0for1_reverts_on_add0 (dx : Amount asset0) (minOut : Amount asset1)
     (houtM : w.self.reserve1.raw * dxFeeLess dx.raw < wordBound)
     (hmin : minOut.raw ≤ swap0Out w.self dx.raw)
     (houtP : 0 < swap0Out w.self dx.raw)
-    (hcoeff : (1 : Nat) * coeffOf w.self < wordBound)
     (hprotoM : swapFee dx.raw * coeffOf w.self < wordBound)
     (htaken : protoOf w.self dx.raw ≤ dx.raw)
     (hadd0 : ¬ w.self.reserve0.raw + (dx.raw - protoOf w.self dx.raw) < wordBound) :
@@ -1895,26 +1799,12 @@ theorem swap0for1_reverts_on_add0 (dx : Amount asset0) (minOut : Amount asset1)
     run_load_bind, run_load_bind, Tx.run_ite]
   by_cases hft : w.self.feeTo = 0
   · have hpeq : protoOf w.self dx.raw = 0 := protoOf_of_eq hft
-    have h1 : (1 : Amount asset0).raw = 1 := Amount.raw_ofNat 1
-    have hcoeff0 : (1 : Amount asset0).raw * (0 : Word) < wordBound :=
-      hMul_zero_lt (a := asset0)
     rw [if_pos hft, run_pure_bind]
-    simp only [run_hMul_bind]
-    rw [if_pos hcoeff0]
     simp only [run_hSub_bind]
     rw [if_pos hdxFle]
-    simp only [run_mulDivDown_bind]
-    rw [if_neg one_bps_ne]
-    have hpm : (dx.raw - dxFeeLess dx.raw) *
-        ((1 : Amount asset0).raw * (0 : Word)) < wordBound := by
-      simpa [h1] using hMul_zero_lt (a := asset0)
-    rw [if_pos hpm]
-    have hpr :
-        (⟨(dx.raw - dxFeeLess dx.raw) *
-            ((1 : Amount asset0).raw * (0 : Word)) /
-            (10000 : Amount asset0).raw⟩ : Amount asset0) = ⟨0⟩ := by
-      simp [h1, Amount.raw_ofNat]
-    rw [hpr]
+    simp only [run_mulFixedDown_bind]
+    rw [if_pos (proto_prod_zero dx.raw)]
+    rw [proto_mulDown_zero dx.raw]
     simp only [run_hSub_bind]
     have ht0 : (0 : Nat) ≤ dx.raw := Nat.zero_le _
     rw [if_pos ht0]
@@ -1922,28 +1812,22 @@ theorem swap0for1_reverts_on_add0 (dx : Amount asset0) (minOut : Amount asset1)
     have hadd0' : ¬ w.self.reserve0.raw + (dx.raw - 0) < wordBound := by
       simpa [hpeq] using hadd0
     rw [if_neg hadd0']
-  · have hce : coeffOf w.self = w.self.protocolShareBps := coeffOf_of_ne hft
+  · have hce : coeffOf w.self = w.self.protocolShareBps.raw := coeffOf_of_ne hft
     have hpeq : protoOf w.self dx.raw =
-        swapFee dx.raw * w.self.protocolShareBps / BPS := protoOf_of_ne hft
-    have h1 : (1 : Amount asset0).raw = 1 := Amount.raw_ofNat 1
-    have hcoeff' : (1 : Amount asset0).raw * w.self.protocolShareBps < wordBound := by
-      simpa [h1, hce] using hcoeff
+        swapFee dx.raw * w.self.protocolShareBps.raw / BPS.raw := protoOf_of_ne hft
     have hpm : (dx.raw - dxFeeLess dx.raw) *
-        ((1 : Amount asset0).raw * w.self.protocolShareBps) < wordBound := by
-      simpa [h1, hce, swapFee] using hprotoM
+        w.self.protocolShareBps.raw < wordBound := by
+      simpa [hce, swapFee] using hprotoM
     have hpr :
-        (⟨(dx.raw - dxFeeLess dx.raw) *
-            ((1 : Amount asset0).raw * w.self.protocolShareBps) /
-            (10000 : Amount asset0).raw⟩ : Amount asset0) =
+        Amount.mulDown (⟨dx.raw - dxFeeLess dx.raw⟩ : Amount asset0)
+          w.self.protocolShareBps =
           ⟨protoOf w.self dx.raw⟩ := by
-      simp [h1, Amount.raw_ofNat, hpeq, BPS, swapFee, raw_10000]
+      simpa [proto_mulDown, hpeq, swapFee, BPS_eq]
     rw [if_neg hft, run_pure_bind]
-    simp only [run_hMul_bind]
-    rw [if_pos hcoeff']
     simp only [run_hSub_bind]
     rw [if_pos hdxFle]
-    simp only [run_mulDivDown_bind]
-    rw [if_neg one_bps_ne, if_pos hpm, hpr]
+    simp only [run_mulFixedDown_bind]
+    rw [if_pos hpm, hpr]
     simp only [run_hSub_bind]
     rw [if_pos htaken]
     simp only [run_hAdd_bind]
@@ -1956,7 +1840,6 @@ theorem swap0for1_reverts_on_sub1 (dx : Amount asset0) (minOut : Amount asset1)
     (houtM : w.self.reserve1.raw * dxFeeLess dx.raw < wordBound)
     (hmin : minOut.raw ≤ swap0Out w.self dx.raw)
     (houtP : 0 < swap0Out w.self dx.raw)
-    (hcoeff : (1 : Nat) * coeffOf w.self < wordBound)
     (hprotoM : swapFee dx.raw * coeffOf w.self < wordBound)
     (htaken : protoOf w.self dx.raw ≤ dx.raw)
     (hadd0 : w.self.reserve0.raw + (dx.raw - protoOf w.self dx.raw) < wordBound)
@@ -1967,26 +1850,12 @@ theorem swap0for1_reverts_on_sub1 (dx : Amount asset0) (minOut : Amount asset1)
     run_load_bind, run_load_bind, Tx.run_ite]
   by_cases hft : w.self.feeTo = 0
   · have hpeq : protoOf w.self dx.raw = 0 := protoOf_of_eq hft
-    have h1 : (1 : Amount asset0).raw = 1 := Amount.raw_ofNat 1
-    have hcoeff0 : (1 : Amount asset0).raw * (0 : Word) < wordBound :=
-      hMul_zero_lt (a := asset0)
     rw [if_pos hft, run_pure_bind]
-    simp only [run_hMul_bind]
-    rw [if_pos hcoeff0]
     simp only [run_hSub_bind]
     rw [if_pos hdxFle]
-    simp only [run_mulDivDown_bind]
-    rw [if_neg one_bps_ne]
-    have hpm : (dx.raw - dxFeeLess dx.raw) *
-        ((1 : Amount asset0).raw * (0 : Word)) < wordBound := by
-      simpa [h1] using hMul_zero_lt (a := asset0)
-    rw [if_pos hpm]
-    have hpr :
-        (⟨(dx.raw - dxFeeLess dx.raw) *
-            ((1 : Amount asset0).raw * (0 : Word)) /
-            (10000 : Amount asset0).raw⟩ : Amount asset0) = ⟨0⟩ := by
-      simp [h1, Amount.raw_ofNat]
-    rw [hpr]
+    simp only [run_mulFixedDown_bind]
+    rw [if_pos (proto_prod_zero dx.raw)]
+    rw [proto_mulDown_zero dx.raw]
     simp only [run_hSub_bind]
     have ht0 : (0 : Nat) ≤ dx.raw := Nat.zero_le _
     rw [if_pos ht0]
@@ -1996,28 +1865,22 @@ theorem swap0for1_reverts_on_sub1 (dx : Amount asset0) (minOut : Amount asset1)
     rw [if_pos hadd0', run_store_bind]
     simp only [run_hSub_bind]
     rw [if_neg hsub1]
-  · have hce : coeffOf w.self = w.self.protocolShareBps := coeffOf_of_ne hft
+  · have hce : coeffOf w.self = w.self.protocolShareBps.raw := coeffOf_of_ne hft
     have hpeq : protoOf w.self dx.raw =
-        swapFee dx.raw * w.self.protocolShareBps / BPS := protoOf_of_ne hft
-    have h1 : (1 : Amount asset0).raw = 1 := Amount.raw_ofNat 1
-    have hcoeff' : (1 : Amount asset0).raw * w.self.protocolShareBps < wordBound := by
-      simpa [h1, hce] using hcoeff
+        swapFee dx.raw * w.self.protocolShareBps.raw / BPS.raw := protoOf_of_ne hft
     have hpm : (dx.raw - dxFeeLess dx.raw) *
-        ((1 : Amount asset0).raw * w.self.protocolShareBps) < wordBound := by
-      simpa [h1, hce, swapFee] using hprotoM
+        w.self.protocolShareBps.raw < wordBound := by
+      simpa [hce, swapFee] using hprotoM
     have hpr :
-        (⟨(dx.raw - dxFeeLess dx.raw) *
-            ((1 : Amount asset0).raw * w.self.protocolShareBps) /
-            (10000 : Amount asset0).raw⟩ : Amount asset0) =
+        Amount.mulDown (⟨dx.raw - dxFeeLess dx.raw⟩ : Amount asset0)
+          w.self.protocolShareBps =
           ⟨protoOf w.self dx.raw⟩ := by
-      simp [h1, Amount.raw_ofNat, hpeq, BPS, swapFee, raw_10000]
+      simpa [proto_mulDown, hpeq, swapFee, BPS_eq]
     rw [if_neg hft, run_pure_bind]
-    simp only [run_hMul_bind]
-    rw [if_pos hcoeff']
     simp only [run_hSub_bind]
     rw [if_pos hdxFle]
-    simp only [run_mulDivDown_bind]
-    rw [if_neg one_bps_ne, if_pos hpm, hpr]
+    simp only [run_mulFixedDown_bind]
+    rw [if_pos hpm, hpr]
     simp only [run_hSub_bind]
     rw [if_pos htaken]
     simp only [run_hAdd_bind]
@@ -2032,7 +1895,6 @@ theorem swap0for1_reverts_on_acc (dx : Amount asset0) (minOut : Amount asset1)
     (houtM : w.self.reserve1.raw * dxFeeLess dx.raw < wordBound)
     (hmin : minOut.raw ≤ swap0Out w.self dx.raw)
     (houtP : 0 < swap0Out w.self dx.raw)
-    (hcoeff : (1 : Nat) * coeffOf w.self < wordBound)
     (hprotoM : swapFee dx.raw * coeffOf w.self < wordBound)
     (htaken : protoOf w.self dx.raw ≤ dx.raw)
     (hadd0 : w.self.reserve0.raw + (dx.raw - protoOf w.self dx.raw) < wordBound)
@@ -2044,26 +1906,12 @@ theorem swap0for1_reverts_on_acc (dx : Amount asset0) (minOut : Amount asset1)
     run_load_bind, run_load_bind, Tx.run_ite]
   by_cases hft : w.self.feeTo = 0
   · have hpeq : protoOf w.self dx.raw = 0 := protoOf_of_eq hft
-    have h1 : (1 : Amount asset0).raw = 1 := Amount.raw_ofNat 1
-    have hcoeff0 : (1 : Amount asset0).raw * (0 : Word) < wordBound :=
-      hMul_zero_lt (a := asset0)
     rw [if_pos hft, run_pure_bind]
-    simp only [run_hMul_bind]
-    rw [if_pos hcoeff0]
     simp only [run_hSub_bind]
     rw [if_pos hdxFle]
-    simp only [run_mulDivDown_bind]
-    rw [if_neg one_bps_ne]
-    have hpm : (dx.raw - dxFeeLess dx.raw) *
-        ((1 : Amount asset0).raw * (0 : Word)) < wordBound := by
-      simpa [h1] using hMul_zero_lt (a := asset0)
-    rw [if_pos hpm]
-    have hpr :
-        (⟨(dx.raw - dxFeeLess dx.raw) *
-            ((1 : Amount asset0).raw * (0 : Word)) /
-            (10000 : Amount asset0).raw⟩ : Amount asset0) = ⟨0⟩ := by
-      simp [h1, Amount.raw_ofNat]
-    rw [hpr]
+    simp only [run_mulFixedDown_bind]
+    rw [if_pos (proto_prod_zero dx.raw)]
+    rw [proto_mulDown_zero dx.raw]
     simp only [run_hSub_bind]
     have ht0 : (0 : Nat) ≤ dx.raw := Nat.zero_le _
     rw [if_pos ht0]
@@ -2077,28 +1925,22 @@ theorem swap0for1_reverts_on_acc (dx : Amount asset0) (minOut : Amount asset1)
     have hacc0 : ¬ w.self.protocolFees0.raw + 0 < wordBound := by
       simpa [hpeq] using hacc
     rw [if_neg hacc0]
-  · have hce : coeffOf w.self = w.self.protocolShareBps := coeffOf_of_ne hft
+  · have hce : coeffOf w.self = w.self.protocolShareBps.raw := coeffOf_of_ne hft
     have hpeq : protoOf w.self dx.raw =
-        swapFee dx.raw * w.self.protocolShareBps / BPS := protoOf_of_ne hft
-    have h1 : (1 : Amount asset0).raw = 1 := Amount.raw_ofNat 1
-    have hcoeff' : (1 : Amount asset0).raw * w.self.protocolShareBps < wordBound := by
-      simpa [h1, hce] using hcoeff
+        swapFee dx.raw * w.self.protocolShareBps.raw / BPS.raw := protoOf_of_ne hft
     have hpm : (dx.raw - dxFeeLess dx.raw) *
-        ((1 : Amount asset0).raw * w.self.protocolShareBps) < wordBound := by
-      simpa [h1, hce, swapFee] using hprotoM
+        w.self.protocolShareBps.raw < wordBound := by
+      simpa [hce, swapFee] using hprotoM
     have hpr :
-        (⟨(dx.raw - dxFeeLess dx.raw) *
-            ((1 : Amount asset0).raw * w.self.protocolShareBps) /
-            (10000 : Amount asset0).raw⟩ : Amount asset0) =
+        Amount.mulDown (⟨dx.raw - dxFeeLess dx.raw⟩ : Amount asset0)
+          w.self.protocolShareBps =
           ⟨protoOf w.self dx.raw⟩ := by
-      simp [h1, Amount.raw_ofNat, hpeq, BPS, swapFee, raw_10000]
+      simpa [proto_mulDown, hpeq, swapFee, BPS_eq]
     rw [if_neg hft, run_pure_bind]
-    simp only [run_hMul_bind]
-    rw [if_pos hcoeff']
     simp only [run_hSub_bind]
     rw [if_pos hdxFle]
-    simp only [run_mulDivDown_bind]
-    rw [if_neg one_bps_ne, if_pos hpm, hpr]
+    simp only [run_mulFixedDown_bind]
+    rw [if_pos hpm, hpr]
     simp only [run_hSub_bind]
     rw [if_pos htaken]
     simp only [run_hAdd_bind]
@@ -2147,36 +1989,32 @@ theorem swap0for1_ok_of_run {dx : Amount asset0} {minOut : Amount asset1}
     by_contra h
     exact Tx.run_ok_error hrun
       (swap0for1_reverts_on_zero_out dx minOut hpos hr0 hr1 hfee hden houtM hmin h)
-  have hcoeff : (1 : Nat) * coeffOf w.self < wordBound := by
-    by_contra h
-    exact Tx.run_ok_error hrun
-      (swap0for1_reverts_on_coeff dx minOut hpos hr0 hr1 hfee hden houtM hmin houtP h)
   have hprotoM : swapFee dx.raw * coeffOf w.self < wordBound := by
     by_contra h
     exact Tx.run_ok_error hrun
       (swap0for1_reverts_on_proto_mul dx minOut hpos hr0 hr1 hfee hden houtM
-        hmin houtP hcoeff h)
+        hmin houtP h)
   have htaken : protoOf w.self dx.raw ≤ dx.raw := by
     by_contra h
     exact Tx.run_ok_error hrun
       (swap0for1_reverts_on_taken dx minOut hpos hr0 hr1 hfee hden houtM
-        hmin houtP hcoeff hprotoM h)
+        hmin houtP hprotoM h)
   have hadd0 : w.self.reserve0.raw + (dx.raw - protoOf w.self dx.raw) < wordBound := by
     by_contra h
     exact Tx.run_ok_error hrun
       (swap0for1_reverts_on_add0 dx minOut hpos hr0 hr1 hfee hden houtM
-        hmin houtP hcoeff hprotoM htaken h)
+        hmin houtP hprotoM htaken h)
   have hsub1 : swap0Out w.self dx.raw ≤ w.self.reserve1.raw := by
     by_contra h
     exact Tx.run_ok_error hrun
       (swap0for1_reverts_on_sub1 dx minOut hpos hr0 hr1 hfee hden houtM
-        hmin houtP hcoeff hprotoM htaken hadd0 h)
+        hmin houtP hprotoM htaken hadd0 h)
   have hacc : w.self.protocolFees0.raw + protoOf w.self dx.raw < wordBound := by
     by_contra h
     exact Tx.run_ok_error hrun
       (swap0for1_reverts_on_acc dx minOut hpos hr0 hr1 hfee hden houtM
-        hmin houtP hcoeff hprotoM htaken hadd0 hsub1 h)
-  exact ⟨hpos, hr0, hr1, hfee, hden, houtM, hmin, houtP, hcoeff, hprotoM, htaken,
+        hmin houtP hprotoM htaken hadd0 hsub1 h)
+  exact ⟨hpos, hr0, hr1, hfee, hden, houtM, hmin, houtP, hprotoM, htaken,
     hadd0, hsub1, hacc⟩
 
 theorem swap0for1_to_tail (dx : Amount asset0) (minOut : Amount asset1)
@@ -2192,16 +2030,12 @@ theorem swap0for1_to_tail (dx : Amount asset0) (minOut : Amount asset1)
         Tx.emit (.Swap0for1 ctx.sender dx out) >>= fun _ =>
         (pure out : Tx Storage ExtState Event Error (Amount asset1)))
         ctx { w with self := swap0Post w.self dx.raw proto (swap0Out w.self dx.raw) } := by
-  rcases h with ⟨hpos, hr0, hr1, hfee, hden, houtM, hmin, houtP, hcoeff, hprotoM,
+  rcases h with ⟨hpos, hr0, hr1, hfee, hden, houtM, hmin, houtP, hprotoM,
     htaken, hadd0, hsub1, hacc⟩
   have hr0A : 0 < w.self.reserve0 := by simpa [Amount.lt_iff] using hr0
   have hr1A : 0 < w.self.reserve1 := by simpa [Amount.lt_iff] using hr1
-  have hfee' : dx.raw * (9970 : Amount asset0).raw < wordBound := by
-    rw [raw_9970]; exact hfee
   have hdxFeq :
-      (⟨dx.raw * (9970 : Amount asset0).raw / (10000 : Amount asset0).raw⟩ :
-        Amount asset0) = ⟨dxFeeLess dx.raw⟩ := by
-    rw [raw_9970, raw_10000]; rfl
+      (⟨dx.raw * 9970 / 10000⟩ : Amount asset0) = ⟨dxFeeLess dx.raw⟩ := rfl
   have hdenn :
       (⟨w.self.reserve0.raw + dxFeeLess dx.raw⟩ : Amount asset0).raw ≠ 0 :=
     Nat.ne_of_gt (Nat.add_pos_left hr0 _)
@@ -2215,11 +2049,10 @@ theorem swap0for1_to_tail (dx : Amount asset0) (minOut : Amount asset1)
   have houtA : 0 < (⟨swap0Out w.self dx.raw⟩ : Amount asset1) := by
     simpa [Amount.lt_iff] using houtP
   have hdxFle : dxFeeLess dx.raw ≤ dx.raw := dxFeeLess_le dx.raw
-  have h1 : (1 : Amount asset0).raw = 1 := Amount.raw_ofNat 1
   rw [swap0for1, run_req_true hpos, run_load_bind, run_load_bind,
     run_req_true hr0A, run_req_true hr1A]
-  simp only [run_mulDivDown_bind]
-  rw [if_neg one_bps_ne, if_pos hfee']
+  simp only [run_mulDivDown_word_bind]
+  rw [if_neg word_10000_ne, if_pos hfee]
   rw [hdxFeq]
   simp only [run_hAdd_bind]
   rw [if_pos hden]
@@ -2228,30 +2061,13 @@ theorem swap0for1_to_tail (dx : Amount asset0) (minOut : Amount asset1)
   rw [houtEq, run_req_true hminA, run_req_true houtA,
     run_load_bind, run_load_bind, Tx.run_ite]
   by_cases hft : w.self.feeTo = 0
-  · have hcoeff0 : (1 : Amount asset0).raw * (0 : Word) < wordBound :=
-      hMul_zero_lt (a := asset0)
-    have hproto0 : swapFee dx.raw * (0 : Nat) < wordBound := by
-      rw [Nat.mul_zero]
-      exact wordBound_pos
-    have hpeq : protoOf w.self dx.raw = 0 := protoOf_of_eq hft
-    have hce : coeffOf w.self = 0 := coeffOf_of_eq hft
+  · have hpeq : protoOf w.self dx.raw = 0 := protoOf_of_eq hft
     rw [if_pos hft, run_pure_bind]
-    simp only [run_hMul_bind]
-    rw [if_pos hcoeff0]
     simp only [run_hSub_bind]
     rw [if_pos hdxFle]
-    simp only [run_mulDivDown_bind]
-    rw [if_neg one_bps_ne]
-    have hpm : (dx.raw - dxFeeLess dx.raw) *
-        ((1 : Amount asset0).raw * (0 : Word)) < wordBound := by
-      simpa [h1] using hMul_zero_lt (a := asset0)
-    rw [if_pos hpm]
-    have hpr :
-        (⟨(dx.raw - dxFeeLess dx.raw) *
-            ((1 : Amount asset0).raw * (0 : Word)) /
-            (10000 : Amount asset0).raw⟩ : Amount asset0) = ⟨0⟩ := by
-      simp [h1, Amount.raw_ofNat]
-    rw [hpr]
+    simp only [run_mulFixedDown_bind]
+    rw [if_pos (proto_prod_zero dx.raw)]
+    rw [proto_mulDown_zero dx.raw]
     simp only [run_hSub_bind]
     have ht0 : (0 : Nat) ≤ dx.raw := Nat.zero_le _
     rw [if_pos ht0]
@@ -2279,29 +2095,22 @@ theorem swap0for1_to_tail (dx : Amount asset0) (minOut : Amount asset1)
       Amount.ofWord_add_right, Amount.ofWord_sub_left, Amount.ofWord_raw,
       Amount.mk_raw]
     rfl
-  · have hce : coeffOf w.self = w.self.protocolShareBps := coeffOf_of_ne hft
+  · have hce : coeffOf w.self = w.self.protocolShareBps.raw := coeffOf_of_ne hft
     have hpeq : protoOf w.self dx.raw =
-        swapFee dx.raw * w.self.protocolShareBps / BPS := protoOf_of_ne hft
-    have hcoeff' : (1 : Amount asset0).raw * w.self.protocolShareBps < wordBound := by
-      simpa [h1, hce] using hcoeff
+        swapFee dx.raw * w.self.protocolShareBps.raw / BPS.raw := protoOf_of_ne hft
+    have hpm : (dx.raw - dxFeeLess dx.raw) *
+        w.self.protocolShareBps.raw < wordBound := by
+      simpa [hce, swapFee] using hprotoM
+    have hpr :
+        Amount.mulDown (⟨dx.raw - dxFeeLess dx.raw⟩ : Amount asset0)
+          w.self.protocolShareBps =
+          ⟨protoOf w.self dx.raw⟩ := by
+      simpa [proto_mulDown, hpeq, swapFee, BPS_eq]
     rw [if_neg hft, run_pure_bind]
-    simp only [run_hMul_bind]
-    rw [if_pos hcoeff']
     simp only [run_hSub_bind]
     rw [if_pos hdxFle]
-    simp only [run_mulDivDown_bind]
-    rw [if_neg one_bps_ne]
-    have hpm : (dx.raw - dxFeeLess dx.raw) *
-        ((1 : Amount asset0).raw * w.self.protocolShareBps) < wordBound := by
-      simpa [h1, hce, swapFee] using hprotoM
-    rw [if_pos hpm]
-    have hpr :
-        (⟨(dx.raw - dxFeeLess dx.raw) *
-            ((1 : Amount asset0).raw * w.self.protocolShareBps) /
-            (10000 : Amount asset0).raw⟩ : Amount asset0) =
-          ⟨protoOf w.self dx.raw⟩ := by
-      simp [h1, Amount.raw_ofNat, hpeq, BPS, swapFee, raw_10000]
-    rw [hpr]
+    simp only [run_mulFixedDown_bind]
+    rw [if_pos hpm, hpr]
     simp only [run_hSub_bind]
     rw [if_pos htaken]
     simp only [run_hAdd_bind]
@@ -2390,7 +2199,7 @@ private theorem swap1_after_res (dx : Amount asset1) (minOut : Amount asset0)
     Tx.run (swap1for0 dx minOut) ctx w =
       Tx.run (
         Tx.HMulDivDown.hMulDivDown (S := Storage) (X := ExtState) (E := Event)
-          (ε := Error) dx (9970 : Amount asset1) (10000 : Amount asset1) >>=
+          (ε := Error) dx (9970 : Word) (10000 : Word) >>=
         fun dxF => do
           let den ← w.self.reserve1 +? dxF
           let out ← w.self.reserve0 mulDiv↓ dxF / den
@@ -2398,10 +2207,9 @@ private theorem swap1_after_res (dx : Amount asset1) (minOut : Amount asset0)
           Tx.require (0 < out) .ZeroOut
           let ft ← read feeTo
           let ps ← read protocolShareBps
-          let coeffW ← if ft = 0 then pure (0 : Word) else pure ps
-          let coeff ← (1 : Amount asset1) *? coeffW
+          let coeff : Bps ← if ft = 0 then pure (0 : Bps) else pure ps
           let fee ← dx -? dxF
-          let proto ← fee mulDiv↓ coeff / (10000 : Amount asset1)
+          let proto ← fee *?↓ coeff
           let taken ← dx -? proto
           let r1' ← w.self.reserve1 +? taken
           write reserve1 r1'
@@ -2428,26 +2236,20 @@ theorem swap1for0_reverts_on_fee_mul (dx : Amount asset1) (minOut : Amount asset
     (hpos : 0 < dx) (hr0 : 0 < w.self.reserve0.raw) (hr1 : 0 < w.self.reserve1.raw)
     (hfee : ¬ dx.raw * 9970 < wordBound) :
     Tx.run (swap1for0 dx minOut) ctx w = .error (.arith .overflow) := by
-  have hfee' : ¬ dx.raw * (9970 : Amount asset1).raw < wordBound := by
-    rw [raw_9970]; exact hfee
   rw [swap1_after_res dx minOut hpos hr0 hr1]
-  simp only [run_mulDivDown_bind]
-  rw [if_neg one_bps1_ne, if_neg hfee']
+  simp only [run_mulDivDown_word_bind]
+  rw [if_neg word_10000_ne, if_neg hfee]
 
 theorem swap1for0_reverts_on_den (dx : Amount asset1) (minOut : Amount asset0)
     (hpos : 0 < dx) (hr0 : 0 < w.self.reserve0.raw) (hr1 : 0 < w.self.reserve1.raw)
     (hfee : dx.raw * 9970 < wordBound)
     (hden : ¬ w.self.reserve1.raw + dxFeeLess dx.raw < wordBound) :
     Tx.run (swap1for0 dx minOut) ctx w = .error (.arith .overflow) := by
-  have hfee' : dx.raw * (9970 : Amount asset1).raw < wordBound := by
-    rw [raw_9970]; exact hfee
   have hdxFeq :
-      (⟨dx.raw * (9970 : Amount asset1).raw / (10000 : Amount asset1).raw⟩ :
-        Amount asset1) = ⟨dxFeeLess dx.raw⟩ := by
-    rw [raw_9970, raw_10000]; rfl
+      (⟨dx.raw * 9970 / 10000⟩ : Amount asset1) = ⟨dxFeeLess dx.raw⟩ := rfl
   rw [swap1_after_res dx minOut hpos hr0 hr1]
-  simp only [run_mulDivDown_bind]
-  rw [if_neg one_bps1_ne, if_pos hfee']
+  simp only [run_mulDivDown_word_bind]
+  rw [if_neg word_10000_ne, if_pos hfee]
   rw [hdxFeq]
   simp only [run_hAdd_bind]
   rw [if_neg hden]
@@ -2458,18 +2260,14 @@ theorem swap1for0_reverts_on_out_mul (dx : Amount asset1) (minOut : Amount asset
     (hden : w.self.reserve1.raw + dxFeeLess dx.raw < wordBound)
     (houtM : ¬ w.self.reserve0.raw * dxFeeLess dx.raw < wordBound) :
     Tx.run (swap1for0 dx minOut) ctx w = .error (.arith .overflow) := by
-  have hfee' : dx.raw * (9970 : Amount asset1).raw < wordBound := by
-    rw [raw_9970]; exact hfee
   have hdxFeq :
-      (⟨dx.raw * (9970 : Amount asset1).raw / (10000 : Amount asset1).raw⟩ :
-        Amount asset1) = ⟨dxFeeLess dx.raw⟩ := by
-    rw [raw_9970, raw_10000]; rfl
+      (⟨dx.raw * 9970 / 10000⟩ : Amount asset1) = ⟨dxFeeLess dx.raw⟩ := rfl
   have hdenn :
       (⟨w.self.reserve1.raw + dxFeeLess dx.raw⟩ : Amount asset1).raw ≠ 0 :=
     Nat.ne_of_gt (Nat.add_pos_left hr1 _)
   rw [swap1_after_res dx minOut hpos hr0 hr1]
-  simp only [run_mulDivDown_bind]
-  rw [if_neg one_bps1_ne, if_pos hfee']
+  simp only [run_mulDivDown_word_bind]
+  rw [if_neg word_10000_ne, if_pos hfee]
   rw [hdxFeq]
   simp only [run_hAdd_bind]
   rw [if_pos hden]
@@ -2483,12 +2281,8 @@ theorem swap1for0_reverts_on_min (dx : Amount asset1) (minOut : Amount asset0)
     (houtM : w.self.reserve0.raw * dxFeeLess dx.raw < wordBound)
     (hmin : ¬ minOut.raw ≤ swap1Out w.self dx.raw) :
     Tx.run (swap1for0 dx minOut) ctx w = .error (.user .InsufficientOutput) := by
-  have hfee' : dx.raw * (9970 : Amount asset1).raw < wordBound := by
-    rw [raw_9970]; exact hfee
   have hdxFeq :
-      (⟨dx.raw * (9970 : Amount asset1).raw / (10000 : Amount asset1).raw⟩ :
-        Amount asset1) = ⟨dxFeeLess dx.raw⟩ := by
-    rw [raw_9970, raw_10000]; rfl
+      (⟨dx.raw * 9970 / 10000⟩ : Amount asset1) = ⟨dxFeeLess dx.raw⟩ := rfl
   have hdenn :
       (⟨w.self.reserve1.raw + dxFeeLess dx.raw⟩ : Amount asset1).raw ≠ 0 :=
     Nat.ne_of_gt (Nat.add_pos_left hr1 _)
@@ -2500,8 +2294,8 @@ theorem swap1for0_reverts_on_min (dx : Amount asset1) (minOut : Amount asset0)
   have hreq : ¬ minOut ≤ (⟨swap1Out w.self dx.raw⟩ : Amount asset0) := by
     simpa [Amount.le_iff] using hmin
   rw [swap1_after_res dx minOut hpos hr0 hr1]
-  simp only [run_mulDivDown_bind]
-  rw [if_neg one_bps1_ne, if_pos hfee']
+  simp only [run_mulDivDown_word_bind]
+  rw [if_neg word_10000_ne, if_pos hfee]
   rw [hdxFeq]
   simp only [run_hAdd_bind]
   rw [if_pos hden]
@@ -2516,12 +2310,8 @@ theorem swap1for0_reverts_on_zero_out (dx : Amount asset1) (minOut : Amount asse
     (hmin : minOut.raw ≤ swap1Out w.self dx.raw)
     (houtP : ¬ 0 < swap1Out w.self dx.raw) :
     Tx.run (swap1for0 dx minOut) ctx w = .error (.user .ZeroOut) := by
-  have hfee' : dx.raw * (9970 : Amount asset1).raw < wordBound := by
-    rw [raw_9970]; exact hfee
   have hdxFeq :
-      (⟨dx.raw * (9970 : Amount asset1).raw / (10000 : Amount asset1).raw⟩ :
-        Amount asset1) = ⟨dxFeeLess dx.raw⟩ := by
-    rw [raw_9970, raw_10000]; rfl
+      (⟨dx.raw * 9970 / 10000⟩ : Amount asset1) = ⟨dxFeeLess dx.raw⟩ := rfl
   have hdenn :
       (⟨w.self.reserve1.raw + dxFeeLess dx.raw⟩ : Amount asset1).raw ≠ 0 :=
     Nat.ne_of_gt (Nat.add_pos_left hr1 _)
@@ -2535,8 +2325,8 @@ theorem swap1for0_reverts_on_zero_out (dx : Amount asset1) (minOut : Amount asse
   have hreq : ¬ 0 < (⟨swap1Out w.self dx.raw⟩ : Amount asset0) := by
     simpa [Amount.lt_iff] using houtP
   rw [swap1_after_res dx minOut hpos hr0 hr1]
-  simp only [run_mulDivDown_bind]
-  rw [if_neg one_bps1_ne, if_pos hfee']
+  simp only [run_mulDivDown_word_bind]
+  rw [if_neg word_10000_ne, if_pos hfee]
   rw [hdxFeq]
   simp only [run_hAdd_bind]
   rw [if_pos hden]
@@ -2554,10 +2344,9 @@ private theorem swap1_after_out_req (dx : Amount asset1) (minOut : Amount asset0
       Tx.run (do
         let ft ← read feeTo
         let ps ← read protocolShareBps
-        let coeffW ← if ft = 0 then pure (0 : Word) else pure ps
-        let coeff ← (1 : Amount asset1) *? coeffW
+        let coeff : Bps ← if ft = 0 then pure (0 : Bps) else pure ps
         let fee ← dx -? (⟨dxFeeLess dx.raw⟩ : Amount asset1)
-        let proto ← fee mulDiv↓ coeff / (10000 : Amount asset1)
+        let proto ← fee *?↓ coeff
         let taken ← dx -? proto
         let r1' ← w.self.reserve1 +? taken
         write reserve1 r1'
@@ -2576,12 +2365,8 @@ private theorem swap1_after_out_req (dx : Amount asset1) (minOut : Amount asset0
         Tx.emit (.Swap1for0 who dx ⟨swap1Out w.self dx.raw⟩)
         pure (⟨swap1Out w.self dx.raw⟩ : Amount asset0)
         : M (Amount asset0)) ctx w := by
-  have hfee' : dx.raw * (9970 : Amount asset1).raw < wordBound := by
-    rw [raw_9970]; exact hfee
   have hdxFeq :
-      (⟨dx.raw * (9970 : Amount asset1).raw / (10000 : Amount asset1).raw⟩ :
-        Amount asset1) = ⟨dxFeeLess dx.raw⟩ := by
-    rw [raw_9970, raw_10000]; rfl
+      (⟨dx.raw * 9970 / 10000⟩ : Amount asset1) = ⟨dxFeeLess dx.raw⟩ := rfl
   have hdenn :
       (⟨w.self.reserve1.raw + dxFeeLess dx.raw⟩ : Amount asset1).raw ≠ 0 :=
     Nat.ne_of_gt (Nat.add_pos_left hr1 _)
@@ -2595,36 +2380,13 @@ private theorem swap1_after_out_req (dx : Amount asset1) (minOut : Amount asset0
   have houtA : 0 < (⟨swap1Out w.self dx.raw⟩ : Amount asset0) := by
     simpa [Amount.lt_iff] using houtP
   rw [swap1_after_res dx minOut hpos hr0 hr1]
-  simp only [run_mulDivDown_bind]
-  rw [if_neg one_bps1_ne, if_pos hfee']
+  simp only [run_mulDivDown_word_bind]
+  rw [if_neg word_10000_ne, if_pos hfee]
   rw [hdxFeq]
   simp only [run_hAdd_bind]
   rw [if_pos hden]
   simp only [run_mulDivDown_bind]
   rw [if_neg hdenn, if_pos houtM, houtEq, run_req_true hminA, run_req_true houtA]
-
-theorem swap1for0_reverts_on_coeff (dx : Amount asset1) (minOut : Amount asset0)
-    (hpos : 0 < dx) (hr0 : 0 < w.self.reserve0.raw) (hr1 : 0 < w.self.reserve1.raw)
-    (hfee : dx.raw * 9970 < wordBound)
-    (hden : w.self.reserve1.raw + dxFeeLess dx.raw < wordBound)
-    (houtM : w.self.reserve0.raw * dxFeeLess dx.raw < wordBound)
-    (hmin : minOut.raw ≤ swap1Out w.self dx.raw)
-    (houtP : 0 < swap1Out w.self dx.raw)
-    (hcoeff : ¬ (1 : Nat) * coeffOf w.self < wordBound) :
-    Tx.run (swap1for0 dx minOut) ctx w = .error (.arith .overflow) := by
-  by_cases hft : w.self.feeTo = 0
-  · have : (1 : Nat) * coeffOf w.self < wordBound := by
-      rw [coeffOf_of_eq hft, Nat.one_mul]
-      exact wordBound_pos
-    exact (hcoeff this).elim
-  · have hce : coeffOf w.self = w.self.protocolShareBps := coeffOf_of_ne hft
-    have h1 : (1 : Amount asset1).raw = 1 := Amount.raw_ofNat 1
-    have hcoeff' : ¬ (1 : Amount asset1).raw * w.self.protocolShareBps < wordBound := by
-      simpa [h1, hce] using hcoeff
-    rw [swap1_after_out_req dx minOut hpos hr0 hr1 hfee hden houtM hmin houtP,
-      run_load_bind, run_load_bind, Tx.run_ite, if_neg hft, run_pure_bind]
-    simp only [run_hMul_bind]
-    rw [if_neg hcoeff']
 
 theorem swap1for0_reverts_on_proto_mul (dx : Amount asset1) (minOut : Amount asset0)
     (hpos : 0 < dx) (hr0 : 0 < w.self.reserve0.raw) (hr1 : 0 < w.self.reserve1.raw)
@@ -2633,7 +2395,6 @@ theorem swap1for0_reverts_on_proto_mul (dx : Amount asset1) (minOut : Amount ass
     (houtM : w.self.reserve0.raw * dxFeeLess dx.raw < wordBound)
     (hmin : minOut.raw ≤ swap1Out w.self dx.raw)
     (houtP : 0 < swap1Out w.self dx.raw)
-    (hcoeff : (1 : Nat) * coeffOf w.self < wordBound)
     (hprotoM : ¬ swapFee dx.raw * coeffOf w.self < wordBound) :
     Tx.run (swap1for0 dx minOut) ctx w = .error (.arith .overflow) := by
   have hdxFle : dxFeeLess dx.raw ≤ dx.raw := dxFeeLess_le dx.raw
@@ -2642,21 +2403,16 @@ theorem swap1for0_reverts_on_proto_mul (dx : Amount asset1) (minOut : Amount ass
       rw [coeffOf_of_eq hft, Nat.mul_zero]
       exact wordBound_pos
     exact (hprotoM this).elim
-  · have hce : coeffOf w.self = w.self.protocolShareBps := coeffOf_of_ne hft
-    have h1 : (1 : Amount asset1).raw = 1 := Amount.raw_ofNat 1
-    have hcoeff' : (1 : Amount asset1).raw * w.self.protocolShareBps < wordBound := by
-      simpa [h1, hce] using hcoeff
+  · have hce : coeffOf w.self = w.self.protocolShareBps.raw := coeffOf_of_ne hft
     have hpm : ¬ (dx.raw - dxFeeLess dx.raw) *
-        ((1 : Amount asset1).raw * w.self.protocolShareBps) < wordBound := by
-      simpa [h1, hce, swapFee] using hprotoM
+        w.self.protocolShareBps.raw < wordBound := by
+      simpa [hce, swapFee] using hprotoM
     rw [swap1_after_out_req dx minOut hpos hr0 hr1 hfee hden houtM hmin houtP,
       run_load_bind, run_load_bind, Tx.run_ite, if_neg hft, run_pure_bind]
-    simp only [run_hMul_bind]
-    rw [if_pos hcoeff']
     simp only [run_hSub_bind]
     rw [if_pos hdxFle]
-    simp only [run_mulDivDown_bind]
-    rw [if_neg one_bps1_ne, if_neg hpm]
+    simp only [run_mulFixedDown_bind]
+    rw [if_neg hpm]
 
 theorem swap1for0_reverts_on_taken (dx : Amount asset1) (minOut : Amount asset0)
     (hpos : 0 < dx) (hr0 : 0 < w.self.reserve0.raw) (hr1 : 0 < w.self.reserve1.raw)
@@ -2665,7 +2421,6 @@ theorem swap1for0_reverts_on_taken (dx : Amount asset1) (minOut : Amount asset0)
     (houtM : w.self.reserve0.raw * dxFeeLess dx.raw < wordBound)
     (hmin : minOut.raw ≤ swap1Out w.self dx.raw)
     (houtP : 0 < swap1Out w.self dx.raw)
-    (hcoeff : (1 : Nat) * coeffOf w.self < wordBound)
     (hprotoM : swapFee dx.raw * coeffOf w.self < wordBound)
     (htaken : ¬ protoOf w.self dx.raw ≤ dx.raw) :
     Tx.run (swap1for0 dx minOut) ctx w = .error (.arith .underflow) := by
@@ -2675,29 +2430,23 @@ theorem swap1for0_reverts_on_taken (dx : Amount asset1) (minOut : Amount asset0)
       rw [protoOf_of_eq hft]
       exact Nat.zero_le _
     exact (htaken this).elim
-  · have hce : coeffOf w.self = w.self.protocolShareBps := coeffOf_of_ne hft
+  · have hce : coeffOf w.self = w.self.protocolShareBps.raw := coeffOf_of_ne hft
     have hpeq : protoOf w.self dx.raw =
-        swapFee dx.raw * w.self.protocolShareBps / BPS := protoOf_of_ne hft
-    have h1 : (1 : Amount asset1).raw = 1 := Amount.raw_ofNat 1
-    have hcoeff' : (1 : Amount asset1).raw * w.self.protocolShareBps < wordBound := by
-      simpa [h1, hce] using hcoeff
+        swapFee dx.raw * w.self.protocolShareBps.raw / BPS.raw := protoOf_of_ne hft
     have hpm : (dx.raw - dxFeeLess dx.raw) *
-        ((1 : Amount asset1).raw * w.self.protocolShareBps) < wordBound := by
-      simpa [h1, hce, swapFee] using hprotoM
+        w.self.protocolShareBps.raw < wordBound := by
+      simpa [hce, swapFee] using hprotoM
     have hpr :
-        (⟨(dx.raw - dxFeeLess dx.raw) *
-            ((1 : Amount asset1).raw * w.self.protocolShareBps) /
-            (10000 : Amount asset1).raw⟩ : Amount asset1) =
+        Amount.mulDown (⟨dx.raw - dxFeeLess dx.raw⟩ : Amount asset1)
+          w.self.protocolShareBps =
           ⟨protoOf w.self dx.raw⟩ := by
-      simp [h1, Amount.raw_ofNat, hpeq, BPS, swapFee, raw_10000]
+      simpa [proto_mulDown, hpeq, swapFee, BPS_eq]
     rw [swap1_after_out_req dx minOut hpos hr0 hr1 hfee hden houtM hmin houtP,
       run_load_bind, run_load_bind, Tx.run_ite, if_neg hft, run_pure_bind]
-    simp only [run_hMul_bind]
-    rw [if_pos hcoeff']
     simp only [run_hSub_bind]
     rw [if_pos hdxFle]
-    simp only [run_mulDivDown_bind]
-    rw [if_neg one_bps1_ne, if_pos hpm, hpr]
+    simp only [run_mulFixedDown_bind]
+    rw [if_pos hpm, hpr]
     simp only [run_hSub_bind]
     rw [if_neg htaken]
 
@@ -2708,7 +2457,6 @@ theorem swap1for0_reverts_on_add1 (dx : Amount asset1) (minOut : Amount asset0)
     (houtM : w.self.reserve0.raw * dxFeeLess dx.raw < wordBound)
     (hmin : minOut.raw ≤ swap1Out w.self dx.raw)
     (houtP : 0 < swap1Out w.self dx.raw)
-    (hcoeff : (1 : Nat) * coeffOf w.self < wordBound)
     (hprotoM : swapFee dx.raw * coeffOf w.self < wordBound)
     (htaken : protoOf w.self dx.raw ≤ dx.raw)
     (hadd1 : ¬ w.self.reserve1.raw + (dx.raw - protoOf w.self dx.raw) < wordBound) :
@@ -2718,26 +2466,12 @@ theorem swap1for0_reverts_on_add1 (dx : Amount asset1) (minOut : Amount asset0)
     run_load_bind, run_load_bind, Tx.run_ite]
   by_cases hft : w.self.feeTo = 0
   · have hpeq : protoOf w.self dx.raw = 0 := protoOf_of_eq hft
-    have h1 : (1 : Amount asset1).raw = 1 := Amount.raw_ofNat 1
-    have hcoeff0 : (1 : Amount asset1).raw * (0 : Word) < wordBound :=
-      hMul_zero_lt (a := asset1)
     rw [if_pos hft, run_pure_bind]
-    simp only [run_hMul_bind]
-    rw [if_pos hcoeff0]
     simp only [run_hSub_bind]
     rw [if_pos hdxFle]
-    simp only [run_mulDivDown_bind]
-    rw [if_neg one_bps1_ne]
-    have hpm : (dx.raw - dxFeeLess dx.raw) *
-        ((1 : Amount asset1).raw * (0 : Word)) < wordBound := by
-      simpa [h1] using hMul_zero_lt (a := asset1)
-    rw [if_pos hpm]
-    have hpr :
-        (⟨(dx.raw - dxFeeLess dx.raw) *
-            ((1 : Amount asset1).raw * (0 : Word)) /
-            (10000 : Amount asset1).raw⟩ : Amount asset1) = ⟨0⟩ := by
-      simp [h1, Amount.raw_ofNat]
-    rw [hpr]
+    simp only [run_mulFixedDown_bind]
+    rw [if_pos (proto_prod_zero dx.raw)]
+    rw [proto_mulDown_zero dx.raw]
     simp only [run_hSub_bind]
     have ht0 : (0 : Nat) ≤ dx.raw := Nat.zero_le _
     rw [if_pos ht0]
@@ -2745,28 +2479,22 @@ theorem swap1for0_reverts_on_add1 (dx : Amount asset1) (minOut : Amount asset0)
     have hadd0' : ¬ w.self.reserve1.raw + (dx.raw - 0) < wordBound := by
       simpa [hpeq] using hadd1
     rw [if_neg hadd0']
-  · have hce : coeffOf w.self = w.self.protocolShareBps := coeffOf_of_ne hft
+  · have hce : coeffOf w.self = w.self.protocolShareBps.raw := coeffOf_of_ne hft
     have hpeq : protoOf w.self dx.raw =
-        swapFee dx.raw * w.self.protocolShareBps / BPS := protoOf_of_ne hft
-    have h1 : (1 : Amount asset1).raw = 1 := Amount.raw_ofNat 1
-    have hcoeff' : (1 : Amount asset1).raw * w.self.protocolShareBps < wordBound := by
-      simpa [h1, hce] using hcoeff
+        swapFee dx.raw * w.self.protocolShareBps.raw / BPS.raw := protoOf_of_ne hft
     have hpm : (dx.raw - dxFeeLess dx.raw) *
-        ((1 : Amount asset1).raw * w.self.protocolShareBps) < wordBound := by
-      simpa [h1, hce, swapFee] using hprotoM
+        w.self.protocolShareBps.raw < wordBound := by
+      simpa [hce, swapFee] using hprotoM
     have hpr :
-        (⟨(dx.raw - dxFeeLess dx.raw) *
-            ((1 : Amount asset1).raw * w.self.protocolShareBps) /
-            (10000 : Amount asset1).raw⟩ : Amount asset1) =
+        Amount.mulDown (⟨dx.raw - dxFeeLess dx.raw⟩ : Amount asset1)
+          w.self.protocolShareBps =
           ⟨protoOf w.self dx.raw⟩ := by
-      simp [h1, Amount.raw_ofNat, hpeq, BPS, swapFee, raw_10000]
+      simpa [proto_mulDown, hpeq, swapFee, BPS_eq]
     rw [if_neg hft, run_pure_bind]
-    simp only [run_hMul_bind]
-    rw [if_pos hcoeff']
     simp only [run_hSub_bind]
     rw [if_pos hdxFle]
-    simp only [run_mulDivDown_bind]
-    rw [if_neg one_bps1_ne, if_pos hpm, hpr]
+    simp only [run_mulFixedDown_bind]
+    rw [if_pos hpm, hpr]
     simp only [run_hSub_bind]
     rw [if_pos htaken]
     simp only [run_hAdd_bind]
@@ -2779,7 +2507,6 @@ theorem swap1for0_reverts_on_sub0 (dx : Amount asset1) (minOut : Amount asset0)
     (houtM : w.self.reserve0.raw * dxFeeLess dx.raw < wordBound)
     (hmin : minOut.raw ≤ swap1Out w.self dx.raw)
     (houtP : 0 < swap1Out w.self dx.raw)
-    (hcoeff : (1 : Nat) * coeffOf w.self < wordBound)
     (hprotoM : swapFee dx.raw * coeffOf w.self < wordBound)
     (htaken : protoOf w.self dx.raw ≤ dx.raw)
     (hadd1 : w.self.reserve1.raw + (dx.raw - protoOf w.self dx.raw) < wordBound)
@@ -2790,26 +2517,12 @@ theorem swap1for0_reverts_on_sub0 (dx : Amount asset1) (minOut : Amount asset0)
     run_load_bind, run_load_bind, Tx.run_ite]
   by_cases hft : w.self.feeTo = 0
   · have hpeq : protoOf w.self dx.raw = 0 := protoOf_of_eq hft
-    have h1 : (1 : Amount asset1).raw = 1 := Amount.raw_ofNat 1
-    have hcoeff0 : (1 : Amount asset1).raw * (0 : Word) < wordBound :=
-      hMul_zero_lt (a := asset1)
     rw [if_pos hft, run_pure_bind]
-    simp only [run_hMul_bind]
-    rw [if_pos hcoeff0]
     simp only [run_hSub_bind]
     rw [if_pos hdxFle]
-    simp only [run_mulDivDown_bind]
-    rw [if_neg one_bps1_ne]
-    have hpm : (dx.raw - dxFeeLess dx.raw) *
-        ((1 : Amount asset1).raw * (0 : Word)) < wordBound := by
-      simpa [h1] using hMul_zero_lt (a := asset1)
-    rw [if_pos hpm]
-    have hpr :
-        (⟨(dx.raw - dxFeeLess dx.raw) *
-            ((1 : Amount asset1).raw * (0 : Word)) /
-            (10000 : Amount asset1).raw⟩ : Amount asset1) = ⟨0⟩ := by
-      simp [h1, Amount.raw_ofNat]
-    rw [hpr]
+    simp only [run_mulFixedDown_bind]
+    rw [if_pos (proto_prod_zero dx.raw)]
+    rw [proto_mulDown_zero dx.raw]
     simp only [run_hSub_bind]
     have ht0 : (0 : Nat) ≤ dx.raw := Nat.zero_le _
     rw [if_pos ht0]
@@ -2819,28 +2532,22 @@ theorem swap1for0_reverts_on_sub0 (dx : Amount asset1) (minOut : Amount asset0)
     rw [if_pos hadd0', run_store_bind]
     simp only [run_hSub_bind]
     rw [if_neg hsub0]
-  · have hce : coeffOf w.self = w.self.protocolShareBps := coeffOf_of_ne hft
+  · have hce : coeffOf w.self = w.self.protocolShareBps.raw := coeffOf_of_ne hft
     have hpeq : protoOf w.self dx.raw =
-        swapFee dx.raw * w.self.protocolShareBps / BPS := protoOf_of_ne hft
-    have h1 : (1 : Amount asset1).raw = 1 := Amount.raw_ofNat 1
-    have hcoeff' : (1 : Amount asset1).raw * w.self.protocolShareBps < wordBound := by
-      simpa [h1, hce] using hcoeff
+        swapFee dx.raw * w.self.protocolShareBps.raw / BPS.raw := protoOf_of_ne hft
     have hpm : (dx.raw - dxFeeLess dx.raw) *
-        ((1 : Amount asset1).raw * w.self.protocolShareBps) < wordBound := by
-      simpa [h1, hce, swapFee] using hprotoM
+        w.self.protocolShareBps.raw < wordBound := by
+      simpa [hce, swapFee] using hprotoM
     have hpr :
-        (⟨(dx.raw - dxFeeLess dx.raw) *
-            ((1 : Amount asset1).raw * w.self.protocolShareBps) /
-            (10000 : Amount asset1).raw⟩ : Amount asset1) =
+        Amount.mulDown (⟨dx.raw - dxFeeLess dx.raw⟩ : Amount asset1)
+          w.self.protocolShareBps =
           ⟨protoOf w.self dx.raw⟩ := by
-      simp [h1, Amount.raw_ofNat, hpeq, BPS, swapFee, raw_10000]
+      simpa [proto_mulDown, hpeq, swapFee, BPS_eq]
     rw [if_neg hft, run_pure_bind]
-    simp only [run_hMul_bind]
-    rw [if_pos hcoeff']
     simp only [run_hSub_bind]
     rw [if_pos hdxFle]
-    simp only [run_mulDivDown_bind]
-    rw [if_neg one_bps1_ne, if_pos hpm, hpr]
+    simp only [run_mulFixedDown_bind]
+    rw [if_pos hpm, hpr]
     simp only [run_hSub_bind]
     rw [if_pos htaken]
     simp only [run_hAdd_bind]
@@ -2855,7 +2562,6 @@ theorem swap1for0_reverts_on_acc (dx : Amount asset1) (minOut : Amount asset0)
     (houtM : w.self.reserve0.raw * dxFeeLess dx.raw < wordBound)
     (hmin : minOut.raw ≤ swap1Out w.self dx.raw)
     (houtP : 0 < swap1Out w.self dx.raw)
-    (hcoeff : (1 : Nat) * coeffOf w.self < wordBound)
     (hprotoM : swapFee dx.raw * coeffOf w.self < wordBound)
     (htaken : protoOf w.self dx.raw ≤ dx.raw)
     (hadd1 : w.self.reserve1.raw + (dx.raw - protoOf w.self dx.raw) < wordBound)
@@ -2867,26 +2573,12 @@ theorem swap1for0_reverts_on_acc (dx : Amount asset1) (minOut : Amount asset0)
     run_load_bind, run_load_bind, Tx.run_ite]
   by_cases hft : w.self.feeTo = 0
   · have hpeq : protoOf w.self dx.raw = 0 := protoOf_of_eq hft
-    have h1 : (1 : Amount asset1).raw = 1 := Amount.raw_ofNat 1
-    have hcoeff0 : (1 : Amount asset1).raw * (0 : Word) < wordBound :=
-      hMul_zero_lt (a := asset1)
     rw [if_pos hft, run_pure_bind]
-    simp only [run_hMul_bind]
-    rw [if_pos hcoeff0]
     simp only [run_hSub_bind]
     rw [if_pos hdxFle]
-    simp only [run_mulDivDown_bind]
-    rw [if_neg one_bps1_ne]
-    have hpm : (dx.raw - dxFeeLess dx.raw) *
-        ((1 : Amount asset1).raw * (0 : Word)) < wordBound := by
-      simpa [h1] using hMul_zero_lt (a := asset1)
-    rw [if_pos hpm]
-    have hpr :
-        (⟨(dx.raw - dxFeeLess dx.raw) *
-            ((1 : Amount asset1).raw * (0 : Word)) /
-            (10000 : Amount asset1).raw⟩ : Amount asset1) = ⟨0⟩ := by
-      simp [h1, Amount.raw_ofNat]
-    rw [hpr]
+    simp only [run_mulFixedDown_bind]
+    rw [if_pos (proto_prod_zero dx.raw)]
+    rw [proto_mulDown_zero dx.raw]
     simp only [run_hSub_bind]
     have ht0 : (0 : Nat) ≤ dx.raw := Nat.zero_le _
     rw [if_pos ht0]
@@ -2900,28 +2592,22 @@ theorem swap1for0_reverts_on_acc (dx : Amount asset1) (minOut : Amount asset0)
     have hacc0 : ¬ w.self.protocolFees1.raw + 0 < wordBound := by
       simpa [hpeq] using hacc
     rw [if_neg hacc0]
-  · have hce : coeffOf w.self = w.self.protocolShareBps := coeffOf_of_ne hft
+  · have hce : coeffOf w.self = w.self.protocolShareBps.raw := coeffOf_of_ne hft
     have hpeq : protoOf w.self dx.raw =
-        swapFee dx.raw * w.self.protocolShareBps / BPS := protoOf_of_ne hft
-    have h1 : (1 : Amount asset1).raw = 1 := Amount.raw_ofNat 1
-    have hcoeff' : (1 : Amount asset1).raw * w.self.protocolShareBps < wordBound := by
-      simpa [h1, hce] using hcoeff
+        swapFee dx.raw * w.self.protocolShareBps.raw / BPS.raw := protoOf_of_ne hft
     have hpm : (dx.raw - dxFeeLess dx.raw) *
-        ((1 : Amount asset1).raw * w.self.protocolShareBps) < wordBound := by
-      simpa [h1, hce, swapFee] using hprotoM
+        w.self.protocolShareBps.raw < wordBound := by
+      simpa [hce, swapFee] using hprotoM
     have hpr :
-        (⟨(dx.raw - dxFeeLess dx.raw) *
-            ((1 : Amount asset1).raw * w.self.protocolShareBps) /
-            (10000 : Amount asset1).raw⟩ : Amount asset1) =
+        Amount.mulDown (⟨dx.raw - dxFeeLess dx.raw⟩ : Amount asset1)
+          w.self.protocolShareBps =
           ⟨protoOf w.self dx.raw⟩ := by
-      simp [h1, Amount.raw_ofNat, hpeq, BPS, swapFee, raw_10000]
+      simpa [proto_mulDown, hpeq, swapFee, BPS_eq]
     rw [if_neg hft, run_pure_bind]
-    simp only [run_hMul_bind]
-    rw [if_pos hcoeff']
     simp only [run_hSub_bind]
     rw [if_pos hdxFle]
-    simp only [run_mulDivDown_bind]
-    rw [if_neg one_bps1_ne, if_pos hpm, hpr]
+    simp only [run_mulFixedDown_bind]
+    rw [if_pos hpm, hpr]
     simp only [run_hSub_bind]
     rw [if_pos htaken]
     simp only [run_hAdd_bind]
@@ -2970,36 +2656,32 @@ theorem swap1for0_ok_of_run {dx : Amount asset1} {minOut : Amount asset0}
     by_contra h
     exact Tx.run_ok_error hrun
       (swap1for0_reverts_on_zero_out dx minOut hpos hr0 hr1 hfee hden houtM hmin h)
-  have hcoeff : (1 : Nat) * coeffOf w.self < wordBound := by
-    by_contra h
-    exact Tx.run_ok_error hrun
-      (swap1for0_reverts_on_coeff dx minOut hpos hr0 hr1 hfee hden houtM hmin houtP h)
   have hprotoM : swapFee dx.raw * coeffOf w.self < wordBound := by
     by_contra h
     exact Tx.run_ok_error hrun
       (swap1for0_reverts_on_proto_mul dx minOut hpos hr0 hr1 hfee hden houtM
-        hmin houtP hcoeff h)
+        hmin houtP h)
   have htaken : protoOf w.self dx.raw ≤ dx.raw := by
     by_contra h
     exact Tx.run_ok_error hrun
       (swap1for0_reverts_on_taken dx minOut hpos hr0 hr1 hfee hden houtM
-        hmin houtP hcoeff hprotoM h)
+        hmin houtP hprotoM h)
   have hadd1 : w.self.reserve1.raw + (dx.raw - protoOf w.self dx.raw) < wordBound := by
     by_contra h
     exact Tx.run_ok_error hrun
       (swap1for0_reverts_on_add1 dx minOut hpos hr0 hr1 hfee hden houtM
-        hmin houtP hcoeff hprotoM htaken h)
+        hmin houtP hprotoM htaken h)
   have hsub0 : swap1Out w.self dx.raw ≤ w.self.reserve0.raw := by
     by_contra h
     exact Tx.run_ok_error hrun
       (swap1for0_reverts_on_sub0 dx minOut hpos hr0 hr1 hfee hden houtM
-        hmin houtP hcoeff hprotoM htaken hadd1 h)
+        hmin houtP hprotoM htaken hadd1 h)
   have hacc : w.self.protocolFees1.raw + protoOf w.self dx.raw < wordBound := by
     by_contra h
     exact Tx.run_ok_error hrun
       (swap1for0_reverts_on_acc dx minOut hpos hr0 hr1 hfee hden houtM
-        hmin houtP hcoeff hprotoM htaken hadd1 hsub0 h)
-  exact ⟨hpos, hr0, hr1, hfee, hden, houtM, hmin, houtP, hcoeff, hprotoM, htaken,
+        hmin houtP hprotoM htaken hadd1 hsub0 h)
+  exact ⟨hpos, hr0, hr1, hfee, hden, houtM, hmin, houtP, hprotoM, htaken,
     hadd1, hsub0, hacc⟩
 
 
@@ -3016,16 +2698,12 @@ theorem swap1for0_to_tail (dx : Amount asset1) (minOut : Amount asset0)
         Tx.emit (.Swap1for0 ctx.sender dx out) >>= fun _ =>
         (pure out : Tx Storage ExtState Event Error (Amount asset0)))
         ctx { w with self := swap1Post w.self dx.raw proto (swap1Out w.self dx.raw) } := by
-  rcases h with ⟨hpos, hr0, hr1, hfee, hden, houtM, hmin, houtP, hcoeff, hprotoM,
+  rcases h with ⟨hpos, hr0, hr1, hfee, hden, houtM, hmin, houtP, hprotoM,
     htaken, hadd1, hsub0, hacc⟩
   have hr0A : 0 < w.self.reserve0 := by simpa [Amount.lt_iff] using hr0
   have hr1A : 0 < w.self.reserve1 := by simpa [Amount.lt_iff] using hr1
-  have hfee' : dx.raw * (9970 : Amount asset1).raw < wordBound := by
-    rw [raw_9970]; exact hfee
   have hdxFeq :
-      (⟨dx.raw * (9970 : Amount asset1).raw / (10000 : Amount asset1).raw⟩ :
-        Amount asset1) = ⟨dxFeeLess dx.raw⟩ := by
-    rw [raw_9970, raw_10000]; rfl
+      (⟨dx.raw * 9970 / 10000⟩ : Amount asset1) = ⟨dxFeeLess dx.raw⟩ := rfl
   have hdenn :
       (⟨w.self.reserve1.raw + dxFeeLess dx.raw⟩ : Amount asset1).raw ≠ 0 :=
     Nat.ne_of_gt (Nat.add_pos_left hr1 _)
@@ -3039,11 +2717,10 @@ theorem swap1for0_to_tail (dx : Amount asset1) (minOut : Amount asset0)
   have houtA : 0 < (⟨swap1Out w.self dx.raw⟩ : Amount asset0) := by
     simpa [Amount.lt_iff] using houtP
   have hdxFle : dxFeeLess dx.raw ≤ dx.raw := dxFeeLess_le dx.raw
-  have h1 : (1 : Amount asset1).raw = 1 := Amount.raw_ofNat 1
   rw [swap1for0, run_req_true hpos, run_load_bind, run_load_bind,
     run_req_true hr0A, run_req_true hr1A]
-  simp only [run_mulDivDown_bind]
-  rw [if_neg one_bps1_ne, if_pos hfee']
+  simp only [run_mulDivDown_word_bind]
+  rw [if_neg word_10000_ne, if_pos hfee]
   rw [hdxFeq]
   simp only [run_hAdd_bind]
   rw [if_pos hden]
@@ -3052,26 +2729,13 @@ theorem swap1for0_to_tail (dx : Amount asset1) (minOut : Amount asset0)
   rw [houtEq, run_req_true hminA, run_req_true houtA,
     run_load_bind, run_load_bind, Tx.run_ite]
   by_cases hft : w.self.feeTo = 0
-  · have hcoeff0 : (1 : Amount asset1).raw * (0 : Word) < wordBound :=
-      hMul_zero_lt (a := asset1)
-    have hpeq : protoOf w.self dx.raw = 0 := protoOf_of_eq hft
+  · have hpeq : protoOf w.self dx.raw = 0 := protoOf_of_eq hft
     rw [if_pos hft, run_pure_bind]
-    simp only [run_hMul_bind]
-    rw [if_pos hcoeff0]
     simp only [run_hSub_bind]
     rw [if_pos hdxFle]
-    simp only [run_mulDivDown_bind]
-    rw [if_neg one_bps1_ne]
-    have hpm : (dx.raw - dxFeeLess dx.raw) *
-        ((1 : Amount asset1).raw * (0 : Word)) < wordBound := by
-      simpa [h1] using hMul_zero_lt (a := asset1)
-    rw [if_pos hpm]
-    have hpr :
-        (⟨(dx.raw - dxFeeLess dx.raw) *
-            ((1 : Amount asset1).raw * (0 : Word)) /
-            (10000 : Amount asset1).raw⟩ : Amount asset1) = ⟨0⟩ := by
-      simp [h1, Amount.raw_ofNat]
-    rw [hpr]
+    simp only [run_mulFixedDown_bind]
+    rw [if_pos (proto_prod_zero dx.raw)]
+    rw [proto_mulDown_zero dx.raw]
     simp only [run_hSub_bind]
     have ht0 : (0 : Nat) ≤ dx.raw := Nat.zero_le _
     rw [if_pos ht0]
@@ -3099,29 +2763,22 @@ theorem swap1for0_to_tail (dx : Amount asset1) (minOut : Amount asset0)
       Amount.ofWord_add_right, Amount.ofWord_sub_left, Amount.ofWord_raw,
       Amount.mk_raw]
     rfl
-  · have hce : coeffOf w.self = w.self.protocolShareBps := coeffOf_of_ne hft
+  · have hce : coeffOf w.self = w.self.protocolShareBps.raw := coeffOf_of_ne hft
     have hpeq : protoOf w.self dx.raw =
-        swapFee dx.raw * w.self.protocolShareBps / BPS := protoOf_of_ne hft
-    have hcoeff' : (1 : Amount asset1).raw * w.self.protocolShareBps < wordBound := by
-      simpa [h1, hce] using hcoeff
+        swapFee dx.raw * w.self.protocolShareBps.raw / BPS.raw := protoOf_of_ne hft
+    have hpm : (dx.raw - dxFeeLess dx.raw) *
+        w.self.protocolShareBps.raw < wordBound := by
+      simpa [hce, swapFee] using hprotoM
+    have hpr :
+        Amount.mulDown (⟨dx.raw - dxFeeLess dx.raw⟩ : Amount asset1)
+          w.self.protocolShareBps =
+          ⟨protoOf w.self dx.raw⟩ := by
+      simpa [proto_mulDown, hpeq, swapFee, BPS_eq]
     rw [if_neg hft, run_pure_bind]
-    simp only [run_hMul_bind]
-    rw [if_pos hcoeff']
     simp only [run_hSub_bind]
     rw [if_pos hdxFle]
-    simp only [run_mulDivDown_bind]
-    rw [if_neg one_bps1_ne]
-    have hpm : (dx.raw - dxFeeLess dx.raw) *
-        ((1 : Amount asset1).raw * w.self.protocolShareBps) < wordBound := by
-      simpa [h1, hce, swapFee] using hprotoM
-    rw [if_pos hpm]
-    have hpr :
-        (⟨(dx.raw - dxFeeLess dx.raw) *
-            ((1 : Amount asset1).raw * w.self.protocolShareBps) /
-            (10000 : Amount asset1).raw⟩ : Amount asset1) =
-          ⟨protoOf w.self dx.raw⟩ := by
-      simp [h1, Amount.raw_ofNat, hpeq, BPS, swapFee, raw_10000]
-    rw [hpr]
+    simp only [run_mulFixedDown_bind]
+    rw [if_pos hpm, hpr]
     simp only [run_hSub_bind]
     rw [if_pos htaken]
     simp only [run_hAdd_bind]
@@ -3317,8 +2974,10 @@ theorem swap0for1_k {dx : Amount asset0} {minOut : Amount asset1}
       w.self.reserve0.raw * w.self.reserve1.raw := by
   have hok := swap0for1_ok_of_run h
   have ⟨_, hσ, _, _⟩ := swap0for1_post dx minOut hok h
+  have hpsN : w.self.protocolShareBps.raw ≤ BPS.raw := by
+    simpa [Amount.le_iff] using hps
   have hk := swapQuote_k w.self.reserve0.raw w.self.reserve1.raw dx.raw
-    w.self.feeTo w.self.protocolShareBps hok.r0 hps
+    w.self.feeTo w.self.protocolShareBps.raw hok.r0 hpsN
   simp [hσ, swap0Post, Amount.raw_add, Amount.raw_sub, Amount.raw_ofWord,
     protoOf, protoTake, swapQuote, amountOut, amountOutF, swap0Out]
   change (_ : Nat) ≤ _
@@ -3332,8 +2991,10 @@ theorem swap1for0_k {dx : Amount asset1} {minOut : Amount asset0}
       w.self.reserve0.raw * w.self.reserve1.raw := by
   have hok := swap1for0_ok_of_run h
   have ⟨_, hσ, _, _⟩ := swap1for0_post dx minOut hok h
+  have hpsN : w.self.protocolShareBps.raw ≤ BPS.raw := by
+    simpa [Amount.le_iff] using hps
   have hk := swapQuote_k w.self.reserve1.raw w.self.reserve0.raw dx.raw
-    w.self.feeTo w.self.protocolShareBps hok.r1 hps
+    w.self.feeTo w.self.protocolShareBps.raw hok.r1 hpsN
   simp [hσ, swap1Post, Amount.raw_add, Amount.raw_sub, Amount.raw_ofWord]
   change (_ : Nat) ≤ _
   refine (Nat.mul_comm _ _).trans_le (le_trans hk ?_)
@@ -3388,7 +3049,7 @@ theorem removeLiquidity_buckets {s : Amount lpShare}
   have ⟨_, hσ, _, _⟩ := removeLiquidity_post s hok h
   simp [hσ, removeLiquidityPost]
 
-theorem setProtocolShare_buckets {bps : Word} {w' : World Storage ExtState Event}
+theorem setProtocolShare_buckets {bps : Bps} {w' : World Storage ExtState Event}
     (h : Tx.run (setProtocolShare bps) ctx w = .ok ((), w')) :
     w'.self.protocolFees0 = w.self.protocolFees0 ∧
       w'.self.protocolFees1 = w.self.protocolFees1 := by

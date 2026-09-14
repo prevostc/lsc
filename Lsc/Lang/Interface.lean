@@ -24,9 +24,11 @@ adversary is the baseline oracle; a `Spec` hypothesis restricts it.
 Dot notation `asset.transferFrom …` is `I.Ref.transferFrom` via a generated
 `I.Ref` structure. `Ref (I args)` is a macro expanding to `I.Ref args`.
 `asset.try.transferFrom` is the non-reverting form
-(`Tx … (Except (Err ε) R)`). `asset.impl w` is `I.Impl.ofRef asset`, used as
-`(hT : I.Spec (asset.impl w))`. Fn fields of `I.Impl` are `Option` (no error
-parameter): a successful `Tx.run` is that `some` via `Tx.run_ok_toOption`.
+(`Tx … (Except (Err ε) R)`). `asset.impl` is `I.Impl.ofRef asset` over a
+`WorldView` (oracle plus `ext`), used as `(hT : I.Spec asset.impl)`. A
+contract that *is* the interface (Token) still has `C.impl` over `World`.
+Fn fields of `I.Impl` are `Option` (no error parameter): a successful
+`Tx.run` is that `some` via `Tx.run_ok_toOption`.
 
 TODO: payable methods are not modelled yet.
 -/
@@ -219,6 +221,19 @@ def tryView (addr : Address) (sel : Nat) (args : List Word) :
     | some v => .ok (.ok v, w)
 
 end Tx
+
+/-- Decode an oracle CALL on a `WorldView` into `Option (α × WorldView)`.
+`I.Impl.ofRef` Fn fields are this definition, so they share a name with
+`Tx.run (call …)` projected onto `w.view`. -/
+def WorldView.callDecode {X α : Type} [AbiRetType α] (v : WorldView X)
+    (addr : Address) (sel : Nat) (args : List Word) :
+    Option (α × WorldView X) :=
+  match v.oracle.call addr sel args v.ext with
+  | none => none
+  | some (rets, x') =>
+    match AbiRetType.decode (α := α) rets with
+    | none => none
+    | some ret => some (ret, { v with ext := x' })
 
 /-! ### Core-word wrappers
 

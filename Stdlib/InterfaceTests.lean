@@ -97,19 +97,20 @@ example (r : IERC20.Ref testToken) (to : Address) (n : Amount testToken) :
     Tx Unit ToyExt Unit Empty Bool :=
   IERC20.Ref.transfer r to n
 
-/-- `Ref (IERC20 a)` macro, `asset.impl w`, and `IERC20.Spec` with no `ε` ascription. -/
+/-- `Ref (IERC20 a)` macro, `asset.impl`, and `IERC20.Spec` on a `WorldView`. -/
 structure ToyStorage where
   dummy : Nat := 0
 
-example (r : Ref (IERC20 testToken)) (w : World ToyStorage ToyExt Unit)
-    (_hT : IERC20.Spec (r.impl w)) : True :=
+example (r : Ref (IERC20 testToken))
+    (_hT : IERC20.Spec
+      (r.impl : IERC20.Impl testToken (WorldView ToyExt))) : True :=
   trivial
 
 /-- Spec fields are `Option` success (`some`), not `Except.ok`. -/
-example (T : IERC20.Impl testToken (World ToyStorage ToyExt Unit))
+example (T : IERC20.Impl testToken (WorldView ToyExt))
     (_hT : IERC20.Spec T) (to : Address) (n : Amount testToken)
-    (ctx : Ctx) (w w' : World ToyStorage ToyExt Unit)
-    (_h : T.transfer to n ctx w = some (true, w')) : True :=
+    (ctx : Ctx) (v v' : WorldView ToyExt)
+    (_h : T.transfer to n ctx v = some (true, v')) : True :=
   trivial
 
 example (r : IERC20.Ref testToken) (to : Address) (n : Amount testToken) (err : Unit) :

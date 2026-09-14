@@ -113,6 +113,60 @@ theorem mulDivUp_bind_ofWord {β : Type} (num : Amount b) (x y : Amount a)
       Tx.mulDivUp num.raw x.raw y.raw >>= fun n => k (ofWord n) := by
   simp [mulDivUp]
 
+private theorem scale_ne_zero (d : Nat) : Word.scale d ≠ 0 :=
+  Nat.pos_iff_ne_zero.mp (Nat.pow_pos (by decide : 0 < 10))
+
+theorem run_mulFixedDown {d : Nat} (x : Amount a) (r : Fixed d)
+    (ctx : Ctx) (w : World S X E) {v : Amount a} {w' : World S X E} :
+    Tx.run (mulFixedDown (S := S) (X := X) (E := E) (ε := ε) x r) ctx w =
+        .ok (v, w') ↔
+      x.raw * r.raw < wordBound ∧ v = mulDown x r ∧ w' = w := by
+  have hden : (ofWord (Word.scale d) : Amount (Asset.fixed d)).raw ≠ 0 := by
+    simpa [raw_ofWord] using scale_ne_zero d
+  simp only [mulFixedDown, run_mulDivDown]
+  rw [if_neg hden]
+  constructor
+  · intro h
+    by_cases hfit : x.raw * r.raw < wordBound
+    · rw [if_pos hfit] at h
+      injection h with h'
+      refine ⟨hfit, Amount.ext ?_, (congrArg Prod.snd h').symm⟩
+      simpa [mulDown_raw, raw_ofWord] using
+        (congrArg (fun p => p.1.raw) h').symm
+    · rw [if_neg hfit] at h
+      cases h
+  · rintro ⟨hfit, hv, hw⟩
+    subst hv hw
+    rw [if_pos hfit]
+    simp [mulDown, floorMulDiv, raw_ofWord]
+
+theorem run_mulFixedUp {d : Nat} (x : Amount a) (r : Fixed d)
+    (ctx : Ctx) (w : World S X E) {v : Amount a} {w' : World S X E} :
+    Tx.run (mulFixedUp (S := S) (X := X) (E := E) (ε := ε) x r) ctx w =
+        .ok (v, w') ↔
+      x.raw * r.raw < wordBound ∧ v = mulUp x r ∧ w' = w := by
+  have hden : (ofWord (Word.scale d) : Amount (Asset.fixed d)).raw ≠ 0 := by
+    simpa [raw_ofWord] using scale_ne_zero d
+  have hsc : (ofWord (Word.scale d) : Amount (Asset.fixed d)).raw = Word.scale d :=
+    raw_ofWord _
+  simp only [mulFixedUp, run_mulDivUp]
+  rw [if_neg hden]
+  simp only [hsc]
+  constructor
+  · intro h
+    by_cases hfit : x.raw * r.raw < wordBound
+    · rw [if_pos hfit] at h
+      injection h with h'
+      refine ⟨hfit, Amount.ext ?_, (congrArg Prod.snd h').symm⟩
+      simpa [mulUp, ceilMulDiv, scale_ne_zero d, false_or] using
+        (congrArg (fun p => p.1.raw) h').symm
+    · rw [if_neg hfit] at h
+      cases h
+  · rintro ⟨hfit, hv, hw⟩
+    subst hv hw
+    rw [if_pos hfit]
+    simp [mulUp, ceilMulDiv, scale_ne_zero d, false_or]
+
 theorem require_pos (x : Amount a) (err : ε) :
     Tx.require (S := S) (X := X) (E := E) (0 < x) err =
       Tx.require (0 < x.raw) err :=
