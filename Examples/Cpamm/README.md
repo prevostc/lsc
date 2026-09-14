@@ -28,10 +28,11 @@ via `setFeeTo`.
 
 | File | Role |
 |------|------|
-| `Contract.lean` | Pool surface + schema + contract |
+| `Contract.lean` | Pool surface, shared `swapOut` quote, schema, contract |
 | `Spec.lean` | `claim`, `Auth`, `Inv`, `holdings0/1`, `cpammRely` |
 | `Theorems.lean` | Exported Tx and security theorems |
 | `Proofs/Tx.lean` | `Tx.run` lemmas |
+| `Proofs/SwapOut.lean` | Shared `swapOut` quote `Tx.run` lemma |
 | `Proofs/Security.lean` | Invariant and authorisation |
 | `Proofs/Compile.lean` | Runtime `compileRuntime` non-vacuity `#guard` |
 | `Proofs/Math.lean` | Floor-product facts for `k` |
