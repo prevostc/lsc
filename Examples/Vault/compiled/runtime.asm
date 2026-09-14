@@ -12,15 +12,23 @@
     PUSH 0x0100
     ISZERO
     POP
-    PUSH 0x04
-    CALLDATASIZE
-    LT
+    PUSH 0x00
+    TLOAD
     ISZERO
     JUMPI L1
     PUSH 0x00
     PUSH 0x00
     REVERT
 L1:    // JUMPDEST
+    PUSH 0x04
+    CALLDATASIZE
+    LT
+    ISZERO
+    JUMPI L2
+    PUSH 0x00
+    PUSH 0x00
+    REVERT
+L2:    // JUMPDEST
     PUSH 0x00
     CALLDATALOAD
     PUSH 0xe0
@@ -28,47 +36,50 @@ L1:    // JUMPDEST
     DUP1
     PUSH 0xb6b55f25    // selector: deposit(uint256)
     EQ
-    JUMPI L3
+    JUMPI L4
     DUP1
     PUSH 0x2e1a7d4d    // selector: withdraw(uint256)
     EQ
-    JUMPI L27
+    JUMPI L26
     DUP1
     PUSH 0xef8b30f7    // selector: previewDeposit(uint256)
     EQ
-    JUMPI L42
+    JUMPI L41
     DUP1
     PUSH 0x4cdad506    // selector: previewRedeem(uint256)
     EQ
-    JUMPI L52
+    JUMPI L49
     DUP1
     PUSH 0x8456cb59    // selector: pause()
     EQ
-    JUMPI L58
+    JUMPI L55
     DUP1
     PUSH 0x3f4ba83a    // selector: unpause()
     EQ
-    JUMPI L61
+    JUMPI L58
     DUP1
     PUSH 0xb187bd26    // selector: isPaused()
     EQ
-    JUMPI L64
+    JUMPI L61
     POP
     PUSH 0x00
     PUSH 0x00
     REVERT
-    JUMP L2
-L3:    // JUMPDEST
+    JUMP L3
+L4:    // JUMPDEST
     POP
     PUSH 0x24
     CALLDATASIZE
     LT
     ISZERO
-    JUMPI L4
+    JUMPI L5
     PUSH 0x00
     PUSH 0x00
     REVERT
-L4:    // JUMPDEST
+L5:    // JUMPDEST
+    PUSH 0x01
+    PUSH 0x00
+    TSTORE
     PUSH 0x04
     CALLDATALOAD
     PUSH 0x02
@@ -76,7 +87,7 @@ L4:    // JUMPDEST
     PUSH 0x00
     DUP2
     EQ
-    JUMPI L5
+    JUMPI L6
     PUSH 0x9e87fac8    // selector: Paused()
     PUSH 0xe0
     SHL
@@ -85,11 +96,11 @@ L4:    // JUMPDEST
     PUSH 0x04
     PUSH 0x80
     REVERT
-L5:    // JUMPDEST
+L6:    // JUMPDEST
     DUP2
     PUSH 0x00
     LT
-    JUMPI L6
+    JUMPI L7
     PUSH 0xf4560403    // selector: Zero()
     PUSH 0xe0
     SHL
@@ -98,7 +109,7 @@ L5:    // JUMPDEST
     PUSH 0x04
     PUSH 0x80
     REVERT
-L6:    // JUMPDEST
+L7:    // JUMPDEST
     CALLER
     ADDRESS
     PUSH 0x00
@@ -120,11 +131,11 @@ L6:    // JUMPDEST
     PUSH 0x0f4240
     STATICCALL
     DUP1
-    JUMPI L7
+    JUMPI L8
     PUSH 0x00
     PUSH 0x00
     REVERT
-L7:    // JUMPDEST
+L8:    // JUMPDEST
     PUSH 0x40
     RETURNDATASIZE
     LT
@@ -133,11 +144,11 @@ L7:    // JUMPDEST
     LT
     ISZERO
     AND
-    JUMPI L8
+    JUMPI L9
     PUSH 0x00
     PUSH 0x00
     REVERT
-L8:    // JUMPDEST
+L9:    // JUMPDEST
     PUSH 0x80
     MLOAD
     SWAP2
@@ -145,42 +156,36 @@ L8:    // JUMPDEST
     POP
     PUSH 0x03
     SLOAD
-    PUSH 0x01
-    PUSH 0x01
     PUSH 0x00
-    DUP4
+    DUP2
     EQ
     DUP1
     PUSH 0x00
     EQ
-    JUMPI L10
+    JUMPI L11
     POP
-    DUP2
-    JUMPI L19
-    PUSH 0x4e487b71
+    DUP7
+    DUP1
+    PUSH 0x00
+    LT
+    JUMPI L20
+    PUSH 0x9811e0c7    // selector: ZeroShares()
     PUSH 0xe0
     SHL
     PUSH 0x80
     MSTORE
-    PUSH 0x12
-    PUSH 0x84
-    MSTORE
-    PUSH 0x24
+    PUSH 0x04
     PUSH 0x80
     REVERT
-L19:    // JUMPDEST
-    DUP9
+L20:    // JUMPDEST
+    DUP1
+    DUP3
+    ADD
+    DUP3
     DUP2
-    MUL
-    DUP10
-    DUP3
-    DUP3
-    DIV
-    EQ
-    DUP3
+    LT
     ISZERO
-    OR
-    JUMPI L20
+    JUMPI L21
     PUSH 0x4e487b71
     PUSH 0xe0
     SHL
@@ -192,29 +197,24 @@ L19:    // JUMPDEST
     PUSH 0x24
     PUSH 0x80
     REVERT
-L20:    // JUMPDEST
-    DUP3
-    DUP2
-    DIV
-    SWAP1
-    POP
-    DUP1
-    PUSH 0x00
-    LT
-    JUMPI L21
-    PUSH 0x9811e0c7    // selector: ZeroShares()
-    PUSH 0xe0
-    SHL
-    PUSH 0x80
-    MSTORE
-    PUSH 0x04
-    PUSH 0x80
-    REVERT
 L21:    // JUMPDEST
     DUP1
-    DUP5
+    PUSH 0x03
+    SSTORE
+    DUP7
+    PUSH 0x00
+    MSTORE
+    PUSH 0x04
+    PUSH 0x20
+    MSTORE
+    PUSH 0x40
+    PUSH 0x00
+    KECCAK256
+    SLOAD
+    DUP3
+    DUP2
     ADD
-    DUP5
+    DUP2
     DUP2
     LT
     ISZERO
@@ -231,40 +231,7 @@ L21:    // JUMPDEST
     PUSH 0x80
     REVERT
 L22:    // JUMPDEST
-    DUP1
-    PUSH 0x03
-    SSTORE
     DUP9
-    PUSH 0x00
-    MSTORE
-    PUSH 0x04
-    PUSH 0x20
-    MSTORE
-    PUSH 0x40
-    PUSH 0x00
-    KECCAK256
-    SLOAD
-    DUP3
-    DUP2
-    ADD
-    DUP2
-    DUP2
-    LT
-    ISZERO
-    JUMPI L23
-    PUSH 0x4e487b71
-    PUSH 0xe0
-    SHL
-    PUSH 0x80
-    MSTORE
-    PUSH 0x11
-    PUSH 0x84
-    MSTORE
-    PUSH 0x24
-    PUSH 0x80
-    REVERT
-L23:    // JUMPDEST
-    DUP11
     PUSH 0x00
     MSTORE
     PUSH 0x04
@@ -281,13 +248,13 @@ L23:    // JUMPDEST
     SHL
     PUSH 0x80
     MSTORE
-    DUP12
+    DUP10
     PUSH 0x84
     MSTORE
-    DUP11
+    DUP9
     PUSH 0xa4
     MSTORE
-    DUP14
+    DUP12
     PUSH 0xc4
     MSTORE
     PUSH 0x20
@@ -295,15 +262,15 @@ L23:    // JUMPDEST
     PUSH 0x64
     PUSH 0x80
     PUSH 0x00
-    DUP15
+    DUP13
     PUSH 0x0f4240
     CALL
     DUP1
-    JUMPI L24
+    JUMPI L23
     PUSH 0x00
     PUSH 0x00
     REVERT
-L24:    // JUMPDEST
+L23:    // JUMPDEST
     PUSH 0x40
     RETURNDATASIZE
     LT
@@ -315,11 +282,11 @@ L24:    // JUMPDEST
     RETURNDATASIZE
     ISZERO
     OR
-    JUMPI L25
+    JUMPI L24
     PUSH 0x00
     PUSH 0x00
     REVERT
-L25:    // JUMPDEST
+L24:    // JUMPDEST
     PUSH 0x80
     MLOAD
     ISZERO
@@ -333,7 +300,7 @@ L25:    // JUMPDEST
     PUSH 0x01
     DUP2
     EQ
-    JUMPI L26
+    JUMPI L25
     PUSH 0x90b8ec18    // selector: TransferFailed()
     PUSH 0xe0
     SHL
@@ -342,11 +309,11 @@ L25:    // JUMPDEST
     PUSH 0x04
     PUSH 0x80
     REVERT
-L26:    // JUMPDEST
-    DUP12
+L25:    // JUMPDEST
+    DUP10
     PUSH 0x80
     MSTORE
-    DUP14
+    DUP12
     PUSH 0xa0
     MSTORE
     DUP5
@@ -356,6 +323,9 @@ L26:    // JUMPDEST
     PUSH 0x60
     PUSH 0x80
     LOG1
+    PUSH 0x00
+    PUSH 0x00
+    TSTORE
     DUP5
     PUSH 0x80
     MSTORE
@@ -367,11 +337,11 @@ L26:    // JUMPDEST
     POP
     POP
     POP
-    JUMP L9
-L10:    // JUMPDEST
+    JUMP L10
+L11:    // JUMPDEST
     POP
-    DUP4
-    JUMPI L11
+    DUP2
+    JUMPI L12
     PUSH 0x4e487b71
     PUSH 0xe0
     SHL
@@ -383,19 +353,19 @@ L10:    // JUMPDEST
     PUSH 0x24
     PUSH 0x80
     REVERT
-L11:    // JUMPDEST
-    DUP9
-    DUP4
+L12:    // JUMPDEST
+    DUP7
+    DUP2
     MUL
-    DUP10
-    DUP5
+    DUP8
+    DUP3
     DUP3
     DIV
     EQ
-    DUP5
+    DUP3
     ISZERO
     OR
-    JUMPI L12
+    JUMPI L13
     PUSH 0x4e487b71
     PUSH 0xe0
     SHL
@@ -407,8 +377,8 @@ L11:    // JUMPDEST
     PUSH 0x24
     PUSH 0x80
     REVERT
-L12:    // JUMPDEST
-    DUP5
+L13:    // JUMPDEST
+    DUP3
     DUP2
     DIV
     SWAP1
@@ -416,7 +386,7 @@ L12:    // JUMPDEST
     DUP1
     PUSH 0x00
     LT
-    JUMPI L13
+    JUMPI L14
     PUSH 0x9811e0c7    // selector: ZeroShares()
     PUSH 0xe0
     SHL
@@ -425,44 +395,11 @@ L12:    // JUMPDEST
     PUSH 0x04
     PUSH 0x80
     REVERT
-L13:    // JUMPDEST
-    DUP1
-    DUP5
-    ADD
-    DUP5
-    DUP2
-    LT
-    ISZERO
-    JUMPI L14
-    PUSH 0x4e487b71
-    PUSH 0xe0
-    SHL
-    PUSH 0x80
-    MSTORE
-    PUSH 0x11
-    PUSH 0x84
-    MSTORE
-    PUSH 0x24
-    PUSH 0x80
-    REVERT
 L14:    // JUMPDEST
     DUP1
-    PUSH 0x03
-    SSTORE
-    DUP9
-    PUSH 0x00
-    MSTORE
-    PUSH 0x04
-    PUSH 0x20
-    MSTORE
-    PUSH 0x40
-    PUSH 0x00
-    KECCAK256
-    SLOAD
     DUP3
-    DUP2
     ADD
-    DUP2
+    DUP3
     DUP2
     LT
     ISZERO
@@ -479,7 +416,40 @@ L14:    // JUMPDEST
     PUSH 0x80
     REVERT
 L15:    // JUMPDEST
-    DUP11
+    DUP1
+    PUSH 0x03
+    SSTORE
+    DUP7
+    PUSH 0x00
+    MSTORE
+    PUSH 0x04
+    PUSH 0x20
+    MSTORE
+    PUSH 0x40
+    PUSH 0x00
+    KECCAK256
+    SLOAD
+    DUP3
+    DUP2
+    ADD
+    DUP2
+    DUP2
+    LT
+    ISZERO
+    JUMPI L16
+    PUSH 0x4e487b71
+    PUSH 0xe0
+    SHL
+    PUSH 0x80
+    MSTORE
+    PUSH 0x11
+    PUSH 0x84
+    MSTORE
+    PUSH 0x24
+    PUSH 0x80
+    REVERT
+L16:    // JUMPDEST
+    DUP9
     PUSH 0x00
     MSTORE
     PUSH 0x04
@@ -496,13 +466,13 @@ L15:    // JUMPDEST
     SHL
     PUSH 0x80
     MSTORE
-    DUP12
+    DUP10
     PUSH 0x84
     MSTORE
-    DUP11
+    DUP9
     PUSH 0xa4
     MSTORE
-    DUP14
+    DUP12
     PUSH 0xc4
     MSTORE
     PUSH 0x20
@@ -510,15 +480,15 @@ L15:    // JUMPDEST
     PUSH 0x64
     PUSH 0x80
     PUSH 0x00
-    DUP15
+    DUP13
     PUSH 0x0f4240
     CALL
     DUP1
-    JUMPI L16
+    JUMPI L17
     PUSH 0x00
     PUSH 0x00
     REVERT
-L16:    // JUMPDEST
+L17:    // JUMPDEST
     PUSH 0x40
     RETURNDATASIZE
     LT
@@ -530,11 +500,11 @@ L16:    // JUMPDEST
     RETURNDATASIZE
     ISZERO
     OR
-    JUMPI L17
+    JUMPI L18
     PUSH 0x00
     PUSH 0x00
     REVERT
-L17:    // JUMPDEST
+L18:    // JUMPDEST
     PUSH 0x80
     MLOAD
     ISZERO
@@ -548,7 +518,7 @@ L17:    // JUMPDEST
     PUSH 0x01
     DUP2
     EQ
-    JUMPI L18
+    JUMPI L19
     PUSH 0x90b8ec18    // selector: TransferFailed()
     PUSH 0xe0
     SHL
@@ -557,11 +527,11 @@ L17:    // JUMPDEST
     PUSH 0x04
     PUSH 0x80
     REVERT
-L18:    // JUMPDEST
-    DUP12
+L19:    // JUMPDEST
+    DUP10
     PUSH 0x80
     MSTORE
-    DUP14
+    DUP12
     PUSH 0xa0
     MSTORE
     DUP5
@@ -571,6 +541,9 @@ L18:    // JUMPDEST
     PUSH 0x60
     PUSH 0x80
     LOG1
+    PUSH 0x00
+    PUSH 0x00
+    TSTORE
     DUP5
     PUSH 0x80
     MSTORE
@@ -582,7 +555,7 @@ L18:    // JUMPDEST
     POP
     POP
     POP
-L9:    // JUMPDEST
+L10:    // JUMPDEST
     POP
     POP
     POP
@@ -590,20 +563,21 @@ L9:    // JUMPDEST
     POP
     POP
     POP
-    POP
-    POP
-    JUMP L2
-L27:    // JUMPDEST
+    JUMP L3
+L26:    // JUMPDEST
     POP
     PUSH 0x24
     CALLDATASIZE
     LT
     ISZERO
-    JUMPI L28
+    JUMPI L27
     PUSH 0x00
     PUSH 0x00
     REVERT
-L28:    // JUMPDEST
+L27:    // JUMPDEST
+    PUSH 0x01
+    PUSH 0x00
+    TSTORE
     PUSH 0x04
     CALLDATALOAD
     PUSH 0x02
@@ -611,7 +585,7 @@ L28:    // JUMPDEST
     PUSH 0x00
     DUP2
     EQ
-    JUMPI L29
+    JUMPI L28
     PUSH 0x9e87fac8    // selector: Paused()
     PUSH 0xe0
     SHL
@@ -620,11 +594,11 @@ L28:    // JUMPDEST
     PUSH 0x04
     PUSH 0x80
     REVERT
-L29:    // JUMPDEST
+L28:    // JUMPDEST
     DUP2
     PUSH 0x00
     LT
-    JUMPI L30
+    JUMPI L29
     PUSH 0xf4560403    // selector: Zero()
     PUSH 0xe0
     SHL
@@ -633,7 +607,7 @@ L29:    // JUMPDEST
     PUSH 0x04
     PUSH 0x80
     REVERT
-L30:    // JUMPDEST
+L29:    // JUMPDEST
     CALLER
     DUP1
     PUSH 0x00
@@ -649,7 +623,7 @@ L30:    // JUMPDEST
     DUP2
     LT
     ISZERO
-    JUMPI L31
+    JUMPI L30
     PUSH 0x39996567    // selector: InsufficientShares()
     PUSH 0xe0
     SHL
@@ -658,7 +632,7 @@ L30:    // JUMPDEST
     PUSH 0x04
     PUSH 0x80
     REVERT
-L31:    // JUMPDEST
+L30:    // JUMPDEST
     ADDRESS
     PUSH 0x00
     SLOAD
@@ -679,11 +653,11 @@ L31:    // JUMPDEST
     PUSH 0x0f4240
     STATICCALL
     DUP1
-    JUMPI L32
+    JUMPI L31
     PUSH 0x00
     PUSH 0x00
     REVERT
-L32:    // JUMPDEST
+L31:    // JUMPDEST
     PUSH 0x40
     RETURNDATASIZE
     LT
@@ -692,11 +666,11 @@ L32:    // JUMPDEST
     LT
     ISZERO
     AND
-    JUMPI L33
+    JUMPI L32
     PUSH 0x00
     PUSH 0x00
     REVERT
-L33:    // JUMPDEST
+L32:    // JUMPDEST
     PUSH 0x80
     MLOAD
     SWAP2
@@ -705,7 +679,7 @@ L33:    // JUMPDEST
     PUSH 0x03
     SLOAD
     DUP1
-    JUMPI L34
+    JUMPI L33
     PUSH 0x4e487b71
     PUSH 0xe0
     SHL
@@ -717,7 +691,7 @@ L33:    // JUMPDEST
     PUSH 0x24
     PUSH 0x80
     REVERT
-L34:    // JUMPDEST
+L33:    // JUMPDEST
     DUP8
     DUP3
     MUL
@@ -729,7 +703,7 @@ L34:    // JUMPDEST
     DUP4
     ISZERO
     OR
-    JUMPI L35
+    JUMPI L34
     PUSH 0x4e487b71
     PUSH 0xe0
     SHL
@@ -741,7 +715,7 @@ L34:    // JUMPDEST
     PUSH 0x24
     PUSH 0x80
     REVERT
-L35:    // JUMPDEST
+L34:    // JUMPDEST
     DUP2
     DUP2
     DIV
@@ -750,7 +724,7 @@ L35:    // JUMPDEST
     DUP1
     PUSH 0x00
     LT
-    JUMPI L36
+    JUMPI L35
     PUSH 0x32d971dc    // selector: ZeroAssets()
     PUSH 0xe0
     SHL
@@ -759,12 +733,12 @@ L35:    // JUMPDEST
     PUSH 0x04
     PUSH 0x80
     REVERT
-L36:    // JUMPDEST
+L35:    // JUMPDEST
     DUP9
     DUP7
     LT
     ISZERO
-    JUMPI L37
+    JUMPI L36
     PUSH 0x4e487b71
     PUSH 0xe0
     SHL
@@ -776,7 +750,7 @@ L36:    // JUMPDEST
     PUSH 0x24
     PUSH 0x80
     REVERT
-L37:    // JUMPDEST
+L36:    // JUMPDEST
     DUP9
     DUP7
     SUB
@@ -795,7 +769,7 @@ L37:    // JUMPDEST
     DUP4
     LT
     ISZERO
-    JUMPI L38
+    JUMPI L37
     PUSH 0x4e487b71
     PUSH 0xe0
     SHL
@@ -807,7 +781,7 @@ L37:    // JUMPDEST
     PUSH 0x24
     PUSH 0x80
     REVERT
-L38:    // JUMPDEST
+L37:    // JUMPDEST
     DUP10
     DUP4
     SUB
@@ -835,11 +809,11 @@ L38:    // JUMPDEST
     PUSH 0x0f4240
     CALL
     DUP1
-    JUMPI L39
+    JUMPI L38
     PUSH 0x00
     PUSH 0x00
     REVERT
-L39:    // JUMPDEST
+L38:    // JUMPDEST
     PUSH 0x40
     RETURNDATASIZE
     LT
@@ -851,11 +825,11 @@ L39:    // JUMPDEST
     RETURNDATASIZE
     ISZERO
     OR
-    JUMPI L40
+    JUMPI L39
     PUSH 0x00
     PUSH 0x00
     REVERT
-L40:    // JUMPDEST
+L39:    // JUMPDEST
     PUSH 0x80
     MLOAD
     ISZERO
@@ -869,7 +843,7 @@ L40:    // JUMPDEST
     PUSH 0x01
     DUP2
     EQ
-    JUMPI L41
+    JUMPI L40
     PUSH 0x90b8ec18    // selector: TransferFailed()
     PUSH 0xe0
     SHL
@@ -878,7 +852,7 @@ L40:    // JUMPDEST
     PUSH 0x04
     PUSH 0x80
     REVERT
-L41:    // JUMPDEST
+L40:    // JUMPDEST
     DUP10
     PUSH 0x80
     MSTORE
@@ -892,6 +866,9 @@ L41:    // JUMPDEST
     PUSH 0x60
     PUSH 0x80
     LOG1
+    PUSH 0x00
+    PUSH 0x00
+    TSTORE
     DUP4
     PUSH 0x80
     MSTORE
@@ -910,18 +887,18 @@ L41:    // JUMPDEST
     POP
     POP
     POP
-    JUMP L2
-L42:    // JUMPDEST
+    JUMP L3
+L41:    // JUMPDEST
     POP
     PUSH 0x24
     CALLDATASIZE
     LT
     ISZERO
-    JUMPI L43
+    JUMPI L42
     PUSH 0x00
     PUSH 0x00
     REVERT
-L43:    // JUMPDEST
+L42:    // JUMPDEST
     PUSH 0x04
     CALLDATALOAD
     ADDRESS
@@ -944,11 +921,11 @@ L43:    // JUMPDEST
     PUSH 0x0f4240
     STATICCALL
     DUP1
-    JUMPI L44
+    JUMPI L43
     PUSH 0x00
     PUSH 0x00
     REVERT
-L44:    // JUMPDEST
+L43:    // JUMPDEST
     PUSH 0x40
     RETURNDATASIZE
     LT
@@ -957,11 +934,11 @@ L44:    // JUMPDEST
     LT
     ISZERO
     AND
-    JUMPI L45
+    JUMPI L44
     PUSH 0x00
     PUSH 0x00
     REVERT
-L45:    // JUMPDEST
+L44:    // JUMPDEST
     PUSH 0x80
     MLOAD
     SWAP2
@@ -969,18 +946,25 @@ L45:    // JUMPDEST
     POP
     PUSH 0x03
     SLOAD
-    PUSH 0x01
-    PUSH 0x01
     PUSH 0x00
-    DUP4
+    DUP2
     EQ
     DUP1
     PUSH 0x00
     EQ
-    JUMPI L47
+    JUMPI L46
+    POP
+    DUP5
+    PUSH 0x80
+    MSTORE
+    PUSH 0x20
+    PUSH 0x80
+    RETURN
+    JUMP L45
+L46:    // JUMPDEST
     POP
     DUP2
-    JUMPI L50
+    JUMPI L47
     PUSH 0x4e487b71
     PUSH 0xe0
     SHL
@@ -992,11 +976,11 @@ L45:    // JUMPDEST
     PUSH 0x24
     PUSH 0x80
     REVERT
-L50:    // JUMPDEST
-    DUP7
+L47:    // JUMPDEST
+    DUP5
     DUP2
     MUL
-    DUP8
+    DUP6
     DUP3
     DUP3
     DIV
@@ -1004,73 +988,20 @@ L50:    // JUMPDEST
     DUP3
     ISZERO
     OR
-    JUMPI L51
-    PUSH 0x4e487b71
-    PUSH 0xe0
-    SHL
-    PUSH 0x80
-    MSTORE
-    PUSH 0x11
-    PUSH 0x84
-    MSTORE
-    PUSH 0x24
-    PUSH 0x80
-    REVERT
-L51:    // JUMPDEST
-    DUP3
-    DUP2
-    DIV
-    SWAP1
-    POP
-    DUP1
-    PUSH 0x80
-    MSTORE
-    PUSH 0x20
-    PUSH 0x80
-    RETURN
-    POP
-    JUMP L46
-L47:    // JUMPDEST
-    POP
-    DUP4
     JUMPI L48
     PUSH 0x4e487b71
     PUSH 0xe0
     SHL
     PUSH 0x80
     MSTORE
-    PUSH 0x12
-    PUSH 0x84
-    MSTORE
-    PUSH 0x24
-    PUSH 0x80
-    REVERT
-L48:    // JUMPDEST
-    DUP7
-    DUP4
-    MUL
-    DUP8
-    DUP5
-    DUP3
-    DIV
-    EQ
-    DUP5
-    ISZERO
-    OR
-    JUMPI L49
-    PUSH 0x4e487b71
-    PUSH 0xe0
-    SHL
-    PUSH 0x80
-    MSTORE
     PUSH 0x11
     PUSH 0x84
     MSTORE
     PUSH 0x24
     PUSH 0x80
     REVERT
-L49:    // JUMPDEST
-    DUP5
+L48:    // JUMPDEST
+    DUP3
     DUP2
     DIV
     SWAP1
@@ -1082,26 +1013,24 @@ L49:    // JUMPDEST
     PUSH 0x80
     RETURN
     POP
-L46:    // JUMPDEST
+L45:    // JUMPDEST
     POP
     POP
     POP
     POP
     POP
-    POP
-    POP
-    JUMP L2
-L52:    // JUMPDEST
+    JUMP L3
+L49:    // JUMPDEST
     POP
     PUSH 0x24
     CALLDATASIZE
     LT
     ISZERO
-    JUMPI L53
+    JUMPI L50
     PUSH 0x00
     PUSH 0x00
     REVERT
-L53:    // JUMPDEST
+L50:    // JUMPDEST
     PUSH 0x04
     CALLDATALOAD
     ADDRESS
@@ -1124,11 +1053,11 @@ L53:    // JUMPDEST
     PUSH 0x0f4240
     STATICCALL
     DUP1
-    JUMPI L54
+    JUMPI L51
     PUSH 0x00
     PUSH 0x00
     REVERT
-L54:    // JUMPDEST
+L51:    // JUMPDEST
     PUSH 0x40
     RETURNDATASIZE
     LT
@@ -1137,11 +1066,11 @@ L54:    // JUMPDEST
     LT
     ISZERO
     AND
-    JUMPI L55
+    JUMPI L52
     PUSH 0x00
     PUSH 0x00
     REVERT
-L55:    // JUMPDEST
+L52:    // JUMPDEST
     PUSH 0x80
     MLOAD
     SWAP2
@@ -1150,7 +1079,7 @@ L55:    // JUMPDEST
     PUSH 0x03
     SLOAD
     DUP1
-    JUMPI L56
+    JUMPI L53
     PUSH 0x4e487b71
     PUSH 0xe0
     SHL
@@ -1162,7 +1091,7 @@ L55:    // JUMPDEST
     PUSH 0x24
     PUSH 0x80
     REVERT
-L56:    // JUMPDEST
+L53:    // JUMPDEST
     DUP5
     DUP3
     MUL
@@ -1174,7 +1103,7 @@ L56:    // JUMPDEST
     DUP4
     ISZERO
     OR
-    JUMPI L57
+    JUMPI L54
     PUSH 0x4e487b71
     PUSH 0xe0
     SHL
@@ -1186,7 +1115,7 @@ L56:    // JUMPDEST
     PUSH 0x24
     PUSH 0x80
     REVERT
-L57:    // JUMPDEST
+L54:    // JUMPDEST
     DUP2
     DUP2
     DIV
@@ -1204,7 +1133,45 @@ L57:    // JUMPDEST
     POP
     POP
     POP
-    JUMP L2
+    JUMP L3
+L55:    // JUMPDEST
+    POP
+    PUSH 0x04
+    CALLDATASIZE
+    LT
+    ISZERO
+    JUMPI L56
+    PUSH 0x00
+    PUSH 0x00
+    REVERT
+L56:    // JUMPDEST
+    CALLER
+    PUSH 0x01
+    SLOAD
+    DUP1
+    DUP3
+    EQ
+    JUMPI L57
+    PUSH 0x30cd7471    // selector: NotOwner()
+    PUSH 0xe0
+    SHL
+    PUSH 0x80
+    MSTORE
+    PUSH 0x04
+    PUSH 0x80
+    REVERT
+L57:    // JUMPDEST
+    PUSH 0x01
+    PUSH 0x02
+    SSTORE
+    PUSH 0x9e87fac88ff661f02d44f95383c817fece4bce600a3dab7a54406878b965e752    // topic: Paused()
+    PUSH 0x00
+    PUSH 0x80
+    LOG1
+    STOP
+    POP
+    POP
+    JUMP L3
 L58:    // JUMPDEST
     POP
     PUSH 0x04
@@ -1232,17 +1199,17 @@ L59:    // JUMPDEST
     PUSH 0x80
     REVERT
 L60:    // JUMPDEST
-    PUSH 0x01
+    PUSH 0x00
     PUSH 0x02
     SSTORE
-    PUSH 0x9e87fac88ff661f02d44f95383c817fece4bce600a3dab7a54406878b965e752    // topic: Paused()
+    PUSH 0xa45f47fdea8a1efdd9029a5691c7f759c32b7c698632b563573e155625d16933    // topic: Unpaused()
     PUSH 0x00
     PUSH 0x80
     LOG1
     STOP
     POP
     POP
-    JUMP L2
+    JUMP L3
 L61:    // JUMPDEST
     POP
     PUSH 0x04
@@ -1254,44 +1221,6 @@ L61:    // JUMPDEST
     PUSH 0x00
     REVERT
 L62:    // JUMPDEST
-    CALLER
-    PUSH 0x01
-    SLOAD
-    DUP1
-    DUP3
-    EQ
-    JUMPI L63
-    PUSH 0x30cd7471    // selector: NotOwner()
-    PUSH 0xe0
-    SHL
-    PUSH 0x80
-    MSTORE
-    PUSH 0x04
-    PUSH 0x80
-    REVERT
-L63:    // JUMPDEST
-    PUSH 0x00
-    PUSH 0x02
-    SSTORE
-    PUSH 0xa45f47fdea8a1efdd9029a5691c7f759c32b7c698632b563573e155625d16933    // topic: Unpaused()
-    PUSH 0x00
-    PUSH 0x80
-    LOG1
-    STOP
-    POP
-    POP
-    JUMP L2
-L64:    // JUMPDEST
-    POP
-    PUSH 0x04
-    CALLDATASIZE
-    LT
-    ISZERO
-    JUMPI L65
-    PUSH 0x00
-    PUSH 0x00
-    REVERT
-L65:    // JUMPDEST
     PUSH 0x02
     SLOAD
     DUP1
@@ -1301,4 +1230,4 @@ L65:    // JUMPDEST
     PUSH 0x80
     RETURN
     POP
-L2:    // JUMPDEST
+L3:    // JUMPDEST

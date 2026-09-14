@@ -73,9 +73,7 @@ contract DecompiledContract {
         require(!store_b | (((store_b * arg0) / store_b) == arg0));
         uint256 var_a = (store_b * arg0) / var_a;
         return (store_b * arg0) / var_a;
-        require(0x01);
-        require(!0x01 | (((0x01 * arg0) / 0x01) == arg0));
-        return (0x01 * arg0) / 0x01;
+        return arg0;
     }
     
     /// @custom:selector    0x2e1a7d4d
@@ -83,6 +81,7 @@ contract DecompiledContract {
     /// @param              arg0 ["uint256", "bytes32", "int256"]
     function withdraw(uint256 arg0) public payable returns (uint256) {
         require(!(msg.data.length < 0x24), CustomError_9e87fac8());
+        transient[0] = 0x01;
         require(isPaused == 0, CustomError_9e87fac8());
         require(0 < arg0, CustomError_39996567());
         address var_b = msg.sender;
@@ -107,6 +106,7 @@ contract DecompiledContract {
         require((!ret0.length | var_a) == 0x01, CustomError_90b8ec18());
         address var_a = msg.sender;
         emit Withdraw(msg.sender, (var_a * arg0) / store_b, arg0);
+        transient[0] = 0;
         var_a = (var_a * arg0) / store_b;
         return (var_a * arg0) / store_b;
     }
@@ -116,6 +116,7 @@ contract DecompiledContract {
     /// @param              arg0 ["uint256", "bytes32", "int256"]
     function deposit(uint256 arg0) public payable returns (uint256) {
         require(!(msg.data.length < 0x24), CustomError_9e87fac8());
+        transient[0] = 0x01;
         require(isPaused == 0, CustomError_9e87fac8());
         require(0 < arg0);
         var_a = 0x70a0823100000000000000000000000000000000000000000000000000000000;
@@ -142,23 +143,23 @@ contract DecompiledContract {
         require((!ret0.length | var_a) == 0x01, CustomError_90b8ec18());
         address var_a = msg.sender;
         emit Deposit(msg.sender, arg0, (store_b * arg0) / var_a);
+        transient[0] = 0;
         var_a = (store_b * arg0) / var_a;
         return (store_b * arg0) / var_a;
-        require(0x01);
-        require(!0x01 | (((0x01 * arg0) / 0x01) == arg0));
-        require(0 < ((0x01 * arg0) / 0x01));
-        require(!(store_b + ((0x01 * arg0) / 0x01)) < store_b);
-        store_b = store_b + ((0x01 * arg0) / 0x01);
+        require(0 < arg0);
+        require(!(store_b + arg0) < store_b);
+        store_b = store_b + arg0;
         var_c = msg.sender;
-        require(!(storage_map_f[var_c] + ((0x01 * arg0) / 0x01)) < storage_map_f[var_c]);
+        require(!(storage_map_f[var_c] + arg0) < storage_map_f[var_c]);
         var_c = msg.sender;
-        storage_map_f[var_c] = storage_map_f[var_c] + ((0x01 * arg0) / 0x01);
+        storage_map_f[var_c] = storage_map_f[var_c] + arg0;
         var_a = 0x23b872dd00000000000000000000000000000000000000000000000000000000;
         var_b = msg.sender;
         (bool success, bytes memory ret0) = address(store_a).{ gas: 0x0f4240 }gasprice_bit_ether(var_b); // call
         require(!ret0.length | ((!ret0.length < 0x20) & (ret0.length < 0x40)), CustomError_90b8ec18());
         require((!ret0.length | var_a) == 0x01, CustomError_90b8ec18());
-        emit Deposit(msg.sender, arg0, (0x01 * arg0) / 0x01);
-        return (0x01 * arg0) / 0x01;
+        emit Deposit(msg.sender, arg0, arg0);
+        transient[0] = 0;
+        return arg0;
     }
 }

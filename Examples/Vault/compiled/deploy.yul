@@ -22,6 +22,9 @@ object "Vault" {
         code {
             if memoryguard(256) {
             }
+            if tload(0) {
+                revert(0, 0)
+            }
             {
                 if lt(calldatasize(), 4) {
                     revert(0, 0)
@@ -34,6 +37,7 @@ object "Vault" {
                         revert(0, 0)
                     }
                 }
+                tstore(0, 1)
                 {
                     let deposit_0 := calldataload(4)
                     let deposit_1 := sload(2)
@@ -62,8 +66,6 @@ object "Vault" {
                         deposit_5 := mload(128)
                     }
                     let deposit_6 := sload(3)
-                    let deposit_7 := 1
-                    let deposit_8 := 1
                     switch eq(deposit_6, 0)
                     case 0 {
                         if iszero(deposit_5) {
@@ -71,122 +73,113 @@ object "Vault" {
                             mstore(132, 18)
                             revert(128, 36)
                         }
-                        let deposit_9 := mul(deposit_6, deposit_0)
-                        if iszero(or(iszero(deposit_6), eq(div(deposit_9, deposit_6), deposit_0))) {
+                        let deposit_7 := mul(deposit_6, deposit_0)
+                        if iszero(or(iszero(deposit_6), eq(div(deposit_7, deposit_6), deposit_0))) {
                             mstore(128, shl(224, 1313373041))
                             mstore(132, 17)
                             revert(128, 36)
                         }
-                        deposit_9 := div(deposit_9, deposit_5)
-                        if iszero(lt(0, deposit_9)) {
+                        deposit_7 := div(deposit_7, deposit_5)
+                        if iszero(lt(0, deposit_7)) {
                             mstore(128, shl(224, 2551308487))
                             revert(128, 4)
                         }
-                        let deposit_10 := add(deposit_6, deposit_9)
-                        if lt(deposit_10, deposit_6) {
+                        let deposit_8 := add(deposit_6, deposit_7)
+                        if lt(deposit_8, deposit_6) {
                             mstore(128, shl(224, 1313373041))
                             mstore(132, 17)
                             revert(128, 36)
                         }
-                        sstore(3, deposit_10)
+                        sstore(3, deposit_8)
                         mstore(0, deposit_2)
                         mstore(32, 4)
-                        let deposit_11 := sload(keccak256(0, 64))
-                        let deposit_12 := add(deposit_11, deposit_9)
-                        if lt(deposit_12, deposit_11) {
+                        let deposit_9 := sload(keccak256(0, 64))
+                        let deposit_10 := add(deposit_9, deposit_7)
+                        if lt(deposit_10, deposit_9) {
                             mstore(128, shl(224, 1313373041))
                             mstore(132, 17)
                             revert(128, 36)
                         }
                         mstore(0, deposit_2)
                         mstore(32, 4)
-                        sstore(keccak256(0, 64), deposit_12)
-                        let deposit_13 := 0
+                        sstore(keccak256(0, 64), deposit_10)
+                        let deposit_11 := 0
                         {
                             mstore(128, shl(224, 599290589))
                             mstore(132, deposit_2)
                             mstore(164, deposit_3)
                             mstore(196, deposit_0)
-                            let deposit__ok_13 := call(1000000, deposit_4, 0, 128, 100, 128, 32)
-                            if iszero(deposit__ok_13) {
+                            let deposit__ok_11 := call(1000000, deposit_4, 0, 128, 100, 128, 32)
+                            if iszero(deposit__ok_11) {
                                 revert(0, 0)
                             }
                             if iszero(or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 32)), lt(returndatasize(), 64)))) {
                                 revert(0, 0)
                             }
-                            deposit_13 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
+                            deposit_11 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
                         }
-                        if iszero(eq(deposit_13, 1)) {
+                        if iszero(eq(deposit_11, 1)) {
                             mstore(128, shl(224, 2428038168))
                             revert(128, 4)
                         }
                         mstore(128, deposit_2)
                         mstore(160, deposit_0)
-                        mstore(192, deposit_9)
+                        mstore(192, deposit_7)
                         log1(128, 96, 65375163721362069710668505494972926144572850546638504720594393917789416593941)
-                        mstore(128, deposit_9)
+                        tstore(0, 0)
+                        mstore(128, deposit_7)
                         return(128, 32)
                     }
                     default {
-                        if iszero(deposit_7) {
-                            mstore(128, shl(224, 1313373041))
-                            mstore(132, 18)
-                            revert(128, 36)
-                        }
-                        let deposit_9 := mul(deposit_8, deposit_0)
-                        if iszero(or(iszero(deposit_8), eq(div(deposit_9, deposit_8), deposit_0))) {
-                            mstore(128, shl(224, 1313373041))
-                            mstore(132, 17)
-                            revert(128, 36)
-                        }
-                        deposit_9 := div(deposit_9, deposit_7)
-                        if iszero(lt(0, deposit_9)) {
+                        let deposit_7 := deposit_0
+                        if iszero(lt(0, deposit_7)) {
                             mstore(128, shl(224, 2551308487))
                             revert(128, 4)
                         }
-                        let deposit_10 := add(deposit_6, deposit_9)
-                        if lt(deposit_10, deposit_6) {
+                        let deposit_8 := add(deposit_6, deposit_7)
+                        if lt(deposit_8, deposit_6) {
                             mstore(128, shl(224, 1313373041))
                             mstore(132, 17)
                             revert(128, 36)
                         }
-                        sstore(3, deposit_10)
+                        sstore(3, deposit_8)
                         mstore(0, deposit_2)
                         mstore(32, 4)
-                        let deposit_11 := sload(keccak256(0, 64))
-                        let deposit_12 := add(deposit_11, deposit_9)
-                        if lt(deposit_12, deposit_11) {
+                        let deposit_9 := sload(keccak256(0, 64))
+                        let deposit_10 := add(deposit_9, deposit_7)
+                        if lt(deposit_10, deposit_9) {
                             mstore(128, shl(224, 1313373041))
                             mstore(132, 17)
                             revert(128, 36)
                         }
                         mstore(0, deposit_2)
                         mstore(32, 4)
-                        sstore(keccak256(0, 64), deposit_12)
-                        let deposit_13 := 0
+                        sstore(keccak256(0, 64), deposit_10)
+                        let deposit_11 := 0
                         {
                             mstore(128, shl(224, 599290589))
                             mstore(132, deposit_2)
                             mstore(164, deposit_3)
                             mstore(196, deposit_0)
-                            let deposit__ok_13 := call(1000000, deposit_4, 0, 128, 100, 128, 32)
-                            if iszero(deposit__ok_13) {
+                            let deposit__ok_11 := call(1000000, deposit_4, 0, 128, 100, 128, 32)
+                            if iszero(deposit__ok_11) {
                                 revert(0, 0)
                             }
                             if iszero(or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 32)), lt(returndatasize(), 64)))) {
                                 revert(0, 0)
                             }
-                            deposit_13 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
+                            deposit_11 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
                         }
-                        if iszero(eq(deposit_13, 1)) {
+                        if iszero(eq(deposit_11, 1)) {
                             mstore(128, shl(224, 2428038168))
                             revert(128, 4)
                         }
                         mstore(128, deposit_2)
                         mstore(160, deposit_0)
-                        mstore(192, deposit_9)
+                        mstore(192, deposit_7)
                         log1(128, 96, 65375163721362069710668505494972926144572850546638504720594393917789416593941)
-                        mstore(128, deposit_9)
+                        tstore(0, 0)
+                        mstore(128, deposit_7)
                         return(128, 32)
                     }
                 }
@@ -197,6 +190,7 @@ object "Vault" {
                         revert(0, 0)
                     }
                 }
+                tstore(0, 1)
                 {
                     let withdraw_0 := calldataload(4)
                     let withdraw_1 := sload(2)
@@ -286,6 +280,7 @@ object "Vault" {
                     mstore(160, withdraw_8)
                     mstore(192, withdraw_0)
                     log1(128, 96, 109675089620094772280264318389135030480951249233487863733592477092391202960744)
+                    tstore(0, 0)
                     mstore(128, withdraw_8)
                     return(128, 32)
                 }
@@ -314,8 +309,6 @@ object "Vault" {
                         previewDeposit_3 := mload(128)
                     }
                     let previewDeposit_4 := sload(3)
-                    let previewDeposit_5 := 1
-                    let previewDeposit_6 := 1
                     switch eq(previewDeposit_4, 0)
                     case 0 {
                         if iszero(previewDeposit_3) {
@@ -323,30 +316,18 @@ object "Vault" {
                             mstore(132, 18)
                             revert(128, 36)
                         }
-                        let previewDeposit_7 := mul(previewDeposit_4, previewDeposit_0)
-                        if iszero(or(iszero(previewDeposit_4), eq(div(previewDeposit_7, previewDeposit_4), previewDeposit_0))) {
+                        let previewDeposit_5 := mul(previewDeposit_4, previewDeposit_0)
+                        if iszero(or(iszero(previewDeposit_4), eq(div(previewDeposit_5, previewDeposit_4), previewDeposit_0))) {
                             mstore(128, shl(224, 1313373041))
                             mstore(132, 17)
                             revert(128, 36)
                         }
-                        previewDeposit_7 := div(previewDeposit_7, previewDeposit_3)
-                        mstore(128, previewDeposit_7)
+                        previewDeposit_5 := div(previewDeposit_5, previewDeposit_3)
+                        mstore(128, previewDeposit_5)
                         return(128, 32)
                     }
                     default {
-                        if iszero(previewDeposit_5) {
-                            mstore(128, shl(224, 1313373041))
-                            mstore(132, 18)
-                            revert(128, 36)
-                        }
-                        let previewDeposit_7 := mul(previewDeposit_6, previewDeposit_0)
-                        if iszero(or(iszero(previewDeposit_6), eq(div(previewDeposit_7, previewDeposit_6), previewDeposit_0))) {
-                            mstore(128, shl(224, 1313373041))
-                            mstore(132, 17)
-                            revert(128, 36)
-                        }
-                        previewDeposit_7 := div(previewDeposit_7, previewDeposit_5)
-                        mstore(128, previewDeposit_7)
+                        mstore(128, previewDeposit_0)
                         return(128, 32)
                     }
                 }
