@@ -8,8 +8,9 @@ Constant-product pool in LSC (`Examples/Cpamm/Contract.lean`), two
 Storage: `token0/1`, `reserve0/1`, `totalShares`, `shares`, `owner`,
 `feeTo`, `protocolShareBps`, `protocolFees0/1`. First LP mint is `a0`
 (no `sqrt`, no loop). Later mint is `min(⌊a0·S/r0⌋, ⌊a1·S/r1⌋)` via
-`ite`. Swaps charge 30 bps of `amountIn`; LPs keep it on the curve.
-When `feeTo ≠ 0`, `⌊fee · protocolShareBps / BPS⌋` is skimmed into
+`ite`. Both swap directions use `swapOut` (0.3%-fee notional, then
+`require (protoFee ≤ fee)`). LPs keep the fee on the curve. When
+`feeTo ≠ 0`, `⌊fee · protocolShareBps / BPS⌋` is skimmed into
 `protocolFees*` and never enters `k`. CEI is state-then-call; reentrancy
 is not modelled (`EXTERNAL_CALLS.md`). Constructor requires `t0 ≠ t1`.
 
@@ -23,8 +24,8 @@ is not modelled (`EXTERNAL_CALLS.md`). Constructor requires `t0 ≠ t1`.
 - `cpamm_no_unauthorized_extraction`: an address’s **share count** never
   falls without `Auth` (only that address’s `removeLiquidity`).
 - `swap0for1_k` / `swap1for0_k`: `k` does not drop on a successful swap
-  when `protocolShareBps ≤ BPS` (not an `Inv` conjunct). LP rounding
-  favours the pool.
+  (not an `Inv` conjunct). `swapOut` reverts when `protoFee` would
+  exceed the 0.3% fee. LP rounding favours the pool.
 
 Assumed, not proved here: `IERC20.Spec` on both tokens; `TokensIndependent`;
 `Wf` traces (`sender ≠ self`); `cpammRely`. Standard axioms only

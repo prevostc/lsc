@@ -1,4 +1,3 @@
-import Mathlib.Tactic.SplitIfs
 import Examples.Cpamm.Spec
 
 open Stdlib
@@ -21,11 +20,6 @@ theorem remove_le_reserves (s r S : Nat) (hs : s ≤ S) (hS : 0 < S) :
 theorem remove_le_reserves_comm (s r S : Nat) (hs : s ≤ S) (hS : 0 < S) :
     r * s / S ≤ r := by
   simpa [Nat.mul_comm] using remove_le_reserves s r S hs hS
-
-/-- A share `bps / bpsMax` of `n` cannot exceed `n`. -/
-theorem share_le (n bps bpsMax : Nat) (h : bps ≤ bpsMax) (hMax : 0 < bpsMax) :
-    n * bps / bpsMax ≤ n := by
-  simpa [Nat.mul_comm n bps] using remove_le_reserves bps n bpsMax h hMax
 
 /-- Fee-less Uniswap floor output: `k' ≥ k`. -/
 theorem k_nondecreasing (rIn rOut dx : Nat) (hIn : 0 < rIn) :
@@ -64,13 +58,6 @@ theorem swapQuote_proto (rIn rOut dx feeTo pShareBps : Nat) :
     (swapQuote rIn rOut dx feeTo pShareBps).2 =
       protoTake feeTo pShareBps (swapFee dx) :=
   rfl
-
-theorem protoTake_le_fee (feeTo ps fee : Nat) (h : ps ≤ BPS.raw) :
-    protoTake feeTo ps fee ≤ fee := by
-  unfold protoTake
-  split_ifs
-  · exact Nat.zero_le _
-  · exact share_le fee ps BPS.raw h (by decide)
 
 /-- A successful quote never decreases `k` when the protocol take does not
 exceed the 0.3% fee (so net input is at least the fee-less notional). -/

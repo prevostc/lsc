@@ -14,9 +14,10 @@ Amounts are indexed by the asset they denominate (`Amount asset0`,
 stores the ref addresses.
 
 The first LP mint is `a0` (no square root, no loop). Later mints are
-`min(⌊a0·S/r0⌋, ⌊a1·S/r1⌋)`. Swaps use the 0.3%-fee notional
-`⌊dx · 9970 / 10000⌋` on the curve; when `feeTo ≠ 0`, a protocol share of
-that fee is skimmed into `protocolFees*` and never enters `k`. Rounding
+`min(⌊a0·S/r0⌋, ⌊a1·S/r1⌋)`. Both swap directions share `swapOut`: output
+uses the 0.3%-fee notional `⌊dx · 9970 / 10000⌋` on the curve, then
+`require (protoFee ≤ fee)`. When `feeTo ≠ 0`, a protocol share of that
+fee is skimmed into `protocolFees*` and never enters `k`. Rounding
 favours the pool. `k` is a swap fact, not part of the invariant:
 `removeLiquidity` floors and can decrease `k`.
 
@@ -45,7 +46,8 @@ Unauthorised extraction (spec): an address's **share count** never falls
 unless that address called `removeLiquidity` (`cpamm_no_unauthorized_extraction`).
 Swaps and adding liquidity do not decrease another LP's share count.
 Successful swaps do not decrease `reserve0 · reserve1` (`swap0for1_k`,
-`swap1for0_k`) when `protocolShareBps ≤ BPS`.
+`swap1for0_k`). `swapOut` reverts if the protocol take would exceed the
+0.3% fee, so the input reserve grows by at least the fee-less notional.
 
 Assumed, not proved in the Cpamm file: both tokens are distinct conforming
 ERC-20s per `IERC20.Spec`; a CALL on one does not change the other's
