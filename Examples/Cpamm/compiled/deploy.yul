@@ -529,287 +529,245 @@ object "Cpamm" {
                     }
                     let swap0for1_4 := sload(7)
                     let swap0for1_5 := sload(8)
+                    if iszero(10000) {
+                        mstore(128, shl(224, 1313373041))
+                        mstore(132, 18)
+                        revert(128, 36)
+                    }
+                    let swap0for1_6 := mul(swap0for1_0, 9970)
+                    if iszero(or(iszero(swap0for1_0), eq(div(swap0for1_6, swap0for1_0), 9970))) {
+                        mstore(128, shl(224, 1313373041))
+                        mstore(132, 17)
+                        revert(128, 36)
+                    }
+                    swap0for1_6 := div(swap0for1_6, 10000)
+                    let swap0for1_7 := add(swap0for1_2, swap0for1_6)
+                    if lt(swap0for1_7, swap0for1_2) {
+                        mstore(128, shl(224, 1313373041))
+                        mstore(132, 17)
+                        revert(128, 36)
+                    }
+                    if iszero(swap0for1_7) {
+                        mstore(128, shl(224, 1313373041))
+                        mstore(132, 18)
+                        revert(128, 36)
+                    }
+                    let swap0for1_8 := mul(swap0for1_3, swap0for1_6)
+                    if iszero(or(iszero(swap0for1_3), eq(div(swap0for1_8, swap0for1_3), swap0for1_6))) {
+                        mstore(128, shl(224, 1313373041))
+                        mstore(132, 17)
+                        revert(128, 36)
+                    }
+                    swap0for1_8 := div(swap0for1_8, swap0for1_7)
+                    if lt(swap0for1_0, swap0for1_6) {
+                        mstore(128, shl(224, 1313373041))
+                        mstore(132, 17)
+                        revert(128, 36)
+                    }
+                    let swap0for1_9 := sub(swap0for1_0, swap0for1_6)
                     switch eq(swap0for1_4, 0)
                     case 0 {
-                        let swap0for1_6 := swap0for1_5
                         if iszero(10000) {
                             mstore(128, shl(224, 1313373041))
                             mstore(132, 18)
                             revert(128, 36)
                         }
-                        let swap0for1_7 := mul(swap0for1_0, 9970)
-                        if iszero(or(iszero(swap0for1_0), eq(div(swap0for1_7, swap0for1_0), 9970))) {
+                        let swap0for1_10 := mul(swap0for1_9, swap0for1_5)
+                        if iszero(or(iszero(swap0for1_9), eq(div(swap0for1_10, swap0for1_9), swap0for1_5))) {
                             mstore(128, shl(224, 1313373041))
                             mstore(132, 17)
                             revert(128, 36)
                         }
-                        swap0for1_7 := div(swap0for1_7, 10000)
-                        let swap0for1_8 := add(swap0for1_2, swap0for1_7)
-                        if lt(swap0for1_8, swap0for1_2) {
-                            mstore(128, shl(224, 1313373041))
-                            mstore(132, 17)
-                            revert(128, 36)
+                        swap0for1_10 := div(swap0for1_10, 10000)
+                        if iszero(iszero(lt(swap0for1_9, swap0for1_10))) {
+                            mstore(128, shl(224, 3444466023))
+                            revert(128, 4)
                         }
-                        if iszero(swap0for1_8) {
-                            mstore(128, shl(224, 1313373041))
-                            mstore(132, 18)
-                            revert(128, 36)
-                        }
-                        let swap0for1_9 := mul(swap0for1_3, swap0for1_7)
-                        if iszero(or(iszero(swap0for1_3), eq(div(swap0for1_9, swap0for1_3), swap0for1_7))) {
-                            mstore(128, shl(224, 1313373041))
-                            mstore(132, 17)
-                            revert(128, 36)
-                        }
-                        swap0for1_9 := div(swap0for1_9, swap0for1_8)
-                        if lt(swap0for1_0, swap0for1_7) {
-                            mstore(128, shl(224, 1313373041))
-                            mstore(132, 17)
-                            revert(128, 36)
-                        }
-                        let swap0for1_10 := sub(swap0for1_0, swap0for1_7)
-                        if iszero(10000) {
-                            mstore(128, shl(224, 1313373041))
-                            mstore(132, 18)
-                            revert(128, 36)
-                        }
-                        let swap0for1_11 := mul(swap0for1_10, swap0for1_6)
-                        if iszero(or(iszero(swap0for1_10), eq(div(swap0for1_11, swap0for1_10), swap0for1_6))) {
-                            mstore(128, shl(224, 1313373041))
-                            mstore(132, 17)
-                            revert(128, 36)
-                        }
-                        swap0for1_11 := div(swap0for1_11, 10000)
-                        if lt(swap0for1_10, swap0for1_11) {
-                            mstore(128, shl(224, 1313373041))
-                            mstore(132, 17)
-                            revert(128, 36)
-                        }
-                        let swap0for1_12 := sub(swap0for1_10, swap0for1_11)
-                        if iszero(iszero(lt(swap0for1_9, swap0for1_1))) {
+                        if iszero(iszero(lt(swap0for1_8, swap0for1_1))) {
                             mstore(128, shl(224, 3139990979))
                             revert(128, 4)
                         }
-                        if iszero(lt(0, swap0for1_9)) {
+                        if iszero(lt(0, swap0for1_8)) {
                             mstore(128, shl(224, 276346163))
                             revert(128, 4)
                         }
-                        if lt(swap0for1_0, swap0for1_11) {
+                        if lt(swap0for1_0, swap0for1_10) {
                             mstore(128, shl(224, 1313373041))
                             mstore(132, 17)
                             revert(128, 36)
                         }
-                        let swap0for1_13 := sub(swap0for1_0, swap0for1_11)
-                        let swap0for1_14 := add(swap0for1_2, swap0for1_13)
-                        if lt(swap0for1_14, swap0for1_2) {
+                        let swap0for1_11 := sub(swap0for1_0, swap0for1_10)
+                        let swap0for1_12 := add(swap0for1_2, swap0for1_11)
+                        if lt(swap0for1_12, swap0for1_2) {
                             mstore(128, shl(224, 1313373041))
                             mstore(132, 17)
                             revert(128, 36)
                         }
-                        sstore(2, swap0for1_14)
-                        if lt(swap0for1_3, swap0for1_9) {
+                        sstore(2, swap0for1_12)
+                        if lt(swap0for1_3, swap0for1_8) {
                             mstore(128, shl(224, 1313373041))
                             mstore(132, 17)
                             revert(128, 36)
                         }
-                        let swap0for1_15 := sub(swap0for1_3, swap0for1_9)
-                        sstore(3, swap0for1_15)
-                        let swap0for1_16 := sload(9)
-                        let swap0for1_17 := add(swap0for1_16, swap0for1_11)
-                        if lt(swap0for1_17, swap0for1_16) {
+                        let swap0for1_13 := sub(swap0for1_3, swap0for1_8)
+                        sstore(3, swap0for1_13)
+                        let swap0for1_14 := sload(9)
+                        let swap0for1_15 := add(swap0for1_14, swap0for1_10)
+                        if lt(swap0for1_15, swap0for1_14) {
                             mstore(128, shl(224, 1313373041))
                             mstore(132, 17)
                             revert(128, 36)
                         }
-                        sstore(9, swap0for1_17)
-                        let swap0for1_18 := caller()
-                        let swap0for1_19 := address()
-                        let swap0for1_20 := sload(0)
-                        let swap0for1_21 := sload(1)
-                        let swap0for1_22 := 0
+                        sstore(9, swap0for1_15)
+                        let swap0for1_16 := caller()
+                        let swap0for1_17 := address()
+                        let swap0for1_18 := sload(0)
+                        let swap0for1_19 := sload(1)
+                        let swap0for1_20 := 0
                         {
                             mstore(128, shl(224, 599290589))
-                            mstore(132, swap0for1_18)
-                            mstore(164, swap0for1_19)
+                            mstore(132, swap0for1_16)
+                            mstore(164, swap0for1_17)
                             mstore(196, swap0for1_0)
-                            let swap0for1__ok_22 := call(1000000, swap0for1_20, 0, 128, 100, 128, 32)
-                            if iszero(swap0for1__ok_22) {
+                            let swap0for1__ok_20 := call(1000000, swap0for1_18, 0, 128, 100, 128, 32)
+                            if iszero(swap0for1__ok_20) {
                                 revert(0, 0)
                             }
                             if iszero(or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 32)), lt(returndatasize(), 64)))) {
                                 revert(0, 0)
                             }
-                            swap0for1_22 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
+                            swap0for1_20 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
                         }
-                        if iszero(eq(swap0for1_22, 1)) {
+                        if iszero(eq(swap0for1_20, 1)) {
                             mstore(128, shl(224, 2428038168))
                             revert(128, 4)
                         }
-                        let swap0for1_23 := 0
+                        let swap0for1_21 := 0
                         {
                             mstore(128, shl(224, 2835717307))
-                            mstore(132, swap0for1_18)
-                            mstore(164, swap0for1_9)
-                            let swap0for1__ok_23 := call(1000000, swap0for1_21, 0, 128, 68, 128, 32)
-                            if iszero(swap0for1__ok_23) {
+                            mstore(132, swap0for1_16)
+                            mstore(164, swap0for1_8)
+                            let swap0for1__ok_21 := call(1000000, swap0for1_19, 0, 128, 68, 128, 32)
+                            if iszero(swap0for1__ok_21) {
                                 revert(0, 0)
                             }
                             if iszero(or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 32)), lt(returndatasize(), 64)))) {
                                 revert(0, 0)
                             }
-                            swap0for1_23 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
+                            swap0for1_21 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
                         }
-                        if iszero(eq(swap0for1_23, 1)) {
+                        if iszero(eq(swap0for1_21, 1)) {
                             mstore(128, shl(224, 2428038168))
                             revert(128, 4)
                         }
-                        mstore(128, swap0for1_18)
+                        mstore(128, swap0for1_16)
                         mstore(160, swap0for1_0)
-                        mstore(192, swap0for1_9)
+                        mstore(192, swap0for1_8)
                         log1(128, 96, 17437238319937237281100397956711788736631309589920004552140586013878294093770)
                         tstore(0, 0)
-                        mstore(128, swap0for1_9)
+                        mstore(128, swap0for1_8)
                         return(128, 32)
                     }
                     default {
-                        let swap0for1_6 := 0
                         if iszero(10000) {
                             mstore(128, shl(224, 1313373041))
                             mstore(132, 18)
                             revert(128, 36)
                         }
-                        let swap0for1_7 := mul(swap0for1_0, 9970)
-                        if iszero(or(iszero(swap0for1_0), eq(div(swap0for1_7, swap0for1_0), 9970))) {
+                        let swap0for1_10 := mul(swap0for1_9, 0)
+                        if iszero(or(iszero(swap0for1_9), eq(div(swap0for1_10, swap0for1_9), 0))) {
                             mstore(128, shl(224, 1313373041))
                             mstore(132, 17)
                             revert(128, 36)
                         }
-                        swap0for1_7 := div(swap0for1_7, 10000)
-                        let swap0for1_8 := add(swap0for1_2, swap0for1_7)
-                        if lt(swap0for1_8, swap0for1_2) {
-                            mstore(128, shl(224, 1313373041))
-                            mstore(132, 17)
-                            revert(128, 36)
+                        swap0for1_10 := div(swap0for1_10, 10000)
+                        if iszero(iszero(lt(swap0for1_9, swap0for1_10))) {
+                            mstore(128, shl(224, 3444466023))
+                            revert(128, 4)
                         }
-                        if iszero(swap0for1_8) {
-                            mstore(128, shl(224, 1313373041))
-                            mstore(132, 18)
-                            revert(128, 36)
-                        }
-                        let swap0for1_9 := mul(swap0for1_3, swap0for1_7)
-                        if iszero(or(iszero(swap0for1_3), eq(div(swap0for1_9, swap0for1_3), swap0for1_7))) {
-                            mstore(128, shl(224, 1313373041))
-                            mstore(132, 17)
-                            revert(128, 36)
-                        }
-                        swap0for1_9 := div(swap0for1_9, swap0for1_8)
-                        if lt(swap0for1_0, swap0for1_7) {
-                            mstore(128, shl(224, 1313373041))
-                            mstore(132, 17)
-                            revert(128, 36)
-                        }
-                        let swap0for1_10 := sub(swap0for1_0, swap0for1_7)
-                        if iszero(10000) {
-                            mstore(128, shl(224, 1313373041))
-                            mstore(132, 18)
-                            revert(128, 36)
-                        }
-                        let swap0for1_11 := mul(swap0for1_10, swap0for1_6)
-                        if iszero(or(iszero(swap0for1_10), eq(div(swap0for1_11, swap0for1_10), swap0for1_6))) {
-                            mstore(128, shl(224, 1313373041))
-                            mstore(132, 17)
-                            revert(128, 36)
-                        }
-                        swap0for1_11 := div(swap0for1_11, 10000)
-                        if lt(swap0for1_10, swap0for1_11) {
-                            mstore(128, shl(224, 1313373041))
-                            mstore(132, 17)
-                            revert(128, 36)
-                        }
-                        let swap0for1_12 := sub(swap0for1_10, swap0for1_11)
-                        if iszero(iszero(lt(swap0for1_9, swap0for1_1))) {
+                        if iszero(iszero(lt(swap0for1_8, swap0for1_1))) {
                             mstore(128, shl(224, 3139990979))
                             revert(128, 4)
                         }
-                        if iszero(lt(0, swap0for1_9)) {
+                        if iszero(lt(0, swap0for1_8)) {
                             mstore(128, shl(224, 276346163))
                             revert(128, 4)
                         }
-                        if lt(swap0for1_0, swap0for1_11) {
+                        if lt(swap0for1_0, swap0for1_10) {
                             mstore(128, shl(224, 1313373041))
                             mstore(132, 17)
                             revert(128, 36)
                         }
-                        let swap0for1_13 := sub(swap0for1_0, swap0for1_11)
-                        let swap0for1_14 := add(swap0for1_2, swap0for1_13)
-                        if lt(swap0for1_14, swap0for1_2) {
+                        let swap0for1_11 := sub(swap0for1_0, swap0for1_10)
+                        let swap0for1_12 := add(swap0for1_2, swap0for1_11)
+                        if lt(swap0for1_12, swap0for1_2) {
                             mstore(128, shl(224, 1313373041))
                             mstore(132, 17)
                             revert(128, 36)
                         }
-                        sstore(2, swap0for1_14)
-                        if lt(swap0for1_3, swap0for1_9) {
+                        sstore(2, swap0for1_12)
+                        if lt(swap0for1_3, swap0for1_8) {
                             mstore(128, shl(224, 1313373041))
                             mstore(132, 17)
                             revert(128, 36)
                         }
-                        let swap0for1_15 := sub(swap0for1_3, swap0for1_9)
-                        sstore(3, swap0for1_15)
-                        let swap0for1_16 := sload(9)
-                        let swap0for1_17 := add(swap0for1_16, swap0for1_11)
-                        if lt(swap0for1_17, swap0for1_16) {
+                        let swap0for1_13 := sub(swap0for1_3, swap0for1_8)
+                        sstore(3, swap0for1_13)
+                        let swap0for1_14 := sload(9)
+                        let swap0for1_15 := add(swap0for1_14, swap0for1_10)
+                        if lt(swap0for1_15, swap0for1_14) {
                             mstore(128, shl(224, 1313373041))
                             mstore(132, 17)
                             revert(128, 36)
                         }
-                        sstore(9, swap0for1_17)
-                        let swap0for1_18 := caller()
-                        let swap0for1_19 := address()
-                        let swap0for1_20 := sload(0)
-                        let swap0for1_21 := sload(1)
-                        let swap0for1_22 := 0
+                        sstore(9, swap0for1_15)
+                        let swap0for1_16 := caller()
+                        let swap0for1_17 := address()
+                        let swap0for1_18 := sload(0)
+                        let swap0for1_19 := sload(1)
+                        let swap0for1_20 := 0
                         {
                             mstore(128, shl(224, 599290589))
-                            mstore(132, swap0for1_18)
-                            mstore(164, swap0for1_19)
+                            mstore(132, swap0for1_16)
+                            mstore(164, swap0for1_17)
                             mstore(196, swap0for1_0)
-                            let swap0for1__ok_22 := call(1000000, swap0for1_20, 0, 128, 100, 128, 32)
-                            if iszero(swap0for1__ok_22) {
+                            let swap0for1__ok_20 := call(1000000, swap0for1_18, 0, 128, 100, 128, 32)
+                            if iszero(swap0for1__ok_20) {
                                 revert(0, 0)
                             }
                             if iszero(or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 32)), lt(returndatasize(), 64)))) {
                                 revert(0, 0)
                             }
-                            swap0for1_22 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
+                            swap0for1_20 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
                         }
-                        if iszero(eq(swap0for1_22, 1)) {
+                        if iszero(eq(swap0for1_20, 1)) {
                             mstore(128, shl(224, 2428038168))
                             revert(128, 4)
                         }
-                        let swap0for1_23 := 0
+                        let swap0for1_21 := 0
                         {
                             mstore(128, shl(224, 2835717307))
-                            mstore(132, swap0for1_18)
-                            mstore(164, swap0for1_9)
-                            let swap0for1__ok_23 := call(1000000, swap0for1_21, 0, 128, 68, 128, 32)
-                            if iszero(swap0for1__ok_23) {
+                            mstore(132, swap0for1_16)
+                            mstore(164, swap0for1_8)
+                            let swap0for1__ok_21 := call(1000000, swap0for1_19, 0, 128, 68, 128, 32)
+                            if iszero(swap0for1__ok_21) {
                                 revert(0, 0)
                             }
                             if iszero(or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 32)), lt(returndatasize(), 64)))) {
                                 revert(0, 0)
                             }
-                            swap0for1_23 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
+                            swap0for1_21 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
                         }
-                        if iszero(eq(swap0for1_23, 1)) {
+                        if iszero(eq(swap0for1_21, 1)) {
                             mstore(128, shl(224, 2428038168))
                             revert(128, 4)
                         }
-                        mstore(128, swap0for1_18)
+                        mstore(128, swap0for1_16)
                         mstore(160, swap0for1_0)
-                        mstore(192, swap0for1_9)
+                        mstore(192, swap0for1_8)
                         log1(128, 96, 17437238319937237281100397956711788736631309589920004552140586013878294093770)
                         tstore(0, 0)
-                        mstore(128, swap0for1_9)
+                        mstore(128, swap0for1_8)
                         return(128, 32)
                     }
                 }
@@ -840,287 +798,245 @@ object "Cpamm" {
                     }
                     let swap1for0_4 := sload(7)
                     let swap1for0_5 := sload(8)
+                    if iszero(10000) {
+                        mstore(128, shl(224, 1313373041))
+                        mstore(132, 18)
+                        revert(128, 36)
+                    }
+                    let swap1for0_6 := mul(swap1for0_0, 9970)
+                    if iszero(or(iszero(swap1for0_0), eq(div(swap1for0_6, swap1for0_0), 9970))) {
+                        mstore(128, shl(224, 1313373041))
+                        mstore(132, 17)
+                        revert(128, 36)
+                    }
+                    swap1for0_6 := div(swap1for0_6, 10000)
+                    let swap1for0_7 := add(swap1for0_3, swap1for0_6)
+                    if lt(swap1for0_7, swap1for0_3) {
+                        mstore(128, shl(224, 1313373041))
+                        mstore(132, 17)
+                        revert(128, 36)
+                    }
+                    if iszero(swap1for0_7) {
+                        mstore(128, shl(224, 1313373041))
+                        mstore(132, 18)
+                        revert(128, 36)
+                    }
+                    let swap1for0_8 := mul(swap1for0_2, swap1for0_6)
+                    if iszero(or(iszero(swap1for0_2), eq(div(swap1for0_8, swap1for0_2), swap1for0_6))) {
+                        mstore(128, shl(224, 1313373041))
+                        mstore(132, 17)
+                        revert(128, 36)
+                    }
+                    swap1for0_8 := div(swap1for0_8, swap1for0_7)
+                    if lt(swap1for0_0, swap1for0_6) {
+                        mstore(128, shl(224, 1313373041))
+                        mstore(132, 17)
+                        revert(128, 36)
+                    }
+                    let swap1for0_9 := sub(swap1for0_0, swap1for0_6)
                     switch eq(swap1for0_4, 0)
                     case 0 {
-                        let swap1for0_6 := swap1for0_5
                         if iszero(10000) {
                             mstore(128, shl(224, 1313373041))
                             mstore(132, 18)
                             revert(128, 36)
                         }
-                        let swap1for0_7 := mul(swap1for0_0, 9970)
-                        if iszero(or(iszero(swap1for0_0), eq(div(swap1for0_7, swap1for0_0), 9970))) {
+                        let swap1for0_10 := mul(swap1for0_9, swap1for0_5)
+                        if iszero(or(iszero(swap1for0_9), eq(div(swap1for0_10, swap1for0_9), swap1for0_5))) {
                             mstore(128, shl(224, 1313373041))
                             mstore(132, 17)
                             revert(128, 36)
                         }
-                        swap1for0_7 := div(swap1for0_7, 10000)
-                        let swap1for0_8 := add(swap1for0_3, swap1for0_7)
-                        if lt(swap1for0_8, swap1for0_3) {
-                            mstore(128, shl(224, 1313373041))
-                            mstore(132, 17)
-                            revert(128, 36)
+                        swap1for0_10 := div(swap1for0_10, 10000)
+                        if iszero(iszero(lt(swap1for0_9, swap1for0_10))) {
+                            mstore(128, shl(224, 3444466023))
+                            revert(128, 4)
                         }
-                        if iszero(swap1for0_8) {
-                            mstore(128, shl(224, 1313373041))
-                            mstore(132, 18)
-                            revert(128, 36)
-                        }
-                        let swap1for0_9 := mul(swap1for0_2, swap1for0_7)
-                        if iszero(or(iszero(swap1for0_2), eq(div(swap1for0_9, swap1for0_2), swap1for0_7))) {
-                            mstore(128, shl(224, 1313373041))
-                            mstore(132, 17)
-                            revert(128, 36)
-                        }
-                        swap1for0_9 := div(swap1for0_9, swap1for0_8)
-                        if lt(swap1for0_0, swap1for0_7) {
-                            mstore(128, shl(224, 1313373041))
-                            mstore(132, 17)
-                            revert(128, 36)
-                        }
-                        let swap1for0_10 := sub(swap1for0_0, swap1for0_7)
-                        if iszero(10000) {
-                            mstore(128, shl(224, 1313373041))
-                            mstore(132, 18)
-                            revert(128, 36)
-                        }
-                        let swap1for0_11 := mul(swap1for0_10, swap1for0_6)
-                        if iszero(or(iszero(swap1for0_10), eq(div(swap1for0_11, swap1for0_10), swap1for0_6))) {
-                            mstore(128, shl(224, 1313373041))
-                            mstore(132, 17)
-                            revert(128, 36)
-                        }
-                        swap1for0_11 := div(swap1for0_11, 10000)
-                        if lt(swap1for0_10, swap1for0_11) {
-                            mstore(128, shl(224, 1313373041))
-                            mstore(132, 17)
-                            revert(128, 36)
-                        }
-                        let swap1for0_12 := sub(swap1for0_10, swap1for0_11)
-                        if iszero(iszero(lt(swap1for0_9, swap1for0_1))) {
+                        if iszero(iszero(lt(swap1for0_8, swap1for0_1))) {
                             mstore(128, shl(224, 3139990979))
                             revert(128, 4)
                         }
-                        if iszero(lt(0, swap1for0_9)) {
+                        if iszero(lt(0, swap1for0_8)) {
                             mstore(128, shl(224, 276346163))
                             revert(128, 4)
                         }
-                        if lt(swap1for0_0, swap1for0_11) {
+                        if lt(swap1for0_0, swap1for0_10) {
                             mstore(128, shl(224, 1313373041))
                             mstore(132, 17)
                             revert(128, 36)
                         }
-                        let swap1for0_13 := sub(swap1for0_0, swap1for0_11)
-                        let swap1for0_14 := add(swap1for0_3, swap1for0_13)
-                        if lt(swap1for0_14, swap1for0_3) {
+                        let swap1for0_11 := sub(swap1for0_0, swap1for0_10)
+                        let swap1for0_12 := add(swap1for0_3, swap1for0_11)
+                        if lt(swap1for0_12, swap1for0_3) {
                             mstore(128, shl(224, 1313373041))
                             mstore(132, 17)
                             revert(128, 36)
                         }
-                        sstore(3, swap1for0_14)
-                        if lt(swap1for0_2, swap1for0_9) {
+                        sstore(3, swap1for0_12)
+                        if lt(swap1for0_2, swap1for0_8) {
                             mstore(128, shl(224, 1313373041))
                             mstore(132, 17)
                             revert(128, 36)
                         }
-                        let swap1for0_15 := sub(swap1for0_2, swap1for0_9)
-                        sstore(2, swap1for0_15)
-                        let swap1for0_16 := sload(10)
-                        let swap1for0_17 := add(swap1for0_16, swap1for0_11)
-                        if lt(swap1for0_17, swap1for0_16) {
+                        let swap1for0_13 := sub(swap1for0_2, swap1for0_8)
+                        sstore(2, swap1for0_13)
+                        let swap1for0_14 := sload(10)
+                        let swap1for0_15 := add(swap1for0_14, swap1for0_10)
+                        if lt(swap1for0_15, swap1for0_14) {
                             mstore(128, shl(224, 1313373041))
                             mstore(132, 17)
                             revert(128, 36)
                         }
-                        sstore(10, swap1for0_17)
-                        let swap1for0_18 := caller()
-                        let swap1for0_19 := address()
-                        let swap1for0_20 := sload(1)
-                        let swap1for0_21 := sload(0)
-                        let swap1for0_22 := 0
+                        sstore(10, swap1for0_15)
+                        let swap1for0_16 := caller()
+                        let swap1for0_17 := address()
+                        let swap1for0_18 := sload(1)
+                        let swap1for0_19 := sload(0)
+                        let swap1for0_20 := 0
                         {
                             mstore(128, shl(224, 599290589))
-                            mstore(132, swap1for0_18)
-                            mstore(164, swap1for0_19)
+                            mstore(132, swap1for0_16)
+                            mstore(164, swap1for0_17)
                             mstore(196, swap1for0_0)
-                            let swap1for0__ok_22 := call(1000000, swap1for0_20, 0, 128, 100, 128, 32)
-                            if iszero(swap1for0__ok_22) {
+                            let swap1for0__ok_20 := call(1000000, swap1for0_18, 0, 128, 100, 128, 32)
+                            if iszero(swap1for0__ok_20) {
                                 revert(0, 0)
                             }
                             if iszero(or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 32)), lt(returndatasize(), 64)))) {
                                 revert(0, 0)
                             }
-                            swap1for0_22 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
+                            swap1for0_20 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
                         }
-                        if iszero(eq(swap1for0_22, 1)) {
+                        if iszero(eq(swap1for0_20, 1)) {
                             mstore(128, shl(224, 2428038168))
                             revert(128, 4)
                         }
-                        let swap1for0_23 := 0
+                        let swap1for0_21 := 0
                         {
                             mstore(128, shl(224, 2835717307))
-                            mstore(132, swap1for0_18)
-                            mstore(164, swap1for0_9)
-                            let swap1for0__ok_23 := call(1000000, swap1for0_21, 0, 128, 68, 128, 32)
-                            if iszero(swap1for0__ok_23) {
+                            mstore(132, swap1for0_16)
+                            mstore(164, swap1for0_8)
+                            let swap1for0__ok_21 := call(1000000, swap1for0_19, 0, 128, 68, 128, 32)
+                            if iszero(swap1for0__ok_21) {
                                 revert(0, 0)
                             }
                             if iszero(or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 32)), lt(returndatasize(), 64)))) {
                                 revert(0, 0)
                             }
-                            swap1for0_23 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
+                            swap1for0_21 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
                         }
-                        if iszero(eq(swap1for0_23, 1)) {
+                        if iszero(eq(swap1for0_21, 1)) {
                             mstore(128, shl(224, 2428038168))
                             revert(128, 4)
                         }
-                        mstore(128, swap1for0_18)
+                        mstore(128, swap1for0_16)
                         mstore(160, swap1for0_0)
-                        mstore(192, swap1for0_9)
+                        mstore(192, swap1for0_8)
                         log1(128, 96, 106865371797876764641124053122323485270600095508620925271233383623886030425246)
                         tstore(0, 0)
-                        mstore(128, swap1for0_9)
+                        mstore(128, swap1for0_8)
                         return(128, 32)
                     }
                     default {
-                        let swap1for0_6 := 0
                         if iszero(10000) {
                             mstore(128, shl(224, 1313373041))
                             mstore(132, 18)
                             revert(128, 36)
                         }
-                        let swap1for0_7 := mul(swap1for0_0, 9970)
-                        if iszero(or(iszero(swap1for0_0), eq(div(swap1for0_7, swap1for0_0), 9970))) {
+                        let swap1for0_10 := mul(swap1for0_9, 0)
+                        if iszero(or(iszero(swap1for0_9), eq(div(swap1for0_10, swap1for0_9), 0))) {
                             mstore(128, shl(224, 1313373041))
                             mstore(132, 17)
                             revert(128, 36)
                         }
-                        swap1for0_7 := div(swap1for0_7, 10000)
-                        let swap1for0_8 := add(swap1for0_3, swap1for0_7)
-                        if lt(swap1for0_8, swap1for0_3) {
-                            mstore(128, shl(224, 1313373041))
-                            mstore(132, 17)
-                            revert(128, 36)
+                        swap1for0_10 := div(swap1for0_10, 10000)
+                        if iszero(iszero(lt(swap1for0_9, swap1for0_10))) {
+                            mstore(128, shl(224, 3444466023))
+                            revert(128, 4)
                         }
-                        if iszero(swap1for0_8) {
-                            mstore(128, shl(224, 1313373041))
-                            mstore(132, 18)
-                            revert(128, 36)
-                        }
-                        let swap1for0_9 := mul(swap1for0_2, swap1for0_7)
-                        if iszero(or(iszero(swap1for0_2), eq(div(swap1for0_9, swap1for0_2), swap1for0_7))) {
-                            mstore(128, shl(224, 1313373041))
-                            mstore(132, 17)
-                            revert(128, 36)
-                        }
-                        swap1for0_9 := div(swap1for0_9, swap1for0_8)
-                        if lt(swap1for0_0, swap1for0_7) {
-                            mstore(128, shl(224, 1313373041))
-                            mstore(132, 17)
-                            revert(128, 36)
-                        }
-                        let swap1for0_10 := sub(swap1for0_0, swap1for0_7)
-                        if iszero(10000) {
-                            mstore(128, shl(224, 1313373041))
-                            mstore(132, 18)
-                            revert(128, 36)
-                        }
-                        let swap1for0_11 := mul(swap1for0_10, swap1for0_6)
-                        if iszero(or(iszero(swap1for0_10), eq(div(swap1for0_11, swap1for0_10), swap1for0_6))) {
-                            mstore(128, shl(224, 1313373041))
-                            mstore(132, 17)
-                            revert(128, 36)
-                        }
-                        swap1for0_11 := div(swap1for0_11, 10000)
-                        if lt(swap1for0_10, swap1for0_11) {
-                            mstore(128, shl(224, 1313373041))
-                            mstore(132, 17)
-                            revert(128, 36)
-                        }
-                        let swap1for0_12 := sub(swap1for0_10, swap1for0_11)
-                        if iszero(iszero(lt(swap1for0_9, swap1for0_1))) {
+                        if iszero(iszero(lt(swap1for0_8, swap1for0_1))) {
                             mstore(128, shl(224, 3139990979))
                             revert(128, 4)
                         }
-                        if iszero(lt(0, swap1for0_9)) {
+                        if iszero(lt(0, swap1for0_8)) {
                             mstore(128, shl(224, 276346163))
                             revert(128, 4)
                         }
-                        if lt(swap1for0_0, swap1for0_11) {
+                        if lt(swap1for0_0, swap1for0_10) {
                             mstore(128, shl(224, 1313373041))
                             mstore(132, 17)
                             revert(128, 36)
                         }
-                        let swap1for0_13 := sub(swap1for0_0, swap1for0_11)
-                        let swap1for0_14 := add(swap1for0_3, swap1for0_13)
-                        if lt(swap1for0_14, swap1for0_3) {
+                        let swap1for0_11 := sub(swap1for0_0, swap1for0_10)
+                        let swap1for0_12 := add(swap1for0_3, swap1for0_11)
+                        if lt(swap1for0_12, swap1for0_3) {
                             mstore(128, shl(224, 1313373041))
                             mstore(132, 17)
                             revert(128, 36)
                         }
-                        sstore(3, swap1for0_14)
-                        if lt(swap1for0_2, swap1for0_9) {
+                        sstore(3, swap1for0_12)
+                        if lt(swap1for0_2, swap1for0_8) {
                             mstore(128, shl(224, 1313373041))
                             mstore(132, 17)
                             revert(128, 36)
                         }
-                        let swap1for0_15 := sub(swap1for0_2, swap1for0_9)
-                        sstore(2, swap1for0_15)
-                        let swap1for0_16 := sload(10)
-                        let swap1for0_17 := add(swap1for0_16, swap1for0_11)
-                        if lt(swap1for0_17, swap1for0_16) {
+                        let swap1for0_13 := sub(swap1for0_2, swap1for0_8)
+                        sstore(2, swap1for0_13)
+                        let swap1for0_14 := sload(10)
+                        let swap1for0_15 := add(swap1for0_14, swap1for0_10)
+                        if lt(swap1for0_15, swap1for0_14) {
                             mstore(128, shl(224, 1313373041))
                             mstore(132, 17)
                             revert(128, 36)
                         }
-                        sstore(10, swap1for0_17)
-                        let swap1for0_18 := caller()
-                        let swap1for0_19 := address()
-                        let swap1for0_20 := sload(1)
-                        let swap1for0_21 := sload(0)
-                        let swap1for0_22 := 0
+                        sstore(10, swap1for0_15)
+                        let swap1for0_16 := caller()
+                        let swap1for0_17 := address()
+                        let swap1for0_18 := sload(1)
+                        let swap1for0_19 := sload(0)
+                        let swap1for0_20 := 0
                         {
                             mstore(128, shl(224, 599290589))
-                            mstore(132, swap1for0_18)
-                            mstore(164, swap1for0_19)
+                            mstore(132, swap1for0_16)
+                            mstore(164, swap1for0_17)
                             mstore(196, swap1for0_0)
-                            let swap1for0__ok_22 := call(1000000, swap1for0_20, 0, 128, 100, 128, 32)
-                            if iszero(swap1for0__ok_22) {
+                            let swap1for0__ok_20 := call(1000000, swap1for0_18, 0, 128, 100, 128, 32)
+                            if iszero(swap1for0__ok_20) {
                                 revert(0, 0)
                             }
                             if iszero(or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 32)), lt(returndatasize(), 64)))) {
                                 revert(0, 0)
                             }
-                            swap1for0_22 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
+                            swap1for0_20 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
                         }
-                        if iszero(eq(swap1for0_22, 1)) {
+                        if iszero(eq(swap1for0_20, 1)) {
                             mstore(128, shl(224, 2428038168))
                             revert(128, 4)
                         }
-                        let swap1for0_23 := 0
+                        let swap1for0_21 := 0
                         {
                             mstore(128, shl(224, 2835717307))
-                            mstore(132, swap1for0_18)
-                            mstore(164, swap1for0_9)
-                            let swap1for0__ok_23 := call(1000000, swap1for0_21, 0, 128, 68, 128, 32)
-                            if iszero(swap1for0__ok_23) {
+                            mstore(132, swap1for0_16)
+                            mstore(164, swap1for0_8)
+                            let swap1for0__ok_21 := call(1000000, swap1for0_19, 0, 128, 68, 128, 32)
+                            if iszero(swap1for0__ok_21) {
                                 revert(0, 0)
                             }
                             if iszero(or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 32)), lt(returndatasize(), 64)))) {
                                 revert(0, 0)
                             }
-                            swap1for0_23 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
+                            swap1for0_21 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
                         }
-                        if iszero(eq(swap1for0_23, 1)) {
+                        if iszero(eq(swap1for0_21, 1)) {
                             mstore(128, shl(224, 2428038168))
                             revert(128, 4)
                         }
-                        mstore(128, swap1for0_18)
+                        mstore(128, swap1for0_16)
                         mstore(160, swap1for0_0)
-                        mstore(192, swap1for0_9)
+                        mstore(192, swap1for0_8)
                         log1(128, 96, 106865371797876764641124053122323485270600095508620925271233383623886030425246)
                         tstore(0, 0)
-                        mstore(128, swap1for0_9)
+                        mstore(128, swap1for0_8)
                         return(128, 32)
                     }
                 }

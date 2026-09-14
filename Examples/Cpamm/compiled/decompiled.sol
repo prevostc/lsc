@@ -42,22 +42,22 @@ contract DecompiledContract {
     /// @param              arg0 ["uint256", "bytes32", "int256"]
     /// @param              arg1 ["uint256", "bytes32", "int256"]
     function Unresolved_2b1087f0(uint256 arg0, uint256 arg1) public payable returns (uint256) {
-        require(!(msg.data.length < 0x44), CustomError_bb2875c3());
+        require(!(msg.data.length < 0x44), CustomError_cd4e6167());
         transient[0] = 0x01;
         uint256 var_a = arg0;
-        require(0 < var_a, CustomError_bb2875c3());
-        require(0 < store_a, CustomError_bb2875c3());
-        require(0 < store_b, CustomError_bb2875c3());
-        require(0 == (store_c == 0), CustomError_bb2875c3());
-        require(0x2710, CustomError_bb2875c3());
-        require(!var_a | (((var_a * 0x26f2) / var_a) == 0x26f2), CustomError_bb2875c3());
-        require(!((store_a + ((var_a * 0x26f2) / 0x2710)) < store_a), CustomError_bb2875c3());
-        require(store_a + ((var_a * 0x26f2) / 0x2710), CustomError_bb2875c3());
-        require(!store_b | (((store_b * ((var_a * 0x26f2) / 0x2710)) / store_b) == ((var_a * 0x26f2) / 0x2710)), CustomError_bb2875c3());
-        require(!(var_a < ((var_a * 0x26f2) / 0x2710)), CustomError_bb2875c3());
-        require(0x2710, CustomError_bb2875c3());
-        require((!var_a - ((var_a * 0x26f2) / 0x2710)) | (((var_a - ((var_a * 0x26f2) / 0x2710)) * store_d) / (var_a - ((var_a * 0x26f2) / 0x2710)) == store_d), CustomError_bb2875c3());
-        require(!((var_a - ((var_a * 0x26f2) / 0x2710)) < (((var_a - ((var_a * 0x26f2) / 0x2710)) * store_d) / 0x2710)), CustomError_bb2875c3());
+        require(0 < var_a, CustomError_cd4e6167());
+        require(0 < store_a, CustomError_cd4e6167());
+        require(0 < store_b, CustomError_cd4e6167());
+        require(0x2710, CustomError_cd4e6167());
+        require(!var_a | (((var_a * 0x26f2) / var_a) == 0x26f2), CustomError_cd4e6167());
+        require(!((store_a + ((var_a * 0x26f2) / 0x2710)) < store_a), CustomError_cd4e6167());
+        require(store_a + ((var_a * 0x26f2) / 0x2710), CustomError_cd4e6167());
+        require(!store_b | (((store_b * ((var_a * 0x26f2) / 0x2710)) / store_b) == ((var_a * 0x26f2) / 0x2710)), CustomError_cd4e6167());
+        require(!(var_a < ((var_a * 0x26f2) / 0x2710)), CustomError_cd4e6167());
+        require(0 == (store_c == 0), CustomError_cd4e6167());
+        require(0x2710, CustomError_cd4e6167());
+        require((!var_a - ((var_a * 0x26f2) / 0x2710)) | (((var_a - ((var_a * 0x26f2) / 0x2710)) * store_d) / (var_a - ((var_a * 0x26f2) / 0x2710)) == store_d), CustomError_cd4e6167());
+        require(!((var_a - ((var_a * 0x26f2) / 0x2710)) < (((var_a - ((var_a * 0x26f2) / 0x2710)) * store_d) / 0x2710)), CustomError_cd4e6167());
         require(!((store_b * ((var_a * 0x26f2) / 0x2710)) / (store_a + ((var_a * 0x26f2) / 0x2710)) < arg1), CustomError_bb2875c3());
         require(0 < ((store_b * ((var_a * 0x26f2) / 0x2710)) / (store_a + ((var_a * 0x26f2) / 0x2710))));
         require(!var_a < (((var_a - ((var_a * 0x26f2) / 0x2710)) * store_d) / 0x2710));
@@ -80,15 +80,9 @@ contract DecompiledContract {
         emit Event_268d208c(msg.sender, var_a, (store_b * ((var_a * 0x26f2) / 0x2710)) / (store_a + ((var_a * 0x26f2) / 0x2710)));
         transient[0] = 0;
         return (store_b * ((var_a * 0x26f2) / 0x2710)) / (store_a + ((var_a * 0x26f2) / 0x2710));
-        require(0x2710, CustomError_bb2875c3());
-        require(!var_a | (((var_a * 0x26f2) / var_a) == 0x26f2), CustomError_bb2875c3());
-        require(!((store_a + ((var_a * 0x26f2) / 0x2710)) < store_a), CustomError_bb2875c3());
-        require(store_a + ((var_a * 0x26f2) / 0x2710), CustomError_bb2875c3());
-        require(!store_b | (((store_b * ((var_a * 0x26f2) / 0x2710)) / store_b) == ((var_a * 0x26f2) / 0x2710)), CustomError_bb2875c3());
-        require(!(var_a < ((var_a * 0x26f2) / 0x2710)), CustomError_bb2875c3());
-        require(0x2710, CustomError_bb2875c3());
-        require((!var_a - ((var_a * 0x26f2) / 0x2710)) | (((var_a - ((var_a * 0x26f2) / 0x2710)) * 0) / (var_a - ((var_a * 0x26f2) / 0x2710)) == 0), CustomError_bb2875c3());
-        require(!((var_a - ((var_a * 0x26f2) / 0x2710)) < (((var_a - ((var_a * 0x26f2) / 0x2710)) * 0) / 0x2710)), CustomError_bb2875c3());
+        require(0x2710, CustomError_cd4e6167());
+        require((!var_a - ((var_a * 0x26f2) / 0x2710)) | (((var_a - ((var_a * 0x26f2) / 0x2710)) * 0) / (var_a - ((var_a * 0x26f2) / 0x2710)) == 0), CustomError_cd4e6167());
+        require(!((var_a - ((var_a * 0x26f2) / 0x2710)) < (((var_a - ((var_a * 0x26f2) / 0x2710)) * 0) / 0x2710)), CustomError_cd4e6167());
         require(!((store_b * ((var_a * 0x26f2) / 0x2710)) / (store_a + ((var_a * 0x26f2) / 0x2710)) < arg1), CustomError_bb2875c3());
         require(0 < ((store_b * ((var_a * 0x26f2) / 0x2710)) / (store_a + ((var_a * 0x26f2) / 0x2710))));
         require(!var_a < (((var_a - ((var_a * 0x26f2) / 0x2710)) * 0) / 0x2710));
