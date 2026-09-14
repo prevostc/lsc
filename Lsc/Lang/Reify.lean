@@ -20,6 +20,8 @@ per-field `@[simp]` reductions `C.schema_read_<field>` / `C.schema_write_<field>
   for word/address/flag/unit programs. Amount-returning functions certify
   `Amount.ofWord <$> Core.denote = f`; Bool-returning functions certify
   `Tx.natToBool <$> Core.denote = f` (`natToBool n` is `n != 0`).
+  Pair-of-Amount returns certify
+  `Prod.map Amount.ofWord Amount.ofWord <$> Core.denote = f`.
   Intermediate `Amount` / `Ref` loads are peeled with `load_bind_ofWord` /
   `bind_map` and the generated schema-read lemmas. Proved by `rfl`
   when the sides are definitionally equal;
@@ -1302,6 +1304,9 @@ def certifyDenote (fn : Name) (ci : ContractInfo) (lhs lhsRaw rhs coreE : Expr) 
     mkIdent ``Lsc.Tx.map_bind,
     mkIdent ``Lsc.Tx.bind_map,
     mkIdent ``Lsc.Tx.map_bind_ofWord,
+    mkIdent ``Lsc.Tx.map_bind_ofWord_pair,
+    mkIdent ``Lsc.Tx.map_discard_ofWord_pair,
+    mkIdent ``Lsc.Tx.map_pure_ofWord_pair,
     mkIdent ``Lsc.Tx.map_bind_natToBool,
     mkIdent ``Lsc.Tx.map_bind_viewAsNat_amount,
     mkIdent ``Lsc.Tx.bind_load_inner_viewAsNat_amount,
@@ -1447,7 +1452,10 @@ def certifyDenote (fn : Name) (ci : ContractInfo) (lhs lhsRaw rhs coreE : Expr) 
       simp (config := { maxSteps := 20000 }) only
         [Lsc.map_denote_letOp_ofWord, Lsc.map_denote_seq_ofWord,
           Lsc.map_denote_ret_ofWord, Lsc.map_denote_ite_ofWord,
-          Lsc.map_denote_letPure_ofWord, Lsc.map_denote_letOp_natToBool,
+          Lsc.map_denote_letPure_ofWord, Lsc.map_denote_letOp_ofWord_pair,
+          Lsc.map_denote_seq_ofWord_pair, Lsc.map_denote_ret_ofWord_pair,
+          Lsc.map_denote_ite_ofWord_pair, Lsc.map_denote_letPure_ofWord_pair,
+          Lsc.map_denote_letOp_natToBool,
           Lsc.map_denote_seq_natToBool, Lsc.map_denote_ret_natToBool,
           Lsc.map_denote_ite_natToBool, Lsc.map_denote_letPure_natToBool,
           Lsc.map_denote_letOp, Lsc.map_denote_seq, Lsc.map_denote_ret,
@@ -1459,7 +1467,9 @@ def certifyDenote (fn : Name) (ci : ContractInfo) (lhs lhsRaw rhs coreE : Expr) 
     try (conv =>
       lhs
       simp (config := { maxSteps := 20000 }) only
-        [Lsc.Tx.map_bind_ofWord, Lsc.Tx.map_bind_natToBool, Lsc.Tx.map_bind,
+        [Lsc.Tx.map_bind_ofWord, Lsc.Tx.map_bind_ofWord_pair,
+          Lsc.Tx.map_discard_ofWord_pair, Lsc.Tx.map_pure_ofWord_pair,
+          Lsc.Tx.map_bind_natToBool, Lsc.Tx.map_bind,
           Lsc.Tx.map_discard, Lsc.Tx.map_pure, Lsc.Tx.map_ite, Lsc.Tx.bind_ite])
     try simp only [Lsc.list_getD_cons_zero, Lsc.list_getD_cons_one,
       Lsc.list_getD_cons_two, Lsc.list_getD_cons_three, Lsc.list_getD_cons_four,
@@ -1482,6 +1492,8 @@ def certifyDenote (fn : Name) (ci : ContractInfo) (lhs lhsRaw rhs coreE : Expr) 
       Lsc.Tx.callAsNat_bool_bind_require_bind,
       Lsc.Tx.viewAsNat_bool_bind_require_bind,
       Lsc.Tx.map_bind, Lsc.Tx.bind_map, Lsc.Tx.map_bind_ofWord,
+      Lsc.Tx.map_bind_ofWord_pair, Lsc.Tx.map_discard_ofWord_pair,
+      Lsc.Tx.map_pure_ofWord_pair,
       Lsc.Tx.map_bind_natToBool, Lsc.Tx.map_bind_viewAsNat_amount,
       Lsc.Tx.bind_load_inner_viewAsNat_amount,
       Lsc.Tx.bind_load_inner_viewAsNat_amount_addr,
@@ -1544,7 +1556,7 @@ partial def wrapValue (ty : Expr) (e : Expr) : MetaM Expr := do
 
 /-- `Amount.ofWord <$> core` (and Bool / Ref / pair analogues) when Core returns a word.
 Pass the named function, not `fun v => f v`, so certificate `simp` matches
-`map_callAsNat_bool` / `map_viewAsNat_amount`. -/
+`map_callAsNat_bool` / `map_viewAsNat_amount` / `Prod.map Amount.ofWord`. -/
 def wrapDenote (ρ : Expr) (core : Expr) : MetaM Expr := do
   let ρ ← whnfR ρ
   if ρ.isConstOf ``Unit || ρ.isConstOf ``PUnit
@@ -1556,8 +1568,8 @@ def wrapDenote (ρ : Expr) (core : Expr) : MetaM Expr := do
     return core
   let txTy ← inferType core
   let txTy ← whnfToTx txTy
-  let α := txTy.getArg! 4
-  if ← isDefEq α ρ then return core
+  let coreRet := txTy.getArg! 4
+  if ← isDefEq coreRet ρ then return core
   if ρ.isConstOf ``Bool then
     mkAppM ``Functor.map #[mkConst ``Lsc.Tx.natToBool, core]
   else if ρ.isAppOf ``Lsc.Amount then
@@ -1567,8 +1579,21 @@ def wrapDenote (ρ : Expr) (core : Expr) : MetaM Expr := do
     let some n := ρ.getAppFn.constName? | return core
     let f := mkAppN (mkConst (n ++ `mk)) ρ.getAppArgs
     mkAppM ``Functor.map #[f, core]
+  else if ρ.isAppOfArity ``Prod 2 then
+    let fst ← whnfR (ρ.getArg! 0)
+    let snd ← whnfR (ρ.getArg! 1)
+    if fst.isAppOf ``Lsc.Amount && snd.isAppOf ``Lsc.Amount then
+      let f ← mkAppOptM ``Lsc.Amount.ofWord #[fst.getArg! 0]
+      let g ← mkAppOptM ``Lsc.Amount.ofWord #[snd.getArg! 0]
+      let mapped ← mkAppM ``Prod.map #[f, g]
+      mkAppM ``Functor.map #[mapped, core]
+    else
+      withLocalDeclD `v coreRet fun v => do
+        let body ← wrapValue ρ v
+        let f ← mkLambdaFVars #[v] body
+        mkAppM ``Functor.map #[f, core]
   else
-    withLocalDeclD `v α fun v => do
+    withLocalDeclD `v coreRet fun v => do
       let body ← wrapValue ρ v
       let f ← mkLambdaFVars #[v] body
       mkAppM ``Functor.map #[f, core]
@@ -2024,7 +2049,7 @@ def implMethodBody (ns : Name) (m : IfaceMethod) : MetaM Term := do
         `(Lsc.Tx.run $f $ctx $w)
       else
         `(Lsc.Tx.run ($f $ids*) $ctx $w)
-    let mut acc ← `(fun $ctx $w => $run)
+    let mut acc ← `(fun $ctx $w => ($run).toOption)
     for id in ids.reverse do
       acc ← `(fun $id => $acc)
     return acc
@@ -2040,7 +2065,6 @@ def mkImplCommands (ns : Name) (clauses : Array ImplementsClause) :
   if clauses.isEmpty then return #[]
   let ci ← contractInfo ns
   let W ← worldTyTerm ci
-  let ε : Term := ⟨mkIdent ci.error⟩
   let specId : Term := ⟨mkIdent (ns ++ `spec)⟩
   let fnTy : Term := ⟨mkIdent (ns ++ `Fn)⟩
   let mut cmds : Array (TSyntax `command) := #[]
@@ -2054,7 +2078,7 @@ def mkImplCommands (ns : Name) (clauses : Array ImplementsClause) :
     for m in methods do
       checkImplementsMethod ns c.ifaceName m
     collected := collected.push (c.ifaceName, methods)
-    let implTy ← `($(mkIdent (c.ifaceName ++ `Impl)) $c.args* $W $ε)
+    let implTy ← `($(mkIdent (c.ifaceName ++ `Impl)) $c.args* $W)
     let fields : Array (TSyntax ``Parser.Term.structInstField) ←
       methods.mapM fun m => do
         let n := mkIdent m.name
@@ -2075,7 +2099,7 @@ def mkImplCommands (ns : Name) (clauses : Array ImplementsClause) :
   checkSelectorClash collected
   if clauses.size = 1 then
     let c := clauses[0]!
-    let implTy ← `($(mkIdent (c.ifaceName ++ `Impl)) $c.args* $W $ε)
+    let implTy ← `($(mkIdent (c.ifaceName ++ `Impl)) $c.args* $W)
     let implAlias := mkIdent (`_root_ ++ ns ++ `impl)
     let rhs : Term := ⟨mkIdent (`_root_ ++ implNames[0]!)⟩
     cmds := cmds.push (← `(command| def $implAlias : $implTy := $rhs))
@@ -2510,11 +2534,12 @@ def obligationsText (ns : Name) (ctors : List Name) (_extName : String) : String
     "    (w : " ++ world ++ ") (a : Lsc.Address)\n" ++
     "    (hw : " ++ C ++ ".Inv w)\n" ++
     "    (hR : Lsc.Security.RelyAlong (" ++ rely ++ ") tr w)\n" ++
+    "    (hM : Lsc.Security.ClaimMonoEnv " ++ C ++ ".claim (" ++ rely ++ "))\n" ++
     "    (hA : Lsc.Security.NoAuthAlong " ++ C ++ ".Auth a tr w) :\n" ++
-    "    " ++ C ++ ".claim a w.self ≤ " ++ C ++
-    ".claim a (Lsc.Security.run tr w).self :=\n" ++
+    "    " ++ C ++ ".claim a w ≤ " ++ C ++
+    ".claim a (Lsc.Security.run tr w) :=\n" ++
     "  Lsc.Security.no_unauthorized_extraction " ++ C ++ ".no_unauth " ++
-    C ++ ".preserves_inv " ++ C ++ ".inv_rely tr w a hw hR hA"
+    C ++ ".preserves_inv " ++ C ++ ".inv_rely hM tr w a hw hR hA"
   let body :=
     (preserves ++
       [assembler "preserves_inv" s!"Lsc.Security.PreservesInv {C}.spec {C}.Inv"

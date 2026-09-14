@@ -85,9 +85,9 @@ lsc_contract Toy pull held implements IHolder toyAsset
 #check Toy.contract
 #check Toy.pull.core_denote
 #check Toy.held.core_denote
-#check (Toy.impl : IHolder.Impl toyAsset (World Toy.Storage ExtState Toy.Event) Toy.Error)
+#check (Toy.impl : IHolder.Impl toyAsset (World Toy.Storage ExtState Toy.Event))
 #check (Toy.impl_IHolder :
-  IHolder.Impl toyAsset (World Toy.Storage ExtState Toy.Event) Toy.Error)
+  IHolder.Impl toyAsset (World Toy.Storage ExtState Toy.Event))
 
 #guard (Toy.pull.core.effects.calls).contains 0x23b872dd
 #guard (Toy.held.core.effects.views).contains 0x70a08231

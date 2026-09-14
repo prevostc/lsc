@@ -10,14 +10,15 @@ namespace Lsc.Security.Proof
 
 variable {S X E ε : Type} {C : Spec S X E ε}
 
-theorem no_unauthorized_extraction {Inv : World S X E → Prop} {claim : Claim S}
+theorem no_unauthorized_extraction {Inv : World S X E → Prop} {claim : Claim S X E}
     {Auth : AuthPred C} {rely : X → X → Prop}
     (hN : NoUnauthorizedDecrease C Inv claim Auth)
     (hP : PreservesInv C Inv) (hE : PreservesInvEnv C Inv rely)
+    (hM : ClaimMonoEnv claim rely)
     (tr : List (Step C)) (w : World S X E) (a : Address)
     (hw : Inv w) (hR : RelyAlong rely tr w)
     (hA : NoAuthAlong Auth a tr w) :
-    claim a w.self ≤ claim a (run tr w).self := by
+    claim a w ≤ claim a (run tr w) := by
   induction tr generalizing w with
   | nil => simp [run]
   | cons s tr ih =>
@@ -25,22 +26,24 @@ theorem no_unauthorized_extraction {Inv : World S X E → Prop} {claim : Claim S
     | .call c =>
       obtain ⟨hna, htl⟩ := hA
       have hw' : Inv (step (.call c) w) := hP c w hw
-      have hle : claim a w.self ≤ claim a (step (.call c) w).self :=
+      have hle : claim a w ≤ claim a (step (.call c) w) :=
         Nat.le_of_not_lt fun hlt => hna (hN c w a hw hlt)
       exact Nat.le_trans hle (ih (step (.call c) w) hw' hR htl)
     | .env x' =>
       obtain ⟨hr, htl⟩ := hR
       have hw' : Inv { w with ext := x' } := hE w x' hw hr
-      simpa [step] using ih { w with ext := x' } hw' htl hA
+      have hle : claim a w ≤ claim a { w with ext := x' } := hM w x' a hr
+      exact Nat.le_trans hle (ih { w with ext := x' } hw' htl hA)
 
-theorem no_unauthorized_extraction_at {Inv : World S X E → Prop} {claim : Claim S}
+theorem no_unauthorized_extraction_at {Inv : World S X E → Prop} {claim : Claim S X E}
     {Auth : AuthPred C} {rely : X → X → Prop} {self : Address}
     (hN : NoUnauthorizedDecrease C Inv claim Auth)
     (hP : PreservesInvAt C Inv self) (hE : PreservesInvEnv C Inv rely)
+    (hM : ClaimMonoEnv claim rely)
     (tr : List (Step C)) (w : World S X E) (a : Address)
     (hw : Inv w) (hW : Wf self tr) (hR : RelyAlong rely tr w)
     (hA : NoAuthAlong Auth a tr w) :
-    claim a w.self ≤ claim a (run tr w).self := by
+    claim a w ≤ claim a (run tr w) := by
   induction tr generalizing w with
   | nil => simp [run]
   | cons s tr ih =>
@@ -49,15 +52,16 @@ theorem no_unauthorized_extraction_at {Inv : World S X E → Prop} {claim : Clai
       obtain ⟨hna, htl⟩ := hA
       have ⟨ht, hs, hWtl⟩ := hW
       have hw' : Inv (step (.call c) w) := hP c w ht hs hw
-      have hle : claim a w.self ≤ claim a (step (.call c) w).self :=
+      have hle : claim a w ≤ claim a (step (.call c) w) :=
         Nat.le_of_not_lt fun hlt => hna (hN c w a hw hlt)
       exact Nat.le_trans hle (ih (step (.call c) w) hw' hWtl hR htl)
     | .env x' =>
       obtain ⟨hr, htl⟩ := hR
       have hw' : Inv { w with ext := x' } := hE w x' hw hr
-      simpa [step] using ih { w with ext := x' } hw' hW htl hA
+      have hle : claim a w ≤ claim a { w with ext := x' } := hM w x' a hr
+      exact Nat.le_trans hle (ih { w with ext := x' } hw' hW htl hA)
 
-theorem solvent_run {Inv : World S X E → Prop} {claim : Claim S}
+theorem solvent_run {Inv : World S X E → Prop} {claim : Claim S X E}
     {holdings : Holdings S X E} {rely : X → X → Prop}
     (hP : PreservesInv C Inv) (hE : PreservesInvEnv C Inv rely)
     (hS : ∀ self w, Inv w → Solvent claim holdings self w)
@@ -66,7 +70,7 @@ theorem solvent_run {Inv : World S X E → Prop} {claim : Claim S}
     Solvent claim holdings self (run tr w) :=
   hS self _ (inv_run hP hE hw tr hW hR)
 
-theorem solvent_run_at {Inv : World S X E → Prop} {claim : Claim S}
+theorem solvent_run_at {Inv : World S X E → Prop} {claim : Claim S X E}
     {holdings : Holdings S X E} {rely : X → X → Prop} {self : Address}
     (hP : PreservesInvAt C Inv self) (hE : PreservesInvEnv C Inv rely)
     (hS : ∀ w, Inv w → Solvent claim holdings self w)

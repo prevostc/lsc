@@ -100,6 +100,17 @@ def held : M (Amount tAsset) := do
   let tok ← read asset
   tok.balanceOf (← Tx.selfAddress)
 
+/-- Pair-returning body with a CALL: must auto-certify (slice 6a). -/
+def split (n : Amount tAsset) : M (Amount tAsset × Amount tShare) := do
+  let who ← Tx.sender
+  let me ← Tx.selfAddress
+  let tok ← read asset
+  safeTransferFrom tok who me n .TransferFailed
+  let minted : Amount tShare := Amount.ofWord n.raw
+  write totalShares minted
+  write shares[who] minted
+  return (n, minted)
+
 end VaultLike
 
 namespace KindProbe
@@ -132,7 +143,7 @@ end Stdlib.ReifyVaultLikeTests
 open Stdlib.ReifyVaultLikeTests
 
 lsc_schema VaultLike
-lsc_contract VaultLike constructor deposit withdraw transferShares sharesOf held
+lsc_contract VaultLike constructor deposit withdraw transferShares sharesOf held split
   implements IShares tShare
 
 #check VaultLike.contract
@@ -142,8 +153,8 @@ lsc_contract VaultLike constructor deposit withdraw transferShares sharesOf held
 #check VaultLike.transferShares.core_denote
 #check VaultLike.sharesOf.core_denote
 #check VaultLike.held.core_denote
-#check (VaultLike.impl : IShares.Impl tShare (World VaultLike.Storage ExtState VaultLike.Event)
-  VaultLike.Error)
+#check VaultLike.split.core_denote
+#check (VaultLike.impl : IShares.Impl tShare (World VaultLike.Storage ExtState VaultLike.Event))
 
 #guard
   (match VaultLike.contract.functions.find? (·.name == "transferShares") with
@@ -170,6 +181,7 @@ lsc_contract VaultLike constructor deposit withdraw transferShares sharesOf held
 #guard !Core.isPureRead VaultLike.deposit.core
 #guard !Core.isPureRead VaultLike.transferShares.core
 #guard (VaultLike.deposit.core.effects.calls).contains 0x23b872dd
+#guard (VaultLike.split.core.effects.calls).contains 0x23b872dd
 #guard (VaultLike.held.core.effects.views).contains 0x70a08231
 
 lsc_schema KindProbe

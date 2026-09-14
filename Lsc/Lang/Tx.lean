@@ -370,6 +370,37 @@ theorem run_ok_error {x : Tx S X E ε α} {ctx : Ctx} {w : World S X E}
     (hok : run x ctx w = .ok (a, w')) (herr : run x ctx w = .error e) : False :=
   nomatch hok.symm.trans herr
 
+/-- `I.Impl` Fn fields are `Option`; a successful `Tx.run` is that `some`. -/
+theorem run_ok_toOption {x : Tx S X E ε α} {ctx : Ctx} {w : World S X E}
+    {a : α} {w' : World S X E} (h : run x ctx w = .ok (a, w')) :
+    (run x ctx w).toOption = some (a, w') := by
+  rw [h]; rfl
+
+/-- Converse of `run_ok_toOption`. -/
+theorem run_toOption_ok {x : Tx S X E ε α} {ctx : Ctx} {w : World S X E}
+    {a : α} {w' : World S X E} (h : (run x ctx w).toOption = some (a, w')) :
+    run x ctx w = .ok (a, w') := by
+  revert h
+  simp only [run]
+  cases x ctx w with
+  | error _ => intro h; cases h
+  | ok p =>
+    intro h
+    exact congrArg Except.ok (Option.some.inj h)
+
+/-- `toOption` of a run is `some p` exactly when the run is `.ok p`. -/
+theorem run_toOption_iff {x : Tx S X E ε α} {ctx : Ctx} {w : World S X E}
+    {a : α} {w' : World S X E} :
+    (run x ctx w).toOption = some (a, w') ↔ run x ctx w = .ok (a, w') :=
+  ⟨run_toOption_ok, run_ok_toOption⟩
+
+/-- Existence form: a `some` unwraps to a successful run. -/
+theorem run_toOption_some {x : Tx S X E ε α} {ctx : Ctx} {w : World S X E}
+    {p : α × World S X E} (h : (run x ctx w).toOption = some p) :
+    ∃ a w', run x ctx w = .ok (a, w') ∧ p = (a, w') := by
+  cases p with
+  | mk a w' => exact ⟨a, w', run_toOption_ok h, rfl⟩
+
 end RunLemmas
 
 /-! ### Monad laws

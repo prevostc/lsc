@@ -24,18 +24,21 @@ account that authorised nothing never sees its claim fall. "Authorised" is
 whatever the contract declared: typically the victim sent the call, or an
 allowance they granted covers it. Reverted calls leave the world unchanged.
 The protocol invariant must hold at the start and survive every entrypoint
-and those environment steps. Unlike `no_unauthorized_extraction_at`, this
-form does not require the caller to differ from the contract, and does not
-restrict to calls that target this contract. -/
-theorem no_unauthorized_extraction {Inv : World S X E → Prop} {claim : Claim S}
+and those environment steps. Environment steps must not themselves decrease
+the claim (`ClaimMonoEnv`; automatic when `claim` depends only on storage).
+Unlike `no_unauthorized_extraction_at`, this form does not require the caller
+to differ from the contract, and does not restrict to calls that target this
+contract. -/
+theorem no_unauthorized_extraction {Inv : World S X E → Prop} {claim : Claim S X E}
     {Auth : AuthPred C} {rely : X → X → Prop}
     (hN : NoUnauthorizedDecrease C Inv claim Auth)
     (hP : PreservesInv C Inv) (hE : PreservesInvEnv C Inv rely)
+    (hM : ClaimMonoEnv claim rely)
     (tr : List (Step C)) (w : World S X E) (a : Address)
     (hw : Inv w) (hR : RelyAlong rely tr w)
     (hA : NoAuthAlong Auth a tr w) :
-    claim a w.self ≤ claim a (run tr w).self :=
-  Proof.no_unauthorized_extraction hN hP hE tr w a hw hR hA
+    claim a w ≤ claim a (run tr w) :=
+  Proof.no_unauthorized_extraction hN hP hE hM tr w a hw hR hA
 
 /-- Same victim-side guarantee as `no_unauthorized_extraction`, but the
 invariant is only assumed to survive calls that actually target this
@@ -45,15 +48,16 @@ meaningless for a call to some other address; well-formedness (caller ≠
 contract) is required here, not on `no_unauthorized_extraction`.
 Authorisation is still judged in the pre-state of each call, so allowances
 can change along the trace. -/
-theorem no_unauthorized_extraction_at {Inv : World S X E → Prop} {claim : Claim S}
+theorem no_unauthorized_extraction_at {Inv : World S X E → Prop} {claim : Claim S X E}
     {Auth : AuthPred C} {rely : X → X → Prop} {self : Address}
     (hN : NoUnauthorizedDecrease C Inv claim Auth)
     (hP : PreservesInvAt C Inv self) (hE : PreservesInvEnv C Inv rely)
+    (hM : ClaimMonoEnv claim rely)
     (tr : List (Step C)) (w : World S X E) (a : Address)
     (hw : Inv w) (hW : Wf self tr) (hR : RelyAlong rely tr w)
     (hA : NoAuthAlong Auth a tr w) :
-    claim a w.self ≤ claim a (run tr w).self :=
-  Proof.no_unauthorized_extraction_at hN hP hE tr w a hw hW hR hA
+    claim a w ≤ claim a (run tr w) :=
+  Proof.no_unauthorized_extraction_at hN hP hE hM tr w a hw hW hR hA
 
 /-- If the protocol invariant already implies the contract does not owe more
 than it holds, then after any well-formed attack trace it still doesn't.
@@ -61,7 +65,7 @@ Per-step conservation of claims is not required: Vault's floor-rounded
 pro-rata shares can leak dust each step, and solvency is the statement
 that matters there. The invariant must hold at the start and survive
 every entrypoint and every environment step the token model allows. -/
-theorem solvent_run {Inv : World S X E → Prop} {claim : Claim S}
+theorem solvent_run {Inv : World S X E → Prop} {claim : Claim S X E}
     {holdings : Holdings S X E} {rely : X → X → Prop}
     (hP : PreservesInv C Inv) (hE : PreservesInvEnv C Inv rely)
     (hS : ∀ self w, Inv w → Solvent claim holdings self w)
@@ -74,7 +78,7 @@ theorem solvent_run {Inv : World S X E → Prop} {claim : Claim S}
 calls that target this contract with a distinct sender. Vault and AMM use
 this form because "what the contract holds" is this contract's token
 balance, which is only meaningful on calls to this address. -/
-theorem solvent_run_at {Inv : World S X E → Prop} {claim : Claim S}
+theorem solvent_run_at {Inv : World S X E → Prop} {claim : Claim S X E}
     {holdings : Holdings S X E} {rely : X → X → Prop} {self : Address}
     (hP : PreservesInvAt C Inv self) (hE : PreservesInvEnv C Inv rely)
     (hS : ∀ w, Inv w → Solvent claim holdings self w)

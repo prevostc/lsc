@@ -25,7 +25,8 @@ Dot notation `asset.transferFrom …` is `I.Ref.transferFrom` via a generated
 `I.Ref` structure. `Ref (I args)` is a macro expanding to `I.Ref args`.
 `asset.try.transferFrom` is the non-reverting form
 (`Tx … (Except (Err ε) R)`). `asset.impl w` is `I.Impl.ofRef asset`, used as
-`(hT : I.Spec (asset.impl w))`.
+`(hT : I.Spec (asset.impl w))`. Fn fields of `I.Impl` are `Option` (no error
+parameter): a successful `Tx.run` is that `some` via `Tx.run_ok_toOption`.
 
 TODO: payable methods are not modelled yet.
 -/
@@ -575,6 +576,30 @@ theorem map_bind_ofWord {a : Asset} {β : Type} (x : Tx S X E ε β)
     Amount.ofWord (a := a) <$> (x >>= k) =
       x >>= fun b => Amount.ofWord (a := a) <$> k b :=
   map_bind (Amount.ofWord (a := a)) x k
+
+/-- Pair-of-Amount wrap through `bind`. Certificate key for `Prod.map ofWord`. -/
+theorem map_bind_ofWord_pair {a b : Asset} {β : Type} (x : Tx S X E ε β)
+    (k : β → Tx S X E ε (Nat × Nat)) :
+    Prod.map (Amount.ofWord (a := a)) (Amount.ofWord (a := b)) <$> (x >>= k) =
+      x >>= fun v =>
+        Prod.map (Amount.ofWord (a := a)) (Amount.ofWord (a := b)) <$> k v :=
+  map_bind (Prod.map (Amount.ofWord (a := a)) (Amount.ofWord (a := b))) x k
+
+/-- Discarded bind then pair-of-Amount wrap. -/
+theorem map_discard_ofWord_pair {a b : Asset} {γ : Type} (x : Tx S X E ε γ)
+    (y : Tx S X E ε (Nat × Nat)) :
+    Prod.map (Amount.ofWord (a := a)) (Amount.ofWord (a := b)) <$>
+        (x >>= fun _ => y) =
+      x >>= fun _ =>
+        Prod.map (Amount.ofWord (a := a)) (Amount.ofWord (a := b)) <$> y :=
+  map_bind_ofWord_pair (a := a) (b := b) x (fun _ => y)
+
+/-- `Prod.map ofWord` of a Core pair `pure`. -/
+theorem map_pure_ofWord_pair {a b : Asset} (x y : Nat) :
+    Prod.map (Amount.ofWord (a := a)) (Amount.ofWord (a := b)) <$>
+        (pure (x, y) : Tx S X E ε (Nat × Nat)) =
+      pure (Amount.ofWord (a := a) x, Amount.ofWord (a := b) y) :=
+  map_pure (Prod.map (Amount.ofWord (a := a)) (Amount.ofWord (a := b))) (x, y)
 
 /-- `natToBool <$> (x >>= k)` after `Core.denote` of a Bool-returning sequence. -/
 theorem map_bind_natToBool {β : Type} (x : Tx S X E ε β)

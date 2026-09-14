@@ -29,7 +29,8 @@ helper sits mid-`do`. `Amount a` / `Fixed d` are one-field structures over `Word
 Reify erases `.raw` / `ofWord` and certificates of Amount-returning functions are
 `Amount.ofWord <$> Core.denote`. The `map_denote_*` lemmas push that wrapper through
 Core constructors (so the certificate does not depend on `do`-notation matching
-`map_bind`). Bool-returning functions wrap with `Tx.natToBool`.
+`map_bind`). Bool-returning functions wrap with `Tx.natToBool`. Pair-of-Amount
+returns wrap with `Prod.map Amount.ofWord Amount.ofWord`.
 -/
 
 namespace Lsc
@@ -604,6 +605,63 @@ theorem map_denote_letPure_natToBool
       Tx.natToBool <$>
         Core.denote Γ k (Prim.eval p (args.map (·.eval env)) :: env) :=
   map_denote_letPure Tx.natToBool Γ p args k env
+
+/-- Pair-of-Amount wrap through `letOp`. Core `RetTy` is `.pair .word .word`. -/
+theorem map_denote_letOp_ofWord_pair {a b : Asset}
+    (Γ : ContractSchema S X E ε) (op : Op) (k : Core (.pair .word .word))
+    (env : List Nat) :
+    Prod.map (Amount.ofWord (a := a)) (Amount.ofWord (a := b)) <$>
+        Core.denote Γ (.letOp op k) env =
+      Op.denote Γ env op >>= fun v =>
+        Prod.map (Amount.ofWord (a := a)) (Amount.ofWord (a := b)) <$>
+          Core.denote Γ k (v :: env) :=
+  map_denote_letOp
+    (Prod.map (Amount.ofWord (a := a)) (Amount.ofWord (a := b))) Γ op k env
+
+theorem map_denote_seq_ofWord_pair {a b : Asset}
+    (Γ : ContractSchema S X E ε) (s : Stmt) (k : Core (.pair .word .word))
+    (env : List Nat) :
+    Prod.map (Amount.ofWord (a := a)) (Amount.ofWord (a := b)) <$>
+        Core.denote Γ (.seq s k) env =
+      Stmt.denote Γ env s >>= fun _ =>
+        Prod.map (Amount.ofWord (a := a)) (Amount.ofWord (a := b)) <$>
+          Core.denote Γ k env :=
+  map_denote_seq
+    (Prod.map (Amount.ofWord (a := a)) (Amount.ofWord (a := b))) Γ s k env
+
+theorem map_denote_ret_ofWord_pair {a b : Asset}
+    (Γ : ContractSchema S X E ε) (r : RetExpr (.pair .word .word))
+    (env : List Nat) :
+    Prod.map (Amount.ofWord (a := a)) (Amount.ofWord (a := b)) <$>
+        Core.denote Γ (.ret r) env =
+      pure (Prod.map (Amount.ofWord (a := a)) (Amount.ofWord (a := b))
+        (r.eval env)) :=
+  map_denote_ret
+    (Prod.map (Amount.ofWord (a := a)) (Amount.ofWord (a := b))) Γ r env
+
+theorem map_denote_ite_ofWord_pair {a b : Asset}
+    (Γ : ContractSchema S X E ε) (c : Cond) (th el : Core (.pair .word .word))
+    (env : List Nat) :
+    Prod.map (Amount.ofWord (a := a)) (Amount.ofWord (a := b)) <$>
+        Core.denote Γ (.ite c th el) env =
+      if c.denote env then
+        Prod.map (Amount.ofWord (a := a)) (Amount.ofWord (a := b)) <$>
+          Core.denote Γ th env
+      else
+        Prod.map (Amount.ofWord (a := a)) (Amount.ofWord (a := b)) <$>
+          Core.denote Γ el env :=
+  map_denote_ite
+    (Prod.map (Amount.ofWord (a := a)) (Amount.ofWord (a := b))) Γ c th el env
+
+theorem map_denote_letPure_ofWord_pair {a b : Asset}
+    (Γ : ContractSchema S X E ε) (p : Prim) (args : List Atom)
+    (k : Core (.pair .word .word)) (env : List Nat) :
+    Prod.map (Amount.ofWord (a := a)) (Amount.ofWord (a := b)) <$>
+        Core.denote Γ (.letPure p args k) env =
+      Prod.map (Amount.ofWord (a := a)) (Amount.ofWord (a := b)) <$>
+        Core.denote Γ k (Prim.eval p (args.map (·.eval env)) :: env) :=
+  map_denote_letPure
+    (Prod.map (Amount.ofWord (a := a)) (Amount.ofWord (a := b))) Γ p args k env
 
 /-! ## Renaming (used by the reifier to eliminate join points) -/
 

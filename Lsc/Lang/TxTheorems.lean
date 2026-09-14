@@ -17,6 +17,8 @@ Already in `Lsc.Lang.Tx` (`RunLemmas`):
 * `run_sender` / `run_value` / `run_timestamp` / `run_blockNumber` / `run_selfAddress`
 * `run_addChecked` / `run_subChecked` / `run_mulChecked` / `run_divChecked`
 * `run_ok_error` — `.ok` and `.error` of the same run are incompatible
+* `run_ok_toOption` / `run_toOption_ok` / `run_toOption_iff` / `run_toOption_some`
+  — `Tx.run = .ok` iff `(Tx.run).toOption = some` (`I.Impl` Fn fields)
 
 In `Lsc.Lang.Word`: `run_mulDivDown` / `run_mulDivUp` / `run_pow10`.
 

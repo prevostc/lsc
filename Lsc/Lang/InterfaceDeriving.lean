@@ -135,6 +135,10 @@ def emitMethodSig (m : DerivedMethod) : TermElabM Term := do
 def mkWorldBinders : TermElabM (TSyntax ``Parser.Term.bracketedBinder) :=
   toBracketed <$> `(implicitBinderF| {S X E ε : Type})
 
+/-- `Impl` / `ofRef` / `Ref.impl` do not mention `ε` (Fn fields are `Option`). -/
+def mkWorldBindersNoε : TermElabM (TSyntax ``Parser.Term.bracketedBinder) :=
+  toBracketed <$> `(implicitBinderF| {S X E : Type})
+
 def mkArgBinders (m : DerivedMethod) :
     TermElabM (Array (TSyntax ``Parser.Term.bracketedBinder)) :=
   (m.argIdents.zip m.argTys).mapM fun (n, ty) =>
@@ -177,7 +181,7 @@ def implFieldType (m : DerivedMethod) : TermElabM Term := do
   if m.isView then
     mkArrows (m.argTys ++ #[w]) m.retTy
   else
-    let ret ← `(Except (Lsc.Err ε) ($(m.retTy) × W))
+    let ret ← `(Option ($(m.retTy) × W))
     mkArrows (m.argTys ++ #[ctx, w]) ret
 
 def ofRefViewBody (m : DerivedMethod) : TermElabM Term := do
@@ -189,7 +193,9 @@ def ofRefViewBody (m : DerivedMethod) : TermElabM Term := do
 def ofRefFnBody (structName : Name) (_hdr : IfaceHeader) (m : DerivedMethod) :
     TermElabM Term := do
   let f := rootIdent (structName ++ `Ref ++ m.fieldName)
-  `(fun $(m.argIdents)* ctx w => Lsc.Tx.run ($f r $(m.argIdents)*) ctx w)
+  `(fun $(m.argIdents)* ctx w =>
+      (Lsc.Tx.run ($f r $(m.argIdents)* : Lsc.Tx S X E Unit $(m.retTy))
+        ctx w).toOption)
 
 def deriveOne (structName : Name) : CommandElabM Unit := do
   unless isStructure (← getEnv) structName do
@@ -220,7 +226,7 @@ def deriveOne (structName : Name) : CommandElabM Unit := do
         let n := mkIdent m.fieldName
         `(Parser.Command.structSimpleBinder| $n:ident : $ty)
   elabCommand <| ← `(
-    structure $implId $hdr.paramBinders:bracketedBinder* (W ε : Type) where
+    structure $implId $hdr.paramBinders:bracketedBinder* (W : Type) where
       $[$implFields]*
       step : Lsc.Ctx → W → W → Prop)
   -- Interface instance
@@ -239,7 +245,7 @@ def deriveOne (structName : Name) : CommandElabM Unit := do
   let tryApp ← liftTermElabM `($tryId $hdr.paramIdents*)
   let rB : TSyntax ``Parser.Term.bracketedBinder :=
     ← toBracketed <$> `(explicitBinderF| (r : $refApp))
-  let worldB ← liftTermElabM mkWorldBinders
+  let worldB ← liftTermElabM mkWorldBindersNoε
   let wB : TSyntax ``Parser.Term.bracketedBinder :=
     ← toBracketed <$> `(explicitBinderF| (_w : Lsc.World S X E))
   elabCommand <| ← `(
@@ -254,7 +260,7 @@ def deriveOne (structName : Name) : CommandElabM Unit := do
   let ofRefBinds := hdr.paramImplBinders.push worldB |>.push rB
   elabCommand <| ← `(
     def $ofRefId $ofRefBinds:bracketedBinder* :
-        $implId $hdr.paramIdents* (Lsc.World S X E) ε where
+        $implId $hdr.paramIdents* (Lsc.World S X E) where
       $[$instFields]*
       step := fun _ctx w w' =>
         ∃ sel args rets x',
@@ -263,7 +269,7 @@ def deriveOne (structName : Name) : CommandElabM Unit := do
   let implBinds := hdr.paramImplBinders ++ #[worldB, rB, wB]
   elabCommand <| ← `(
     def $implFn $implBinds:bracketedBinder* :
-        $implId $hdr.paramIdents* (Lsc.World S X E) ε :=
+        $implId $hdr.paramIdents* (Lsc.World S X E) :=
       $ofRefId r)
 
 def deriveInterface (declNames : Array Name) : CommandElabM Bool := do
