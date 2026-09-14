@@ -1,4 +1,7 @@
+import Lsc.Compiler.LockDefs
 import Lsc.Compiler.Proof.LockProof
+import Lsc.Compiler.Proof.LockPrefixProof
+import Lsc.Compiler.Proof.LockNestedProof
 import Lsc.Compiler.Bytecode
 import Lsc.Compiler.CorrectnessDefs
 import Lsc.Compiler.EvmDetDefs
@@ -10,9 +13,12 @@ set_option linter.unusedVariables false
 
 /-!
 Held reentrancy lock: the compiled runtime reverts at the prologue, at
-Yul and at assembled bytecode. Slice 8C will use these facts to derive
-the storage / transient / self-log conjuncts of `ExtOracle.NoReentry`
-instead of assuming `hNR`.
+Yul and at assembled bytecode. Every assembled runtime begins with a
+fixed instruction prefix. A nested CALL/STATICCALL frame into that
+runtime, with transient slot 0 set, reverts in that prefix against
+evm-semantics `Step` (not via `compile_correct`). Slice 8C-2 will use
+these facts to derive the storage / transient / self-log conjuncts of
+`ExtOracle.NoReentry` instead of assuming `hNR`.
 -/
 
 namespace Lsc.Compiler
@@ -22,7 +28,8 @@ open YulSemantics
 open YulSemantics.EVM
 open YulEvmCompiler
 open YulEvmCompiler.Optimizer.MemorySpill
-open EvmSemantics.EVM (State Steps)
+open EvmSemantics (AccountAddress)
+open EvmSemantics.EVM (State Steps Step Frame)
 
 /-- If transient slot 0 is set, a Yul run of the memoryguard-erased
 compiled runtime exists and reverts with empty data. Persistent storage,
@@ -116,55 +123,84 @@ theorem lock_held_reverts_evm {c : ContractDef} {rt : YBlock} {is : List Instr}
         LogsMatch yst0.logs s'.substate.logSeries :=
   Proof.lock_held_reverts_evm hrt hcomp hLock himm0
 
+/-- Assembled runtime bytecode of every contract begins with a fixed
+instruction prefix: `PUSH{w} k`, `ISZERO`, `POP`, `PUSH0`, `TLOAD`,
+`ISZERO`, `PUSH2 dest`, `JUMPI`, `PUSH0`, `PUSH0`, `REVERT`, `JUMPDEST`,
+then the rest of the program. `k` is `256` on the memoryguard-erasure
+path and the spill reservation on the spill path. The `PUSH2`
+immediate is the byte offset of that `JUMPDEST` (`13 + w`). -/
+theorem runtime_prefix {c : ContractDef} {rt : YBlock} {is : List Instr}
+    (hrt : runtimeBlock c = some rt) (h : compileBlock rt = some is) :
+    ∃ k w hi lo rest,
+      w = Instr.byteWidth k ∧
+      assembleBytes is =
+        lockPrefixP1 k ++ [hi, lo] ++ lockPrefixP2 ++ rest ∧
+      ofBytes2 hi lo = 13 + w ∧
+      ((compileErased rt = some is ∧ k = memoryGuardK) ∨
+        (compileErased rt = none ∧
+          ∃ r, spillRuntime? rt = some r ∧ k = r.reserved)) :=
+  Proof.runtime_prefix hrt h
+
+/-- A CALL or STATICCALL frame executing this contract's assembled runtime
+at `pc = 0` with an empty stack, with transient slot 0 set at `self`,
+reverts in the runtime prefix (at most the gas in `lockPrefixGasBound`)
+and resumes the caller by rolling the world back to the call-time
+snapshot. Not routed through `compile_correct` (the call stack is
+non-empty). Out-of-gas on a shorter budget is not claimed. -/
+theorem nested_lock_reverts {c : ContractDef} {rt : YBlock} {is : List Instr}
+    {self : AccountAddress} {s : State} {f : Frame} {rest : List Frame}
+    (hrt : runtimeBlock c = some rt) (hcomp : compileBlock rt = some is)
+    (hf : NestedFrame (assemble is) s)
+    (hself : s.executionEnv.address = self)
+    (hacc : (s.accountMap self).code = assemble is)
+    (hpc : s.pc = EvmSemantics.UInt256.ofNat 0)
+    (hstack : s.stack = [])
+    (hlock : (s.accountMap self).tstorage ⟨0⟩ ≠ ⟨0⟩)
+    (hcs : s.callStack = f :: rest)
+    (hcreate : f.createAddr = none) :
+    ∃ b, b ≤ lockPrefixGasBound ∧
+      (b ≤ s.gasAvailable →
+        ∃ sR sP, Steps s sR ∧ sR.halt = .Reverted ∧ sR.hReturn.toList = [] ∧
+          sR.callStack = f :: rest ∧ Step sR sP ∧
+          sP.accountMap = f.snapAccountMap ∧
+          sP.substate = f.snapSubstate) :=
+  Proof.nested_lock_reverts hrt hcomp hf hself hacc hpc hstack hlock hcs hcreate
+
 /-
-Groundwork for slice 8C — statement only, not a theorem.
+Groundwork for slice 8C-2 — statements only, not theorems.
 
-`noInterfere_of_lock` would take `lock_held_reverts_evm`,
-`YulEvmCompiler.CallsRealized (toCalls o)`, a pin that code at `self` is
-the assembled runtime, and "only the executing account `sstore`s /
-`tstore`s / `LOG*`s as itself", and conclude the storage, transient, and
-self-log conjuncts of `ExtOracle.NoReentry.noInterfere`:
+Isolation invariant on a `CallsRealized` witness trace, for assembled
+runtime of `c` pinned at `self`:
 
-  st.env.address = BitVec.ofNat 256 self →
-  ¬ LockFree st →
-  let resp := o req (ExtView.ofState st)
-  resp.world.storage = st.storage ∧
-  resp.world.transient = st.transient ∧
-  (∀ l ∈ resp.world.logs, l.address ≠ st.env.address)
+* Self storage, transient storage, and self-addressed logs are unchanged
+  across any CALL/STATICCALL into `self` while the lock is held: the
+  nested frame reverts in the prefix (`nested_lock_reverts`) and
+  `callReturnRevert` restores `snapAccountMap` / `snapSubstate`.
+* Any active frame with `executionEnv.address = self` and another
+  `self`-addressed frame on the call stack is still inside the runtime
+  prefix (the PUSH/ISZERO/POP/PUSH0/TLOAD/ISZERO/PUSH2/JUMPI/PUSH0/
+  PUSH0/REVERT window). Past `JUMPDEST` the lock was not held on entry,
+  or this is the outermost frame.
+* CALLCODE / DELEGATECALL targeting `self` write the *caller's*
+  account, not `self`. They are outside `nested_lock_reverts`. LSC does
+  not emit them; 8C-2 should keep that exclusion explicit.
+* CREATE2 collision: a successful CREATE2 cannot overwrite existing code
+  at `self`; the code pin is preserved.
+* Start-state code pin: `(accountMap self).code = executionEnv.code`
+  (`= assemble is`). `nested_lock_reverts` takes this as a hypothesis;
+  8C-2 composes it with deploy.
 
-Gaps (do not silently close these in 8C):
+`NoReentry` change planned for 8C-2:
 
-1. Nested frames. `FrameOK.callStack = []` is required by
-   `compile_correct` / `lock_held_reverts_evm`. A reentrant CALL frame
-   has a caller on the stack. Needed in pinned yul-compiler: a
-   `compile_correct` (or Phase-B `astep_sim`) variant that allows a
-   non-empty `callStack`, restoring the caller on halt — or a lemma that
-   a CALL-entered frame whose `executionEnv.code` is `assemble is` and
-   whose `tstorage[0] ≠ 0` reverts without writing that account's
-   storage / transient / logs.
+* Drop the ETH conjuncts (`selfBalance` / `balanceOf`): a non-reentering
+  callee can still transfer value; those stay oracle hypotheses.
+* `toCall` already scrubs executing-account storage/transient/logs
+  (`scrubSelf`); `ignoresSelf` is a property of `o`, not of the lock.
 
-2. Code-at-self pin. `FrameOK.hcode` identifies executing code with
-   `assemble is`. For a CALL to `self`, need
-   `(accountMap self).code = assemble is` (and `codeAddr` agreement).
-   Deploy / `bytecode_deploy_correct` plus "runtime code is not later
-   overwritten" are not in this module.
-
-3. Isolation of `sstore` / `tstore` / `LOG*`. EVM `StepRunning.sstore`,
-   `.tstore`, and `logN` update `executionEnv.address` only; Yul
-   `step_sstore` / `step_tstore` / `appendLog` are the executing
-   account. There is no packaged lemma "a foreign frame cannot write
-   `self` except by calling `self`". `CallsRealized` endpoints do not by
-   themselves name the intermediate reentrant frame.
-
-4. `ignoresSelf` / `scrubSelf`. `NoReentry.ignoresSelf` is that the
-   oracle ignores caller-local fields. The lock lemma does not imply it.
-   `scrubSelf` already drops executing-account storage/transient/logs
-   (`ExtOracle.lean`); proving `ignoresSelf` is a property of `o`, not
-   of the lock.
-
-5. `selfBalance` / `balanceOf`. `noInterfere`'s ETH conjuncts are
-   outside the lock: a non-reentering callee can still transfer value.
-   8C should keep those as oracle hypotheses or a separate lemma.
+8C-1 proved `runtime_prefix` and `nested_lock_reverts` in `lsc` by
+unfolding pinned yul-compiler / evm-semantics (no dependency re-pin,
+no `.lake/packages` change). 8C-3 drops `hNR` on S1/S2 glue and needs
+a human re-pin of `Checks.lean`.
 -/
 
 end Lsc.Compiler

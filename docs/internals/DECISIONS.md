@@ -268,5 +268,20 @@ Three-slice plan:
   Held lock ⇒ prologue revert with empty data and unchanged committed storage /
   transient / logs at Yul; the same at assembled bytecode under
   `compile_correct`'s start hypotheses. `hNR` is still assumed on S1/S2 glue.
-- **8C**: derive `NoReentry` from the lock, drop `hNR`, human re-pin of `Checks.lean`.
-  TCB now records emit + held-lock revert; dropping `hNR` still waits for C.
+- **8C** (no yul-compiler / evm-semantics change; proofs in `lsc` unfold the
+  pinned `compile` / `StepRunning` definitions):
+  - **8C-1** (this): `runtime_prefix` — assembled runtime begins
+    `PUSH{w} k; ISZERO; POP; PUSH0; TLOAD; ISZERO; PUSH2 dest; JUMPI;
+    PUSH0; PUSH0; REVERT; JUMPDEST` with `k = 256` after erasure and
+    `k = reserved` on the spill path, `dest = 13 + w`.
+    `nested_lock_reverts` — a CALL/STATICCALL frame into that runtime
+    at `pc = 0` with `tstorage[0] ≠ 0` reverts in the prefix against
+    evm-semantics `Step` / `callReturnRevert` (not via `compile_correct`,
+    whose `FrameOK` needs an empty call stack) and restores the parent's
+    snapshot of `accountMap` and `substate`. Gas budget `≤ 200`.
+  - **8C-2**: isolation invariant on a `CallsRealized` trace (self
+    storage/tstorage/self-logs unchanged; nested self-frames stay in the
+    prefix; CALLCODE/DELEGATECALL write the caller; CREATE2 collision
+    preserves the code pin). Weaken `NoReentry`: drop ETH conjuncts;
+    `toCall` already scrubs self.
+  - **8C-3**: drop `hNR` on S1/S2 glue; human re-pin of `Checks.lean`.
