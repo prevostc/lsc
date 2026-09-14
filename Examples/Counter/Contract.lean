@@ -40,7 +40,7 @@ def incrementBy (n : Nat) : M Unit := do
 /-- Subtract one, saturating at zero. -/
 def decrement : M Unit := do
   let c ← read count
-  let c' ← if c = 0 then pure 0 else c -? 1
+  let c' ← if c = 0 then (0 : Nat) else c -? 1
   write count c'
 
 /-- Current `count`. -/

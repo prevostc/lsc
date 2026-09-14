@@ -40,7 +40,8 @@ prints the security theorems to prove; it does not import `Lsc.Security`.
 
 The reifier only accepts the *reifiable fragment* — the fixed set of
 `Tx` primitives combined with `do`, `let`, `if` on decidable word comparisons, and
-`pure` of words/addresses/pairs. Library helpers tagged `@[lsc_inline]` are
+`pure` of words/addresses/pairs (including a `CoeTail` lift of a plain value).
+Library helpers tagged `@[lsc_inline]` are
 delta-unfolded (β with arguments, fuel-bounded; recursive defs are rejected at
 the attribute) and reified from the resulting body. Anything else is rejected
 with the offending subterm, so a reifier bug or an out-of-fragment program is a
@@ -694,7 +695,7 @@ def isDeltaStop : Name → Bool
   | ``Lsc.Tx.require | ``Lsc.Tx.emit | ``Lsc.Tx.revert
   | ``Lsc.Tx.sender | ``Lsc.Tx.value | ``Lsc.Tx.timestamp | ``Lsc.Tx.blockNumber
   | ``Lsc.Tx.selfAddress
-  | ``Bind.bind | ``Pure.pure | ``ite
+  | ``Bind.bind | ``Pure.pure | ``CoeTail.coe | ``ite
   | ``Lsc.Amount.add | ``Lsc.Amount.sub
   | ``Lsc.Amount.mulScalar | ``Lsc.Amount.divScalar
   | ``Lsc.Amount.mulDivDown | ``Lsc.Amount.mulDivUp
@@ -978,6 +979,7 @@ def opOf (ci : ContractInfo) (env : Env t) (x : Expr) : MetaM (Option Op) := do
     if n < 3 then return none
     return some (.mulDivUp (← atom args[n - 3]!) (← atom args[n - 2]!) (← atom args[n - 1]!))
   | some ``Pure.pure, 4 => return some (.pure (← atom args[3]!))
+  | some ``CoeTail.coe, 4 => return some (.pure (← atom args[3]!))
   | _, _ => return none
 
 /-- Unit-valued primitives. -/
@@ -1154,6 +1156,7 @@ partial def reify (ci : ContractInfo) (t : RetTy) (env : Env t) (e : Expr)
         else
           throwInlineOr inline? x m!"reify: `{x0}` is not a contract primitive"
       | ``Pure.pure, 4 => return .ret (← retExprOf env t args[3]!)
+      | ``CoeTail.coe, 4 => return .ret (← retExprOf env t args[3]!)
       | ``ite, 5 =>
         let c ← condOf env args[1]!
         let a ← reify ci t env args[3]! inline?

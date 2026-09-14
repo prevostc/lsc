@@ -2,7 +2,9 @@
 
 A contract is ordinary Lean: a storage structure, events, errors, and
 functions in the `Tx` monad. There is no separate grammar. `read` / `write`
-are macros over storage. Control flow is Lean `do` / `let` / `if`.
+are macros over storage. Control flow is Lean `do` / `let` / `if`. A
+plain value in an `if` branch or as a `do` result is lifted into `Tx`
+(no `pure`).
 
 Checked arithmetic (revert on overflow, underflow, or division by zero):
 

@@ -68,7 +68,7 @@ def deposit (assets : Amount vaultAsset) : M (Amount vShare) := do
   let ts ← read totalShares
   let minted ←
     if ts = 0 then
-      pure (assets.as vShare)
+      assets.as vShare
     else
       ts mulDiv↓ assets / ta
   Tx.require (0 < minted) .ZeroShares
@@ -106,7 +106,7 @@ def previewDeposit (assets : Amount vaultAsset) : M (Amount vShare) := do
   let ta ← tok.balanceOf me
   let ts ← read totalShares
   if ts = 0 then
-    pure (assets.as vShare)
+    assets.as vShare
   else
     ts mulDiv↓ assets / ta
 

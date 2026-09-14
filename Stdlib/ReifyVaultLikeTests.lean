@@ -73,7 +73,7 @@ def withdraw (s : Amount tShare) : M (Amount tAsset) := do
   let ts ← read totalShares
   let assetsOut ←
     if ts = 0 then
-      pure (0 : Amount tAsset)
+      (0 : Amount tAsset)
     else
       let one : Amount tShare := 1
       (Amount.ofWord (a := tAsset) s.raw) mulDiv↓ one / one
@@ -134,7 +134,7 @@ def writeTrue : M Bool := do
 
 def unitView : M Unit := do
   let _ ← read dummy
-  pure ()
+  return ()
 
 end KindProbe
 

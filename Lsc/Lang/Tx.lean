@@ -123,6 +123,12 @@ variable {S X E ε : Type} {α K K₁ K₂ V : Type}
 def run (x : Tx S X E ε α) (ctx : Ctx) (w : World S X E) : Except (Err ε) (α × World S X E) :=
   x ctx w
 
+/-- A plain value in a `Tx` position is `pure`. `CoeTail` (not `Coe`) so it
+applies only as the last step of a coercion chain and cannot loop as
+`α → Tx α → Tx (Tx α)`. Same pattern as `Thunk`. Lean unfolds the coercion
+to `pure` at elaboration, so `Tx.run` lemmas about `pure` still apply. -/
+instance : CoeTail α (Tx S X E ε α) := ⟨pure⟩
+
 /-! ### Storage -/
 
 /-- Read a scalar field. `proj` is a projection of the storage structure. -/

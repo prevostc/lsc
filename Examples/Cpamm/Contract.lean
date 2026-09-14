@@ -82,13 +82,13 @@ def addLiquidity (a0 : Amount asset0) (a1 : Amount asset1) : M (Amount lpShare) 
   let ts ← read totalShares
   let minted ←
     if ts = 0 then
-      pure (a0.as lpShare)
+      a0.as lpShare
     else do
       Tx.require (0 < r0) .Zero
       Tx.require (0 < r1) .Zero
       let s0 ← ts mulDiv↓ a0 / r0
       let s1 ← ts mulDiv↓ a1 / r1
-      if s0 ≤ s1 then pure s0 else pure s1
+      if s0 ≤ s1 then s0 else s1
   Tx.require (0 < minted) .ZeroShares
   let r0' ← r0 +? a0
   write reserve0 r0'
@@ -104,7 +104,7 @@ def addLiquidity (a0 : Amount asset0) (a1 : Amount asset1) : M (Amount lpShare) 
   safeTransferFrom t0 who me a0 .TransferFailed
   safeTransferFrom t1 who me a1 .TransferFailed
   Tx.emit (.AddLiquidity who a0 a1 minted)
-  pure minted
+  return minted
 
 /-- Burn `s` and send the floor-pro-rata of each reserve. -/
 def removeLiquidity (s : Amount lpShare) : M (Amount asset0 × Amount asset1) := do
@@ -133,7 +133,7 @@ def removeLiquidity (s : Amount lpShare) : M (Amount asset0 × Amount asset1) :=
   safeTransfer t0 who out0 .TransferFailed
   safeTransfer t1 who out1 .TransferFailed
   Tx.emit (.RemoveLiquidity who out0 out1 s)
-  pure (out0, out1)
+  return (out0, out1)
 
 /-- Sell `amountIn` of token0. Output uses the 0.3%-fee notional; the protocol
 take never enters the curve. -/
@@ -150,7 +150,7 @@ def swap0for1 (amountIn : Amount asset0) (minOut : Amount asset1) : M (Amount as
   Tx.require (0 < out) .ZeroOut
   let ft ← read feeTo
   let ps ← read protocolShareBps
-  let coeff : Bps ← if ft = 0 then pure (0 : Bps) else pure ps
+  let coeff : Bps ← if ft = 0 then (0 : Bps) else ps
   let fee ← amountIn -? dxF
   let proto ← fee *?↓ coeff
   let taken ← amountIn -? proto
@@ -168,7 +168,7 @@ def swap0for1 (amountIn : Amount asset0) (minOut : Amount asset1) : M (Amount as
   safeTransferFrom t0 who me amountIn .TransferFailed
   safeTransfer t1 who out .TransferFailed
   Tx.emit (.Swap0for1 who amountIn out)
-  pure out
+  return out
 
 /-- Sell `amountIn` of token1. Symmetric to `swap0for1`. -/
 def swap1for0 (amountIn : Amount asset1) (minOut : Amount asset0) : M (Amount asset0) := do
@@ -184,7 +184,7 @@ def swap1for0 (amountIn : Amount asset1) (minOut : Amount asset0) : M (Amount as
   Tx.require (0 < out) .ZeroOut
   let ft ← read feeTo
   let ps ← read protocolShareBps
-  let coeff : Bps ← if ft = 0 then pure (0 : Bps) else pure ps
+  let coeff : Bps ← if ft = 0 then (0 : Bps) else ps
   let fee ← amountIn -? dxF
   let proto ← fee *?↓ coeff
   let taken ← amountIn -? proto
@@ -202,7 +202,7 @@ def swap1for0 (amountIn : Amount asset1) (minOut : Amount asset0) : M (Amount as
   safeTransferFrom t1 who me amountIn .TransferFailed
   safeTransfer t0 who out .TransferFailed
   Tx.emit (.Swap1for0 who amountIn out)
-  pure out
+  return out
 
 /-- Owner sets the protocol's share of the swap fee, in bps of that fee. -/
 def setProtocolShare (bps : Bps) : M Unit := do
@@ -236,13 +236,13 @@ def collectProtocolFees : M (Amount asset0 × Amount asset1) := do
   safeTransfer t0 who p0 .TransferFailed
   safeTransfer t1 who p1 .TransferFailed
   Tx.emit (.ProtocolFeesCollected who p0 p1)
-  pure (p0, p1)
+  return (p0, p1)
 
 /-- Current reserves. -/
 def getReserves : M (Amount asset0 × Amount asset1) := do
   let r0 ← read reserve0
   let r1 ← read reserve1
-  pure (r0, r1)
+  return (r0, r1)
 
 /-- LP share balance of `who`. -/
 def sharesOf (who : Address) : M (Amount lpShare) := read shares[who]
@@ -251,7 +251,7 @@ def sharesOf (who : Address) : M (Amount lpShare) := read shares[who]
 def protocolFees : M (Amount asset0 × Amount asset1) := do
   let p0 ← read protocolFees0
   let p1 ← read protocolFees1
-  pure (p0, p1)
+  return (p0, p1)
 
 end Cpamm
 
