@@ -581,7 +581,7 @@ private theorem claim_le_call (c : Call spec)
     · have hok := pause_ok (ctx := ctx) (w := w) howner
       rw [hok] at hrun
       obtain ⟨rfl, rfl⟩ := hrun
-      simp [claim, holdings, impl_balanceOf, viewBal]
+      exact Nat.le_refl _
     · have herr := pause_only_owner (ctx := ctx) (w := w) howner
       rw [herr] at hrun
       cases hrun
@@ -590,7 +590,7 @@ private theorem claim_le_call (c : Call spec)
     · have hok := unpause_ok (ctx := ctx) (w := w) howner
       rw [hok] at hrun
       obtain ⟨rfl, rfl⟩ := hrun
-      simp [claim, holdings, impl_balanceOf, viewBal]
+      exact Nat.le_refl _
     · have herr := unpause_only_owner (ctx := ctx) (w := w) howner
       rw [herr] at hrun
       cases hrun

@@ -55,8 +55,7 @@ def Inv (w : World Storage ExtState Event) : Prop :=
 def balSel : Nat := Interface.selector (I := IERC20 vaultAsset) "balanceOf"
 def supplySel : Nat := Interface.selector (I := IERC20 vaultAsset) "totalSupply"
 
-/-- World whose `impl` views read `oracle` at `x`. Storage besides `asset`
-is unused: `IERC20.Impl` views depend on `addr`, `oracle`, and `ext`. -/
+/-- Dummy `World` so `Impl` views can run: they take a `World` but ignore `self`. -/
 def viewWorld (asset : IERC20.Ref vaultAsset) (oracle : Oracle ExtState)
     (x : ExtState) : World Storage ExtState Event where
   self := {
