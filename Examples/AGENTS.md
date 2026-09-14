@@ -10,9 +10,7 @@ Exactly:
   `.core`/`core_denote`/`Core.*`/`Spec.exec` mention, `Amount.ofWord`/`.raw`/
   word-level plumbing, helper duplicates (`*Raw`, `*U`, `*Unit`, `*Impl`
   suffixes), named arithmetic where an operator exists (`+? -? *? /?`,
-  `mulDiv↓`/`mulDiv↑`). One effect per line: never a nested `(← …)` inside an
-  expression, never two effects on one line. Bad: `write totalShares (← ts +? minted)`.
-  Good: `let ts' ← ts +? minted` then `write totalShares ts'`.
+  `mulDiv↓`/`mulDiv↑`).
 - `Spec.lean` — invariant, rely, authorisation/value predicates, named world
   readers (e.g. `holdings w`). No theorems, no proofs.
 - `Theorems.lean` — every exposed theorem about the *contract*: Tx-level

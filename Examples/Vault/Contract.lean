@@ -72,11 +72,9 @@ def deposit (assets : Amount vaultAsset) : M (Amount vShare) := do
     else
       ts mulDiv↓ assets / ta
   Tx.require (0 < minted) .ZeroShares
-  let ts' ← ts +? minted
-  write totalShares ts'
+  write totalShares (← ts +? minted)
   let bal ← read shares[who]
-  let bal' ← bal +? minted
-  write shares[who] bal'
+  write shares[who] (← bal +? minted)
   safeTransferFrom tok who me assets .TransferFailed
   Tx.emit (.Deposit who assets minted)
   return minted
@@ -95,10 +93,8 @@ def withdraw (sharesIn : Amount vShare) : M (Amount vaultAsset) := do
   let ts ← read totalShares
   let assetsOut ← ta mulDiv↓ sharesIn / ts
   Tx.require (0 < assetsOut) .ZeroAssets
-  let bal' ← bal -? sharesIn
-  write shares[who] bal'
-  let ts' ← ts -? sharesIn
-  write totalShares ts'
+  write shares[who] (← bal -? sharesIn)
+  write totalShares (← ts -? sharesIn)
   safeTransfer tok who assetsOut .TransferFailed
   Tx.emit (.Withdraw who assetsOut sharesIn)
   return assetsOut
