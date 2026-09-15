@@ -33,7 +33,7 @@ via `setFeeTo`.
 
 | File | Role |
 |------|------|
-| `Contract.lean` | Pool surface, shared `swapOut` quote, schema, contract |
+| `Contract.lean` | Pool surface, shared `swap` / `swapOut`, schema, contract |
 | `Spec.lean` | `claim`, `Auth`, `Inv`, `holdings0/1`, `cpammRely` |
 | `Theorems.lean` | Exported Tx and security theorems |
 | `Proofs/Tx.lean` | `Tx.run` lemmas |

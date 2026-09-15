@@ -609,6 +609,36 @@ private theorem run_read_token1_then_token0 {α : Type}
       Tx.run (k w.self.token1 w.self.token0) ctx w := by
   simp only [Tx.run_bind, Tx.run_map, Tx.run_load]
 
+/-- Token refs then `protocolFees0`, as `swap0for1` sequences them. -/
+private theorem run_read_token0_token1_fees0 {α : Type}
+    (k : IERC20.Ref asset0 → IERC20.Ref asset1 → Amount asset0 →
+      Tx Storage ExtState Event Error α) :
+    Tx.run (do
+      let t0 ← (fun n => ({ addr := n } : IERC20.Ref asset0)) <$>
+        Tx.load (X := ExtState) (E := Event) (ε := Error) (fun σ => σ.token0.addr)
+      let t1 ← (fun n => ({ addr := n } : IERC20.Ref asset1)) <$>
+        Tx.load (X := ExtState) (E := Event) (ε := Error) (fun σ => σ.token1.addr)
+      let fees ← Tx.load (X := ExtState) (E := Event) (ε := Error)
+        (fun σ => σ.protocolFees0)
+      k t0 t1 fees) ctx w =
+      Tx.run (k w.self.token0 w.self.token1 w.self.protocolFees0) ctx w := by
+  simp only [Tx.run_bind, Tx.run_map, Tx.run_load]
+
+/-- Token refs then `protocolFees1`, as `swap1for0` sequences them. -/
+private theorem run_read_token1_token0_fees1 {α : Type}
+    (k : IERC20.Ref asset1 → IERC20.Ref asset0 → Amount asset1 →
+      Tx Storage ExtState Event Error α) :
+    Tx.run (do
+      let t1 ← (fun n => ({ addr := n } : IERC20.Ref asset1)) <$>
+        Tx.load (X := ExtState) (E := Event) (ε := Error) (fun σ => σ.token1.addr)
+      let t0 ← (fun n => ({ addr := n } : IERC20.Ref asset0)) <$>
+        Tx.load (X := ExtState) (E := Event) (ε := Error) (fun σ => σ.token0.addr)
+      let fees ← Tx.load (X := ExtState) (E := Event) (ε := Error)
+        (fun σ => σ.protocolFees1)
+      k t1 t0 fees) ctx w =
+      Tx.run (k w.self.token1 w.self.token0 w.self.protocolFees1) ctx w := by
+  simp only [Tx.run_bind, Tx.run_map, Tx.run_load]
+
 private theorem run_emit_bind {α : Type} {ev : Event}
     (k : Unit → Tx Storage ExtState Event Error α) :
     Tx.run (Tx.emit (S := Storage) (X := ExtState) ev >>= k) ctx w =
@@ -1928,6 +1958,32 @@ private theorem protoMul_coeff {dx : Nat} :
       swapFee dx * coeffOf w.self < wordBound := by
   simp [coeffBps_raw]
 
+private theorem swap0for1_to_swap (dx : Amount asset0) (minOut : Amount asset1) :
+    Tx.run (swap0for1 dx minOut) ctx w =
+      Tx.run (swap w.self.reserve0 w.self.reserve1 w.self.token0 w.self.token1
+        w.self.protocolFees0
+        (fun v => write reserve0 v) (fun v => write reserve1 v)
+        (fun v => write protocolFees0 v) Event.Swap0for1 dx minOut) ctx w := by
+  unfold swap0for1
+  simp only [run_load_bind]
+  exact run_read_token0_token1_fees0 fun t0 t1 fees =>
+    swap w.self.reserve0 w.self.reserve1 t0 t1 fees
+      (fun v => write reserve0 v) (fun v => write reserve1 v)
+      (fun v => write protocolFees0 v) Event.Swap0for1 dx minOut
+
+private theorem swap1for0_to_swap (dx : Amount asset1) (minOut : Amount asset0) :
+    Tx.run (swap1for0 dx minOut) ctx w =
+      Tx.run (swap w.self.reserve1 w.self.reserve0 w.self.token1 w.self.token0
+        w.self.protocolFees1
+        (fun v => write reserve1 v) (fun v => write reserve0 v)
+        (fun v => write protocolFees1 v) Event.Swap1for0 dx minOut) ctx w := by
+  unfold swap1for0
+  simp only [run_load_bind]
+  exact run_read_token1_token0_fees1 fun t1 t0 fees =>
+    swap w.self.reserve1 w.self.reserve0 t1 t0 fees
+      (fun v => write reserve1 v) (fun v => write reserve0 v)
+      (fun v => write protocolFees1 v) Event.Swap1for0 dx minOut
+
 private theorem swap0_after_quote (dx : Amount asset0) (minOut : Amount asset1)
     (hpos : 0 < dx) (hr0 : 0 < w.self.reserve0.raw) (hr1 : 0 < w.self.reserve1.raw) :
     Tx.run (swap0for1 dx minOut) ctx w =
@@ -1939,21 +1995,18 @@ private theorem swap0_after_quote (dx : Amount asset0) (minOut : Amount asset1)
           write reserve0 r0'
           let r1' ← w.self.reserve1 -? p.1
           write reserve1 r1'
-          let acc ← read protocolFees0
-          let acc' ← acc +? p.2
+          let acc' ← w.self.protocolFees0 +? p.2
           write protocolFees0 acc'
           let who ← Tx.sender
           let me ← Tx.selfAddress
-          let t0 ← read token0
-          let t1 ← read token1
-          safeTransferFrom t0 who me dx .TransferFailed
-          safeTransfer t1 who p.1 .TransferFailed
+          safeTransferFrom w.self.token0 who me dx .TransferFailed
+          safeTransfer w.self.token1 who p.1 .TransferFailed
           Tx.emit (.Swap0for1 who dx p.1)
           return p.1) ctx w := by
   have hr0A : 0 < w.self.reserve0 := by simpa [Amount.lt_iff] using hr0
   have hr1A : 0 < w.self.reserve1 := by simpa [Amount.lt_iff] using hr1
-  rw [swap0for1, run_req_true hpos, run_load_bind, run_load_bind,
-    run_req_true hr0A, run_req_true hr1A, run_load_bind, run_load_bind]
+  rw [swap0for1_to_swap, Cpamm.swap, run_req_true hpos, run_req_true hr0A,
+    run_req_true hr1A, run_load_bind, run_load_bind]
   simp [coeffBps]
 
 private theorem swap1_after_quote (dx : Amount asset1) (minOut : Amount asset0)
@@ -1967,21 +2020,18 @@ private theorem swap1_after_quote (dx : Amount asset1) (minOut : Amount asset0)
           write reserve1 r1'
           let r0' ← w.self.reserve0 -? p.1
           write reserve0 r0'
-          let acc ← read protocolFees1
-          let acc' ← acc +? p.2
+          let acc' ← w.self.protocolFees1 +? p.2
           write protocolFees1 acc'
           let who ← Tx.sender
           let me ← Tx.selfAddress
-          let t1 ← read token1
-          let t0 ← read token0
-          safeTransferFrom t1 who me dx .TransferFailed
-          safeTransfer t0 who p.1 .TransferFailed
+          safeTransferFrom w.self.token1 who me dx .TransferFailed
+          safeTransfer w.self.token0 who p.1 .TransferFailed
           Tx.emit (.Swap1for0 who dx p.1)
           return p.1) ctx w := by
   have hr0A : 0 < w.self.reserve0 := by simpa [Amount.lt_iff] using hr0
   have hr1A : 0 < w.self.reserve1 := by simpa [Amount.lt_iff] using hr1
-  rw [swap1for0, run_req_true hpos, run_load_bind, run_load_bind,
-    run_req_true hr0A, run_req_true hr1A, run_load_bind, run_load_bind]
+  rw [swap1for0_to_swap, Cpamm.swap, run_req_true hpos, run_req_true hr1A,
+    run_req_true hr0A, run_load_bind, run_load_bind]
   simp [coeffBps]
 
 theorem swap0for1_reverts_on_fee_mul (dx : Amount asset0) (minOut : Amount asset1)
@@ -2044,15 +2094,12 @@ private theorem swap0_k (dx : Amount asset0) (minOut : Amount asset1)
         write reserve0 r0'
         let r1' ← w.self.reserve1 -? (⟨swap0Out w.self dx.raw⟩ : Amount asset1)
         write reserve1 r1'
-        let acc ← read protocolFees0
-        let acc' ← acc +? (⟨protoOf w.self dx.raw⟩ : Amount asset0)
+        let acc' ← w.self.protocolFees0 +? (⟨protoOf w.self dx.raw⟩ : Amount asset0)
         write protocolFees0 acc'
         let who ← Tx.sender
         let me ← Tx.selfAddress
-        let t0 ← read token0
-        let t1 ← read token1
-        safeTransferFrom t0 who me dx .TransferFailed
-        safeTransfer t1 who (⟨swap0Out w.self dx.raw⟩ : Amount asset1)
+        safeTransferFrom w.self.token0 who me dx .TransferFailed
+        safeTransfer w.self.token1 who (⟨swap0Out w.self dx.raw⟩ : Amount asset1)
           .TransferFailed
         Tx.emit (.Swap0for1 who dx ⟨swap0Out w.self dx.raw⟩)
         pure (⟨swap0Out w.self dx.raw⟩ : Amount asset1)
@@ -2112,15 +2159,12 @@ private theorem swap0_after_req (dx : Amount asset0) (minOut : Amount asset1)
         write reserve0 r0'
         let r1' ← w.self.reserve1 -? (⟨swap0Out w.self dx.raw⟩ : Amount asset1)
         write reserve1 r1'
-        let acc ← read protocolFees0
-        let acc' ← acc +? (⟨protoOf w.self dx.raw⟩ : Amount asset0)
+        let acc' ← w.self.protocolFees0 +? (⟨protoOf w.self dx.raw⟩ : Amount asset0)
         write protocolFees0 acc'
         let who ← Tx.sender
         let me ← Tx.selfAddress
-        let t0 ← read token0
-        let t1 ← read token1
-        safeTransferFrom t0 who me dx .TransferFailed
-        safeTransfer t1 who (⟨swap0Out w.self dx.raw⟩ : Amount asset1)
+        safeTransferFrom w.self.token0 who me dx .TransferFailed
+        safeTransfer w.self.token1 who (⟨swap0Out w.self dx.raw⟩ : Amount asset1)
           .TransferFailed
         Tx.emit (.Swap0for1 who dx ⟨swap0Out w.self dx.raw⟩)
         pure (⟨swap0Out w.self dx.raw⟩ : Amount asset1)
@@ -2196,7 +2240,7 @@ theorem swap0for1_reverts_on_acc (dx : Amount asset0) (minOut : Amount asset1)
   simp only [run_hAdd_bind]
   rw [if_pos hadd0, run_store_bind]
   simp only [run_hSub_bind]
-  rw [if_pos hsub1, run_store_bind, run_load_bind]
+  rw [if_pos hsub1, run_store_bind]
   simp only [run_hAdd_bind]
   rw [if_neg hacc]
 
@@ -2206,20 +2250,19 @@ theorem swap0for1_ok_of_run {dx : Amount asset0} {minOut : Amount asset1}
     Swap0Ok w dx minOut := by
   have hpos : 0 < dx := by
     by_contra h
-    rw [swap0for1, run_req_false h] at hrun
+    rw [swap0for1_to_swap, Cpamm.swap, run_req_false h] at hrun
     cases hrun
   have hr0 : 0 < w.self.reserve0.raw := by
     by_contra h
     have hz : ¬ 0 < w.self.reserve0 := by simpa [Amount.lt_iff] using h
-    rw [swap0for1, run_req_true hpos, run_load_bind, run_load_bind,
-      run_req_false hz] at hrun
+    rw [swap0for1_to_swap, Cpamm.swap, run_req_true hpos, run_req_false hz] at hrun
     cases hrun
   have hr1 : 0 < w.self.reserve1.raw := by
     by_contra h
     have hz : ¬ 0 < w.self.reserve1 := by simpa [Amount.lt_iff] using h
     have hr0A : 0 < w.self.reserve0 := by simpa [Amount.lt_iff] using hr0
-    rw [swap0for1, run_req_true hpos, run_load_bind, run_load_bind,
-      run_req_true hr0A, run_req_false hz] at hrun
+    rw [swap0for1_to_swap, Cpamm.swap, run_req_true hpos, run_req_true hr0A,
+      run_req_false hz] at hrun
     cases hrun
   have hfee : dx.raw * 9970 < wordBound := by
     by_contra h
@@ -2293,19 +2336,9 @@ theorem swap0for1_to_tail (dx : Amount asset0) (minOut : Amount asset1)
   simp only [run_hAdd_bind]
   rw [if_pos hadd0, run_store_bind]
   simp only [run_hSub_bind]
-  rw [if_pos hsub1, run_store_bind, run_load_bind]
+  rw [if_pos hsub1, run_store_bind]
   simp only [run_hAdd_bind]
   rw [if_pos hacc, run_store_bind, run_sender_bind, run_self_bind]
-  refine (run_read_token0_then_token1 (fun t0 t1 =>
-    safeTransferFrom (E := Event) t0 ctx.sender ctx.self dx
-      Error.TransferFailed >>= fun _ =>
-    safeTransfer (E := Event) t1 ctx.sender
-      (Amount.ofWord (swap0Out w.self dx.raw)) Error.TransferFailed >>=
-      fun _ =>
-    Tx.emit (.Swap0for1 ctx.sender dx
-      (Amount.ofWord (swap0Out w.self dx.raw))) >>= fun _ =>
-    (pure (Amount.ofWord (swap0Out w.self dx.raw)) :
-      Tx Storage ExtState Event Error (Amount asset1)))).trans ?_
   simp only [swap0Post, Amount.raw_add, Amount.raw_sub, Amount.raw_ofWord,
     Amount.ofWord_add_right, Amount.ofWord_sub_left, Amount.ofWord_raw,
     Amount.mk_raw]
@@ -2431,15 +2464,12 @@ private theorem swap1_k (dx : Amount asset1) (minOut : Amount asset0)
         write reserve1 r1'
         let r0' ← w.self.reserve0 -? (⟨swap1Out w.self dx.raw⟩ : Amount asset0)
         write reserve0 r0'
-        let acc ← read protocolFees1
-        let acc' ← acc +? (⟨protoOf w.self dx.raw⟩ : Amount asset1)
+        let acc' ← w.self.protocolFees1 +? (⟨protoOf w.self dx.raw⟩ : Amount asset1)
         write protocolFees1 acc'
         let who ← Tx.sender
         let me ← Tx.selfAddress
-        let t1 ← read token1
-        let t0 ← read token0
-        safeTransferFrom t1 who me dx .TransferFailed
-        safeTransfer t0 who (⟨swap1Out w.self dx.raw⟩ : Amount asset0)
+        safeTransferFrom w.self.token1 who me dx .TransferFailed
+        safeTransfer w.self.token0 who (⟨swap1Out w.self dx.raw⟩ : Amount asset0)
           .TransferFailed
         Tx.emit (.Swap1for0 who dx ⟨swap1Out w.self dx.raw⟩)
         pure (⟨swap1Out w.self dx.raw⟩ : Amount asset0)
@@ -2499,15 +2529,12 @@ private theorem swap1_after_req (dx : Amount asset1) (minOut : Amount asset0)
         write reserve1 r1'
         let r0' ← w.self.reserve0 -? (⟨swap1Out w.self dx.raw⟩ : Amount asset0)
         write reserve0 r0'
-        let acc ← read protocolFees1
-        let acc' ← acc +? (⟨protoOf w.self dx.raw⟩ : Amount asset1)
+        let acc' ← w.self.protocolFees1 +? (⟨protoOf w.self dx.raw⟩ : Amount asset1)
         write protocolFees1 acc'
         let who ← Tx.sender
         let me ← Tx.selfAddress
-        let t1 ← read token1
-        let t0 ← read token0
-        safeTransferFrom t1 who me dx .TransferFailed
-        safeTransfer t0 who (⟨swap1Out w.self dx.raw⟩ : Amount asset0)
+        safeTransferFrom w.self.token1 who me dx .TransferFailed
+        safeTransfer w.self.token0 who (⟨swap1Out w.self dx.raw⟩ : Amount asset0)
           .TransferFailed
         Tx.emit (.Swap1for0 who dx ⟨swap1Out w.self dx.raw⟩)
         pure (⟨swap1Out w.self dx.raw⟩ : Amount asset0)
@@ -2583,7 +2610,7 @@ theorem swap1for0_reverts_on_acc (dx : Amount asset1) (minOut : Amount asset0)
   simp only [run_hAdd_bind]
   rw [if_pos hadd1, run_store_bind]
   simp only [run_hSub_bind]
-  rw [if_pos hsub0, run_store_bind, run_load_bind]
+  rw [if_pos hsub0, run_store_bind]
   simp only [run_hAdd_bind]
   rw [if_neg hacc]
 
@@ -2593,20 +2620,19 @@ theorem swap1for0_ok_of_run {dx : Amount asset1} {minOut : Amount asset0}
     Swap1Ok w dx minOut := by
   have hpos : 0 < dx := by
     by_contra h
-    rw [swap1for0, run_req_false h] at hrun
-    cases hrun
-  have hr0 : 0 < w.self.reserve0.raw := by
-    by_contra h
-    have hz : ¬ 0 < w.self.reserve0 := by simpa [Amount.lt_iff] using h
-    rw [swap1for0, run_req_true hpos, run_load_bind, run_load_bind,
-      run_req_false hz] at hrun
+    rw [swap1for0_to_swap, Cpamm.swap, run_req_false h] at hrun
     cases hrun
   have hr1 : 0 < w.self.reserve1.raw := by
     by_contra h
     have hz : ¬ 0 < w.self.reserve1 := by simpa [Amount.lt_iff] using h
-    have hr0A : 0 < w.self.reserve0 := by simpa [Amount.lt_iff] using hr0
-    rw [swap1for0, run_req_true hpos, run_load_bind, run_load_bind,
-      run_req_true hr0A, run_req_false hz] at hrun
+    rw [swap1for0_to_swap, Cpamm.swap, run_req_true hpos, run_req_false hz] at hrun
+    cases hrun
+  have hr0 : 0 < w.self.reserve0.raw := by
+    by_contra h
+    have hz : ¬ 0 < w.self.reserve0 := by simpa [Amount.lt_iff] using h
+    have hr1A : 0 < w.self.reserve1 := by simpa [Amount.lt_iff] using hr1
+    rw [swap1for0_to_swap, Cpamm.swap, run_req_true hpos, run_req_true hr1A,
+      run_req_false hz] at hrun
     cases hrun
   have hfee : dx.raw * 9970 < wordBound := by
     by_contra h
@@ -2680,19 +2706,9 @@ theorem swap1for0_to_tail (dx : Amount asset1) (minOut : Amount asset0)
   simp only [run_hAdd_bind]
   rw [if_pos hadd1, run_store_bind]
   simp only [run_hSub_bind]
-  rw [if_pos hsub0, run_store_bind, run_load_bind]
+  rw [if_pos hsub0, run_store_bind]
   simp only [run_hAdd_bind]
   rw [if_pos hacc, run_store_bind, run_sender_bind, run_self_bind]
-  refine (run_read_token1_then_token0 (fun t1 t0 =>
-    safeTransferFrom (E := Event) t1 ctx.sender ctx.self dx
-      Error.TransferFailed >>= fun _ =>
-    safeTransfer (E := Event) t0 ctx.sender
-      (Amount.ofWord (swap1Out w.self dx.raw)) Error.TransferFailed >>=
-      fun _ =>
-    Tx.emit (.Swap1for0 ctx.sender dx
-      (Amount.ofWord (swap1Out w.self dx.raw))) >>= fun _ =>
-    (pure (Amount.ofWord (swap1Out w.self dx.raw)) :
-      Tx Storage ExtState Event Error (Amount asset0)))).trans ?_
   simp only [swap1Post, Amount.raw_add, Amount.raw_sub, Amount.raw_ofWord,
     Amount.ofWord_add_right, Amount.ofWord_sub_left, Amount.ofWord_raw,
     Amount.mk_raw]

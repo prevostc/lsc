@@ -156,66 +156,48 @@ def removeLiquidity (s : Amount lpShare) : M (Amount asset0 × Amount asset1) :=
   Tx.emit (.RemoveLiquidity who out0 out1 s)
   return (out0, out1)
 
-/-- Sell `amountIn` of token0. Output uses the 0.3%-fee notional; the protocol
-take never enters the curve. -/
-def swap0for1 (amountIn : Amount asset0) (minOut : Amount asset1) : M (Amount asset1) := do
+/-- Sell `amountIn` of `tokenIn` for `tokenOut`; reverts unless `out ≥ minOut`. -/
+@[lsc_inline] def swap {a b : Asset}
+    (rIn : Amount a) (rOut : Amount b)
+    (tokenIn : Ref (IERC20 a)) (tokenOut : Ref (IERC20 b))
+    (fees : Amount a)
+    (setRIn : Amount a → M Unit) (setROut : Amount b → M Unit)
+    (setFees : Amount a → M Unit)
+    (ev : Address → Amount a → Amount b → Event)
+    (amountIn : Amount a) (minOut : Amount b) : M (Amount b) := do
   Tx.require (0 < amountIn) .Zero
-  let r0 ← read reserve0
-  let r1 ← read reserve1
-  Tx.require (0 < r0) .Zero
-  Tx.require (0 < r1) .Zero
+  Tx.require (0 < rIn) .Zero
+  Tx.require (0 < rOut) .Zero
   let ft ← read feeTo
   let ps ← read protocolShareBps
   let coeff : Bps := if ft = 0 then 0 else ps
-  let (out, protoFee) ← swapOut r0 r1 amountIn coeff
+  let (out, protoFee) ← swapOut rIn rOut amountIn coeff
   Tx.require (minOut ≤ out) .InsufficientOutput
   Tx.require (0 < out) .ZeroOut
   let taken ← amountIn -? protoFee
-  let r0' ← r0 +? taken
-  write reserve0 r0'
-  let r1' ← r1 -? out
-  write reserve1 r1'
-  let acc ← read protocolFees0
-  let acc' ← acc +? protoFee
-  write protocolFees0 acc'
+  setRIn (← rIn +? taken)
+  setROut (← rOut -? out)
+  setFees (← fees +? protoFee)
   let who ← Tx.sender
   let me ← Tx.selfAddress
-  let t0 ← read token0
-  let t1 ← read token1
-  safeTransferFrom t0 who me amountIn .TransferFailed
-  safeTransfer t1 who out .TransferFailed
-  Tx.emit (.Swap0for1 who amountIn out)
+  safeTransferFrom tokenIn who me amountIn .TransferFailed
+  safeTransfer tokenOut who out .TransferFailed
+  Tx.emit (ev who amountIn out)
   return out
 
-/-- Sell `amountIn` of token1. Symmetric to `swap0for1`. -/
+/-- Swap `amountIn` of token0 for token1; reverts unless `out ≥ minOut`. -/
+def swap0for1 (amountIn : Amount asset0) (minOut : Amount asset1) : M (Amount asset1) := do
+  swap (← read reserve0) (← read reserve1) (← read token0) (← read token1)
+    (← read protocolFees0)
+    (fun v => write reserve0 v) (fun v => write reserve1 v)
+    (fun v => write protocolFees0 v) Event.Swap0for1 amountIn minOut
+
+/-- Swap `amountIn` of token1 for token0; reverts unless `out ≥ minOut`. -/
 def swap1for0 (amountIn : Amount asset1) (minOut : Amount asset0) : M (Amount asset0) := do
-  Tx.require (0 < amountIn) .Zero
-  let r0 ← read reserve0
-  let r1 ← read reserve1
-  Tx.require (0 < r0) .Zero
-  Tx.require (0 < r1) .Zero
-  let ft ← read feeTo
-  let ps ← read protocolShareBps
-  let coeff : Bps := if ft = 0 then 0 else ps
-  let (out, protoFee) ← swapOut r1 r0 amountIn coeff
-  Tx.require (minOut ≤ out) .InsufficientOutput
-  Tx.require (0 < out) .ZeroOut
-  let taken ← amountIn -? protoFee
-  let r1' ← r1 +? taken
-  write reserve1 r1'
-  let r0' ← r0 -? out
-  write reserve0 r0'
-  let acc ← read protocolFees1
-  let acc' ← acc +? protoFee
-  write protocolFees1 acc'
-  let who ← Tx.sender
-  let me ← Tx.selfAddress
-  let t1 ← read token1
-  let t0 ← read token0
-  safeTransferFrom t1 who me amountIn .TransferFailed
-  safeTransfer t0 who out .TransferFailed
-  Tx.emit (.Swap1for0 who amountIn out)
-  return out
+  swap (← read reserve1) (← read reserve0) (← read token1) (← read token0)
+    (← read protocolFees1)
+    (fun v => write reserve1 v) (fun v => write reserve0 v)
+    (fun v => write protocolFees1 v) Event.Swap1for0 amountIn minOut
 
 /-- Owner sets the protocol's share of the swap fee, in bps of that fee. -/
 def setProtocolShare (bps : Bps) : M Unit := do
