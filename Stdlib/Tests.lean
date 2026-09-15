@@ -137,8 +137,11 @@ def doAsUnchecked (x : Amount testToken) : M (Amount asset1) := do
 
 def shareAsset : Asset := ⟨`shareAsset, some 18⟩
 
-/-- Virtual offset used by the compile tests (`10^6` virtual shares). -/
+/-- Virtual offsets used by the compile tests. -/
+def offset0 : Shares.Offset := ⟨0⟩
+def offset3 : Shares.Offset := ⟨3⟩
 def offset : Shares.Offset := ⟨6⟩
+def offset18 : Shares.Offset := ⟨18⟩
 
 /-- Virtual-offset share mint. `Shares.toShares offset` must certify. -/
 def doToShares (assets totalAssets : Amount testToken)
@@ -148,6 +151,18 @@ def doToShares (assets totalAssets : Amount testToken)
 def doToAssets (shares : Amount shareAsset) (totalAssets : Amount testToken)
     (totalShares : Amount shareAsset) : M (Amount testToken) :=
   Shares.toAssets offset shares totalAssets totalShares
+
+def doVirt0 (ts : Amount shareAsset) : M (Amount shareAsset) :=
+  Amount.add ts (Shares.virtualShares offset0)
+
+def doVirt3 (ts : Amount shareAsset) : M (Amount shareAsset) :=
+  Amount.add ts (Shares.virtualShares offset3)
+
+def doVirt6 (ts : Amount shareAsset) : M (Amount shareAsset) :=
+  Amount.add ts (Shares.virtualShares offset)
+
+def doVirt18 (ts : Amount shareAsset) : M (Amount shareAsset) :=
+  Amount.add ts (Shares.virtualShares offset18)
 
 end StdlibTests
 
@@ -164,6 +179,8 @@ lsc_reify StdlibTests.doQuotePair StdlibTests.doQuoteTriple
 lsc_reify StdlibTests.doIteCoeff
 lsc_reify StdlibTests.doAs StdlibTests.doAsUnchecked
 lsc_reify StdlibTests.doToShares StdlibTests.doToAssets
+lsc_reify StdlibTests.doVirt0 StdlibTests.doVirt3 StdlibTests.doVirt6
+  StdlibTests.doVirt18
 
 #check StdlibTests.doCheckOk.core_denote
 #check StdlibTests.doSafeTransfer.core_denote
@@ -192,9 +209,17 @@ lsc_reify StdlibTests.doToShares StdlibTests.doToAssets
 #check StdlibTests.doAsUnchecked.core_denote
 #check StdlibTests.doToShares.core_denote
 #check StdlibTests.doToAssets.core_denote
+#check StdlibTests.doVirt0.core_denote
+#check StdlibTests.doVirt3.core_denote
+#check StdlibTests.doVirt6.core_denote
+#check StdlibTests.doVirt18.core_denote
 
 #guard (toString (repr StdlibTests.doToShares.core)).contains "1000000"
 #guard (toString (repr StdlibTests.doToAssets.core)).contains "1000000"
+#guard (toString (repr StdlibTests.doVirt0.core)).contains "1"
+#guard (toString (repr StdlibTests.doVirt3.core)).contains "1000"
+#guard (toString (repr StdlibTests.doVirt6.core)).contains "1000000"
+#guard (toString (repr StdlibTests.doVirt18.core)).contains "1000000000000000000"
 
 example : Nat.pow 10 18 = WAD.raw := rfl
 example : Nat.pow 10 27 = RAY.raw := rfl

@@ -501,20 +501,26 @@ def natLit? (e : Expr) : Option Nat :=
       | _ => none
     else none
 
+/-- Numeral or `OfNat.ofNat`. -/
+def natLitOrOfNat? (e : Expr) : Option Nat :=
+  let e := e.consumeMData
+  if let some n := natLit? e then some n
+  else if e.isAppOf ``OfNat.ofNat && e.getAppNumArgs ≥ 2 then
+    natLit? (e.getArg! 1).consumeMData
+  else none
+
 /-- Numeral, `OfNat`, or a one-field constructor projection (`Offset.mk 6`). -/
 def closedDigit? (e : Expr) : Option Nat :=
   let e := e.consumeMData
-  if let some n := natLit? e then some n
+  if let some n := natLitOrOfNat? e then some n
   else
     let inner : Expr → Option Nat := fun s =>
       let s := s.consumeMData
-      if let some n := natLit? s then some n
+      if let some n := natLitOrOfNat? s then some n
       else if s.isApp then
-        -- `Offset.mk (OfNat.ofNat … 6 …)`: last arg may be the instance;
-        -- try every argument.
         Id.run do
           for i in [:s.getAppNumArgs] do
-            if let some n := natLit? (s.getArg! i).consumeMData then
+            if let some n := natLitOrOfNat? (s.getArg! i) then
               return some n
           none
       else none
@@ -527,8 +533,17 @@ def closedDigit? (e : Expr) : Option Nat :=
     | _ =>
       if e.getAppNumArgs ≥ 1 then inner e else none
 
-/-- `Offset.mk 6`, named `offset`, or `offset.decimals` → `6`.
-Unfolds the named constant; never `reduce`s `Nat.pow`. -/
+/-- Exponent cap so `b ^ d` (in particular `10 ^ d`) fits in a word. -/
+def maxClosedPowExp : Nat := 77
+
+/-- `base ^ d * acc` by iteration (no kernel `Nat.pow`). -/
+def repeatMul (base d acc : Nat) : Nat :=
+  match d with
+  | 0 => acc
+  | d + 1 => repeatMul base d (acc * base)
+
+/-- Closed `Offset` / `Offset.mk d` / `o.decimals` → `d`. Unfold only; never
+`reduce` (`Nat.pow`). -/
 partial def closedOffsetDecimals? (e : Expr) (fuel : Nat) : MetaM (Option Nat) := do
   if fuel = 0 then return none
   let e := e.consumeMData
@@ -537,7 +552,10 @@ partial def closedOffsetDecimals? (e : Expr) (fuel : Nat) : MetaM (Option Nat) :
     match ← unfoldDefinition? e with
     | some e' => return (← closedOffsetDecimals? e' (fuel - 1))
     | none => return none
-  if let .proj _ 0 s := e then
+  if let .proj _ idx s := e then
+    let s := s.consumeMData
+    if idx < s.getAppNumArgs then
+      return (← closedOffsetDecimals? (s.getArg! idx) (fuel - 1))
     return (← closedOffsetDecimals? s (fuel - 1))
   if e.getAppFn.constName?.any (·.getString! == "decimals") && e.getAppNumArgs ≥ 1 then
     return (← closedOffsetDecimals? e.appArg! (fuel - 1))
@@ -547,51 +565,53 @@ partial def closedOffsetDecimals? (e : Expr) (fuel : Nat) : MetaM (Option Nat) :
     return (← closedOffsetDecimals? e' (fuel - 1))
   | none => return none
 
-/-- Evaluate a closed `Nat` (literals, `WAD`/`RAY`/`Flag.on`, `10 ^ 18`, …) to a number.
-Used so scale constants become `Atom.lit` and the certificate still closes by `rfl`. -/
+/-- Evaluate a closed `Nat` (literals, `WAD`/`RAY`/`Flag.on`, `10 ^ 18`,
+`Word.scale 6`, `Offset.virtual ⟨6⟩`, …) to a number. Powers are computed
+by iteration in MetaM; never kernel-reduce `Nat.pow`. Exponent `> 77` is
+rejected so the literal stays below `wordBound`. -/
 partial def closedNat? (e : Expr) (fuel : Nat := 8) : MetaM (Option Nat) := do
   if fuel = 0 then return none
   let e := e.consumeMData
-  if let some n := natLit? e then return some n
-  -- Do not run `closedDigit?` on the whole term: `Word.scale 18` contains the
-  -- digit `18` as an argument and would fold to `18` instead of `10^18`.
-  -- `Word.scale d` / `10 ^ d` / `Nat.pow 10 d`. Never `reduce` these: `Nat.pow`
-  -- unfolding hits `maxRecDepth`.
+  if let some n := natLitOrOfNat? e then return some n
+  -- Do not run `closedDigit?` on the whole term: `Word.scale 18` contains
+  -- the digit `18` as an argument and would fold to `18` instead of `10^18`.
   let pow10? (exp : Expr) : MetaM (Option Nat) := do
-    match closedDigit? exp with
-    | some d => return some (Nat.pow 10 d)
-    | none =>
-      match ← closedOffsetDecimals? exp (fuel - 1) with
-      | some d => return some (Nat.pow 10 d)
-      | none => return none
+    let d? := closedDigit? exp
+    let d? ← if d?.isSome then pure d? else closedOffsetDecimals? exp (fuel - 1)
+    let some d := d? | return none
+    if d > maxClosedPowExp then return none
+    return some (repeatMul 10 d 1)
   if e.isAppOf ``Lsc.Word.scale then
     return (← pow10? e.appArg!)
   if e.isAppOf ``Nat.pow && e.getAppNumArgs ≥ 2 then
-    match natLit? (e.getArg! 0).consumeMData, closedDigit? (e.getArg! 1) with
-    | some 10, some d => return some (Nat.pow 10 d)
-    | some b, some d => return some (Nat.pow b d)
-    | _, _ =>
-      match natLit? (e.getArg! 0).consumeMData,
-            ← closedOffsetDecimals? (e.getArg! 1) (fuel - 1) with
-      | some b, some d => return some (Nat.pow b d)
-      | _, _ => return none
+    match natLitOrOfNat? (e.getArg! 0), closedDigit? (e.getArg! 1) with
+    | some b, some d =>
+      if d > maxClosedPowExp then return none
+      return some (repeatMul b d 1)
+    | some b, none =>
+      match ← closedOffsetDecimals? (e.getArg! 1) (fuel - 1) with
+      | some d =>
+        if d > maxClosedPowExp then return none
+        return some (repeatMul b d 1)
+      | none => return none
+    | _, _ => return none
   if e.isAppOf ``HPow.hPow && e.getAppNumArgs ≥ 2 then
     let n := e.getAppNumArgs
-    match natLit? (e.getArg! (n - 2)).consumeMData, closedDigit? (e.getArg! (n - 1)) with
-    | some 10, some d => return some (Nat.pow 10 d)
-    | some b, some d => return some (Nat.pow b d)
-    | _, _ =>
-      match natLit? (e.getArg! (n - 2)).consumeMData,
-            ← closedOffsetDecimals? (e.getArg! (n - 1)) (fuel - 1) with
-      | some b, some d => return some (Nat.pow b d)
-      | _, _ => return none
-  -- `Offset.virtual o` / `virtualShares o` is `10^o.decimals`.
-  if let some n := e.getAppFn.constName? then
-    let s := n.getString!
-    if (s == "virtual" || s == "virtualShares") && e.getAppNumArgs ≥ 1 then
-      match ← closedOffsetDecimals? e.appArg! (fuel - 1) with
-      | some d => return some (Nat.pow 10 d)
-      | none => pure ()
+    match natLitOrOfNat? (e.getArg! (n - 2)), closedDigit? (e.getArg! (n - 1)) with
+    | some b, some d =>
+      if d > maxClosedPowExp then return none
+      return some (repeatMul b d 1)
+    | some b, none =>
+      match ← closedOffsetDecimals? (e.getArg! (n - 1)) (fuel - 1) with
+      | some d =>
+        if d > maxClosedPowExp then return none
+        return some (repeatMul b d 1)
+      | none => return none
+    | _, _ => return none
+  if e.isAppOf (`Lsc.Stdlib.Shares.Offset.virtual) && e.getAppNumArgs ≥ 1 then
+    return (← pow10? e.appArg!)
+  if e.isAppOf (`Lsc.Stdlib.Shares.virtualShares) && e.getAppNumArgs ≥ 1 then
+    return (← pow10? e.appArg!)
   -- Named numerals (`Flag.on`). Never `reduce` an application (`Nat.pow`).
   if e.isConst then
     try
@@ -599,8 +619,6 @@ partial def closedNat? (e : Expr) (fuel : Nat := 8) : MetaM (Option Nat) := do
       return natLit? e.consumeMData
     catch _ =>
       return none
-  -- One unfold for projections / `virtualShares`. Fuel-capped. Do not
-  -- `reduce`/`whnf` a `Nat.pow`.
   match ← unfoldDefinition? e with
   | some e' =>
     if e' == e then return none
@@ -625,8 +643,7 @@ partial def atomOf (env : Env t) (e : Expr) (fuel : Nat := 64) : MetaM Atom := d
     if e.getAppNumArgs ≥ 2 then
       return (← atomOf env (e.getArg! 1) (fuel - 1))
   -- Named `Amount` constants (`BPS`, `WAD`, `RAY`) unfold to `Amount.mk`.
-  -- `virtualShares offset` stays intact so `closedNat?` can fold it to a
-  -- numeral; unfolding yields a `match` that is not an atom.
+  -- `virtualShares o` stays intact so `closedNat?` can fold it.
   if e.isConst then
     let ty ← whnfD (← inferType e)
     if ty.isAppOf ``Lsc.Amount then
@@ -1415,6 +1432,9 @@ partial def reify (ci : ContractInfo) (t : RetTy) (env : Env t) (e : Expr)
             reify ci t env (← reduceTupleCont k val) inline?
           else if x.isAppOfArity ``ite 5 then
             -- `bind (if c then a else b) k` → Core.ite (`Tx.bind_ite`).
+            -- This duplicates `k` into both branches. A shared-continuation
+            -- form would need a new `Core` constructor (changes `Core.denote`
+            -- and `Lsc/Compiler/**`); see the 14c stop note.
             let c ← condOf env (x.getArg! 1)
             let mkBind (x' : Expr) :=
               mkAppN f #[args[0]!, args[1]!, args[2]!, args[3]!, x', k]
@@ -1507,14 +1527,6 @@ partial def reify (ci : ContractInfo) (t : RetTy) (env : Env t) (e : Expr)
 def isCertUnfold (env : Environment) (n : Name) : Bool :=
   Lsc.lscInlineAttr.hasTag env n || isRefMethod n
 
-/-- Named `Offset` / `virtualShares` / `offset` used by `fn` or its inlines.
-`simp only` must unfold these so `Word.scale offset.decimals` becomes the
-numeral `1000000` and `rfl` never reduces `Nat.pow` of a projection. -/
-def isCertNumeralName (n : Name) : Bool :=
-  let s := n.getString!
-  s == "offset" || s == "virtual" || s == "virtualShares" || s == "virtual6"
-    || s == "virtual6_eq"
-
 /-- `@[lsc_inline]` names and `I.Ref` methods reachable from `fn`. -/
 def inlinesUsedBy (fn : Name) : MetaM (Array Name) := do
   let env ← getEnv
@@ -1538,9 +1550,26 @@ def inlinesUsedBy (fn : Name) : MetaM (Array Name) := do
           work := work.push m
   return acc
 
-/-- Numeral defs (`offset`, `Offset.virtual`, …) reachable from `fn` / inlines. -/
-def numeralDefsUsedBy (fn : Name) : MetaM (Array Name) := do
+/-- `Word.scale` / `Offset.virtual` / `virtualShares` and closed `Offset`
+constants reachable from `fn`. Unfolded in the certificate so `Nat.reducePow`
+sees `10 ^ d` with a literal `d` (kernel `Nat.pow` hits `maxRecDepth`). -/
+def isScaleUnfoldName (n : Name) : Bool :=
+  n == `Lsc.Stdlib.Shares.Offset.virtual ||
+    n == `Lsc.Stdlib.Shares.virtualShares ||
+    n == `Lsc.Stdlib.Shares.virtual_eq_scale
+
+def isOffsetTy (ty : Expr) : Bool :=
+  ty.consumeMData.isConstOf (`Lsc.Stdlib.Shares.Offset)
+
+def isOffsetConst (n : Name) : MetaM Bool := do
   let env ← getEnv
+  let some info := env.find? n | return false
+  return isOffsetTy info.type
+
+/-- Closed `Offset` defs and scale wrappers used by `fn` / its inlines. -/
+def scaleConstsUsedBy (fn : Name) : MetaM (Array Name) := do
+  let env ← getEnv
+  unless env.contains (`Lsc.Stdlib.Shares.Offset) do return #[]
   let inls ← inlinesUsedBy fn
   let mut acc : Array Name := #[]
   let mut seen : NameSet := {}
@@ -1553,12 +1582,11 @@ def numeralDefsUsedBy (fn : Name) : MetaM (Array Name) := do
     for m in v.getUsedConstants do
       if seen.contains m then continue
       seen := seen.insert m
-      if isCertNumeralName m then
-        acc := acc.push m
+      let hit := isScaleUnfoldName m || (← isOffsetConst m)
+      if hit then acc := acc.push m
       if let some info := env.find? m then
-        if info.isDefinition then
-          if isCertNumeralName m then
-            work := work.push m
+        if info.isDefinition && hit then
+          work := work.push m
   return acc
 
 def bindArgs? (e : Expr) : Option (Expr × Expr) :=
@@ -1633,9 +1661,12 @@ def certifyDenote (fn : Name) (ci : ContractInfo) (lhs lhsRaw rhs coreE : Expr) 
     TermElabM Expr := do
   let eq ← mkEq lhs rhs
   let inlines ← inlinesUsedBy fn
+  let scales ← scaleConstsUsedBy fn
   -- `isDefEq` on a large non-matching `do` block (inlined helper mid-body)
   -- burns the heartbeat budget; skip it when inlines are present.
-  if inlines.isEmpty then
+  -- Skip it when a closed `10 ^ d` is present: reducible `isDefEq` unfolds
+  -- kernel `Nat.pow` and hits `maxRecDepth`.
+  if inlines.isEmpty && scales.isEmpty then
     -- Default `isDefEq` on a large mismatched `do` block burns heartbeats.
     -- Reducible equality is the fast path; otherwise fall through to simp.
     if ← withNewMCtxDepth (withReducible (isDefEq lhs rhs)) then
@@ -1812,11 +1843,12 @@ def certifyDenote (fn : Name) (ci : ContractInfo) (lhs lhsRaw rhs coreE : Expr) 
   idsAmount := idsAmount ++ schemaIds
   for n in inlines do
     idsAmount := idsAmount.push (mkIdent n)
-  let numerals ← numeralDefsUsedBy fn
-  for n in numerals do
+  for n in scales do
     idsAmount := idsAmount.push (mkIdent n)
-  if !numerals.isEmpty then
-    let scaleLemmas ← existingIdents #[``Lsc.Word.scale_six]
+  if !scales.isEmpty then
+    idsAmount := idsAmount.push (mkIdent ``Nat.reducePow)
+    let scaleLemmas ← existingIdents
+      #[``Lsc.Word.scale, ``Lsc.Word.scale_six, `Lsc.Stdlib.Shares.virtual_eq_scale]
     idsAmount := idsAmount ++ scaleLemmas
   -- `lhsRaw` inlines `f.core`. `simp` of `Core.denote` equation lemmas gives
   -- the `Tx` `>>=` spine without unfolding into ReaderT.

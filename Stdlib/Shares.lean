@@ -29,15 +29,10 @@ structure Offset where
 `*Raw` specs stay generic in `o.decimals`. -/
 def virtual6 : Word := 1000000
 
-/-- `10^o.decimals` as a word. The `6` branch is a numeral so reification
-certificates close by `rfl` without unfolding `Nat.pow`. -/
-def Offset.virtual (o : Offset) : Word :=
-  match o.decimals with
-  | 6 => 1000000
-  | d => Word.scale d
+/-- `10^o.decimals` as a word. Closed offsets fold at reify time. -/
+def Offset.virtual (o : Offset) : Word := 10 ^ o.decimals
 
-/-- `10^o.decimals` virtual shares. Folds to a literal when `o` is a closed
-numeral (`⟨6⟩` → `1000000`). -/
+/-- `10^o.decimals` virtual shares. -/
 def virtualShares {s : Asset} (o : Offset) : Amount s :=
   ⟨o.virtual⟩
 
@@ -74,11 +69,8 @@ def toAssets (o : Offset) (shares : Amount s) (totalAssets : Amount a)
 @[simp] theorem virtual6_scale : virtual6 = Word.scale 6 := rfl
 
 @[simp] theorem virtual_eq_scale (o : Offset) :
-    o.virtual = Word.scale o.decimals := by
-  dsimp [Offset.virtual]
-  split
-  · next h => rw [h]; rfl
-  · rfl
+    o.virtual = Word.scale o.decimals :=
+  rfl
 
 @[simp] theorem virtualShares_raw {s : Asset} (o : Offset) :
     (virtualShares (s := s) o).raw = Word.scale o.decimals := by
