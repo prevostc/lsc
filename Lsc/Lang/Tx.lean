@@ -195,52 +195,184 @@ def mulChecked (a b : Nat) : Tx S X E ε Nat :=
 def divChecked (a b : Nat) : Tx S X E ε Nat :=
   fun _ w => if b ≠ 0 then .ok (a / b, w) else .error (.arith .divByZero)
 
-/-! ### Checked arithmetic class (`Word`, `Amount a`, and `Fixed d` share `+? -? *? /?`) -/
+/-! ### Checked arithmetic class (`Word`, `Amount a`, and `Fixed d` share `+? -? *? /?`)
+
+Monad parameters live on the class so `Tx S X E ε α` operands share the
+result monad. Pure instances stay; left/right lifts bind left-to-right. -/
 
 /-- Checked add: same type on both sides, revert on overflow. -/
-class HAddChecked (α β : Type) (γ : outParam Type) where
-  hAdd {S X E ε : Type} : α → β → Tx S X E ε γ
+class HAddChecked (S X E ε : Type) (α β : Type) (γ : outParam Type) where
+  hAdd : α → β → Tx S X E ε γ
 
 /-- Checked subtract: same type on both sides, revert on underflow. -/
-class HSubChecked (α β : Type) (γ : outParam Type) where
-  hSub {S X E ε : Type} : α → β → Tx S X E ε γ
+class HSubChecked (S X E ε : Type) (α β : Type) (γ : outParam Type) where
+  hSub : α → β → Tx S X E ε γ
 
 /-- Checked multiply. `Amount a *? Word` scales; `Amount a *? Amount b` is not an instance. -/
-class HMulChecked (α β : Type) (γ : outParam Type) where
-  hMul {S X E ε : Type} : α → β → Tx S X E ε γ
+class HMulChecked (S X E ε : Type) (α β : Type) (γ : outParam Type) where
+  hMul : α → β → Tx S X E ε γ
 
 /-- Checked divide. `Amount a /? Word` scales; `Amount a /? Amount b` is not an instance. -/
-class HDivChecked (α β : Type) (γ : outParam Type) where
-  hDiv {S X E ε : Type} : α → β → Tx S X E ε γ
+class HDivChecked (S X E ε : Type) (α β : Type) (γ : outParam Type) where
+  hDiv : α → β → Tx S X E ε γ
 
-instance : HAddChecked Nat Nat Nat where
+instance : HAddChecked S X E ε Nat Nat Nat where
   hAdd := addChecked
-instance : HSubChecked Nat Nat Nat where
+instance : HSubChecked S X E ε Nat Nat Nat where
   hSub := subChecked
-instance : HMulChecked Nat Nat Nat where
+instance : HMulChecked S X E ε Nat Nat Nat where
   hMul := mulChecked
-instance : HDivChecked Nat Nat Nat where
+instance : HDivChecked S X E ε Nat Nat Nat where
   hDiv := divChecked
 
 /-- Fused checked `⌊a * b / c⌋`. One operation, not `*?` then `/?`.
 Instances: `Nat` (`Tx.mulDivDown`) and `Amount` (`Amount.mulDivDown`),
 plus `Amount b` with a `Word`/`Word` ratio (scale 0). -/
-class HMulDivDown (α β γ : Type) (δ : outParam Type) where
-  hMulDivDown {S X E ε : Type} : α → β → γ → Tx S X E ε δ
+class HMulDivDown (S X E ε : Type) (α β γ : Type) (δ : outParam Type) where
+  hMulDivDown : α → β → γ → Tx S X E ε δ
 
 /-- Fused checked `⌈a * b / c⌉`. -/
-class HMulDivUp (α β γ : Type) (δ : outParam Type) where
-  hMulDivUp {S X E ε : Type} : α → β → γ → Tx S X E ε δ
+class HMulDivUp (S X E ε : Type) (α β γ : Type) (δ : outParam Type) where
+  hMulDivUp : α → β → γ → Tx S X E ε δ
 
 /-- Scale by a dimensionless `Fixed d`: `⌊x * r / 10^d⌋`.
 `Amount a *?↓ Fixed d` (and `Fixed d *?↓ Fixed d'`) is an instance;
 `Amount a *?↓ Amount b` for a non-fixed `b` is not. -/
-class HMulFixedDown (α β : Type) (γ : outParam Type) where
-  hMulFixedDown {S X E ε : Type} : α → β → Tx S X E ε γ
+class HMulFixedDown (S X E ε : Type) (α β : Type) (γ : outParam Type) where
+  hMulFixedDown : α → β → Tx S X E ε γ
 
 /-- Scale by a dimensionless `Fixed d`: `⌈x * r / 10^d⌉`. -/
-class HMulFixedUp (α β : Type) (γ : outParam Type) where
-  hMulFixedUp {S X E ε : Type} : α → β → Tx S X E ε γ
+class HMulFixedUp (S X E ε : Type) (α β : Type) (γ : outParam Type) where
+  hMulFixedUp : α → β → Tx S X E ε γ
+
+/-! Lifted operands. Premises are the unlifted instance; they compose. -/
+
+instance (priority := high) [HAddChecked S X E ε α β γ] :
+    HAddChecked S X E ε (Tx S X E ε α) β γ where
+  hAdd ma b := ma >>= fun a => HAddChecked.hAdd a b
+instance (priority := high) [HAddChecked S X E ε α β γ] :
+    HAddChecked S X E ε α (Tx S X E ε β) γ where
+  hAdd a mb := mb >>= fun b => HAddChecked.hAdd a b
+
+instance (priority := high) [HSubChecked S X E ε α β γ] :
+    HSubChecked S X E ε (Tx S X E ε α) β γ where
+  hSub ma b := ma >>= fun a => HSubChecked.hSub a b
+instance (priority := high) [HSubChecked S X E ε α β γ] :
+    HSubChecked S X E ε α (Tx S X E ε β) γ where
+  hSub a mb := mb >>= fun b => HSubChecked.hSub a b
+
+instance (priority := high) [HMulChecked S X E ε α β γ] :
+    HMulChecked S X E ε (Tx S X E ε α) β γ where
+  hMul ma b := ma >>= fun a => HMulChecked.hMul a b
+instance (priority := high) [HMulChecked S X E ε α β γ] :
+    HMulChecked S X E ε α (Tx S X E ε β) γ where
+  hMul a mb := mb >>= fun b => HMulChecked.hMul a b
+
+instance (priority := high) [HDivChecked S X E ε α β γ] :
+    HDivChecked S X E ε (Tx S X E ε α) β γ where
+  hDiv ma b := ma >>= fun a => HDivChecked.hDiv a b
+instance (priority := high) [HDivChecked S X E ε α β γ] :
+    HDivChecked S X E ε α (Tx S X E ε β) γ where
+  hDiv a mb := mb >>= fun b => HDivChecked.hDiv a b
+
+instance (priority := high) [HMulDivDown S X E ε α β γ δ] :
+    HMulDivDown S X E ε (Tx S X E ε α) β γ δ where
+  hMulDivDown ma b c := ma >>= fun a => HMulDivDown.hMulDivDown a b c
+instance (priority := high) [HMulDivDown S X E ε α β γ δ] :
+    HMulDivDown S X E ε α (Tx S X E ε β) γ δ where
+  hMulDivDown a mb c := mb >>= fun b => HMulDivDown.hMulDivDown a b c
+instance (priority := high) [HMulDivDown S X E ε α β γ δ] :
+    HMulDivDown S X E ε α β (Tx S X E ε γ) δ where
+  hMulDivDown a b mc := mc >>= fun c => HMulDivDown.hMulDivDown a b c
+
+instance (priority := high) [HMulDivUp S X E ε α β γ δ] :
+    HMulDivUp S X E ε (Tx S X E ε α) β γ δ where
+  hMulDivUp ma b c := ma >>= fun a => HMulDivUp.hMulDivUp a b c
+instance (priority := high) [HMulDivUp S X E ε α β γ δ] :
+    HMulDivUp S X E ε α (Tx S X E ε β) γ δ where
+  hMulDivUp a mb c := mb >>= fun b => HMulDivUp.hMulDivUp a b c
+instance (priority := high) [HMulDivUp S X E ε α β γ δ] :
+    HMulDivUp S X E ε α β (Tx S X E ε γ) δ where
+  hMulDivUp a b mc := mc >>= fun c => HMulDivUp.hMulDivUp a b c
+
+instance (priority := high) [HMulFixedDown S X E ε α β γ] :
+    HMulFixedDown S X E ε (Tx S X E ε α) β γ where
+  hMulFixedDown ma b := ma >>= fun a => HMulFixedDown.hMulFixedDown a b
+instance (priority := high) [HMulFixedDown S X E ε α β γ] :
+    HMulFixedDown S X E ε α (Tx S X E ε β) γ where
+  hMulFixedDown a mb := mb >>= fun b => HMulFixedDown.hMulFixedDown a b
+
+instance (priority := high) [HMulFixedUp S X E ε α β γ] :
+    HMulFixedUp S X E ε (Tx S X E ε α) β γ where
+  hMulFixedUp ma b := ma >>= fun a => HMulFixedUp.hMulFixedUp a b
+instance (priority := high) [HMulFixedUp S X E ε α β γ] :
+    HMulFixedUp S X E ε α (Tx S X E ε β) γ where
+  hMulFixedUp a mb := mb >>= fun b => HMulFixedUp.hMulFixedUp a b
+
+@[simp] theorem hAdd_bind_left [HAddChecked S X E ε α β γ]
+    (ma : Tx S X E ε α) (b : β) :
+    HAddChecked.hAdd ma b = (ma >>= fun a => HAddChecked.hAdd a b) := rfl
+@[simp] theorem hAdd_bind_right [HAddChecked S X E ε α β γ]
+    (a : α) (mb : Tx S X E ε β) :
+    HAddChecked.hAdd a mb = (mb >>= fun b => HAddChecked.hAdd a b) := rfl
+@[simp] theorem hSub_bind_left [HSubChecked S X E ε α β γ]
+    (ma : Tx S X E ε α) (b : β) :
+    HSubChecked.hSub ma b = (ma >>= fun a => HSubChecked.hSub a b) := rfl
+@[simp] theorem hSub_bind_right [HSubChecked S X E ε α β γ]
+    (a : α) (mb : Tx S X E ε β) :
+    HSubChecked.hSub a mb = (mb >>= fun b => HSubChecked.hSub a b) := rfl
+@[simp] theorem hMul_bind_left [HMulChecked S X E ε α β γ]
+    (ma : Tx S X E ε α) (b : β) :
+    HMulChecked.hMul ma b = (ma >>= fun a => HMulChecked.hMul a b) := rfl
+@[simp] theorem hMul_bind_right [HMulChecked S X E ε α β γ]
+    (a : α) (mb : Tx S X E ε β) :
+    HMulChecked.hMul a mb = (mb >>= fun b => HMulChecked.hMul a b) := rfl
+@[simp] theorem hDiv_bind_left [HDivChecked S X E ε α β γ]
+    (ma : Tx S X E ε α) (b : β) :
+    HDivChecked.hDiv ma b = (ma >>= fun a => HDivChecked.hDiv a b) := rfl
+@[simp] theorem hDiv_bind_right [HDivChecked S X E ε α β γ]
+    (a : α) (mb : Tx S X E ε β) :
+    HDivChecked.hDiv a mb = (mb >>= fun b => HDivChecked.hDiv a b) := rfl
+@[simp] theorem hMulDivDown_bind_left [HMulDivDown S X E ε α β γ δ]
+    (ma : Tx S X E ε α) (b : β) (c : γ) :
+    HMulDivDown.hMulDivDown ma b c =
+      (ma >>= fun a => HMulDivDown.hMulDivDown a b c) := rfl
+@[simp] theorem hMulDivDown_bind_mid [HMulDivDown S X E ε α β γ δ]
+    (a : α) (mb : Tx S X E ε β) (c : γ) :
+    HMulDivDown.hMulDivDown a mb c =
+      (mb >>= fun b => HMulDivDown.hMulDivDown a b c) := rfl
+@[simp] theorem hMulDivDown_bind_right [HMulDivDown S X E ε α β γ δ]
+    (a : α) (b : β) (mc : Tx S X E ε γ) :
+    HMulDivDown.hMulDivDown a b mc =
+      (mc >>= fun c => HMulDivDown.hMulDivDown a b c) := rfl
+@[simp] theorem hMulDivUp_bind_left [HMulDivUp S X E ε α β γ δ]
+    (ma : Tx S X E ε α) (b : β) (c : γ) :
+    HMulDivUp.hMulDivUp ma b c =
+      (ma >>= fun a => HMulDivUp.hMulDivUp a b c) := rfl
+@[simp] theorem hMulDivUp_bind_mid [HMulDivUp S X E ε α β γ δ]
+    (a : α) (mb : Tx S X E ε β) (c : γ) :
+    HMulDivUp.hMulDivUp a mb c =
+      (mb >>= fun b => HMulDivUp.hMulDivUp a b c) := rfl
+@[simp] theorem hMulDivUp_bind_right [HMulDivUp S X E ε α β γ δ]
+    (a : α) (b : β) (mc : Tx S X E ε γ) :
+    HMulDivUp.hMulDivUp a b mc =
+      (mc >>= fun c => HMulDivUp.hMulDivUp a b c) := rfl
+@[simp] theorem hMulFixedDown_bind_left [HMulFixedDown S X E ε α β γ]
+    (ma : Tx S X E ε α) (b : β) :
+    HMulFixedDown.hMulFixedDown ma b =
+      (ma >>= fun a => HMulFixedDown.hMulFixedDown a b) := rfl
+@[simp] theorem hMulFixedDown_bind_right [HMulFixedDown S X E ε α β γ]
+    (a : α) (mb : Tx S X E ε β) :
+    HMulFixedDown.hMulFixedDown a mb =
+      (mb >>= fun b => HMulFixedDown.hMulFixedDown a b) := rfl
+@[simp] theorem hMulFixedUp_bind_left [HMulFixedUp S X E ε α β γ]
+    (ma : Tx S X E ε α) (b : β) :
+    HMulFixedUp.hMulFixedUp ma b =
+      (ma >>= fun a => HMulFixedUp.hMulFixedUp a b) := rfl
+@[simp] theorem hMulFixedUp_bind_right [HMulFixedUp S X E ε α β γ]
+    (a : α) (mb : Tx S X E ε β) :
+    HMulFixedUp.hMulFixedUp a mb =
+      (mb >>= fun b => HMulFixedUp.hMulFixedUp a b) := rfl
 
 /-! ### Wrapping arithmetic (pure, exactly the EVM) -/
 
@@ -273,7 +405,7 @@ syntax; their elaborators live in `Lsc.Lang.Interface` so they can wrap
 
 * `read f`, `read f[k]`, `read f[k₁, k₂]` — storage reads
 * `write f v`, `write f[k] v`, `write f[k₁, k₂] v` — storage writes
-* `a +? b`, `a -? b`, `a *? b`, `a /? b` — checked arithmetic (monadic, bind with `←`)
+* `a +? b`, `a -? b`, `a *? b`, `a /? b` — checked arithmetic (operands may be `Tx`)
 * `a mulDiv↓ b / c`, `a mulDiv↑ b / c` — fused checked mulDiv (one op, not `*?` then `/?`)
 * `a *?↓ r`, `a *?↑ r` — scale an amount by a `Fixed d` (`⌊a * r / 10^d⌋` / ceil)
 * `a +↻ b`, `a -↻ b`, `a *↻ b` — wrapping arithmetic (pure)

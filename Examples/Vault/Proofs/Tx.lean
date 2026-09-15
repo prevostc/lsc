@@ -557,7 +557,7 @@ private theorem deposit_head (assets : Amount vaultAsset)
     run_sender_bind, run_self_bind]
   refine (run_read_asset _).trans ?_
   rw [run_balanceOf_bind]
-  simp only [run_load_bind]
+  simp only [run_load_bind, Tx.bind_assoc]
 
 private theorem deposit_head_some (assets : Amount vaultAsset)
     {ta : Amount vaultAsset}
@@ -642,7 +642,7 @@ private theorem withdraw_head (sharesIn : Amount vShare)
     run_sender_bind, run_loadMap_bind, run_req_true hbal, run_self_bind]
   refine (run_read_asset _).trans ?_
   rw [run_balanceOf_bind]
-  simp only [run_load_bind]
+  simp only [run_load_bind, Tx.bind_assoc]
 
 private theorem withdraw_head_some (sharesIn : Amount vShare)
     {ta : Amount vaultAsset}

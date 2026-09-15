@@ -869,7 +869,6 @@ def roundingOf (e : Expr) : MetaM Rounding := do
 def isDeltaStop : Name → Bool
   | ``Lsc.Tx.addChecked | ``Lsc.Tx.subChecked | ``Lsc.Tx.mulChecked | ``Lsc.Tx.divChecked
   | ``Lsc.Tx.mulDivDown | ``Lsc.Tx.mulDivUp | ``Lsc.Tx.pow10
-  | ``Lsc.Tx.HMulDivDown.hMulDivDown | ``Lsc.Tx.HMulDivUp.hMulDivUp
   | ``Lsc.Tx.call | ``Lsc.Tx.view | ``Lsc.Tx.callAsNat | ``Lsc.Tx.viewAsNat
   | ``Lsc.Tx.tryCall | ``Lsc.Tx.tryView
   | ``Lsc.Tx.load | ``Lsc.Tx.loadMap | ``Lsc.Tx.loadMap2
@@ -880,9 +879,7 @@ def isDeltaStop : Name → Bool
   | ``Bind.bind | ``Pure.pure | ``CoeTail.coe | ``ite
   | ``Lsc.Amount.add | ``Lsc.Amount.sub
   | ``Lsc.Amount.mulScalar | ``Lsc.Amount.divScalar
-  | ``Lsc.Amount.mulDivDown | ``Lsc.Amount.mulDivUp
-  | ``Lsc.Tx.HAddChecked.hAdd | ``Lsc.Tx.HSubChecked.hSub
-  | ``Lsc.Tx.HMulChecked.hMul | ``Lsc.Tx.HDivChecked.hDiv =>
+  | ``Lsc.Amount.mulDivDown | ``Lsc.Amount.mulDivUp =>
     true
   | _ => false
 
@@ -1887,6 +1884,24 @@ def certifyDenote (fn : Name) (ci : ContractInfo) (lhs lhsRaw rhs coreE : Expr) 
     mkIdent ``Lsc.Tx.HMulDivUp.hMulDivUp,
     mkIdent ``Lsc.Tx.HMulFixedDown.hMulFixedDown,
     mkIdent ``Lsc.Tx.HMulFixedUp.hMulFixedUp,
+    mkIdent ``Lsc.Tx.hAdd_bind_left,
+    mkIdent ``Lsc.Tx.hAdd_bind_right,
+    mkIdent ``Lsc.Tx.hSub_bind_left,
+    mkIdent ``Lsc.Tx.hSub_bind_right,
+    mkIdent ``Lsc.Tx.hMul_bind_left,
+    mkIdent ``Lsc.Tx.hMul_bind_right,
+    mkIdent ``Lsc.Tx.hDiv_bind_left,
+    mkIdent ``Lsc.Tx.hDiv_bind_right,
+    mkIdent ``Lsc.Tx.hMulDivDown_bind_left,
+    mkIdent ``Lsc.Tx.hMulDivDown_bind_mid,
+    mkIdent ``Lsc.Tx.hMulDivDown_bind_right,
+    mkIdent ``Lsc.Tx.hMulDivUp_bind_left,
+    mkIdent ``Lsc.Tx.hMulDivUp_bind_mid,
+    mkIdent ``Lsc.Tx.hMulDivUp_bind_right,
+    mkIdent ``Lsc.Tx.hMulFixedDown_bind_left,
+    mkIdent ``Lsc.Tx.hMulFixedDown_bind_right,
+    mkIdent ``Lsc.Tx.hMulFixedUp_bind_left,
+    mkIdent ``Lsc.Tx.hMulFixedUp_bind_right,
     mkIdent ``Lsc.Amount.raw,
     mkIdent ``Lsc.Prim.eval_id,
     mkIdent ``Lsc.RetExpr.eval_word,

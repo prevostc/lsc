@@ -36,12 +36,17 @@ CONTRACT_PATTERNS=(
   '[a-z]U([^A-Za-z0-9]|$)'
   'mulDivDown'
   'mulDivUp'
+  '\(←[[:space:]]*\(←'
 )
 
 scan_contract() {
   local file="$1"
+  local skip_nested="${2:-}"
   local pat hits
   for pat in "${CONTRACT_PATTERNS[@]}"; do
+    if [ -n "$skip_nested" ] && [[ "$pat" == *'←'* ]]; then
+      continue
+    fi
     if command -v rg >/dev/null 2>&1; then
       hits="$(rg -n --pcre2 "$pat" "$file" || true)"
     else
@@ -83,7 +88,12 @@ check_root() {
     fi
     shopt -s nullglob
     for f in Examples/*/Contract.lean; do
-      scan_contract "$f" || status=1
+      # Cpamm still uses nested `←` until its own sweep.
+      if [ "$f" = "Examples/Cpamm/Contract.lean" ]; then
+        scan_contract "$f" skip_nested || status=1
+      else
+        scan_contract "$f" || status=1
+      fi
     done
     for f in Examples/*/Theorems.lean; do
       scan_theorems "$f" || status=1
@@ -106,7 +116,7 @@ self_test() {
   cat > "$tmp/good/Examples/Token/Contract.lean" << 'EOF'
 /-- A tiny token. -/
 def transfer (to : Address) (amount : Amount tokenAsset) : M Bool := do
-  write balances[to] (← (← read balances[to]) +? amount)
+  write balances[to] (read balances[to] +? amount)
   return true
 
 lsc_contract Token transfer

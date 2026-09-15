@@ -2,6 +2,13 @@
 
 Short dated records.
 
+## 2026-09-15 — fallible ops and `write` accept `M` (17b)
+
+`+? -? *? /?`, `mulDiv↓`/`mulDiv↑`, and `*?↓`/`*?↑` take `Tx` on either
+operand via the existing checked classes (monad params on the class; not
+ordinary `HAdd`). `write` tries the field type, then `M`. Owner rejected
+`+=?`: `read`/`write` stay explicit. Nested `←` is linted out.
+
 ## 2026-09-15 — `[Payable]` / `[Reentrant]` instance binders (17a)
 
 Empty `Prop` marker classes; no user instances. `lsc_contract` reads

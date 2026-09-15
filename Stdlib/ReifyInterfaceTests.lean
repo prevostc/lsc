@@ -37,7 +37,7 @@ abbrev M := Tx Storage ExtState Event Error
 def pull (n : Amount toyAsset) : M Unit := do
   let tok ← read token
   safeTransferFrom tok (← Tx.sender) (← Tx.selfAddress) n .TransferFailed
-  write owner (← Tx.sender)
+  write owner Tx.sender
 
 def held : M (Amount toyAsset) := do
   let tok ← read token
@@ -67,7 +67,7 @@ inductive Error
 abbrev M := Tx Storage ExtState Event Error
 
 def pull (_n : Amount otherAsset) : M Unit := do
-  write owner (← Tx.sender)
+  write owner Tx.sender
 
 def held : M (Amount toyAsset) := do
   let tok ← read token

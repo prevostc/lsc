@@ -6,7 +6,11 @@ are macros over storage. Control flow is Lean `do` / `let` / `if`. A
 plain value in an `if` branch or as a `do` result is lifted into `Tx`
 (no `pure`).
 
-Checked arithmetic (revert on overflow, underflow, or division by zero):
+Checked arithmetic (revert on overflow, underflow, or division by zero).
+Either operand may be `M` (`Tx`); `write` also accepts an `M` value, so
+`write balances[who] (read balances[who] -? amount)` needs no nested `←`.
+`let x ← …` and `Tx.require` stay as they are. (`+=?` was rejected:
+`read`/`write` stay explicit.)
 
 | Surface | Meaning |
 |---|---|
@@ -29,7 +33,7 @@ structure Storage where
 
 def increment : M Unit := do
   let c ← read count
-  write count (← c +? 1)
+  write count (c +? 1)
   Tx.emit (.Incremented 1)
 ```
 
@@ -55,9 +59,9 @@ def transfer (to : Address) (amount : Amount tokenAsset) : M Bool := do
   let src ← Tx.sender
   let b ← read balances[src]
   Tx.require (amount ≤ b) .InsufficientBalance
-  write balances[src] (← b -? amount)
+  write balances[src] (b -? amount)
   let r ← read balances[to]
-  write balances[to] (← r +? amount)
+  write balances[to] (r +? amount)
   Tx.emit (.Transfer src to amount)
   return true
 ```

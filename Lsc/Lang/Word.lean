@@ -97,9 +97,9 @@ def rescale (srcDec tgtDec : Nat) (r : Rounding) (a : Nat) : Tx S X E ε Nat :=
     | .down => mulDivDown a tgt src
     | .up => mulDivUp a tgt src
 
-instance : Lsc.Tx.HMulDivDown Nat Nat Nat Nat where
+instance : Lsc.Tx.HMulDivDown S X E ε Nat Nat Nat Nat where
   hMulDivDown := mulDivDown
-instance : Lsc.Tx.HMulDivUp Nat Nat Nat Nat where
+instance : Lsc.Tx.HMulDivUp S X E ε Nat Nat Nat Nat where
   hMulDivUp := mulDivUp
 
 end Tx

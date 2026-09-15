@@ -383,6 +383,25 @@ where
     let p := projOf f
     `($p $k₁ $k₂)
 
+/-- Elaborate `v` as the field type `α`, otherwise as `Tx S X E ε α`.
+The surrounding `write`'s `Tx` expected type supplies `S X E ε` so nested
+`read`s inside `v` can see the storage. -/
+def writeArg (α : Expr) (v : Term) (expectedType? : Option Expr)
+    (mkPure mkTx : Term → TermElabM Term) : TermElabM Term := do
+  let αStx ← delab α
+  let saved ← saveState
+  let asPure ← observing? (withoutErrToSorry (elabTermEnsuringType v α))
+  saved.restore
+  if asPure.isSome then
+    mkPure (← `(($v : $αStx)))
+  else
+    match ← txStorage? expectedType? with
+    | some S =>
+      let SStx ← delab S
+      mkTx (← `(($v : Lsc.Tx $SStx _ _ _ $αStx)))
+    | none =>
+      mkTx (← `(($v : Lsc.Tx _ _ _ _ $αStx)))
+
 @[term_elab lscWrite]
 def elabWrite : TermElab := fun stx expectedType? => do
   tryPostponeIfNoneOrMVar expectedType?
@@ -391,7 +410,7 @@ def elabWrite : TermElab := fun stx expectedType? => do
     let n ← fieldKeyCount f expectedType?
     unless n == 0 do throwError "write: `{f.getId}` needs keys"
     let α ← fieldValTy f expectedType?
-    elabTerm (← storeScalar f α v) expectedType?
+    elabTerm (← storeScalar f α v expectedType?) expectedType?
   | `(write $f:ident [ $ks:term,* ] $v) => do
     let keys := ks.getElems
     let n ← fieldKeyCount f expectedType?
@@ -399,42 +418,80 @@ def elabWrite : TermElab := fun stx expectedType? => do
       throwError "write: `{f.getId}` expects {n} key(s)"
     let α ← fieldValTy f expectedType?
     match keys.toList with
-    | [k] => elabTerm (← storeMap1 f α k v) expectedType?
-    | [k₁, k₂] => elabTerm (← storeMap2 f α k₁ k₂ v) expectedType?
+    | [k] => elabTerm (← storeMap1 f α k v expectedType?) expectedType?
+    | [k₁, k₂] => elabTerm (← storeMap2 f α k₁ k₂ v expectedType?) expectedType?
     | _ => throwError "write: mappings have one or two keys"
   | _ => throwUnsupportedSyntax
 
 where
-  storeScalar (f : Ident) (α : Expr) (v : Term) : TermElabM Term := do
+  storeScalar (f : Ident) (α : Expr) (v : Term) (expectedType? : Option Expr) :
+      TermElabM Term := do
     let α ← whnfD α
     let σ := sigma
     if isAmount α then
-      let tyStx ← delab α
-      `(Lsc.Tx.store (fun $σ m => { $σ with $f:ident := Lsc.Amount.ofWord m })
-          (Lsc.Amount.raw ($v : $tyStx)))
+      writeArg α v expectedType?
+        (fun v =>
+          `(Lsc.Tx.store (fun $σ m => { $σ with $f:ident := Lsc.Amount.ofWord m })
+              (Lsc.Amount.raw $v)))
+        (fun m =>
+          `(($m) >>= fun x =>
+            Lsc.Tx.store (fun $σ y => { $σ with $f:ident := Lsc.Amount.ofWord y })
+              (Lsc.Amount.raw x)))
     else if isRef α then
-      let tyStx ← delab α
-      `(Lsc.Tx.store (fun $σ m => { $σ with $f:ident := { addr := m } })
-          (($v : $tyStx).addr))
+      writeArg α v expectedType?
+        (fun v =>
+          `(Lsc.Tx.store (fun $σ m => { $σ with $f:ident := { addr := m } })
+              ($v).addr))
+        (fun m =>
+          `(($m) >>= fun x =>
+            Lsc.Tx.store (fun $σ y => { $σ with $f:ident := { addr := y } })
+              x.addr))
     else
-      `(Lsc.Tx.store (fun $σ m => { $σ with $f:ident := m }) $v)
-  storeMap1 (f : Ident) (α : Expr) (k v : Term) : TermElabM Term := do
+      writeArg α v expectedType?
+        (fun v => `(Lsc.Tx.store (fun $σ m => { $σ with $f:ident := m }) $v))
+        (fun m =>
+          `(($m) >>= fun x =>
+            Lsc.Tx.store (fun $σ y => { $σ with $f:ident := y }) x))
+  storeMap1 (f : Ident) (α : Expr) (k v : Term) (expectedType? : Option Expr) :
+      TermElabM Term := do
     let α ← whnfD α
     let σ := sigma
     let p := projOf f
     let kk := mkIdent `k
     let mm := mkIdent `m
     if isAmount α then
-      `(Lsc.Tx.storeMap (fun $σ $kk => Lsc.Amount.raw ($p $kk))
-          (fun $σ $mm => { $σ with $f:ident := fun $kk => Lsc.Amount.ofWord ($mm $kk) })
-          $k (Lsc.Amount.raw $v))
+      writeArg α v expectedType?
+        (fun v =>
+          `(Lsc.Tx.storeMap (fun $σ $kk => Lsc.Amount.raw ($p $kk))
+              (fun $σ $mm => { $σ with $f:ident := fun $kk => Lsc.Amount.ofWord ($mm $kk) })
+              $k (Lsc.Amount.raw $v)))
+        (fun m =>
+          `(($m) >>= fun x =>
+            Lsc.Tx.storeMap (fun $σ $kk => Lsc.Amount.raw ($p $kk))
+              (fun $σ $mm => { $σ with $f:ident := fun $kk => Lsc.Amount.ofWord ($mm $kk) })
+              $k (Lsc.Amount.raw x)))
     else if isRef α then
-      `(Lsc.Tx.storeMap (fun $σ $kk => ($p $kk).addr)
-          (fun $σ $mm => { $σ with $f:ident := fun $kk => { addr := $mm $kk } })
-          $k ($v).addr)
+      writeArg α v expectedType?
+        (fun v =>
+          `(Lsc.Tx.storeMap (fun $σ $kk => ($p $kk).addr)
+              (fun $σ $mm => { $σ with $f:ident := fun $kk => { addr := $mm $kk } })
+              $k ($v).addr))
+        (fun m =>
+          `(($m) >>= fun x =>
+            Lsc.Tx.storeMap (fun $σ $kk => ($p $kk).addr)
+              (fun $σ $mm => { $σ with $f:ident := fun $kk => { addr := $mm $kk } })
+              $k x.addr))
     else
-      `(Lsc.Tx.storeMap (fun $σ => $p) (fun $σ $mm => { $σ with $f:ident := $mm }) $k $v)
-  storeMap2 (f : Ident) (α : Expr) (k₁ k₂ v : Term) : TermElabM Term := do
+      writeArg α v expectedType?
+        (fun v =>
+          `(Lsc.Tx.storeMap (fun $σ => $p) (fun $σ $mm => { $σ with $f:ident := $mm })
+              $k $v))
+        (fun m =>
+          `(($m) >>= fun x =>
+            Lsc.Tx.storeMap (fun $σ => $p) (fun $σ $mm => { $σ with $f:ident := $mm })
+              $k x))
+  storeMap2 (f : Ident) (α : Expr) (k₁ k₂ v : Term) (expectedType? : Option Expr) :
+      TermElabM Term := do
     let α ← whnfD α
     let σ := sigma
     let p := projOf f
@@ -442,16 +499,36 @@ where
     let b := mkIdent `k₂
     let mm := mkIdent `m
     if isAmount α then
-      `(Lsc.Tx.storeMap2 (fun $σ $a $b => Lsc.Amount.raw ($p $a $b))
-          (fun $σ $mm => { $σ with $f:ident := fun $a $b => Lsc.Amount.ofWord ($mm $a $b) })
-          $k₁ $k₂ (Lsc.Amount.raw $v))
+      writeArg α v expectedType?
+        (fun v =>
+          `(Lsc.Tx.storeMap2 (fun $σ $a $b => Lsc.Amount.raw ($p $a $b))
+              (fun $σ $mm => { $σ with $f:ident := fun $a $b => Lsc.Amount.ofWord ($mm $a $b) })
+              $k₁ $k₂ (Lsc.Amount.raw $v)))
+        (fun m =>
+          `(($m) >>= fun x =>
+            Lsc.Tx.storeMap2 (fun $σ $a $b => Lsc.Amount.raw ($p $a $b))
+              (fun $σ $mm => { $σ with $f:ident := fun $a $b => Lsc.Amount.ofWord ($mm $a $b) })
+              $k₁ $k₂ (Lsc.Amount.raw x)))
     else if isRef α then
-      `(Lsc.Tx.storeMap2 (fun $σ $a $b => ($p $a $b).addr)
-          (fun $σ $mm => { $σ with $f:ident := fun $a $b => { addr := $mm $a $b } })
-          $k₁ $k₂ ($v).addr)
+      writeArg α v expectedType?
+        (fun v =>
+          `(Lsc.Tx.storeMap2 (fun $σ $a $b => ($p $a $b).addr)
+              (fun $σ $mm => { $σ with $f:ident := fun $a $b => { addr := $mm $a $b } })
+              $k₁ $k₂ ($v).addr))
+        (fun m =>
+          `(($m) >>= fun x =>
+            Lsc.Tx.storeMap2 (fun $σ $a $b => ($p $a $b).addr)
+              (fun $σ $mm => { $σ with $f:ident := fun $a $b => { addr := $mm $a $b } })
+              $k₁ $k₂ x.addr))
     else
-      `(Lsc.Tx.storeMap2 (fun $σ => $p) (fun $σ $mm => { $σ with $f:ident := $mm })
-          $k₁ $k₂ $v)
+      writeArg α v expectedType?
+        (fun v =>
+          `(Lsc.Tx.storeMap2 (fun $σ => $p) (fun $σ $mm => { $σ with $f:ident := $mm })
+              $k₁ $k₂ $v))
+        (fun m =>
+          `(($m) >>= fun x =>
+            Lsc.Tx.storeMap2 (fun $σ => $p) (fun $σ $mm => { $σ with $f:ident := $mm })
+              $k₁ $k₂ x))
 
 end Syntax
 

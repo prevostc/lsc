@@ -6,7 +6,9 @@ Exactly:
   developer, ≤8 lines); `Asset` constants; `Storage`, `Event`, `Error`; the
   user-facing functions, each with a one-line docstring; the single
   `lsc_contract` line. `[Payable]` / `[Reentrant]` / `[Reentrant.Unsafe]`
-  instance binders may sit on a user-facing function. FORBIDDEN: `theorem`, `lemma`, `example`,
+  instance binders may sit on a user-facing function. `write` accepts `M`;
+  fallible ops (`+? -? *?`, `mulDiv↓`/`mulDiv↑`) accept `M` on either side.
+  Nested `←` (`(← (←`) is forbidden. FORBIDDEN: `theorem`, `lemma`, `example`,
   `instance`,
   `@[simp]`, `#guard`, `#eval`, `#check`, `#guard_msgs`, any
   `.core`/`core_denote`/`Core.*`/`Spec.exec` mention, `Amount.ofWord`/`.raw`/

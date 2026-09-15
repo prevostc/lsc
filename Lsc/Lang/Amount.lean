@@ -260,28 +260,28 @@ def mulFixedDown {d : Nat} (x : Amount a) (r : Fixed d) : Tx S X E ε (Amount a)
 def mulFixedUp {d : Nat} (x : Amount a) (r : Fixed d) : Tx S X E ε (Amount a) :=
   mulDivUp x r (ofWord (Word.scale d))
 
-instance : Tx.HAddChecked (Amount a) (Amount a) (Amount a) where
+instance : Tx.HAddChecked S X E ε (Amount a) (Amount a) (Amount a) where
   hAdd := add
-instance : Tx.HSubChecked (Amount a) (Amount a) (Amount a) where
+instance : Tx.HSubChecked S X E ε (Amount a) (Amount a) (Amount a) where
   hSub := sub
-instance : Tx.HMulChecked (Amount a) Word (Amount a) where
+instance : Tx.HMulChecked S X E ε (Amount a) Word (Amount a) where
   hMul := mulScalar
-instance : Tx.HDivChecked (Amount a) Word (Amount a) where
+instance : Tx.HDivChecked S X E ε (Amount a) Word (Amount a) where
   hDiv := divScalar
-instance : Tx.HMulDivDown (Amount b) (Amount a) (Amount a) (Amount b) where
+instance : Tx.HMulDivDown S X E ε (Amount b) (Amount a) (Amount a) (Amount b) where
   hMulDivDown := mulDivDown
-instance : Tx.HMulDivUp (Amount b) (Amount a) (Amount a) (Amount b) where
+instance : Tx.HMulDivUp S X E ε (Amount b) (Amount a) (Amount a) (Amount b) where
   hMulDivUp := mulDivUp
 /-- Scale-0 ratio: `num mulDiv↓ 9970 / 10000` with plain `Word`s. -/
-instance (priority := 2000) : Tx.HMulDivDown (Amount b) Word Word (Amount b) where
+instance (priority := 2000) : Tx.HMulDivDown S X E ε (Amount b) Word Word (Amount b) where
   hMulDivDown num x y :=
     mulDivDown (a := Asset.fixed 0) num (ofWord x) (ofWord y)
-instance (priority := 2000) : Tx.HMulDivUp (Amount b) Word Word (Amount b) where
+instance (priority := 2000) : Tx.HMulDivUp S X E ε (Amount b) Word Word (Amount b) where
   hMulDivUp num x y :=
     mulDivUp (a := Asset.fixed 0) num (ofWord x) (ofWord y)
-instance {d : Nat} : Tx.HMulFixedDown (Amount a) (Fixed d) (Amount a) where
+instance {d : Nat} : Tx.HMulFixedDown S X E ε (Amount a) (Fixed d) (Amount a) where
   hMulFixedDown := mulFixedDown
-instance {d : Nat} : Tx.HMulFixedUp (Amount a) (Fixed d) (Amount a) where
+instance {d : Nat} : Tx.HMulFixedUp S X E ε (Amount a) (Fixed d) (Amount a) where
   hMulFixedUp := mulFixedUp
 
 variable {S X E ε : Type}
