@@ -12,7 +12,9 @@ amount back to `Word`). Same-asset `+? -?`; `*? /?` only against a `Word`
 scalar; `mulDivDown` / `Up` take a numerator of asset `b` and a ratio of
 two `a`s, or two `Word`s (scale 0). The fused ops are written
 `num mulDiv↓ x / y` and `num mulDiv↑ x / y`. `x *?↓ r` / `x *?↑ r`
-scale by a `Fixed d`. `x.as b` is the 1:1 retag.
+scale by a `Fixed d`. `x.as b` is the 1:1 retag when `a.decimals?` equals
+`b.decimals?` at elaboration; `x.asUnchecked b` is the same retag without
+that check.
 
 `Fixed d` is dimensionless fixed-point with static decimals.
 -/
@@ -37,6 +39,16 @@ structure Amount (a : Asset) where
 
 /-- Dimensionless fixed-point number at `d` decimals. -/
 abbrev Fixed (d : Nat) : Type := Amount (Asset.fixed d)
+
+/-- Elaboration tactic for `Amount.as`: `decide` the decimals equality, or a
+readable error telling the author to use `asUnchecked`. -/
+syntax "same_decimals" : tactic
+
+macro_rules
+  | `(tactic| same_decimals) =>
+    `(tactic| first
+        | decide
+        | fail "Amount.as: decimals? must be equal (use asUnchecked)")
 
 namespace Amount
 
@@ -72,8 +84,17 @@ instance : Mul (Amount a) where
 /-- Tag a raw word as an amount. Boundary use only. -/
 def ofWord (n : Word) : Amount a := ⟨n⟩
 
-/-- 1:1 retag: same raw word, new asset. The only explicit unit conversion. -/
-def as (x : Amount a) (b : Asset) : Amount b := ⟨x.raw⟩
+/-- 1:1 retag: same raw word, new asset. Requires `a.decimals? = b.decimals?`
+at elaboration (`none` matches only `none`; `some 6` does not match
+`some 18`). This is the only explicit same-scale unit conversion. -/
+def as (x : Amount a) (b : Asset)
+    (_h : a.decimals? = b.decimals? := by same_decimals) : Amount b :=
+  ⟨x.raw⟩
+
+/-- 1:1 retag with no decimals check. For genuine cross-scale relabellings
+(an AMM's first LP mint, whose share unit has no single underlying
+decimals). The caller must justify the conversion in its docstring. -/
+def asUnchecked (x : Amount a) (b : Asset) : Amount b := ⟨x.raw⟩
 
 /-- Total `⌊x * y / z⌋` on raw words (Lean: `n / 0 = 0`). -/
 def floorMulDiv (x y z : Nat) : Nat := x * y / z
@@ -90,10 +111,19 @@ def mulDown {d : Nat} (x : Amount a) (r : Fixed d) : Amount a :=
 def mulUp {d : Nat} (x : Amount a) (r : Fixed d) : Amount a :=
   ⟨ceilMulDiv x.raw r.raw (Word.scale d)⟩
 
-@[simp] theorem raw_as (x : Amount a) (b : Asset) : (x.as b).raw = x.raw := rfl
-@[simp] theorem as_eq_ofWord (x : Amount a) (b : Asset) : x.as b = ofWord x.raw := rfl
-@[simp] theorem as_ofWord (n : Word) (b : Asset) :
-    (ofWord n : Amount a).as b = ofWord n := rfl
+@[simp] theorem raw_as (x : Amount a) (b : Asset)
+    (h : a.decimals? = b.decimals?) : (as x b h).raw = x.raw := rfl
+@[simp] theorem as_eq_ofWord (x : Amount a) (b : Asset)
+    (h : a.decimals? = b.decimals?) : as x b h = ofWord x.raw := rfl
+@[simp] theorem as_ofWord (n : Word) (b : Asset)
+    (h : a.decimals? = b.decimals?) :
+    as (ofWord n : Amount a) b h = ofWord n := rfl
+@[simp] theorem raw_asUnchecked (x : Amount a) (b : Asset) :
+    (x.asUnchecked b).raw = x.raw := rfl
+@[simp] theorem asUnchecked_eq_ofWord (x : Amount a) (b : Asset) :
+    x.asUnchecked b = ofWord x.raw := rfl
+@[simp] theorem asUnchecked_ofWord (n : Word) (b : Asset) :
+    (ofWord n : Amount a).asUnchecked b = ofWord n := rfl
 @[simp] theorem mulDown_raw {d : Nat} (x : Amount a) (r : Fixed d) :
     (mulDown x r).raw = x.raw * r.raw / Word.scale d := rfl
 @[simp] theorem mulUp_raw {d : Nat} (x : Amount a) (r : Fixed d) :

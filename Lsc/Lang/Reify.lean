@@ -501,51 +501,116 @@ def natLit? (e : Expr) : Option Nat :=
       | _ => none
     else none
 
+/-- Numeral, `OfNat`, or a one-field constructor projection (`Offset.mk 6`). -/
+def closedDigit? (e : Expr) : Option Nat :=
+  let e := e.consumeMData
+  if let some n := natLit? e then some n
+  else
+    let inner : Expr → Option Nat := fun s =>
+      let s := s.consumeMData
+      if let some n := natLit? s then some n
+      else if s.isApp then
+        -- `Offset.mk (OfNat.ofNat … 6 …)`: last arg may be the instance;
+        -- try every argument.
+        Id.run do
+          for i in [:s.getAppNumArgs] do
+            if let some n := natLit? (s.getArg! i).consumeMData then
+              return some n
+          none
+      else none
+    match e with
+    | .proj _ idx s =>
+      let s := s.consumeMData
+      if idx < s.getAppNumArgs then
+        inner (s.getArg! idx)
+      else inner s
+    | _ =>
+      if e.getAppNumArgs ≥ 1 then inner e else none
+
 /-- Evaluate a closed `Nat` (literals, `WAD`/`RAY`/`Flag.on`, `10 ^ 18`, …) to a number.
 Used so scale constants become `Atom.lit` and the certificate still closes by `rfl`. -/
-def closedNat? (e : Expr) : MetaM (Option Nat) := do
+partial def closedNat? (e : Expr) (fuel : Nat := 8) : MetaM (Option Nat) := do
+  if fuel = 0 then return none
   let e := e.consumeMData
   if let some n := natLit? e then return some n
-  try
-    let e ← reduce (skipTypes := true) e
-    return natLit? e.consumeMData
-  catch _ =>
+  -- `Word.scale d` / `10 ^ d` / `Nat.pow 10 d`. Never `reduce` these: `Nat.pow`
+  -- unfolding hits `maxRecDepth`.
+  let pow10? (exp : Expr) : Option Nat :=
+    match closedDigit? exp with
+    | some d => some (Nat.pow 10 d)
+    | none => none
+  if e.isAppOf ``Lsc.Word.scale then
+    return pow10? e.appArg!
+  if e.isAppOf ``Nat.pow && e.getAppNumArgs ≥ 2 then
+    match natLit? (e.getArg! 0).consumeMData, closedDigit? (e.getArg! 1) with
+    | some 10, some d => return some (Nat.pow 10 d)
+    | some b, some d => return some (Nat.pow b d)
+    | _, _ => return none
+  if e.isAppOf ``HPow.hPow && e.getAppNumArgs ≥ 2 then
+    let n := e.getAppNumArgs
+    match natLit? (e.getArg! (n - 2)).consumeMData, closedDigit? (e.getArg! (n - 1)) with
+    | some 10, some d => return some (Nat.pow 10 d)
+    | some b, some d => return some (Nat.pow b d)
+    | _, _ => return none
+  -- Named numerals (`Flag.on`). Never `reduce` an application (`Nat.pow`).
+  if e.isConst then
+    try
+      let e ← reduce (skipTypes := true) e
+      return natLit? e.consumeMData
+    catch _ =>
+      return none
+  -- `Offset.virtual o` is `10^o.decimals`. Read the structure field; compute
+  -- the power in MetaM (kernel `whnf` of `Nat.pow` hits `maxRecDepth`).
+  if e.getAppFn.constName?.any (·.getString! == "virtual") && e.getAppNumArgs ≥ 1 then
+    match closedDigit? e.appArg! with
+    | some d => return some (Nat.pow 10 d)
+    | none => pure ()
+  -- One unfold for projections. Fuel-capped. Do not `reduce`/`whnf`.
+  match ← unfoldDefinition? e with
+  | some e' =>
+    if e' == e then return none
+    if let some n := natLit? e'.consumeMData then return some n
+    closedNat? e' (fuel - 1)
+  | none =>
     return none
 
-partial def atomOf (env : Env t) (e : Expr) : MetaM Atom := do
+partial def atomOf (env : Env t) (e : Expr) (fuel : Nat := 64) : MetaM Atom := do
+  if fuel = 0 then
+    throwError "reify: atomOf fuel exhausted on `{e}`"
   let e := e.consumeMData
   -- Amount / Ref / ABI boundary: Core stores the underlying word.
   if e.isAppOf ``Lsc.Amount.raw || e.isAppOf ``Lsc.Amount.ofWord
       || e.isAppOf ``Lsc.Amount.mk
       || e.isAppOf ``Lsc.Address.toWord
       || e.isAppOf ``Lsc.AbiType.encode then
-    return (← atomOf env e.appArg!)
-  if e.isAppOf ``Lsc.Amount.as then
-    let n := e.getAppNumArgs
-    if n ≥ 2 then
-      return (← atomOf env (e.getArg! (n - 2)))
+    return (← atomOf env e.appArg! (fuel - 1))
+  if e.isAppOf ``Lsc.Amount.as || e.isAppOf ``Lsc.Amount.asUnchecked then
+    -- `as` has an auto-param proof; `asUnchecked` does not. The `Amount`
+    -- argument is always the first explicit argument (index 1 after `{a}`).
+    if e.getAppNumArgs ≥ 2 then
+      return (← atomOf env (e.getArg! 1) (fuel - 1))
   -- Named `Amount` constants (`BPS`, `WAD`, `RAY`) unfold to `Amount.mk`.
   if e.isConst then
     let ty ← whnfD (← inferType e)
     if ty.isAppOf ``Lsc.Amount then
       if let some e' ← unfoldDefinition? e then
-        return (← atomOf env e')
+        return (← atomOf env e' (fuel - 1))
   if e.isConstOf ``Bool.true then return .lit 1
   if e.isConstOf ``Bool.false then return .lit 0
   if let some n := e.getAppFn.constName? then
     if n.getString! == "addr" && e.getAppNumArgs ≥ 1 then
       let recv := e.getArg! (e.getAppNumArgs - 1)
       if ← isRefTy (← inferType recv) then
-        return (← atomOf env recv)
+        return (← atomOf env recv (fuel - 1))
     if n.getString! == "mk" && e.getAppNumArgs ≥ 1 then
       let last := e.getArg! (e.getAppNumArgs - 1)
       -- `I.Ref.mk addr` / `{ addr := n }`
       if ← isRefTy (← inferType e) then
-        return (← atomOf env last)
+        return (← atomOf env last (fuel - 1))
   if let .proj _ 0 s := e then
     let ty ← whnfD (← inferType s)
     if ty.isAppOf ``Lsc.Amount || (← isRefTy ty) then
-      return (← atomOf env s)
+      return (← atomOf env s (fuel - 1))
   if let some n ← closedNat? e then return .lit n
   if let .fvar id := e then
     match env.vars.idxOf? id with
@@ -1637,8 +1702,11 @@ def certifyDenote (fn : Name) (ci : ContractInfo) (lhs lhsRaw rhs coreE : Expr) 
     mkIdent ``Lsc.Amount.hMulFixedDown_def,
     mkIdent ``Lsc.Amount.hMulFixedUp_def,
     mkIdent ``Lsc.Amount.as,
+    mkIdent ``Lsc.Amount.asUnchecked,
     mkIdent ``Lsc.Amount.as_eq_ofWord,
+    mkIdent ``Lsc.Amount.asUnchecked_eq_ofWord,
     mkIdent ``Lsc.Amount.raw_as,
+    mkIdent ``Lsc.Amount.raw_asUnchecked,
     mkIdent ``Lsc.Amount.eq_iff,
     mkIdent ``Lsc.Amount.ne_iff,
     mkIdent ``Lsc.Amount.lt_iff,
@@ -1744,10 +1812,12 @@ def certifyDenote (fn : Name) (ci : ContractInfo) (lhs lhsRaw rhs coreE : Expr) 
       Lsc.Amount.mulDivDown_bind_ofWord, Lsc.Amount.mulDivUp_bind_ofWord,
       Lsc.Amount.require_lt_ofWord, Lsc.Amount.require_pos, Lsc.Amount.require_le_ofWord,
       Lsc.Amount.require_eq_zero_ofWord, Lsc.Amount.ite_eq_zero_ofWord,
-      Lsc.Amount.as_eq_ofWord, Lsc.Amount.raw_as,
+      Lsc.Amount.as_eq_ofWord, Lsc.Amount.asUnchecked_eq_ofWord,
+      Lsc.Amount.raw_as, Lsc.Amount.raw_asUnchecked,
       Lsc.Amount.raw_ofNat, Lsc.Amount.raw_one, Lsc.Amount.raw_zero,
       Lsc.Amount.raw_ofWord, Lsc.Amount.as_eq_ofWord, Lsc.Amount.raw_as,
-      Lsc.Amount.as, Lsc.Amount.hMulFixedDown_def, Lsc.Amount.hMulFixedUp_def,
+      Lsc.Amount.as, Lsc.Amount.asUnchecked,
+      Lsc.Amount.hMulFixedDown_def, Lsc.Amount.hMulFixedUp_def,
       Lsc.Amount.hMulDivDown_word, Lsc.Amount.hMulDivUp_word,
       Lsc.Tx.bind_assoc, Lsc.Tx.bind_assoc_pure, Lsc.Tx.discard_bind_pure,
       Lsc.Tx.pure_bind, Lsc.Tx.bind_pure, Lsc.Tx.mulDivDown_ite,

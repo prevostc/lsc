@@ -2,13 +2,16 @@ import Mathlib.Algebra.BigOperators.Group.Finset.Basic
 import Lsc.Security.Wealth
 import Examples.Vault.Contract
 import Stdlib.ERC20
+import Stdlib.Shares
 
 /-!
-Vault spec: `claim` is floor-rounded redeemable assets against the vault's
-live token balance (`holdings`); `Auth` is the victim's own `withdraw`.
-`Inv` is finite share-support. Between our transactions, `vaultRely` lets
-`ext` change arbitrarily except that the vault's token balance does not fall
-and the token's `totalSupply` view stays the same — that is `ClaimMonoEnv`.
+Vault spec: `claim` is the virtual-offset redeemable assets against the
+vault's live token balance (`holdings`); `Auth` is the victim's own
+`withdraw`. `Inv` is finite share-support plus
+`totalShares ≤ holdings · 10^offset`. Between our transactions, `vaultRely`
+lets `ext` change arbitrarily except that the vault's token balance does
+not fall and the token's `totalSupply` view stays the same — that is
+`ClaimMonoEnv`.
 -/
 
 open Lsc Lsc.Stdlib Lsc.Security Vault
@@ -21,12 +24,12 @@ abbrev AssetImpl := IERC20.Impl vaultAsset (WorldView ExtState)
 def holdings (self : Address) (w : World Storage ExtState Event) : Nat :=
   (w.self.asset.impl.balanceOf self w.view).raw
 
-/-- Redeemable assets of `a`. Zero when the supply is empty. Pro-rata of the
-live token balance at this world. -/
+/-- Redeemable assets of `a`:
+`⌊shares[a] · (holdings + 1) / (totalShares + 10^offset)⌋`. -/
 def claim (self : Address) : Claim Storage ExtState Event :=
   fun a w =>
-    if w.self.totalShares = 0 then 0
-    else (w.self.shares a).raw * holdings self w / w.self.totalShares.raw
+    Shares.toAssetsRaw offset (w.self.shares a).raw (holdings self w)
+      w.self.totalShares.raw
 
 /-- Only a `withdraw` by `a` itself may decrease `claim a`. -/
 def Auth : AuthPred spec :=
@@ -49,9 +52,12 @@ def InvStorage (σ : Storage) : Prop :=
     (∀ a, a ∉ H → σ.shares a = 0) ∧
     H.sum (fun a => (σ.shares a).raw) = σ.totalShares.raw
 
-/-- Share balances have finite support summing to `totalShares`. -/
-def Inv (w : World Storage ExtState Event) : Prop :=
-  InvStorage w.self
+/-- Share balances have finite support summing to `totalShares`, and
+`totalShares ≤ holdings · 10^offset` so offset claims stay covered by
+holdings. -/
+def Inv (self : Address) (w : World Storage ExtState Event) : Prop :=
+  InvStorage w.self ∧
+    w.self.totalShares.raw ≤ holdings self w * Word.scale offset.decimals
 
 /-- `balanceOf` / `totalSupply` selectors of the vault asset (IERC20 ABI). -/
 def balSel : Nat := Interface.selector (I := IERC20 vaultAsset) "balanceOf"

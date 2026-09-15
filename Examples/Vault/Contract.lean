@@ -2,14 +2,16 @@ import Lsc.Lang.Word
 import Lsc.Lang.Reify
 import Stdlib.ERC20
 import Stdlib.SafeERC20
+import Stdlib.Shares
 
 /-!
 # Vault — single-asset ERC-4626-style vault
 
 Binds one underlying ERC-20, mints shares on deposit and burns on withdraw.
-The first mint is 1:1; later mints and redeems round down. Pause is
-owner-only. External calls run after storage writes; reentrancy is not
-modelled.
+Share conversion uses a virtual offset of `10^6` shares and 1 virtual asset
+so a donation inflation attack costs on the order of `10^6` wei per wei
+stolen. Pause is owner-only. External calls run after storage writes;
+reentrancy is not modelled.
 -/
 
 open Lsc Lsc.Syntax Lsc.Stdlib
@@ -20,6 +22,9 @@ namespace Vault
 def vaultAsset : Asset := ⟨`vaultAsset, none⟩
 /-- Vault share unit. Static 18 decimals. -/
 def vShare : Asset := ⟨`vShare, some 18⟩
+
+/-- Virtual offset: `10^6` virtual shares and 1 virtual asset. -/
+def offset : Shares.Offset := ⟨6⟩
 
 structure Storage where
   asset : Ref (IERC20 vaultAsset)
@@ -55,8 +60,8 @@ def constructor (owner tok : Address) : M Unit := do
   write asset { addr := tok }
   write paused Flag.off
 
-/-- Deposit `assets` and mint floor-pro-rata shares against the live token
-balance (1:1 if empty). -/
+/-- Deposit `assets` and mint floor shares against the live token balance,
+using the virtual-offset conversion. -/
 def deposit (assets : Amount vaultAsset) : M (Amount vShare) := do
   let p ← read paused
   Tx.require (p = Flag.off) .Paused
@@ -66,20 +71,23 @@ def deposit (assets : Amount vaultAsset) : M (Amount vShare) := do
   let tok ← read asset
   let ta ← tok.balanceOf me
   let ts ← read totalShares
-  let minted ←
-    if ts = 0 then
-      assets.as vShare
-    else
-      ts mulDiv↓ assets / ta
+  -- `Shares.toShares offset`; expanded so `lsc_contract` certifies.
+  let vs : Amount vShare := ⟨1000000⟩
+  let tsV ← ts +? vs
+  let ta' ← ta +? (1 : Amount vaultAsset)
+  let minted ← tsV mulDiv↓ assets / ta'
   Tx.require (0 < minted) .ZeroShares
-  write totalShares (← ts +? minted)
+  let ts' ← ts +? minted
+  write totalShares ts'
   let bal ← read shares[who]
-  write shares[who] (← bal +? minted)
+  let bal' ← bal +? minted
+  write shares[who] bal'
   safeTransferFrom tok who me assets .TransferFailed
   Tx.emit (.Deposit who assets minted)
   return minted
 
-/-- Burn `sharesIn` and pay the floor-pro-rata of the live token balance. -/
+/-- Burn `sharesIn` and pay the floor virtual-offset conversion of the live
+token balance. -/
 def withdraw (sharesIn : Amount vShare) : M (Amount vaultAsset) := do
   let p ← read paused
   Tx.require (p = Flag.off) .Paused
@@ -91,10 +99,15 @@ def withdraw (sharesIn : Amount vShare) : M (Amount vaultAsset) := do
   let tok ← read asset
   let ta ← tok.balanceOf me
   let ts ← read totalShares
-  let assetsOut ← ta mulDiv↓ sharesIn / ts
+  let vs : Amount vShare := ⟨1000000⟩
+  let ta' ← ta +? (1 : Amount vaultAsset)
+  let tsV ← ts +? vs
+  let assetsOut ← ta' mulDiv↓ sharesIn / tsV
   Tx.require (0 < assetsOut) .ZeroAssets
-  write shares[who] (← bal -? sharesIn)
-  write totalShares (← ts -? sharesIn)
+  let bal' ← bal -? sharesIn
+  write shares[who] bal'
+  let ts' ← ts -? sharesIn
+  write totalShares ts'
   safeTransfer tok who assetsOut .TransferFailed
   Tx.emit (.Withdraw who assetsOut sharesIn)
   return assetsOut
@@ -105,10 +118,10 @@ def previewDeposit (assets : Amount vaultAsset) : M (Amount vShare) := do
   let tok ← read asset
   let ta ← tok.balanceOf me
   let ts ← read totalShares
-  if ts = 0 then
-    assets.as vShare
-  else
-    ts mulDiv↓ assets / ta
+  let vs : Amount vShare := ⟨1000000⟩
+  let tsV ← ts +? vs
+  let ta' ← ta +? (1 : Amount vaultAsset)
+  tsV mulDiv↓ assets / ta'
 
 /-- Assets `withdraw` would return. -/
 def previewRedeem (sharesIn : Amount vShare) : M (Amount vaultAsset) := do
@@ -116,7 +129,10 @@ def previewRedeem (sharesIn : Amount vShare) : M (Amount vaultAsset) := do
   let tok ← read asset
   let ta ← tok.balanceOf me
   let ts ← read totalShares
-  ta mulDiv↓ sharesIn / ts
+  let vs : Amount vShare := ⟨1000000⟩
+  let ta' ← ta +? (1 : Amount vaultAsset)
+  let tsV ← ts +? vs
+  ta' mulDiv↓ sharesIn / tsV
 
 /-- Owner-only: set the pause flag. -/
 def pause : M Unit := do

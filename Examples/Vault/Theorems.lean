@@ -73,7 +73,7 @@ theorem vault_solvent (self : Address) (tr : List (Step spec))
     (hW : Wf self tr)
     (hR : RelyAlong (vaultRely self w.self.asset w.oracle) tr w)
     (hT : IERC20.Spec (w.self.asset.impl : AssetImpl))
-    (h : Inv w) :
+    (h : Inv self w) :
     Solvent (claim self) holdings self (run tr w) :=
   Proof.vault_solvent self tr w hW hR hT h
 
@@ -87,11 +87,26 @@ ERC-20 per `IERC20.Spec`; no reentrancy is modelled. This is not liveness —
 pause can block withdrawal without reducing the recorded claim. -/
 theorem vault_no_unauthorized_extraction (self : Address)
     (tr : List (Step spec)) (w : World Storage ExtState Event) (a : Address)
-    (hw : Inv w) (hW : Wf self tr)
+    (hw : Inv self w) (hW : Wf self tr)
     (hR : RelyAlong (vaultRely self w.self.asset w.oracle) tr w)
     (hT : IERC20.Spec (w.self.asset.impl : AssetImpl))
     (hA : NoAuthAlong Auth a tr w) :
     claim self a w ≤ claim self a (run tr w) :=
   Proof.vault_no_unauthorized_extraction self tr w a hw hW hR hT hA
+
+/-- After a successful `deposit` of `x` assets against live holdings `A` and
+share supply `S`, redeeming the minted shares recovers all but at most
+`(A + 10^offset) / 10^offset` wei: an inflation donation of size `A` costs
+on the order of `10^offset` wei per wei the depositor cannot redeem. -/
+theorem deposit_inflation_bounded (assets : Amount vaultAsset)
+    {minted : Amount vShare} {w' : World Storage ExtState Event}
+    (h : Tx.run (deposit assets) ctx w = .ok (minted, w')) :
+    let V := Word.scale offset.decimals
+    let A := holdings ctx.self w
+    let S := w.self.totalShares.raw
+    let x := assets.raw
+    let r := Shares.toAssetsRaw offset minted.raw (A + x) (S + minted.raw)
+    V * (x - r) ≤ A + V :=
+  Proof.deposit_inflation_bounded h
 
 end Vault

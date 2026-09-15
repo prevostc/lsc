@@ -116,22 +116,35 @@ theorem removeLiquidity_paid (s : Amount lpShare)
       p.2.raw = w.self.reserve1.raw * s.raw / w.self.totalShares.raw :=
   Proof.removeLiquidity_paid h
 
-/-- A successful `addLiquidity` credits the caller and `totalShares` by the
-minted shares. -/
+/-- A successful `addLiquidity` credits the caller with the minted shares
+(plus the first-mint lock if the caller is address 0) and raises
+`totalShares` by the minted shares plus any `MINIMUM_LIQUIDITY` lock. -/
 theorem addLiquidity_pro_rata (a0 : Amount asset0) (a1 : Amount asset1)
     {n : Amount lpShare} {w' : World Storage ExtState Event}
     (h : Tx.run (addLiquidity a0 a1) ctx w = .ok (n, w')) :
-    w'.self.shares ctx.sender = w.self.shares ctx.sender + n ∧
-      w'.self.totalShares = w.self.totalShares + n :=
+    w'.self.shares ctx.sender =
+      sharesAfterDead w.self ctx.sender + n ∧
+      w'.self.totalShares =
+        w.self.totalShares + n + Amount.ofWord (deadShares w.self) :=
   Proof.addLiquidity_pro_rata h
 
 /-- Shares minted by a successful `addLiquidity` are the floor-min of the
-two reserve ratios, or `a0` on the first mint. -/
+two reserve ratios, or `a0 − 1000` on the first mint. -/
 theorem addLiquidity_minted (a0 : Amount asset0) (a1 : Amount asset1)
     {n : Amount lpShare} {w' : World Storage ExtState Event}
     (h : Tx.run (addLiquidity a0 a1) ctx w = .ok (n, w')) :
     n = Amount.ofWord (mintedShares w.self a0.raw a1.raw) :=
   Proof.addLiquidity_minted h
+
+/-- A successful first mint leaves at least `MINIMUM_LIQUIDITY` shares
+outstanding. On that mint those 1000 shares are locked at address 0.
+Later mints only increase `totalShares`; a pool that never locked 1000
+is not lifted to 1000 by a subsequent mint. -/
+theorem addLiquidity_min_liquidity (a0 : Amount asset0) (a1 : Amount asset1)
+    {n : Amount lpShare} {w' : World Storage ExtState Event}
+    (h : Tx.run (addLiquidity a0 a1) ctx w = .ok (n, w')) :
+    w.self.totalShares.raw = 0 → 1000 ≤ w'.self.totalShares.raw :=
+  Proof.addLiquidity_min_liquidity h
 
 end Tx
 

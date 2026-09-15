@@ -13,7 +13,10 @@ Amounts are indexed by the asset they denominate (`Amount asset0`,
 `Amount lpShare`). The constructor requires the two tokens to differ and
 stores the ref addresses.
 
-The first LP mint is `a0` (no square root, no loop). Later mints are
+The first LP mint relabels `a0` as LP shares (`asUnchecked`: two-asset
+pools have no single decimals; Uniswap-v2 convention) and burns
+`MINIMUM_LIQUIDITY = 1000` shares to address 0; it reverts
+`.InsufficientLiquidity` if `a0 ≤ 1000`. Later mints are
 `min(⌊a0·S/r0⌋, ⌊a1·S/r1⌋)`. Both swap directions share `swapOut`: output
 uses the 0.3%-fee notional `⌊dx · 9970 / 10000⌋` on the curve, then
 `require (protoFee ≤ fee)`. When `feeTo ≠ 0`, a protocol share of that
@@ -45,9 +48,13 @@ buckets is covered by live holdings (`cpamm_solvent`).
 Unauthorised extraction (spec): an address's **share count** never falls
 unless that address called `removeLiquidity` (`cpamm_no_unauthorized_extraction`).
 Swaps and adding liquidity do not decrease another LP's share count.
+Address 0's locked 1000 shares count as a claim (`Claim.ofSelf`); only a
+`removeLiquidity` signed by address 0 could burn them.
 Successful swaps do not decrease `reserve0 · reserve1` (`swap0for1_k`,
 `swap1for0_k`). `swapOut` reverts if the protocol take would exceed the
 0.3% fee, so the input reserve grows by at least the fee-less notional.
+A successful first mint leaves at least 1000 shares outstanding
+(`addLiquidity_min_liquidity`); a later mint only increases `totalShares`.
 
 Assumed, not proved in the Cpamm file: both tokens are distinct conforming
 ERC-20s per `IERC20.Spec`; a CALL on one does not change the other's

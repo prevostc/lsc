@@ -1,16 +1,18 @@
 # Vault
 
 Single-asset vault: binds one typed ERC-20, mints shares on `deposit`, burns
-on `withdraw`. Pause flag. First mint is 1:1; later mints/redeems floor.
-The exchange rate is the live token balance (`holdings`); there is no
-cached `totalAssets`. Token pull/push after storage writes. Donations raise
-everyone's claim pro-rata; first-depositor inflation is not prevented by
-this contract.
+on `withdraw`. Pause flag. Share conversion uses OpenZeppelin-style virtual
+offset (`10^6` virtual shares and 1 virtual asset) against the live token
+balance (`holdings`); there is no cached `totalAssets`. Token pull/push after
+storage writes. Donations raise everyone's claim pro-rata; a donation of
+size `A` costs on the order of `10^6` wei per wei a later depositor cannot
+redeem (`deposit_inflation_bounded`: `10^offset · (x − r) ≤ A + 10^offset`).
 
 **Proved:** a successful deposit credits shares and raises live holdings (when
 the caller is not the vault). A successful withdraw burns shares and lowers
 holdings. An address's redeemable assets never fall unless that address
 called `withdraw`. The vault stays solvent vs its live token balance.
+Inflation of the share rate is bounded as above.
 Assumed of the token: it is a conforming ERC-20 per `IERC20.Spec`; no
 reentrancy is modelled. Between calls the vault's token balance does not
 fall and the token's `totalSupply` view stays the same.

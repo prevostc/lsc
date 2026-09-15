@@ -1,6 +1,8 @@
 import Stdlib.ERC20
 import Stdlib.SafeERC20
 import Stdlib.Scales
+import Stdlib.Shares
+import Stdlib.SharesTheorems
 
 /-!
 # Stdlib — user-importable features above the language

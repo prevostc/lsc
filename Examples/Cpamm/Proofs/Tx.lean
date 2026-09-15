@@ -34,23 +34,51 @@ abbrev trCall {a : Asset} (r : IERC20.Ref a) (dst : Address)
     (amt : Amount a) : Tx Storage ExtState Event Error Bool :=
   r.transfer dst amt
 
-/-- Shares `addLiquidity` mints from `σ` (the floor-min; first mint is `a0`). -/
+/-- Shares `addLiquidity` mints from `σ`. First mint is `a0 - 1000`
+(Uniswap-v2 `MINIMUM_LIQUIDITY`); later mint is the floor-min. -/
 def mintedShares (σ : Storage) (a0 a1 : Nat) : Nat :=
-  if σ.totalShares.raw = 0 then a0
+  if σ.totalShares.raw = 0 then a0 - 1000
   else if σ.totalShares.raw * a0 / σ.reserve0.raw ≤
       σ.totalShares.raw * a1 / σ.reserve1.raw then
     σ.totalShares.raw * a0 / σ.reserve0.raw
   else
     σ.totalShares.raw * a1 / σ.reserve1.raw
 
+/-- Locked LP shares burned to address 0 on the first mint. -/
+def deadShares (σ : Storage) : Nat :=
+  if σ.totalShares.raw = 0 then 1000 else 0
+
+@[simp] theorem deadShares_zero {σ : Storage} (h : σ.totalShares.raw = 0) :
+    deadShares σ = 1000 := by simp [deadShares, h]
+
+@[simp] theorem deadShares_ne {σ : Storage} (h : σ.totalShares.raw ≠ 0) :
+    deadShares σ = 0 := by simp [deadShares, h]
+
+private theorem MINIMUM_LIQUIDITY_raw : MINIMUM_LIQUIDITY.raw = 1000 := rfl
+
+private theorem dead_ite_raw (σ : Storage) :
+    (if σ.totalShares = 0 then MINIMUM_LIQUIDITY else (0 : Amount lpShare)).raw =
+      deadShares σ := by
+  by_cases h : σ.totalShares = 0
+  · have hr : σ.totalShares.raw = 0 := (Amount.eq_iff _ _).mp h
+    simp [h, hr, deadShares, MINIMUM_LIQUIDITY_raw]
+  · have hr : σ.totalShares.raw ≠ 0 := (Amount.ne_iff _ _).mp h
+    simp [h, hr, deadShares]
+
+/-- Share map after crediting the first-mint lock (no-op later). -/
+def sharesAfterDead (σ : Storage) : Address → Amount lpShare :=
+  if σ.totalShares.raw = 0 then Function.update σ.shares 0 ⟨1000⟩ else σ.shares
+
 /-- Storage after a successful `addLiquidity` by `who`. -/
 def addLiquidityPost (σ : Storage) (who : Address) (a0 a1 : Nat) : Storage :=
   let n := mintedShares σ a0 a1
+  let dead := deadShares σ
+  let sh := sharesAfterDead σ
   { σ with
     reserve0 := σ.reserve0 + Amount.ofWord a0
     reserve1 := σ.reserve1 + Amount.ofWord a1
-    totalShares := Amount.ofWord n + σ.totalShares
-    shares := Function.update σ.shares who (Amount.ofWord n + σ.shares who) }
+    totalShares := σ.totalShares + Amount.ofWord (n + dead)
+    shares := Function.update sh who (Amount.ofWord n + sh who) }
 
 /-- Floor-pro-rata redemption of `s` shares. -/
 def redeemed (σ : Storage) (s : Nat) : Nat × Nat :=
@@ -601,9 +629,13 @@ private theorem addLiq_after_mint (a0 : Amount asset0) (a1 : Amount asset1)
         write reserve0 r0'
         let r1' ← w.self.reserve1 +? a1
         write reserve1 r1'
-        let ts' ← (⟨mintedShares w.self a0.raw a1.raw⟩ : Amount lpShare) +?
-          w.self.totalShares
+        let ts' ← w.self.totalShares +?
+          (⟨mintedShares w.self a0.raw a1.raw⟩ : Amount lpShare)
         write totalShares ts'
+        if w.self.totalShares = 0 then
+          write totalShares (⟨a0.raw⟩ : Amount lpShare)
+        if w.self.totalShares = 0 then
+          write shares[(0 : Address)] MINIMUM_LIQUIDITY
         let bal ← read shares[ctx.sender]
         let bal' ← (⟨mintedShares w.self a0.raw a1.raw⟩ : Amount lpShare) +? bal
         write shares[ctx.sender] bal'
@@ -617,18 +649,35 @@ private theorem addLiq_after_mint (a0 : Amount asset0) (a1 : Amount asset1)
         : M (Amount lpShare)) ctx w := by
   have hposM : 0 < (⟨mintedShares w.self a0.raw a1.raw⟩ : Amount lpShare) := by
     simpa [Amount.lt_iff] using hminted
+  have hraw : a0.asUnchecked lpShare = ⟨a0.raw⟩ := Amount.ext (by
+    simp [Amount.raw_asUnchecked])
   rw [addLiquidity, run_req_true hpos0, run_req_true hpos1,
     run_sender_bind, run_self_bind, run_load_bind, run_load_bind, run_load_bind]
+  conv => lhs; rw [hraw]
   rw [Tx.run_ite]
   by_cases hts : w.self.totalShares = 0
   · have htsr : w.self.totalShares.raw = 0 := (Amount.eq_iff _ _).mp hts
-    rw [if_pos hts]
-    simp only [Tx.pure_bind]
-    have hm : a0.as lpShare =
+    have hmint : mintedShares w.self a0.raw a1.raw = a0.raw - 1000 := by
+      simp [mintedShares, htsr]
+    have hliqN : 1000 < a0.raw := Nat.lt_of_sub_pos (by simpa [hmint] using hminted)
+    have hliq : MINIMUM_LIQUIDITY < (⟨a0.raw⟩ : Amount lpShare) := by
+      simpa [Amount.lt_iff, MINIMUM_LIQUIDITY_raw] using hliqN
+    have hle : MINIMUM_LIQUIDITY.raw ≤ (⟨a0.raw⟩ : Amount lpShare).raw := by
+      simpa [MINIMUM_LIQUIDITY_raw, Amount.raw_mk] using Nat.le_of_lt hliqN
+    have hm :
+        (⟨(⟨a0.raw⟩ : Amount lpShare).raw - MINIMUM_LIQUIDITY.raw⟩ :
+          Amount lpShare) =
           ⟨mintedShares w.self a0.raw a1.raw⟩ := by
-      apply Amount.ext
-      simp [mintedShares, htsr, Amount.raw_as]
-    rw [hm, run_req_true hposM]
+      simp [MINIMUM_LIQUIDITY_raw, Amount.raw_mk, hmint]
+    rw [if_pos hts]
+    conv => lhs; rw [run_req_true hliq]
+    rw [Tx.run_ite, if_pos hts]
+    conv =>
+      lhs
+      rw [run_hSub_bind]
+      rw [if_pos hle]
+      rw [hm]
+      rw [run_req_true hposM]
   · have htsr : w.self.totalShares.raw ≠ 0 := (Amount.ne_iff _ _).mp hts
     rcases hprod with h0 | ⟨hr0, hr1, hm0, hm1⟩
     · exact (htsr h0).elim
@@ -636,7 +685,8 @@ private theorem addLiq_after_mint (a0 : Amount asset0) (a1 : Amount asset1)
       have hr1A : 0 < w.self.reserve1 := by simpa [Amount.lt_iff] using hr1
       have hr0n : w.self.reserve0.raw ≠ 0 := Nat.ne_of_gt hr0
       have hr1n : w.self.reserve1.raw ≠ 0 := Nat.ne_of_gt hr1
-      rw [if_neg hts, run_req_true hr0A, run_req_true hr1A]
+      rw [if_neg hts]
+      rw [Tx.run_ite, if_neg hts, run_req_true hr0A, run_req_true hr1A]
       rw [run_mulDivDown_bind]
       rw [if_neg hr0n, if_pos hm0]
       rw [run_mulDivDown_bind]
@@ -755,8 +805,9 @@ structure AddLiqOk (ctx : Ctx) (w : World Storage ExtState Event)
         w.self.totalShares.raw * a1.raw < wordBound)
   add0 : w.self.reserve0.raw + a0.raw < wordBound
   add1 : w.self.reserve1.raw + a1.raw < wordBound
-  addS : mintedShares w.self a0.raw a1.raw + w.self.totalShares.raw < wordBound
-  addB : mintedShares w.self a0.raw a1.raw + (w.self.shares ctx.sender).raw < wordBound
+  addS : w.self.totalShares.raw + mintedShares w.self a0.raw a1.raw < wordBound
+  addB : mintedShares w.self a0.raw a1.raw +
+      (sharesAfterDead w.self ctx.sender).raw < wordBound
 
 theorem addLiquidity_reverts_on_zero_r0 (a0 : Amount asset0) (a1 : Amount asset1)
     (hpos0 : 0 < a0) (hpos1 : 0 < a1)
@@ -764,9 +815,13 @@ theorem addLiquidity_reverts_on_zero_r0 (a0 : Amount asset0) (a1 : Amount asset1
     Tx.run (addLiquidity a0 a1) ctx w = .error (.user .Zero) := by
   have hne : ¬ w.self.totalShares = 0 := (Amount.ne_iff _ _).mpr hts
   have hz : ¬ 0 < w.self.reserve0 := by simpa [Amount.lt_iff] using hr0
+  have hraw : a0.asUnchecked lpShare = ⟨a0.raw⟩ := Amount.ext (by
+    simp [Amount.raw_asUnchecked])
   rw [addLiquidity, run_req_true hpos0, run_req_true hpos1,
-    run_sender_bind, run_self_bind, run_load_bind, run_load_bind, run_load_bind,
-    Tx.run_ite, if_neg hne, run_req_false hz]
+    run_sender_bind, run_self_bind, run_load_bind, run_load_bind, run_load_bind]
+  conv => lhs; rw [hraw]
+  rw [Tx.run_ite, if_neg hne]
+  rw [Tx.run_ite, if_neg hne, run_req_false hz]
 
 theorem addLiquidity_reverts_on_zero_r1 (a0 : Amount asset0) (a1 : Amount asset1)
     (hpos0 : 0 < a0) (hpos1 : 0 < a1)
@@ -776,9 +831,13 @@ theorem addLiquidity_reverts_on_zero_r1 (a0 : Amount asset0) (a1 : Amount asset1
   have hne : ¬ w.self.totalShares = 0 := (Amount.ne_iff _ _).mpr hts
   have hr0A : 0 < w.self.reserve0 := by simpa [Amount.lt_iff] using hr0
   have hz : ¬ 0 < w.self.reserve1 := by simpa [Amount.lt_iff] using hr1
+  have hraw : a0.asUnchecked lpShare = ⟨a0.raw⟩ := Amount.ext (by
+    simp [Amount.raw_asUnchecked])
   rw [addLiquidity, run_req_true hpos0, run_req_true hpos1,
-    run_sender_bind, run_self_bind, run_load_bind, run_load_bind, run_load_bind,
-    Tx.run_ite, if_neg hne, run_req_true hr0A, run_req_false hz]
+    run_sender_bind, run_self_bind, run_load_bind, run_load_bind, run_load_bind]
+  conv => lhs; rw [hraw]
+  rw [Tx.run_ite, if_neg hne]
+  rw [Tx.run_ite, if_neg hne, run_req_true hr0A, run_req_false hz]
 
 theorem addLiquidity_reverts_on_mul0 (a0 : Amount asset0) (a1 : Amount asset1)
     (hpos0 : 0 < a0) (hpos1 : 0 < a1)
@@ -790,8 +849,12 @@ theorem addLiquidity_reverts_on_mul0 (a0 : Amount asset0) (a1 : Amount asset1)
   have hr0A : 0 < w.self.reserve0 := by simpa [Amount.lt_iff] using hr0
   have hr1A : 0 < w.self.reserve1 := by simpa [Amount.lt_iff] using hr1
   have hr0n : w.self.reserve0.raw ≠ 0 := Nat.ne_of_gt hr0
+  have hraw : a0.asUnchecked lpShare = ⟨a0.raw⟩ := Amount.ext (by
+    simp [Amount.raw_asUnchecked])
   rw [addLiquidity, run_req_true hpos0, run_req_true hpos1,
     run_sender_bind, run_self_bind, run_load_bind, run_load_bind, run_load_bind]
+  conv => lhs; rw [hraw]
+  rw [Tx.run_ite, if_neg hne]
   rw [Tx.run_ite, if_neg hne, run_req_true hr0A, run_req_true hr1A]
   rw [run_mulDivDown_bind, if_neg hr0n, if_neg hmul]
 
@@ -807,11 +870,32 @@ theorem addLiquidity_reverts_on_mul1 (a0 : Amount asset0) (a1 : Amount asset1)
   have hr1A : 0 < w.self.reserve1 := by simpa [Amount.lt_iff] using hr1
   have hr0n : w.self.reserve0.raw ≠ 0 := Nat.ne_of_gt hr0
   have hr1n : w.self.reserve1.raw ≠ 0 := Nat.ne_of_gt hr1
+  have hraw : a0.asUnchecked lpShare = ⟨a0.raw⟩ := Amount.ext (by
+    simp [Amount.raw_asUnchecked])
   rw [addLiquidity, run_req_true hpos0, run_req_true hpos1,
     run_sender_bind, run_self_bind, run_load_bind, run_load_bind, run_load_bind]
+  conv => lhs; rw [hraw]
+  rw [Tx.run_ite, if_neg hne]
   rw [Tx.run_ite, if_neg hne, run_req_true hr0A, run_req_true hr1A]
   rw [run_mulDivDown_bind, if_neg hr0n, if_pos hm0]
   rw [run_mulDivDown_bind, if_neg hr1n, if_neg hmul]
+
+theorem addLiquidity_reverts_on_min_liquidity (a0 : Amount asset0)
+    (a1 : Amount asset1)
+    (hpos0 : 0 < a0) (hpos1 : 0 < a1)
+    (hts0 : w.self.totalShares.raw = 0)
+    (hliq : ¬ 1000 < a0.raw) :
+    Tx.run (addLiquidity a0 a1) ctx w = .error (.user .InsufficientLiquidity) := by
+  have hts : w.self.totalShares = 0 := (Amount.eq_iff _ _).mpr hts0
+  have hraw : a0.asUnchecked lpShare = ⟨a0.raw⟩ := by
+    apply Amount.ext
+    simp [Amount.raw_asUnchecked]
+  have hreq : ¬ MINIMUM_LIQUIDITY < (⟨a0.raw⟩ : Amount lpShare) := by
+    simpa [Amount.lt_iff, MINIMUM_LIQUIDITY_raw] using hliq
+  rw [addLiquidity, run_req_true hpos0, run_req_true hpos1,
+    run_sender_bind, run_self_bind, run_load_bind, run_load_bind, run_load_bind]
+  conv => lhs; rw [hraw]
+  rw [Tx.run_ite, if_pos hts, run_req_false hreq]
 
 theorem addLiquidity_reverts_on_zero_shares (a0 : Amount asset0) (a1 : Amount asset1)
     (hpos0 : 0 < a0) (hpos1 : 0 < a1)
@@ -820,48 +904,50 @@ theorem addLiquidity_reverts_on_zero_shares (a0 : Amount asset0) (a1 : Amount as
         (0 < w.self.reserve0.raw ∧ 0 < w.self.reserve1.raw ∧
           w.self.totalShares.raw * a0.raw < wordBound ∧
           w.self.totalShares.raw * a1.raw < wordBound))
-    (hminted : ¬ 0 < mintedShares w.self a0.raw a1.raw) :
+    (hminted : ¬ 0 < mintedShares w.self a0.raw a1.raw)
+    (hts0 : w.self.totalShares.raw ≠ 0) :
     Tx.run (addLiquidity a0 a1) ctx w = .error (.user .ZeroShares) := by
   have hreq : ¬ 0 < (⟨mintedShares w.self a0.raw a1.raw⟩ : Amount lpShare) := by
     simpa [Amount.lt_iff] using hminted
-  by_cases hts : w.self.totalShares = 0
-  · have htsr : w.self.totalShares.raw = 0 := (Amount.eq_iff _ _).mp hts
-    have : ¬ 0 < a0.raw := by simpa [mintedShares, htsr] using hminted
-    exact (this (by simpa [Amount.lt_iff] using hpos0)).elim
-  · have htsr : w.self.totalShares.raw ≠ 0 := (Amount.ne_iff _ _).mp hts
-    rcases hprod with h0 | ⟨hr0, hr1, hm0, hm1⟩
-    · exact (htsr h0).elim
-    · have hr0A : 0 < w.self.reserve0 := by simpa [Amount.lt_iff] using hr0
-      have hr1A : 0 < w.self.reserve1 := by simpa [Amount.lt_iff] using hr1
-      have hr0n : w.self.reserve0.raw ≠ 0 := Nat.ne_of_gt hr0
-      have hr1n : w.self.reserve1.raw ≠ 0 := Nat.ne_of_gt hr1
-      rw [addLiquidity, run_req_true hpos0, run_req_true hpos1,
-        run_sender_bind, run_self_bind, run_load_bind, run_load_bind, run_load_bind]
-      rw [Tx.run_ite, if_neg hts, run_req_true hr0A, run_req_true hr1A]
-      rw [run_mulDivDown_bind, if_neg hr0n, if_pos hm0]
-      rw [run_mulDivDown_bind, if_neg hr1n, if_pos hm1, Tx.run_ite]
-      by_cases hle :
+  have hts : ¬ w.self.totalShares = 0 := (Amount.ne_iff _ _).mpr hts0
+  have htsr : w.self.totalShares.raw ≠ 0 := hts0
+  rcases hprod with h0 | ⟨hr0, hr1, hm0, hm1⟩
+  · exact (htsr h0).elim
+  · have hr0A : 0 < w.self.reserve0 := by simpa [Amount.lt_iff] using hr0
+    have hr1A : 0 < w.self.reserve1 := by simpa [Amount.lt_iff] using hr1
+    have hr0n : w.self.reserve0.raw ≠ 0 := Nat.ne_of_gt hr0
+    have hr1n : w.self.reserve1.raw ≠ 0 := Nat.ne_of_gt hr1
+    have hraw : a0.asUnchecked lpShare = ⟨a0.raw⟩ := Amount.ext (by
+      simp [Amount.raw_asUnchecked])
+    rw [addLiquidity, run_req_true hpos0, run_req_true hpos1,
+      run_sender_bind, run_self_bind, run_load_bind, run_load_bind, run_load_bind]
+    conv => lhs; rw [hraw]
+    rw [Tx.run_ite, if_neg hts]
+    rw [Tx.run_ite, if_neg hts, run_req_true hr0A, run_req_true hr1A]
+    rw [run_mulDivDown_bind, if_neg hr0n, if_pos hm0]
+    rw [run_mulDivDown_bind, if_neg hr1n, if_pos hm1, Tx.run_ite]
+    by_cases hle :
+        (⟨w.self.totalShares.raw * a0.raw / w.self.reserve0.raw⟩ :
+          Amount lpShare) ≤
+          ⟨w.self.totalShares.raw * a1.raw / w.self.reserve1.raw⟩
+    · have hle' : w.self.totalShares.raw * a0.raw / w.self.reserve0.raw ≤
+          w.self.totalShares.raw * a1.raw / w.self.reserve1.raw := by
+        simpa [Amount.le_iff] using hle
+      have hm :
           (⟨w.self.totalShares.raw * a0.raw / w.self.reserve0.raw⟩ :
-            Amount lpShare) ≤
-            ⟨w.self.totalShares.raw * a1.raw / w.self.reserve1.raw⟩
-      · have hle' : w.self.totalShares.raw * a0.raw / w.self.reserve0.raw ≤
-            w.self.totalShares.raw * a1.raw / w.self.reserve1.raw := by
-          simpa [Amount.le_iff] using hle
-        have hm :
-            (⟨w.self.totalShares.raw * a0.raw / w.self.reserve0.raw⟩ :
-              Amount lpShare) =
-              ⟨mintedShares w.self a0.raw a1.raw⟩ := by
-          simp [mintedShares, htsr, hle']
-        rw [if_pos hle, run_pure_bind, hm, run_req_false hreq]
-      · have hle' : ¬ w.self.totalShares.raw * a0.raw / w.self.reserve0.raw ≤
-            w.self.totalShares.raw * a1.raw / w.self.reserve1.raw := by
-          simpa [Amount.le_iff] using hle
-        have hm :
-            (⟨w.self.totalShares.raw * a1.raw / w.self.reserve1.raw⟩ :
-              Amount lpShare) =
-              ⟨mintedShares w.self a0.raw a1.raw⟩ := by
-          simp [mintedShares, htsr, hle']
-        rw [if_neg hle, run_pure_bind, hm, run_req_false hreq]
+            Amount lpShare) =
+            ⟨mintedShares w.self a0.raw a1.raw⟩ := by
+        simp [mintedShares, htsr, hle']
+      rw [if_pos hle, run_pure_bind, hm, run_req_false hreq]
+    · have hle' : ¬ w.self.totalShares.raw * a0.raw / w.self.reserve0.raw ≤
+          w.self.totalShares.raw * a1.raw / w.self.reserve1.raw := by
+        simpa [Amount.le_iff] using hle
+      have hm :
+          (⟨w.self.totalShares.raw * a1.raw / w.self.reserve1.raw⟩ :
+            Amount lpShare) =
+            ⟨mintedShares w.self a0.raw a1.raw⟩ := by
+        simp [mintedShares, htsr, hle']
+      rw [if_neg hle, run_pure_bind, hm, run_req_false hreq]
 
 theorem addLiquidity_reverts_on_add_r0 (a0 : Amount asset0) (a1 : Amount asset1)
     (hpos0 : 0 < a0) (hpos1 : 0 < a1)
@@ -904,7 +990,8 @@ theorem addLiquidity_reverts_on_add_ts (a0 : Amount asset0) (a1 : Amount asset1)
           w.self.totalShares.raw * a1.raw < wordBound))
     (hadd0 : w.self.reserve0.raw + a0.raw < wordBound)
     (hadd1 : w.self.reserve1.raw + a1.raw < wordBound)
-    (hadd : ¬ mintedShares w.self a0.raw a1.raw + w.self.totalShares.raw < wordBound) :
+    (hadd : ¬ w.self.totalShares.raw + mintedShares w.self a0.raw a1.raw <
+        wordBound) :
     Tx.run (addLiquidity a0 a1) ctx w = .error (.arith .overflow) := by
   rw [addLiq_after_mint a0 a1 hpos0 hpos1 hprod hminted]
   simp only [run_hAdd_bind]
@@ -924,9 +1011,10 @@ theorem addLiquidity_reverts_on_add_bal (a0 : Amount asset0) (a1 : Amount asset1
           w.self.totalShares.raw * a1.raw < wordBound))
     (hadd0 : w.self.reserve0.raw + a0.raw < wordBound)
     (hadd1 : w.self.reserve1.raw + a1.raw < wordBound)
-    (haddS : mintedShares w.self a0.raw a1.raw + w.self.totalShares.raw < wordBound)
-    (hadd : ¬ mintedShares w.self a0.raw a1.raw + (w.self.shares ctx.sender).raw <
-        wordBound) :
+    (haddS : w.self.totalShares.raw + mintedShares w.self a0.raw a1.raw <
+        wordBound)
+    (hadd : ¬ mintedShares w.self a0.raw a1.raw +
+        (sharesAfterDead w.self ctx.sender).raw < wordBound) :
     Tx.run (addLiquidity a0 a1) ctx w = .error (.arith .overflow) := by
   rw [addLiq_after_mint a0 a1 hpos0 hpos1 hprod hminted]
   simp only [run_hAdd_bind]
@@ -934,9 +1022,39 @@ theorem addLiquidity_reverts_on_add_bal (a0 : Amount asset0) (a1 : Amount asset1
   simp only [run_hAdd_bind]
   rw [if_pos hadd1, run_store_bind]
   simp only [run_hAdd_bind]
-  rw [if_pos haddS, run_store_bind, run_loadMap_bind]
-  simp only [run_hAdd_bind]
-  rw [if_neg hadd]
+  rw [if_pos haddS, run_store_bind]
+  rw [Tx.run_ite]
+  by_cases hts : w.self.totalShares = 0
+  · have htsr : w.self.totalShares.raw = 0 := (Amount.eq_iff _ _).mp hts
+    rw [if_pos hts, run_store_bind]
+    rw [Tx.run_ite, if_pos hts, run_storeMap_bind, run_loadMap_bind]
+    simp only [run_hAdd_bind]
+    have hneg :
+        ¬ mintedShares w.self a0.raw a1.raw +
+            (Amount.ofWord (a := lpShare)
+              (Function.update (fun k => (w.self.shares k).raw)
+                (0 : Address) MINIMUM_LIQUIDITY.raw ctx.sender)).raw <
+              wordBound := by
+      have hbal :
+          (Amount.ofWord (a := lpShare)
+            (Function.update (fun k => (w.self.shares k).raw)
+              (0 : Address) MINIMUM_LIQUIDITY.raw ctx.sender)) =
+            sharesAfterDead w.self ctx.sender := by
+        simp [sharesAfterDead, htsr, Amount.ofWord_update_lookup,
+          MINIMUM_LIQUIDITY_raw]
+      simpa [hbal, Amount.raw_ofWord] using hadd
+    rw [if_neg hneg]
+  · have htsr : w.self.totalShares.raw ≠ 0 := (Amount.ne_iff _ _).mp hts
+    have hbal : sharesAfterDead w.self ctx.sender = w.self.shares ctx.sender := by
+      simp [sharesAfterDead, htsr]
+    rw [if_neg hts]
+    rw [Tx.run_ite, if_neg hts, run_loadMap_bind]
+    simp only [run_hAdd_bind]
+    have hneg :
+        ¬ mintedShares w.self a0.raw a1.raw +
+            (w.self.shares ctx.sender).raw < wordBound := by
+      simpa [hbal] using hadd
+    rw [if_neg hneg]
 
 theorem addLiquidity_ok_of_run {a0 : Amount asset0} {a1 : Amount asset1}
     {n : Amount lpShare} {w' : World Storage ExtState Event}
@@ -967,8 +1085,15 @@ theorem addLiquidity_ok_of_run {a0 : Amount asset0} {a1 : Amount asset1}
       · exact (Tx.run_ok_error hrun
           (addLiquidity_reverts_on_zero_r0 a0 a1 hpos0 hpos1 hts hr0)).elim
   have hminted : 0 < mintedShares w.self a0.raw a1.raw := by
-    by_contra h
-    exact Tx.run_ok_error hrun (addLiquidity_reverts_on_zero_shares a0 a1 hpos0 hpos1 hprod h)
+    by_cases hts : w.self.totalShares.raw = 0
+    · have hliq : 1000 < a0.raw := by
+        by_contra h
+        exact Tx.run_ok_error hrun
+          (addLiquidity_reverts_on_min_liquidity a0 a1 hpos0 hpos1 hts h)
+      simpa [mintedShares, hts] using Nat.sub_pos_of_lt hliq
+    · by_contra h
+      exact Tx.run_ok_error hrun
+        (addLiquidity_reverts_on_zero_shares a0 a1 hpos0 hpos1 hprod h hts)
   have hadd0 : w.self.reserve0.raw + a0.raw < wordBound := by
     by_contra h
     exact Tx.run_ok_error hrun
@@ -977,19 +1102,20 @@ theorem addLiquidity_ok_of_run {a0 : Amount asset0} {a1 : Amount asset1}
     by_contra h
     exact Tx.run_ok_error hrun
       (addLiquidity_reverts_on_add_r1 a0 a1 hpos0 hpos1 hminted hprod hadd0 h)
-  have haddS : mintedShares w.self a0.raw a1.raw + w.self.totalShares.raw < wordBound := by
+  have haddS : w.self.totalShares.raw + mintedShares w.self a0.raw a1.raw <
+      wordBound := by
     by_contra h
     exact Tx.run_ok_error hrun
-      (addLiquidity_reverts_on_add_ts a0 a1 hpos0 hpos1 hminted hprod hadd0 hadd1 h)
-  have haddB : mintedShares w.self a0.raw a1.raw + (w.self.shares ctx.sender).raw <
-      wordBound := by
+      (addLiquidity_reverts_on_add_ts a0 a1 hpos0 hpos1 hminted hprod
+        hadd0 hadd1 h)
+  have haddB : mintedShares w.self a0.raw a1.raw +
+      (sharesAfterDead w.self ctx.sender).raw < wordBound := by
     by_contra h
     exact Tx.run_ok_error hrun
       (addLiquidity_reverts_on_add_bal a0 a1 hpos0 hpos1 hminted hprod
         hadd0 hadd1 haddS h)
   exact ⟨hpos0, hpos1, hminted, hprod, hadd0, hadd1, haddS, haddB⟩
 
-/-- Reduce a well-formed `addLiquidity` to the two token pulls + emit on post-storage. -/
 theorem addLiquidity_to_tail (a0 : Amount asset0) (a1 : Amount asset1)
     (h : AddLiqOk ctx w a0 a1) :
     let minted := Amount.ofWord (mintedShares w.self a0.raw a1.raw)
@@ -1009,20 +1135,93 @@ theorem addLiquidity_to_tail (a0 : Amount asset0) (a1 : Amount asset1)
   simp only [run_hAdd_bind]
   rw [if_pos hadd1, run_store_bind]
   simp only [run_hAdd_bind]
-  rw [if_pos haddS, run_store_bind, run_loadMap_bind]
-  simp only [run_hAdd_bind]
-  rw [if_pos haddB, run_storeMap_bind]
-  refine (run_read_token0_then_token1 (fun t0 t1 =>
-    safeTransferFrom (E := Event) t0 ctx.sender ctx.self a0 Error.TransferFailed >>=
-      fun _ =>
-    safeTransferFrom (E := Event) t1 ctx.sender ctx.self a1 Error.TransferFailed >>=
-      fun _ =>
-    Tx.emit (.AddLiquidity ctx.sender a0 a1
-      ⟨mintedShares w.self a0.raw a1.raw⟩) >>= fun _ =>
-    (pure (⟨mintedShares w.self a0.raw a1.raw⟩ : Amount lpShare)))).trans ?_
-  simp only [addLiquidityPost, mintedShares, Amount.update_raw, Amount.raw_add,
-    Amount.raw_ofWord, Amount.ofWord_add_right, Amount.ofWord_raw, Amount.mk_raw]
-  rfl
+  rw [if_pos haddS, run_store_bind]
+  rw [Tx.run_ite]
+  by_cases hts : w.self.totalShares = 0
+  · have htsr : w.self.totalShares.raw = 0 := (Amount.eq_iff _ _).mp hts
+    have hmint : mintedShares w.self a0.raw a1.raw = a0.raw - 1000 := by
+      simp [mintedShares, htsr]
+    have hle : 1000 ≤ a0.raw :=
+      Nat.le_of_lt (Nat.lt_of_sub_pos (by simpa [hmint] using hminted))
+    have hB : mintedShares w.self a0.raw a1.raw +
+        (Amount.ofWord (a := lpShare)
+          (Function.update (fun i => (w.self.shares i).raw)
+            (0 : Address) MINIMUM_LIQUIDITY.raw ctx.sender)).raw < wordBound := by
+      have : Amount.ofWord (a := lpShare)
+          (Function.update (fun i => (w.self.shares i).raw)
+            (0 : Address) MINIMUM_LIQUIDITY.raw ctx.sender) =
+          sharesAfterDead w.self ctx.sender := by
+        simp [sharesAfterDead, htsr, Amount.ofWord_update_lookup,
+          MINIMUM_LIQUIDITY_raw]
+      simpa [this, Amount.raw_ofWord] using haddB
+    rw [if_pos hts, run_store_bind]
+    rw [Tx.run_ite, if_pos hts, run_storeMap_bind, run_loadMap_bind]
+    simp only [run_hAdd_bind]
+    rw [if_pos hB, run_storeMap_bind]
+    refine (run_read_token0_then_token1 (fun t0 t1 =>
+      safeTransferFrom (E := Event) t0 ctx.sender ctx.self a0 Error.TransferFailed >>=
+        fun _ =>
+      safeTransferFrom (E := Event) t1 ctx.sender ctx.self a1 Error.TransferFailed >>=
+        fun _ =>
+      Tx.emit (.AddLiquidity ctx.sender a0 a1
+        ⟨mintedShares w.self a0.raw a1.raw⟩) >>= fun _ =>
+      (pure (⟨mintedShares w.self a0.raw a1.raw⟩ : Amount lpShare)))).trans ?_
+    rw [hmint]
+    dsimp
+    simp only [addLiquidityPost, sharesAfterDead, deadShares, hts, hmint,
+      Amount.raw_zero, Amount.mk_raw, Amount.ofWord, Amount.zero_add,
+      ite_true, MINIMUM_LIQUIDITY_raw, Nat.sub_add_cancel hle]
+    have hsh :
+        (fun k =>
+          ({ raw :=
+              Function.update
+                (fun k =>
+                  Function.update (fun k => (w.self.shares k).raw) (0 : Address)
+                    1000 k)
+                ctx.sender
+                (a0.raw - 1000 +
+                  Function.update (fun k => (w.self.shares k).raw) (0 : Address)
+                    1000 ctx.sender)
+                k } : Amount lpShare)) =
+          Function.update (Function.update w.self.shares 0 { raw := 1000 })
+            ctx.sender
+            ({ raw := a0.raw - 1000 } +
+              Function.update w.self.shares 0 { raw := 1000 } ctx.sender) := by
+      funext k
+      apply Amount.ext
+      simp [Function.update, Amount.raw_add]
+      split_ifs <;> simp [Amount.raw_add]
+    simp [hsh]
+  · have htsr : w.self.totalShares.raw ≠ 0 := (Amount.ne_iff _ _).mp hts
+    have hB : mintedShares w.self a0.raw a1.raw +
+        (w.self.shares ctx.sender).raw < wordBound := by
+      simpa [sharesAfterDead, htsr] using haddB
+    rw [if_neg hts]
+    rw [Tx.run_ite, if_neg hts, run_loadMap_bind]
+    simp only [run_hAdd_bind]
+    rw [if_pos hB, run_storeMap_bind]
+    refine (run_read_token0_then_token1 (fun t0 t1 =>
+      safeTransferFrom (E := Event) t0 ctx.sender ctx.self a0 Error.TransferFailed >>=
+        fun _ =>
+      safeTransferFrom (E := Event) t1 ctx.sender ctx.self a1 Error.TransferFailed >>=
+        fun _ =>
+      Tx.emit (.AddLiquidity ctx.sender a0 a1
+        ⟨mintedShares w.self a0.raw a1.raw⟩) >>= fun _ =>
+      (pure (⟨mintedShares w.self a0.raw a1.raw⟩ : Amount lpShare)))).trans ?_
+    dsimp
+    simp only [addLiquidityPost, sharesAfterDead, deadShares, if_neg htsr,
+      Amount.mk_raw, Nat.add_zero, ite_false]
+    rw [Amount.update_raw (a := lpShare) w.self.shares ctx.sender
+      (mintedShares w.self a0.raw a1.raw + (w.self.shares ctx.sender).raw)]
+    have hadd :
+        Amount.ofWord (mintedShares w.self a0.raw a1.raw +
+            (w.self.shares ctx.sender).raw) =
+          Amount.ofWord (mintedShares w.self a0.raw a1.raw) +
+            w.self.shares ctx.sender :=
+      Amount.ofWord_add (Amount.ofWord (mintedShares w.self a0.raw a1.raw))
+        (w.self.shares ctx.sender)
+    rw [hadd]
+    simp only [Amount.raw_ofWord, Amount.ofWord_raw, Amount.ofWord]
 
 theorem addLiquidity_post (a0 : Amount asset0) (a1 : Amount asset1)
     {n : Amount lpShare} {w' : World Storage ExtState Event}
@@ -2608,13 +2807,15 @@ theorem removeLiquidity_paid {s : Amount lpShare}
 theorem addLiquidity_pro_rata {a0 : Amount asset0} {a1 : Amount asset1}
     {n : Amount lpShare} {w' : World Storage ExtState Event}
     (h : Tx.run (addLiquidity a0 a1) ctx w = .ok (n, w')) :
-    w'.self.shares ctx.sender = w.self.shares ctx.sender + n ∧
-      w'.self.totalShares = w.self.totalShares + n := by
+    w'.self.shares ctx.sender =
+      sharesAfterDead w.self ctx.sender + n ∧
+      w'.self.totalShares =
+        w.self.totalShares + n + Amount.ofWord (deadShares w.self) := by
   have hok := addLiquidity_ok_of_run h
   have ⟨hn, hσ, _, _⟩ := addLiquidity_post a0 a1 hok h
   subst hn
   simp [hσ, addLiquidityPost, Function.update, Amount.raw_add, Amount.raw_ofWord,
-    Nat.add_comm]
+    Nat.add_comm, Nat.add_assoc, Nat.add_left_comm]
 
 theorem addLiquidity_minted {a0 : Amount asset0} {a1 : Amount asset1}
     {n : Amount lpShare} {w' : World Storage ExtState Event}
@@ -2622,6 +2823,18 @@ theorem addLiquidity_minted {a0 : Amount asset0} {a1 : Amount asset1}
     n = Amount.ofWord (mintedShares w.self a0.raw a1.raw) := by
   have hok := addLiquidity_ok_of_run h
   exact (addLiquidity_post a0 a1 hok h).1
+
+/-- A successful first mint leaves at least `MINIMUM_LIQUIDITY` shares
+outstanding (locked at address 0). A later mint on a pool that never
+locked 1000 shares need not reach 1000; success only grows `totalShares`. -/
+theorem addLiquidity_min_liquidity {a0 : Amount asset0} {a1 : Amount asset1}
+    {n : Amount lpShare} {w' : World Storage ExtState Event}
+    (h : Tx.run (addLiquidity a0 a1) ctx w = .ok (n, w')) :
+    w.self.totalShares.raw = 0 → 1000 ≤ w'.self.totalShares.raw := by
+  have hok := addLiquidity_ok_of_run h
+  have ⟨hn, hσ, _, _⟩ := addLiquidity_post a0 a1 hok h
+  intro hts
+  simp [hσ, addLiquidityPost, Amount.raw_add, Amount.raw_ofWord, hts, deadShares]
 
 end Proof
 

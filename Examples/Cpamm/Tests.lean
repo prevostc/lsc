@@ -53,7 +53,14 @@ end Cpamm
 
 #guard
   (match Lsc.Tx.run (Cpamm.addLiquidity 100 200) Cpamm.smokeCtx Cpamm.smokeEmpty with
-    | .ok (n, _) => n.raw == 100
+    | .error (.user .InsufficientLiquidity) => true
+    | _ => false)
+
+#guard
+  (match Lsc.Tx.run (Cpamm.addLiquidity 2000 4000) Cpamm.smokeCtx Cpamm.smokeEmpty with
+    | .ok (n, w') =>
+        n.raw == 1000 && w'.self.totalShares.raw == 2000
+          && (w'.self.shares 2).raw == 1000 && (w'.self.shares 0).raw == 1000
     | _ => false)
 
 #guard

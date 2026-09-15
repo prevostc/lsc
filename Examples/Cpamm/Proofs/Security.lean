@@ -98,68 +98,124 @@ private theorem nat_sum_update_sub (H : Finset Address) (f : Address → Nat)
   have hS := sum_update_mem H f hi (f i - n)
   omega
 
+private theorem invStorage_shares_zero {σ : Storage} (h : InvStorage σ)
+    (hts : σ.totalShares.raw = 0) (a : Address) : (σ.shares a).raw = 0 := by
+  obtain ⟨H, h0, hsum⟩ := h
+  rw [hts] at hsum
+  by_cases ha : a ∈ H
+  · have hle := Finset.single_le_sum (s := H) (f := fun x => (σ.shares x).raw)
+      (fun _ _ => Nat.zero_le _) ha
+    rw [hsum] at hle
+    exact Nat.eq_zero_of_le_zero hle
+  · have := h0 a ha
+    simpa [Amount.eq_iff] using this
+
 private theorem invStorage_of_addLiquidityPost (σ : Storage) (who : Address)
     (a0 a1 : Nat) (hInv : InvStorage σ) :
     InvStorage (addLiquidityPost σ who a0 a1) := by
   obtain ⟨H, h0, hsum⟩ := hInv
   have hsumr : H.sum (rawShares σ.shares) = σ.totalShares.raw := hsum
-  by_cases ht : who ∈ H
-  · refine ⟨H, ?_, ?_⟩
-    · intro a ha
-      have hne : a ≠ who := by intro h; subst h; exact ha ht
-      simp [addLiquidityPost, Function.update_of_ne hne]
-      exact h0 a ha
-    · have hsum' :
-          H.sum (rawShares (addLiquidityPost σ who a0 a1).shares) =
-            H.sum (rawShares σ.shares) + mintedShares σ a0 a1 := by
-        simp only [addLiquidityPost, rawShares_update, Amount.raw_add,
-          Amount.raw_ofWord]
-        rw [Nat.add_comm (mintedShares σ a0 a1)]
-        exact nat_sum_update_add H (rawShares σ.shares) ht (mintedShares σ a0 a1)
-      change H.sum (rawShares (addLiquidityPost σ who a0 a1).shares) =
-        (addLiquidityPost σ who a0 a1).totalShares.raw
-      rw [hsum', hsumr]
-      simp [addLiquidityPost, Amount.raw_add, Amount.raw_ofWord, Nat.add_comm]
-  · refine ⟨insert who H, ?_, ?_⟩
-    · intro a ha
-      have hat : a ≠ who := by
-        intro h; subst h; exact ha (Finset.mem_insert_self _ _)
-      have haH : a ∉ H := fun hH => ha (Finset.mem_insert_of_mem hH)
-      simp [addLiquidityPost, Function.update_of_ne hat]
-      exact h0 a haH
-    · have hb0 : σ.shares who = 0 := h0 who ht
-      have hwho0 : (σ.shares who).raw = 0 := by
-        simpa [Amount.raw_ofNat] using congrArg Amount.raw hb0
-      have hupd :
-          (fun x =>
-            (Function.update σ.shares who
-              (Amount.ofWord (mintedShares σ a0 a1) + σ.shares who) x).raw) =
-            Function.update (rawShares σ.shares) who
-              (mintedShares σ a0 a1 + (σ.shares who).raw) := by
-        funext x
-        by_cases hx : x = who <;>
-          simp [rawShares, Function.update, hx, Amount.raw_add, Amount.raw_ofWord]
-      have hframe :=
-        sum_update_not_mem H (rawShares σ.shares) ht
-          (mintedShares σ a0 a1 + (σ.shares who).raw)
-      have hframe' :
-          H.sum (Function.update (rawShares σ.shares) who
-              (mintedShares σ a0 a1)) =
-            H.sum (rawShares σ.shares) := by
-        simpa [hwho0, Nat.add_comm] using hframe
-      have hsum' :
-          (∑ a ∈ insert who H,
-              rawShares (addLiquidityPost σ who a0 a1).shares a) =
-            H.sum (rawShares σ.shares) + mintedShares σ a0 a1 := by
-        rw [Finset.sum_insert ht]
-        simp only [addLiquidityPost, Function.update_self, rawShares,
-          Amount.raw_add, Amount.raw_ofWord]
-        simp [hupd, hframe', hwho0, Nat.add_comm]
-      change (∑ a ∈ insert who H,
-          ((addLiquidityPost σ who a0 a1).shares a).raw) =
-        (addLiquidityPost σ who a0 a1).totalShares.raw
-      rw [hsum', hsumr]
-      simp [addLiquidityPost, Amount.raw_add, Amount.raw_ofWord, Nat.add_comm]
+  by_cases hts : σ.totalShares.raw = 0
+  · have hz : ∀ a, (σ.shares a).raw = 0 :=
+      invStorage_shares_zero ⟨H, h0, hsum⟩ hts
+    have hdead : deadShares σ = 1000 := by simp [hts]
+    have hsh0 : sharesAfterDead σ 0 = ⟨1000⟩ := by
+      simp [sharesAfterDead, hts, Function.update]
+    by_cases hw : who = (0 : Address)
+    · refine ⟨({0} : Finset Address), ?_, ?_⟩
+      · intro a ha
+        have hne : a ≠ (0 : Address) := by simpa [Finset.mem_singleton] using ha
+        have hnew : (addLiquidityPost σ who a0 a1).shares a = σ.shares a := by
+          subst hw
+          simp [addLiquidityPost, sharesAfterDead, hts, Function.update, hne]
+        have := hz a
+        simpa [hnew, Amount.eq_iff] using this
+      · subst hw
+        simp [addLiquidityPost, sharesAfterDead, hts, deadShares, Function.update,
+          Amount.raw_add, Amount.raw_ofWord, Finset.sum_singleton, hz, hdead]
+    · have hpair : (0 : Address) ≠ who := by intro h; exact hw h.symm
+      refine ⟨({0, who} : Finset Address), ?_, ?_⟩
+      · intro a ha
+        have ha0 : a ≠ (0 : Address) := by
+          intro h; subst h; exact ha (by simp)
+        have haw : a ≠ who := by
+          intro h; subst h; exact ha (by simp)
+        have hnew : (addLiquidityPost σ who a0 a1).shares a = σ.shares a := by
+          simp [addLiquidityPost, sharesAfterDead, hts, Function.update, ha0, haw]
+        have := hz a
+        simpa [hnew, Amount.eq_iff] using this
+      · have hsum' :
+            ({0, who} : Finset Address).sum
+                (rawShares (addLiquidityPost σ who a0 a1).shares) =
+              1000 + mintedShares σ a0 a1 := by
+          rw [Finset.sum_pair hpair]
+          simp [addLiquidityPost, sharesAfterDead, hts, Function.update, hw,
+            Amount.raw_add, Amount.raw_ofWord, hz, hsh0, Ne.symm hw]
+        change ({0, who} : Finset Address).sum
+            (fun a => (addLiquidityPost σ who a0 a1).shares a |>.raw) =
+          (addLiquidityPost σ who a0 a1).totalShares.raw
+        rw [hsum']
+        simp [addLiquidityPost, Amount.raw_add, Amount.raw_ofWord, hts, hdead]
+        exact Nat.add_comm _ _
+  · have hdead : deadShares σ = 0 := by simp [hts]
+    have hsh : sharesAfterDead σ = σ.shares := by simp [sharesAfterDead, hts]
+    by_cases ht : who ∈ H
+    · refine ⟨H, ?_, ?_⟩
+      · intro a ha
+        have hne : a ≠ who := by intro h; subst h; exact ha ht
+        simp [addLiquidityPost, hsh, Function.update_of_ne hne]
+        exact h0 a ha
+      · have hsum' :
+            H.sum (rawShares (addLiquidityPost σ who a0 a1).shares) =
+              H.sum (rawShares σ.shares) + mintedShares σ a0 a1 := by
+          simp only [addLiquidityPost, hsh, rawShares_update, Amount.raw_add,
+            Amount.raw_ofWord]
+          rw [Nat.add_comm (mintedShares σ a0 a1)]
+          exact nat_sum_update_add H (rawShares σ.shares) ht (mintedShares σ a0 a1)
+        change H.sum (rawShares (addLiquidityPost σ who a0 a1).shares) =
+          (addLiquidityPost σ who a0 a1).totalShares.raw
+        rw [hsum', hsumr]
+        simp [addLiquidityPost, Amount.raw_add, Amount.raw_ofWord, hdead, Nat.add_comm]
+    · refine ⟨insert who H, ?_, ?_⟩
+      · intro a ha
+        have hat : a ≠ who := by
+          intro h; subst h; exact ha (Finset.mem_insert_self _ _)
+        have haH : a ∉ H := fun hH => ha (Finset.mem_insert_of_mem hH)
+        simp [addLiquidityPost, hsh, Function.update_of_ne hat]
+        exact h0 a haH
+      · have hb0 : σ.shares who = 0 := h0 who ht
+        have hwho0 : (σ.shares who).raw = 0 := by
+          simpa [Amount.eq_iff] using hb0
+        have hupd :
+            (fun x =>
+              (Function.update σ.shares who
+                (Amount.ofWord (mintedShares σ a0 a1) + σ.shares who) x).raw) =
+              Function.update (rawShares σ.shares) who
+                (mintedShares σ a0 a1 + (σ.shares who).raw) := by
+          funext x
+          by_cases hx : x = who <;>
+            simp [rawShares, Function.update, hx, Amount.raw_add, Amount.raw_ofWord]
+        have hframe :=
+          sum_update_not_mem H (rawShares σ.shares) ht
+            (mintedShares σ a0 a1 + (σ.shares who).raw)
+        have hframe' :
+            H.sum (Function.update (rawShares σ.shares) who
+                (mintedShares σ a0 a1)) =
+              H.sum (rawShares σ.shares) := by
+          simpa [hwho0, Nat.add_comm] using hframe
+        have hsum' :
+            (∑ a ∈ insert who H,
+                rawShares (addLiquidityPost σ who a0 a1).shares a) =
+              H.sum (rawShares σ.shares) + mintedShares σ a0 a1 := by
+          rw [Finset.sum_insert ht]
+          simp only [addLiquidityPost, hsh, Function.update_self, rawShares,
+            Amount.raw_add, Amount.raw_ofWord]
+          simp [hupd, hframe', hwho0, Nat.add_comm]
+        change (∑ a ∈ insert who H,
+            ((addLiquidityPost σ who a0 a1).shares a).raw) =
+          (addLiquidityPost σ who a0 a1).totalShares.raw
+        rw [hsum', hsumr]
+        simp [addLiquidityPost, Amount.raw_add, Amount.raw_ofWord, hdead, Nat.add_comm]
 
 private theorem invStorage_of_removeLiquidityPost (σ : Storage) (who : Address)
     (s : Nat) (hInv : InvStorage σ) (hn : Amount.ofWord s ≤ σ.shares who) :
@@ -717,13 +773,22 @@ theorem cpamm_preserves_inv :
 
 /-! ### Authorization (share count) -/
 
-private theorem claim_mono_add (σ : Storage) (who a : Address) (a0 a1 : Nat) :
+private theorem claim_mono_add (σ : Storage) (who a : Address) (a0 a1 : Nat)
+    (hInv : InvStorage σ) :
     (σ.shares a).raw ≤ ((addLiquidityPost σ who a0 a1).shares a).raw := by
-  simp [addLiquidityPost]
+  have hsh : (σ.shares a).raw ≤ (sharesAfterDead σ a).raw := by
+    by_cases hts : σ.totalShares.raw = 0
+    · have hz := invStorage_shares_zero hInv hts a
+      simp [sharesAfterDead, hts, Function.update, hz]
+    · simp [sharesAfterDead, hts]
+  simp only [addLiquidityPost]
   by_cases h : a = who
-  · subst h; simp [Function.update]
+  · subst h
+    simp [Function.update, Amount.raw_add, Amount.raw_ofWord]
+    exact Nat.le_trans hsh (Nat.le_add_left _ _)
   · have hne : a ≠ who := h
     rw [Function.update_of_ne hne]
+    exact hsh
 
 private theorem claim_frame_remove (σ : Storage) (who a : Address) (s : Nat)
     (hne : who ≠ a) :
@@ -742,11 +807,13 @@ private theorem claim_eq_swap1 (σ : Storage) (dx proto out : Nat) (a : Address)
 theorem addLiquidity_auth :
     NoUnauthorizedDecreaseFn spec (InvT self t0 t1 oracle) claim Auth
       .addLiquidity :=
-  NoUnauthorizedDecreaseFn_of_ok fun ⟨a0, a1⟩ ctx w a n w' _hInv hrun hdec => by
+  NoUnauthorizedDecreaseFn_of_ok fun ⟨a0, a1⟩ ctx w a n w' hInv hrun hdec => by
     have hok := addLiquidity_ok_of_run hrun
     have ⟨_, hσ, _, _⟩ := addLiquidity_post a0 a1 hok hrun
+    have hst : InvStorage w.self := hInv.1.2.2.1
     exact (Nat.not_lt.mpr (by
-      simpa [claim, hσ] using claim_mono_add w.self ctx.sender a a0.raw a1.raw)) hdec
+      simpa [claim, hσ] using
+        claim_mono_add w.self ctx.sender a a0.raw a1.raw hst)) hdec
 
 theorem removeLiquidity_auth :
     NoUnauthorizedDecreaseFn spec (InvT self t0 t1 oracle) claim Auth

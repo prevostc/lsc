@@ -4,6 +4,7 @@ import Lsc.Security.Wealth
 import Lsc.Security.WealthTheorems
 import Examples.Vault.Spec
 import Examples.Vault.Proofs.Tx
+import Stdlib.SharesTheorems
 
 set_option linter.unusedSimpArgs false
 
@@ -18,19 +19,26 @@ and `IERC20.Spec`. Well-formed traces use `PreservesInvFnAt`
 -/
 
 /-- Invariant plus the callee promise, pinned to the starting asset/oracle. -/
-def InvT (asset : IERC20.Ref vaultAsset)
+def InvT (self : Address) (asset : IERC20.Ref vaultAsset)
     (oracle : Oracle ExtState) (w : World Storage ExtState Event) : Prop :=
-  Inv w ∧ w.self.asset = asset ∧ w.oracle = oracle ∧
+  Inv self w ∧ w.self.asset = asset ∧ w.oracle = oracle ∧
     IERC20.Spec (asset.impl : AssetImpl)
 
 /-! ### Environment -/
 
 theorem inv_rely (self : Address) (asset : IERC20.Ref vaultAsset)
     (oracle : Oracle ExtState) :
-    PreservesInvEnv spec (InvT asset oracle)
+    PreservesInvEnv spec (InvT self asset oracle)
       (vaultRely self asset oracle) := by
-  intro w x' ⟨hinv, ha, ho, hT⟩ ⟨_hbal, _hsup⟩
-  exact ⟨hinv, ha, ho, by simpa [IERC20.Ref.impl] using hT⟩
+  intro w x' ⟨⟨hst, hbd⟩, ha, ho, hT⟩ ⟨hbal, _hsup⟩
+  refine ⟨⟨hst, ?_⟩, ha, ho, by simpa [IERC20.Ref.impl] using hT⟩
+  have hH : holdings self w = (viewBal asset self oracle w.ext).raw := by
+    simp [holdings_view, ha, ho]
+  have hH' : holdings self { w with ext := x' } =
+      (viewBal asset self oracle x').raw := by
+    simp [holdings_view, ha, ho]
+  rw [hH']
+  exact Nat.le_trans (hH ▸ hbd) (Nat.mul_le_mul_right _ hbal)
 
 /-! ### Share-support preservation -/
 
@@ -191,122 +199,183 @@ private theorem invStorage_bystander_zero (σ : Storage) (who a : Address)
       exact Amount.ext (Nat.eq_zero_of_le_zero (hle.trans_eq (hsum.trans hts0)))
     · exact h0 a ha
 
-/-- Pro-rata redeemable assets of `a` against holdings `TA`. -/
+/-- Virtual-offset redeemable assets of `a` against holdings `TA`. -/
 private def rate (σ : Storage) (TA : Nat) (a : Address) : Nat :=
-  if σ.totalShares = 0 then 0
-  else (σ.shares a).raw * TA / σ.totalShares.raw
+  Shares.toAssetsRaw offset (σ.shares a).raw TA σ.totalShares.raw
 
 private theorem claim_eq_rate (self a : Address)
     (w : World Storage ExtState Event) :
     claim self a w = rate w.self (holdings self w) a :=
   rfl
 
-/-- Deposit never decreases a pro-rata claim when holdings rise by `assets`. -/
+/-- Deposit never decreases an offset claim when holdings rise by `assets`. -/
 private theorem rate_le_of_depositPost (σ : Storage) (who a : Address)
-    (ta assets : Amount vaultAsset)
-    (hprod : σ.totalShares.raw = 0 ∨ ta.raw ≠ 0) :
+    (ta assets : Amount vaultAsset) :
     let m := mintedShares σ.totalShares ta assets
     rate σ ta.raw a ≤
       rate (depositPost σ who m) (ta.raw + assets.raw) a := by
   set m := mintedShares σ.totalShares ta assets
-  by_cases hts : σ.totalShares = 0
-  · simp [rate, hts]
-  · have htsr : σ.totalShares.raw ≠ 0 := (Amount.ne_iff _ _).mp hts
-    have hTA : ta.raw ≠ 0 := by
-      rcases hprod with h0 | hta
-      · exact (htsr h0).elim
-      · exact hta
-    have hTS : 0 < σ.totalShares.raw := Nat.pos_of_ne_zero htsr
-    have hm : m = σ.totalShares.raw * assets.raw / ta.raw := by
-      simp [m, mintedShares, htsr]
-    have hts' : (depositPost σ who m).totalShares ≠ 0 := by
-      intro hz
-      have hzraw : (depositPost σ who m).totalShares.raw = 0 :=
-        (Amount.eq_iff _ _).mp hz
-      simp [depositPost, Amount.raw_add, Amount.raw_ofWord, m, mintedShares] at hzraw
-      exact htsr hzraw.1
-    dsimp [rate]
-    rw [if_neg hts, if_neg hts']
-    have hm' : m = assets.raw * σ.totalShares.raw / ta.raw := by
-      rw [hm, Nat.mul_comm]
-    by_cases ha : a = who
-    · subst ha
-      simp only [depositPost, Function.update_self, Amount.raw_add, Amount.raw_ofWord, hm']
-      refine Nat.le_trans
-        (deposit_rate_nondecreasing ta.raw σ.totalShares.raw
-          (σ.shares a).raw assets.raw hTS) ?_
-      rw [Nat.add_comm σ.totalShares.raw]
-      exact Nat.div_le_div_right (Nat.mul_le_mul_right _
-        (Nat.le_add_right (σ.shares a).raw
-          (assets.raw * σ.totalShares.raw / ta.raw)))
-    · simp only [depositPost, Function.update_of_ne ha, Amount.raw_add,
-        Amount.raw_ofWord, hm']
-      convert deposit_rate_nondecreasing ta.raw σ.totalShares.raw
-        (σ.shares a).raw assets.raw hTS using 2
+  set V : Nat := Word.scale offset.decimals
+  have hV : 0 < σ.totalShares.raw + V :=
+    Nat.lt_of_lt_of_le (Nat.pow_pos (by decide : 0 < 10))
+      (Nat.le_add_left V σ.totalShares.raw)
+  have hm : m = assets.raw * (σ.totalShares.raw + V) / (ta.raw + 1) := rfl
+  unfold rate
+  simp only [Shares.toAssetsRaw]
+  have hTS : 0 < σ.totalShares.raw + V := hV
+  by_cases ha : a = who
+  · subst ha
+    simp only [depositPost, Function.update_self, Amount.raw_add, Amount.raw_ofWord, hm]
+    have hmono :=
+      deposit_rate_nondecreasing (ta.raw + 1) (σ.totalShares.raw + V)
+        (σ.shares a).raw assets.raw hTS
+    have hstep :=
+      Nat.le_trans hmono (Nat.div_le_div_right (Nat.mul_le_mul_right
+        (ta.raw + 1 + assets.raw) (Nat.le_add_right _ m)))
+    convert hstep using 1
+    simp [V, hm, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc]
+  · simp only [depositPost, Function.update_of_ne ha, Amount.raw_add,
+      Amount.raw_ofWord, hm]
+    have hmono :=
+      deposit_rate_nondecreasing (ta.raw + 1) (σ.totalShares.raw + V)
+        (σ.shares a).raw assets.raw hTS
+    convert hmono using 1
+    simp [V, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc]
 
-/-- Another account's withdraw does not decrease a pro-rata claim. -/
+/-- Another account's withdraw does not decrease an offset claim. -/
 private theorem rate_le_of_withdrawPost (σ : Storage) (who a : Address)
     (ta : Amount vaultAsset) (sharesIn : Amount vShare)
-    (hInv : InvStorage σ) (hne : who ≠ a)
-    (hbal : sharesIn ≤ σ.shares who)
-    (hden : σ.totalShares.raw ≠ 0)
-    (hsup : sharesIn ≤ σ.totalShares) :
+    (hne : who ≠ a) (hsup : sharesIn ≤ σ.totalShares) :
     rate σ ta.raw a ≤
       rate (withdrawPost σ who sharesIn)
         (ta.raw - redeemedAssets σ.totalShares ta sharesIn) a := by
-  have htsσ : σ.totalShares ≠ 0 := (Amount.ne_iff _ _).mpr hden
-  by_cases hts' : (σ.totalShares - sharesIn).raw = 0
-  · have hs_eq : sharesIn.raw = σ.totalShares.raw :=
-      Nat.le_antisymm ((Amount.le_iff _ _).mp hsup)
-        (Nat.sub_eq_zero_iff_le.mp hts')
-    have hall : σ.totalShares ≤ σ.shares who :=
-      (Amount.le_iff _ _).mpr (hs_eq ▸ (Amount.le_iff _ _).mp hbal)
-    have ha0 := invStorage_bystander_zero σ who a hInv hne hall
-    have hpost0 : (withdrawPost σ who sharesIn).totalShares = 0 :=
-      Amount.ext (by simpa [withdrawPost, Amount.raw_sub] using hts')
-    dsimp [rate]
-    rw [if_neg htsσ, if_pos hpost0]
-    simp [ha0, Amount.raw_zero]
-  · have hs_ne : sharesIn.raw ≠ σ.totalShares.raw := by
-      intro heq; exact hts' (by simp [Amount.raw_sub, heq])
-    have hs_lt : sharesIn.raw < σ.totalShares.raw :=
-      Nat.lt_of_le_of_ne ((Amount.le_iff _ _).mp hsup) hs_ne
-    have hTS : 0 < σ.totalShares.raw := Nat.pos_of_ne_zero hden
-    have hpost_ne : (withdrawPost σ who sharesIn).totalShares ≠ 0 :=
-      (Amount.ne_iff _ _).mpr (by simpa [withdrawPost, Amount.raw_sub] using hts')
-    dsimp [rate]
-    rw [if_neg htsσ, if_neg hpost_ne]
-    simp [withdrawPost, Function.update_of_ne hne.symm, Amount.raw_sub,
-      redeemedAssets]
-    convert withdraw_rate_nondecreasing ta.raw σ.totalShares.raw
-      (σ.shares a).raw sharesIn.raw hTS hs_lt using 1
-    simp [Nat.mul_comm]
+  set V : Nat := Word.scale offset.decimals
+  have hVpos : 0 < V := Nat.pow_pos (by decide : 0 < 10)
+  have hTS : 0 < σ.totalShares.raw + V :=
+    Nat.lt_of_lt_of_le hVpos (Nat.le_add_left V σ.totalShares.raw)
+  have hs_lt : sharesIn.raw < σ.totalShares.raw + V :=
+    Nat.lt_of_le_of_lt ((Amount.le_iff _ _).mp hsup)
+      (Nat.lt_add_of_pos_right hVpos)
+  unfold rate
+  simp only [Shares.toAssetsRaw, withdrawPost, Function.update_of_ne hne.symm,
+    Amount.raw_sub]
+  have hr : redeemedAssets σ.totalShares ta sharesIn =
+      sharesIn.raw * (ta.raw + 1) / (σ.totalShares.raw + V) := by
+    unfold redeemedAssets Shares.toAssetsRaw
+    rw [Nat.mul_comm]
+  have hs : sharesIn.raw ≤ σ.totalShares.raw := (Amount.le_iff _ _).mp hsup
+  have hdenEq :
+      σ.totalShares.raw - sharesIn.raw + V =
+        σ.totalShares.raw + V - sharesIn.raw := (Nat.sub_add_comm hs).symm
+  have hr_le : redeemedAssets σ.totalShares ta sharesIn ≤ ta.raw + 1 := by
+    have hle : sharesIn.raw * (ta.raw + 1) ≤
+        (σ.totalShares.raw + V) * (ta.raw + 1) :=
+      Nat.mul_le_mul_right _ (Nat.le_trans hs (Nat.le_add_right _ _))
+    rw [hr]
+    exact Nat.div_le_of_le_mul hle
+  set r := redeemedAssets σ.totalShares ta sharesIn
+  have hnum : (ta.raw + 1) - r ≤ (ta.raw - r) + 1 := by
+    cases Nat.lt_or_ge ta.raw r with
+    | inl hlt =>
+      have hz : ta.raw - r = 0 := Nat.sub_eq_zero_of_le (Nat.le_of_lt hlt)
+      rw [hz]
+      have : r = ta.raw + 1 := Nat.le_antisymm hr_le (Nat.succ_le_of_lt hlt)
+      simp [this]
+    | inr hge =>
+      rw [Nat.sub_add_comm hge]
+  have hmono :=
+    withdraw_rate_nondecreasing (ta.raw + 1) (σ.totalShares.raw + V)
+      (σ.shares a).raw sharesIn.raw hTS hs_lt
+  have hmono' :
+      (σ.shares a).raw * (ta.raw + 1) / (σ.totalShares.raw + V) ≤
+        (σ.shares a).raw * ((ta.raw + 1) - r) /
+          (σ.totalShares.raw + V - sharesIn.raw) := by
+    simpa [hr] using hmono
+  have hstep :
+      (σ.shares a).raw * ((ta.raw + 1) - r) /
+          (σ.totalShares.raw + V - sharesIn.raw) ≤
+        (σ.shares a).raw * ((ta.raw - r) + 1) /
+          (σ.totalShares.raw - sharesIn.raw + V) := by
+    rw [hdenEq]
+    exact Nat.div_le_div_right (Nat.mul_le_mul_left _ hnum)
+  simpa [V, r] using Nat.le_trans hmono' hstep
+
+private theorem nat_add_div_le (x y d : Nat) : x / d + y / d ≤ (x + y) / d := by
+  by_cases hd : d = 0
+  · subst hd; simp
+  · have hpos : 0 < d := Nat.pos_of_ne_zero hd
+    have hx : d * (x / d) ≤ x := Nat.mul_div_le x d
+    have hy : d * (y / d) ≤ y := Nat.mul_div_le y d
+    have hsum : d * (x / d + y / d) ≤ x + y := by
+      rw [Nat.mul_add]; exact Nat.add_le_add hx hy
+    exact (Nat.le_div_iff_mul_le hpos).mpr (Nat.mul_comm _ _ ▸ hsum)
+
+private theorem sum_div_le_div_sum {α : Type} [DecidableEq α]
+    (H : Finset α) (f : α → Nat) (d : Nat) :
+    H.sum (fun a => f a / d) ≤ H.sum f / d := by
+  classical
+  induction H using Finset.induction_on with
+  | empty => simp
+  | insert x S hx ih =>
+    rw [Finset.sum_insert hx, Finset.sum_insert hx]
+    exact Nat.le_trans (Nat.add_le_add (Nat.le_refl (f x / d)) ih)
+      (nat_add_div_le (f x) (S.sum f) d)
+
+private theorem offset_claims_le (A S V : Nat) (hV : 0 < V)
+    (h : S ≤ A * V) :
+    S * (A + 1) / (S + V) ≤ A := by
+  have _hden : 0 < S + V := Nat.lt_of_lt_of_le hV (Nat.le_add_left V S)
+  have hmul : S * (A + 1) ≤ (S + V) * A := by
+    calc
+      S * (A + 1) = S * A + S := by rw [Nat.mul_add, Nat.mul_one]
+      _ ≤ A * S + A * V := Nat.add_le_add (Nat.mul_comm S A ▸ Nat.le_refl _) h
+      _ = A * (S + V) := (Nat.mul_add A S V).symm
+      _ = (S + V) * A := Nat.mul_comm _ _
+  exact Nat.div_le_of_le_mul hmul
+
+private theorem sum_mul_const {α : Type} [DecidableEq α]
+    (H : Finset α) (f : α → Nat) (c : Nat) :
+    H.sum (fun a => f a * c) = H.sum f * c := by
+  classical
+  induction H using Finset.induction_on with
+  | empty => simp
+  | insert x S hx ih =>
+    rw [Finset.sum_insert hx, Finset.sum_insert hx, ih, Nat.add_mul]
 
 theorem inv_solvent (self : Address) (w : World Storage ExtState Event)
-    (h : Inv w) :
+    (h : Inv self w) :
     Solvent (claim self) holdings self w := by
-  obtain ⟨H, h0, hs⟩ := h
-  by_cases hts : w.self.totalShares = 0
-  · refine ⟨H, ?_, ?_⟩
-    · intro a ha; simp [claim, hts]
-    · simp [claim, hts]
-  · refine ⟨H, ?_, ?_⟩
-    · intro a ha
-      have hs0 := h0 a ha
-      simp [claim, hts, hs0, Amount.raw_zero]
-    · have htsr : w.self.totalShares.raw ≠ 0 := (Amount.ne_iff _ _).mp hts
-      have hpos : 0 < w.self.totalShares.raw := Nat.pos_of_ne_zero htsr
-      have hcl :
-          H.sum (fun a => claim self a w) =
-            H.sum (fun a => (w.self.shares a).raw * holdings self w /
-              w.self.totalShares.raw) := by
-        apply Finset.sum_congr rfl
-        intro a _; simp [claim, hts]
-      have hle :=
-        sum_mul_div_le H (fun a => (w.self.shares a).raw) (holdings self w)
-          w.self.totalShares.raw hs hpos
-      rw [hcl]
-      exact hle
+  obtain ⟨⟨H, h0, hs⟩, hbd⟩ := h
+  refine ⟨H, ?_, ?_⟩
+  · intro a ha
+    have hs0 := h0 a ha
+    simp [claim, Shares.toAssetsRaw, hs0, Amount.raw_zero]
+  · have hV : 0 < Word.scale offset.decimals :=
+      Nat.pow_pos (by decide : 0 < 10)
+    have hcl :
+        H.sum (fun a => claim self a w) =
+          H.sum (fun a => (w.self.shares a).raw * (holdings self w + 1) /
+            (w.self.totalShares.raw + Word.scale offset.decimals)) := by
+      apply Finset.sum_congr rfl
+      intro a _; simp [claim, Shares.toAssetsRaw]
+    have hsum :
+        H.sum (fun a => (w.self.shares a).raw * (holdings self w + 1) /
+            (w.self.totalShares.raw + Word.scale offset.decimals)) ≤
+          w.self.totalShares.raw * (holdings self w + 1) /
+            (w.self.totalShares.raw + Word.scale offset.decimals) := by
+      have := sum_div_le_div_sum H
+        (fun a => (w.self.shares a).raw * (holdings self w + 1))
+        (w.self.totalShares.raw + Word.scale offset.decimals)
+      have hfactor :
+          H.sum (fun a => (w.self.shares a).raw * (holdings self w + 1)) =
+            w.self.totalShares.raw * (holdings self w + 1) := by
+        rw [sum_mul_const, hs]
+      simpa [hfactor] using this
+    have hcov :=
+      offset_claims_le (holdings self w) w.self.totalShares.raw
+        (Word.scale offset.decimals) hV hbd
+    rw [hcl]
+    exact Nat.le_trans hsum hcov
 
 private theorem holdings_add_of_transferFrom
     (self : Address) {ctx : Ctx} {w w1 : World Storage ExtState Event}
@@ -385,48 +454,89 @@ private theorem claim_le_of_rely (self : Address)
     simp [holdings_view, ha, ho]
   rw [claim_eq_rate, claim_eq_rate, hH, hH']
   dsimp [rate]
-  split_ifs
-  · exact Nat.le_refl _
-  · exact Nat.div_le_div_right (Nat.mul_le_mul_left _ hbal)
+  simp [Shares.toAssetsRaw]
+  exact Nat.div_le_div_right (Nat.mul_le_mul_left _ (Nat.add_le_add_right hbal 1))
 
 /-! ### Invariant preservation -/
 
 variable (self : Address) (asset : IERC20.Ref vaultAsset) (oracle : Oracle ExtState)
 
 theorem deposit_preserves_inv :
-    PreservesInvFnAt spec (InvT asset oracle) self .deposit :=
+    PreservesInvFnAt spec (InvT self asset oracle) self .deposit :=
   PreservesInvFnAt_of_ok fun assets ctx w _n w' hself hsne hInvT hrun => by
-    obtain ⟨hst, ha, ho, hT⟩ := hInvT
+    obtain ⟨⟨hst, hbd⟩, ha, ho, hT⟩ := hInvT
     have hok := deposit_ok_of_run hrun
     obtain ⟨_, hσ, hor, _⟩ := deposit_post assets hok hrun
     obtain ⟨w1, htf, hself1, hor1, _, hext, _⟩ := deposit_call assets hok hrun
     have hT' : IERC20.Spec (w.self.asset.impl : AssetImpl) := by
       simpa [IERC20.Ref.impl, ha] using hT
-    refine ⟨by
-        simp [Inv, hσ]
-        exact invStorage_of_depositPost w.self ctx.sender
-          (mintedShares w.self.totalShares hok.ta assets) hst,
-      ?_, ?_, ?_⟩
+    have hTA : holdings self w = hok.ta.raw := by
+      subst hself
+      exact viewBal?_some_holdings ctx.self hok.viewOk
+    have hhold := holdings_add_of_transferFrom self hself hsne hT' htf
+    have hhold' : holdings self w' = holdings self w1 :=
+      holdings_congr self (by simp [hσ, depositPost, hself1])
+        (hor.trans hor1.symm) hext
+    have hH' : holdings self w' = holdings self w + assets.raw := by
+      rw [hhold', hhold]
+    refine ⟨⟨?_, ?_⟩, ?_, ?_, ?_⟩
+    · simpa [hσ] using
+        invStorage_of_depositPost w.self ctx.sender
+          (mintedShares w.self.totalShares hok.ta assets) hst
+    · rw [hσ]
+      simp only [depositPost, Amount.raw_add, Amount.raw_ofWord, mintedShares]
+      have hbd' : w.self.totalShares.raw ≤ hok.ta.raw * Word.scale offset.decimals :=
+        hTA ▸ hbd
+      simpa [hH', hTA] using Shares.toSharesRaw_preserves_inv offset hbd'
     · simpa [hσ, depositPost] using ha
     · simpa [hor] using ho
     · simpa [IERC20.Ref.impl, hσ, depositPost, ha] using hT
 
 theorem withdraw_preserves_inv :
-    PreservesInvFnAt spec (InvT asset oracle) self .withdraw :=
+    PreservesInvFnAt spec (InvT self asset oracle) self .withdraw :=
   PreservesInvFnAt_of_ok fun sharesIn ctx w _n w' hself hsne hInvT hrun => by
-    obtain ⟨hst, ha, ho, hT⟩ := hInvT
+    obtain ⟨⟨hst, hbd⟩, ha, ho, hT⟩ := hInvT
     have hok := withdraw_ok_of_run hrun
     obtain ⟨_, hσ, hor, _⟩ := withdraw_post sharesIn hok hrun
-    refine ⟨by
-        simp [Inv, hσ]
-        exact invStorage_of_withdrawPost w.self ctx.sender sharesIn hst hok.bal,
-      ?_, ?_, ?_⟩
+    obtain ⟨w1, htr, hself1, hor1, hext, _, _⟩ := withdraw_call sharesIn hok hrun
+    have hT' : IERC20.Spec (w.self.asset.impl : AssetImpl) := by
+      simpa [IERC20.Ref.impl, ha] using hT
+    have hTA : holdings self w = hok.ta.raw := by
+      subst hself
+      exact viewBal?_some_holdings ctx.self hok.viewOk
+    have hhold := holdings_sub_of_transfer self hself hsne hT'
+      (wCall := withdrawTailWorld w ctx.sender sharesIn)
+      (by simp [withdrawTailWorld, withdrawPost]) rfl rfl
+      (by simpa [withdrawTailWorld] using htr)
+    have hhold' : holdings self w' = holdings self w1 :=
+      holdings_congr self (by simp [hσ, withdrawPost, hself1])
+        (hor.trans hor1.symm) hext
+    set amt := Amount.ofWord (redeemedAssets w.self.totalShares hok.ta sharesIn)
+    have hH' : holdings self w' + amt.raw = holdings self w := by
+      rw [hhold', hhold]
+    refine ⟨⟨?_, ?_⟩, ?_, ?_, ?_⟩
+    · simpa [hσ] using
+        invStorage_of_withdrawPost w.self ctx.sender sharesIn hst hok.bal
+    · rw [hσ]
+      simp only [withdrawPost, Amount.raw_sub]
+      have hbd' : w.self.totalShares.raw ≤ hok.ta.raw * Word.scale offset.decimals :=
+        hTA ▸ hbd
+      have hsub : holdings self w' =
+          hok.ta.raw - redeemedAssets w.self.totalShares hok.ta sharesIn := by
+        have : amt.raw = redeemedAssets w.self.totalShares hok.ta sharesIn :=
+          Amount.raw_ofWord _
+        rw [hTA] at hH'
+        rw [this] at hH'
+        exact Nat.eq_sub_of_add_eq hH'
+      simpa [hsub, redeemedAssets] using
+        Shares.toAssetsRaw_preserves_inv (o := offset)
+          ((Amount.le_iff _ _).mp hok.supply) hbd'
     · simpa [hσ, withdrawPost] using ha
     · simpa [hor] using ho
     · simpa [IERC20.Ref.impl, hσ, withdrawPost, ha] using hT
 
 theorem pause_preserves_inv :
-    PreservesInvFnAt spec (InvT asset oracle) self .pause := by
+    PreservesInvFnAt spec (InvT self asset oracle) self .pause := by
   intro u ctx w _ _ hInvT
   by_cases howner : ctx.sender = w.self.owner
   · obtain ⟨hInv, ha, ho, hT⟩ := hInvT
@@ -437,7 +547,7 @@ theorem pause_preserves_inv :
     simp [worldAfter, hrun]; exact hInvT
 
 theorem unpause_preserves_inv :
-    PreservesInvFnAt spec (InvT asset oracle) self .unpause := by
+    PreservesInvFnAt spec (InvT self asset oracle) self .unpause := by
   intro u ctx w _ _ hInvT
   by_cases howner : ctx.sender = w.self.owner
   · obtain ⟨hInv, ha, ho, hT⟩ := hInvT
@@ -448,7 +558,7 @@ theorem unpause_preserves_inv :
     simp [worldAfter, hrun]; exact hInvT
 
 theorem isPaused_preserves_inv :
-    PreservesInvFnAt spec (InvT asset oracle) self .isPaused := by
+    PreservesInvFnAt spec (InvT self asset oracle) self .isPaused := by
   intro u ctx w _ _ hInvT
   unfold worldAfter
   rw [isPaused_returns_stored]
@@ -465,19 +575,19 @@ private theorem previewRedeem_worldAfter (sharesIn : Amount vShare)
   worldAfter_eq_self (fun _ _ h => previewRedeem_success_world h)
 
 theorem previewDeposit_preserves_inv :
-    PreservesInvFnAt spec (InvT asset oracle) self .previewDeposit := by
+    PreservesInvFnAt spec (InvT self asset oracle) self .previewDeposit := by
   intro assets ctx w _ _ hInvT
   rw [previewDeposit_worldAfter]
   exact hInvT
 
 theorem previewRedeem_preserves_inv :
-    PreservesInvFnAt spec (InvT asset oracle) self .previewRedeem := by
+    PreservesInvFnAt spec (InvT self asset oracle) self .previewRedeem := by
   intro sharesIn ctx w _ _ hInvT
   rw [previewRedeem_worldAfter]
   exact hInvT
 
 theorem vault_preserves_inv :
-    PreservesInvAt spec (InvT asset oracle) self :=
+    PreservesInvAt spec (InvT self asset oracle) self :=
   PreservesInvAt.of_fns fun fn =>
     match fn with
     | .deposit => deposit_preserves_inv self asset oracle
@@ -509,11 +619,7 @@ private theorem claim_le_deposit_run (assets : Amount vaultAsset)
     rw [hhold', hhold]
   have hTA : holdings ctx.self w = hok.ta.raw :=
     viewBal?_some_holdings ctx.self hok.viewOk
-  have hprod : w.self.totalShares.raw = 0 ∨ hok.ta.raw ≠ 0 := by
-    rcases hok.prod with h0 | ⟨hta, _⟩
-    · exact Or.inl h0
-    · exact Or.inr hta
-  have hrate := rate_le_of_depositPost w.self ctx.sender a hok.ta assets hprod
+  have hrate := rate_le_of_depositPost w.self ctx.sender a hok.ta assets
   rw [claim_eq_rate, claim_eq_rate, hσ, hH', hTA]
   exact hrate
 
@@ -522,7 +628,6 @@ private theorem claim_le_withdraw_run (sharesIn : Amount vShare)
     {a : Address}
     (hself : ctx.self = self) (hsne : ctx.sender ≠ self)
     (hneA : ctx.sender ≠ a)
-    (hInv : Inv w)
     (hT : IERC20.Spec (w.self.asset.impl : AssetImpl))
     (hrun : Tx.run (withdraw sharesIn) ctx w = .ok (n, w')) :
     claim self a w ≤ claim self a w' := by
@@ -545,7 +650,7 @@ private theorem claim_le_withdraw_run (sharesIn : Amount vShare)
   have hTA : holdings ctx.self w = hok.ta.raw :=
     viewBal?_some_holdings ctx.self hok.viewOk
   have hrate := rate_le_of_withdrawPost w.self ctx.sender a hok.ta sharesIn
-    hInv hneA hok.bal hok.denom hok.supply
+    hneA hok.supply
   have hsub : holdings ctx.self w' =
       hok.ta.raw - redeemedAssets w.self.totalShares hok.ta sharesIn := by
     have : amt.raw = redeemedAssets w.self.totalShares hok.ta sharesIn :=
@@ -558,7 +663,7 @@ private theorem claim_le_withdraw_run (sharesIn : Amount vShare)
 
 private theorem claim_le_call (c : Call spec)
     (w : World Storage ExtState Event) (a : Address)
-    (hInvT : InvT asset oracle w)
+    (hInvT : InvT self asset oracle w)
     (ht : c.target = self) (hs : c.sender ≠ self)
     (hna : ¬ Auth a c w) :
     claim self a w ≤ claim self a (step (.call c) w) := by
@@ -581,7 +686,7 @@ private theorem claim_le_call (c : Call spec)
     have hneA : ctx.sender ≠ a := by
       intro heq
       exact hna (by simpa [Auth, AuthPred.ofSelf] using heq)
-    exact claim_le_withdraw_run (self := self) args hself hsne hneA hInv hT' hrun
+    exact claim_le_withdraw_run (self := self) args hself hsne hneA hT' hrun
   | .pause =>
     by_cases howner : ctx.sender = w.self.owner
     · have hok := pause_ok (ctx := ctx) (w := w) howner
@@ -621,7 +726,7 @@ theorem vault_solvent (self : Address) (tr : List (Step spec))
     (hW : Wf self tr)
     (hR : RelyAlong (vaultRely self w.self.asset w.oracle) tr w)
     (hT : IERC20.Spec (w.self.asset.impl : AssetImpl))
-    (h : Inv w) :
+    (h : Inv self w) :
     Solvent (claim self) holdings self (run tr w) :=
   solvent_run_at
     (vault_preserves_inv self w.self.asset w.oracle)
@@ -631,7 +736,7 @@ theorem vault_solvent (self : Address) (tr : List (Step spec))
 
 theorem vault_no_unauthorized_extraction (self : Address)
     (tr : List (Step spec)) (w : World Storage ExtState Event) (a : Address)
-    (hw : Inv w) (hW : Wf self tr)
+    (hw : Inv self w) (hW : Wf self tr)
     (hR : RelyAlong (vaultRely self w.self.asset w.oracle) tr w)
     (hT : IERC20.Spec (w.self.asset.impl : AssetImpl))
     (hA : NoAuthAlong Auth a tr w) :
@@ -639,7 +744,7 @@ theorem vault_no_unauthorized_extraction (self : Address)
   let asset := w.self.asset
   let oracle := w.oracle
   have go : ∀ (tr : List (Step spec)) (w' : World Storage ExtState Event),
-      InvT asset oracle w' →
+      InvT self asset oracle w' →
       Wf self tr →
       RelyAlong (vaultRely self asset oracle) tr w' →
       NoAuthAlong Auth a tr w' →

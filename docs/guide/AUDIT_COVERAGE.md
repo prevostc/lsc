@@ -15,7 +15,7 @@ DeFi-oriented cut of SWC / OWASP Smart Contract Top 10 / Solodit. Status is
 | Reentrancy (classic, RO, cross-fn) | Assumed | lock emitted + held-lock revert proved; `NoReentry` hypothesis remains until 8C | Compiler: drop `hNR` (8C) |
 | Integer overflow/underflow | Impossible | `Tx.addChecked` / `+?` revert; wrapping only `+↻` (`Prim.addWrap`) | Don’t use `+↻` in money paths |
 | Rounding / precision loss | Proved | `mulDiv↓`/`↑`; `swap0for1_k`; `removeLiquidity_paid`; `vault_solvent` (floor dust) | 512-bit `mulDiv` (Cpamm docstring) |
-| First-depositor / share inflation / donation | Open | Vault README: inflation “not prevented”; `deposit` rates off live `balanceOf`; Vault first mint `assets.as`; Cpamm first mint `a0.as lpShare` (no `min(a0,a1)`, no dead shares); `require (0 < minted)` only | Stdlib virtual offset / dead shares |
+| First-depositor / share inflation / donation | Proved | Vault: `Shares` virtual offset `10^6`; `deposit_inflation_bounded` / `Shares.inflation_bound_raw` (`V · (x − r) ≤ A + V`); Cpamm: Uniswap-v2 `MINIMUM_LIQUIDITY` lock, `addLiquidity_min_liquidity` (first mint → `1000 ≤ totalShares`) | Weaker `r ≥ x − x/V − 1` is false when the mint is 0; attacker-cost form is what is proved |
 | Access control / missing auth | Proved | `token_no_unauthorized_extraction` + `Auth`; Vault/Cpamm own `withdraw`/`removeLiquidity`; `NotOwner` on mint/pause | `Auth` is per-contract; missing `require` still compiles until proofs fail |
 | Unchecked CALL return | Impossible | `if iszero(ok) { revert(0,0) }`; `SafeERC20` `require (ok = true)`; `boolOpt` empty→true | Raw `r.transfer` without `safe*` still compiles |
 | Fee-on-transfer / rebase / weird ERC20 | Assumed | `IERC20.Spec.transfer_moves` exact `amount`; SECURITY.md fee-on-transfer, down-rebase excluded; `vaultRely` allows up-rebase | Stdlib: credit `Δ balanceOf` |
@@ -31,7 +31,7 @@ DeFi-oriented cut of SWC / OWASP Smart Contract Top 10 / Solodit. Status is
 | DoS via revert-in-callback / unexpected ETH | Assumed | Failed CALL reverts us (SECURITY.md); ABI `nonpayable`; no `receive` | Liveness vs token-revert griefing |
 | Timestamp / block dependence | Open | `Tx.timestamp` / `blockNumber` are `Core.Op` and compile | Lint/ban in `Auth` |
 | ETH / `payable` / stuck funds | Assumed | Interface “payable methods are not modelled”; outgoing `call(..., 0, ...)` | Model payable; sweep force-ETH |
-| Decimals mismatch / unit confusion | Open | `Amount a` blocks mixed `+?`; `Amount.as` is 1:1 retag (Vault/Cpamm first mint) | Ban `.as` except explicit mint |
+| Decimals mismatch / unit confusion | Proved | `Amount a` blocks mixed `+?`; `x.as b` requires `a.decimals? = b.decimals?` at elaboration (rejects `USDC(6)→DAI(18)` and `none` vs `some`); `asUnchecked` only for documented cross-scale retags (Cpamm first mint) | `decodeOrDefault` on views still fail-open |
 | Unsafe casts / silent truncation | Open | `Amount.ofWord`; `decodeOrDefault` on views | Fail closed on bad view ABI |
 | ERC-777 / token-hook reentrancy | Assumed | SECURITY.md ERC-777 hooks out of scope; `NoReentry` | 8C + token `Spec` |
 | Governance / admin key | Assumed | Owner `pause`/`setFeeTo`; vault: pause blocks, claim unchanged; Cpamm README: fee redirect not proved | Example: own-call fairness (DECISIONS, not landed) |
@@ -48,12 +48,11 @@ DeFi-oriented cut of SWC / OWASP Smart Contract Top 10 / Solodit. Status is
 Ordered by value/cost. One cheapest close each.
 
 1. **Reentrancy hyp `hNR`** — compiler: finish 8C; lock emitted + held-lock revert proved; `NoReentry` hypothesis remains until 8C.
-2. **Share inflation / donation** — stdlib: virtual offset or Uniswap-style dead shares (code has neither).
-3. **Fee-on-transfer / down-rebase** — model: `IERC20.Spec` from `Δ balanceOf`, not stated `amount`.
-4. **`implements_to_conforms`** — model: Lsc callee discharges `Conforms` (DECISIONS only).
-5. **Deadline + `minOut`** — stdlib + one Cpamm theorem (`out ≥ minOut`, `timestamp ≤ deadline`).
-6. **Admin fairness** — example: `setFeeTo`/`pause` cannot cut another’s *claim* is proved; prove they cannot redirect *value*.
-7. **Price oracle** — stdlib `IOracle.Spec` (freshness, bounds); none today.
-8. **Approve race** — stdlib `increaseAllowance` / `safeApprove` pattern.
-9. **CREATE args / S2 constructors** — model: TRUST.md gap; Vault/Cpamm ctor `CALL`.
-10. **`Amount.as` / `decodeOrDefault`** — language: fail closed on unit retag and bad view payloads.
+2. **Fee-on-transfer / down-rebase** — model: `IERC20.Spec` from `Δ balanceOf`, not stated `amount`.
+3. **`implements_to_conforms`** — model: Lsc callee discharges `Conforms` (DECISIONS only).
+4. **Deadline + `minOut`** — stdlib + one Cpamm theorem (`out ≥ minOut`, `timestamp ≤ deadline`).
+5. **Admin fairness** — example: `setFeeTo`/`pause` cannot cut another’s *claim* is proved; prove they cannot redirect *value*.
+6. **Price oracle** — stdlib `IOracle.Spec` (freshness, bounds); none today.
+7. **Approve race** — stdlib `increaseAllowance` / `safeApprove` pattern.
+8. **CREATE args / S2 constructors** — model: TRUST.md gap; Vault/Cpamm ctor `CALL`.
+9. **`decodeOrDefault`** — language: fail closed on bad view payloads (`Amount.as` is already decimals-checked).

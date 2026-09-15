@@ -14,7 +14,8 @@ Checked arithmetic (revert on overflow, underflow, or division by zero):
 | `x *? k`, `x /? k` | scale by a `Word` |
 | `x mulDiv↓ y / z`, `x mulDiv↑ y / z` | fused `⌊x·y/z⌋` / `⌈x·y/z⌉`; `y`/`z` may be two `Amount`s or two `Word`s |
 | `x *?↓ r`, `x *?↑ r` | scale `x : Amount a` by `r : Fixed d` (`⌊x·r/10^d⌋` / ceil) |
-| `x.as b` | 1:1 retag to asset `b` (same raw word) |
+| `x.as b` | 1:1 retag to asset `b` when `a.decimals? = b.decimals?` at elaboration |
+| `x.asUnchecked b` | same retag without the decimals check; document why |
 
 Units in `Stdlib/Scales.lean`: `Wad`/`Ray`/`Bps` (`Fixed 18/27/4`) and constants `WAD`/`RAY`/`BPS`.
 
@@ -67,6 +68,7 @@ IERC20.Spec Token.impl` is in `Examples/Token/Theorems.lean`.
 
 Vault (`Examples/Vault/Contract.lean`) stores `asset : Ref (IERC20 vaultAsset)`,
 reads it with `let tok ← read asset`, and pulls with `safeTransferFrom`.
+Share conversion is `Stdlib/Shares.lean` virtual-offset math (`offset := ⟨6⟩`).
 Cpamm (`Examples/Cpamm/Contract.lean`) binds two `Ref (IERC20 …)` tokens.
 See [External calls](EXTERNAL_CALLS.md).
 

@@ -10,12 +10,15 @@ calls run after storage writes.
 (the fee is what makes the increase strict in typical trades); protocol
 buckets move only on swaps and `collectProtocolFees`; `removeLiquidity` pays
 the floor pro-rata of each reserve; `addLiquidity` mints the floor-min of
-the two reserve ratios (or `a0` on the first mint); owner admin does not
-touch the buckets.
+the two reserve ratios, or `a0 − 1000` on the first mint, locking
+`MINIMUM_LIQUIDITY` at address 0 (`addLiquidity_min_liquidity` on a first
+mint). Owner admin does not touch the buckets.
 
 **Proved (spec):** share-count anti-extraction
 (`cpamm_no_unauthorized_extraction`) and solvency of LP claims plus protocol
-buckets against live holdings (`cpamm_solvent`). Assumed of the tokens: they
+buckets against live holdings (`cpamm_solvent`). Address 0's locked shares
+count as a claim; only a `removeLiquidity` it signs could burn them.
+Assumed of the tokens: they
 are distinct conforming ERC-20s per `IERC20.Spec`; a CALL on one does not
 change the other's `balanceOf` / `totalSupply` views; no reentrancy is
 modelled; no fee-on-transfer. Between calls neither pool balance may fall

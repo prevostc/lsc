@@ -60,6 +60,7 @@ inductive Error
   | NotOwner
   | FeeTooHigh
   | NoFeeTo
+  | InsufficientLiquidity
   deriving DecidableEq, Repr
 
 abbrev M := Tx Storage ExtState Event Error
@@ -82,7 +83,12 @@ def constructor (owner t0 t1 : Address) : M Unit := do
   write token0 { addr := t0 }
   write token1 { addr := t1 }
 
-/-- Deposit `a0`/`a1`. First mint is `a0`; later mint is the floor-min. -/
+/-- Uniswap-v2 minimum liquidity burned to address 0 on the first mint. -/
+def MINIMUM_LIQUIDITY : Amount lpShare := 1000
+
+/-- Deposit `a0`/`a1`. First mint relabels `a0` as LP shares (two-asset pools
+have no single decimals; Uniswap-v2 convention) and burns
+`MINIMUM_LIQUIDITY` to address 0. Later mint is the floor-min. -/
 def addLiquidity (a0 : Amount asset0) (a1 : Amount asset1) : M (Amount lpShare) := do
   Tx.require (0 < a0) .Zero
   Tx.require (0 < a1) .Zero
@@ -91,9 +97,14 @@ def addLiquidity (a0 : Amount asset0) (a1 : Amount asset1) : M (Amount lpShare) 
   let r0 ← read reserve0
   let r1 ← read reserve1
   let ts ← read totalShares
+  let raw : Amount lpShare := a0.asUnchecked lpShare
+  -- LP shares of a two-asset pool have no single decimals; Uniswap-v2
+  -- convention uses token0's raw amount. `asUnchecked` is the cross-scale
+  -- relabel.
+  if ts = 0 then
+    Tx.require (MINIMUM_LIQUIDITY < raw) .InsufficientLiquidity
   let minted ←
-    if ts = 0 then
-      a0.as lpShare
+    if ts = 0 then raw -? MINIMUM_LIQUIDITY
     else do
       Tx.require (0 < r0) .Zero
       Tx.require (0 < r1) .Zero
@@ -105,8 +116,12 @@ def addLiquidity (a0 : Amount asset0) (a1 : Amount asset1) : M (Amount lpShare) 
   write reserve0 r0'
   let r1' ← r1 +? a1
   write reserve1 r1'
-  let ts' ← minted +? ts
+  let ts' ← ts +? minted
   write totalShares ts'
+  if ts = 0 then
+    write totalShares raw
+  if ts = 0 then
+    write shares[0] MINIMUM_LIQUIDITY
   let bal ← read shares[who]
   let bal' ← minted +? bal
   write shares[who] bal'

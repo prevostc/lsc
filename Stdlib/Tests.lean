@@ -1,6 +1,7 @@
 import Lsc.Lang.Reify
 import Stdlib.SafeERC20
 import Stdlib.Scales
+import Stdlib.Shares
 
 /-!
 # Stdlib compile tests — `@[lsc_inline]` helpers, including mid-`do`
@@ -126,6 +127,32 @@ def doIteCoeff (x : Amount testToken) (ft : Address) (ps : Bps) :
   let coeff : Bps := if ft = 0 then 0 else ps
   x *?↓ coeff
 
+/-- Same-asset `as` (equal `decimals?`) is a 1:1 retag. -/
+def doAs (x : Amount testToken) : M (Amount testToken) := do
+  x.as testToken
+
+/-- Cross-scale relabel: `none` vs `some 18`, justified as a compile test. -/
+def doAsUnchecked (x : Amount testToken) : M (Amount asset1) := do
+  x.asUnchecked asset1
+
+def shareAsset : Asset := ⟨`shareAsset, some 18⟩
+
+/-- Virtual-offset share mint; `1000000` is `10^6` (offset `⟨6⟩`).
+`Shares.toShares` is the spec/proof helper; compiling a direct call currently
+fails the reification certificate (`simp [toShares, bind_assoc]`), so tests
+and examples expand the three binds with a folded literal. -/
+def doToShares (assets totalAssets : Amount testToken)
+    (totalShares : Amount shareAsset) : M (Amount shareAsset) := do
+  let ts' ← Amount.add totalShares (⟨1000000⟩ : Amount shareAsset)
+  let ta' ← Amount.add totalAssets (1 : Amount testToken)
+  Amount.mulDivDown ts' assets ta'
+
+def doToAssets (shares : Amount shareAsset) (totalAssets : Amount testToken)
+    (totalShares : Amount shareAsset) : M (Amount testToken) := do
+  let ta' ← Amount.add totalAssets (1 : Amount testToken)
+  let ts' ← Amount.add totalShares (⟨1000000⟩ : Amount shareAsset)
+  Amount.mulDivDown ta' shares ts'
+
 end StdlibTests
 
 lsc_schema StdlibTests
@@ -139,6 +166,8 @@ lsc_reify StdlibTests.doAdd StdlibTests.doQuote StdlibTests.doMulFixed
 lsc_reify StdlibTests.doSafeTransferFromMid
 lsc_reify StdlibTests.doQuotePair StdlibTests.doQuoteTriple
 lsc_reify StdlibTests.doIteCoeff
+lsc_reify StdlibTests.doAs StdlibTests.doAsUnchecked
+lsc_reify StdlibTests.doToShares StdlibTests.doToAssets
 
 #check StdlibTests.doCheckOk.core_denote
 #check StdlibTests.doSafeTransfer.core_denote
@@ -163,6 +192,10 @@ lsc_reify StdlibTests.doIteCoeff
 #check StdlibTests.doQuotePair.core_denote
 #check StdlibTests.doQuoteTriple.core_denote
 #check StdlibTests.doIteCoeff.core_denote
+#check StdlibTests.doAs.core_denote
+#check StdlibTests.doAsUnchecked.core_denote
+#check StdlibTests.doToShares.core_denote
+#check StdlibTests.doToAssets.core_denote
 
 example : Nat.pow 10 18 = WAD.raw := rfl
 example : Nat.pow 10 27 = RAY.raw := rfl
@@ -192,3 +225,27 @@ example : True := by
       (Amount.mulDivDown r1 dxF (r1 +? dxF) :
         StdlibTests.M (Amount StdlibTests.asset1)))
   trivial
+
+def usdc6 : Lsc.Asset := ⟨`USDC, some 6⟩
+def dai18 : Lsc.Asset := ⟨`DAI, some 18⟩
+def dynNone : Lsc.Asset := ⟨`dyn, none⟩
+
+/--
+error: could not synthesize default value for parameter '_h' using tactics
+---
+error: Amount.as: decimals? must be equal (use asUnchecked)
+x : Amount usdc6
+⊢ usdc6.decimals? = dai18.decimals?
+-/
+#guard_msgs in
+example (x : Amount usdc6) : Amount dai18 := x.as dai18
+
+/--
+error: could not synthesize default value for parameter '_h' using tactics
+---
+error: Amount.as: decimals? must be equal (use asUnchecked)
+x : Amount dynNone
+⊢ dynNone.decimals? = dai18.decimals?
+-/
+#guard_msgs in
+example (x : Amount dynNone) : Amount dai18 := x.as dai18

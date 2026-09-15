@@ -41,12 +41,12 @@ end Vault
 
 #guard
   (match Lsc.Tx.run (Vault.deposit 50) Vault.smokeCtx Vault.smokeEmpty with
-    | .ok (n, _) => n.raw == 50
+    | .ok (n, _) => n.raw == 495049
     | _ => false)
 
 #guard
   (match Lsc.Tx.run (Vault.previewDeposit 50) Vault.smokeCtx Vault.smokeFilled with
-    | .ok (n, w') => n.raw == 50 && w'.self.totalShares == 100
+    | .ok (n, w') => n.raw == 495099 && w'.self.totalShares == 100
     | _ => false)
 
 #guard
