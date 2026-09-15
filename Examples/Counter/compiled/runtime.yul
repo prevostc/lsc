@@ -22,6 +22,9 @@
                 revert(0, 0)
             }
         }
+        if callvalue() {
+            revert(0, 0)
+        }
         {
             let increment_0 := sload(0)
             let increment_1 := add(increment_0, 1)
@@ -41,6 +44,9 @@
             if lt(calldatasize(), 36) {
                 revert(0, 0)
             }
+        }
+        if callvalue() {
+            revert(0, 0)
         }
         {
             let incrementBy_0 := calldataload(4)
@@ -66,6 +72,9 @@
             if lt(calldatasize(), 4) {
                 revert(0, 0)
             }
+        }
+        if callvalue() {
+            revert(0, 0)
         }
         {
             let decrement_0 := sload(0)
@@ -97,6 +106,9 @@
             if lt(calldatasize(), 4) {
                 revert(0, 0)
             }
+        }
+        if callvalue() {
+            revert(0, 0)
         }
         {
             let get_0 := sload(0)

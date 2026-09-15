@@ -25,6 +25,9 @@
                 revert(0, 0)
             }
         }
+        if callvalue() {
+            revert(0, 0)
+        }
         tstore(0, 1)
         {
             let deposit_0 := calldataload(4)
@@ -134,6 +137,9 @@
             if lt(calldatasize(), 36) {
                 revert(0, 0)
             }
+        }
+        if callvalue() {
+            revert(0, 0)
         }
         tstore(0, 1)
         {
@@ -248,6 +254,9 @@
                 revert(0, 0)
             }
         }
+        if callvalue() {
+            revert(0, 0)
+        }
         {
             let previewDeposit_0 := calldataload(4)
             let previewDeposit_1 := address()
@@ -299,6 +308,9 @@
             if lt(calldatasize(), 36) {
                 revert(0, 0)
             }
+        }
+        if callvalue() {
+            revert(0, 0)
         }
         {
             let previewRedeem_0 := calldataload(4)
@@ -352,6 +364,9 @@
                 revert(0, 0)
             }
         }
+        if callvalue() {
+            revert(0, 0)
+        }
         {
             let pause_0 := caller()
             let pause_1 := sload(1)
@@ -370,6 +385,9 @@
                 revert(0, 0)
             }
         }
+        if callvalue() {
+            revert(0, 0)
+        }
         {
             let unpause_0 := caller()
             let unpause_1 := sload(1)
@@ -387,6 +405,9 @@
             if lt(calldatasize(), 4) {
                 revert(0, 0)
             }
+        }
+        if callvalue() {
+            revert(0, 0)
         }
         {
             let isPaused_0 := sload(2)

@@ -388,21 +388,23 @@ def check_storage(node: Anvil, addr: str, slots: list[dict[str, str]], row: Row)
 def run_call_case(node: Anvil, addr: str, case: dict[str, Any], row: Row) -> None:
     sender = case["sender"]
     calldata = case["calldata"]
+    value = int(case.get("value") or 0)
     node.impersonate(sender)
     apply_pre(node, addr, case.get("pre_storage") or [])
 
-    call = node.run_cast(
-        [
-            "call",
-            "--from",
-            sender,
-            "--gas-limit",
-            GAS_LIMIT,
-            "--data",
-            calldata,
-            addr,
-        ]
-    )
+    call_cmd = [
+        "call",
+        "--from",
+        sender,
+        "--gas-limit",
+        GAS_LIMIT,
+        "--data",
+        calldata,
+    ]
+    if value:
+        call_cmd.extend(["--value", str(value)])
+    call_cmd.append(addr)
+    call = node.run_cast(call_cmd)
     call_ok, ret = parse_call_result(call)
     expected_ok = case["status"] == "ok"
     expected_ret = norm_hex(case.get("return_data") or "0x")
@@ -420,19 +422,19 @@ def run_call_case(node: Anvil, addr: str, case: dict[str, Any], row: Row) -> Non
     else:
         row.ret = "match"
 
-    send = node.run_cast(
-        [
-            "send",
-            "--from",
-            sender,
-            "--unlocked",
-            "--gas-limit",
-            GAS_LIMIT,
-            "--json",
-            addr,
-            calldata,
-        ]
-    )
+    send_cmd = [
+        "send",
+        "--from",
+        sender,
+        "--unlocked",
+        "--gas-limit",
+        GAS_LIMIT,
+        "--json",
+    ]
+    if value:
+        send_cmd.extend(["--value", str(value)])
+    send_cmd.extend([addr, calldata])
+    send = node.run_cast(send_cmd)
     send_ok, send_out = parse_send_ok(send)
     if send_ok != expected_ok:
         row.fail(

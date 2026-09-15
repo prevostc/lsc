@@ -35,14 +35,14 @@ contract DecompiledContract {
     
     event Event_d24ccccf();
     error CustomError_00000000();
-    event Event_268d208c();
+    event Event_bfd50a04();
     
     /// @custom:selector    0x2b1087f0
-    /// @custom:signature   Unresolved_2b1087f0(uint256 arg0, uint256 arg1) public payable returns (uint256)
+    /// @custom:signature   Unresolved_2b1087f0(uint256 arg0, uint256 arg1) public returns (uint256)
     /// @param              arg0 ["uint256", "bytes32", "int256"]
     /// @param              arg1 ["uint256", "bytes32", "int256"]
-    function Unresolved_2b1087f0(uint256 arg0, uint256 arg1) public payable returns (uint256) {
-        require(!(msg.data.length < 0x44), CustomError_cd4e6167());
+    function Unresolved_2b1087f0(uint256 arg0, uint256 arg1) public returns (uint256) {
+        require(!msg.data.length < 0x44);
         transient[0] = 0x01;
         uint256 var_a = arg0;
         require(0 < var_a, CustomError_cd4e6167());
@@ -77,7 +77,7 @@ contract DecompiledContract {
         (bool success, bytes memory ret0) = address(store_g).{ gas: 0x0f4240 }Unresolved_a9059cbb(var_c); // call
         require(!ret0.length | ((!ret0.length < 0x20) & (ret0.length < 0x40)), CustomError_90b8ec18());
         require((!ret0.length | var_b) == 0x01, CustomError_90b8ec18());
-        emit Event_268d208c(msg.sender, var_a, (store_b * ((var_a * 0x26f2) / 0x2710)) / (store_a + ((var_a * 0x26f2) / 0x2710)));
+        emit Event_bfd50a04(msg.sender, 0x01, var_a, (store_b * ((var_a * 0x26f2) / 0x2710)) / (store_a + ((var_a * 0x26f2) / 0x2710)));
         transient[0] = 0;
         return (store_b * ((var_a * 0x26f2) / 0x2710)) / (store_a + ((var_a * 0x26f2) / 0x2710));
         require(0x2710, CustomError_cd4e6167());
@@ -96,7 +96,7 @@ contract DecompiledContract {
         var_c = msg.sender;
         var_d = address(this);
         var_e = var_a;
-        (bool success, bytes memory ret0) = address(store_f).{ gas: 0x0f4240 }Unresolved_23b872dd(var_c, var_d, var_e); // call
+        (bool success, bytes memory ret0) = address(store_f).{ gas: 0x0f4240 }Unresolved_23b872dd(var_c, var_d, var_e, var_i); // call
         require(!ret0.length | ((!ret0.length < 0x20) & (ret0.length < 0x40)), CustomError_90b8ec18());
         require((!ret0.length | var_b) == 0x01, CustomError_90b8ec18());
         var_b = 0xa9059cbb00000000000000000000000000000000000000000000000000000000;
@@ -105,7 +105,7 @@ contract DecompiledContract {
         (bool success, bytes memory ret0) = address(store_g).{ gas: 0x0f4240 }Unresolved_a9059cbb(var_c, var_d, var_e); // call
         require(!ret0.length | ((!ret0.length < 0x20) & (ret0.length < 0x40)), CustomError_90b8ec18());
         require((!ret0.length | var_b) == 0x01, CustomError_90b8ec18());
-        emit Event_268d208c(msg.sender, var_a, (store_b * ((var_a * 0x26f2) / 0x2710)) / (store_a + ((var_a * 0x26f2) / 0x2710)));
+        emit Event_bfd50a04(msg.sender, 0x01, var_a, (store_b * ((var_a * 0x26f2) / 0x2710)) / (store_a + ((var_a * 0x26f2) / 0x2710)));
         transient[0] = 0;
         return (store_b * ((var_a * 0x26f2) / 0x2710)) / (store_a + ((var_a * 0x26f2) / 0x2710));
     }

@@ -21,8 +21,8 @@ contract DecompiledContract {
     error CustomError_00000000();
     
     /// @custom:selector    0x2baeceb7
-    /// @custom:signature   Unresolved_2baeceb7() public payable
-    function Unresolved_2baeceb7() public payable {
+    /// @custom:signature   Unresolved_2baeceb7() public
+    function Unresolved_2baeceb7() public {
         if (0 == (unresolved_6d4ce63c == 0)) {
             if (!unresolved_6d4ce63c < 0x01) {
                 unresolved_6d4ce63c = unresolved_6d4ce63c - 0x01;
@@ -32,10 +32,10 @@ contract DecompiledContract {
     }
     
     /// @custom:selector    0x03df179c
-    /// @custom:signature   Unresolved_03df179c(uint256 arg0) public payable
+    /// @custom:signature   Unresolved_03df179c(uint256 arg0) public
     /// @param              arg0 ["uint256", "bytes32", "int256"]
-    function Unresolved_03df179c(uint256 arg0) public payable {
-        require(!(msg.data.length < 0x24), CustomError_f4560403());
+    function Unresolved_03df179c(uint256 arg0) public {
+        require(!msg.data.length < 0x24);
         require(!(arg0 == 0), CustomError_f4560403());
         require(!((unresolved_6d4ce63c + arg0) < unresolved_6d4ce63c), CustomError_f4560403());
         unresolved_6d4ce63c = unresolved_6d4ce63c + arg0;
@@ -43,8 +43,8 @@ contract DecompiledContract {
     }
     
     /// @custom:selector    0xd09de08a
-    /// @custom:signature   Unresolved_d09de08a() public payable
-    function Unresolved_d09de08a() public payable {
+    /// @custom:signature   Unresolved_d09de08a() public
+    function Unresolved_d09de08a() public {
         if (!(unresolved_6d4ce63c + 0x01) < unresolved_6d4ce63c) {
             unresolved_6d4ce63c = unresolved_6d4ce63c + 0x01;
             emit Event_20d8a6f5(0x01);

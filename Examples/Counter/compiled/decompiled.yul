@@ -26,51 +26,57 @@ object "DecompiledContract" {
             switch selector()
             
             /*
-            * @custom:signature    Unresolved_2baeceb7() public payable
+            * @custom:signature    Unresolved_2baeceb7() public
             */
             case 0x2baeceb7 {
                 if iszero(lt(calldatasize(), 0x04)) { revert(0, 0); } else {
-                    if eq(0, eq(sload(0), 0)) {
-                        if iszero(lt(sload(0), 0x01)) {
-                            sstore(0, sub(sload(0), 0x01))
-                            mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
-                            mstore(0x84, 0x11)
-                            sstore(0, 0)
+                    if iszero(callvalue()) { revert(0, 0); } else {
+                        if eq(0, eq(sload(0), 0)) {
+                            if iszero(lt(sload(0), 0x01)) {
+                                sstore(0, sub(sload(0), 0x01))
+                                mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
+                                mstore(0x84, 0x11)
+                                sstore(0, 0)
+                            }
                         }
                     }
                 }
             }
             
             /*
-            * @custom:signature    Unresolved_03df179c(uint256 arg0) public payable
+            * @custom:signature    Unresolved_03df179c(uint256 arg0) public
             * @param                arg0 ["uint256", "bytes32", "int256"]
             */
             case 0x03df179c {
                 if iszero(lt(calldatasize(), 0x24)) {
-                    if iszero(eq(calldataload(0x04), 0)) {
-                        if iszero(lt(add(sload(0), calldataload(0x04)), sload(0))) { revert(0, 0); } else {
-                            mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
-                            mstore(0x84, 0x11)
-                            sstore(0, add(sload(0), calldataload(0x04)))
-                            mstore(0x80, calldataload(0x04))
-                            log1(0x80, 0x20, 0x20d8a6f5a693f9d1d627a598e8820f7a55ee74c183aa8f1a30e8d4e8dd9a8d84)
-                            mstore(0x80, 0xf456040300000000000000000000000000000000000000000000000000000000)
+                    if iszero(callvalue()) { revert(0, 0); } else {
+                        if iszero(eq(calldataload(0x04), 0)) {
+                            if iszero(lt(add(sload(0), calldataload(0x04)), sload(0))) { revert(0, 0); } else {
+                                mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
+                                mstore(0x84, 0x11)
+                                sstore(0, add(sload(0), calldataload(0x04)))
+                                mstore(0x80, calldataload(0x04))
+                                log1(0x80, 0x20, 0x20d8a6f5a693f9d1d627a598e8820f7a55ee74c183aa8f1a30e8d4e8dd9a8d84)
+                                mstore(0x80, 0xf456040300000000000000000000000000000000000000000000000000000000)
+                            }
                         }
                     }
                 }
             }
             
             /*
-            * @custom:signature    Unresolved_d09de08a() public payable
+            * @custom:signature    Unresolved_d09de08a() public
             */
             case 0xd09de08a {
                 if iszero(lt(calldatasize(), 0x04)) { revert(0, 0); } else {
-                    if iszero(lt(add(sload(0), 0x01), sload(0))) {
-                        mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
-                        mstore(0x84, 0x11)
-                        sstore(0, add(sload(0), 0x01))
-                        mstore(0x80, 0x01)
-                        log1(0x80, 0x20, 0x20d8a6f5a693f9d1d627a598e8820f7a55ee74c183aa8f1a30e8d4e8dd9a8d84)
+                    if iszero(callvalue()) { revert(0, 0); } else {
+                        if iszero(lt(add(sload(0), 0x01), sload(0))) {
+                            mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
+                            mstore(0x84, 0x11)
+                            sstore(0, add(sload(0), 0x01))
+                            mstore(0x80, 0x01)
+                            log1(0x80, 0x20, 0x20d8a6f5a693f9d1d627a598e8820f7a55ee74c183aa8f1a30e8d4e8dd9a8d84)
+                        }
                     }
                 }
             }
@@ -80,8 +86,10 @@ object "DecompiledContract" {
             */
             case 0x6d4ce63c {
                 if iszero(lt(calldatasize(), 0x04)) { revert(0, 0); } else {
-                    mstore(0x80, sload(0))
-                    return(0x80, 0x20)
+                    if iszero(callvalue()) { revert(0, 0); } else {
+                        mstore(0x80, sload(0))
+                        return(0x80, 0x20)
+                    }
                 }
             }
             default { revert(0, 0) }

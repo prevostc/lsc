@@ -26,6 +26,9 @@
                 revert(0, 0)
             }
         }
+        if callvalue() {
+            revert(0, 0)
+        }
         {
             let transfer_0 := calldataload(4)
             let transfer_1 := calldataload(36)
@@ -71,6 +74,9 @@
             if lt(calldatasize(), 100) {
                 revert(0, 0)
             }
+        }
+        if callvalue() {
+            revert(0, 0)
         }
         {
             let transferFrom_0 := calldataload(4)
@@ -139,6 +145,9 @@
                 revert(0, 0)
             }
         }
+        if callvalue() {
+            revert(0, 0)
+        }
         {
             let approve_0 := calldataload(4)
             let approve_1 := calldataload(36)
@@ -162,6 +171,9 @@
                 revert(0, 0)
             }
         }
+        if callvalue() {
+            revert(0, 0)
+        }
         {
             let totalSupply_0 := sload(1)
             mstore(128, totalSupply_0)
@@ -173,6 +185,9 @@
             if lt(calldatasize(), 36) {
                 revert(0, 0)
             }
+        }
+        if callvalue() {
+            revert(0, 0)
         }
         {
             let balanceOf_0 := calldataload(4)
@@ -188,6 +203,9 @@
             if lt(calldatasize(), 68) {
                 revert(0, 0)
             }
+        }
+        if callvalue() {
+            revert(0, 0)
         }
         {
             let allowance_0 := calldataload(4)
@@ -206,6 +224,9 @@
             if lt(calldatasize(), 68) {
                 revert(0, 0)
             }
+        }
+        if callvalue() {
+            revert(0, 0)
         }
         {
             let mint_0 := calldataload(4)
@@ -248,6 +269,9 @@
             if lt(calldatasize(), 36) {
                 revert(0, 0)
             }
+        }
+        if callvalue() {
+            revert(0, 0)
         }
         {
             let burn_0 := calldataload(4)

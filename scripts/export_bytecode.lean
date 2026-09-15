@@ -105,6 +105,7 @@ structure Case where
   returnData : List UInt8
   pre : List (BitVec 256 × BitVec 256)
   post : List (BitVec 256 × BitVec 256)
+  value : Nat := 0
 
 def caseJson (c : Case) : String :=
   "{" ++ String.intercalate "," [
@@ -114,7 +115,8 @@ def caseJson (c : Case) : String :=
     "\"status\":" ++ jStr c.status,
     "\"return_data\":" ++ jStr (bytesHex c.returnData),
     "\"pre_storage\":" ++ slotsJson c.pre,
-    "\"post_storage\":" ++ slotsJson c.post
+    "\"post_storage\":" ++ slotsJson c.post,
+    "\"value\":" ++ toString c.value
   ] ++ "}"
 
 def unitOutcome {S X E ε : Type}
@@ -194,6 +196,9 @@ def counterCases : List Case :=
   [ ctrUnit "increment_ok" "increment" [] 5 (Tx.run Counter.increment ctx1 (ctrW 5))
   , ctrUnit "increment_overflow" "increment" [] (wordBound - 1)
       (Tx.run Counter.increment ctx1 (ctrW (wordBound - 1)))
+  , { ctrUnit "increment_value_revert" "increment" [] 5
+        (Tx.run Counter.increment ctx1 (ctrW 5)) with
+      status := "revert", returnData := [], post := ctrSlots 5, value := 1 }
   , ctrUnit "incrementBy_ok" "incrementBy" [3] 5 (Tx.run (Counter.incrementBy 3) ctx1 (ctrW 5))
   , ctrUnit "incrementBy_zero" "incrementBy" [0] 5 (Tx.run (Counter.incrementBy 0) ctx1 (ctrW 5))
   , ctrUnit "decrement_from_zero" "decrement" [] 0 (Tx.run Counter.decrement ctx1 (ctrW 0))
@@ -275,6 +280,9 @@ def tokenCases : List Case :=
       (Tx.run (Token.transfer 2 100) ctxOwner w₁)
   , tokBool "transfer_revert" "transfer" [2, 2000] ctxOwner σ₁
       (Tx.run (Token.transfer 2 2000) ctxOwner w₁)
+  , { tokBool "transfer_value_revert" "transfer" [2, 100] ctxOwner σ₁
+        (Tx.run (Token.transfer 2 100) ctxOwner w₁) with
+      status := "revert", returnData := [], post := tokSlots σ₁, value := 1 }
   , tokBool "approve_ok" "approve" [2, 50] ctxOwner σ₁
       (Tx.run (Token.approve 2 50) ctxOwner w₁)
   , tokBool "transferFrom_ok" "transferFrom" [1, 3, 40] ctx2 σAllow

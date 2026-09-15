@@ -25,10 +25,10 @@ contract DecompiledContract {
     event Event_ddf252ad();
     
     /// @custom:selector    0x42966c68
-    /// @custom:signature   Unresolved_42966c68(uint256 arg0) public payable
+    /// @custom:signature   Unresolved_42966c68(uint256 arg0) public
     /// @param              arg0 ["uint256", "bytes32", "int256"]
-    function Unresolved_42966c68(uint256 arg0) public payable {
-        require(!(msg.data.length < 0x24), CustomError_f4d678b8());
+    function Unresolved_42966c68(uint256 arg0) public {
+        require(!msg.data.length < 0x24);
         address var_a = msg.sender;
         require(0 == (!storage_map_a[var_a] < arg0), CustomError_f4d678b8());
         require(!storage_map_a[var_a] < arg0);
@@ -40,11 +40,11 @@ contract DecompiledContract {
     }
     
     /// @custom:selector    0xa9059cbb
-    /// @custom:signature   Unresolved_a9059cbb(uint256 arg0, uint256 arg1) public payable returns (uint256)
+    /// @custom:signature   Unresolved_a9059cbb(uint256 arg0, uint256 arg1) public returns (uint256)
     /// @param              arg0 ["uint256", "bytes32", "int256"]
     /// @param              arg1 ["uint256", "bytes32", "int256"]
-    function Unresolved_a9059cbb(uint256 arg0, uint256 arg1) public payable returns (uint256) {
-        require(!(msg.data.length < 0x44), CustomError_f4d678b8());
+    function Unresolved_a9059cbb(uint256 arg0, uint256 arg1) public returns (uint256) {
+        require(!msg.data.length < 0x44);
         address var_a = msg.sender;
         require(!(storage_map_a[var_a] < arg1), CustomError_f4d678b8());
         require(!storage_map_a[var_a] < arg1);
@@ -59,11 +59,11 @@ contract DecompiledContract {
     }
     
     /// @custom:selector    0x40c10f19
-    /// @custom:signature   Unresolved_40c10f19(uint256 arg0, uint256 arg1) public payable
+    /// @custom:signature   Unresolved_40c10f19(uint256 arg0, uint256 arg1) public
     /// @param              arg0 ["uint256", "bytes32", "int256"]
     /// @param              arg1 ["uint256", "bytes32", "int256"]
-    function Unresolved_40c10f19(uint256 arg0, uint256 arg1) public payable {
-        require(!(msg.data.length < 0x44), CustomError_30cd7471());
+    function Unresolved_40c10f19(uint256 arg0, uint256 arg1) public {
+        require(!msg.data.length < 0x44);
         require(msg.sender == store_c, CustomError_30cd7471());
         require(!(unresolved_18160ddd + arg1) < unresolved_18160ddd);
         unresolved_18160ddd = unresolved_18160ddd + arg1;
@@ -86,12 +86,12 @@ contract DecompiledContract {
     }
     
     /// @custom:selector    0x23b872dd
-    /// @custom:signature   Unresolved_23b872dd(uint256 arg0, uint256 arg1, uint256 arg2) public payable returns (uint256)
+    /// @custom:signature   Unresolved_23b872dd(uint256 arg0, uint256 arg1, uint256 arg2) public returns (uint256)
     /// @param              arg0 ["uint256", "bytes32", "int256"]
     /// @param              arg1 ["uint256", "bytes32", "int256"]
     /// @param              arg2 ["uint256", "bytes32", "int256"]
-    function Unresolved_23b872dd(uint256 arg0, uint256 arg1, uint256 arg2) public payable returns (uint256) {
-        require(!(msg.data.length < 0x64), CustomError_13be252b());
+    function Unresolved_23b872dd(uint256 arg0, uint256 arg1, uint256 arg2) public returns (uint256) {
+        require(!msg.data.length < 0x64);
         uint256 var_a = arg0;
         var_a = msg.sender;
         require(!(storage_map_a[var_a] < arg2), CustomError_13be252b());
@@ -113,10 +113,10 @@ contract DecompiledContract {
     }
     
     /// @custom:selector    0x095ea7b3
-    /// @custom:signature   Unresolved_095ea7b3(uint256 arg0, uint256 arg1) public payable returns (uint256)
+    /// @custom:signature   Unresolved_095ea7b3(uint256 arg0, uint256 arg1) public returns (uint256)
     /// @param              arg0 ["uint256", "bytes32", "int256"]
     /// @param              arg1 ["uint256", "bytes32", "int256"]
-    function Unresolved_095ea7b3(uint256 arg0, uint256 arg1) public payable returns (uint256) {
+    function Unresolved_095ea7b3(uint256 arg0, uint256 arg1) public returns (uint256) {
         require(!msg.data.length < 0x44);
         address var_a = msg.sender;
         var_a = arg0;

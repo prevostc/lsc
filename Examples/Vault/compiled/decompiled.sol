@@ -29,9 +29,9 @@ contract DecompiledContract {
     error CustomError_00000000();
     
     /// @custom:selector    0x4cdad506
-    /// @custom:signature   Unresolved_4cdad506(uint256 arg0) public payable returns (uint256)
+    /// @custom:signature   Unresolved_4cdad506(uint256 arg0) public returns (uint256)
     /// @param              arg0 ["uint256", "bytes32", "int256"]
-    function Unresolved_4cdad506(uint256 arg0) public payable returns (uint256) {
+    function Unresolved_4cdad506(uint256 arg0) public returns (uint256) {
         require(!msg.data.length < 0x24);
         var_a = 0x70a0823100000000000000000000000000000000000000000000000000000000;
         address var_b = address(this);
@@ -47,25 +47,25 @@ contract DecompiledContract {
     }
     
     /// @custom:selector    0x8456cb59
-    /// @custom:signature   Unresolved_8456cb59() public payable
-    function Unresolved_8456cb59() public payable {
+    /// @custom:signature   Unresolved_8456cb59() public
+    function Unresolved_8456cb59() public {
         require(msg.sender == store_c, CustomError_30cd7471());
         unresolved_b187bd26 = 0x01;
         emit Event_9e87fac8();
     }
     
     /// @custom:selector    0x3f4ba83a
-    /// @custom:signature   Unresolved_3f4ba83a() public payable
-    function Unresolved_3f4ba83a() public payable {
+    /// @custom:signature   Unresolved_3f4ba83a() public
+    function Unresolved_3f4ba83a() public {
         require(msg.sender == store_c, CustomError_30cd7471());
         unresolved_b187bd26 = 0;
         emit Event_a45f47fd();
     }
     
     /// @custom:selector    0xef8b30f7
-    /// @custom:signature   Unresolved_ef8b30f7(uint256 arg0) public payable returns (uint256)
+    /// @custom:signature   Unresolved_ef8b30f7(uint256 arg0) public returns (uint256)
     /// @param              arg0 ["uint256", "bytes32", "int256"]
-    function Unresolved_ef8b30f7(uint256 arg0) public payable returns (uint256) {
+    function Unresolved_ef8b30f7(uint256 arg0) public returns (uint256) {
         require(!msg.data.length < 0x24);
         address var_b = address(this);
         (bool success, bytes memory ret0) = address(store_a).{ gas: 0x0f4240 }Unresolved_70a08231(var_b); // staticcall
@@ -81,10 +81,10 @@ contract DecompiledContract {
     }
     
     /// @custom:selector    0x2e1a7d4d
-    /// @custom:signature   Unresolved_2e1a7d4d(uint256 arg0) public payable returns (uint256)
+    /// @custom:signature   Unresolved_2e1a7d4d(uint256 arg0) public returns (uint256)
     /// @param              arg0 ["uint256", "bytes32", "int256"]
-    function Unresolved_2e1a7d4d(uint256 arg0) public payable returns (uint256) {
-        require(!(msg.data.length < 0x24), CustomError_9e87fac8());
+    function Unresolved_2e1a7d4d(uint256 arg0) public returns (uint256) {
+        require(!msg.data.length < 0x24);
         transient[0] = 0x01;
         require(unresolved_b187bd26 == 0, CustomError_9e87fac8());
         require(0 < arg0, CustomError_39996567());
@@ -119,10 +119,10 @@ contract DecompiledContract {
     }
     
     /// @custom:selector    0xb6b55f25
-    /// @custom:signature   Unresolved_b6b55f25(uint256 arg0) public payable returns (uint256)
+    /// @custom:signature   Unresolved_b6b55f25(uint256 arg0) public returns (uint256)
     /// @param              arg0 ["uint256", "bytes32", "int256"]
-    function Unresolved_b6b55f25(uint256 arg0) public payable returns (uint256) {
-        require(!(msg.data.length < 0x24), CustomError_9e87fac8());
+    function Unresolved_b6b55f25(uint256 arg0) public returns (uint256) {
+        require(!msg.data.length < 0x24);
         transient[0] = 0x01;
         require(unresolved_b187bd26 == 0, CustomError_9e87fac8());
         require(0 < arg0);
