@@ -13,8 +13,9 @@ address 0 (no `sqrt`, no loop; revert `.InsufficientLiquidity` if
 pure `if`. Both branches of the first-vs-later mint share one tail
 (`seqIf`): require nonzero shares, write reserves, `mint who minted`.
 `mint` is `@[lsc_inline]` and updates `shares[to]` and `totalShares`.
-Both swap directions are thin wrappers over one `@[lsc_inline]` `swap`
-(input/output reserves, tokens, and the input-side protocol bucket).
+Both swap directions are thin wrappers over one `@[lsc_inline]`
+`SwapDirection`-indexed `swap` (`read d.reserveIn` / `write d.reserveOut`,
+one `Swap` event with a `Bool` direction bit).
 `swap` quotes with `swapOut` (0.3%-fee notional, then
 `require (protoFee ≤ fee)`). LPs keep the fee on the curve. When
 `feeTo ≠ 0`, `⌊fee · protocolShareBps / BPS⌋` is skimmed into

@@ -224,6 +224,7 @@ def ctorBuilder (ctor : Name) : MetaM Term := do
       let arg ←
         if ← isAmountTy ty then `(Lsc.Amount.ofWord $get)
         else if ← isRefTy ty then `({ addr := $get })
+        else if (← whnfR ty).isConstOf ``Bool then `(Lsc.Tx.natToBool $get)
         else pure get
       app ← `($app $arg)
     `(fun ($argsId : List Nat) => $app)
@@ -666,6 +667,11 @@ partial def atomOf (env : Env t) (e : Expr) (fuel : Nat := 64) : MetaM Atom := d
         return (← atomOf env e' (fuel - 1))
   if e.isConstOf ``Bool.true then return .lit 1
   if e.isConstOf ``Bool.false then return .lit 0
+  if (← whnfR (← inferType e)).isConstOf ``Bool then
+    let e' ← whnf e
+    if e'.isConstOf ``Bool.true then return .lit 1
+    if e'.isConstOf ``Bool.false then return .lit 0
+    if e' != e then return (← atomOf env e' (fuel - 1))
   if let some n := e.getAppFn.constName? then
     if n.getString! == "addr" && e.getAppNumArgs ≥ 1 then
       let recv := e.getArg! (e.getAppNumArgs - 1)
@@ -1707,6 +1713,33 @@ def inlinesUsedBy (fn : Name) : MetaM (Array Name) := do
           work := work.push m
   return acc
 
+/-- `Field S α` / `Bool` helpers used by `fn` / its inlines (`reserveIn`,
+`zeroForOneB`). `simp only` will not unfold them unless they are listed. -/
+def fieldHelpersUsedBy (fn : Name) : MetaM (Array Name) := do
+  let env ← getEnv
+  let isHelper (n : Name) : MetaM Bool := do
+    let some info := env.find? n | return false
+    unless info.isDefinition do return false
+    forallTelescope info.type fun _ body => do
+      let body ← whnfR body
+      return body.isAppOf ``Lsc.Field || body.isConstOf ``Bool
+  let inls ← inlinesUsedBy fn
+  let mut acc : Array Name := #[]
+  let mut seen : NameSet := {}
+  let mut work : Array Name := #[fn] ++ inls
+  let mut i := 0
+  while h : i < work.size do
+    let n := work[i]
+    i := i + 1
+    let some v := (env.find? n).bind (·.value?) | continue
+    for m in v.getUsedConstants do
+      if seen.contains m then continue
+      seen := seen.insert m
+      if ← isHelper m then
+        acc := acc.push m
+        work := work.push m
+  return acc
+
 /-- `Word.scale` / `Offset.virtual` / `virtualShares` and closed `Offset`
 constants reachable from `fn`. Unfolded in the certificate so `Nat.reducePow`
 sees `10 ^ d` with a literal `d` (kernel `Nat.pow` hits `maxRecDepth`). -/
@@ -1818,6 +1851,7 @@ def certifyDenote (fn : Name) (ci : ContractInfo) (lhs lhsRaw rhs coreE : Expr) 
     TermElabM Expr := do
   let eq ← mkEq lhs rhs
   let inlines ← inlinesUsedBy fn
+  let locals ← fieldHelpersUsedBy fn
   let scales ← scaleConstsUsedBy fn
   -- `isDefEq` on a large non-matching `do` block (inlined helper mid-body)
   -- burns the heartbeat budget; skip it when inlines are present.
@@ -1887,6 +1921,9 @@ def certifyDenote (fn : Name) (ci : ContractInfo) (lhs lhsRaw rhs coreE : Expr) 
     mkIdent ``Lsc.Tx.encode_address,
     mkIdent ``Lsc.Tx.encode_amount,
     mkIdent ``Lsc.Tx.encode_word,
+    mkIdent ``Lsc.Tx.encode_bool,
+    mkIdent ``Lsc.Field.get_mk,
+    mkIdent ``Lsc.Field.set_mk,
     mkIdent ``Lsc.Tx.callAsNat_addr,
     mkIdent ``Lsc.Tx.viewAsNat_addr,
     mkIdent ``Lsc.AbiType.encode,
@@ -2025,6 +2062,8 @@ def certifyDenote (fn : Name) (ci : ContractInfo) (lhs lhsRaw rhs coreE : Expr) 
   let schemaIds ← existingIdents (schemaLemmaNames ci)
   idsAmount := idsAmount ++ schemaIds
   for n in inlines do
+    idsAmount := idsAmount.push (mkIdent n)
+  for n in locals do
     idsAmount := idsAmount.push (mkIdent n)
   for n in scales do
     idsAmount := idsAmount.push (mkIdent n)
@@ -2215,6 +2254,7 @@ def encodeEnvAtom (p : Expr) : MetaM Expr := do
   else if ← isRefTy ty then
     mkAppM ``Lsc.Address.toWord (#[(← mkProjection p `addr)])
   else if (← whnfR ty).isConstOf ``Lsc.Address then mkAppM ``Lsc.Address.toWord #[p]
+  else if (← whnfR ty).isConstOf ``Bool then mkAppM ``Lsc.AbiType.encode #[p]
   else pure p
 
 /-- Instance-binder capabilities `lsc_contract` records on `FnDef`. -/

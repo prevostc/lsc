@@ -286,6 +286,10 @@ theorem bind_viewAsNat_bool (addr : Address) (sel : Nat) (args : List Word) :
 @[simp] theorem encode_word (w : Word) : AbiType.encode w = w :=
   by apply Proof.encode_word
 
+/-- ABI-encoding a bool is `1` / `0`. -/
+@[simp] theorem encode_bool (b : Bool) : AbiType.encode b = if b then 1 else 0 :=
+  by apply Proof.encode_bool
+
 /-- `Address.toWord` is the identity; CALL targets from Core env atoms use it. -/
 theorem callAsNat_addr (ret : AbiRet) (addr : Address) (sel : Nat)
     (args : List Word) :

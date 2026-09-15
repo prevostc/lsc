@@ -42,8 +42,7 @@ inductive Event
       (sharesOut : Amount lpShare)
   | RemoveLiquidity (who : Address) (a0 : Amount asset0) (a1 : Amount asset1)
       (sharesIn : Amount lpShare)
-  | Swap0for1 (who : Address) (a0 : Amount asset0) (a1 : Amount asset1)
-  | Swap1for0 (who : Address) (a1 : Amount asset1) (a0 : Amount asset0)
+  | Swap (who : Address) (zeroForOne : Bool) (amountIn amountOut : Word)
   | ProtocolShareSet (bps : Bps)
   | FeeToSet (who : Address)
   | ProtocolFeesCollected (who : Address) (a0 : Amount asset0) (a1 : Amount asset1)
@@ -64,6 +63,50 @@ inductive Error
   deriving DecidableEq, Repr
 
 abbrev M := Tx Storage ExtState Event Error
+
+inductive SwapDirection
+  | zeroForOne
+  | oneForZero
+  deriving DecidableEq, Repr
+
+@[reducible] def SwapDirection.assetIn : SwapDirection → Asset
+  | .zeroForOne => asset0
+  | .oneForZero => asset1
+
+@[reducible] def SwapDirection.assetOut : SwapDirection → Asset
+  | .zeroForOne => asset1
+  | .oneForZero => asset0
+
+/-- `true` when selling token0. Event payload; ABI has no user inductive. -/
+@[reducible] def SwapDirection.zeroForOneB : SwapDirection → Bool
+  | .zeroForOne => true
+  | .oneForZero => false
+
+/-- Storage fields on the input/output side of a swap. -/
+@[reducible] def SwapDirection.reserveIn :
+    (d : SwapDirection) → Field Storage (Amount d.assetIn)
+  | .zeroForOne => ⟨Storage.reserve0, fun σ v => { σ with reserve0 := v }⟩
+  | .oneForZero => ⟨Storage.reserve1, fun σ v => { σ with reserve1 := v }⟩
+
+@[reducible] def SwapDirection.reserveOut :
+    (d : SwapDirection) → Field Storage (Amount d.assetOut)
+  | .zeroForOne => ⟨Storage.reserve1, fun σ v => { σ with reserve1 := v }⟩
+  | .oneForZero => ⟨Storage.reserve0, fun σ v => { σ with reserve0 := v }⟩
+
+@[reducible] def SwapDirection.tokenIn :
+    (d : SwapDirection) → Field Storage (Ref (IERC20 d.assetIn))
+  | .zeroForOne => ⟨Storage.token0, fun σ v => { σ with token0 := v }⟩
+  | .oneForZero => ⟨Storage.token1, fun σ v => { σ with token1 := v }⟩
+
+@[reducible] def SwapDirection.tokenOut :
+    (d : SwapDirection) → Field Storage (Ref (IERC20 d.assetOut))
+  | .zeroForOne => ⟨Storage.token1, fun σ v => { σ with token1 := v }⟩
+  | .oneForZero => ⟨Storage.token0, fun σ v => { σ with token0 := v }⟩
+
+@[reducible] def SwapDirection.protocolFees :
+    (d : SwapDirection) → Field Storage (Amount d.assetIn)
+  | .zeroForOne => ⟨Storage.protocolFees0, fun σ v => { σ with protocolFees0 := v }⟩
+  | .oneForZero => ⟨Storage.protocolFees1, fun σ v => { σ with protocolFees1 := v }⟩
 
 /-- Constant-product quote: 0.3% fee, output and protocol take; oversized take reverts. -/
 @[lsc_inline] def swapOut {a b : Asset} (rIn : Amount a) (rOut : Amount b)
@@ -88,8 +131,8 @@ def MINIMUM_LIQUIDITY : Amount lpShare := 1000
 
 /-- Mint `n` shares to `to` and bump `totalShares`. -/
 @[lsc_inline] def mint (to : Address) (n : Amount lpShare) : M Unit := do
-  write shares[to] (← (← read shares[to]) +? n)
-  write totalShares (← (← read totalShares) +? n)
+  write shares[to] (read shares[to] +? n)
+  write totalShares (read totalShares +? n)
 
 /-- Deposit `a0`/`a1`. First mint relabels `a0` as LP shares (two-asset pools
 have no single decimals; Uniswap-v2 convention) and burns
@@ -117,8 +160,8 @@ def addLiquidity (a0 : Amount asset0) (a1 : Amount asset1) : M (Amount lpShare) 
       let s1 ← ts mulDiv↓ a1 / r1
       if s0 ≤ s1 then s0 else s1
   Tx.require (0 < minted) .ZeroShares
-  write reserve0 (← r0 +? a0)
-  write reserve1 (← r1 +? a1)
+  write reserve0 (r0 +? a0)
+  write reserve1 (r1 +? a1)
   mint who minted
   let t0 ← read token0
   let t1 ← read token1
@@ -141,14 +184,10 @@ def removeLiquidity (s : Amount lpShare) : M (Amount asset0 × Amount asset1) :=
   let out1 ← r1 mulDiv↓ s / ts
   Tx.require (0 < out0) .ZeroOut
   Tx.require (0 < out1) .ZeroOut
-  let bal' ← bal -? s
-  write shares[who] bal'
-  let ts' ← ts -? s
-  write totalShares ts'
-  let r0' ← r0 -? out0
-  write reserve0 r0'
-  let r1' ← r1 -? out1
-  write reserve1 r1'
+  write shares[who] (bal -? s)
+  write totalShares (ts -? s)
+  write reserve0 (r0 -? out0)
+  write reserve1 (r1 -? out1)
   let t0 ← read token0
   let t1 ← read token1
   safeTransfer t0 who out0 .TransferFailed
@@ -156,16 +195,12 @@ def removeLiquidity (s : Amount lpShare) : M (Amount asset0 × Amount asset1) :=
   Tx.emit (.RemoveLiquidity who out0 out1 s)
   return (out0, out1)
 
-/-- Sell `amountIn` of `tokenIn` for `tokenOut`; reverts unless `out ≥ minOut`. -/
-@[lsc_inline] def swap {a b : Asset}
-    (rIn : Amount a) (rOut : Amount b)
-    (tokenIn : Ref (IERC20 a)) (tokenOut : Ref (IERC20 b))
-    (fees : Amount a)
-    (setRIn : Amount a → M Unit) (setROut : Amount b → M Unit)
-    (setFees : Amount a → M Unit)
-    (ev : Address → Amount a → Amount b → Event)
-    (amountIn : Amount a) (minOut : Amount b) : M (Amount b) := do
+/-- Sell `amountIn` on side `d`; reverts unless `out ≥ minOut`. -/
+@[lsc_inline] def swap (d : SwapDirection) (amountIn : Amount d.assetIn)
+    (minOut : Amount d.assetOut) : M (Amount d.assetOut) := do
   Tx.require (0 < amountIn) .Zero
+  let rIn ← read d.reserveIn
+  let rOut ← read d.reserveOut
   Tx.require (0 < rIn) .Zero
   Tx.require (0 < rOut) .Zero
   let ft ← read feeTo
@@ -175,29 +210,23 @@ def removeLiquidity (s : Amount lpShare) : M (Amount asset0 × Amount asset1) :=
   Tx.require (minOut ≤ out) .InsufficientOutput
   Tx.require (0 < out) .ZeroOut
   let taken ← amountIn -? protoFee
-  setRIn (← rIn +? taken)
-  setROut (← rOut -? out)
-  setFees (← fees +? protoFee)
+  write d.reserveIn (rIn +? taken)
+  write d.reserveOut (rOut -? out)
+  write d.protocolFees (read d.protocolFees +? protoFee)
   let who ← Tx.sender
   let me ← Tx.selfAddress
-  safeTransferFrom tokenIn who me amountIn .TransferFailed
-  safeTransfer tokenOut who out .TransferFailed
-  Tx.emit (ev who amountIn out)
+  safeTransferFrom (← read d.tokenIn) who me amountIn .TransferFailed
+  safeTransfer (← read d.tokenOut) who out .TransferFailed
+  Tx.emit (.Swap who d.zeroForOneB (AbiType.encode amountIn) (AbiType.encode out))
   return out
 
-/-- Swap `amountIn` of token0 for token1; reverts unless `out ≥ minOut`. -/
-def swap0for1 (amountIn : Amount asset0) (minOut : Amount asset1) : M (Amount asset1) := do
-  swap (← read reserve0) (← read reserve1) (← read token0) (← read token1)
-    (← read protocolFees0)
-    (fun v => write reserve0 v) (fun v => write reserve1 v)
-    (fun v => write protocolFees0 v) Event.Swap0for1 amountIn minOut
+def swap0for1 (amountIn : Amount asset0) (minOut : Amount asset1) :
+    M (Amount asset1) :=
+  swap .zeroForOne amountIn minOut
 
-/-- Swap `amountIn` of token1 for token0; reverts unless `out ≥ minOut`. -/
-def swap1for0 (amountIn : Amount asset1) (minOut : Amount asset0) : M (Amount asset0) := do
-  swap (← read reserve1) (← read reserve0) (← read token1) (← read token0)
-    (← read protocolFees1)
-    (fun v => write reserve1 v) (fun v => write reserve0 v)
-    (fun v => write protocolFees1 v) Event.Swap1for0 amountIn minOut
+def swap1for0 (amountIn : Amount asset1) (minOut : Amount asset0) :
+    M (Amount asset0) :=
+  swap .oneForZero amountIn minOut
 
 /-- Owner sets the protocol's share of the swap fee, in bps of that fee. -/
 def setProtocolShare (bps : Bps) : M Unit := do

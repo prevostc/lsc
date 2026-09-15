@@ -23,6 +23,9 @@ variable {ctx : Ctx} {w : World Storage ExtState Event}
 
 private theorem word_10000_ne : (10000 : Word) ≠ 0 := by decide
 
+private theorem raw_10000 {a : Asset} : Amount.raw (10000 : Amount a) = 10000 := rfl
+private theorem raw_9970 {a : Asset} : Amount.raw (9970 : Amount a) = 9970 := rfl
+
 private theorem run_mulDivDown_bind {α : Type} {a b : Asset}
     (num : Amount b) (x y : Amount a)
     (k : Amount b → Tx Storage ExtState Event Error α) :
@@ -159,7 +162,10 @@ theorem run_swapOut_fee_mul {a b : Asset}
     (h : ¬ amountIn.raw * 9970 < wordBound) :
     Tx.run (swapOut rIn rOut amountIn share) ctx w = .error (.arith .overflow) := by
   unfold swapOut
-  simp only [run_mulDivDown_word_bind]
+  try simp only [Tx.hMulDivDown_bind_left, Tx.hMulDivDown_bind_mid,
+    Tx.hMulDivDown_bind_right, Tx.hAdd_bind_left, Tx.hSub_bind_left,
+    Tx.hMulFixedDown_bind_left, Tx.bind_assoc, CoeTail.coe, Tx.pure_bind]
+  simp only [run_mulDivDown_word_bind, run_mulDivDown_bind, raw_10000, raw_9970]
   rw [if_neg word_10000_ne, if_neg h]
 
 /-- `swapOut` reverts when `rIn + dxF` overflows. -/
@@ -169,7 +175,10 @@ theorem run_swapOut_den {a b : Asset}
     (hden : ¬ rIn.raw + dxFeeLess amountIn.raw < wordBound) :
     Tx.run (swapOut rIn rOut amountIn share) ctx w = .error (.arith .overflow) := by
   unfold swapOut
-  simp only [run_mulDivDown_word_bind]
+  try simp only [Tx.hMulDivDown_bind_left, Tx.hMulDivDown_bind_mid,
+    Tx.hMulDivDown_bind_right, Tx.hAdd_bind_left, Tx.hSub_bind_left,
+    Tx.hMulFixedDown_bind_left, Tx.bind_assoc, CoeTail.coe, Tx.pure_bind]
+  simp only [run_mulDivDown_word_bind, run_mulDivDown_bind, raw_10000, raw_9970]
   rw [if_neg word_10000_ne, if_pos hfee, dxF_eq]
   simp only [run_hAdd_bind]
   rw [if_neg hden]
@@ -183,7 +192,10 @@ theorem run_swapOut_out_mul {a b : Asset}
     (houtM : ¬ rOut.raw * dxFeeLess amountIn.raw < wordBound) :
     Tx.run (swapOut rIn rOut amountIn share) ctx w = .error (.arith .overflow) := by
   unfold swapOut
-  simp only [run_mulDivDown_word_bind]
+  try simp only [Tx.hMulDivDown_bind_left, Tx.hMulDivDown_bind_mid,
+    Tx.hMulDivDown_bind_right, Tx.hAdd_bind_left, Tx.hSub_bind_left,
+    Tx.hMulFixedDown_bind_left, Tx.bind_assoc, CoeTail.coe, Tx.pure_bind]
+  simp only [run_mulDivDown_word_bind, run_mulDivDown_bind, raw_10000, raw_9970]
   rw [if_neg word_10000_ne, if_pos hfee, dxF_eq]
   simp only [run_hAdd_bind]
   rw [if_pos hden]
@@ -201,7 +213,10 @@ theorem run_swapOut_proto_mul {a b : Asset}
     Tx.run (swapOut rIn rOut amountIn share) ctx w = .error (.arith .overflow) := by
   have hdxFle : dxFeeLess amountIn.raw ≤ amountIn.raw := dxFeeLess_le' amountIn.raw
   unfold swapOut
-  simp only [run_mulDivDown_word_bind]
+  try simp only [Tx.hMulDivDown_bind_left, Tx.hMulDivDown_bind_mid,
+    Tx.hMulDivDown_bind_right, Tx.hAdd_bind_left, Tx.hSub_bind_left,
+    Tx.hMulFixedDown_bind_left, Tx.bind_assoc, CoeTail.coe, Tx.pure_bind]
+  simp only [run_mulDivDown_word_bind, run_mulDivDown_bind, raw_10000, raw_9970]
   rw [if_neg word_10000_ne, if_pos hfee, dxF_eq]
   simp only [run_hAdd_bind]
   rw [if_pos hden]
@@ -227,7 +242,10 @@ theorem run_swapOut_lp {a b : Asset}
     Tx.run (swapOut rIn rOut amountIn share) ctx w = .error (.user .FeeTooHigh) := by
   have hdxFle : dxFeeLess amountIn.raw ≤ amountIn.raw := dxFeeLess_le' amountIn.raw
   unfold swapOut
-  simp only [run_mulDivDown_word_bind]
+  try simp only [Tx.hMulDivDown_bind_left, Tx.hMulDivDown_bind_mid,
+    Tx.hMulDivDown_bind_right, Tx.hAdd_bind_left, Tx.hSub_bind_left,
+    Tx.hMulFixedDown_bind_left, Tx.bind_assoc, CoeTail.coe, Tx.pure_bind]
+  simp only [run_mulDivDown_word_bind, run_mulDivDown_bind, raw_10000, raw_9970]
   rw [if_neg word_10000_ne, if_pos hfee, dxF_eq]
   simp only [run_hAdd_bind]
   rw [if_pos hden]
@@ -257,7 +275,10 @@ theorem run_swapOut {a b : Asset}
         ⟨swapOutProto amountIn.raw share⟩), w) := by
   have hdxFle : dxFeeLess amountIn.raw ≤ amountIn.raw := dxFeeLess_le' amountIn.raw
   unfold swapOut
-  simp only [run_mulDivDown_word_bind]
+  try simp only [Tx.hMulDivDown_bind_left, Tx.hMulDivDown_bind_mid,
+    Tx.hMulDivDown_bind_right, Tx.hAdd_bind_left, Tx.hSub_bind_left,
+    Tx.hMulFixedDown_bind_left, Tx.bind_assoc, CoeTail.coe, Tx.pure_bind]
+  simp only [run_mulDivDown_word_bind, run_mulDivDown_bind, raw_10000, raw_9970]
   rw [if_neg word_10000_ne, if_pos h.feeMul, dxF_eq]
   simp only [run_hAdd_bind]
   rw [if_pos h.den]
@@ -311,7 +332,10 @@ theorem run_swapOut_ok {a b : Asset} (rIn : Amount a) (rOut : Amount b)
     have hdenNe : rIn.raw + dxFeeLess amountIn.raw ≠ 0 := by
       by_contra ht
       unfold swapOut at hrun
-      simp only [run_mulDivDown_word_bind] at hrun
+      try simp only [Tx.hMulDivDown_bind_left, Tx.hMulDivDown_bind_mid,
+        Tx.hMulDivDown_bind_right, Tx.hAdd_bind_left, Tx.hSub_bind_left,
+        Tx.hMulFixedDown_bind_left, Tx.bind_assoc, CoeTail.coe, Tx.pure_bind] at hrun
+      simp only [run_mulDivDown_word_bind, run_mulDivDown_bind, raw_10000, raw_9970] at hrun
       rw [if_neg word_10000_ne, if_pos hfee, dxF_eq] at hrun
       simp only [run_hAdd_bind] at hrun
       rw [if_pos hden] at hrun

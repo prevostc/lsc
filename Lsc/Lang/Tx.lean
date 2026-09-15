@@ -117,6 +117,11 @@ structure Field (S : Type) (α : Type) where
   get : S → α
   set : S → α → S
 
+@[simp] theorem Field.get_mk {S α} (get : S → α) (set : S → α → S) :
+    Field.get ⟨get, set⟩ = get := rfl
+@[simp] theorem Field.set_mk {S α} (get : S → α) (set : S → α → S) :
+    Field.set ⟨get, set⟩ = set := rfl
+
 /-- The contract monad: read the context, thread the world, revert with `Err ε`.
 A revert discards state and logs, exactly like the EVM. -/
 abbrev Tx (S X E ε : Type) (α : Type) : Type :=

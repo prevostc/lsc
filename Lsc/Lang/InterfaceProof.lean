@@ -306,6 +306,9 @@ theorem encode_amount {a : Asset} (x : Amount a) :
 theorem encode_word (w : Word) : AbiType.encode w = w :=
   rfl
 
+theorem encode_bool (b : Bool) : AbiType.encode b = if b then 1 else 0 :=
+  rfl
+
 /-- `Address.toWord` is the identity; CALL targets from Core env atoms use it. -/
 theorem callAsNat_addr (ret : AbiRet) (addr : Address) (sel : Nat)
     (args : List Word) :

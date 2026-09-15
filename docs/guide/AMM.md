@@ -17,8 +17,9 @@ The first LP mint relabels `a0` as LP shares (`asUnchecked`: two-asset
 pools have no single decimals; Uniswap-v2 convention) and burns
 `MINIMUM_LIQUIDITY = 1000` shares to address 0; it reverts
 `.InsufficientLiquidity` if `a0 ≤ 1000`. Later mints are
-`min(⌊a0·S/r0⌋, ⌊a1·S/r1⌋)`. Both swap directions share `swap`, which
-quotes with `swapOut`: output uses the 0.3%-fee notional
+`min(⌊a0·S/r0⌋, ⌊a1·S/r1⌋)`. Both swap directions are `swap0for1` / `swap1for0` over one
+`SwapDirection`-indexed `swap` (storage via `read d.reserveIn` and friends).
+`swap` quotes with `swapOut`: output uses the 0.3%-fee notional
 `⌊dx · 9970 / 10000⌋` on the curve, then
 `require (protoFee ≤ fee)`. When `feeTo ≠ 0`, a protocol share of that
 fee is skimmed into `protocolFees*` and never enters `k`. Rounding

@@ -494,11 +494,43 @@ def wrapLoad (α : Expr) (load : Term) (expectedType? : Option Expr) : TermElabM
   else
     elabTerm load expectedType?
 
+/-- Lean lexes `d.f` as one hierarchical `ident`, so `read d.f` / `write d.f`
+hit `lscRead` / `lscWrite`. Split that form; `lscReadField` stays for an
+explicit `d` / `.` / `f` parse if it ever wins. -/
+def splitFieldIdent? (id : Ident) : Option (Ident × Ident) :=
+  match id.getId with
+  | .str pre field =>
+    if !pre.isAnonymous && pre.getPrefix.isAnonymous then
+      some (mkIdent pre, mkIdent (Name.mkSimple field))
+    else none
+  | _ => none
+
+/-- Elaborate `d.f` as `Field S α` using the surrounding `Tx` storage. -/
+def elabFieldRef (d f : Ident) (expectedType? : Option Expr) : TermElabM Expr := do
+  let some S ← txStorage? expectedType? |
+    throwError "read/write: could not infer storage type (use in a `Tx` context)"
+  let α ← mkFreshExprMVar none
+  let fieldTy := mkAppN (mkConst ``Lsc.Field) #[S, α]
+  discard <| elabTerm (← `($d.$f)) (some fieldTy)
+  withReducible (instantiateMVars (← whnf α))
+
+def elabReadFieldOf (d f : Ident) (expectedType? : Option Expr) : TermElabM Expr := do
+  let α ← elabFieldRef d f expectedType?
+  let load ←
+    if isRef α then
+      `(Lsc.Tx.load (fun $(sigma) =>
+          ((Lsc.Field.get ($d.$f) $(sigma)).addr : Nat)))
+    else
+      `(Lsc.Tx.load (Lsc.Field.get ($d.$f)))
+  wrapLoad α load expectedType?
+
 @[term_elab lscRead]
 def elabRead : TermElab := fun stx expectedType? => do
   tryPostponeIfNoneOrMVar expectedType?
   match stx with
   | `(read $f:ident) => do
+    if let some (d, fld) := splitFieldIdent? f then
+      return ← elabReadFieldOf d fld expectedType?
     let n ← fieldKeyCount f expectedType?
     unless n == 0 do throwError "read: `{f.getId}` needs keys"
     let α ← fieldValTy f expectedType?
@@ -584,28 +616,39 @@ def writeArg (α : Expr) (v : Term) (expectedType? : Option Expr)
     saved.restore
     elabTerm (← mkPure (← `(($v : $αStx)))) expectedType?
 
-/-- Elaborate `d.f` as `Field S α` using the surrounding `Tx` storage. -/
-def elabFieldRef (d f : Ident) (expectedType? : Option Expr) : TermElabM Expr := do
-  let some S ← txStorage? expectedType? |
-    throwError "read/write: could not infer storage type (use in a `Tx` context)"
-  let α ← mkFreshExprMVar none
-  let fieldTy := mkAppN (mkConst ``Lsc.Field) #[S, α]
-  discard <| elabTerm (← `($d.$f)) (some fieldTy)
-  instantiateMVars (← whnfD α)
+def elabWriteFieldOf (d f : Ident) (v : Term) (expectedType? : Option Expr) :
+    TermElabM Expr := do
+  let α ← elabFieldRef d f expectedType?
+  let α ← withReducible (whnf α)
+  let σ := sigma
+  if isAmount α then
+    writeArg α v expectedType?
+      (fun v =>
+        `(Lsc.Tx.store (fun $σ m =>
+            Lsc.Field.set ($d.$f) $σ (Lsc.Amount.ofWord m))
+          (Lsc.Amount.raw $v)))
+      `(fun x =>
+        Lsc.Tx.store (fun $σ y =>
+            Lsc.Field.set ($d.$f) $σ (Lsc.Amount.ofWord y))
+          (Lsc.Amount.raw x))
+  else if isRef α then
+    writeArg α v expectedType?
+      (fun v =>
+        `(Lsc.Tx.store (fun $σ m => Lsc.Field.set ($d.$f) $σ { addr := m })
+            ($v).addr))
+      `(fun x =>
+        Lsc.Tx.store (fun $σ y => Lsc.Field.set ($d.$f) $σ { addr := y })
+          x.addr)
+  else
+    writeArg α v expectedType?
+      (fun v => `(Lsc.Tx.store (Lsc.Field.set ($d.$f)) $v))
+      `(fun x => Lsc.Tx.store (Lsc.Field.set ($d.$f)) x)
 
 @[term_elab lscReadField]
 def elabReadField : TermElab := fun stx expectedType? => do
   tryPostponeIfNoneOrMVar expectedType?
   match stx with
-  | `(read $d:ident.$f:ident) => do
-    let α ← elabFieldRef d f expectedType?
-    let load ←
-      if isRef α then
-        `(Lsc.Tx.load (fun $(sigma) =>
-            ((Lsc.Field.get ($d.$f) $(sigma)).addr : Nat)))
-      else
-        `(Lsc.Tx.load (Lsc.Field.get ($d.$f)))
-    wrapLoad α load expectedType?
+  | `(read $d:ident.$f:ident) => elabReadFieldOf d f expectedType?
   | _ => throwUnsupportedSyntax
 
 @[term_elab lscWrite]
@@ -613,6 +656,8 @@ def elabWrite : TermElab := fun stx expectedType? => do
   tryPostponeIfNoneOrMVar expectedType?
   match stx with
   | `(write $f:ident $v) => do
+    if let some (d, fld) := splitFieldIdent? f then
+      return ← elabWriteFieldOf d fld v expectedType?
     let n ← fieldKeyCount f expectedType?
     unless n == 0 do throwError "write: `{f.getId}` needs keys"
     let α ← fieldValTy f expectedType?
@@ -730,32 +775,7 @@ where
 def elabWriteField : TermElab := fun stx expectedType? => do
   tryPostponeIfNoneOrMVar expectedType?
   match stx with
-  | `(write $d:ident.$f:ident $v) => do
-    let α ← elabFieldRef d f expectedType?
-    let α ← withReducible (whnf α)
-    let σ := sigma
-    if isAmount α then
-      writeArg α v expectedType?
-        (fun v =>
-          `(Lsc.Tx.store (fun $σ m =>
-              Lsc.Field.set ($d.$f) $σ (Lsc.Amount.ofWord m))
-            (Lsc.Amount.raw $v)))
-        `(fun x =>
-          Lsc.Tx.store (fun $σ y =>
-              Lsc.Field.set ($d.$f) $σ (Lsc.Amount.ofWord y))
-            (Lsc.Amount.raw x))
-    else if isRef α then
-      writeArg α v expectedType?
-        (fun v =>
-          `(Lsc.Tx.store (fun $σ m => Lsc.Field.set ($d.$f) $σ { addr := m })
-              ($v).addr))
-        `(fun x =>
-          Lsc.Tx.store (fun $σ y => Lsc.Field.set ($d.$f) $σ { addr := y })
-            x.addr)
-    else
-      writeArg α v expectedType?
-        (fun v => `(Lsc.Tx.store (Lsc.Field.set ($d.$f)) $v))
-        `(fun x => Lsc.Tx.store (Lsc.Field.set ($d.$f)) x)
+  | `(write $d:ident.$f:ident $v) => elabWriteFieldOf d f v expectedType?
   | _ => throwUnsupportedSyntax
 
 end Syntax

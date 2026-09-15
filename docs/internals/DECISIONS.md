@@ -2,6 +2,14 @@
 
 Short dated records.
 
+## 2026-09-15 — Cpamm `SwapDirection`-indexed swap (18a)
+
+One `@[lsc_inline] swap d` with `Field Storage` accessors on `d`. Lean
+lexes `d.reserveIn` as one hierarchical `ident`, so `read`/`write` split
+that name and emit `Field.get`/`set`. After inline, `d` is a constructor
+and Reify/`simp` reduce the match. `Event` cannot carry a user inductive
+and ABI has no `uint8`; `Swap` is `Swap(address,bool,uint256,uint256)`.
+
 ## 2026-09-15 — `write f (read f op x)` elaborates (17c)
 
 Root cause: `+?` was plain infix `hAdd`, so instance search ran before
