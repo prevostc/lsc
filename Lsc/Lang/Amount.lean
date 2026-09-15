@@ -84,16 +84,13 @@ instance : Mul (Amount a) where
 /-- Tag a raw word as an amount. Boundary use only. -/
 def ofWord (n : Word) : Amount a := ⟨n⟩
 
-/-- 1:1 retag: same raw word, new asset. Requires `a.decimals? = b.decimals?`
-at elaboration (`none` matches only `none`; `some 6` does not match
-`some 18`). This is the only explicit same-scale unit conversion. -/
+/-- 1:1 retag when `a.decimals? = b.decimals?` at elaboration; use `asUnchecked`
+for a documented cross-scale relabel (an AMM first mint has no single decimals). -/
 def as (x : Amount a) (b : Asset)
     (_h : a.decimals? = b.decimals? := by same_decimals) : Amount b :=
   ⟨x.raw⟩
 
-/-- 1:1 retag with no decimals check. For genuine cross-scale relabellings
-(an AMM's first LP mint, whose share unit has no single underlying
-decimals). The caller must justify the conversion in its docstring. -/
+/-- Same retag with no decimals check. Document why the conversion is sound. -/
 def asUnchecked (x : Amount a) (b : Asset) : Amount b := ⟨x.raw⟩
 
 /-- Total `⌊x * y / z⌋` on raw words (Lean: `n / 0 = 0`). -/

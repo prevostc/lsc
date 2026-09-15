@@ -86,6 +86,10 @@ def constructor (owner t0 t1 : Address) : M Unit := do
 /-- Uniswap-v2 minimum liquidity burned to address 0 on the first mint. -/
 def MINIMUM_LIQUIDITY : Amount lpShare := 1000
 
+/-- Mint `n` shares to `to`. -/
+@[lsc_inline] def mint (to : Address) (n : Amount lpShare) : M Unit := do
+  write shares[to] (← (← read shares[to]) +? n)
+
 /-- Deposit `a0`/`a1`. First mint relabels `a0` as LP shares (two-asset pools
 have no single decimals; Uniswap-v2 convention) and burns
 `MINIMUM_LIQUIDITY` to address 0. Later mint is the floor-min. -/
@@ -97,14 +101,11 @@ def addLiquidity (a0 : Amount asset0) (a1 : Amount asset1) : M (Amount lpShare) 
   let r0 ← read reserve0
   let r1 ← read reserve1
   let ts ← read totalShares
-  let raw : Amount lpShare := a0.asUnchecked lpShare
-  -- LP shares of a two-asset pool have no single decimals; Uniswap-v2
-  -- convention uses token0's raw amount. `asUnchecked` is the cross-scale
-  -- relabel.
-  if ts = 0 then
-    Tx.require (MINIMUM_LIQUIDITY < raw) .InsufficientLiquidity
   let minted ←
-    if ts = 0 then raw -? MINIMUM_LIQUIDITY
+    if ts = 0 then
+      let raw := a0.asUnchecked lpShare
+      Tx.require (MINIMUM_LIQUIDITY < raw) .InsufficientLiquidity
+      raw -? MINIMUM_LIQUIDITY
     else do
       Tx.require (0 < r0) .Zero
       Tx.require (0 < r1) .Zero
@@ -112,19 +113,14 @@ def addLiquidity (a0 : Amount asset0) (a1 : Amount asset1) : M (Amount lpShare) 
       let s1 ← ts mulDiv↓ a1 / r1
       if s0 ≤ s1 then s0 else s1
   Tx.require (0 < minted) .ZeroShares
-  let r0' ← r0 +? a0
-  write reserve0 r0'
-  let r1' ← r1 +? a1
-  write reserve1 r1'
-  let ts' ← ts +? minted
-  write totalShares ts'
+  write reserve0 (← r0 +? a0)
+  write reserve1 (← r1 +? a1)
   if ts = 0 then
-    write totalShares raw
-  if ts = 0 then
+    write totalShares (← ts +? (a0.asUnchecked lpShare))
     write shares[0] MINIMUM_LIQUIDITY
-  let bal ← read shares[who]
-  let bal' ← minted +? bal
-  write shares[who] bal'
+  if ts ≠ 0 then
+    write totalShares (← ts +? minted)
+  mint who minted
   let t0 ← read token0
   let t1 ← read token1
   safeTransferFrom t0 who me a0 .TransferFailed

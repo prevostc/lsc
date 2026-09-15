@@ -137,21 +137,17 @@ def doAsUnchecked (x : Amount testToken) : M (Amount asset1) := do
 
 def shareAsset : Asset := ⟨`shareAsset, some 18⟩
 
-/-- Virtual-offset share mint; `1000000` is `10^6` (offset `⟨6⟩`).
-`Shares.toShares` is the spec/proof helper; compiling a direct call currently
-fails the reification certificate (`simp [toShares, bind_assoc]`), so tests
-and examples expand the three binds with a folded literal. -/
+/-- Virtual offset used by the compile tests (`10^6` virtual shares). -/
+def offset : Shares.Offset := ⟨6⟩
+
+/-- Virtual-offset share mint. `Shares.toShares offset` must certify. -/
 def doToShares (assets totalAssets : Amount testToken)
-    (totalShares : Amount shareAsset) : M (Amount shareAsset) := do
-  let ts' ← Amount.add totalShares (⟨1000000⟩ : Amount shareAsset)
-  let ta' ← Amount.add totalAssets (1 : Amount testToken)
-  Amount.mulDivDown ts' assets ta'
+    (totalShares : Amount shareAsset) : M (Amount shareAsset) :=
+  Shares.toShares offset assets totalAssets totalShares
 
 def doToAssets (shares : Amount shareAsset) (totalAssets : Amount testToken)
-    (totalShares : Amount shareAsset) : M (Amount testToken) := do
-  let ta' ← Amount.add totalAssets (1 : Amount testToken)
-  let ts' ← Amount.add totalShares (⟨1000000⟩ : Amount shareAsset)
-  Amount.mulDivDown ta' shares ts'
+    (totalShares : Amount shareAsset) : M (Amount testToken) :=
+  Shares.toAssets offset shares totalAssets totalShares
 
 end StdlibTests
 
@@ -196,6 +192,9 @@ lsc_reify StdlibTests.doToShares StdlibTests.doToAssets
 #check StdlibTests.doAsUnchecked.core_denote
 #check StdlibTests.doToShares.core_denote
 #check StdlibTests.doToAssets.core_denote
+
+#guard (toString (repr StdlibTests.doToShares.core)).contains "1000000"
+#guard (toString (repr StdlibTests.doToAssets.core)).contains "1000000"
 
 example : Nat.pow 10 18 = WAD.raw := rfl
 example : Nat.pow 10 27 = RAY.raw := rfl

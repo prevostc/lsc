@@ -54,7 +54,8 @@ Successful swaps do not decrease `reserve0 · reserve1` (`swap0for1_k`,
 `swap1for0_k`). `swapOut` reverts if the protocol take would exceed the
 0.3% fee, so the input reserve grows by at least the fee-less notional.
 A successful first mint leaves at least 1000 shares outstanding
-(`addLiquidity_min_liquidity`); a later mint only increases `totalShares`.
+(`addLiquidity_min_liquidity`). `Wf` only excludes `sender = self`, so
+address 0 can later burn `shares[0]`.
 
 Assumed, not proved in the Cpamm file: both tokens are distinct conforming
 ERC-20s per `IERC20.Spec`; a CALL on one does not change the other's

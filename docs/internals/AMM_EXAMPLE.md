@@ -27,7 +27,8 @@ is not modelled (`EXTERNAL_CALLS.md`). Constructor requires `t0 ≠ t1`.
   falls without `Auth` (only that address’s `removeLiquidity`). Address 0
   holds the 1000 locked shares as a claim; they are not excluded.
 - `addLiquidity_min_liquidity`: a successful first mint leaves
-  `1000 ≤ totalShares` (later mints only increase `totalShares`).
+  `1000 ≤ totalShares`. `Wf` only excludes `sender = self`, so
+  `ctx.sender = 0` can later burn `shares[0]`.
 - `swap0for1_k` / `swap1for0_k`: `k` does not drop on a successful swap
   (not an `Inv` conjunct). `swapOut` reverts when `protoFee` would
   exceed the 0.3% fee. LP rounding favours the pool.

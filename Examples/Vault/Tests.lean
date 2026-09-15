@@ -53,3 +53,8 @@ end Vault
   (match Lsc.Tx.run Vault.isPaused Vault.smokeCtx Vault.smokeEmpty with
     | .ok (p, _) => p == Lsc.Flag.off
     | _ => false)
+
+#guard (toString (repr Vault.deposit.core)).contains "1000000"
+#guard (toString (repr Vault.withdraw.core)).contains "1000000"
+#guard (toString (repr Vault.previewDeposit.core)).contains "1000000"
+#guard (toString (repr Vault.previewRedeem.core)).contains "1000000"

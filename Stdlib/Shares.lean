@@ -33,7 +33,7 @@ def virtual6 : Word := 1000000
 certificates close by `rfl` without unfolding `Nat.pow`. -/
 def Offset.virtual (o : Offset) : Word :=
   match o.decimals with
-  | 6 => virtual6
+  | 6 => 1000000
   | d => Word.scale d
 
 /-- `10^o.decimals` virtual shares. Folds to a literal when `o` is a closed
@@ -56,7 +56,7 @@ variable {S X E ε : Type} {a s : Asset}
 @[lsc_inline]
 def toShares (o : Offset) (assets totalAssets : Amount a)
     (totalShares : Amount s) : Tx S X E ε (Amount s) := do
-  let ts' ← Amount.add totalShares ⟨Word.scale o.decimals⟩
+  let ts' ← Amount.add totalShares (virtualShares o)
   let ta' ← Amount.add totalAssets (1 : Amount a)
   Amount.mulDivDown ts' assets ta'
 
@@ -66,7 +66,7 @@ def toShares (o : Offset) (assets totalAssets : Amount a)
 def toAssets (o : Offset) (shares : Amount s) (totalAssets : Amount a)
     (totalShares : Amount s) : Tx S X E ε (Amount a) := do
   let ta' ← Amount.add totalAssets (1 : Amount a)
-  let ts' ← Amount.add totalShares ⟨Word.scale o.decimals⟩
+  let ts' ← Amount.add totalShares (virtualShares o)
   Amount.mulDivDown ta' shares ts'
 
 @[simp] theorem virtual6_eq : virtual6 = 1000000 := rfl

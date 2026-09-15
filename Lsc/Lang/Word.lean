@@ -28,6 +28,9 @@ namespace Word
 /-- `10^d` as a word. Meaningful as a 256-bit value for `d ≤ 77`. -/
 def scale (d : Nat) : Word := (10 ^ d : Nat)
 
+/-- `10^6` as a numeral, so certificates do not reduce `Nat.pow`. -/
+@[simp] theorem scale_six : scale 6 = 1000000 := rfl
+
 /-- `10^77` still fits in a 256-bit word; `10^78` does not. -/
 theorem tenPow77_lt_wordBound : (10 : Nat) ^ 77 < wordBound := by decide
 

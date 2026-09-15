@@ -68,7 +68,8 @@ IERC20.Spec Token.impl` is in `Examples/Token/Theorems.lean`.
 
 Vault (`Examples/Vault/Contract.lean`) stores `asset : Ref (IERC20 vaultAsset)`,
 reads it with `let tok ← read asset`, and pulls with `safeTransferFrom`.
-Share conversion is `Stdlib/Shares.lean` virtual-offset math (`offset := ⟨6⟩`).
+Share conversion is `Shares.toShares` / `Shares.toAssets` with
+`offset := ⟨6⟩` (virtual offset `10^6`).
 Cpamm (`Examples/Cpamm/Contract.lean`) binds two `Ref (IERC20 …)` tokens.
 See [External calls](EXTERNAL_CALLS.md).
 

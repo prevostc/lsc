@@ -138,8 +138,9 @@ theorem addLiquidity_minted (a0 : Amount asset0) (a1 : Amount asset1)
 
 /-- A successful first mint leaves at least `MINIMUM_LIQUIDITY` shares
 outstanding. On that mint those 1000 shares are locked at address 0.
-Later mints only increase `totalShares`; a pool that never locked 1000
-is not lifted to 1000 by a subsequent mint. -/
+`Wf` only excludes `sender = self`, so `ctx.sender = 0` can later burn
+`shares[0]`; this is not a trace invariant. Later mints only increase
+`totalShares`. -/
 theorem addLiquidity_min_liquidity (a0 : Amount asset0) (a1 : Amount asset1)
     {n : Amount lpShare} {w' : World Storage ExtState Event}
     (h : Tx.run (addLiquidity a0 a1) ctx w = .ok (n, w')) :

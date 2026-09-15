@@ -432,17 +432,12 @@ private theorem run_storeMap_bind {α : Type} {K V : Type} [DecidableEq K]
         { w with self := upd w.self (Function.update (proj w.self) key v) } := by
   rw [Tx.run_bind, Tx.run_storeMap]
 
-/-- Unfolded `Shares.toShares offset` (literal `10^6`). -/
+/-- `Shares.toShares offset` then `k`. -/
 private theorem run_toShares_binds {α : Type}
     (ts : Amount vShare) (ta assets : Amount vaultAsset)
     (k : Amount vShare → Tx Storage ExtState Event Error α) :
-    Tx.run (do
-      let vs : Amount vShare := ⟨1000000⟩
-      let tsV ← Tx.HAddChecked.hAdd (S := Storage) (X := ExtState) (E := Event)
-        (ε := Error) ts vs
-      let ta' ← Tx.HAddChecked.hAdd ta (1 : Amount vaultAsset)
-      let minted ← Tx.HMulDivDown.hMulDivDown tsV assets ta'
-      k minted) ctx w =
+    Tx.run (Shares.toShares (S := Storage) (X := ExtState) (E := Event)
+        (ε := Error) offset assets ta ts >>= k) ctx w =
       if ts.raw + 1000000 < wordBound then
         if ta.raw + 1 < wordBound then
           if (ts.raw + 1000000) * assets.raw < wordBound then
@@ -450,41 +445,25 @@ private theorem run_toShares_binds {α : Type}
           else .error (.arith .overflow)
         else .error (.arith .overflow)
       else .error (.arith .overflow) := by
-  have h1 : (1 : Amount vaultAsset).raw = 1 := rfl
-  have hv : (⟨1000000⟩ : Amount vShare).raw = 1000000 := rfl
-  simp only [run_hAdd_bind, hv, h1]
+  rw [Tx.run_bind, Shares.run_toShares]
+  simp only [scale_offset]
   by_cases hV : ts.raw + 1000000 < wordBound
-  · conv => lhs; rw [if_pos hV]
-    conv => rhs; rw [if_pos hV]
+  · simp [hV]
     by_cases hA : ta.raw + 1 < wordBound
-    · conv => lhs; rw [if_pos hA]
-      conv => rhs; rw [if_pos hA]
-      have hden : ta.raw + 1 ≠ 0 := Nat.succ_ne_zero _
-      simp only [run_mulDivDown_ts, hden, ↓reduceIte]
+    · simp [hA]
       by_cases hM : (ts.raw + 1000000) * assets.raw < wordBound
-      · conv => lhs; rw [if_pos hM]
-        conv => rhs; rw [if_pos hM]
-        apply congrArg (fun n => Tx.run (k n) ctx w)
-        apply Amount.ext
-        exact (mintedShares_formula ts ta assets).symm
-      · conv => lhs; rw [if_neg hM]
-        conv => rhs; rw [if_neg hM]
-    · conv => lhs; rw [if_neg hA]
-      conv => rhs; rw [if_neg hA]
-  · conv => lhs; rw [if_neg hV]
-    conv => rhs; rw [if_neg hV]
+      · simp [hM]
+        rfl
+      · simp [hM]
+    · simp [hA]
+  · simp [hV]
 
-/-- Unfolded `Shares.toAssets offset` (literal `10^6`). -/
+/-- `Shares.toAssets offset` then `k`. -/
 private theorem run_toAssets_binds {α : Type}
     (ts : Amount vShare) (ta : Amount vaultAsset) (sharesIn : Amount vShare)
     (k : Amount vaultAsset → Tx Storage ExtState Event Error α) :
-    Tx.run (do
-      let vs : Amount vShare := ⟨1000000⟩
-      let ta' ← Tx.HAddChecked.hAdd (S := Storage) (X := ExtState) (E := Event)
-        (ε := Error) ta (1 : Amount vaultAsset)
-      let tsV ← Tx.HAddChecked.hAdd ts vs
-      let assetsOut ← Tx.HMulDivDown.hMulDivDown ta' sharesIn tsV
-      k assetsOut) ctx w =
+    Tx.run (Shares.toAssets (S := Storage) (X := ExtState) (E := Event)
+        (ε := Error) offset sharesIn ta ts >>= k) ctx w =
       if ta.raw + 1 < wordBound then
         if ts.raw + 1000000 < wordBound then
           if (ta.raw + 1) * sharesIn.raw < wordBound then
@@ -492,40 +471,23 @@ private theorem run_toAssets_binds {α : Type}
           else .error (.arith .overflow)
         else .error (.arith .overflow)
       else .error (.arith .overflow) := by
-  have h1 : (1 : Amount vaultAsset).raw = 1 := rfl
-  have hv : (⟨1000000⟩ : Amount vShare).raw = 1000000 := rfl
-  simp only [run_hAdd_bind, h1, hv]
+  rw [Tx.run_bind, Shares.run_toAssets]
+  simp only [scale_offset]
   by_cases hA : ta.raw + 1 < wordBound
-  · conv => lhs; rw [if_pos hA]
-    conv => rhs; rw [if_pos hA]
+  · simp [hA]
     by_cases hV : ts.raw + 1000000 < wordBound
-    · conv => lhs; rw [if_pos hV]
-      conv => rhs; rw [if_pos hV]
-      have hden : ts.raw + 1000000 ≠ 0 :=
-        Nat.ne_of_gt (Nat.lt_of_lt_of_le (by decide : 0 < 1000000)
-          (Nat.le_add_left 1000000 ts.raw))
-      simp only [run_mulDivDown_ta, hden, ↓reduceIte]
+    · simp [hV]
       by_cases hM : (ta.raw + 1) * sharesIn.raw < wordBound
-      · conv => lhs; rw [if_pos hM]
-        conv => rhs; rw [if_pos hM]
-        apply congrArg (fun n => Tx.run (k n) ctx w)
-        apply Amount.ext
-        exact (redeemedAssets_formula ts ta sharesIn).symm
-      · conv => lhs; rw [if_neg hM]
-        conv => rhs; rw [if_neg hM]
-    · conv => lhs; rw [if_neg hV]
-      conv => rhs; rw [if_neg hV]
-  · conv => lhs; rw [if_neg hA]
-    conv => rhs; rw [if_neg hA]
+      · simp [hM]
+        rfl
+      · simp [hM]
+    · simp [hV]
+  · simp [hA]
 
-/-- `previewDeposit` body: the three binds returning the minted amount. -/
+/-- `previewDeposit` body: `Shares.toShares offset`. -/
 private theorem run_toShares_val (ts : Amount vShare) (ta assets : Amount vaultAsset) :
-    Tx.run (do
-      have vs : Amount vShare := ⟨1000000⟩
-      let tsV ← ts +? vs
-      let ta' ← ta +? (1 : Amount vaultAsset)
-      (tsV mulDiv↓ assets / ta' : Tx Storage ExtState Event Error (Amount vShare)))
-      ctx w =
+    Tx.run (Shares.toShares (S := Storage) (X := ExtState) (E := Event)
+        (ε := Error) offset assets ta ts) ctx w =
       if ts.raw + 1000000 < wordBound then
         if ta.raw + 1 < wordBound then
           if (ts.raw + 1000000) * assets.raw < wordBound then
@@ -533,40 +495,23 @@ private theorem run_toShares_val (ts : Amount vShare) (ta assets : Amount vaultA
           else .error (.arith .overflow)
         else .error (.arith .overflow)
       else .error (.arith .overflow) := by
-  have h1 : (1 : Amount vaultAsset).raw = 1 := rfl
-  have hv : (⟨1000000⟩ : Amount vShare).raw = 1000000 := rfl
-  simp only [run_hAdd_bind, hv, h1]
+  rw [Shares.run_toShares]
+  simp only [scale_offset]
   by_cases hV : ts.raw + 1000000 < wordBound
-  · conv => lhs; rw [if_pos hV]
-    conv => rhs; rw [if_pos hV]
+  · simp [hV]
     by_cases hA : ta.raw + 1 < wordBound
-    · conv => lhs; rw [if_pos hA]
-      conv => rhs; rw [if_pos hA]
-      have hden : ta.raw + 1 ≠ 0 := Nat.succ_ne_zero _
-      rw [Amount.hMulDivDown_def, Amount.run_mulDivDown]
-      simp only [hden, ↓reduceIte]
+    · simp [hA]
       by_cases hM : (ts.raw + 1000000) * assets.raw < wordBound
-      · conv => lhs; rw [if_pos hM]
-        conv => rhs; rw [if_pos hM]
-        apply congrArg (fun n => Except.ok (n, w))
-        apply Amount.ext
-        exact (mintedShares_formula ts ta assets).symm
-      · conv => lhs; rw [if_neg hM]
-        conv => rhs; rw [if_neg hM]
-    · conv => lhs; rw [if_neg hA]
-      conv => rhs; rw [if_neg hA]
-  · conv => lhs; rw [if_neg hV]
-    conv => rhs; rw [if_neg hV]
+      · simp [hM]; rfl
+      · simp [hM]
+    · simp [hA]
+  · simp [hV]
 
-/-- `previewRedeem` body: the three binds returning the redeemed assets. -/
+/-- `previewRedeem` body: `Shares.toAssets offset`. -/
 private theorem run_toAssets_val (ts : Amount vShare) (ta : Amount vaultAsset)
     (sharesIn : Amount vShare) :
-    Tx.run (do
-      have vs : Amount vShare := ⟨1000000⟩
-      let ta' ← ta +? (1 : Amount vaultAsset)
-      let tsV ← ts +? vs
-      (ta' mulDiv↓ sharesIn / tsV : Tx Storage ExtState Event Error (Amount vaultAsset)))
-      ctx w =
+    Tx.run (Shares.toAssets (S := Storage) (X := ExtState) (E := Event)
+        (ε := Error) offset sharesIn ta ts) ctx w =
       if ta.raw + 1 < wordBound then
         if ts.raw + 1000000 < wordBound then
           if (ta.raw + 1) * sharesIn.raw < wordBound then
@@ -574,32 +519,17 @@ private theorem run_toAssets_val (ts : Amount vShare) (ta : Amount vaultAsset)
           else .error (.arith .overflow)
         else .error (.arith .overflow)
       else .error (.arith .overflow) := by
-  have h1 : (1 : Amount vaultAsset).raw = 1 := rfl
-  have hv : (⟨1000000⟩ : Amount vShare).raw = 1000000 := rfl
-  simp only [run_hAdd_bind, h1, hv]
+  rw [Shares.run_toAssets]
+  simp only [scale_offset]
   by_cases hA : ta.raw + 1 < wordBound
-  · conv => lhs; rw [if_pos hA]
-    conv => rhs; rw [if_pos hA]
+  · simp [hA]
     by_cases hV : ts.raw + 1000000 < wordBound
-    · conv => lhs; rw [if_pos hV]
-      conv => rhs; rw [if_pos hV]
-      have hden : ts.raw + 1000000 ≠ 0 :=
-        Nat.ne_of_gt (Nat.lt_of_lt_of_le (by decide : 0 < 1000000)
-          (Nat.le_add_left 1000000 ts.raw))
-      rw [Amount.hMulDivDown_def, Amount.run_mulDivDown]
-      simp only [hden, ↓reduceIte]
+    · simp [hV]
       by_cases hM : (ta.raw + 1) * sharesIn.raw < wordBound
-      · conv => lhs; rw [if_pos hM]
-        conv => rhs; rw [if_pos hM]
-        apply congrArg (fun n => Except.ok (n, w))
-        apply Amount.ext
-        exact (redeemedAssets_formula ts ta sharesIn).symm
-      · conv => lhs; rw [if_neg hM]
-        conv => rhs; rw [if_neg hM]
-    · conv => lhs; rw [if_neg hV]
-      conv => rhs; rw [if_neg hV]
-  · conv => lhs; rw [if_neg hA]
-    conv => rhs; rw [if_neg hA]
+      · simp [hM]; rfl
+      · simp [hM]
+    · simp [hV]
+  · simp [hA]
 
 /-- After pause/positivity, `deposit` is a `balanceOf` view then the mint join. -/
 private theorem deposit_head (assets : Amount vaultAsset)
@@ -609,10 +539,7 @@ private theorem deposit_head (assets : Amount vaultAsset)
       | none => .error .callFailed
       | some ta =>
         Tx.run (do
-          have vs : Amount vShare := ⟨1000000⟩
-          let tsV ← w.self.totalShares +? vs
-          let ta' ← ta +? (1 : Amount vaultAsset)
-          let minted ← tsV mulDiv↓ assets / ta'
+          let minted ← Shares.toShares offset assets ta w.self.totalShares
           Tx.require (0 < minted) Error.ZeroShares
           let ts' ← w.self.totalShares +? minted
           Tx.store (fun σ m => { σ with totalShares := Amount.ofWord m })
@@ -638,10 +565,7 @@ private theorem deposit_head_some (assets : Amount vaultAsset)
     (hview : viewBal? w.self.asset ctx.self w = some ta) :
     Tx.run (deposit assets) ctx w =
       Tx.run (do
-        have vs : Amount vShare := ⟨1000000⟩
-        let tsV ← w.self.totalShares +? vs
-        let ta' ← ta +? (1 : Amount vaultAsset)
-        let minted ← tsV mulDiv↓ assets / ta'
+        let minted ← Shares.toShares offset assets ta w.self.totalShares
         Tx.require (0 < minted) Error.ZeroShares
         let ts' ← w.self.totalShares +? minted
         Tx.store (fun σ m => { σ with totalShares := Amount.ofWord m })
@@ -703,10 +627,7 @@ private theorem withdraw_head (sharesIn : Amount vShare)
       | none => .error .callFailed
       | some ta =>
         Tx.run (do
-          have vs : Amount vShare := ⟨1000000⟩
-          let ta' ← ta +? (1 : Amount vaultAsset)
-          let tsV ← w.self.totalShares +? vs
-          let assetsOut ← ta' mulDiv↓ sharesIn / tsV
+          let assetsOut ← Shares.toAssets offset sharesIn ta w.self.totalShares
           Tx.require (0 < assetsOut) Error.ZeroAssets
           let bal' ← w.self.shares ctx.sender -? sharesIn
           Tx.storeMap (fun σ i => (σ.shares i).raw)
@@ -730,10 +651,7 @@ private theorem withdraw_head_some (sharesIn : Amount vShare)
     (hview : viewBal? w.self.asset ctx.self w = some ta) :
     Tx.run (withdraw sharesIn) ctx w =
       Tx.run (do
-        have vs : Amount vShare := ⟨1000000⟩
-        let ta' ← ta +? (1 : Amount vaultAsset)
-        let tsV ← w.self.totalShares +? vs
-        let assetsOut ← ta' mulDiv↓ sharesIn / tsV
+        let assetsOut ← Shares.toAssets offset sharesIn ta w.self.totalShares
         Tx.require (0 < assetsOut) Error.ZeroAssets
         let bal' ← w.self.shares ctx.sender -? sharesIn
         Tx.storeMap (fun σ i => (σ.shares i).raw)
@@ -820,11 +738,7 @@ private theorem previewDeposit_head (assets : Amount vaultAsset) :
       match viewBal? w.self.asset ctx.self w with
       | none => .error .callFailed
       | some ta =>
-        Tx.run (do
-          have vs : Amount vShare := ⟨1000000⟩
-          let tsV ← w.self.totalShares +? vs
-          let ta' ← ta +? (1 : Amount vaultAsset)
-          tsV mulDiv↓ assets / ta') ctx w := by
+        Tx.run (Shares.toShares offset assets ta w.self.totalShares) ctx w := by
   rw [previewDeposit, run_self_bind]
   refine (run_read_asset _).trans ?_
   rw [run_balanceOf_bind]
@@ -835,11 +749,7 @@ private theorem previewRedeem_head (sharesIn : Amount vShare) :
       match viewBal? w.self.asset ctx.self w with
       | none => .error .callFailed
       | some ta =>
-        Tx.run (do
-          have vs : Amount vShare := ⟨1000000⟩
-          let ta' ← ta +? (1 : Amount vaultAsset)
-          let tsV ← w.self.totalShares +? vs
-          ta' mulDiv↓ sharesIn / tsV) ctx w := by
+        Tx.run (Shares.toAssets offset sharesIn ta w.self.totalShares) ctx w := by
   rw [previewRedeem, run_self_bind]
   refine (run_read_asset _).trans ?_
   rw [run_balanceOf_bind]

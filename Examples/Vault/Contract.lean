@@ -71,17 +71,10 @@ def deposit (assets : Amount vaultAsset) : M (Amount vShare) := do
   let tok ← read asset
   let ta ← tok.balanceOf me
   let ts ← read totalShares
-  -- `Shares.toShares offset`; expanded so `lsc_contract` certifies.
-  let vs : Amount vShare := ⟨1000000⟩
-  let tsV ← ts +? vs
-  let ta' ← ta +? (1 : Amount vaultAsset)
-  let minted ← tsV mulDiv↓ assets / ta'
+  let minted ← Shares.toShares offset assets ta ts
   Tx.require (0 < minted) .ZeroShares
-  let ts' ← ts +? minted
-  write totalShares ts'
-  let bal ← read shares[who]
-  let bal' ← bal +? minted
-  write shares[who] bal'
+  write totalShares (← ts +? minted)
+  write shares[who] (← (← read shares[who]) +? minted)
   safeTransferFrom tok who me assets .TransferFailed
   Tx.emit (.Deposit who assets minted)
   return minted
@@ -99,15 +92,10 @@ def withdraw (sharesIn : Amount vShare) : M (Amount vaultAsset) := do
   let tok ← read asset
   let ta ← tok.balanceOf me
   let ts ← read totalShares
-  let vs : Amount vShare := ⟨1000000⟩
-  let ta' ← ta +? (1 : Amount vaultAsset)
-  let tsV ← ts +? vs
-  let assetsOut ← ta' mulDiv↓ sharesIn / tsV
+  let assetsOut ← Shares.toAssets offset sharesIn ta ts
   Tx.require (0 < assetsOut) .ZeroAssets
-  let bal' ← bal -? sharesIn
-  write shares[who] bal'
-  let ts' ← ts -? sharesIn
-  write totalShares ts'
+  write shares[who] (← bal -? sharesIn)
+  write totalShares (← ts -? sharesIn)
   safeTransfer tok who assetsOut .TransferFailed
   Tx.emit (.Withdraw who assetsOut sharesIn)
   return assetsOut
@@ -118,10 +106,7 @@ def previewDeposit (assets : Amount vaultAsset) : M (Amount vShare) := do
   let tok ← read asset
   let ta ← tok.balanceOf me
   let ts ← read totalShares
-  let vs : Amount vShare := ⟨1000000⟩
-  let tsV ← ts +? vs
-  let ta' ← ta +? (1 : Amount vaultAsset)
-  tsV mulDiv↓ assets / ta'
+  Shares.toShares offset assets ta ts
 
 /-- Assets `withdraw` would return. -/
 def previewRedeem (sharesIn : Amount vShare) : M (Amount vaultAsset) := do
@@ -129,10 +114,7 @@ def previewRedeem (sharesIn : Amount vShare) : M (Amount vaultAsset) := do
   let tok ← read asset
   let ta ← tok.balanceOf me
   let ts ← read totalShares
-  let vs : Amount vShare := ⟨1000000⟩
-  let ta' ← ta +? (1 : Amount vaultAsset)
-  let tsV ← ts +? vs
-  ta' mulDiv↓ sharesIn / tsV
+  Shares.toAssets offset sharesIn ta ts
 
 /-- Owner-only: set the pause flag. -/
 def pause : M Unit := do
