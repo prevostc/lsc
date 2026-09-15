@@ -320,22 +320,12 @@ theorem noExt_callSuffix (d : Nat) (ret : AbiRet) (isView : Bool) (assign : Opti
 
 /-! ## Prefix evaluation -/
 
-/-- `V` is `toVEnv tag env` (`Stmt.call` / `Stmt.view`) or `identV d :: toVEnv`
-(`Op.call` / `Op.view` after `let v := 0`). -/
+/-- Atom evaluation from `localsOK` (`Stmt.call` / `Op.call` after `let dest`). -/
 theorem eval_atom_pre (funs : FunEnv evm) {env : List Nat} {V : VEnv evm} (st : EvmState)
-    (hV : V = toVEnv tag env ∨
-      V = (identV tag env.length, (0 : U256)) :: toVEnv tag env)
-    (hn : identsNodup tag env.length = true)
-    (hn1 : V = (identV tag env.length, (0 : U256)) :: toVEnv tag env →
-        identsNodup tag (env.length + 1) = true)
-    (a : Atom) :
+    (hok : localsOK tag env V) (a : Atom) :
     EvalExpr evm funs V st (atomE tag env.length a)
-      (.vals [BitVec.ofNat 256 (a.eval env)] st) := by
-  cases hV with
-  | inl h => exact eval_atom tag funs st h hn a
-  | inr h =>
-    rw [h]
-    exact eval_atom_cons tag funs st 0 rfl (hn1 h) a
+      (.vals [BitVec.ofNat 256 (a.eval env)] st) :=
+  eval_atom_ok tag funs st hok a
 
 theorem VEnv.get_cons_open {D : Dialect} {x : Ident} {v : D.Value}
     {V : VEnv D} {y : Ident} :
@@ -343,14 +333,10 @@ theorem VEnv.get_cons_open {D : Dialect} {x : Ident} {v : D.Value}
   simp only [VEnv.get, List.find?]
   by_cases h : x = y <;> simp [h]
 
-/-- `atomE` is a literal or a `toVEnv` variable, so its value is unique on `yulD`. -/
+/-- `atomE` is a literal or a `localsOK` variable, so its value is unique on `yulD`. -/
 theorem eval_atomE_unique {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
     {env : List Nat} {V : VEnv (yulD calls)} {st : EvmState} {a : Atom} {r}
-    (hV : V = toVEnv tag env ∨
-      V = (identV tag env.length, (0 : U256)) :: toVEnv tag env)
-    (hn : identsNodup tag env.length = true)
-    (hn1 : V = (identV tag env.length, (0 : U256)) :: toVEnv tag env →
-        identsNodup tag (env.length + 1) = true)
+    (hok : localsOK tag env V)
     (h : EvalExpr (yulD calls) funs V st (atomE tag env.length a) r) :
     r = .vals [BitVec.ofNat 256 (a.eval env)] st := by
   cases a with
@@ -361,29 +347,9 @@ theorem eval_atomE_unique {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
     split_ifs at h with hi
     · have heval : Atom.eval env (.var i) = env[i] := by
         simp [Atom.eval, List.getD_eq_getElem?_getD, List.getElem?_eq_getElem hi]
-      cases hV with
-      | inl hVeq =>
-        subst hVeq
-        have hget := get_toVEnv tag env hn hi
-        have := eval_var_unique hget h
-        simpa [heval] using this
-      | inr hVeq =>
-        subst hVeq
-        have hn' := hn1 rfl
-        have hne : identV tag env.length ≠ identV tag (env.length - 1 - i) := by
-          intro heq
-          have hlt : env.length - 1 - i < env.length + 1 :=
-            Nat.lt_succ_of_le (Nat.le_trans (Nat.sub_le _ _) (Nat.sub_le _ _))
-          have := identV_inj_of_nodup tag (env.length + 1) hn' (Nat.lt_succ_self _) hlt heq
-          omega
-        have hget :
-            VEnv.get ((identV tag env.length, (0 : U256)) :: toVEnv tag env)
-              (identV tag (env.length - 1 - i)) =
-              some (BitVec.ofNat 256 env[i]) := by
-          rw [VEnv.get_cons_open, if_neg hne]
-          exact get_toVEnv tag env hn hi
-        have := eval_var_unique hget h
-        simpa [heval] using this
+      have hget := hok i hi
+      have := eval_var_unique hget h
+      simpa [heval] using this
     · have : Atom.eval env (.var i) = 0 := by
         simp [Atom.eval, List.getD_eq_getElem?_getD,
           List.getElem?_eq_none (Nat.le_of_not_gt hi)]
@@ -415,11 +381,7 @@ theorem eval_mstore_sel_fwd (funs : FunEnv evm) (V : VEnv evm) (st : EvmState)
 
 theorem eval_mstore_atom_fwd (funs : FunEnv evm) {env : List Nat} {V : VEnv evm}
     (st : EvmState) (i : Nat) (a : Atom)
-    (hV : V = toVEnv tag env ∨
-      V = (identV tag env.length, (0 : U256)) :: toVEnv tag env)
-    (hn : identsNodup tag env.length = true)
-    (hn1 : V = (identV tag env.length, (0 : U256)) :: toVEnv tag env →
-        identsNodup tag (env.length + 1) = true)
+    (hok : localsOK tag env V)
     (hi : i ≤ 3) :
     EvalExpr evm funs V st
       (bop EVM.Op.mstore [lit (abiAfterSel + 32 * i), atomE tag env.length a])
@@ -427,7 +389,7 @@ theorem eval_mstore_atom_fwd (funs : FunEnv evm) {env : List Nat} {V : VEnv evm}
         { touchMemory st (abiAfterSel + 32 * i) 32 with
           memory := storeWord st.memory (abiAfterSel + 32 * i)
             (BitVec.ofNat 256 (a.eval env)) }) := by
-  have ha := eval_atom_pre tag funs st hV hn hn1 a
+  have ha := eval_atom_pre tag funs st hok a
   refine Step.builtinOk (Step.argsCons (Step.argsCons Step.argsNil ha) Step.lit) ?_
   simp only [litValue_number, step_mstore, toNat_abiAfterSel_off hi]
 
@@ -476,11 +438,7 @@ theorem callPrefix_append (d : Nat) (sel : Nat) (args : List Atom) :
 /-- Pack remaining `args` at ABI offset `off` into a memory that already holds `pre`. -/
 theorem mstoreArgs_exec_from {env : List Nat} {V : VEnv evm}
     (funs : FunEnv evm) (st : EvmState) (off : Nat) (args : List Atom)
-    (hV : V = toVEnv tag env ∨
-      V = (identV tag env.length, (0 : U256)) :: toVEnv tag env)
-    (hn : identsNodup tag env.length = true)
-    (hn1 : V = (identV tag env.length, (0 : U256)) :: toVEnv tag env →
-        identsNodup tag (env.length + 1) = true)
+    (hok : localsOK tag env V)
     (hoff : off + args.length ≤ 3)
     (hvals : ∀ x ∈ args, atomWF x = true) (hwf : EnvWF env)
     {pre : List UInt8}
@@ -501,7 +459,7 @@ theorem mstoreArgs_exec_from {env : List Nat} {V : VEnv evm}
   | cons a rest ih =>
     have hi : off ≤ 3 := Nat.le_trans (Nat.le_add_right off (a :: rest).length) hoff
     have haLt := atom_eval_lt hwf (hvals a (by simp))
-    have hmA := eval_mstore_atom_fwd tag funs st off a hV hn hn1 hi
+    have hmA := eval_mstore_atom_fwd tag funs st off a hok hi
     let stA : EvmState :=
       { touchMemory st (abiAfterSel + 32 * off) 32 with
         memory := storeWord st.memory (abiAfterSel + 32 * off)
@@ -542,11 +500,7 @@ theorem mstoreArgs_exec_from {env : List Nat} {V : VEnv evm}
 theorem mstoreArgs_exec {env : List Nat} {V : VEnv evm}
     (funs : FunEnv evm) (st : EvmState) (orig : Nat → UInt8)
     (sel : Nat) (args : List Atom)
-    (hV : V = toVEnv tag env ∨
-      V = (identV tag env.length, (0 : U256)) :: toVEnv tag env)
-    (hn : identsNodup tag env.length = true)
-    (hn1 : V = (identV tag env.length, (0 : U256)) :: toVEnv tag env →
-        identsNodup tag (env.length + 1) = true)
+    (hok : localsOK tag env V)
     (hn3 : args.length ≤ 3)
     (hvals : ∀ x ∈ args, atomWF x = true) (hwf : EnvWF env)
     (hsel : sel < 2 ^ 32)
@@ -563,17 +517,13 @@ theorem mstoreArgs_exec {env : List Nat} {V : VEnv evm}
     exact readBytes_pack0 orig sel hsel
   simpa using
     mstoreArgs_exec_from tag (env := env) (V := V)
-      funs st 0 args hV hn hn1 (by simpa using hn3) hvals hwf hpre
+      funs st 0 args hok (by simpa using hn3) hvals hwf hpre
 
 /-- Combined prefix: selector word plus argument words. `d` is unused in the
 statements (`callPrefix` uses `env.length` via `atomE`). -/
 theorem call_prefix_fwd {env : List Nat} {V : VEnv evm} {st : EvmState} {ctx : Ctx}
     (funs : FunEnv evm) (sel : Nat) (args : List Atom)
-    (hV : V = toVEnv tag env ∨
-      V = (identV tag env.length, (0 : U256)) :: toVEnv tag env)
-    (hn : identsNodup tag env.length = true)
-    (hn1 : V = (identV tag env.length, (0 : U256)) :: toVEnv tag env →
-        identsNodup tag (env.length + 1) = true)
+    (hok : localsOK tag env V)
     (hctx : ctxRel ctx st) (hwf : EnvWF env)
     (hn3 : args.length ≤ 3)
     (hvals : ∀ x ∈ args, atomWF x = true)
@@ -590,7 +540,7 @@ theorem call_prefix_fwd {env : List Nat} {V : VEnv evm} {st : EvmState} {ctx : C
     call_prefix_fwd_nil (tag := tag) funs V st sel hsel hctx
   obtain ⟨st', hM, hpack, hMO, hCW, hEV⟩ :=
     mstoreArgs_exec tag (env := env) (V := V) funs stSel st.memory sel args
-      hV hn hn1 hn3 hvals hwf hsel hmem
+      hok hn3 hvals hwf hsel hmem
   refine ⟨st', ?_, hpack, MemOnly.trans hMO0 hMO, ?_, hCW.trans hCW0, hEV.trans hEV0⟩
   · rw [callPrefix_append]
     have hP' : ExecStmts evm funs V st (callPrefix tag env.length sel []) V stSel .normal := by
@@ -936,11 +886,6 @@ theorem suffixOk_boolOpt {ok : U256} {st : EvmState} {ck : Bool}
     rcases Bool.or_eq_true_iff.mp h with h0 | hrest
     · exact .inl (of_decide_eq_true h0)
     · exact .inr hrest
-
-theorem VEnv.set_cons_ne {x y : Ident} {vx vy : U256} {V : VEnv evm}
-    (h : x ≠ y) :
-    VEnv.set ((x, vx) :: V) y vy = (x, vx) :: VEnv.set V y vy := by
-  simp [VEnv.set, h]
 
 theorem ult32_of_ge {n : Nat} (hn : n < wordBound) (h : 32 ≤ n) :
     (BitVec.ofNat 256 n).ult 32#256 = false := by

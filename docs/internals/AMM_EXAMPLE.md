@@ -9,8 +9,11 @@ Storage: `token0/1`, `reserve0/1`, `totalShares`, `shares`, `owner`,
 `feeTo`, `protocolShareBps`, `protocolFees0/1`. First LP mint is
 `a0.asUnchecked lpShare` minus `MINIMUM_LIQUIDITY = 1000` locked at
 address 0 (no `sqrt`, no loop; revert `.InsufficientLiquidity` if
-`a0 ≤ 1000`). Later mint is `min(⌊a0·S/r0⌋, ⌊a1·S/r1⌋)` via
-`ite`. Both swap directions use `swapOut` (0.3%-fee notional, then
+`a0 ≤ 1000`). Later mint is `min(⌊a0·S/r0⌋, ⌊a1·S/r1⌋)` via a
+pure `if`. Both branches of the first-vs-later mint share one tail
+(`seqIf`): require nonzero shares, write reserves, `mint who minted`.
+`mint` is `@[lsc_inline]` and updates `shares[to]` and `totalShares`.
+Both swap directions use `swapOut` (0.3%-fee notional, then
 `require (protoFee ≤ fee)`). LPs keep the fee on the curve. When
 `feeTo ≠ 0`, `⌊fee · protocolShareBps / BPS⌋` is skimmed into
 `protocolFees*` and never enters `k`. CEI is state-then-call; reentrancy

@@ -77,6 +77,104 @@ theorem get_toVEnv tag (env : List Nat) (hn : identsNodup tag env.length = true)
       simp only [hne, ↓reduceIte]
       exact ih (identsNodup_mono tag (by omega) hn') hi'
 
+/-- `V` agrees with `env` on every `identV` looked up at this depth.
+Word `seqIf` keeps dest/phi in front of `toVEnv`; atoms only need this. -/
+def localsOK (env : List Nat) (V : VEnv evm) : Prop :=
+  ∀ i (hi : i < env.length),
+    VEnv.get V (identV tag (env.length - 1 - i)) =
+      some (BitVec.ofNat 256 (env[i]'hi))
+
+theorem localsOK_toVEnv (env : List Nat)
+    (hn : identsNodup tag env.length = true) :
+    localsOK tag env (toVEnv tag env) :=
+  fun _i hi => get_toVEnv tag env hn hi
+
+theorem localsOK_of_eq {env : List Nat} {V : VEnv evm}
+    (hV : V = toVEnv tag env) (hn : identsNodup tag env.length = true) :
+    localsOK tag env V := by
+  subst hV
+  exact localsOK_toVEnv tag env hn
+
+theorem localsOK_skip_head {env : List Nat} {V : VEnv evm} {x : YIdent} {vx : U256}
+    (hok : localsOK tag env V)
+    (hne : ∀ i, i < env.length → x ≠ identV tag (env.length - 1 - i)) :
+    localsOK tag env ((x, vx) :: V) := by
+  intro i hi
+  rw [VEnv.get_cons, if_neg (hne i hi)]
+  exact hok i hi
+
+/-- `identV d` is not among the `env`-depth lookups, so it may sit in front. -/
+theorem localsOK_identV_front {env : List Nat} {V : VEnv evm} (v : U256)
+    (hn : identsNodup tag (env.length + 1) = true)
+    (hok : localsOK tag env V) :
+    localsOK tag env ((identV tag env.length, v) :: V) := by
+  refine localsOK_skip_head (tag := tag) hok ?_
+  intro i hi heq
+  have := identV_inj_of_nodup tag (env.length + 1) hn (Nat.lt_succ_self _)
+    (by omega) heq
+  omega
+
+theorem localsOK_of_identV_front {env : List Nat} {V : VEnv evm} {v : U256}
+    (hn : identsNodup tag (env.length + 1) = true)
+    (hok : localsOK tag env ((identV tag env.length, v) :: V)) :
+    localsOK tag env V := by
+  intro i hi
+  have hget := hok i hi
+  rw [VEnv.get_cons] at hget
+  have hne : identV tag env.length ≠ identV tag (env.length - 1 - i) := by
+    intro heq
+    have := identV_inj_of_nodup tag (env.length + 1) hn (Nat.lt_succ_self _)
+      (by omega) heq
+    omega
+  simp only [hne, ↓reduceIte] at hget
+  exact hget
+
+theorem ofNat_toNat_u256 (v : U256) : BitVec.ofNat 256 v.toNat = v :=
+  BitVec.eq_of_toNat_eq (toNat_ofNat_of_lt (by simpa [wordBound] using v.isLt))
+
+theorem localsOK_cons {env : List Nat} {V : VEnv evm} (v : Nat)
+    (hn : identsNodup tag (env.length + 1) = true)
+    (hok : localsOK tag env V) :
+    localsOK tag (v :: env)
+      ((identV tag env.length, BitVec.ofNat 256 v) :: V) := by
+  intro i hi
+  rw [VEnv.get_cons]
+  cases i with
+  | zero =>
+    have hidx : (v :: env).length - 1 - 0 = env.length := by simp
+    rw [hidx, if_pos rfl]
+    rfl
+  | succ i =>
+    have hi' : i < env.length := by
+      simp [List.length_cons] at hi
+      omega
+    have hidx : (v :: env).length - 1 - i.succ = env.length - 1 - i := by
+      simp [List.length_cons]; omega
+    have hne : identV tag env.length ≠ identV tag (env.length - 1 - i) := by
+      intro heq
+      have := identV_inj_of_nodup tag (env.length + 1) hn (Nat.lt_succ_self _)
+        (by omega) heq
+      omega
+    rw [hidx, if_neg hne]
+    simpa [List.getElem_cons_succ] using hok i hi'
+
+theorem localsOK_phi_dest {env : List Nat} {V : VEnv evm} (p d0 : U256)
+    (hn : identsNodup tag (env.length + 1) = true)
+    (hok : localsOK tag env V) :
+    localsOK tag env
+      ((identPhi tag env.length, p) :: (identV tag env.length, d0) :: V) := by
+  have hφ : ∀ i, i < env.length →
+      identPhi tag env.length ≠ identV tag (env.length - 1 - i) :=
+    fun i _ => identPhi_ne_identV tag env.length (env.length - 1 - i)
+  have hd : ∀ i, i < env.length →
+      identV tag env.length ≠ identV tag (env.length - 1 - i) := by
+    intro i hi heq
+    have := identV_inj_of_nodup tag (env.length + 1) hn (Nat.lt_succ_self _)
+      (by omega) heq
+    omega
+  exact localsOK_skip_head tag
+    (localsOK_skip_head tag hok hd) hφ
+
 theorem restore_nil (Vb : VEnv evm) : restore ([] : VEnv evm) Vb = [] := by
   simp [restore]
 
@@ -108,6 +206,41 @@ theorem eval_atom tag (funs : FunEnv evm) {env : List Nat} {V : VEnv evm} (st : 
       rw [this]
       exact Step.lit
 
+/-- Atom evaluation from `localsOK` (dest/phi may sit in front of `toVEnv`). -/
+theorem eval_atom_ok tag (funs : FunEnv evm) {env : List Nat} {V : VEnv evm}
+    (st : EvmState) (hok : localsOK tag env V) :
+    ∀ a, EvalExpr evm funs V st (atomE tag env.length a)
+      (.vals [BitVec.ofNat 256 (a.eval env)] st) := by
+  intro a
+  cases a with
+  | lit n =>
+    simp [atomE, Atom.eval]
+    exact Step.lit
+  | var i =>
+    simp only [atomE, Atom.eval]
+    split_ifs with hi
+    · have hget := hok i hi
+      rw [← List.getElem_eq_getD (h := hi) 0]
+      exact Step.var hget
+    · have : env.getD i 0 = 0 := by
+        simp [List.getD_eq_getElem?_getD, List.getElem?_eq_none (Nat.le_of_not_gt hi)]
+      rw [this]
+      exact Step.lit
+
+/-- `atomE` at the original depth after `let identV_d`. -/
+theorem eval_atom_ok_cons tag (funs : FunEnv evm) {env : List Nat} {V : VEnv evm}
+    (st : EvmState) (v : U256) (hok : localsOK tag env V)
+    (hn : identsNodup tag (env.length + 1) = true) :
+    ∀ a, EvalExpr evm funs ((identV tag env.length, v) :: V) st
+      (atomE tag env.length a)
+      (.vals [BitVec.ofNat 256 (a.eval env)] st) :=
+  eval_atom_ok tag funs st (by
+    refine localsOK_skip_head (tag := tag) hok ?_
+    intro i hi heq
+    have := identV_inj_of_nodup tag (env.length + 1) hn (Nat.lt_succ_self _)
+      (by omega) heq
+    omega)
+
 /-- Evaluating `atomE tag d a` after binding `v_d` — the new name is not among `a`'s lookups. -/
 theorem eval_atom_cons tag (funs : FunEnv evm) {env : List Nat} {V : VEnv evm} (st : EvmState)
     (v : U256) (hV : V = toVEnv tag env) (hn : identsNodup tag (env.length + 1) = true) :
@@ -130,6 +263,46 @@ theorem eval_atom_cons tag (funs : FunEnv evm) {env : List Nat} {V : VEnv evm} (
           have := identV_inj_of_nodup tag (env.length + 1) hn (by omega) (by omega) heq
           omega
         simp only [hne, ↓reduceIte]
+        subst hV
+        exact get_toVEnv tag env (identsNodup_mono tag (by omega) hn) hi
+      rw [← List.getElem_eq_getD (h := hi) 0]
+      exact Step.var hget
+    · have : env.getD i 0 = 0 := by
+        simp [List.getD_eq_getElem?_getD, List.getElem?_eq_none (Nat.le_of_not_gt hi)]
+      rw [this]
+      exact Step.lit
+
+/-- `atomE` after `let dest` and `let phi` — neither name is among the source locals. -/
+theorem eval_atom_phi_dest tag (funs : FunEnv evm) {env : List Nat} {V : VEnv evm}
+    (st : EvmState) (p d0 : U256)
+    (hV : V = toVEnv tag env) (hn : identsNodup tag (env.length + 1) = true) :
+    ∀ a, EvalExpr evm funs
+      ((identPhi tag env.length, p) :: (identV tag env.length, d0) :: V) st
+      (atomE tag env.length a)
+      (.vals [BitVec.ofNat 256 (a.eval env)] st) := by
+  intro a
+  cases a with
+  | lit n =>
+    simp [atomE, Atom.eval]
+    exact Step.lit
+  | var i =>
+    simp only [atomE, Atom.eval]
+    split_ifs with hi
+    · have hget :
+          VEnv.get ((identPhi tag env.length, p) ::
+            (identV tag env.length, d0) :: V)
+            (identV tag (env.length - 1 - i)) =
+          some (BitVec.ofNat 256 env[i]) := by
+        rw [VEnv.get_cons]
+        have hneΦ : identPhi tag env.length ≠ identV tag (env.length - 1 - i) :=
+          identPhi_ne_identV tag env.length (env.length - 1 - i)
+        simp only [hneΦ, ↓reduceIte]
+        rw [VEnv.get_cons]
+        have hneD : identV tag env.length ≠ identV tag (env.length - 1 - i) := by
+          intro heq
+          have := identV_inj_of_nodup tag (env.length + 1) hn (by omega) (by omega) heq
+          omega
+        simp only [hneD, ↓reduceIte]
         subst hV
         exact get_toVEnv tag env (identsNodup_mono tag (by omega) hn) hi
       rw [← List.getElem_eq_getD (h := hi) 0]
@@ -307,11 +480,109 @@ theorem VEnv.set_head (x : Ident) (v w : U256) (V : VEnv evm) :
     VEnv.set ((x, v) :: V) x w = (x, w) :: V := by
   simp [VEnv.set]
 
+theorem VEnv.set_cons_ne {x y : Ident} {vx : U256} {V : VEnv evm} {w : U256}
+    (h : x ≠ y) :
+    VEnv.set ((x, vx) :: V) y w = (x, vx) :: VEnv.set V y w := by
+  simp [VEnv.set, h]
+
+theorem VEnv.get_set (V : VEnv evm) (x : Ident) (v : U256)
+    (h : VEnv.get V x ≠ none) :
+    VEnv.get (VEnv.set V x v) x = some v := by
+  induction V with
+  | nil => simp [VEnv.get] at h
+  | cons p rest ih =>
+    rcases p with ⟨y, w⟩
+    unfold VEnv.set
+    split_ifs with hx
+    · subst hx
+      simp [VEnv.get]
+    · have h' : VEnv.get rest x ≠ none := by
+        intro hn
+        apply h
+        rw [VEnv.get_cons, if_neg hx, hn]
+      rw [VEnv.get_cons, if_neg hx]
+      exact ih h'
+
+theorem VEnv.get_set_ne {V : VEnv evm} {x y : Ident} {v : U256}
+    (h : x ≠ y) :
+    VEnv.get (VEnv.set V y v) x = VEnv.get V x := by
+  induction V with
+  | nil => rfl
+  | cons p rest ih =>
+    rcases p with ⟨z, w⟩
+    unfold VEnv.set
+    split_ifs with hz
+    · subst hz
+      rw [VEnv.get_cons, if_neg h.symm, VEnv.get_cons, if_neg h.symm]
+    · rw [VEnv.get_cons, VEnv.get_cons]
+      split_ifs
+      · rfl
+      · exact ih
+
+theorem VEnv.get_set_of_some {V : VEnv evm} {x : Ident} {old v : U256}
+    (h : VEnv.get V x = some old) :
+    VEnv.get (VEnv.set V x v) x = some v :=
+  VEnv.get_set V x v (by simp [h])
+
 theorem VEnv.setMany_one (V : VEnv evm) (x : Ident) (v : U256) :
     VEnv.setMany V [x] [v] = VEnv.set V x v := rfl
+
+theorem localsOK_set {env : List Nat} {V : VEnv evm} {dest : YIdent} (v : U256)
+    (hok : localsOK tag env V)
+    (hne : ∀ i, i < env.length → dest ≠ identV tag (env.length - 1 - i)) :
+    localsOK tag env (VEnv.set V dest v) := by
+  intro i hi
+  rw [VEnv.get_set_ne (hne i hi).symm]
+  exact hok i hi
 
 theorem restore_length {V Vb : VEnv evm} (h : V.length = Vb.length) :
     restore V Vb = Vb := by
   simp [restore, h]
+
+theorem VEnv.set_length (V : VEnv evm) (x : Ident) (v : U256) :
+    (VEnv.set V x v).length = V.length := by
+  induction V with
+  | nil => simp [VEnv.set]
+  | cons p rest ih =>
+    rcases p with ⟨y, w⟩
+    by_cases hx : y = x
+    · subst hx; simp [VEnv.set]
+    · rw [VEnv.set_cons_ne hx]; simp [ih]
+
+theorem restore_set (V : VEnv evm) (dest : YIdent) (v : U256) :
+    restore V (VEnv.set V dest v) = VEnv.set V dest v :=
+  restore_length (VEnv.set_length V dest v).symm
+
+/-- Extra head + in-place `dest` update restores to the in-place update. -/
+theorem restore_cons_set {x dest : Ident} {vx r : U256} {V : VEnv evm}
+    (h : x ≠ dest) :
+    restore V (VEnv.set ((x, vx) :: V) dest r) = VEnv.set V dest r := by
+  rw [VEnv.set_cons_ne h]
+  unfold restore
+  simp only [List.length_cons]
+  rw [VEnv.set_length, Nat.add_sub_cancel_left]
+  simp [List.drop]
+
+theorem restore_tail_of_restore_cons_set {x dest : Ident} {vx r : U256}
+    {V V' : VEnv evm} (hne : x ≠ dest)
+    (h : restore ((x, vx) :: V) V' = VEnv.set ((x, vx) :: V) dest r) :
+    restore V V' = VEnv.set V dest r := by
+  rw [VEnv.set_cons_ne hne] at h
+  unfold restore at h ⊢
+  simp [List.length_cons] at h ⊢
+  have hlen : V.length + 1 ≤ V'.length := by
+    by_contra hlt
+    rw [Nat.not_le] at hlt
+    have hz : V'.length - (V.length + 1) = 0 :=
+      Nat.sub_eq_zero_of_le (Nat.le_of_lt hlt)
+    simp [hz] at h
+    have hlenV' : V'.length = V.length + 1 := by
+      have := congrArg List.length h
+      simp [List.length_cons] at this
+      rwa [VEnv.set_length] at this
+    omega
+  have hsub : V'.length - V.length = V'.length - (V.length + 1) + 1 := by omega
+  rw [hsub, ← List.drop_drop, h]
+  simp [List.drop]
 
 end Lsc.Compiler

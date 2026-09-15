@@ -89,6 +89,344 @@ theorem selectSwitch_nonzero_yulD {calls : ExternalCalls} {eA eB : YBlock} {cv :
     exact h
   simp [selectSwitch, List.find?, decide_eq_false hne]
 
+
+theorem ExtAgree_of_noExt_append {calls : ExternalCalls}
+    {funs : FunEnv (yulD calls)} {V : VEnv (yulD calls)} {st : EvmState}
+    {pre rest : YBlock} {V' : VEnv (yulD calls)} {st' : EvmState} {o : Outcome}
+    {V1 : VEnv evm} {st1 : EvmState} {self : Address} {x : Lsc.ExtState}
+    (hfuns : noExtFuns funs = true) (hno : noExtBlock pre = true)
+    (hexec : ExecStmts (yulD calls) funs V st (pre ++ rest) V' st' o)
+    (hfwd : ExecStmts evm (funEnvUncast calls funs) V st pre V1 st1 .normal)
+    (hAgr : ExtAgree self x st)
+    (haddr : st.env.address = BitVec.ofNat 256 self) :
+    ExtAgree self x st1 := by
+  cases execStmts_append_inv hexec with
+  | inr hstop =>
+    have hdesc := execStmts_descend hfuns hno hstop.2
+    have ⟨_, _, ho⟩ := execStmts_det_evm hfwd hdesc
+    exact (hstop.1 ho.symm).elim
+  | inl hok =>
+    obtain ⟨_, _, hpre, _⟩ := hok
+    have hdesc := execStmts_descend hfuns hno hpre
+    have ⟨_, hsteq, _⟩ := execStmts_det_evm hfwd hdesc
+    subst hsteq
+    exact ExtAgree_noExt hAgr haddr hfuns hno hpre
+
+/-- Unit `seqIf` with call-free branches: invert `switch ++ k`. -/
+theorem sim_ext_seqIf_unit {S E ε : Type} {u : RetTy}
+    {c : ContractDef} {Γ : ContractSchema S ExtState E ε} {κ : List UInt8 → U256}
+    {ctx : Ctx} {haltUnit : Bool} {o : ExtOracle}
+    {cond : Cond} {th el : Core .unit} {k : Core u}
+    (hΓ : Γ.st.Lawful c.fields) (hκ : KeccakSep c κ)
+    (hlen : c.fields.length < wordBound)
+    (hC : M1Cond cond) (hth : M1Frag th) (hel : M1Frag el)
+    (ihk : SimExt tag c Γ κ o ctx haltUnit k)
+    {w : World S ExtState E} {env : List Nat}
+    {V : VEnv (yulD (toCalls o))} {st : EvmState}
+    (funs : FunEnv (yulD (toCalls o)))
+    (hfuns : noExtFuns funs = true)
+    (hwf : coreWF c (.seqIf cond th el k) = true)
+    (hn : identsNodup tag (env.length + coreExtraDepth (.seqIf cond th el k)) = true)
+    (hinv : Inv tag Γ c κ ctx w env V st)
+    (hAgr : ExtAgree ctx.self w.ext st)
+    (hOr : w.oracle = Oracle.ofExt o)
+    (hNR : ExtOracle.NoReentry o ctx.self)
+    {clearLock : Bool} {e' : Emit}
+    (hem : emitCore tag c {} env.length haltUnit (.seqIf cond th el k) clearLock = some e')
+    {V' : VEnv (yulD (toCalls o))} {st' : EvmState} {out : Outcome}
+    (hexec : ExecStmts (yulD (toCalls o)) funs V st e'.stmts V' st' out) :
+    match Tx.run (Core.denote Γ (.seqIf cond th el k) env) ctx w with
+    | .ok (v, w') =>
+        out = Outcome.halt ∧ haltSuccess u v st'.halted ∧
+          R c Γ κ w' st' ∧ ExtAgree ctx.self w'.ext st'
+    | .error e =>
+        ∃ bytes, out = Outcome.halt ∧ st'.halted = some (HaltKind.revert, bytes) ∧
+          haltError c Γ e bytes := by
+  have ⟨hcWF, hthWF, helWF, hkWF, _⟩ := coreWF_seqIf.mp hwf
+  simp only [emitCore] at hem
+  obtain ⟨eA, hA⟩ := emitCore_some tag (c := c) (halt := false) (clearLock := false)
+    th ({} : Emit) env.length
+  obtain ⟨eB, hB⟩ := emitCore_some tag (c := c) (halt := false) (clearLock := false)
+    el ({} : Emit) env.length
+  simp [hA, hB] at hem
+  obtain ⟨eK, hKpre, hst⟩ := emitCore_prefix tag hem
+  rw [hst] at hexec
+  have hpush :
+      (Emit.push ({} : Emit) (.switch (emitCond tag env.length cond)
+        [(YulSemantics.Literal.number 0, eB.stmts)] (some eA.stmts))).stmts =
+        [.switch (emitCond tag env.length cond)
+          [(YulSemantics.Literal.number 0, eB.stmts)] (some eA.stmts)] := by
+    simp [Emit.stmts_push, Emit.stmts_nil]
+  rw [hpush] at hexec
+  have hnA : identsNodup tag (env.length + coreExtraDepth th) = true :=
+    identsNodup_mono tag (by simp [coreExtraDepth]; try omega) hn
+  have hnB : identsNodup tag (env.length + coreExtraDepth el) = true :=
+    identsNodup_mono tag (by simp [coreExtraDepth]; try omega) hn
+  have hnK : identsNodup tag (env.length + coreExtraDepth k) = true :=
+    identsNodup_mono tag (by simp [coreExtraDepth]; try omega) hn
+  have hno : noExtBlock
+      [.switch (emitCond tag env.length cond)
+        [(YulSemantics.Literal.number 0, eB.stmts)] (some eA.stmts)] = true := by
+    simpa [Emit.stmts_push, Emit.stmts_nil] using
+      noExt_switch (e := {}) noExt_nil (noExt_emitCond tag env.length cond)
+        (by
+          change (noExtStmts eB.stmts && noExtCases []) = true
+          simpa [noExtBlock] using
+            noExt_core_callFree (tag := tag) (c := c) (halt := false)
+              (clearLock := false) hel {} env.length hB noExt_nil)
+        (noExt_core_callFree (tag := tag) (c := c) (halt := false)
+          (clearLock := false) hth {} env.length hA noExt_nil)
+  have hcond :=
+    eval_cond_ok tag (st := st) (funEnvUncast (toCalls o) funs) hinv.venv hinv.wf hC hcWF
+  have hfunsN := noExtFuns_cons_nil (calls := toCalls o) hfuns
+  simp only [Core.denote, Tx.run_bind]
+  split_ifs with hc
+  · have hsel :
+        selectSwitch evm (b2w (decide (cond.denote env)))
+          [(YulSemantics.Literal.number 0, eB.stmts)] (some eA.stmts) = eA.stmts :=
+      selectSwitch_nonzero (by simp [hc, b2w])
+    have hsim :=
+      core_sim_fall (tag := tag) hΓ hκ hlen th hth rfl
+        (funEnvUncast (toCalls o) ([] :: funs)) hthWF hnA hinv hA
+    cases hrun : Tx.run (Core.denote Γ th env) ctx w with
+    | error err =>
+      rw [hrun] at hsim
+      obtain ⟨VA, stA, bytes, hexecA, hh, herr⟩ := hsim
+      have hsw :=
+        exec_switch (funs := funEnvUncast (toCalls o) funs) hcond hsel
+          (hoist_emitCore tag hA) hexecA
+      have ⟨ho, hVeq, hsteq⟩ := s1_match_prefix_halt hfuns hno hexec hsw
+      subst hVeq; subst hsteq
+      simp only [hrun, except_error_prod]
+      exact ⟨bytes, ho, hh, herr⟩
+    | ok p =>
+      rcases p with ⟨_, w1⟩
+      rw [hrun] at hsim
+      obtain ⟨VA, stA, hexecA, hRA, hctxA, hrestA⟩ := hsim
+      have hsw :=
+        exec_switch (funs := funEnvUncast (toCalls o) funs) hcond hsel
+          (hoist_emitCore tag hA) hexecA
+      rw [hrestA] at hsw
+      have hrest := s1_match_prefix_ok hfuns hno hexec hsw
+      have hokd : Core.denote Γ th env ctx w = .ok ((), w1) := by
+        simpa [Tx.run] using hrun
+      have hg := callFree_preserves_ghost (Γ := Γ) hth env ctx w hokd
+      have hAgr1 : ExtAgree ctx.self w1.ext stA := by
+        rw [hg.1]
+        exact ExtAgree_of_noExt_append hfuns hno hexec hsw hAgr
+          (ctxRel_address hinv.ctxr)
+      have hinvK : Inv tag Γ c κ ctx w1 env V stA :=
+        ⟨hinv.venv, hinv.wf, hRA, hctxA⟩
+      have hsimK :=
+        ihk w1 env V stA funs hfuns hkWF hnK hinvK hAgr1 (hg.2.trans hOr) hNR
+          hKpre hrest
+      simp only [hrun]
+      exact hsimK
+  · have hsel :
+        selectSwitch evm (b2w (decide (cond.denote env)))
+          [(YulSemantics.Literal.number 0, eB.stmts)] (some eA.stmts) = eB.stmts := by
+      simp [hc, b2w]; exact selectSwitch_zero
+    have hsim :=
+      core_sim_fall (tag := tag) hΓ hκ hlen el hel rfl
+        (funEnvUncast (toCalls o) ([] :: funs)) helWF hnB hinv hB
+    cases hrun : Tx.run (Core.denote Γ el env) ctx w with
+    | error err =>
+      rw [hrun] at hsim
+      obtain ⟨VB, stB, bytes, hexecB, hh, herr⟩ := hsim
+      have hsw :=
+        exec_switch (funs := funEnvUncast (toCalls o) funs) hcond hsel
+          (hoist_emitCore tag hB) hexecB
+      have ⟨ho, hVeq, hsteq⟩ := s1_match_prefix_halt hfuns hno hexec hsw
+      subst hVeq; subst hsteq
+      simp only [hrun, except_error_prod]
+      exact ⟨bytes, ho, hh, herr⟩
+    | ok p =>
+      rcases p with ⟨_, w1⟩
+      rw [hrun] at hsim
+      obtain ⟨VB, stB, hexecB, hRB, hctxB, hrestB⟩ := hsim
+      have hsw :=
+        exec_switch (funs := funEnvUncast (toCalls o) funs) hcond hsel
+          (hoist_emitCore tag hB) hexecB
+      rw [hrestB] at hsw
+      have hrest := s1_match_prefix_ok hfuns hno hexec hsw
+      have hokd : Core.denote Γ el env ctx w = .ok ((), w1) := by
+        simpa [Tx.run] using hrun
+      have hg := callFree_preserves_ghost (Γ := Γ) hel env ctx w hokd
+      have hAgr1 : ExtAgree ctx.self w1.ext stB := by
+        rw [hg.1]
+        exact ExtAgree_of_noExt_append hfuns hno hexec hsw hAgr
+          (ctxRel_address hinv.ctxr)
+      have hinvK : Inv tag Γ c κ ctx w1 env V stB :=
+        ⟨hinv.venv, hinv.wf, hRB, hctxB⟩
+      have hsimK :=
+        ihk w1 env V stB funs hfuns hkWF hnK hinvK hAgr1 (hg.2.trans hOr) hNR
+          hKpre hrest
+      simp only [hrun]
+      exact hsimK
+
+/-- Word-like `seqIf` with call-free branches: invert `emitSeqIfWord ++ k`. -/
+theorem sim_ext_seqIf_wordLike {S E ε : Type} {t u : RetTy}
+    {c : ContractDef} {Γ : ContractSchema S ExtState E ε} {κ : List UInt8 → U256}
+    {ctx : Ctx} {haltUnit : Bool} {o : ExtOracle}
+    {cond : Cond} {th el : Core t} {k : Core u}
+    (hΓ : Γ.st.Lawful c.fields) (hκ : KeccakSep c κ)
+    (hlen : c.fields.length < wordBound)
+    (htBr : retTyWordLike t)
+    (hC : M1Cond cond) (hth : M1Frag th) (hel : M1Frag el)
+    (ihk : SimExt tag c Γ κ o ctx haltUnit k)
+    {w : World S ExtState E} {env : List Nat}
+    {V : VEnv (yulD (toCalls o))} {st : EvmState}
+    (funs : FunEnv (yulD (toCalls o)))
+    (hfuns : noExtFuns funs = true)
+    (hwf : coreWF c (.seqIf cond th el k) = true)
+    (hn : identsNodup tag (env.length + coreExtraDepth (.seqIf cond th el k)) = true)
+    (hinv : Inv tag Γ c κ ctx w env V st)
+    (hAgr : ExtAgree ctx.self w.ext st)
+    (hOr : w.oracle = Oracle.ofExt o)
+    (hNR : ExtOracle.NoReentry o ctx.self)
+    {clearLock : Bool} {e' : Emit}
+    (hem : emitCore tag c {} env.length haltUnit (.seqIf cond th el k) clearLock = some e')
+    {V' : VEnv (yulD (toCalls o))} {st' : EvmState} {out : Outcome}
+    (hexec : ExecStmts (yulD (toCalls o)) funs V st e'.stmts V' st' out) :
+    match Tx.run (Core.denote Γ (.seqIf cond th el k) env) ctx w with
+    | .ok (v, w') =>
+        out = Outcome.halt ∧ haltSuccess u v st'.halted ∧
+          R c Γ κ w' st' ∧ ExtAgree ctx.self w'.ext st'
+    | .error e =>
+        ∃ bytes, out = Outcome.halt ∧ st'.halted = some (HaltKind.revert, bytes) ∧
+          haltError c Γ e bytes := by
+  have ⟨hcWF, hthWF, helWF, hkWF⟩ := (coreWF_seqIf_wordLike htBr).mp hwf
+  obtain ⟨eA, eB, eK, hA, hB, hKpre, hst⟩ :=
+    emitCore_seqIf_wordLike_prefix (tag := tag) htBr hem
+  rw [hst] at hexec
+  have ⟨hthD, helD, h1D, hkD⟩ := seqIf_wordLike_depth_le htBr cond th el k
+  have hn1 : identsNodup tag (env.length + 1) = true :=
+    identsNodup_mono tag (Nat.add_le_add_left h1D _) hn
+  have hnA : identsNodup tag (env.length + coreExtraDepth th) = true :=
+    identsNodup_mono tag (Nat.add_le_add_left hthD _) hn
+  have hnB : identsNodup tag (env.length + coreExtraDepth el) = true :=
+    identsNodup_mono tag (Nat.add_le_add_left helD _) hn
+  have hnK : identsNodup tag ((env.length + 1) + coreExtraDepth k) = true :=
+    identsNodup_mono tag (by
+      rw [show (env.length + 1) + coreExtraDepth k =
+            env.length + (coreExtraDepth k + 1) by omega]
+      exact Nat.add_le_add_left hkD env.length) hn
+  have hno : noExtBlock (emitSeqIfWord tag {} env.length cond eA eB).stmts = true :=
+    noExt_emitSeqIfWord (tag := tag) {} env.length cond eA eB noExt_nil
+      (noExt_coreToVar (tag := tag) hth {} env.length (identPhi tag env.length) hA noExt_nil)
+      (noExt_coreToVar (tag := tag) hel {} env.length (identPhi tag env.length) hB noExt_nil)
+  have hokΦ : localsOK tag env
+      ((identPhi tag env.length, (0 : U256)) ::
+        (identV tag env.length, (0 : U256)) :: V) :=
+    localsOK_phi_dest (tag := tag) 0 0 hn1 hinv.venv
+  have hinvΦ : Inv tag Γ c κ ctx w env
+      ((identPhi tag env.length, (0 : U256)) ::
+        (identV tag env.length, (0 : U256)) :: V) st :=
+    ⟨hokΦ, hinv.wf, hinv.rel, hinv.ctxr⟩
+  have hgetΦ : VEnv.get
+      ((identPhi tag env.length, (0 : U256)) ::
+        (identV tag env.length, (0 : U256)) :: V)
+      (identPhi tag env.length) = some 0 := by
+    rw [VEnv.get_cons_open, if_pos rfl]
+  have hneΦ : ∀ n, identPhi tag env.length ≠ identV tag n :=
+    fun n => identPhi_ne_identV tag env.length n
+  have hcond1 :=
+    eval_cond_ok tag (st := st) (funEnvUncast (toCalls o) ([] :: funs))
+      hokΦ hinv.wf hC hcWF
+  have htEq := retTyWordLike_cases htBr
+  rw [denote_seqIf_wordLike htBr, Tx.run_bind]
+  split_ifs with hc
+  · have hsel :
+        selectSwitch evm (b2w (decide (cond.denote env)))
+          [(YulSemantics.Literal.number 0, eB.stmts)] (some eA.stmts) = eA.stmts :=
+      selectSwitch_nonzero (by simp [hc, b2w])
+    have hthSim :=
+      core_toVar_sim (tag := tag) hΓ hκ hlen th hth htBr
+        (identPhi tag env.length) hneΦ hgetΦ
+        (funEnvUncast (toCalls o) ([] :: [] :: funs)) hthWF hnA hinvΦ hA
+    cases hrun : Tx.run (Core.denote Γ th env) ctx w with
+    | error err =>
+      rw [hrun] at hthSim
+      obtain ⟨VA, stA, bytes, hexecA, hh, herr⟩ := hthSim
+      have hpre :=
+        exec_seqIfWord_halt (tag := tag) hcond1 hsel
+          (hoist_emitCoreToVar tag hA) hexecA
+      have ⟨ho, hVeq, hsteq⟩ := s1_match_prefix_halt hfuns hno hexec hpre
+      subst hVeq; subst hsteq
+      simp only [except_error_prod]
+      exact ⟨bytes, ho, hh, herr⟩
+    | ok q =>
+      rw [hrun] at hthSim
+      obtain ⟨VA, stA, hexecA, hgetA, hRA, hctxA, hrestA, hvA⟩ := hthSim
+      rcases q with ⟨v, w1⟩
+      have hpre :=
+        exec_seqIfWord_ok (tag := tag) hcond1 hsel
+          (hoist_emitCoreToVar tag hA) hexecA hrestA
+      have hrest := s1_match_prefix_ok hfuns hno hexec hpre
+      have hokd : Core.denote Γ th env ctx w = .ok (v, w1) := by
+        simpa [Tx.run] using hrun
+      have hg := callFree_preserves_ghost (Γ := Γ) hth env ctx w hokd
+      have hAgr1 : ExtAgree ctx.self w1.ext stA := by
+        rw [hg.1]
+        exact ExtAgree_of_noExt_append hfuns hno hexec hpre hAgr
+          (ctxRel_address hinv.ctxr)
+      have hinvK : Inv tag Γ c κ ctx w1 (retAsNat v :: env)
+          ((identV tag env.length, BitVec.ofNat 256 (retAsNat v)) :: V) stA :=
+        ⟨localsOK_cons (tag := tag) (retAsNat v) hn1 hinv.venv,
+          envWF_cons hvA hinv.wf, hRA, hctxA⟩
+      have hsimK :=
+        ihk w1 (retAsNat v :: env)
+          ((identV tag env.length, BitVec.ofNat 256 (retAsNat v)) :: V) stA
+          funs hfuns hkWF hnK hinvK hAgr1 (hg.2.trans hOr) hNR hKpre hrest
+      simp only [hrun]
+      rw [seqIfCont_retAsNat (Γ := Γ) v k env htEq]
+      exact hsimK
+  · have hsel :
+        selectSwitch evm (b2w (decide (cond.denote env)))
+          [(YulSemantics.Literal.number 0, eB.stmts)] (some eA.stmts) = eB.stmts := by
+      simp [hc, b2w]; exact selectSwitch_zero
+    have helSim :=
+      core_toVar_sim (tag := tag) hΓ hκ hlen el hel htBr
+        (identPhi tag env.length) hneΦ hgetΦ
+        (funEnvUncast (toCalls o) ([] :: [] :: funs)) helWF hnB hinvΦ hB
+    cases hrun : Tx.run (Core.denote Γ el env) ctx w with
+    | error err =>
+      rw [hrun] at helSim
+      obtain ⟨VB, stB, bytes, hexecB, hh, herr⟩ := helSim
+      have hpre :=
+        exec_seqIfWord_halt (tag := tag) hcond1 hsel
+          (hoist_emitCoreToVar tag hB) hexecB
+      have ⟨ho, hVeq, hsteq⟩ := s1_match_prefix_halt hfuns hno hexec hpre
+      subst hVeq; subst hsteq
+      simp only [except_error_prod]
+      exact ⟨bytes, ho, hh, herr⟩
+    | ok q =>
+      rw [hrun] at helSim
+      obtain ⟨VB, stB, hexecB, hgetB, hRB, hctxB, hrestB, hvB⟩ := helSim
+      rcases q with ⟨v, w1⟩
+      have hpre :=
+        exec_seqIfWord_ok (tag := tag) hcond1 hsel
+          (hoist_emitCoreToVar tag hB) hexecB hrestB
+      have hrest := s1_match_prefix_ok hfuns hno hexec hpre
+      have hokd : Core.denote Γ el env ctx w = .ok (v, w1) := by
+        simpa [Tx.run] using hrun
+      have hg := callFree_preserves_ghost (Γ := Γ) hel env ctx w hokd
+      have hAgr1 : ExtAgree ctx.self w1.ext stB := by
+        rw [hg.1]
+        exact ExtAgree_of_noExt_append hfuns hno hexec hpre hAgr
+          (ctxRel_address hinv.ctxr)
+      have hinvK : Inv tag Γ c κ ctx w1 (retAsNat v :: env)
+          ((identV tag env.length, BitVec.ofNat 256 (retAsNat v)) :: V) stB :=
+        ⟨localsOK_cons (tag := tag) (retAsNat v) hn1 hinv.venv,
+          envWF_cons hvB hinv.wf, hRB, hctxB⟩
+      have hsimK :=
+        ihk w1 (retAsNat v :: env)
+          ((identV tag env.length, BitVec.ofNat 256 (retAsNat v)) :: V) stB
+          funs hfuns hkWF hnK hinvK hAgr1 (hg.2.trans hOr) hNR hKpre hrest
+      simp only [hrun]
+      rw [seqIfCont_retAsNat (Γ := Γ) v k env htEq]
+      exact hsimK
+
 /-- S2 backward `core_sim` for every `S2Frag` core. Call-free constructors
 delegate to `core_sim_ext_callFree`. A `.call` / `.view` head uses the
 selector-driven `sim_ext_*` helpers. Reentrancy is excluded by `NoReentry`;
@@ -362,9 +700,11 @@ theorem core_sim_ext {S E ε}
     rw [hst] at hexec
     have hn0 : identsNodup tag env.length = true :=
       identsNodup_mono tag (by simp [coreExtraDepth]; try omega) hn
+    have hn1 : identsNodup tag (env.length + 1) = true :=
+      identsNodup_mono tag (by simp [coreExtraDepth]; try omega) hn
     have hnK : identsNodup tag ((env.length + 1) + coreExtraDepth k) = true := by
       simpa [coreExtraDepth, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using hn
-    have he := eval_atom tag (funEnvUncast (toCalls o) funs) (st := st) hinv.venv hn0 a
+    have he := eval_atom_ok tag (funEnvUncast (toCalls o) funs) (st := st) hinv.venv a
     have hv := atom_eval_lt hinv.wf hwfA
     have hlet :
         ExecStmt evm (funEnvUncast (toCalls o) funs) V st
@@ -381,7 +721,7 @@ theorem core_sim_ext {S E ε}
     have hrest := s1_match_prefix_ok hfuns hnoLet hexec hpre
     have hinv1 : Inv tag Γ c κ ctx w (a.eval env :: env)
         ((identV tag env.length, BitVec.ofNat 256 (a.eval env)) :: V) st :=
-      ⟨by rw [hinv.venv, toVEnv_cons], envWF_cons hv hinv.wf, hinv.rel, hinv.ctxr⟩
+      ⟨localsOK_cons (tag := tag) _ hn1 hinv.venv, envWF_cons hv hinv.wf, hinv.rel, hinv.ctxr⟩
     have hsim :=
       ih hk w (a.eval env :: env)
         ((identV tag env.length, BitVec.ofNat 256 (a.eval env)) :: V) st
@@ -417,7 +757,7 @@ theorem core_sim_ext {S E ε}
       simp [Emit.stmts_push, Emit.stmts_nil]
     rw [hpush] at hexec
     have hsw := execStmts_one hexec
-    have hcond := eval_cond tag (st := st) (funEnvUncast (toCalls o) funs) hinv.venv hinv.wf hn0 hC hcWF
+    have hcond := eval_cond_ok tag (st := st) (funEnvUncast (toCalls o) funs) hinv.venv hinv.wf hC hcWF
     have hfunsN := noExtFuns_cons_nil (calls := toCalls o) hfuns
     cases hsw with
     | switchHalt he =>
@@ -450,6 +790,23 @@ theorem core_sim_ext {S E ε}
             exact selectSwitch_zero_yulD
           rw [hsel, hhoistB] at hss
           exact ihb hb w env V st ([] :: funs) hfunsN hbWF hnB hinv hAgr hOr hNR hB hss
+  | @seqIf tBr _ cond th el k _ _ ihk =>
+    intro hS2 w env V st funs hfuns hwf hn hinv hAgr hOr hNR clearLock e' hem V' st' out hexec
+    by_cases hM1 : M1Frag (.seqIf cond th el k)
+    · exact core_sim_ext_callFree (tag := tag) hhalt hΓ hκ hlen (.seqIf cond th el k)
+        (by simpa [CallFree] using hM1) w env V st funs hfuns hwf hn hinv hAgr hOr hNR
+        hem hexec
+    ·       cases tBr with
+      | pair _ _ => simp [S2Frag] at hS2
+      | unit =>
+        have ⟨hC, hth, hel, hk⟩ := s2frag_seqIf.mp hS2
+        exact sim_ext_seqIf_unit (tag := tag) hΓ hκ hlen hC hth hel (ihk hk)
+          funs hfuns hwf hn hinv hAgr hOr hNR hem hexec
+      | word | addr | flag =>
+        have ⟨hC, hth, hel, hk⟩ := s2frag_seqIf.mp hS2
+        have htWL : retTyWordLike (coreRetTy th) := trivial
+        exact sim_ext_seqIf_wordLike (tag := tag) hΓ hκ hlen htWL hC hth hel
+          (ihk hk) funs hfuns hwf hn hinv hAgr hOr hNR hem hexec
 
 /-- S2 backward `toYulFn` for `S2Frag` cores. Every Yul run is predicted by
 `Core.denote` with `w.oracle = Oracle.ofExt o`. Reentrancy is not modelled
@@ -487,12 +844,14 @@ theorem toYulFn_correct_ext {S E ε : Type}
   have hrest :=
     s1_match_prefix_ok (calls := toCalls o) hfuns
       (noExt_params (tag := f.name) 4 f.params.length) hbody hpar'
-  have hinv : Inv f.name Γ c κ ctx w args.reverse (toVEnv f.name args.reverse) st0 :=
-    ⟨rfl, henv, hR, hctx⟩
   have hn : identsNodup f.name (f.params.length + coreExtraDepth f.core) = true := by
     simpa [maxDepth] using hnod
   have hn' : identsNodup f.name (args.reverse.length + coreExtraDepth f.core) = true := by
     simpa [args, decodeArgs_length, List.length_reverse] using hn
+  have hnEnv : identsNodup f.name args.reverse.length = true :=
+    identsNodup_mono f.name (Nat.le_add_right _ _) hn'
+  have hinv : Inv f.name Γ c κ ctx w args.reverse (toVEnv f.name args.reverse) st0 :=
+    Inv.of_eq (tag := f.name) rfl hnEnv henv hR hctx
   have h0' : emitCore f.name c {} args.reverse.length true f.core (locks f) = some e0 := by
     simpa [args, decodeArgs_length, List.length_reverse] using h0
   have hsim :=

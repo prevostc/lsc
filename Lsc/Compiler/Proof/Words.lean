@@ -104,6 +104,56 @@ theorem b2w_true : b2w true = 1 := rfl
 
 theorem identV_string tag (i : Nat) : identV tag i = tag ++ "_" ++ toString i := rfl
 
+theorem identPhi_string tag (i : Nat) : identPhi tag i = tag ++ "__phi_" ++ toString i := rfl
+
+private theorem toDigits10_isDigit {n : Nat} {c : Char}
+    (h : c ∈ Nat.toDigits 10 n) : c.isDigit := by
+  induction n using Nat.strongRecOn with
+  | _ n ih =>
+    rw [Nat.toDigits_eq_if (by decide : (1 : Nat) < 10)] at h
+    split at h
+    · simp only [List.mem_singleton] at h
+      subst h
+      simp [Nat.isDigit_digitChar]
+      omega
+    · simp only [List.mem_append, List.mem_singleton] at h
+      rcases h with h | rfl
+      · exact ih (n / 10) (Nat.div_lt_self (by omega) (by decide)) h
+      · simp [Nat.isDigit_digitChar]
+        exact Nat.mod_lt n (by decide)
+
+private theorem toString_nat_head_ne_underscore (n : Nat) :
+    (toString n).toList.head? ≠ some '_' := by
+  have hlist : (toString n).toList = Nat.toDigits 10 n := by
+    rw [Nat.toString_eq_repr, Nat.toList_repr]
+  intro h
+  have hmem : '_' ∈ Nat.toDigits 10 n := by
+    rw [← hlist]
+    exact List.mem_of_mem_head? h
+  have hdig := toDigits10_isDigit hmem
+  simp at hdig
+
+private theorem string_append_cancel_left {a s t : String}
+    (h : a ++ s = a ++ t) : s = t := by
+  apply String.ext
+  simpa [String.toList_append] using congrArg String.toList h
+
+theorem identPhi_ne_identV tag (i j : Nat) : identPhi tag i ≠ identV tag j := by
+  intro h
+  have h' : tag ++ ("__phi_" ++ toString i) = tag ++ ("_" ++ toString j) := by
+    simpa [identPhi_string, identV_string, String.append_assoc] using h
+  have h2 : "__phi_" ++ toString i = "_" ++ toString j :=
+    string_append_cancel_left h'
+  have h2' : "_" ++ ("_phi_" ++ toString i) = "_" ++ toString j := by
+    rw [show "__phi_" = "_" ++ "_phi_" from rfl, String.append_assoc] at h2
+    exact h2
+  have h3 : "_phi_" ++ toString i = toString j :=
+    string_append_cancel_left h2'
+  have hhead : (toString j).toList.head? = some '_' := by
+    simp [h3.symm, String.toList_append]
+  exact toString_nat_head_ne_underscore j hhead
+
+
 theorem identV_inj_of_nodup tag (n : Nat) (h : identsNodup tag n = true)
     {i j : Nat} (hi : i < n) (hj : j < n) (heq : identV tag i = identV tag j) : i = j := by
   have hnd : ((List.range n).map (identV tag)).Nodup := (identsNodup_iff tag n).mp h

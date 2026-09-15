@@ -13,13 +13,13 @@ shapes Lean's `do` elaborator produces for programs in the reifiable fragment:
 
 * `bind op (fun x => k)`       ↦ `letOp op k` (word-valued primitive) / `seq s k` (unit statement)
 * `let x := p a b; k`          ↦ `letPure p [a, b] k`
-* `if c then a else b`         ↦ `ite c a b`
+* `if c then a else b`         ↦ `ite c a b` (pure / expression-level)
+* `bind (if c then a else b) k` with effects ↦ `seqIf c a b k` (`k` once)
 * `pure v` in tail position    ↦ `ret v`
 * tail primitives              ↦ `opTail` / `stmtTail` / `revertTail`
 
-Join points (`have __do_jp := fun y => rest; …`) are eliminated by the reifier through
-leaf substitution, which is definitionally what Lean's ζ/β-reduction does to them, so
-`Core.denote` never has to reason about them.
+Join points (`have __do_jp := fun y => rest; …`) of an effectful `if` become the
+shared `seqIf` continuation. Pure join points are still leaf-substituted.
 
 Locals are de Bruijn indices into an environment of words (`var 0` is the most recently
 bound value; function parameters are the initial environment, last parameter first).
@@ -386,6 +386,9 @@ inductive Core : RetTy → Type
   | seq {t : RetTy} (s : Stmt) (k : Core t) : Core t
   | letPure {t : RetTy} (p : Prim) (args : List Atom) (k : Core t) : Core t
   | ite {t : RetTy} (c : Cond) (a b : Core t) : Core t
+  /-- Run `th` or `el`, then `k` once. Unit branches keep `k`'s environment;
+  word/addr/flag branches bind the result as `var 0` in `k`. -/
+  | seqIf {t u : RetTy} (c : Cond) (th el : Core t) (k : Core u) : Core u
 
 /-! ## Schemas: how field / event / error indices map to the user's Lean types -/
 
@@ -470,6 +473,23 @@ def Core.denote (Γ : ContractSchema S X E ε) : {t : RetTy} → Core t → List
   | _, .seq s k, env => Stmt.denote Γ env s >>= fun _ => Core.denote Γ k env
   | _, .letPure p args k, env => Core.denote Γ k (Prim.eval p (args.map (·.eval env)) :: env)
   | _, .ite c a b, env => if c.denote env then Core.denote Γ a env else Core.denote Γ b env
+  | _, .seqIf (t := t) c th el k, env =>
+      (if c.denote env then Core.denote Γ th env else Core.denote Γ el env) >>=
+        match t with
+        | .unit => fun _ => Core.denote Γ k env
+        | .word => fun v => Core.denote Γ k (v :: env)
+        | .addr => fun v => Core.denote Γ k ((v : Nat) :: env)
+        | .flag => fun v => Core.denote Γ k (v :: env)
+        | .pair _ _ => fun _ => Core.denote Γ k env
+
+/-- Continuation of `seqIf` (`k` after the chosen branch). -/
+def Core.seqIfCont (Γ : ContractSchema S X E ε) :
+    {t u : RetTy} → t.denote → Core u → List Nat → Tx S X E ε u.denote
+  | .unit, _, _, k, env => Core.denote Γ k env
+  | .word, _, v, k, env => Core.denote Γ k (v :: env)
+  | .addr, _, v, k, env => Core.denote Γ k ((v : Nat) :: env)
+  | .flag, _, v, k, env => Core.denote Γ k (v :: env)
+  | .pair _ _, _, _, k, env => Core.denote Γ k env
 
 /-! ## Renaming (used by the reifier to eliminate join points) -/
 
@@ -484,6 +504,12 @@ def liftRename (ρ : Nat → Atom) : Nat → Atom
     match ρ i with
     | .var j => .var (j + 1)
     | .lit n => .lit n
+
+/-- `seqIf` binds `k` under one extra local iff the branches are word-like. -/
+def seqIfRename {t : RetTy} (ρ : Nat → Atom) : Nat → Atom :=
+  match t with
+  | .word | .addr | .flag => liftRename ρ
+  | .unit | .pair _ _ => ρ
 
 def Cond.rename (ρ : Nat → Atom) : Cond → Cond
   | .lt a b => .lt (a.rename ρ) (b.rename ρ)
@@ -544,6 +570,61 @@ def Core.rename (ρ : Nat → Atom) : {t : RetTy} → Core t → Core t
   | _, .seq s k => .seq (s.rename ρ) (k.rename ρ)
   | _, .letPure p args k => .letPure p (args.map (·.rename ρ)) (k.rename (liftRename ρ))
   | _, .ite c a b => .ite (c.rename ρ) (a.rename ρ) (b.rename ρ)
+  | _, .seqIf (t := t) c th el k =>
+      .seqIf (c.rename ρ) (th.rename ρ) (el.rename ρ) (k.rename (seqIfRename (t := t) ρ))
+
+/-- Sequence a unit core before `k`, duplicating `k` through `ite`. -/
+def Core.seqUnit {u : RetTy} : Core .unit → Core u → Core u
+  | .ret _, k => k
+  | .stmtTail s, k => .seq s k
+  | .seq s k', k => .seq s (seqUnit k' k)
+  | .letOp op k', k => .letOp op (seqUnit k' (k.rename (fun i => .var (i + 1))))
+  | .letPure p args k', k => .letPure p args (seqUnit k' (k.rename (fun i => .var (i + 1))))
+  | .ite c a b, k => .ite c (seqUnit a k) (seqUnit b k)
+  | .seqIf (t := t) c th el k', k =>
+      .seqIf c th el (seqUnit k' (match t with
+        | .word | .addr | .flag => k.rename (fun i => .var (i + 1))
+        | .unit | .pair _ _ => k))
+  | .revertTail e args, _ => .revertTail e args
+
+/-- Bind a word core's result into `k` (`var 0`), duplicating `k` through `ite`. -/
+def Core.bindWord {u : RetTy} : Core .word → Core u → Core u
+  | .ret r, k =>
+    match r with
+    | .word a => .letPure .id [a] k
+  | .opTail op, k => .letOp op k
+  | .letOp op k', k => .letOp op (bindWord k' k)
+  | .seq s k', k => .seq s (bindWord k' k)
+  | .letPure p args k', k => .letPure p args (bindWord k' k)
+  | .ite c a b, k => .ite c (bindWord a k) (bindWord b k)
+  | .seqIf c th el k', k => .seqIf c th el (bindWord k' k)
+  | .revertTail e args, _ => .revertTail e args
+
+/-- Bind an address core's result into `k`. -/
+def Core.bindAddr {u : RetTy} : Core .addr → Core u → Core u
+  | .ret r, k =>
+    match r with
+    | .addr a => .letPure .id [a] k
+  | .opTailAddr op, k => .letOp op k
+  | .letOp op k', k => .letOp op (bindAddr k' k)
+  | .seq s k', k => .seq s (bindAddr k' k)
+  | .letPure p args k', k => .letPure p args (bindAddr k' k)
+  | .ite c a b, k => .ite c (bindAddr a k) (bindAddr b k)
+  | .seqIf c th el k', k => .seqIf c th el (bindAddr k' k)
+  | .revertTail e args, _ => .revertTail e args
+
+/-- Bind a flag core's result into `k`. -/
+def Core.bindFlag {u : RetTy} : Core .flag → Core u → Core u
+  | .ret r, k =>
+    match r with
+    | .flag a => .letPure .id [a] k
+  | .opTailFlag op, k => .letOp op k
+  | .letOp op k', k => .letOp op (bindFlag k' k)
+  | .seq s k', k => .seq s (bindFlag k' k)
+  | .letPure p args k', k => .letPure p args (bindFlag k' k)
+  | .ite c a b, k => .ite c (bindFlag a k) (bindFlag b k)
+  | .seqIf c th el k', k => .seqIf c th el (bindFlag k' k)
+  | .revertTail e args, _ => .revertTail e args
 
 /-! ## Quoting `Core` values into `Expr` (indexed families are not covered by `deriving ToExpr`) -/
 
@@ -570,6 +651,9 @@ def Core.toExpr : {t : RetTy} → Core t → Expr
   | t, .letPure p args k =>
     mkApp4 (mkConst ``Core.letPure) (Lean.toExpr t) (Lean.toExpr p) (Lean.toExpr args) k.toExpr
   | t, .ite c a b => mkApp4 (mkConst ``Core.ite) (Lean.toExpr t) (Lean.toExpr c) a.toExpr b.toExpr
+  | u, .seqIf (t := t) c th el k =>
+    mkAppN (mkConst ``Core.seqIf)
+      #[Lean.toExpr t, Lean.toExpr u, Lean.toExpr c, th.toExpr, el.toExpr, k.toExpr]
 
 /-! ## Pretty-printing of `Core` for `#eval`/logging -/
 
@@ -598,6 +682,10 @@ instance : Repr (Core t) where
       | _, .ite c a b =>
         "if " ++ repr c ++ " then" ++ Std.Format.nest 2 (Std.Format.line ++ go a) ++
           Std.Format.line ++ "else" ++ Std.Format.nest 2 (Std.Format.line ++ go b)
+      | _, .seqIf c th el k =>
+        "seqIf " ++ repr c ++ " then" ++ Std.Format.nest 2 (Std.Format.line ++ go th) ++
+          Std.Format.line ++ "else" ++ Std.Format.nest 2 (Std.Format.line ++ go el) ++
+          Std.Format.line ++ "then" ++ Std.Format.nest 2 (Std.Format.line ++ go k)
     go c
 
 /-! ## Effects and framing -/
@@ -648,6 +736,8 @@ def Core.effects : {t : RetTy} → Core t → Effects
   | _, .seq s k => (Stmt.effects s).append (Core.effects k)
   | _, .letPure _ _ k => Core.effects k
   | _, .ite _ a b => (Core.effects a).append (Core.effects b)
+  | _, .seqIf _ th el k =>
+    ((Core.effects th).append (Core.effects el)).append (Core.effects k)
 
 /-- No stores, emits, or state-changing CALLs — allowed as an `implements` View. -/
 def Core.isPureRead {t : RetTy} (c : Core t) : Bool :=
@@ -690,6 +780,17 @@ def Core.storeAfterCallSeen {t : RetTy} (seen : Bool) : Core t → Bool
   | .letPure _ _ k => Core.storeAfterCallSeen seen k
   | .ite _ a b =>
     Core.storeAfterCallSeen seen a || Core.storeAfterCallSeen seen b
+  | .seqIf _ th el k =>
+    Core.storeAfterCallSeen seen th || Core.storeAfterCallSeen seen el ||
+      Core.storeAfterCallSeen seen k
+
+/-- Number of `seqIf` nodes, for reifier tests. -/
+def Core.countSeqIf : {t : RetTy} → Core t → Nat
+  | _, .seqIf _ th el k =>
+    1 + Core.countSeqIf th + Core.countSeqIf el + Core.countSeqIf k
+  | _, .ite _ a b => Core.countSeqIf a + Core.countSeqIf b
+  | _, .letOp _ k | _, .seq _ k | _, .letPure _ _ k => Core.countSeqIf k
+  | _, _ => 0
 
 /-- Syntactic checks-effects-interactions: some path has an `Op`/`Stmt`
 store after an external CALL/STATICCALL in program order. Used to reject

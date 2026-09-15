@@ -179,6 +179,30 @@ theorem effects_frame_on {α} {Γ : ContractSchema S X E ε} {t : RetTy} (c : Co
     split at h
     · exact iha env hfab.1 h
     · exact ihb env hfab.2 h
+  | @seqIf tBr _ c th el k ihth ihel ihk =>
+    simp only [Core.denote, Tx.run_bind] at h
+    have hfth :
+        f ∉ (Core.effects th).writes ∧ f ∉ (Core.effects el).writes ∧
+          f ∉ (Core.effects k).writes := by
+      simpa [Core.effects, Effects.append, List.mem_append, not_or] using hf
+    cases hIf : Tx.run
+        (if c.denote env then Core.denote Γ th env else Core.denote Γ el env) ctx w with
+    | error _ => simp [hIf] at h
+    | ok p =>
+      rcases p with ⟨vBr, w1⟩
+      simp [hIf] at h
+      have hbr : P w1.self = P w.self := by
+        split at hIf
+        · exact ihth env hfth.1 hIf
+        · exact ihel env hfth.2.1 hIf
+      have hk : P w'.self = P w1.self := by
+        cases tBr with
+        | unit => exact ihk env hfth.2.2 h
+        | word => exact ihk (vBr :: env) hfth.2.2 h
+        | addr => exact ihk ((vBr : Nat) :: env) hfth.2.2 h
+        | flag => exact ihk (vBr :: env) hfth.2.2 h
+        | pair _ _ => exact ihk env hfth.2.2 h
+      rw [hk, hbr]
 
 /-- A successful run does not change scalar field `f` unless `f` is in `writes`. -/
 theorem effects_frame {Γ : ContractSchema S X E ε} {t} (c : Core t) (env : List Nat)
@@ -270,6 +294,305 @@ theorem map_denote_ite {t : RetTy} {γ : Type} (f : t.denote → γ)
       if c.denote env then f <$> Core.denote Γ a env
       else f <$> Core.denote Γ b env :=
   Tx.map_ite (c.denote env) f (Core.denote Γ a env) (Core.denote Γ b env)
+
+/-- `seqIf` is bind of the chosen branch into `seqIfCont`. -/
+theorem denote_seqIf {t u : RetTy}
+    (Γ : ContractSchema S X E ε) (c : Cond) (th el : Core t) (k : Core u)
+    (env : List Nat) :
+    Core.denote Γ (.seqIf c th el k) env =
+      (if c.denote env then Core.denote Γ th env else Core.denote Γ el env) >>=
+        fun v => Core.seqIfCont Γ v k env := by
+  simp only [Core.denote]
+  cases t <;> rfl
+
+/-- Push `f <$>` through `seqIf`. -/
+theorem map_denote_seqIf {t u : RetTy} {γ : Type} (f : u.denote → γ)
+    (Γ : ContractSchema S X E ε) (c : Cond) (th el : Core t) (k : Core u)
+    (env : List Nat) :
+    f <$> Core.denote Γ (.seqIf c th el k) env =
+      (if c.denote env then Core.denote Γ th env else Core.denote Γ el env) >>=
+        fun v => f <$> Core.seqIfCont Γ v k env := by
+  rw [denote_seqIf]
+  exact Tx.map_bind f
+    (if c.denote env then Core.denote Γ th env else Core.denote Γ el env)
+    (fun v => Core.seqIfCont Γ v k env)
+
+/-- Amount wrap through `seqIf`. -/
+theorem map_denote_seqIf_ofWord {a : Asset} {t : RetTy}
+    (Γ : ContractSchema S X E ε) (c : Cond) (th el : Core t) (k : Core .word)
+    (env : List Nat) :
+    Amount.ofWord (a := a) <$> Core.denote Γ (.seqIf c th el k) env =
+      (if c.denote env then Core.denote Γ th env else Core.denote Γ el env) >>=
+        fun v => Amount.ofWord (a := a) <$> Core.seqIfCont Γ v k env :=
+  map_denote_seqIf (Amount.ofWord (a := a)) Γ c th el k env
+
+/-- Bool wrap through `seqIf`. -/
+theorem map_denote_seqIf_natToBool {t : RetTy}
+    (Γ : ContractSchema S X E ε) (c : Cond) (th el : Core t) (k : Core .flag)
+    (env : List Nat) :
+    Tx.natToBool <$> Core.denote Γ (.seqIf c th el k) env =
+      (if c.denote env then Core.denote Γ th env else Core.denote Γ el env) >>=
+        fun v => Tx.natToBool <$> Core.seqIfCont Γ v k env :=
+  map_denote_seqIf Tx.natToBool Γ c th el k env
+
+/-- Pair-of-Amount wrap through `seqIf`. -/
+theorem map_denote_seqIf_ofWord_pair {a b : Asset} {t : RetTy}
+    (Γ : ContractSchema S X E ε) (c : Cond) (th el : Core t)
+    (k : Core (.pair .word .word)) (env : List Nat) :
+    Prod.map (Amount.ofWord (a := a)) (Amount.ofWord (a := b)) <$>
+        Core.denote Γ (.seqIf c th el k) env =
+      (if c.denote env then Core.denote Γ th env else Core.denote Γ el env) >>=
+        fun v =>
+          Prod.map (Amount.ofWord (a := a)) (Amount.ofWord (a := b)) <$>
+            Core.seqIfCont Γ v k env :=
+  map_denote_seqIf
+    (Prod.map (Amount.ofWord (a := a)) (Amount.ofWord (a := b))) Γ c th el k env
+
+theorem atom_eval_rename (ρ : Nat → Atom) {env env' : List Nat}
+    (h : ∀ i, (ρ i).eval env' = env.getD i 0) (a : Atom) :
+    (a.rename ρ).eval env' = a.eval env := by
+  cases a with
+  | lit _ => rfl
+  | var i => exact h i
+
+theorem list_atom_eval_rename (ρ : Nat → Atom) {env env' : List Nat}
+    (h : ∀ i, (ρ i).eval env' = env.getD i 0) (args : List Atom) :
+    (args.map (·.rename ρ)).map (·.eval env') = args.map (·.eval env) := by
+  induction args with
+  | nil => rfl
+  | cons a args ih => simp [atom_eval_rename ρ h, ih]
+
+theorem cond_denote_rename (ρ : Nat → Atom) {env env' : List Nat}
+    (h : ∀ i, (ρ i).eval env' = env.getD i 0) (c : Cond) :
+    Cond.denote env' (c.rename ρ) ↔ c.denote env := by
+  induction c with
+  | lt a b | le a b | eq a b | ne a b =>
+    simp [Cond.rename, Cond.denote, atom_eval_rename ρ h]
+  | and c d ihc ihd | or c d ihc ihd =>
+    simp [Cond.rename, Cond.denote, ihc, ihd]
+  | not c ih => simp [Cond.rename, Cond.denote, ih]
+  | tt | ff => simp [Cond.rename, Cond.denote]
+
+theorem liftRename_eval (ρ : Nat → Atom) {env env' : List Nat} {v : Nat}
+    (h : ∀ i, (ρ i).eval env' = env.getD i 0) :
+    ∀ i, (liftRename ρ i).eval (v :: env') = (v :: env).getD i 0
+  | 0 => rfl
+  | i + 1 => by
+    dsimp [liftRename]
+    cases hρ : ρ i with
+    | var j =>
+      have := h i
+      simp [hρ, Atom.eval] at this ⊢
+      simp [this]
+    | lit n =>
+      have := h i
+      simp [hρ, Atom.eval] at this ⊢
+      simp [this]
+
+theorem retExpr_eval_rename (ρ : Nat → Atom) {env env' : List Nat}
+    (h : ∀ i, (ρ i).eval env' = env.getD i 0) {t} (r : RetExpr t) :
+    (r.rename ρ).eval env' = r.eval env := by
+  induction r with
+  | unit => rfl
+  | word a | addr a | flag a => exact atom_eval_rename ρ h a
+  | pair x y ihx ihy =>
+    simp [RetExpr.rename, RetExpr.eval, ihx, ihy]
+
+theorem op_denote_rename {Γ : ContractSchema S X E ε} (ρ : Nat → Atom)
+    {env env' : List Nat} (h : ∀ i, (ρ i).eval env' = env.getD i 0) (op : Op) :
+    Op.denote Γ env' (op.rename ρ) = Op.denote Γ env op := by
+  cases op <;> simp [Op.rename, Op.denote, atom_eval_rename ρ h,
+    list_atom_eval_rename ρ h] <;> rfl
+
+theorem stmt_denote_rename {Γ : ContractSchema S X E ε} (ρ : Nat → Atom)
+    {env env' : List Nat} (h : ∀ i, (ρ i).eval env' = env.getD i 0) (s : Stmt) :
+    Stmt.denote Γ env' (s.rename ρ) = Stmt.denote Γ env s := by
+  cases s with
+  | store f v =>
+    simp [Stmt.rename, Stmt.denote, atom_eval_rename ρ h]
+  | storeMap f k v =>
+    simp [Stmt.rename, Stmt.denote, atom_eval_rename ρ h]
+  | storeMap2 f k₁ k₂ v =>
+    simp [Stmt.rename, Stmt.denote, atom_eval_rename ρ h]
+  | require c err args =>
+    simp [Stmt.rename, Stmt.denote, list_atom_eval_rename ρ h]
+    exact Tx.require_iff _ (cond_denote_rename ρ h c)
+  | emit ev args | revert err args =>
+    simp [Stmt.rename, Stmt.denote, list_atom_eval_rename ρ h]
+  | call t sel args ret =>
+    simp [Stmt.rename, Stmt.denote]
+    have hcall := op_denote_rename (Γ := Γ) ρ h (.call t sel args ret)
+    simpa [Op.rename] using congrArg (fun x => (fun _ => ()) <$> x) hcall
+  | view t sel args ret =>
+    simp [Stmt.rename, Stmt.denote]
+    have hview := op_denote_rename (Γ := Γ) ρ h (.view t sel args ret)
+    simpa [Op.rename] using congrArg (fun x => (fun _ => ()) <$> x) hview
+
+theorem denote_rename {Γ : ContractSchema S X E ε} {t : RetTy}
+    (k : Core t) (ρ : Nat → Atom) {env env' : List Nat}
+    (h : ∀ i, (ρ i).eval env' = env.getD i 0) :
+    Core.denote Γ (k.rename ρ) env' = Core.denote Γ k env := by
+  induction k generalizing env env' ρ with
+  | ret r => simp [Core.rename, Core.denote, retExpr_eval_rename ρ h]
+  | opTail op =>
+    simp [Core.rename, Core.denote, op_denote_rename ρ h]
+  | opTailAddr op | opTailFlag op =>
+    simp [Core.rename, Core.denote, op_denote_rename ρ h]
+    try rfl
+  | stmtTail s => simp [Core.rename, Core.denote, stmt_denote_rename ρ h]
+  | revertTail err args =>
+    simp [Core.rename, Core.denote, list_atom_eval_rename ρ h]
+  | letOp op k ih =>
+    simp [Core.rename, Core.denote, op_denote_rename ρ h]
+    refine congrArg (fun f => Op.denote Γ env op >>= f) ?_
+    funext v
+    exact ih (ρ := liftRename ρ) (liftRename_eval (v := v) ρ h)
+  | seq s k ih =>
+    simp [Core.rename, Core.denote, stmt_denote_rename ρ h]
+    exact congrArg (fun t => Stmt.denote Γ env s >>= fun _ => t) (ih (ρ := ρ) h)
+  | letPure p args k ih =>
+    simp [Core.rename, Core.denote, list_atom_eval_rename ρ h]
+    exact ih (ρ := liftRename ρ) (liftRename_eval ρ h)
+  | ite c a b iha ihb =>
+    have hc := cond_denote_rename ρ h c
+    simp only [Core.rename, Core.denote]
+    by_cases hcond : c.denote env
+    · have hc' : Cond.denote env' (c.rename ρ) := hc.mpr hcond
+      simp [hc', hcond]
+      exact iha (ρ := ρ) h
+    · have hc' : ¬ Cond.denote env' (c.rename ρ) := fun h' => hcond (hc.mp h')
+      simp [hc', hcond]
+      exact ihb (ρ := ρ) h
+  | @seqIf tBr _ c th el k ihth ihel ihk =>
+    have hc := cond_denote_rename ρ h c
+    simp only [Core.rename, Core.denote]
+    rw [ihth (ρ := ρ) h, ihel (ρ := ρ) h]
+    have hif :
+        (if Cond.denote env' (c.rename ρ) then Core.denote Γ th env
+          else Core.denote Γ el env) =
+        (if c.denote env then Core.denote Γ th env else Core.denote Γ el env) := by
+      simp [hc]
+    rw [hif]
+    refine congrArg
+      (fun f =>
+        (if c.denote env then Core.denote Γ th env else Core.denote Γ el env) >>= f)
+      ?_
+    funext v
+    cases tBr with
+    | unit =>
+      simp [seqIfRename]
+      exact ihk (ρ := ρ) h
+    | pair _ _ =>
+      simp [seqIfRename]
+      exact ihk (ρ := ρ) h
+    | word =>
+      simp [seqIfRename]
+      exact ihk (ρ := liftRename ρ) (liftRename_eval (v := v) ρ h)
+    | addr =>
+      simp [seqIfRename]
+      exact ihk (ρ := liftRename ρ) (liftRename_eval (v := (v : Nat)) ρ h)
+    | flag =>
+      simp [seqIfRename]
+      exact ihk (ρ := liftRename ρ) (liftRename_eval (v := v) ρ h)
+
+/-- `seqUnit` is bind of a unit core into `k`. -/
+theorem denote_seqUnit {u : RetTy} (Γ : ContractSchema S X E ε)
+    (a : Core .unit) (k : Core u) (env : List Nat) :
+    Core.denote Γ (a.seqUnit k) env =
+      Core.denote Γ a env >>= fun _ => Core.denote Γ k env := by
+  cases a with
+  | ret r =>
+    cases r
+    simp [Core.seqUnit, Core.denote, Tx.pure_bind]
+  | stmtTail s =>
+    simp [Core.seqUnit, Core.denote]
+  | revertTail e args =>
+    simp [Core.seqUnit, Core.denote]
+    funext ctx w
+    simp [Tx.bind_apply, Tx.run_revert, Tx.revert]
+  | letOp op k' =>
+    simp [Core.seqUnit, Core.denote, Tx.bind_assoc]
+    refine congrArg (fun f => Op.denote Γ env op >>= f) ?_
+    funext v
+    have hρ : ∀ i, Atom.eval (v :: env) (.var (i + 1)) = env.getD i 0 :=
+      fun _ => rfl
+    rw [denote_seqUnit (Γ := Γ) k' (k.rename fun i => .var (i + 1)) (v :: env),
+      denote_rename (ρ := fun i => .var (i + 1)) (h := hρ)]
+  | seq s k' =>
+    simp [Core.seqUnit, Core.denote, Tx.bind_assoc]
+    exact congrArg (fun t => Stmt.denote Γ env s >>= fun _ => t)
+      (denote_seqUnit (Γ := Γ) k' k env)
+  | letPure p args k' =>
+    simp [Core.seqUnit, Core.denote]
+    have hρ : ∀ i,
+        Atom.eval (Prim.eval p (args.map (·.eval env)) :: env) (.var (i + 1)) =
+          env.getD i 0 := fun _ => rfl
+    rw [denote_seqUnit (Γ := Γ) k' (k.rename fun i => .var (i + 1)) _,
+      denote_rename (ρ := fun i => .var (i + 1)) (h := hρ)]
+  | ite c th el =>
+    simp [Core.seqUnit, Core.denote, Tx.bind_ite]
+    rw [denote_seqUnit (Γ := Γ) th k env, denote_seqUnit (Γ := Γ) el k env]
+  | @seqIf tBr _ c th el k' =>
+    cases tBr with
+    | unit =>
+      simp [Core.seqUnit, Core.denote, Tx.bind_assoc]
+      refine congrArg
+        (fun f =>
+          (if c.denote env then Core.denote Γ th env else Core.denote Γ el env) >>= f)
+        ?_
+      funext _
+      exact denote_seqUnit (Γ := Γ) k' k env
+    | pair _ _ =>
+      simp [Core.seqUnit, Core.denote, Tx.bind_assoc]
+      refine congrArg
+        (fun f =>
+          (if c.denote env then Core.denote Γ th env else Core.denote Γ el env) >>= f)
+        ?_
+      funext _
+      exact denote_seqUnit (Γ := Γ) k' k env
+    | word =>
+      simp [Core.seqUnit, Core.denote, Tx.bind_assoc]
+      refine congrArg
+        (fun f =>
+          (if c.denote env then Core.denote Γ th env else Core.denote Γ el env) >>= f)
+        ?_
+      funext v
+      have hρ : ∀ i, Atom.eval (v :: env) (.var (i + 1)) = env.getD i 0 :=
+        fun _ => rfl
+      rw [denote_seqUnit (Γ := Γ) k' (k.rename fun i => .var (i + 1)) (v :: env),
+        denote_rename (ρ := fun i => .var (i + 1)) (h := hρ)]
+    | addr =>
+      simp [Core.seqUnit, Core.denote, Tx.bind_assoc]
+      refine congrArg
+        (fun f =>
+          (if c.denote env then Core.denote Γ th env else Core.denote Γ el env) >>= f)
+        ?_
+      funext v
+      have hρ : ∀ i, Atom.eval ((v : Nat) :: env) (.var (i + 1)) = env.getD i 0 :=
+        fun _ => rfl
+      rw [denote_seqUnit (Γ := Γ) k' (k.rename fun i => .var (i + 1)) ((v : Nat) :: env),
+        denote_rename (ρ := fun i => .var (i + 1)) (h := hρ)]
+    | flag =>
+      simp [Core.seqUnit, Core.denote, Tx.bind_assoc]
+      refine congrArg
+        (fun f =>
+          (if c.denote env then Core.denote Γ th env else Core.denote Γ el env) >>= f)
+        ?_
+      funext v
+      have hρ : ∀ i, Atom.eval (v :: env) (.var (i + 1)) = env.getD i 0 :=
+        fun _ => rfl
+      rw [denote_seqUnit (Γ := Γ) k' (k.rename fun i => .var (i + 1)) (v :: env),
+        denote_rename (ρ := fun i => .var (i + 1)) (h := hρ)]
+termination_by a
+decreasing_by all_goals decreasing_tactic
+
+/-- `seqIf` of unit branches is `ite` with `k` copied into both sides. -/
+theorem seqIf_eq_ite {u : RetTy} (Γ : ContractSchema S X E ε)
+    (c : Cond) (th el : Core .unit) (k : Core u) (env : List Nat) :
+    Core.denote Γ (.seqIf c th el k) env =
+      Core.denote Γ (.ite c (th.seqUnit k) (el.seqUnit k)) env := by
+  rw [denote_seqIf, Core.denote]
+  simp [Core.seqIfCont, denote_seqUnit, Tx.bind_ite]
 
 /-- `letPure` is substitution; the wrap stays on the continuation. -/
 theorem map_denote_letPure {t : RetTy} {γ : Type} (f : t.denote → γ)

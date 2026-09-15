@@ -48,6 +48,10 @@ def S2Frag : {t : RetTy} → Core t → Prop
   | _, .seq s k => S2Stmt s ∧ S2Frag k
   | _, .letPure p args k => p = .id ∧ args.length = 1 ∧ S2Frag k
   | _, .ite c a b => M1Cond c ∧ S2Frag a ∧ S2Frag b
+  | _, .seqIf (t := t) c th el k =>
+      match t with
+      | .pair _ _ => False
+      | _ => M1Cond c ∧ M1Frag th ∧ M1Frag el ∧ S2Frag k
   | _, _ => False
 
 def s2OpB : Lsc.Op → Bool
@@ -75,6 +79,10 @@ def s2FragB : {t : RetTy} → Core t → Bool
   | _, .seq s k => s2StmtB s && s2FragB k
   | _, .letPure p args k => decide (p = .id) && args.length == 1 && s2FragB k
   | _, .ite _ a b => s2FragB a && s2FragB b
+  | _, .seqIf (t := t) _ th el k =>
+      match t with
+      | .pair _ _ => false
+      | _ => m1FragB th && m1FragB el && s2FragB k
   | _, _ => false
 
 theorem s2OpB_eq (op : Lsc.Op) : s2OpB op = true ↔ S2Op op := by
@@ -110,6 +118,11 @@ theorem s2FragB_eq {t} (core : Core t) : s2FragB core = true ↔ S2Frag core := 
   | seq s k ih => simp [s2FragB, S2Frag, s2StmtB_eq, ih]
   | letPure p args k ih => simp [s2FragB, S2Frag, ih, and_assoc]
   | ite _ a b iha ihb => simp [s2FragB, S2Frag, M1Cond, iha, ihb]
+  | @seqIf t _ _ th el k _ _ ihk =>
+    cases t with
+    | pair _ _ => simp [s2FragB, S2Frag]
+    | unit | word | addr | flag =>
+      simp [s2FragB, S2Frag, M1Cond, m1FragB_eq, ihk, and_assoc]
 
 instance (op : Lsc.Op) : Decidable (S2Op op) :=
   decidable_of_iff (s2OpB op = true) (s2OpB_eq op)
@@ -159,6 +172,13 @@ theorem s2frag_ite {t c} {a b : Core t} :
     S2Frag (.ite c a b) ↔ M1Cond c ∧ S2Frag a ∧ S2Frag b := by
   simp [S2Frag]
 
+theorem s2frag_seqIf {t u c} {th el : Core t} {k : Core u} :
+    S2Frag (.seqIf c th el k) ↔
+      match t with
+      | .pair _ _ => False
+      | _ => M1Cond c ∧ M1Frag th ∧ M1Frag el ∧ S2Frag k := by
+  cases t <;> simp [S2Frag]
+
 theorem s2frag_letPure {t p args} {k : Core t} :
     S2Frag (.letPure p args k) ↔ p = .id ∧ args.length = 1 ∧ S2Frag k := by
   simp [S2Frag]
@@ -199,6 +219,14 @@ theorem s2frag_of_callFree {t} {core : Core t} (h : CallFree core) : S2Frag core
     intro h
     have ⟨hc, ha, hb⟩ := m1frag_ite.mp h
     simpa [S2Frag] using And.intro hc (And.intro (iha ha) (ihb hb))
+  | @seqIf tBr _ c th el k _ _ ihk =>
+    intro h
+    cases tBr with
+    | pair _ _ => simp [CallFree, M1Frag] at h
+    | unit | word | addr | flag =>
+      have ⟨hc, hth, hel, hk⟩ := m1frag_seqIf.mp h
+      simpa [S2Frag] using
+        And.intro hc (And.intro hth (And.intro hel (ihk hk)))
 
 /-! ## `NoExternalOps` of CallFree emit -/
 
@@ -303,12 +331,98 @@ theorem noExt_stmt_m1 {c : ContractDef} {e : Emit} {d : Nat} {s : Lsc.Stmt}
       exact noExt_customError c e err [] he (fun _ hx => by cases hx)
   | call _ _ _ _ | view _ _ _ _ => exact (show False from hM1).elim
 
+theorem noExt_coreToVar {c t} {core : Core t} (hM1 : CallFree core) :
+    ∀ (e : Emit) (d : Nat) (dest : YIdent) {e' : Emit},
+      emitCoreToVar tag c e d dest core = some e' →
+      noExtBlock e.stmts = true → noExtBlock e'.stmts = true := by
+  revert hM1
+  induction core with
+  | ret r =>
+    intro hM1 e d dest e' hem he
+    simp [emitCoreToVar, emitAssignRet] at hem
+    cases r <;> cases hem <;> first
+      | exact he
+      | exact noExt_assign he (noExt_atomE tag d _)
+  | opTail op | opTailAddr op | opTailFlag op =>
+    intro hM1 e d dest e' hem he
+    simp [emitCoreToVar] at hem
+    obtain ⟨e1, h1⟩ := emitLetOp_some tag c e d op
+    simp [h1] at hem; cases hem
+    have hop : M1Op op := by simpa [CallFree, M1Frag] using hM1
+    exact noExt_assign (noExt_letOp_m1 tag hop he h1) (noExt_var _)
+  | stmtTail s =>
+    intro hM1 e d dest e' hem he
+    simp [emitCoreToVar] at hem; cases hem
+    exact noExt_stmt_m1 tag (by simpa [CallFree, M1Frag] using hM1) he
+  | revertTail err args =>
+    intro hM1 e d dest e' hem he
+    have hnil : args.length = 0 := by simpa [CallFree, M1Frag] using hM1
+    match args with
+    | _ :: _ => cases hnil
+    | [] =>
+      simp [emitCoreToVar] at hem; cases hem
+      exact noExt_customError c e err [] he (fun _ hx => by cases hx)
+  | letOp op k ih =>
+    intro hM1 e d dest e' hem he
+    have ⟨hop, hk⟩ := m1frag_letOp.mp hM1
+    simp [emitCoreToVar] at hem
+    obtain ⟨e1, h1⟩ := emitLetOp_some tag c e d op
+    simp [h1] at hem
+    exact ih hk e1 (d + 1) dest hem (noExt_letOp_m1 tag hop he h1)
+  | seq s k ih =>
+    intro hM1 e d dest e' hem he
+    have ⟨hs, hk⟩ := m1frag_seq.mp hM1
+    simp [emitCoreToVar] at hem
+    exact ih hk (emitStmt tag c e d s) d dest hem (noExt_stmt_m1 tag hs he)
+  | letPure p args k ih =>
+    intro hM1 e d dest e' hem he
+    have ⟨_, _, hk⟩ := m1frag_letPure.mp hM1
+    simp [emitCoreToVar] at hem
+    exact ih hk _ (d + 1) dest hem (noExt_let he (noExt_emitPrim tag d p args))
+  | ite cond a b iha ihb =>
+    intro hM1 e d dest e' hem he
+    have ⟨_, ha, hb⟩ := m1frag_ite.mp hM1
+    simp [emitCoreToVar] at hem
+    obtain ⟨eA, hA⟩ := emitCoreToVar_some tag (c := c) a ({} : Emit) d dest
+    obtain ⟨eB, hB⟩ := emitCoreToVar_some tag (c := c) b ({} : Emit) d dest
+    simp [hA, hB] at hem; cases hem
+    exact noExt_switch he (noExt_emitCond tag d cond)
+      (by
+        change (noExtStmts eB.stmts && noExtCases []) = true
+        simpa [noExtBlock] using ihb hb {} d dest hB noExt_nil)
+      (iha ha {} d dest hA noExt_nil)
+  | @seqIf tBr _ cond th el k ihth ihel ihk =>
+    intro hM1 e d dest e' hem he
+    cases tBr with
+    | pair _ _ => cases (m1frag_seqIf.mp hM1)
+    | unit =>
+      have ⟨_, hth, hel, hk⟩ := m1frag_seqIf.mp hM1
+      simp [emitCoreToVar] at hem
+      obtain ⟨eA, hA⟩ := emitCoreToVar_some tag (c := c) th ({} : Emit) d dest
+      obtain ⟨eB, hB⟩ := emitCoreToVar_some tag (c := c) el ({} : Emit) d dest
+      simp [hA, hB] at hem
+      exact ihk hk _ d dest hem (noExt_switch he (noExt_emitCond tag d cond)
+        (by
+          change (noExtStmts eB.stmts && noExtCases []) = true
+          simpa [noExtBlock] using ihel hel {} d dest hB noExt_nil)
+        (ihth hth {} d dest hA noExt_nil))
+    | word | addr | flag =>
+      have ⟨_, hth, hel, hk⟩ := m1frag_seqIf.mp hM1
+      simp [emitCoreToVar] at hem
+      obtain ⟨eA, hA⟩ := emitCoreToVar_some tag (c := c) th ({} : Emit) d (identPhi tag d)
+      obtain ⟨eB, hB⟩ := emitCoreToVar_some tag (c := c) el ({} : Emit) d (identPhi tag d)
+      simp [hA, hB] at hem
+      exact ihk hk _ (d + 1) dest hem
+        (noExt_emitSeqIfWord (tag := tag) e d cond eA eB he
+          (ihth hth {} d (identPhi tag d) hA noExt_nil)
+          (ihel hel {} d (identPhi tag d) hB noExt_nil))
+
 theorem noExt_core_callFree {c halt clearLock t} {core : Core t} (hM1 : CallFree core) :
     ∀ (e : Emit) (d : Nat) {e' : Emit},
       emitCore tag c e d halt core clearLock = some e' →
       noExtBlock e.stmts = true → noExtBlock e'.stmts = true := by
   revert hM1
-  induction core with
+  induction core generalizing halt clearLock with
   | ret r =>
     intro hM1 e d e' hem he
     simp [emitCore] at hem; cases hem
@@ -338,17 +452,17 @@ theorem noExt_core_callFree {c halt clearLock t} {core : Core t} (hM1 : CallFree
     simp [emitCore] at hem
     obtain ⟨e1, h1⟩ := emitLetOp_some tag c e d op
     simp [h1] at hem
-    exact ih hk e1 (d + 1) hem (noExt_letOp_m1 tag hop he h1)
+    exact ih (halt := halt) (clearLock := clearLock) hk e1 (d + 1) hem (noExt_letOp_m1 tag hop he h1)
   | seq s k ih =>
     intro hM1 e d e' hem he
     have ⟨hs, hk⟩ := m1frag_seq.mp hM1
     simp [emitCore] at hem
-    exact ih hk (emitStmt tag c e d s) d hem (noExt_stmt_m1 tag hs he)
+    exact ih (halt := halt) (clearLock := clearLock) hk (emitStmt tag c e d s) d hem (noExt_stmt_m1 tag hs he)
   | letPure p args k ih =>
     intro hM1 e d e' hem he
     have ⟨_, _, hk⟩ := m1frag_letPure.mp hM1
     simp [emitCore] at hem
-    exact ih hk _ (d + 1) hem (noExt_let he (noExt_emitPrim tag d p args))
+    exact ih (halt := halt) (clearLock := clearLock) hk _ (d + 1) hem (noExt_let he (noExt_emitPrim tag d p args))
   | ite cond a b iha ihb =>
     intro hM1 e d e' hem he
     have ⟨_, ha, hb⟩ := m1frag_ite.mp hM1
@@ -361,8 +475,36 @@ theorem noExt_core_callFree {c halt clearLock t} {core : Core t} (hM1 : CallFree
     exact noExt_switch he (noExt_emitCond tag d cond)
       (by
         change (noExtStmts eB.stmts && noExtCases []) = true
-        simpa [noExtBlock] using ihb hb {} d hB noExt_nil)
-      (iha ha {} d hA noExt_nil)
+        simpa [noExtBlock] using ihb (halt := halt) (clearLock := clearLock) hb {} d hB noExt_nil)
+      (iha (halt := halt) (clearLock := clearLock) ha {} d hA noExt_nil)
+  | @seqIf tBr _ cond th el k ihth ihel ihk =>
+    intro hM1 e d e' hem he
+    cases tBr with
+    | pair _ _ => cases (m1frag_seqIf.mp hM1)
+    | unit =>
+      have ⟨_, hth, hel, hk⟩ := m1frag_seqIf.mp hM1
+      simp [emitCore] at hem
+      obtain ⟨eA, hA⟩ := emitCore_some tag (c := c) (halt := false) (clearLock := false)
+        th ({} : Emit) d
+      obtain ⟨eB, hB⟩ := emitCore_some tag (c := c) (halt := false) (clearLock := false)
+        el ({} : Emit) d
+      simp [hA, hB] at hem
+      exact ihk (halt := halt) (clearLock := clearLock) hk _ d hem (noExt_switch he (noExt_emitCond tag d cond)
+        (by
+          change (noExtStmts eB.stmts && noExtCases []) = true
+          simpa [noExtBlock] using
+            ihel (halt := false) (clearLock := false) hel {} d hB noExt_nil)
+        (ihth (halt := false) (clearLock := false) hth {} d hA noExt_nil))
+    | word | addr | flag =>
+      have ⟨_, hth, hel, hk⟩ := m1frag_seqIf.mp hM1
+      simp [emitCore] at hem
+      obtain ⟨eA, hA⟩ := emitCoreToVar_some tag (c := c) th ({} : Emit) d (identPhi tag d)
+      obtain ⟨eB, hB⟩ := emitCoreToVar_some tag (c := c) el ({} : Emit) d (identPhi tag d)
+      simp [hA, hB] at hem
+      exact ihk (halt := halt) (clearLock := clearLock) hk _ (d + 1) hem
+        (noExt_emitSeqIfWord (tag := tag) e d cond eA eB he
+          (noExt_coreToVar (tag := tag) hth {} d (identPhi tag d) hA noExt_nil)
+          (noExt_coreToVar (tag := tag) hel {} d (identPhi tag d) hB noExt_nil))
 
 theorem hoist_yulD_of_evm {calls : ExternalCalls} {ss : YBlock}
     (h : hoist evm ss = []) : hoist (yulD calls) ss = [] := by
@@ -649,6 +791,56 @@ theorem callFree_preserves_ghost {S X E ε} {Γ : ContractSchema S X E ε} {t}
     by_cases hc : c.denote env
     · simp [hc] at hok; exact iha ha env w hok
     · simp [hc] at hok; exact ihb hb env w hok
+  | @seqIf tBr _ c th el k ihth ihel ihk =>
+    intro h env w v w' hok
+    cases tBr with
+    | pair _ _ => cases (m1frag_seqIf.mp h)
+    | unit =>
+      have ⟨_, hth, hel, hk⟩ := m1frag_seqIf.mp h
+      simp only [Core.denote] at hok
+      change Tx.run
+          ((if c.denote env then Core.denote Γ th env else Core.denote Γ el env) >>=
+            fun _ => Core.denote Γ k env)
+          ctx w = .ok (v, w') at hok
+      rw [Tx.run_bind] at hok
+      cases hIf : Tx.run
+          (if c.denote env then Core.denote Γ th env else Core.denote Γ el env) ctx w with
+      | error _ => simp [hIf] at hok
+      | ok p =>
+        have hbr : p.2.ext = w.ext ∧ p.2.oracle = w.oracle := by
+          by_cases hc : Cond.denote env c
+          · have hIf' := hIf
+            simp [hc, Tx.run] at hIf'
+            exact ihth hth env w hIf'
+          · have hIf' := hIf
+            simp [hc, Tx.run] at hIf'
+            exact ihel hel env w hIf'
+        simp [hIf] at hok
+        have hk' := ihk hk env p.2 hok
+        exact ⟨hk'.1.trans hbr.1, hk'.2.trans hbr.2⟩
+    | word | addr | flag =>
+      have ⟨_, hth, hel, hk⟩ := m1frag_seqIf.mp h
+      simp only [Core.denote] at hok
+      change Tx.run
+          ((if c.denote env then Core.denote Γ th env else Core.denote Γ el env) >>=
+            fun x => Core.denote Γ k (retAsNat x :: env))
+          ctx w = .ok (v, w') at hok
+      rw [Tx.run_bind] at hok
+      cases hIf : Tx.run
+          (if c.denote env then Core.denote Γ th env else Core.denote Γ el env) ctx w with
+      | error _ => simp [hIf] at hok
+      | ok p =>
+        have hbr : p.2.ext = w.ext ∧ p.2.oracle = w.oracle := by
+          by_cases hc : Cond.denote env c
+          · have hIf' := hIf
+            simp [hc, Tx.run] at hIf'
+            exact ihth hth env w hIf'
+          · have hIf' := hIf
+            simp [hc, Tx.run] at hIf'
+            exact ihel hel env w hIf'
+        simp [hIf] at hok
+        have hk' := ihk hk (retAsNat p.1 :: env) p.2 hok
+        exact ⟨hk'.1.trans hbr.1, hk'.2.trans hbr.2⟩
 
 /-! ## `ExtAgree` after local storage writes -/
 

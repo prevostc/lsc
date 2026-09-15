@@ -107,6 +107,23 @@ theorem staticSafe_emitCond (d : Nat) : ∀ c, staticSafeExpr memoryGuardK (emit
       staticSafe_emitCond d c]
   | .tt | .ff => by simp [emitCond, staticSafeExpr_lit]
 
+theorem staticSafe_seqIfWordInner (d : Nat) (cond : Cond) (eA eB : Emit)
+    (hA : staticSafeStmts memoryGuardK eA.stmts = true)
+    (hB : staticSafeStmts memoryGuardK eB.stmts = true) :
+    staticSafeStmts memoryGuardK (seqIfWordInner tag d cond eA eB) = true := by
+  rw [seqIfWordInner_eq]
+  simp [staticSafeStmts, staticSafeStmt, staticSafeStmt_switch, staticSafe_emitCond,
+    staticSafeCases, staticSafeExpr_lit, staticSafeExpr_var, hA, hB]
+
+theorem staticSafe_emitSeqIfWord (e : Emit) (d : Nat) (cond : Cond) (eA eB : Emit)
+    (he : staticSafeStmts memoryGuardK e.stmts = true)
+    (hA : staticSafeStmts memoryGuardK eA.stmts = true)
+    (hB : staticSafeStmts memoryGuardK eB.stmts = true) :
+    staticSafeStmts memoryGuardK (emitSeqIfWord tag e d cond eA eB).stmts = true :=
+  staticSafe_emitBlock (emitLet e (identV tag d) (lit 0)) _
+    (staticSafe_emitLet e _ _ he (staticSafeExpr_lit _ _))
+    (staticSafe_seqIfWordInner (tag := tag) d cond eA eB hA hB)
+
 theorem staticSafe_emitPrim (d : Nat) (p : Prim) (args : List Atom) :
     staticSafeExpr memoryGuardK (emitPrim tag d p args) = true := by
   cases p <;> cases args with
@@ -621,13 +638,143 @@ theorem coreWF_ret_fits {c t} {r : RetExpr t}
   simp [coreWF, Bool.and_eq_true, fitsGuardWords_iff] at h
   exact h.2
 
+theorem staticSafe_emitCoreToVar (c : ContractDef) {t} (core : Core t)
+    (hwf : coreWF c core = true) :
+    ∀ (e : Emit) (d : Nat) (dest : YIdent),
+      staticSafeStmts memoryGuardK e.stmts = true →
+      ∀ e', emitCoreToVar tag c e d dest core = some e' →
+        staticSafeStmts memoryGuardK e'.stmts = true := by
+  induction core with
+  | ret r =>
+    intro e d dest he e' h
+    simp [emitCoreToVar, emitAssignRet] at h
+    cases r with
+    | unit | pair _ _ => cases h; exact he
+    | word a | addr a | flag a =>
+      cases h
+      exact staticSafe_emitAssign e dest (atomE tag d a) he (staticSafe_atomE _ _ _ _)
+  | opTail op | opTailAddr op | opTailFlag op =>
+    intro e d dest he e' h
+    simp only [emitCoreToVar, Bind.bind, Option.bind, Pure.pure] at h
+    cases hop : emitLetOp tag c e d op with
+    | none => simp [hop] at h
+    | some e1 =>
+      simp [hop] at h
+      cases h
+      have hopWF : opWF c op = true := by simpa [coreWF] using hwf
+      exact staticSafe_emitAssign e1 dest (var (identV tag d))
+        (staticSafe_emitLetOp tag c e d op he hopWF hop) (staticSafeExpr_var _ _)
+  | stmtTail s =>
+    intro e d dest he e' h
+    simp [emitCoreToVar] at h
+    cases h
+    have hsWF : stmtWF c s = true := by simpa [coreWF] using hwf
+    exact staticSafe_emitStmt tag c e d s he hsWF
+  | revertTail err args =>
+    intro e d dest he e' h
+    simp [emitCoreToVar] at h
+    cases h
+    have herr : errorOK c err args.length = true := by
+      simp [coreWF, Bool.and_eq_true] at hwf; exact hwf.1
+    exact staticSafe_emitCustomError c e err (args.map (atomE tag d)) he
+      (staticSafeExprs_map_atom _ _ _ _)
+      (by simpa [List.length_map] using errorOK_fits herr)
+  | letOp op k ih =>
+    intro e d dest he e' h
+    simp only [emitCoreToVar, Bind.bind, Option.bind] at h
+    cases hop : emitLetOp tag c e d op with
+    | none => simp [hop] at h
+    | some e1 =>
+      simp [hop] at h
+      have hopWF : opWF c op = true := by
+        simp [coreWF, Bool.and_eq_true] at hwf; exact hwf.1
+      have hkWF : coreWF c k = true := by
+        simp [coreWF, Bool.and_eq_true] at hwf; exact hwf.2
+      exact ih hkWF e1 (d + 1) dest (staticSafe_emitLetOp tag c e d op he hopWF hop) e' h
+  | seq s k ih =>
+    intro e d dest he e' h
+    simp only [emitCoreToVar] at h
+    have hsWF : stmtWF c s = true := by
+      simp [coreWF, Bool.and_eq_true] at hwf; exact hwf.1
+    have hkWF : coreWF c k = true := by
+      simp [coreWF, Bool.and_eq_true] at hwf; exact hwf.2
+    exact ih hkWF (emitStmt tag c e d s) d dest
+      (staticSafe_emitStmt tag c e d s he hsWF) e' h
+  | letPure p args k ih =>
+    intro e d dest he e' h
+    simp only [emitCoreToVar] at h
+    have hkWF : coreWF c k = true := by
+      simp [coreWF, Bool.and_eq_true] at hwf; exact hwf.2
+    exact ih hkWF (emitLet e (identV tag d) (emitPrim tag d p args)) (d + 1) dest
+      (staticSafe_emitLet e _ _ he (staticSafe_emitPrim tag d p args)) e' h
+  | ite cond a b iha ihb =>
+    intro e d dest he e' h
+    simp only [emitCoreToVar, Bind.bind, Option.bind, Pure.pure] at h
+    have haWF : coreWF c a = true := by
+      simp [coreWF, Bool.and_eq_true] at hwf; exact hwf.1.2
+    have hbWF : coreWF c b = true := by
+      simp [coreWF, Bool.and_eq_true] at hwf; exact hwf.2
+    cases ha : emitCoreToVar tag c {} d dest a with
+    | none => simp [ha] at h
+    | some eA =>
+      simp [ha] at h
+      cases hb : emitCoreToVar tag c {} d dest b with
+      | none => simp [hb] at h
+      | some eB =>
+        simp [hb] at h
+        cases h
+        exact staticSafe_emit_push _ e _ he (by
+          simp [staticSafeStmt_switch, staticSafe_emitCond, staticSafeCases, staticSafeStmts,
+            iha haWF {} d dest (staticSafe_nilEmit _) _ ha,
+            ihb hbWF {} d dest (staticSafe_nilEmit _) _ hb])
+  | @seqIf tBr _ cond th el k ihth ihel ihk =>
+    intro e d dest he e' h
+    have hthWF : coreWF c th = true := by
+      simp [coreWF, Bool.and_eq_true] at hwf; exact hwf.1.1.1.2
+    have helWF : coreWF c el = true := by
+      simp [coreWF, Bool.and_eq_true] at hwf; exact hwf.1.1.2
+    have hkWF : coreWF c k = true := by
+      simp [coreWF, Bool.and_eq_true] at hwf; exact hwf.1.2
+    cases tBr with
+    | pair _ _ => simp [coreWF] at hwf
+    | unit =>
+      simp only [emitCoreToVar, Bind.bind, Option.bind, Pure.pure] at h
+      cases ha : emitCoreToVar tag c {} d dest th with
+      | none => simp [ha] at h
+      | some eA =>
+        simp [ha] at h
+        cases hb : emitCoreToVar tag c {} d dest el with
+        | none => simp [hb] at h
+        | some eB =>
+          simp [ha, hb] at h
+          exact ihk hkWF (e.push (.switch (emitCond tag d cond)
+              [(YulSemantics.Literal.number 0, eB.stmts)] (some eA.stmts))) d dest
+            (staticSafe_emit_push _ e _ he (by
+              simp [staticSafeStmt_switch, staticSafe_emitCond, staticSafeCases,
+                staticSafeStmts, ihth hthWF {} d dest (staticSafe_nilEmit _) _ ha,
+                ihel helWF {} d dest (staticSafe_nilEmit _) _ hb])) e' h
+    | word | addr | flag =>
+      simp only [emitCoreToVar, Bind.bind, Option.bind, Pure.pure] at h
+      cases ha : emitCoreToVar tag c {} d (identPhi tag d) th with
+      | none => simp [ha] at h
+      | some eA =>
+        simp [ha] at h
+        cases hb : emitCoreToVar tag c {} d (identPhi tag d) el with
+        | none => simp [hb] at h
+        | some eB =>
+          simp [ha, hb] at h
+          exact ihk hkWF (emitSeqIfWord tag e d cond eA eB) (d + 1) dest
+            (staticSafe_emitSeqIfWord (tag := tag) e d cond eA eB he
+              (ihth hthWF {} d (identPhi tag d) (staticSafe_nilEmit _) _ ha)
+              (ihel helWF {} d (identPhi tag d) (staticSafe_nilEmit _) _ hb)) e' h
+
 theorem staticSafe_emitCore (c : ContractDef) (halt : Bool)
     {clearLock : Bool} {t} (core : Core t)
     (hwf : coreWF c core = true) :
     ∀ (e : Emit) (d : Nat), staticSafeStmts memoryGuardK e.stmts = true →
       ∀ e', emitCore tag c e d halt core clearLock = some e' →
         staticSafeStmts memoryGuardK e'.stmts = true := by
-  induction core with
+  induction core generalizing halt clearLock with
   | ret r =>
     intro e d he e' h
     simp only [emitCore] at h
@@ -678,7 +825,7 @@ theorem staticSafe_emitCore (c : ContractDef) (halt : Bool)
         simp [coreWF, Bool.and_eq_true] at hwf; exact hwf.1
       have hkWF : coreWF c k = true := by
         simp [coreWF, Bool.and_eq_true] at hwf; exact hwf.2
-      exact ih hkWF e1 (d + 1) (staticSafe_emitLetOp tag c e d op he hopWF hop) e' h
+      exact ih (halt := halt) (clearLock := clearLock) hkWF e1 (d + 1) (staticSafe_emitLetOp tag c e d op he hopWF hop) e' h
   | seq s k ih =>
     intro e d he e' h
     simp only [emitCore] at h
@@ -686,13 +833,13 @@ theorem staticSafe_emitCore (c : ContractDef) (halt : Bool)
       simp [coreWF, Bool.and_eq_true] at hwf; exact hwf.1
     have hkWF : coreWF c k = true := by
       simp [coreWF, Bool.and_eq_true] at hwf; exact hwf.2
-    exact ih hkWF (emitStmt tag c e d s) d (staticSafe_emitStmt tag c e d s he hsWF) e' h
+    exact ih (halt := halt) (clearLock := clearLock) hkWF (emitStmt tag c e d s) d (staticSafe_emitStmt tag c e d s he hsWF) e' h
   | letPure p args k ih =>
     intro e d he e' h
     simp only [emitCore] at h
     have hkWF : coreWF c k = true := by
       simp [coreWF, Bool.and_eq_true] at hwf; exact hwf.2
-    exact ih hkWF (emitLet e (identV tag d) (emitPrim tag d p args)) (d + 1)
+    exact ih (halt := halt) (clearLock := clearLock) hkWF (emitLet e (identV tag d) (emitPrim tag d p args)) (d + 1)
       (staticSafe_emitLet e _ _ he (staticSafe_emitPrim tag d p args)) e' h
   | ite cond a b iha ihb =>
     intro e d he e' h
@@ -712,10 +859,59 @@ theorem staticSafe_emitCore (c : ContractDef) (halt : Bool)
       | some eB =>
         simp [hb] at h
         cases h
-        have hA := iha haWF {} d (staticSafe_nilEmit _) _ ha
-        have hB := ihb hbWF {} d (staticSafe_nilEmit _) _ hb
+        have hA := iha (halt := halt) (clearLock := clearLock) haWF {} d (staticSafe_nilEmit _) _ ha
+        have hB := ihb (halt := halt) (clearLock := clearLock) hbWF {} d (staticSafe_nilEmit _) _ hb
         exact staticSafe_emit_push _ e _ he (by
           simp [staticSafeStmt_switch, staticSafe_emitCond, staticSafeCases, staticSafeStmts, hA, hB])
+  | @seqIf tBr _ cond th el k ihth ihel ihk =>
+    intro e d he e' h
+    have hcond : condWF cond = true := by
+      simp [coreWF, Bool.and_eq_true] at hwf; exact hwf.1.1.1.1
+    have hthWF : coreWF c th = true := by
+      simp [coreWF, Bool.and_eq_true] at hwf; exact hwf.1.1.1.2
+    have helWF : coreWF c el = true := by
+      simp [coreWF, Bool.and_eq_true] at hwf; exact hwf.1.1.2
+    have hkWF : coreWF c k = true := by
+      simp [coreWF, Bool.and_eq_true] at hwf; exact hwf.1.2
+    cases tBr with
+    | pair _ _ =>
+      simp [coreWF] at hwf
+    | unit =>
+      simp only [emitCore, Bind.bind, Option.bind, Pure.pure] at h
+      cases ha : emitCore tag c {} d false th false with
+      | none => simp [ha] at h
+      | some eA =>
+        simp [ha] at h
+        cases hb : emitCore tag c {} d false el false with
+        | none => simp [hb] at h
+        | some eB =>
+          simp [ha, hb] at h
+          have hA := ihth (halt := false) (clearLock := false) hthWF {} d
+            (staticSafe_nilEmit _) _ ha
+          have hB := ihel (halt := false) (clearLock := false) helWF {} d
+            (staticSafe_nilEmit _) _ hb
+          exact ihk (halt := halt) (clearLock := clearLock) hkWF (e.push (.switch (emitCond tag d cond)
+              [(YulSemantics.Literal.number 0, eB.stmts)] (some eA.stmts))) d
+            (staticSafe_emit_push _ e _ he (by
+              simp [staticSafeStmt_switch, staticSafe_emitCond, staticSafeCases,
+                staticSafeStmts, hA, hB])) e' h
+    | word | addr | flag =>
+      simp only [emitCore, Bind.bind, Option.bind, Pure.pure] at h
+      cases ha : emitCoreToVar tag c {} d (identPhi tag d) th with
+      | none => simp [ha] at h
+      | some eA =>
+        simp [ha] at h
+        cases hb : emitCoreToVar tag c {} d (identPhi tag d) el with
+        | none => simp [hb] at h
+        | some eB =>
+          simp [ha, hb] at h
+          have hA := staticSafe_emitCoreToVar tag c th hthWF {} d (identPhi tag d)
+            (staticSafe_nilEmit _) _ ha
+          have hB := staticSafe_emitCoreToVar tag c el helWF {} d (identPhi tag d)
+            (staticSafe_nilEmit _) _ hb
+          exact ihk (halt := halt) (clearLock := clearLock) hkWF
+            (emitSeqIfWord tag e d cond eA eB) (d + 1)
+            (staticSafe_emitSeqIfWord (tag := tag) e d cond eA eB he hA hB) e' h
 
 theorem staticSafe_toYulFn {c f yul} (h : toYulFn c f = some yul) :
     staticSafeStmts memoryGuardK yul = true := by

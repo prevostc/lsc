@@ -56,11 +56,11 @@ theorem op_sim_pow10 {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
             V' st' .halt ∧
           st'.halted = some (.revert, bytes) ∧
           haltError c Γ e bytes := by
-  rcases hinv with ⟨hV, henv, hR, hctx⟩
+  rcases hinv with ⟨hok, henv, hR, hctx⟩
   have hwf' : atomWF a = true := by simpa [opWF] using hwf
   have ha := atom_eval_lt henv hwf'
   have hn0 : identsNodup tag env.length = true := identsNodup_mono tag (by omega) hn
-  have hea := eval_atom tag funs (st := st) hV hn0 a
+  have hea := eval_atom_ok tag funs (st := st) hok a
   have he77 := eval_lit funs V st 77
   have he10 := eval_lit funs V st 10
   have hgt :
@@ -104,6 +104,6 @@ theorem op_sim_pow10 {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     · simp only [emitPow10_stmts, Emit.stmts_nil, List.nil_append]
       refine Step.seqCons (Step.ifFalse hgt ?_) (Step.seqCons hlet Step.seqNil)
       simp [hcv, Dialect.zero, litValue]
-    · exact ⟨by rw [hV, toVEnv_cons], envWF_cons hpow henv, hR, hctx⟩
+    · exact ⟨localsOK_cons (tag := tag) _ hn hok, envWF_cons hpow henv, hR, hctx⟩
 
 end Lsc.Compiler

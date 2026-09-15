@@ -336,6 +336,21 @@ theorem noGas_emitCond tag (d : Nat) : ∀ c, noGasExpr (emitCond tag d c) = tru
     simp [emitCond, bop, noGasExpr, noGasOp, noGasExprs, noGas_emitCond tag d c]
   | .tt | .ff => by simp [emitCond, noGasExpr, lit]
 
+theorem noGas_seqIfWordInner tag (d : Nat) (cond : Cond) (eA eB : Emit)
+    (hA : noGasStmts eA.stmts = true) (hB : noGasStmts eB.stmts = true) :
+    noGasStmts (seqIfWordInner tag d cond eA eB) = true := by
+  rw [seqIfWordInner_eq]
+  simp [noGasStmts, noGasStmt, noGas_emitCond, noGasCases, noGasDflt,
+    noGasExpr, lit, noGas_var, hA, hB]
+
+theorem noGas_emitSeqIfWord tag (e : Emit) (d : Nat) (cond : Cond) (eA eB : Emit)
+    (he : noGasStmts e.stmts = true)
+    (hA : noGasStmts eA.stmts = true) (hB : noGasStmts eB.stmts = true) :
+    noGasStmts (emitSeqIfWord tag e d cond eA eB).stmts = true :=
+  noGas_emitBlock (emitLet e (identV tag d) (lit 0)) _
+    (noGas_emitLet e _ _ he (noGas_lit 0))
+    (noGas_seqIfWordInner tag d cond eA eB hA hB)
+
 theorem noGas_emitPrim tag (d : Nat) (p : Prim) (args : List Atom) :
     noGasExpr (emitPrim tag d p args) = true := by
   cases p <;> cases args with
@@ -563,12 +578,113 @@ theorem noGas_emitParams tag (e : Emit) (offset n : Nat)
     simp [noGasStmts_append, noGasStmts, ih e he, noGasStmt, bop, noGasExpr, noGasOp,
       noGasExprs, lit]
 
+theorem noGas_emitCoreToVar tag (c : ContractDef) {t} (core : Core t) :
+    ∀ (e : Emit) (d : Nat) (dest : YIdent), noGasStmts e.stmts = true →
+      ∀ e', emitCoreToVar tag c e d dest core = some e' →
+        noGasStmts e'.stmts = true := by
+  induction core with
+  | ret r =>
+    intro e d dest he e' h
+    simp [emitCoreToVar, emitAssignRet] at h
+    cases r with
+    | unit | pair _ _ => cases h; exact he
+    | word a | addr a | flag a =>
+      cases h
+      exact noGas_emitAssign e dest (atomE tag d a) he (noGas_atom tag d a)
+  | opTail op | opTailAddr op | opTailFlag op =>
+    intro e d dest he e' h
+    simp only [emitCoreToVar, Bind.bind, Option.bind, Pure.pure] at h
+    cases hop : emitLetOp tag c e d op with
+    | none => simp [hop] at h
+    | some e1 =>
+      simp [hop] at h
+      cases h
+      exact noGas_emitAssign e1 dest (var (identV tag d))
+        (noGas_emitLetOp tag c e d op he hop) (noGas_var _)
+  | stmtTail s =>
+    intro e d dest he e' h
+    simp [emitCoreToVar] at h
+    cases h
+    exact noGas_emitStmt tag c e d s he
+  | revertTail err args =>
+    intro e d dest he e' h
+    simp [emitCoreToVar] at h
+    cases h
+    exact noGas_emitCustomError c e err (args.map (atomE tag d)) he
+      (noGasExprs_map_atom tag d args)
+  | letOp op k ih =>
+    intro e d dest he e' h
+    simp only [emitCoreToVar, Bind.bind, Option.bind] at h
+    cases hop : emitLetOp tag c e d op with
+    | none => simp [hop] at h
+    | some e1 =>
+      simp [hop] at h
+      exact ih e1 (d + 1) dest (noGas_emitLetOp tag c e d op he hop) e' h
+  | seq s k ih =>
+    intro e d dest he e' h
+    simp only [emitCoreToVar] at h
+    exact ih (emitStmt tag c e d s) d dest (noGas_emitStmt tag c e d s he) e' h
+  | letPure p args k ih =>
+    intro e d dest he e' h
+    simp only [emitCoreToVar] at h
+    exact ih (emitLet e (identV tag d) (emitPrim tag d p args)) (d + 1) dest
+      (noGas_emitLet e _ _ he (noGas_emitPrim tag d p args)) e' h
+  | ite cond a b iha ihb =>
+    intro e d dest he e' h
+    simp only [emitCoreToVar, Bind.bind, Option.bind, Pure.pure] at h
+    cases ha : emitCoreToVar tag c {} d dest a with
+    | none => simp [ha] at h
+    | some eA =>
+      simp [ha] at h
+      cases hb : emitCoreToVar tag c {} d dest b with
+      | none => simp [hb] at h
+      | some eB =>
+        simp [hb] at h
+        cases h
+        exact noGas_emit_push e _ he (by
+          simp [noGasStmt, noGas_emitCond tag d cond, noGasCases, noGasStmts, noGasDflt,
+            iha {} d dest noGas_nilEmit _ ha, ihb {} d dest noGas_nilEmit _ hb])
+  | @seqIf tBr _ cond th el k ihth ihel ihk =>
+    intro e d dest he e' h
+    cases tBr with
+    | pair _ _ =>
+      simp [emitCoreToVar] at h; cases h; exact he
+    | unit =>
+      simp only [emitCoreToVar, Bind.bind, Option.bind, Pure.pure] at h
+      cases ha : emitCoreToVar tag c {} d dest th with
+      | none => simp [ha] at h
+      | some eA =>
+        simp [ha] at h
+        cases hb : emitCoreToVar tag c {} d dest el with
+        | none => simp [hb] at h
+        | some eB =>
+          simp [ha, hb] at h
+          exact ihk (e.push (.switch (emitCond tag d cond)
+              [(YulSemantics.Literal.number 0, eB.stmts)] (some eA.stmts))) d dest
+            (noGas_emit_push e _ he (by
+              simp [noGasStmt, noGas_emitCond tag d cond, noGasCases, noGasStmts, noGasDflt,
+                ihth {} d dest noGas_nilEmit _ ha, ihel {} d dest noGas_nilEmit _ hb])) e' h
+    | word | addr | flag =>
+      simp only [emitCoreToVar, Bind.bind, Option.bind, Pure.pure] at h
+      cases ha : emitCoreToVar tag c {} d (identPhi tag d) th with
+      | none => simp [ha] at h
+      | some eA =>
+        simp [ha] at h
+        cases hb : emitCoreToVar tag c {} d (identPhi tag d) el with
+        | none => simp [hb] at h
+        | some eB =>
+          simp [ha, hb] at h
+          exact ihk (emitSeqIfWord tag e d cond eA eB) (d + 1) dest
+            (noGas_emitSeqIfWord tag e d cond eA eB he
+              (ihth {} d (identPhi tag d) noGas_nilEmit _ ha)
+              (ihel {} d (identPhi tag d) noGas_nilEmit _ hb)) e' h
+
 theorem noGas_emitCore tag (c : ContractDef) (halt : Bool)
     {clearLock : Bool} {t} (core : Core t) :
     ∀ (e : Emit) (d : Nat), noGasStmts e.stmts = true →
       ∀ e', emitCore tag c e d halt core clearLock = some e' →
         noGasStmts e'.stmts = true := by
-  induction core with
+  induction core generalizing halt clearLock with
   | ret r =>
     intro e d he e' h
     simp only [emitCore] at h
@@ -608,15 +724,15 @@ theorem noGas_emitCore tag (c : ContractDef) (halt : Bool)
     | none => simp [hop] at h
     | some e1 =>
       simp [hop] at h
-      exact ih e1 (d + 1) (noGas_emitLetOp tag c e d op he hop) e' h
+      exact ih (halt := halt) (clearLock := clearLock) e1 (d + 1) (noGas_emitLetOp tag c e d op he hop) e' h
   | seq s k ih =>
     intro e d he e' h
     simp only [emitCore] at h
-    exact ih (emitStmt tag c e d s) d (noGas_emitStmt tag c e d s he) e' h
+    exact ih (halt := halt) (clearLock := clearLock) (emitStmt tag c e d s) d (noGas_emitStmt tag c e d s he) e' h
   | letPure p args k ih =>
     intro e d he e' h
     simp only [emitCore] at h
-    exact ih (emitLet e (identV tag d) (emitPrim tag d p args)) (d + 1)
+    exact ih (halt := halt) (clearLock := clearLock) (emitLet e (identV tag d) (emitPrim tag d p args)) (d + 1)
       (noGas_emitLet e _ _ he (noGas_emitPrim tag d p args)) e' h
   | ite cond a b iha ihb =>
     intro e d he e' h
@@ -630,10 +746,47 @@ theorem noGas_emitCore tag (c : ContractDef) (halt : Bool)
       | some eB =>
         simp [hb] at h
         cases h
-        have hA := iha {} d noGas_nilEmit _ ha
-        have hB := ihb {} d noGas_nilEmit _ hb
+        have hA := iha (halt := halt) (clearLock := clearLock) {} d noGas_nilEmit _ ha
+        have hB := ihb (halt := halt) (clearLock := clearLock) {} d noGas_nilEmit _ hb
         exact noGas_emit_push e _ he (by
           simp [noGasStmt, noGas_emitCond tag d cond, noGasCases, noGasStmts, noGasDflt, hA, hB])
+  | @seqIf tBr _ cond th el k ihth ihel ihk =>
+    intro e d he e' h
+    cases tBr with
+    | pair _ _ =>
+      simp [emitCore] at h; cases h; exact he
+    | unit =>
+      simp only [emitCore, Bind.bind, Option.bind, Pure.pure] at h
+      cases ha : emitCore tag c {} d false th false with
+      | none => simp [ha] at h
+      | some eA =>
+        simp [ha] at h
+        cases hb : emitCore tag c {} d false el false with
+        | none => simp [hb] at h
+        | some eB =>
+          simp [ha, hb] at h
+          have hA := ihth (halt := false) (clearLock := false) {} d noGas_nilEmit _ ha
+          have hB := ihel (halt := false) (clearLock := false) {} d noGas_nilEmit _ hb
+          exact ihk (halt := halt) (clearLock := clearLock) (e.push (.switch (emitCond tag d cond)
+              [(YulSemantics.Literal.number 0, eB.stmts)] (some eA.stmts))) d
+            (noGas_emit_push e _ he (by
+              simp [noGasStmt, noGas_emitCond tag d cond, noGasCases, noGasStmts, noGasDflt,
+                hA, hB])) e' h
+    | word | addr | flag =>
+      simp only [emitCore, Bind.bind, Option.bind, Pure.pure] at h
+      cases ha : emitCoreToVar tag c {} d (identPhi tag d) th with
+      | none => simp [ha] at h
+      | some eA =>
+        simp [ha] at h
+        cases hb : emitCoreToVar tag c {} d (identPhi tag d) el with
+        | none => simp [hb] at h
+        | some eB =>
+          simp [ha, hb] at h
+          have hA := noGas_emitCoreToVar tag c th {} d (identPhi tag d) noGas_nilEmit _ ha
+          have hB := noGas_emitCoreToVar tag c el {} d (identPhi tag d) noGas_nilEmit _ hb
+          exact ihk (halt := halt) (clearLock := clearLock)
+            (emitSeqIfWord tag e d cond eA eB) (d + 1)
+            (noGas_emitSeqIfWord tag e d cond eA eB he hA hB) e' h
 
 theorem noGas_lockSetStmt : noGasStmt lockSetStmt = true := by
   simp [lockSetStmt, noGasStmt, bop, noGasExpr, noGasOp, noGasExprs, lit]

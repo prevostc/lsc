@@ -228,7 +228,7 @@ theorem sim_ext_op_call_return {S E ε : Type} {t : RetTy}
     | ok p =>
       rcases p with ⟨v, w0⟩
       simp only [hrun, except_ok_prod] at hbit
-      obtain ⟨-, hVeq, hInv0, hAgr0⟩ := hbit
+      obtain ⟨-, hInv0, hAgr0⟩ := hbit
       have hstatic := ctxRel_static hInv0.ctxr
       have hrest' :=
         s1_match_prefix_ok hfuns (noExt_maybeLock clearLock) hrest
@@ -237,9 +237,8 @@ theorem sim_ext_op_call_return {S E ε : Type} {t : RetTy}
       have hInv1 := Inv_memOnly tag hInv0 hMO
       have haddr0 := ctxRel_address hInv0.ctxr
       have hAgr1 := ExtAgree_stAfterLockClear clearLock hAgr0 haddr0
-      have hn0 : identsNodup tag (v :: env).length = true := by simpa using hn1
-      have he := eval_atom tag (funEnvUncast (toCalls o) funs)
-        (st := stAfterLockClear clearLock st1) hVeq hn0 (.var 0)
+      have he := eval_atom_ok tag (funEnvUncast (toCalls o) funs)
+        (st := stAfterLockClear clearLock st1) hInv0.venv (.var 0)
       have hv : v < wordBound := hInv0.wf v (by simp)
       obtain ⟨_stR, hret, hh, hR'⟩ :=
         return_word_sim (funEnvUncast (toCalls o) funs) V1 hv he hInv1.rel
@@ -326,7 +325,7 @@ theorem sim_ext_op_view_return {S E ε : Type} {t : RetTy}
     | ok p =>
       rcases p with ⟨v, w0⟩
       simp only [hrun, except_ok_prod] at hbit
-      obtain ⟨-, hVeq, hInv0, hAgr0⟩ := hbit
+      obtain ⟨-, hInv0, hAgr0⟩ := hbit
       have hstatic := ctxRel_static hInv0.ctxr
       have hrest' :=
         s1_match_prefix_ok hfuns (noExt_maybeLock clearLock) hrest
@@ -335,9 +334,8 @@ theorem sim_ext_op_view_return {S E ε : Type} {t : RetTy}
       have hInv1 := Inv_memOnly tag hInv0 hMO
       have haddr0 := ctxRel_address hInv0.ctxr
       have hAgr1 := ExtAgree_stAfterLockClear clearLock hAgr0 haddr0
-      have hn0 : identsNodup tag (v :: env).length = true := by simpa using hn1
-      have he := eval_atom tag (funEnvUncast (toCalls o) funs)
-        (st := stAfterLockClear clearLock st1) hVeq hn0 (.var 0)
+      have he := eval_atom_ok tag (funEnvUncast (toCalls o) funs)
+        (st := stAfterLockClear clearLock st1) hInv0.venv (.var 0)
       have hv : v < wordBound := hInv0.wf v (by simp)
       obtain ⟨_stR, hret, hh, hR'⟩ :=
         return_word_sim (funEnvUncast (toCalls o) funs) V1 hv he hInv1.rel
@@ -396,7 +394,7 @@ theorem sim_ext_seq_call {S E ε : Type} {t : RetTy}
     | ok p =>
       rcases p with ⟨_, w0⟩
       simp only [hrun, except_ok_prod] at hbit
-      obtain ⟨-, hVeq, hInv0, hAgr0⟩ := hbit
+      obtain ⟨-, hInv0, hAgr0⟩ := hbit
       have ⟨_, hop⟩ := stmt_call_ok_op hrun
       have hOr0 : w0.oracle = Oracle.ofExt o :=
         (denote_call_ok_oracle hop).trans hOr
@@ -450,7 +448,7 @@ theorem sim_ext_seq_view {S E ε : Type} {t : RetTy}
     | ok p =>
       rcases p with ⟨_, w0⟩
       simp only [hrun, except_ok_prod] at hbit
-      obtain ⟨-, hVeq, hInv0, hAgr0⟩ := hbit
+      obtain ⟨-, hInv0, hAgr0⟩ := hbit
       have ⟨_, hop⟩ := stmt_view_ok_op hrun
       have hOr0 : w0.oracle = Oracle.ofExt o := by
         rw [denote_view_ok_world hop, hOr]
@@ -528,7 +526,7 @@ theorem sim_ext_letOp_call {S E ε : Type} {t : RetTy}
     | ok p =>
       rcases p with ⟨v, w0⟩
       simp only [hrun, except_ok_prod] at hbit
-      obtain ⟨-, hVeq, hInv0, hAgr0⟩ := hbit
+      obtain ⟨-, hInv0, hAgr0⟩ := hbit
       have hOr0 : w0.oracle = Oracle.ofExt o :=
         (denote_call_ok_oracle hrun).trans hOr
       have hsim :=
@@ -592,7 +590,7 @@ theorem sim_ext_letOp_view {S E ε : Type} {t : RetTy}
     | ok p =>
       rcases p with ⟨v, w0⟩
       simp only [hrun, except_ok_prod] at hbit
-      obtain ⟨-, hVeq, hInv0, hAgr0⟩ := hbit
+      obtain ⟨-, hInv0, hAgr0⟩ := hbit
       have hOr0 : w0.oracle = Oracle.ofExt o := by
         rw [denote_view_ok_world hrun, hOr]
       have hsim :=
@@ -809,7 +807,7 @@ theorem sim_ext_stmtTail_call {S E ε : Type}
     | ok p =>
       rcases p with ⟨_, w0⟩
       simp only [hrun, except_ok_prod] at hbit
-      obtain ⟨-, hVeq, hInv0, hAgr0⟩ := hbit
+      obtain ⟨-, hInv0, hAgr0⟩ := hbit
       have hstatic := ctxRel_static hInv0.ctxr
       have hMO := memOnly_stAfterLockClear clearLock st1
       have hInv1 := Inv_memOnly tag hInv0 hMO
@@ -881,7 +879,7 @@ theorem sim_ext_stmtTail_view {S E ε : Type}
     | ok p =>
       rcases p with ⟨_, w0⟩
       simp only [hrun, except_ok_prod] at hbit
-      obtain ⟨-, hVeq, hInv0, hAgr0⟩ := hbit
+      obtain ⟨-, hInv0, hAgr0⟩ := hbit
       have hstatic := ctxRel_static hInv0.ctxr
       have hMO := memOnly_stAfterLockClear clearLock st1
       have hInv1 := Inv_memOnly tag hInv0 hMO

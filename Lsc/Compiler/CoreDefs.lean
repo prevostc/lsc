@@ -26,6 +26,10 @@ def M1Frag : {t : RetTy} → Core t → Prop
   | _, .seq s k => M1Stmt s ∧ M1Frag k
   | _, .letPure p args k => p = .id ∧ args.length = 1 ∧ M1Frag k
   | _, .ite c a b => M1Cond c ∧ M1Frag a ∧ M1Frag b
+  | _, .seqIf (t := t) c th el k =>
+      match t with
+      | .pair _ _ => False
+      | _ => M1Cond c ∧ M1Frag th ∧ M1Frag el ∧ M1Frag k
   | _, _ => False
 
 def CallFreeOp : Lsc.Op → Prop := M1Op
@@ -70,6 +74,10 @@ def m1FragB : {t : RetTy} → Core t → Bool
   | _, .seq s k => m1StmtB s && m1FragB k
   | _, .letPure p args k => decide (p = .id) && args.length == 1 && m1FragB k
   | _, .ite _ a b => m1FragB a && m1FragB b
+  | _, .seqIf (t := t) _ th el k =>
+      match t with
+      | .pair _ _ => false
+      | _ => m1FragB th && m1FragB el && m1FragB k
   | _, _ => false
 
 def callFreeB {t : RetTy} (core : Core t) : Bool := m1FragB core
@@ -110,6 +118,11 @@ theorem m1FragB_eq {t} (core : Core t) : m1FragB core = true ↔ M1Frag core := 
     simp [m1FragB, M1Frag, ih, and_assoc]
   | ite _ a b iha ihb =>
     simp [m1FragB, M1Frag, M1Cond, iha, ihb]
+  | @seqIf t _ _ th el k ihth ihel ihk =>
+    cases t with
+    | pair _ _ => simp [m1FragB, M1Frag]
+    | unit | word | addr | flag =>
+      simp [m1FragB, M1Frag, M1Cond, ihth, ihel, ihk, and_assoc]
 
 theorem callFreeB_eq {t} (core : Core t) : callFreeB core = true ↔ CallFree core :=
   m1FragB_eq core
@@ -176,6 +189,17 @@ theorem M1Frag_noExtCall {t} (core : Core t) (h : M1Frag core) :
     have ⟨hc, hv⟩ := iha ha
     have ⟨hc', hv'⟩ := ihb hb
     simp [Core.effects, Effects.append, hc, hv, hc', hv']
+  | @seqIf t _ c th el k ihth ihel ihk =>
+    match t with
+    | .pair _ _ =>
+      cases (by simpa [M1Frag] using h : False)
+    | .unit | .word | .addr | .flag =>
+      have ⟨_, hth, hel, hk⟩ :=
+        (by simpa [M1Frag] using h : M1Cond c ∧ M1Frag th ∧ M1Frag el ∧ M1Frag k)
+      have ⟨hc, hv⟩ := ihth hth
+      have ⟨hc', hv'⟩ := ihel hel
+      have ⟨hc'', hv''⟩ := ihk hk
+      simp [Core.effects, Effects.append, hc, hv, hc', hv', hc'', hv'']
 
 theorem CallFree_not_hasExtCall {t} {core : Core t} (h : CallFree core) :
     Core.hasExtCall core = false := by

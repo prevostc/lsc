@@ -120,7 +120,7 @@ private theorem invStorage_of_addLiquidityPost (σ : Storage) (who : Address)
       invStorage_shares_zero ⟨H, h0, hsum⟩ hts
     have hdead : deadShares σ = 1000 := by simp [hts]
     have hsh0 : sharesAfterDead σ 0 = ⟨1000⟩ := by
-      simp [sharesAfterDead, hts, Function.update]
+      simp [sharesAfterDead, hts, Function.update, hz]
     by_cases hw : who = (0 : Address)
     · refine ⟨({0} : Finset Address), ?_, ?_⟩
       · intro a ha

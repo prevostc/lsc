@@ -161,6 +161,61 @@ theorem map_denote_ite {t : RetTy} {γ : Type} (f : t.denote → γ)
       else f <$> Core.denote Γ b env :=
   by apply Proof.map_denote_ite
 
+/-- `seqIf` is bind of the chosen branch into `seqIfCont`. -/
+theorem denote_seqIf {t u : RetTy}
+    (Γ : ContractSchema S X E ε) (c : Cond) (th el : Core t) (k : Core u)
+    (env : List Nat) :
+    Core.denote Γ (.seqIf c th el k) env =
+      (if c.denote env then Core.denote Γ th env else Core.denote Γ el env) >>=
+        fun v => Core.seqIfCont Γ v k env :=
+  by apply Proof.denote_seqIf
+
+/-- Push `f <$>` through `seqIf`. -/
+theorem map_denote_seqIf {t u : RetTy} {γ : Type} (f : u.denote → γ)
+    (Γ : ContractSchema S X E ε) (c : Cond) (th el : Core t) (k : Core u)
+    (env : List Nat) :
+    f <$> Core.denote Γ (.seqIf c th el k) env =
+      (if c.denote env then Core.denote Γ th env else Core.denote Γ el env) >>=
+        fun v => f <$> Core.seqIfCont Γ v k env :=
+  by apply Proof.map_denote_seqIf
+
+/-- Amount wrap through `seqIf`. -/
+theorem map_denote_seqIf_ofWord {a : Asset} {t : RetTy}
+    (Γ : ContractSchema S X E ε) (c : Cond) (th el : Core t) (k : Core .word)
+    (env : List Nat) :
+    Amount.ofWord (a := a) <$> Core.denote Γ (.seqIf c th el k) env =
+      (if c.denote env then Core.denote Γ th env else Core.denote Γ el env) >>=
+        fun v => Amount.ofWord (a := a) <$> Core.seqIfCont Γ v k env :=
+  by apply Proof.map_denote_seqIf_ofWord
+
+/-- Bool wrap through `seqIf`. -/
+theorem map_denote_seqIf_natToBool {t : RetTy}
+    (Γ : ContractSchema S X E ε) (c : Cond) (th el : Core t) (k : Core .flag)
+    (env : List Nat) :
+    Tx.natToBool <$> Core.denote Γ (.seqIf c th el k) env =
+      (if c.denote env then Core.denote Γ th env else Core.denote Γ el env) >>=
+        fun v => Tx.natToBool <$> Core.seqIfCont Γ v k env :=
+  by apply Proof.map_denote_seqIf_natToBool
+
+/-- Pair-of-Amount wrap through `seqIf`. -/
+theorem map_denote_seqIf_ofWord_pair {a b : Asset} {t : RetTy}
+    (Γ : ContractSchema S X E ε) (c : Cond) (th el : Core t)
+    (k : Core (.pair .word .word)) (env : List Nat) :
+    Prod.map (Amount.ofWord (a := a)) (Amount.ofWord (a := b)) <$>
+        Core.denote Γ (.seqIf c th el k) env =
+      (if c.denote env then Core.denote Γ th env else Core.denote Γ el env) >>=
+        fun v =>
+          Prod.map (Amount.ofWord (a := a)) (Amount.ofWord (a := b)) <$>
+            Core.seqIfCont Γ v k env :=
+  by apply Proof.map_denote_seqIf_ofWord_pair
+
+/-- `seqIf` of unit branches is `ite` with `k` copied into both sides. -/
+theorem seqIf_eq_ite {u : RetTy} (Γ : ContractSchema S X E ε)
+    (c : Cond) (th el : Core .unit) (k : Core u) (env : List Nat) :
+    Core.denote Γ (.seqIf c th el k) env =
+      Core.denote Γ (.ite c (th.seqUnit k) (el.seqUnit k)) env :=
+  by apply Proof.seqIf_eq_ite
+
 /-- `letPure` is substitution; the wrap stays on the continuation. -/
 theorem map_denote_letPure {t : RetTy} {γ : Type} (f : t.denote → γ)
     (Γ : ContractSchema S X E ε) (p : Prim) (args : List Atom) (k : Core t)

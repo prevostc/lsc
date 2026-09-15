@@ -225,7 +225,7 @@ theorem op_sim_loadMap {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E �
         ((identV tag env.length, BitVec.ofNat 256 v) :: V) st' .normal ∧
       Inv tag Γ c κ ctx w (v :: env)
         ((identV tag env.length, BitVec.ofNat 256 v) :: V) st' := by
-  rcases hinv with ⟨hV, henv, hR, hctx⟩
+  rcases hinv with ⟨hok, henv, hR, hctx⟩
   rcases hR with ⟨hs, hl, hκe, hW⟩
   have hwf' : fieldKindOK c f .map1 = true ∧ atomWF k = true := by
     simpa [opWF, Bool.and_eq_true] using hwf
@@ -233,7 +233,7 @@ theorem op_sim_loadMap {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E �
   have hn0 : identsNodup tag env.length = true := identsNodup_mono tag (by omega) hn
   have hk := atom_eval_lt henv hwf'.2
   have hfB := field_lt_wordBound hlen hfd
-  have hek := eval_atom tag funs (st := st) hV hn0 k
+  have hek := eval_atom_ok tag funs (st := st) hok k
   obtain ⟨stP, hexecP, hmem, hmP⟩ := mapSlotPrep_exec funs V st f hek hfB
   have hhash :
       stP.env.keccakOf (readBytes stP.memory 0 64) = mapSlot1 κ f (k.eval env) :=
@@ -268,7 +268,7 @@ theorem op_sim_loadMap {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E �
   · rw [emitLet_mapSlot_stmts]
     exact execStmts_append hexecP (Step.seqCons hlet Step.seqNil)
   · have hmK : MemOnly st stK := MemOnly.trans hmP (memOnly_touch stP 0 64)
-    exact ⟨by rw [hV, toVEnv_cons], envWF_cons hv henv,
+    exact ⟨localsOK_cons (tag := tag) _ hn hok, envWF_cons hv henv,
       R_memOnly ⟨hs, hl, hκe, hW⟩ hmK, ctxRel_memOnly hctx hmK⟩
 
 theorem stmt_sim_storeMap {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
@@ -284,7 +284,7 @@ theorem stmt_sim_storeMap {S X E ε} {c : ContractDef} {Γ : ContractSchema S X 
     ∃ st',
       ExecStmts evm funs V st (emitStmt tag c {} env.length (.storeMap f k val)).stmts V st' .normal ∧
       Inv tag Γ c κ ctx w' env V st' := by
-  rcases hinv with ⟨hV, henv, hR, hctx⟩
+  rcases hinv with ⟨hok, henv, hR, hctx⟩
   rcases hR with ⟨hs, hl, hκe, hW⟩
   have hwf' : (fieldKindOK c f .map1 = true ∧ atomWF k = true) ∧ atomWF val = true := by
     simpa [stmtWF, Bool.and_eq_true] using hwf
@@ -292,13 +292,13 @@ theorem stmt_sim_storeMap {S X E ε} {c : ContractDef} {Γ : ContractSchema S X 
   have hk := atom_eval_lt henv hwf'.1.2
   have hv := atom_eval_lt henv hwf'.2
   have hfB := field_lt_wordBound hlen hfd
-  have hek := eval_atom tag funs (st := st) hV hn k
+  have hek := eval_atom_ok tag funs (st := st) hok k
   obtain ⟨stP, hexecP, hmem, hmP⟩ := mapSlotPrep_exec funs V st f hek hfB
   have hhash :
       stP.env.keccakOf (readBytes stP.memory 0 64) = mapSlot1 κ f (k.eval env) :=
     mapSlotPrep_hash (st := st) κ (k.eval env) f hk hfB hκe rfl hmem
       (by rcases hmP with ⟨_, _, _, _, _, _, _, _, hκeq, _, _⟩; exact hκeq)
-  have hev := eval_atom tag funs (st := stP) hV hn val
+  have hev := eval_atom_ok tag funs (st := stP) hok val
   have hctxP := ctxRel_memOnly hctx hmP
   have hstatic := ctxRel_static hctxP
   let stK := touchMemory stP 0 64
@@ -333,7 +333,7 @@ theorem stmt_sim_storeMap {S X E ε} {c : ContractDef} {Γ : ContractSchema S X 
     exact execStmts_append hexecP (Step.seqCons hexpr Step.seqNil)
   · have hmK : MemOnly st stK := MemOnly.trans hmP (memOnly_touch stP 0 64)
     have hRK : R c Γ κ w stK := R_memOnly ⟨hs, hl, hκe, hW⟩ hmK
-    exact ⟨hV, henv, R_sstoreMap hRK (ctxRel_memOnly hctx hmK) hΓ hκ hlen hwf'.1.1 hk hv,
+    exact ⟨hok, henv, R_sstoreMap hRK (ctxRel_memOnly hctx hmK) hΓ hκ hlen hwf'.1.1 hk hv,
       ctxRel_sstore (ctxRel_memOnly hctx hmK) _ _⟩
 
 end Lsc.Compiler

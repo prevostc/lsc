@@ -164,6 +164,42 @@ def doVirt6 (ts : Amount shareAsset) : M (Amount shareAsset) :=
 def doVirt18 (ts : Amount shareAsset) : M (Amount shareAsset) :=
   Amount.add ts (Shares.virtualShares offset18)
 
+/-- Effectful `if`/`else` then a shared tail (`seqIf`). -/
+def doSeqIfEffect (c x : Word) : M Word := do
+  if c = 0 then
+    Tx.require (0 < x) .TransferFailed
+  else
+    Tx.require (x = x) .TransferFailed
+  x +? 1
+
+/-- `if` without `else`, then a shared tail. -/
+def doSeqIfNoElse (c x : Word) : M Word := do
+  if c = 0 then
+    Tx.require (0 < x) .TransferFailed
+  x +? 1
+
+/-- `let y ← if …` with effects in both branches, then a shared tail. -/
+def doSeqIfLet (c x : Word) : M Word := do
+  let y ←
+    if c = 0 then
+      Tx.require (0 < x) .TransferFailed
+      x +? 1
+    else
+      x +? 0
+  Tx.require (0 < y) .TransferFailed
+  y +? 1
+
+/-- Nested effectful `if`. -/
+def doSeqIfNested (c d x : Word) : M Word := do
+  if c = 0 then
+    if d = 0 then
+      Tx.require (0 < x) .TransferFailed
+    else
+      Tx.require (x = x) .TransferFailed
+  else
+    Tx.require (0 < x) .TransferFailed
+  x +? 1
+
 end StdlibTests
 
 lsc_schema StdlibTests
@@ -181,6 +217,8 @@ lsc_reify StdlibTests.doAs StdlibTests.doAsUnchecked
 lsc_reify StdlibTests.doToShares StdlibTests.doToAssets
 lsc_reify StdlibTests.doVirt0 StdlibTests.doVirt3 StdlibTests.doVirt6
   StdlibTests.doVirt18
+lsc_reify StdlibTests.doSeqIfEffect StdlibTests.doSeqIfNoElse
+  StdlibTests.doSeqIfLet StdlibTests.doSeqIfNested
 
 #check StdlibTests.doCheckOk.core_denote
 #check StdlibTests.doSafeTransfer.core_denote
@@ -213,6 +251,10 @@ lsc_reify StdlibTests.doVirt0 StdlibTests.doVirt3 StdlibTests.doVirt6
 #check StdlibTests.doVirt3.core_denote
 #check StdlibTests.doVirt6.core_denote
 #check StdlibTests.doVirt18.core_denote
+#check StdlibTests.doSeqIfEffect.core_denote
+#check StdlibTests.doSeqIfNoElse.core_denote
+#check StdlibTests.doSeqIfLet.core_denote
+#check StdlibTests.doSeqIfNested.core_denote
 
 #guard (toString (repr StdlibTests.doToShares.core)).contains "1000000"
 #guard (toString (repr StdlibTests.doToAssets.core)).contains "1000000"
@@ -220,6 +262,11 @@ lsc_reify StdlibTests.doVirt0 StdlibTests.doVirt3 StdlibTests.doVirt6
 #guard (toString (repr StdlibTests.doVirt3.core)).contains "1000"
 #guard (toString (repr StdlibTests.doVirt6.core)).contains "1000000"
 #guard (toString (repr StdlibTests.doVirt18.core)).contains "1000000000000000000"
+#guard Core.countSeqIf StdlibTests.doSeqIfEffect.core = 1
+#guard Core.countSeqIf StdlibTests.doSeqIfNoElse.core = 1
+#guard Core.countSeqIf StdlibTests.doSeqIfLet.core = 1
+#guard 1 ≤ Core.countSeqIf StdlibTests.doSeqIfNested.core
+#guard (toString (repr StdlibTests.doSeqIfEffect.core)).contains "seqIf"
 
 example : Nat.pow 10 18 = WAD.raw := rfl
 example : Nat.pow 10 27 = RAY.raw := rfl

@@ -41,7 +41,10 @@ Core  --toYul (ours)-->  Yul AST (powdr yul-semantics)  --powdr compile_correct-
 ## Core: the only IR
 
 - Loop-free ANF over words with de Bruijn locals; compiler denotation `Core.denote : Core → List ℕ →
-  Tx …`. Storage fields, events and errors are indices into a generated schema.
+  Tx …`. Constructors: `ret`, `opTail`/`stmtTail`/`revertTail`, `letOp`, `seq`, `letPure`,
+  expression-level `ite`, and statement-level `seqIf c th el k` (run `th` or `el`, then `k`
+  once — word-like branches bind the result as `var 0` in `k`). Storage fields, events and errors
+  are indices into a generated schema.
   There is no binding table: `Op.call` / `Stmt.call` carry a target `Atom`, selector,
   args, and `AbiRet`. `Amount a` is erased to a word by Reify.
 - The reifier (`lsc_contract` / `lsc_reify`, MetaM) is **untrusted**: every run emits `f.core_denote`,

@@ -212,6 +212,131 @@ theorem callFree_run_self_ext {Γ : ContractSchema S X E ε} {t}
     split_ifs
     · exact iha ha env w w' hs he
     · exact ihb hb env w w' hs he
+  | @seqIf tBr _ c th el k ihth ihel ihk =>
+    intro h env w w' hs he
+    cases tBr with
+    | pair _ _ => simp [CallFree, M1Frag] at h
+    | unit =>
+      have ⟨_, hth, hel, hk⟩ := m1frag_seqIf.mp h
+      simp only [Core.denote, Tx.run_bind]
+      have hbr :
+          exceptSelfExt
+            (Tx.run (if c.denote env then Core.denote Γ th env
+              else Core.denote Γ el env) ctx w)
+            (Tx.run (if c.denote env then Core.denote Γ th env
+              else Core.denote Γ el env) ctx w') := by
+        split_ifs
+        · exact ihth hth env w w' hs he
+        · exact ihel hel env w w' hs he
+      cases h1 : Tx.run (if c.denote env then Core.denote Γ th env
+          else Core.denote Γ el env) ctx w with
+      | error e =>
+        cases h2 : Tx.run (if c.denote env then Core.denote Γ th env
+            else Core.denote Γ el env) ctx w' with
+        | error e' =>
+          have := exceptSelfExt_error_error h1 h2 hbr
+          simp [exceptSelfExt, this]
+        | ok _ => simp [exceptSelfExt, h1, h2] at hbr
+      | ok p =>
+        cases h2 : Tx.run (if c.denote env then Core.denote Γ th env
+            else Core.denote Γ el env) ctx w' with
+        | error _ => simp [exceptSelfExt, h1, h2] at hbr
+        | ok p' =>
+          have ⟨_, hs1, he1⟩ := exceptSelfExt_ok_ok h1 h2 hbr
+          exact ihk hk env p.2 p'.2 hs1 he1
+    | word =>
+      have ⟨_, hth, hel, hk⟩ := m1frag_seqIf.mp h
+      simp only [Core.denote, Tx.run_bind]
+      have hbr :
+          exceptSelfExt
+            (Tx.run (if c.denote env then Core.denote Γ th env
+              else Core.denote Γ el env) ctx w)
+            (Tx.run (if c.denote env then Core.denote Γ th env
+              else Core.denote Γ el env) ctx w') := by
+        split_ifs
+        · exact ihth hth env w w' hs he
+        · exact ihel hel env w w' hs he
+      cases h1 : Tx.run (if c.denote env then Core.denote Γ th env
+          else Core.denote Γ el env) ctx w with
+      | error e =>
+        cases h2 : Tx.run (if c.denote env then Core.denote Γ th env
+            else Core.denote Γ el env) ctx w' with
+        | error e' =>
+          have := exceptSelfExt_error_error h1 h2 hbr
+          simp [exceptSelfExt, this]
+        | ok _ => simp [exceptSelfExt, h1, h2] at hbr
+      | ok p =>
+        cases h2 : Tx.run (if c.denote env then Core.denote Γ th env
+            else Core.denote Γ el env) ctx w' with
+        | error _ => simp [exceptSelfExt, h1, h2] at hbr
+        | ok p' =>
+          rcases p with ⟨v, w1⟩
+          rcases p' with ⟨v', w1'⟩
+          have ⟨hv, hs1, he1⟩ := exceptSelfExt_ok_ok h1 h2 hbr
+          subst hv
+          exact ihk hk (v :: env) w1 w1' hs1 he1
+    | addr =>
+      have ⟨_, hth, hel, hk⟩ := m1frag_seqIf.mp h
+      simp only [Core.denote, Tx.run_bind]
+      have hbr :
+          exceptSelfExt
+            (Tx.run (if c.denote env then Core.denote Γ th env
+              else Core.denote Γ el env) ctx w)
+            (Tx.run (if c.denote env then Core.denote Γ th env
+              else Core.denote Γ el env) ctx w') := by
+        split_ifs
+        · exact ihth hth env w w' hs he
+        · exact ihel hel env w w' hs he
+      cases h1 : Tx.run (if c.denote env then Core.denote Γ th env
+          else Core.denote Γ el env) ctx w with
+      | error e =>
+        cases h2 : Tx.run (if c.denote env then Core.denote Γ th env
+            else Core.denote Γ el env) ctx w' with
+        | error e' =>
+          have := exceptSelfExt_error_error h1 h2 hbr
+          simp [exceptSelfExt, this]
+        | ok _ => simp [exceptSelfExt, h1, h2] at hbr
+      | ok p =>
+        cases h2 : Tx.run (if c.denote env then Core.denote Γ th env
+            else Core.denote Γ el env) ctx w' with
+        | error _ => simp [exceptSelfExt, h1, h2] at hbr
+        | ok p' =>
+          rcases p with ⟨v, w1⟩
+          rcases p' with ⟨v', w1'⟩
+          have ⟨hv, hs1, he1⟩ := exceptSelfExt_ok_ok h1 h2 hbr
+          subst hv
+          exact ihk hk ((v : Nat) :: env) w1 w1' hs1 he1
+    | flag =>
+      have ⟨_, hth, hel, hk⟩ := m1frag_seqIf.mp h
+      simp only [Core.denote, Tx.run_bind]
+      have hbr :
+          exceptSelfExt
+            (Tx.run (if c.denote env then Core.denote Γ th env
+              else Core.denote Γ el env) ctx w)
+            (Tx.run (if c.denote env then Core.denote Γ th env
+              else Core.denote Γ el env) ctx w') := by
+        split_ifs
+        · exact ihth hth env w w' hs he
+        · exact ihel hel env w w' hs he
+      cases h1 : Tx.run (if c.denote env then Core.denote Γ th env
+          else Core.denote Γ el env) ctx w with
+      | error e =>
+        cases h2 : Tx.run (if c.denote env then Core.denote Γ th env
+            else Core.denote Γ el env) ctx w' with
+        | error e' =>
+          have := exceptSelfExt_error_error h1 h2 hbr
+          simp [exceptSelfExt, this]
+        | ok _ => simp [exceptSelfExt, h1, h2] at hbr
+      | ok p =>
+        cases h2 : Tx.run (if c.denote env then Core.denote Γ th env
+            else Core.denote Γ el env) ctx w' with
+        | error _ => simp [exceptSelfExt, h1, h2] at hbr
+        | ok p' =>
+          rcases p with ⟨v, w1⟩
+          rcases p' with ⟨v', w1'⟩
+          have ⟨hv, hs1, he1⟩ := exceptSelfExt_ok_ok h1 h2 hbr
+          subst hv
+          exact ihk hk (v :: env) w1 w1' hs1 he1
 
 /-- A call-free Core run's post-`self`/`ext` depend only on the pre-`self`/`ext`
 (not log or faults). -/

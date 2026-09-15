@@ -101,10 +101,11 @@ The translation follows the shapes Lean's `do` elaborator produces:
 * `bind (pure (e₁, e₂, …)) k` (inlined tuple return) → β-reduce; `Prod.mk` match /
                                                       `fst`/`snd` substitute components so the
                                                       tuple never needs to be an atom
+* `bind (if c then a else b) k` (effectful `if`) → `seqIf c a b k` (`k` once)
 * `let x := if c then a else b; k`                 → substitute the `ite`; split at the
                                                       primitive that consumes it (`apply_ite`)
-* `have __do_jp := fun y => rest; body`            → reify `rest` once, then substitute it
-                                                      for every `__do_jp y` leaf of `body`
+* `have __do_jp := fun y => rest; if c then … else …` → `seqIf` with `rest` as the shared
+                                                      continuation; `__do_jp y` is `ret` of `y`
 * `ite c a b`, `pure v`, tail primitives          → `ite`, `ret`, `opTail`/`stmtTail`/`revertTail`
 -/
 
@@ -138,16 +139,25 @@ structure ContractInfo where
   errCtors : Array Name
 
 /-- A join point in scope: `have jp := fun (y : T) => rest`. `body` is `rest` reified in
-the environment at the definition point (plus `y` if `hasArg`). -/
+the environment at the definition point (plus `y` if `hasArg`). `argTy` is the type of
+`y` (`.unit` when the join takes no argument). -/
 structure JoinPoint (t : RetTy) where
   fvar : FVarId
   hasArg : Bool
+  argTy : RetTy
   depth : Nat
   body : Core t
 
 structure Env (t : RetTy) where
   vars : List FVarId := []
   jp : Option (JoinPoint t) := none
+  /-- When set, a call to this fvar is the tail of a `seqIf` branch (`ret` of the
+  join argument) rather than a substitution of `jp.body`. -/
+  tailFvar : Option FVarId := none
+
+/-- Reify at another return type, keeping locals and the seqIf tail marker. -/
+def Env.cast (env : Env t) : Env u :=
+  { vars := env.vars, tailFvar := env.tailFvar }
 
 /-! ## Contract information from the user's types -/
 
@@ -1224,6 +1234,10 @@ def isUnitTy (ty : Expr) : MetaM Bool := do
   let ty ← whnfR ty
   return ty.isConstOf ``Unit || ty.isConstOf ``PUnit
 
+/-- Lean `if`/`else` (`ite`) or dependent `dite`. -/
+def isIteExpr (e : Expr) : Bool :=
+  e.isAppOfArity ``ite 5 || e.isAppOfArity ``dite 5
+
 /-- Wrap `op` as a tail `Core t`. `none` when `t` is not a word-like return. -/
 def opTailCore (t : RetTy) (op : Op) : Option (Core t) :=
   match t with
@@ -1384,11 +1398,13 @@ partial def reify (ci : ContractInfo) (t : RetTy) (env : Env t) (e : Expr)
     if v.isLambda then
       -- Join point: `have jp := fun (y : T) => rest; body`.
       let hasArg := !(← isUnitTy v.bindingDomain!)
+      let argTy ← if hasArg then retTyOf v.bindingDomain! else pure .unit
       let body ← lambdaBoundedTelescope v 1 fun ys rest => do
         let vars := if hasArg then ys[0]!.fvarId! :: env.vars else env.vars
         reify ci t { env with vars } rest inline?
       withLetDecl n ty v fun jpVar => do
-        let jp : JoinPoint t := { fvar := jpVar.fvarId!, hasArg, depth := env.vars.length, body }
+        let jp : JoinPoint t :=
+          { fvar := jpVar.fvarId!, hasArg, argTy, depth := env.vars.length, body }
         reify ci t { env with jp := some jp } (b.instantiate1 jpVar) inline?
     else if v.isAppOfArity ``ite 5 then
       -- `let x := if c then a else b; k` is substitution of the `ite` (not a Core
@@ -1404,6 +1420,17 @@ partial def reify (ci : ContractInfo) (t : RetTy) (env : Env t) (e : Expr)
     let args := e.getAppArgs
     match f with
     | .fvar id =>
+      if env.tailFvar == some id then
+        -- Tail of a `seqIf` branch: the join argument is the branch result.
+        match t with
+        | .unit => return .ret (← retExprOf env t (mkConst ``Unit.unit))
+        | .pair _ _ =>
+          throwError "reify: pair-valued join point `{e}` is not a seqIf tail"
+        | .word | .addr | .flag =>
+          unless args.size == 1 do
+            throwError "reify: malformed seqIf join-point call `{e}`"
+          return .ret (← retExprOf env t args[0]!)
+      else
       match env.jp with
       | some jp =>
         unless jp.fvar == id do throwError "reify: unexpected local function `{e}`"
@@ -1434,17 +1461,29 @@ partial def reify (ci : ContractInfo) (t : RetTy) (env : Env t) (e : Expr)
           if let some val := prodPure? then
             -- `pure (e₁, e₂, …) >>= k` is substitution; the tuple is never an atom.
             reify ci t env (← reduceTupleCont k val) inline?
-          else if x.isAppOfArity ``ite 5 then
-            -- `bind (if c then a else b) k` → Core.ite (`Tx.bind_ite`).
-            -- This duplicates `k` into both branches. A shared-continuation
-            -- form would need a new `Core` constructor (changes `Core.denote`
-            -- and `Lsc/Compiler/**`); see the 14c stop note.
-            let c ← condOf env (x.getArg! 1)
-            let mkBind (x' : Expr) :=
-              mkAppN f #[args[0]!, args[1]!, args[2]!, args[3]!, x', k]
-            let th ← reify ci t env (mkBind (x.getArg! 3)) inline?
-            let el ← reify ci t env (mkBind (x.getArg! 4)) inline?
-            return .ite c th el
+          else if isIteExpr x then
+            -- `bind (if c then a else b) k` → `seqIf` (`k` once). Pair-valued
+            -- `if` still duplicates `k` through `Core.ite` (`Tx.bind_ite`).
+            let tBr ← retTyOf args[1]!
+            match tBr with
+            | .pair _ _ =>
+              let c ← condOf env (x.getArg! 1)
+              let mkBind (x' : Expr) :=
+                mkAppN f #[args[0]!, args[1]!, args[2]!, args[3]!, x', k]
+              let th ← reify ci t env (mkBind (x.getArg! 3)) inline?
+              let el ← reify ci t env (mkBind (x.getArg! 4)) inline?
+              return .ite c th el
+            | .unit | .word | .addr | .flag =>
+              let c ← condOf env (x.getArg! 1)
+              let envBr : Env tBr := env.cast
+              let th ← reify ci tBr envBr (x.getArg! 3) inline?
+              let el ← reify ci tBr envBr (x.getArg! 4) inline?
+              lambdaBoundedTelescope k 1 fun ys body => do
+                let isU ← isUnitTy args[1]!
+                let kEnv :=
+                  if isU then env else { env with vars := ys[0]!.fvarId! :: env.vars }
+                let kc ← reify ci t kEnv body inline?
+                return .seqIf (t := tBr) c th el kc
           else if let some (i, c, th, el) ← firstIteArg? x then
             -- `op (if c then a else b)` → split at this primitive, not at `let coeff := if`.
             let c ← condOf env c
@@ -1470,11 +1509,26 @@ partial def reify (ci : ContractInfo) (t : RetTy) (env : Env t) (e : Expr)
             throwInlineOr inline? x m!"reify: `{x0}` is not a contract primitive"
       | ``Pure.pure, 4 => return .ret (← retExprOf env t args[3]!)
       | ``CoeTail.coe, 4 => return .ret (← retExprOf env t args[3]!)
-      | ``ite, 5 =>
-        let c ← condOf env args[1]!
-        let a ← reify ci t env args[3]! inline?
-        let b ← reify ci t env args[4]! inline?
-        return .ite c a b
+      | ``ite, 5 | ``dite, 5 =>
+        match env.jp with
+        | some jp =>
+          match jp.argTy with
+          | .pair _ _ =>
+            let c ← condOf env args[1]!
+            let a ← reify ci t env args[3]! inline?
+            let b ← reify ci t env args[4]! inline?
+            return .ite c a b
+          | .unit | .word | .addr | .flag =>
+            let c ← condOf env args[1]!
+            let envBr : Env jp.argTy := { vars := env.vars, tailFvar := some jp.fvar }
+            let th ← reify ci jp.argTy envBr args[3]! inline?
+            let el ← reify ci jp.argTy envBr args[4]! inline?
+            return .seqIf (t := jp.argTy) c th el jp.body
+        | none =>
+          let c ← condOf env args[1]!
+          let a ← reify ci t env args[3]! inline?
+          let b ← reify ci t env args[4]! inline?
+          return .ite c a b
       | ``Lsc.Tx.revert, 6 =>
         let (i, eargs) ← ctorIndex ci.errCtors args[5]!
         return .revertTail i (← eargs.toList.mapM (atomOf env))
@@ -1868,14 +1922,19 @@ def certifyDenote (fn : Name) (ci : ContractInfo) (lhs lhsRaw rhs coreE : Expr) 
       simp (config := { maxSteps := 20000 }) only
         [Lsc.map_denote_letOp_ofWord, Lsc.map_denote_seq_ofWord,
           Lsc.map_denote_ret_ofWord, Lsc.map_denote_ite_ofWord,
-          Lsc.map_denote_letPure_ofWord, Lsc.map_denote_letOp_ofWord_pair,
+          Lsc.map_denote_seqIf_ofWord, Lsc.map_denote_letPure_ofWord,
+          Lsc.map_denote_letOp_ofWord_pair,
           Lsc.map_denote_seq_ofWord_pair, Lsc.map_denote_ret_ofWord_pair,
-          Lsc.map_denote_ite_ofWord_pair, Lsc.map_denote_letPure_ofWord_pair,
+          Lsc.map_denote_ite_ofWord_pair, Lsc.map_denote_seqIf_ofWord_pair,
+          Lsc.map_denote_letPure_ofWord_pair,
           Lsc.map_denote_letOp_natToBool,
           Lsc.map_denote_seq_natToBool, Lsc.map_denote_ret_natToBool,
-          Lsc.map_denote_ite_natToBool, Lsc.map_denote_letPure_natToBool,
+          Lsc.map_denote_ite_natToBool, Lsc.map_denote_seqIf_natToBool,
+          Lsc.map_denote_letPure_natToBool,
           Lsc.map_denote_letOp, Lsc.map_denote_seq, Lsc.map_denote_ret,
-          Lsc.map_denote_ite, Lsc.map_denote_letPure, Lsc.map_denote_opTail,
+          Lsc.map_denote_ite, Lsc.map_denote_seqIf, Lsc.map_denote_letPure,
+          Lsc.map_denote_opTail,
+          Lsc.Core.seqIfCont, Lsc.Tx.bind_ite,
           Lsc.map_denote_opTailFlag, Lsc.map_denote_opTailAddr,
           Lsc.map_denote_stmtTail, Lsc.map_denote_revertTail,
           Lsc.Tx.map_pure, Lsc.Tx.natToBool_one])
@@ -2165,6 +2224,12 @@ partial def storeAfterCallExpr (seen : Bool) (e : Expr) : MetaM Bool := do
     let b := e.appArg!
     let a := e.appFn!.appArg!
     return (← storeAfterCallExpr seen a) || (← storeAfterCallExpr seen b)
+  else if e.isAppOf ``Lsc.Core.seqIf then
+    let k := e.appArg!
+    let el := e.appFn!.appArg!
+    let th := e.appFn!.appFn!.appArg!
+    return (← storeAfterCallExpr seen th) || (← storeAfterCallExpr seen el) ||
+      (← storeAfterCallExpr seen k)
   else
     let n ← appCtor e
     throwError "lsc_contract: could not decide store-after-call (stuck at {n})"

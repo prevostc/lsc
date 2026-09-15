@@ -28,6 +28,27 @@ theorem restore_drop2 {D : Dialect} {x y : Ident} {vx vy : D.Value} {V : VEnv D}
   have : V.length + 1 + 1 - V.length = 2 := by omega
   simp [this]
 
+/-- If a cons-extension restores to itself, the tail restores to the original env. -/
+theorem restore_of_restore_cons {D : Dialect} {x : Ident} {v : D.Value}
+    {V V' : VEnv D}
+    (h : restore ((x, v) :: V) V' = (x, v) :: V) :
+    restore V V' = V := by
+  simp only [restore] at h ⊢
+  simp [List.length_cons] at h ⊢
+  have hlen : V.length + 1 ≤ V'.length := by
+    by_contra hlt
+    rw [Nat.not_le] at hlt
+    have hz : V'.length - (V.length + 1) = 0 :=
+      Nat.sub_eq_zero_of_le (Nat.le_of_lt hlt)
+    simp [hz] at h
+    have hlenV' : V'.length = V.length + 1 := by
+      simpa [List.length_cons] using congrArg List.length h
+    omega
+  have hsub : V'.length - V.length = V'.length - (V.length + 1) + 1 := by omega
+  rw [hsub, ← List.drop_drop, h]
+  simp [List.drop]
+
+
 /-- After `let v := 0 { … v := r }` the block's `ok` temp is dropped. -/
 theorem restore_call_assign {D : Dialect} {ok name : Ident}
     {f v0 v : D.Value} {V : VEnv D} :

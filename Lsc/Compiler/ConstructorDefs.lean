@@ -8,9 +8,10 @@ namespace Lsc.Compiler
 
 open Lsc
 
-/-- Cores without `ite` (Token constructor). Avoids a `.normal` switch lemma. -/
+/-- Cores without `ite` / `seqIf` (Token constructor). Avoids a `.normal` switch lemma. -/
 def NoIte : {t : RetTy} → Core t → Prop
   | _, .ite .. => False
+  | _, .seqIf .. => False
   | _, .letOp _ k => NoIte k
   | _, .seq _ k => NoIte k
   | _, .letPure _ _ k => NoIte k

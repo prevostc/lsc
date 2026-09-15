@@ -17,9 +17,6 @@ open YulSemantics
 open YulSemantics.EVM
 open Lsc
 
-theorem emitReturnUnit_false (e : Emit) : emitReturnUnit e false = e := rfl
-
-
 theorem core_sim_ctor {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx}
     (hΓ : Γ.st.Lawful c.fields) (hκ : KeccakSep c κ)
@@ -184,7 +181,7 @@ theorem core_sim_ctor {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε
       identsNodup_mono tag (by simp [coreExtraDepth]; try omega) hn
     have hnK : identsNodup tag ((env.length + 1) + coreExtraDepth k) = true := by
       simpa [coreExtraDepth, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using hn
-    have he := eval_atom tag funs (st := st) hinv.venv hn0 a
+    have he := eval_atom_ok tag funs (st := st) hinv.venv a
     have hv := atom_eval_lt hinv.wf hwfA
     have hlet :
         ExecStmt evm funs V st
@@ -193,7 +190,7 @@ theorem core_sim_ctor {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε
       Step.letVal he rfl
     have hinv1 : Inv tag Γ c κ ctx w (a.eval env :: env)
         ((identV tag env.length, BitVec.ofNat 256 (a.eval env)) :: V) st :=
-      ⟨by rw [hinv.venv, toVEnv_cons], envWF_cons hv hinv.wf, hinv.rel, hinv.ctxr⟩
+      ⟨localsOK_cons (tag := tag) _ hn1 hinv.venv, envWF_cons hv hinv.wf, hinv.rel, hinv.ctxr⟩
     have ih' := ih hk hNo ht funs hkWF (by simpa using hnK) hinv1 h0
     cases hK : Tx.run (Core.denote Γ k (a.eval env :: env)) ctx w with
     | ok q =>
@@ -214,6 +211,9 @@ theorem core_sim_ctor {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε
       simp only [emitLet, Emit.stmts_push, Emit.stmts_nil, List.nil_append]
       exact execStmts_append (Step.seqCons hlet Step.seqNil) hexeck
   | ite _ _ _ =>
+    intro hM1 hNo ht
+    exact (show False from hNo).elim
+  | seqIf _ _ _ _ =>
     intro hM1 hNo ht
     exact (show False from hNo).elim
   | revertTail err args =>
@@ -283,13 +283,15 @@ theorem constructor_correct {S X E ε : Type} (c : ContractDef)
   have henv : EnvWF args.reverse := decodeCtorArgs_wf f.params.length st0.env.code
   obtain ⟨stP, hMO, hpar⟩ := params_sim_ctor (tag := f.name) (funs := ([[]] : FunEnv evm)) st0
     f.params.length hle hcode hptr
-  have hinv : Inv f.name Γ c κ ctx w args.reverse (toVEnv f.name args.reverse) stP :=
-    ⟨rfl, henv, R_memOnly hR hMO, ctxRel_memOnly hctx hMO⟩
-  obtain ⟨e0, h0, hst⟩ := emitCore_prefix (tag := f.name) hem
   have hn : identsNodup f.name (f.params.length + coreExtraDepth f.core) = true := by
     simpa [maxDepth] using hnod
   have hn' : identsNodup f.name (args.reverse.length + coreExtraDepth f.core) = true := by
     simpa [args, decodeCtorArgs_length, List.length_reverse] using hn
+  have hn0 : identsNodup f.name args.reverse.length = true :=
+    identsNodup_mono f.name (Nat.le_add_right _ _) hn'
+  have hinv : Inv f.name Γ c κ ctx w args.reverse (toVEnv f.name args.reverse) stP :=
+    Inv.of_eq (tag := f.name) rfl hn0 henv (R_memOnly hR hMO) (ctxRel_memOnly hctx hMO)
+  obtain ⟨e0, h0, hst⟩ := emitCore_prefix (tag := f.name) hem
   have h0' : emitCore f.name c {} args.reverse.length false f.core = some e0 := by
     simpa [args, decodeCtorArgs_length, List.length_reverse] using h0
   have hsim := core_sim_ctor (tag := f.name) (c := c) (Γ := Γ) (κ := κ) (ctx := ctx) hΓ hκ hlen

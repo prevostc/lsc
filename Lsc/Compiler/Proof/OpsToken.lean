@@ -40,6 +40,7 @@ theorem toNat_abiPtr64 : (BitVec.ofNat 256 (abiPtr + 64)).toNat = abiPtr + 64 :=
 theorem op_sim_nullary {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx} {w : World S X E} {env V st}
     (funs : FunEnv evm) (hinv : Inv tag Γ c κ ctx w env V st)
+    (hnod : identsNodup tag (env.length + 1) = true)
     (op : YOp) (v : Nat) (hv : v < wordBound)
     (he : EvalExpr evm funs V st (bop op []) (.vals [BitVec.ofNat 256 v] st)) :
     ∃ st',
@@ -48,14 +49,15 @@ theorem op_sim_nullary {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E �
         ((identV tag env.length, BitVec.ofNat 256 v) :: V) st' .normal ∧
       Inv tag Γ c κ ctx w (v :: env)
         ((identV tag env.length, BitVec.ofNat 256 v) :: V) st' := by
-  rcases hinv with ⟨hV, henv, hR, hctx⟩
-  refine ⟨st, ?_, ⟨by rw [hV, toVEnv_cons], envWF_cons hv henv, hR, hctx⟩⟩
+  rcases hinv with ⟨hok, henv, hR, hctx⟩
+  refine ⟨st, ?_, ⟨localsOK_cons (tag := tag) _ hnod hok, envWF_cons hv henv, hR, hctx⟩⟩
   simp only [emitLet_stmts, Emit.stmts_nil, List.nil_append]
   exact Step.seqCons (Step.letVal he rfl) Step.seqNil
 
 theorem op_sim_sender {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx} {w : World S X E} {env V st}
-    (funs : FunEnv evm) (hinv : Inv tag Γ c κ ctx w env V st) :
+    (funs : FunEnv evm) (hinv : Inv tag Γ c κ ctx w env V st)
+    (hnod : identsNodup tag (env.length + 1) = true) :
     let v := ctx.sender
     ∃ st',
       ExecStmts evm funs V st
@@ -64,13 +66,14 @@ theorem op_sim_sender {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε
       Inv tag Γ c κ ctx w (v :: env)
         ((identV tag env.length, BitVec.ofNat 256 v) :: V) st' := by
   rcases hinv.ctxr with ⟨hc, _, _, _, _, _, _, _, ⟨hs, _⟩⟩
-  refine op_sim_nullary tag funs hinv Op.caller ctx.sender hs ?_
+  refine op_sim_nullary tag funs hinv hnod Op.caller ctx.sender hs ?_
   refine Step.builtinOk Step.argsNil ?_
   simp only [step_caller, hc]
 
 theorem op_sim_value {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx} {w : World S X E} {env V st}
-    (funs : FunEnv evm) (hinv : Inv tag Γ c κ ctx w env V st) :
+    (funs : FunEnv evm) (hinv : Inv tag Γ c κ ctx w env V st)
+    (hnod : identsNodup tag (env.length + 1) = true) :
     let v := ctx.value
     ∃ st',
       ExecStmts evm funs V st
@@ -79,13 +82,14 @@ theorem op_sim_value {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
       Inv tag Γ c κ ctx w (v :: env)
         ((identV tag env.length, BitVec.ofNat 256 v) :: V) st' := by
   rcases hinv.ctxr with ⟨_, hv, _, _, _, _, _, _, ⟨_, hval, _⟩⟩
-  refine op_sim_nullary tag funs hinv Op.callvalue ctx.value hval ?_
+  refine op_sim_nullary tag funs hinv hnod Op.callvalue ctx.value hval ?_
   refine Step.builtinOk Step.argsNil ?_
   simp only [step_callvalue, hv]
 
 theorem op_sim_timestamp {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx} {w : World S X E} {env V st}
-    (funs : FunEnv evm) (hinv : Inv tag Γ c κ ctx w env V st) :
+    (funs : FunEnv evm) (hinv : Inv tag Γ c κ ctx w env V st)
+    (hnod : identsNodup tag (env.length + 1) = true) :
     let v := ctx.timestamp
     ∃ st',
       ExecStmts evm funs V st
@@ -94,13 +98,14 @@ theorem op_sim_timestamp {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E
       Inv tag Γ c κ ctx w (v :: env)
         ((identV tag env.length, BitVec.ofNat 256 v) :: V) st' := by
   rcases hinv.ctxr with ⟨_, _, ht, _, _, _, _, _, ⟨_, _, hts, _⟩⟩
-  refine op_sim_nullary tag funs hinv YulSemantics.EVM.Op.timestamp ctx.timestamp hts ?_
+  refine op_sim_nullary tag funs hinv hnod YulSemantics.EVM.Op.timestamp ctx.timestamp hts ?_
   refine Step.builtinOk Step.argsNil ?_
   simp only [step_timestamp, ht]
 
 theorem op_sim_blockNumber {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx} {w : World S X E} {env V st}
-    (funs : FunEnv evm) (hinv : Inv tag Γ c κ ctx w env V st) :
+    (funs : FunEnv evm) (hinv : Inv tag Γ c κ ctx w env V st)
+    (hnod : identsNodup tag (env.length + 1) = true) :
     let v := ctx.blockNumber
     ∃ st',
       ExecStmts evm funs V st
@@ -108,14 +113,15 @@ theorem op_sim_blockNumber {S X E ε} {c : ContractDef} {Γ : ContractSchema S X
         ((identV tag env.length, BitVec.ofNat 256 v) :: V) st' .normal ∧
       Inv tag Γ c κ ctx w (v :: env)
         ((identV tag env.length, BitVec.ofNat 256 v) :: V) st' := by
-  rcases hinv.ctxr with ⟨_, _, _, hn, _, _, _, _, ⟨_, _, _, hbn, _⟩⟩
-  refine op_sim_nullary tag funs hinv Op.number ctx.blockNumber hbn ?_
+  rcases hinv.ctxr with ⟨_, _, _, hnum, _, _, _, _, ⟨_, _, _, hbn, _⟩⟩
+  refine op_sim_nullary tag funs hinv hnod Op.number ctx.blockNumber hbn ?_
   refine Step.builtinOk Step.argsNil ?_
-  simp only [step_number, hn]
+  simp only [step_number, hnum]
 
 theorem op_sim_selfAddress {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx} {w : World S X E} {env V st}
-    (funs : FunEnv evm) (hinv : Inv tag Γ c κ ctx w env V st) :
+    (funs : FunEnv evm) (hinv : Inv tag Γ c κ ctx w env V st)
+    (hnod : identsNodup tag (env.length + 1) = true) :
     let v := ctx.self
     ∃ st',
       ExecStmts evm funs V st
@@ -124,7 +130,7 @@ theorem op_sim_selfAddress {S X E ε} {c : ContractDef} {Γ : ContractSchema S X
       Inv tag Γ c κ ctx w (v :: env)
         ((identV tag env.length, BitVec.ofNat 256 v) :: V) st' := by
   rcases hinv.ctxr with ⟨_, _, _, _, ha, _, _, _, ⟨_, _, _, _, hs⟩⟩
-  refine op_sim_nullary tag funs hinv Op.address ctx.self hs ?_
+  refine op_sim_nullary tag funs hinv hnod Op.address ctx.self hs ?_
   refine Step.builtinOk Step.argsNil ?_
   simp only [step_address, ha]
 
@@ -225,7 +231,7 @@ theorem stmt_sim_emit3 {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E �
       ExecStmts evm funs V st (emitStmt tag c {} env.length (.emit ev [a, b, c'])).stmts
         V st' .normal ∧
       Inv tag Γ c κ ctx w' env V st' := by
-  rcases hinv with ⟨hV, henv, hR, hctx⟩
+  rcases hinv with ⟨hok, henv, hR, hctx⟩
   have hwf' : eventOK c ev 3 = true ∧
       atomWF a = true ∧ atomWF b = true ∧ atomWF c' = true := by
     simpa [stmtWF, Bool.and_eq_true, List.all_cons, List.all_nil] using hwf
@@ -235,15 +241,15 @@ theorem stmt_sim_emit3 {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E �
   have hb := atom_eval_lt henv hwf'.2.2.1
   have hc := atom_eval_lt henv hwf'.2.2.2
   have hstatic := ctxRel_static hctx
-  have hea := eval_atom tag funs (st := st) hV hn a
+  have hea := eval_atom_ok tag funs (st := st) hok a
   let st0 :=
     { touchMemory st abiPtr 32 with
       memory := storeWord st.memory abiPtr (BitVec.ofNat 256 (a.eval env)) }
-  have heb := eval_atom tag funs (st := st0) hV hn b
+  have heb := eval_atom_ok tag funs (st := st0) hok b
   let st1 :=
     { touchMemory st0 (abiPtr + 32) 32 with
       memory := storeWord st0.memory (abiPtr + 32) (BitVec.ofNat 256 (b.eval env)) }
-  have hec := eval_atom tag funs (st := st1) hV hn c'
+  have hec := eval_atom_ok tag funs (st := st1) hok c'
   let st2 :=
     { touchMemory st1 (abiPtr + 64) 32 with
       memory := storeWord st1.memory (abiPtr + 64) (BitVec.ofNat 256 (c'.eval env)) }
@@ -304,7 +310,7 @@ theorem stmt_sim_emit3 {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E �
         rw [hget] at hl'
         exact hl'
       · simpa [stL, appendLog, touchMemory, st2, st1, st0] using hk
-    exact ⟨hV, henv, hR',
+    exact ⟨hok, henv, hR',
       ctxRel_appendLog (st := st2)
         (ctxRel_memOnly hctx (by simp [MemOnly, st2, st1, st0, touchMemory]))
         [BitVec.ofNat 256 ed.topic0]
@@ -388,7 +394,7 @@ theorem stmt_sim_emit4 {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E �
       ExecStmts evm funs V st (emitStmt tag c {} env.length (.emit ev [a, b, c', d])).stmts
         V st' .normal ∧
       Inv tag Γ c κ ctx w' env V st' := by
-  rcases hinv with ⟨hV, henv, hR, hctx⟩
+  rcases hinv with ⟨hok, henv, hR, hctx⟩
   have hwf' : eventOK c ev 4 = true ∧
       atomWF a = true ∧ atomWF b = true ∧ atomWF c' = true ∧ atomWF d = true := by
     simpa [stmtWF, Bool.and_eq_true, List.all_cons, List.all_nil] using hwf
@@ -399,19 +405,19 @@ theorem stmt_sim_emit4 {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E �
   have hc := atom_eval_lt henv hwf'.2.2.2.1
   have hd := atom_eval_lt henv hwf'.2.2.2.2
   have hstatic := ctxRel_static hctx
-  have hea := eval_atom tag funs (st := st) hV hn a
+  have hea := eval_atom_ok tag funs (st := st) hok a
   let st0 :=
     { touchMemory st abiPtr 32 with
       memory := storeWord st.memory abiPtr (BitVec.ofNat 256 (a.eval env)) }
-  have heb := eval_atom tag funs (st := st0) hV hn b
+  have heb := eval_atom_ok tag funs (st := st0) hok b
   let st1 :=
     { touchMemory st0 (abiPtr + 32) 32 with
       memory := storeWord st0.memory (abiPtr + 32) (BitVec.ofNat 256 (b.eval env)) }
-  have hec := eval_atom tag funs (st := st1) hV hn c'
+  have hec := eval_atom_ok tag funs (st := st1) hok c'
   let st2 :=
     { touchMemory st1 (abiPtr + 64) 32 with
       memory := storeWord st1.memory (abiPtr + 64) (BitVec.ofNat 256 (c'.eval env)) }
-  have hedA := eval_atom tag funs (st := st2) hV hn d
+  have hedA := eval_atom_ok tag funs (st := st2) hok d
   let st3 :=
     { touchMemory st2 (abiPtr + 96) 32 with
       memory := storeWord st2.memory (abiPtr + 96) (BitVec.ofNat 256 (d.eval env)) }
@@ -479,7 +485,7 @@ theorem stmt_sim_emit4 {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E �
         rw [hget] at hl'
         exact hl'
       · simpa [stL, appendLog, touchMemory, st3, st2, st1, st0] using hk
-    exact ⟨hV, henv, hR',
+    exact ⟨hok, henv, hR',
       ctxRel_appendLog (st := st3)
         (ctxRel_memOnly hctx (by simp [MemOnly, st3, st2, st1, st0, touchMemory]))
         [BitVec.ofNat 256 ed.topic0]
@@ -505,7 +511,7 @@ theorem stmt_sim_revert {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E 
           ExecStmts evm funs V st (emitStmt tag c {} env.length (.revert err [])).stmts
             V' st' .halt ∧
           st'.halted = some (.revert, bytes) ∧ haltError c Γ e bytes := by
-  rcases hinv with ⟨hV, henv, hR, hctx⟩
+  rcases hinv with ⟨hok, henv, hR, hctx⟩
   have ⟨ed, hed, _⟩ := (errorOK_iff c err 0).mp (by simpa [stmtWF, Bool.and_eq_true] using hwf)
   simp [Stmt.denote, Tx.run_revert]
   obtain ⟨st', hp, hh⟩ := customError_nil_sim funs V st c err hed

@@ -34,8 +34,30 @@ theorem exec_switch_halt_open {calls : ExternalCalls}
       [.switch cnd [(YulSemantics.Literal.number 0, eB)] (some eA)]
       (restore V V') st' .halt := by
   refine Step.seqStop ?_ halt_ne_normal
-  refine Step.switchExec he ?_
-  exact Step.block (by rwa [hsel, hhoist])
+  exact Step.switchExec he (Step.block (by rwa [hsel, hhoist]))
+
+/-- `switch` as a singleton list, any outcome, on the open dialect. -/
+theorem exec_switch_open {calls : ExternalCalls}
+    {funs : FunEnv (yulD calls)} {V : VEnv (yulD calls)} {st : EvmState}
+    {V' : VEnv (yulD calls)} {st' : EvmState} {o : Outcome}
+    {cnd : YExpr} {eA eB body : YBlock} {cv : U256}
+    (he : EvalExpr (yulD calls) funs V st cnd (.vals [cv] st))
+    (hsel : selectSwitch (yulD calls) cv
+      [(YulSemantics.Literal.number 0, eB)] (some eA) = body)
+    (hhoist : hoist (yulD calls) body = [])
+    (hexec : ExecStmts (yulD calls) ([] :: funs) V st body V' st' o) :
+    ExecStmts (yulD calls) funs V st
+      [.switch cnd [(YulSemantics.Literal.number 0, eB)] (some eA)]
+      (restore V V') st' o := by
+  cases o with
+  | normal =>
+    exact Step.seqCons (Step.switchExec he (Step.block (by rwa [hsel, hhoist])))
+      Step.seqNil
+  | halt =>
+    exact exec_switch_halt_open he hsel hhoist hexec
+  | «leave» | «break» | «continue» =>
+    refine Step.seqStop ?_ (by simp)
+    exact Step.switchExec he (Step.block (by rwa [hsel, hhoist]))
 
 theorem exec_head_halt_open {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
     {V : VEnv (yulD calls)} {st : EvmState} {s : YulSemantics.Stmt YOp}
@@ -72,11 +94,10 @@ theorem return_var0_progress {S X E ε} {c : ContractDef} {Γ : ContractSchema S
     {calls : ExternalCalls} {n : Nat}
     (hv : v < wordBound) (hR : R c Γ κ w st)
     {env : List Nat} {V : VEnv evm}
-    (hV : V = toVEnv tag (v :: env))
-    (hn : identsNodup tag (v :: env).length = true) :
+    (hok : localsOK tag (v :: env) V) :
     ∃ st', ExecStmts (yulD calls) (List.replicate n []) V st
       (emitReturnWords {} [atomE tag (env.length + 1) (.var 0)]).stmts V st' .halt := by
-  have he := eval_atom tag (funs := List.replicate n []) (st := st) hV hn (.var 0)
+  have he := eval_atom_ok tag (funs := List.replicate n []) (st := st) hok (.var 0)
   have : (v :: env).length = env.length + 1 := rfl
   simp only [this] at he
   have ⟨st', hexec, _, _⟩ := return_word_sim (c := c) (Γ := Γ) (κ := κ) (w := w)
@@ -89,31 +110,28 @@ theorem finish_opTail_word {S E ε}
     {V : VEnv evm} {st : EvmState} {n : Nat} {e1 : Emit}
     {V1 : VEnv evm} {st1 : EvmState} {out : Outcome}
     {calls : ExternalCalls} (clearLock : Bool)
-    (hV : V = toVEnv tag env)
-    (hexec : ExecStmts (yulD calls) (List.replicate n []) (toVEnv tag env) st
+    (hexec : ExecStmts (yulD calls) (List.replicate n []) V st
       e1.stmts V1 st1 out)
-    (ho : out = .halt ∨ (out = .normal ∧ ∃ v, V1 = toVEnv tag (v :: env) ∧
-      Inv tag Γ c κ ctx w (v :: env) V1 st1))
-    (hn1 : identsNodup tag (env.length + 1) = true) :
+    (ho : out = .halt ∨ (out = .normal ∧ ∃ v,
+      Inv tag Γ c κ ctx w (v :: env) V1 st1)) :
     ∃ V' st', ExecStmts (yulD calls) (List.replicate n []) V st
       (e1.stmts ++ ((if clearLock then [lockClearStmt] else []) ++
         (emitReturnWords {} [atomE tag (env.length + 1) (.var 0)]).stmts))
       V' st' .halt := by
-  rcases ho with ho | ⟨ho, v, hVeq, hinv1⟩
+  rcases ho with ho | ⟨ho, v, hinv1⟩
   · subst ho
-    exact ⟨V1, st1, execStmts_append_halt_open (by simpa [hV] using hexec)⟩
+    exact ⟨V1, st1, execStmts_append_halt_open hexec⟩
   · subst ho
-    have hn1' : identsNodup tag (v :: env).length = true := by simpa using hn1
     have hv : v < wordBound := hinv1.wf v (by simp)
     have hstatic := ctxRel_static hinv1.ctxr
     have hMO := memOnly_stAfterLockClear clearLock st1
     have ⟨stR, hret⟩ :=
       return_var0_progress tag (κ := κ) (w := w)
         (st := stAfterLockClear clearLock st1) (calls := calls) (n := n)
-        hv (R_memOnly hinv1.rel hMO) hVeq hn1'
+        hv (R_memOnly hinv1.rel hMO) hinv1.venv
     have hmid := execStmts_maybe_lockClear_nils (calls := calls) (n := n)
       clearLock hstatic hret
-    exact ⟨V1, stR, execStmts_append_open (by simpa [hV] using hexec) hmid⟩
+    exact ⟨V1, stR, execStmts_append_open hexec hmid⟩
 
 theorem finish_stmtTail {S E ε}
     {c : ContractDef} {Γ : ContractSchema S ExtState E ε}
@@ -121,17 +139,16 @@ theorem finish_stmtTail {S E ε}
     {V : VEnv evm} {st : EvmState} {n : Nat}
     {V1 : VEnv evm} {st1 : EvmState} {out : Outcome}
     {calls : ExternalCalls} {ss : YBlock} (clearLock : Bool)
-    (hV : V = toVEnv tag env)
-    (hexec : ExecStmts (yulD calls) (List.replicate n []) (toVEnv tag env) st
+    (hexec : ExecStmts (yulD calls) (List.replicate n []) V st
       ss V1 st1 out)
-    (ho : out = .halt ∨ (out = .normal ∧ V1 = toVEnv tag env ∧
+    (ho : out = .halt ∨ (out = .normal ∧
       Inv tag Γ c κ ctx w env V1 st1)) :
     ∃ V' st', ExecStmts (yulD calls) (List.replicate n []) V st
       (ss ++ ((if clearLock then [lockClearStmt] else []) ++ [stopStmt]))
       V' st' .halt := by
-  rcases ho with ho | ⟨ho, hVeq, hinv1⟩
+  rcases ho with ho | ⟨ho, hinv1⟩
   · subst ho
-    exact ⟨V1, st1, execStmts_append_halt_open (by simpa [hV] using hexec)⟩
+    exact ⟨V1, st1, execStmts_append_halt_open hexec⟩
   · subst ho
     have hstatic := ctxRel_static hinv1.ctxr
     have hstop :=
@@ -139,7 +156,7 @@ theorem finish_stmtTail {S E ε}
         (stop_sim (List.replicate n []) V1 (stAfterLockClear clearLock st1))
     have hmid := execStmts_maybe_lockClear_nils (calls := calls) (n := n)
       clearLock hstatic hstop
-    exact ⟨V1, _, execStmts_append_open (by simpa [hV] using hexec) hmid⟩
+    exact ⟨V1, _, execStmts_append_open hexec hmid⟩
 
 /-! ## `core_progress` -/
 
@@ -198,13 +215,11 @@ theorem core_progress {S E ε}
           identsNodup_mono tag (by simp [coreExtraDepth]) hn
         have hn1 : identsNodup tag (env.length + 1) = true :=
           identsNodup_mono tag (by simp [coreExtraDepth]) hn
-        have hinvT : Inv tag Γ c κ ctx w env (toVEnv tag env) st := by
-          rwa [hinv.venv] at hinv
         have hcallP :=
-          op_call_progress tag o (n := n) (target := target) (sel := sel) (args := args) (ret := ret) hinvT hNR hwfCall hsel hn0 hn1
+          op_call_progress tag o (n := n) (target := target) (sel := sel) (args := args) (ret := ret) hinv hNR hwfCall hsel hn0 hn1
         obtain ⟨V1, st1, out, hexec, ho⟩ := hcallP
         rw [hE] at hexec
-        exact finish_opTail_word tag clearLock hinv.venv hexec ho hn1
+        exact finish_opTail_word tag clearLock hexec ho
     | inr hrest =>
       cases hrest with
       | inl hview =>
@@ -222,13 +237,11 @@ theorem core_progress {S E ε}
             identsNodup_mono tag (by simp [coreExtraDepth]) hn
           have hn1 : identsNodup tag (env.length + 1) = true :=
             identsNodup_mono tag (by simp [coreExtraDepth]) hn
-          have hinvT : Inv tag Γ c κ ctx w env (toVEnv tag env) st := by
-            rwa [hinv.venv] at hinv
           have hcallP :=
-            op_view_progress tag o (n := n) (target := target) (sel := sel) (args := args) (ret := ret) hinvT hwfCall hsel hn0 hn1
+            op_view_progress tag o (n := n) (target := target) (sel := sel) (args := args) (ret := ret) hinv hwfCall hsel hn0 hn1
           obtain ⟨V1, st1, out, hexec, ho⟩ := hcallP
           rw [hE] at hexec
-          exact finish_opTail_word tag clearLock hinv.venv hexec ho hn1
+          exact finish_opTail_word tag clearLock hexec ho
       | inr hM1 =>
         exact core_progress_callFree tag hhalt hΓ hκ hlen (calls := toCalls o)
           (.opTail op) (by simpa [CallFree, M1Frag] using hM1) hwf hn hinv hem
@@ -250,13 +263,11 @@ theorem core_progress {S E ε}
           identsNodup_mono tag (by simp [coreExtraDepth]) hn
         have hn1 : identsNodup tag (env.length + 1) = true :=
           identsNodup_mono tag (by simp [coreExtraDepth]) hn
-        have hinvT : Inv tag Γ c κ ctx w env (toVEnv tag env) st := by
-          rwa [hinv.venv] at hinv
         have hcallP :=
-          op_call_progress tag o (n := n) (target := target) (sel := sel) (args := args) (ret := ret) hinvT hNR hwfCall hsel hn0 hn1
+          op_call_progress tag o (n := n) (target := target) (sel := sel) (args := args) (ret := ret) hinv hNR hwfCall hsel hn0 hn1
         obtain ⟨V1, st1, out, hexec, ho⟩ := hcallP
         rw [hE] at hexec
-        exact finish_opTail_word tag clearLock hinv.venv hexec ho hn1
+        exact finish_opTail_word tag clearLock hexec ho
     | inr hrest =>
       cases hrest with
       | inl hview =>
@@ -274,13 +285,11 @@ theorem core_progress {S E ε}
             identsNodup_mono tag (by simp [coreExtraDepth]) hn
           have hn1 : identsNodup tag (env.length + 1) = true :=
             identsNodup_mono tag (by simp [coreExtraDepth]) hn
-          have hinvT : Inv tag Γ c κ ctx w env (toVEnv tag env) st := by
-            rwa [hinv.venv] at hinv
           have hcallP :=
-            op_view_progress tag o (n := n) (target := target) (sel := sel) (args := args) (ret := ret) hinvT hwfCall hsel hn0 hn1
+            op_view_progress tag o (n := n) (target := target) (sel := sel) (args := args) (ret := ret) hinv hwfCall hsel hn0 hn1
           obtain ⟨V1, st1, out, hexec, ho⟩ := hcallP
           rw [hE] at hexec
-          exact finish_opTail_word tag clearLock hinv.venv hexec ho hn1
+          exact finish_opTail_word tag clearLock hexec ho
       | inr hM1 =>
         exact core_progress_callFree tag hhalt hΓ hκ hlen (calls := toCalls o)
           (.opTailAddr op) (by simpa [CallFree, M1Frag] using hM1) hwf hn hinv hem
@@ -302,13 +311,11 @@ theorem core_progress {S E ε}
           identsNodup_mono tag (by simp [coreExtraDepth]) hn
         have hn1 : identsNodup tag (env.length + 1) = true :=
           identsNodup_mono tag (by simp [coreExtraDepth]) hn
-        have hinvT : Inv tag Γ c κ ctx w env (toVEnv tag env) st := by
-          rwa [hinv.venv] at hinv
         have hcallP :=
-          op_call_progress tag o (n := n) (target := target) (sel := sel) (args := args) (ret := ret) hinvT hNR hwfCall hsel hn0 hn1
+          op_call_progress tag o (n := n) (target := target) (sel := sel) (args := args) (ret := ret) hinv hNR hwfCall hsel hn0 hn1
         obtain ⟨V1, st1, out, hexec, ho⟩ := hcallP
         rw [hE] at hexec
-        exact finish_opTail_word tag clearLock hinv.venv hexec ho hn1
+        exact finish_opTail_word tag clearLock hexec ho
     | inr hrest =>
       cases hrest with
       | inl hview =>
@@ -326,13 +333,11 @@ theorem core_progress {S E ε}
             identsNodup_mono tag (by simp [coreExtraDepth]) hn
           have hn1 : identsNodup tag (env.length + 1) = true :=
             identsNodup_mono tag (by simp [coreExtraDepth]) hn
-          have hinvT : Inv tag Γ c κ ctx w env (toVEnv tag env) st := by
-            rwa [hinv.venv] at hinv
           have hcallP :=
-            op_view_progress tag o (n := n) (target := target) (sel := sel) (args := args) (ret := ret) hinvT hwfCall hsel hn0 hn1
+            op_view_progress tag o (n := n) (target := target) (sel := sel) (args := args) (ret := ret) hinv hwfCall hsel hn0 hn1
           obtain ⟨V1, st1, out, hexec, ho⟩ := hcallP
           rw [hE] at hexec
-          exact finish_opTail_word tag clearLock hinv.venv hexec ho hn1
+          exact finish_opTail_word tag clearLock hexec ho
       | inr hM1 =>
         exact core_progress_callFree tag hhalt hΓ hκ hlen (calls := toCalls o)
           (.opTailFlag op) (by simpa [CallFree, M1Frag] using hM1) hwf hn hinv hem
@@ -347,12 +352,10 @@ theorem core_progress {S E ε}
       have ⟨hwfCall, hsel⟩ :=
         stmtWF_call (c := c) (t := target) (sel := sel) (args := args) (ret := ret) (by simpa [coreWF] using hwf)
       have hn0 : identsNodup tag env.length = true := by simpa [coreExtraDepth] using hn
-      have hinvT : Inv tag Γ c κ ctx w env (toVEnv tag env) st := by
-        rwa [hinv.venv] at hinv
       have hcallP :=
-        stmt_call_progress tag o (n := n) (target := target) (sel := sel) (args := args) (ret := ret) hinvT hNR hwfCall hsel hn0
+        stmt_call_progress tag o (n := n) (target := target) (sel := sel) (args := args) (ret := ret) hinv hNR hwfCall hsel hn0
       obtain ⟨V1, st1, out, hexec, ho⟩ := hcallP
-      exact finish_stmtTail tag clearLock hinv.venv hexec ho
+      exact finish_stmtTail tag clearLock hexec ho
     | inr hrest =>
       cases hrest with
       | inl hview =>
@@ -363,12 +366,10 @@ theorem core_progress {S E ε}
         have ⟨hwfCall, hsel⟩ :=
           stmtWF_view (c := c) (t := target) (sel := sel) (args := args) (ret := ret) (by simpa [coreWF] using hwf)
         have hn0 : identsNodup tag env.length = true := by simpa [coreExtraDepth] using hn
-        have hinvT : Inv tag Γ c κ ctx w env (toVEnv tag env) st := by
-          rwa [hinv.venv] at hinv
         have hcallP :=
-          stmt_view_progress tag o (n := n) (target := target) (sel := sel) (args := args) (ret := ret) hinvT hwfCall hsel hn0
+          stmt_view_progress tag o (n := n) (target := target) (sel := sel) (args := args) (ret := ret) hinv hwfCall hsel hn0
         obtain ⟨V1, st1, out, hexec, ho⟩ := hcallP
-        exact finish_stmtTail tag clearLock hinv.venv hexec ho
+        exact finish_stmtTail tag clearLock hexec ho
       | inr hM1 =>
         exact core_progress_callFree tag hhalt hΓ hκ hlen (calls := toCalls o)
           (.stmtTail s) (by simpa [CallFree, M1Frag] using hM1) hwf hn hinv hem
@@ -390,39 +391,35 @@ theorem core_progress {S E ε}
     | inl hcall =>
       obtain ⟨target, sel, args, ret, rfl⟩ := hcall
       have ⟨hwfCall, hsel⟩ := opWF_call (c := c) (t := target) (sel := sel) (args := args) (ret := ret) (by simpa [opWF] using hwfOp)
-      have hinvT : Inv tag Γ c κ ctx w env (toVEnv tag env) st := by
-        rwa [hinv.venv] at hinv
       have hcallP :=
-        op_call_progress tag o (n := n) (target := target) (sel := sel) (args := args) (ret := ret) hinvT hNR hwfCall hsel hn0 hn1
+        op_call_progress tag o (n := n) (target := target) (sel := sel) (args := args) (ret := ret) hinv hNR hwfCall hsel hn0 hn1
       obtain ⟨V1, st1, out, hexec, ho⟩ := hcallP
       simp only [h1] at hexec
-      rcases ho with ho | ⟨ho, v, hVeq, hinv1⟩
+      rcases ho with ho | ⟨ho, v, hinv1⟩
       · subst ho
-        exact ⟨V1, st1, execStmts_append_halt_open (by simpa [hinv.venv] using hexec)⟩
+        exact ⟨V1, st1, execStmts_append_halt_open hexec⟩
       · subst ho
         have ihk := ih hkS2 (env := v :: env) (n := n) hwfK hnK
-          (by simpa [hVeq] using hinv1) hNR h0
+          hinv1 hNR h0
         obtain ⟨V2, st2, hk⟩ := ihk
-        exact ⟨V2, st2, execStmts_append_open (by simpa [hinv.venv, hVeq] using hexec) hk⟩
+        exact ⟨V2, st2, execStmts_append_open hexec hk⟩
     | inr hrest =>
       cases hrest with
       | inl hview =>
         obtain ⟨target, sel, args, ret, rfl⟩ := hview
         have ⟨hwfCall, hsel⟩ := opWF_view (c := c) (t := target) (sel := sel) (args := args) (ret := ret) (by simpa [opWF] using hwfOp)
-        have hinvT : Inv tag Γ c κ ctx w env (toVEnv tag env) st := by
-          rwa [hinv.venv] at hinv
         have hcallP :=
-          op_view_progress tag o (n := n) (target := target) (sel := sel) (args := args) (ret := ret) hinvT hwfCall hsel hn0 hn1
+          op_view_progress tag o (n := n) (target := target) (sel := sel) (args := args) (ret := ret) hinv hwfCall hsel hn0 hn1
         obtain ⟨V1, st1, out, hexec, ho⟩ := hcallP
         simp only [h1] at hexec
-        rcases ho with ho | ⟨ho, v, hVeq, hinv1⟩
+        rcases ho with ho | ⟨ho, v, hinv1⟩
         · subst ho
-          exact ⟨V1, st1, execStmts_append_halt_open (by simpa [hinv.venv] using hexec)⟩
+          exact ⟨V1, st1, execStmts_append_halt_open hexec⟩
         · subst ho
           have ihk := ih hkS2 (env := v :: env) (n := n) hwfK hnK
-            (by simpa [hVeq] using hinv1) hNR h0
+            hinv1 hNR h0
           obtain ⟨V2, st2, hk⟩ := ihk
-          exact ⟨V2, st2, execStmts_append_open (by simpa [hinv.venv, hVeq] using hexec) hk⟩
+          exact ⟨V2, st2, execStmts_append_open hexec hk⟩
       | inr hM1 =>
         have hsim := op_sim tag (List.replicate n []) hinv hΓ hκ hlen hM1 hwfOp hn1
         cases hrun : Tx.run (Op.denote Γ env op) ctx w with
@@ -455,35 +452,31 @@ theorem core_progress {S E ε}
     | inl hcall =>
       obtain ⟨target, sel, args, ret, rfl⟩ := hcall
       have ⟨hwfCall, hsel⟩ := stmtWF_call (c := c) (t := target) (sel := sel) (args := args) (ret := ret) (by simpa [stmtWF] using hwfS)
-      have hinvT : Inv tag Γ c κ ctx w env (toVEnv tag env) st := by
-        rwa [hinv.venv] at hinv
       have hcallP :=
-        stmt_call_progress tag o (n := n) (target := target) (sel := sel) (args := args) (ret := ret) hinvT hNR hwfCall hsel hn0
+        stmt_call_progress tag o (n := n) (target := target) (sel := sel) (args := args) (ret := ret) hinv hNR hwfCall hsel hn0
       obtain ⟨V1, st1, out, hexec, ho⟩ := hcallP
-      rcases ho with ho | ⟨ho, hVeq, hinv1⟩
+      rcases ho with ho | ⟨ho, hinv1⟩
       · subst ho
-        exact ⟨V1, st1, execStmts_append_halt_open (by simpa [hinv.venv] using hexec)⟩
+        exact ⟨V1, st1, execStmts_append_halt_open hexec⟩
       · subst ho
-        have ihk := ih hkS2 (n := n) hwfK hnK (by simpa [hVeq] using hinv1) hNR h0
+        have ihk := ih hkS2 (n := n) hwfK hnK hinv1 hNR h0
         obtain ⟨V2, st2, hk⟩ := ihk
-        exact ⟨V2, st2, execStmts_append_open (by simpa [hinv.venv, hVeq] using hexec) hk⟩
+        exact ⟨V2, st2, execStmts_append_open hexec hk⟩
     | inr hrest =>
       cases hrest with
       | inl hview =>
         obtain ⟨target, sel, args, ret, rfl⟩ := hview
         have ⟨hwfCall, hsel⟩ := stmtWF_view (c := c) (t := target) (sel := sel) (args := args) (ret := ret) (by simpa [stmtWF] using hwfS)
-        have hinvT : Inv tag Γ c κ ctx w env (toVEnv tag env) st := by
-          rwa [hinv.venv] at hinv
         have hcallP :=
-          stmt_view_progress tag o (n := n) (target := target) (sel := sel) (args := args) (ret := ret) hinvT hwfCall hsel hn0
+          stmt_view_progress tag o (n := n) (target := target) (sel := sel) (args := args) (ret := ret) hinv hwfCall hsel hn0
         obtain ⟨V1, st1, out, hexec, ho⟩ := hcallP
-        rcases ho with ho | ⟨ho, hVeq, hinv1⟩
+        rcases ho with ho | ⟨ho, hinv1⟩
         · subst ho
-          exact ⟨V1, st1, execStmts_append_halt_open (by simpa [hinv.venv] using hexec)⟩
+          exact ⟨V1, st1, execStmts_append_halt_open hexec⟩
         · subst ho
-          have ihk := ih hkS2 (n := n) hwfK hnK (by simpa [hVeq] using hinv1) hNR h0
+          have ihk := ih hkS2 (n := n) hwfK hnK hinv1 hNR h0
           obtain ⟨V2, st2, hk⟩ := ihk
-          exact ⟨V2, st2, execStmts_append_open (by simpa [hinv.venv, hVeq] using hexec) hk⟩
+          exact ⟨V2, st2, execStmts_append_open hexec hk⟩
       | inr hM1 =>
         have hsim := stmt_sim tag (List.replicate n []) hinv hΓ hκ hlen hM1 hwfS hn0
         cases hrun : Tx.run (Stmt.denote Γ env s) ctx w with
@@ -511,9 +504,12 @@ theorem core_progress {S E ε}
     obtain ⟨e0, h0, hst⟩ := emitCore_prefix tag hem
     have hn0 : identsNodup tag env.length = true :=
       identsNodup_mono tag (Nat.le_add_right env.length _) hn
+    have hn1 : identsNodup tag (env.length + 1) = true :=
+      identsNodup_mono tag (Nat.le_add_right (env.length + 1) (coreExtraDepth k))
+        (by simpa [coreExtraDepth, Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using hn)
     have hnK : identsNodup tag ((env.length + 1) + coreExtraDepth k) = true := by
       simpa [coreExtraDepth, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using hn
-    have he := eval_atom tag (List.replicate n []) (st := st) hinv.venv hn0 a
+    have he := eval_atom_ok tag (List.replicate n []) (st := st) hinv.venv a
     have hv := atom_eval_lt hinv.wf hwfA
     have hlet :
         ExecStmt (yulD (toCalls o)) (List.replicate n []) V st
@@ -522,7 +518,7 @@ theorem core_progress {S E ε}
       Step.letVal (evalExpr_lift_nils he) rfl
     have hinv1 : Inv tag Γ c κ ctx w (a.eval env :: env)
         ((identV tag env.length, BitVec.ofNat 256 (a.eval env)) :: V) st :=
-      ⟨by rw [hinv.venv, toVEnv_cons], envWF_cons hv hinv.wf, hinv.rel, hinv.ctxr⟩
+      ⟨localsOK_cons (tag := tag) _ hn1 hinv.venv, envWF_cons hv hinv.wf, hinv.rel, hinv.ctxr⟩
     have ihk := ih hkS2 (env := a.eval env :: env) (n := n) hkWF
       (by simpa using hnK) hinv1 hNR h0
     obtain ⟨V2, st2, hk⟩ := ihk
@@ -549,7 +545,7 @@ theorem core_progress {S E ε}
       identsNodup_mono tag (Nat.add_le_add_left (Nat.le_max_left _ _) _) hn
     have hnB : identsNodup tag (env.length + coreExtraDepth b) = true :=
       identsNodup_mono tag (Nat.add_le_add_left (Nat.le_max_right _ _) _) hn
-    have hcond := eval_cond tag (st := st) (List.replicate n []) hinv.venv hinv.wf hn0 hC hcWF
+    have hcond := eval_cond_ok tag (st := st) (List.replicate n []) hinv.venv hinv.wf hC hcWF
     have hcond' := evalExpr_lift_nils (calls := toCalls o) (n := n) hcond
     have hpush :
         (Emit.push ({} : Emit) (.switch (emitCond tag env.length cond)
@@ -585,6 +581,230 @@ theorem core_progress {S E ε}
         simpa [this] using hsel
       exact exec_switch_halt_open hcond' hsel'
         (hoist_yulD_of_evm (hoist_emitCore tag hB)) hBexec
+  | @seqIf tBr _ cond th el k _ _ ihk =>
+    intro hS2 w env V st n hwf hn hinv hNR clearLock e' hem
+    by_cases hM1 : M1Frag (.seqIf cond th el k)
+    · exact core_progress_callFree tag hhalt hΓ hκ hlen (calls := toCalls o)
+        _ (by simpa [CallFree] using hM1) hwf hn hinv hem
+    · clear hM1
+      revert hS2 hwf hn hem
+      cases tBr with
+      | pair _ _ =>
+        intro hS2 hwf hn hem
+        simp [S2Frag] at hS2
+      | unit =>
+        intro hS2 hwf hn hem
+        have ⟨hC, hth, hel, hk⟩ := s2frag_seqIf.mp hS2
+        have ⟨hcWF, hthWF, helWF, hkWF, _⟩ := coreWF_seqIf.mp hwf
+        simp only [emitCore] at hem
+        obtain ⟨eA, hA⟩ := emitCore_some tag (c := c) (halt := false) (clearLock := false)
+          th ({} : Emit) env.length
+        obtain ⟨eB, hB⟩ := emitCore_some tag (c := c) (halt := false) (clearLock := false)
+          el ({} : Emit) env.length
+        simp [hA, hB] at hem
+        obtain ⟨eK, hKpre, hst⟩ := emitCore_prefix tag hem
+        have hnA : identsNodup tag (env.length + coreExtraDepth th) = true :=
+          identsNodup_mono tag (by simp [coreExtraDepth]; try omega) hn
+        have hnB : identsNodup tag (env.length + coreExtraDepth el) = true :=
+          identsNodup_mono tag (by simp [coreExtraDepth]; try omega) hn
+        have hnK : identsNodup tag (env.length + coreExtraDepth k) = true :=
+          identsNodup_mono tag (by simp [coreExtraDepth]; try omega) hn
+        have hcond := eval_cond_ok tag (st := st) (List.replicate n []) hinv.venv hinv.wf hC hcWF
+        have hcond' := evalExpr_lift_nils (calls := toCalls o) (n := n) hcond
+        by_cases hc : cond.denote env
+        · have hsel := selectSwitch_nonzero_yulD (calls := toCalls o)
+            (eA := eA.stmts) (eB := eB.stmts)
+            (b2w_ne_zero.mpr (decide_eq_true hc))
+          have ihA :=
+            core_sim_fall (tag := tag) hΓ hκ hlen th hth rfl
+              (List.replicate (n + 1) []) hthWF hnA hinv hA
+          cases hrun : Tx.run (Core.denote Γ th env) ctx w with
+          | ok q =>
+            simp only [hrun, except_ok_prod] at ihA
+            obtain ⟨VA, stA, hexecA, hRA, hctxA, hrestA⟩ := ihA
+            rcases q with ⟨_, wA⟩
+            have hinvK : Inv tag Γ c κ ctx wA env V stA :=
+              ⟨hinv.venv, hinv.wf, hRA, hctxA⟩
+            have ⟨VK, stK, hexeck⟩ :=
+              ihk hk (n := n) hkWF hnK hinvK hNR hKpre
+            refine ⟨VK, stK, ?_⟩
+            rw [hst]
+            have hsw := exec_switch (funs := List.replicate n []) hcond
+              (selectSwitch_nonzero (eA := eA.stmts) (eB := eB.stmts)
+                (b2w_ne_zero.mpr (decide_eq_true hc)))
+              (hoist_emitCore tag hA)
+              (by simpa [List.replicate_succ] using hexecA)
+            rw [hrestA] at hsw
+            exact execStmts_append_open (execStmts_lift_nils (calls := toCalls o) hsw) hexeck
+          | error err =>
+            simp only [hrun, except_error_prod] at ihA
+            obtain ⟨V', st', bytes, hexec, hh, herr⟩ := ihA
+            refine ⟨restore V V', st', ?_⟩
+            rw [hst]
+            exact execStmts_append_halt_open
+              (exec_switch_halt_open hcond' hsel
+                (hoist_yulD_of_evm (hoist_emitCore tag hA))
+                (execStmts_lift_nils hexec))
+        · have hsel := selectSwitch_zero_yulD (calls := toCalls o)
+            (eA := eA.stmts) (eB := eB.stmts)
+          have ihB :=
+            core_sim_fall (tag := tag) hΓ hκ hlen el hel rfl
+              (List.replicate (n + 1) []) helWF hnB hinv hB
+          cases hrun : Tx.run (Core.denote Γ el env) ctx w with
+          | ok q =>
+            simp only [hrun, except_ok_prod] at ihB
+            obtain ⟨VB, stB, hexecB, hRB, hctxB, hrestB⟩ := ihB
+            rcases q with ⟨_, wB⟩
+            have hinvK : Inv tag Γ c κ ctx wB env V stB :=
+              ⟨hinv.venv, hinv.wf, hRB, hctxB⟩
+            have ⟨VK, stK, hexeck⟩ :=
+              ihk hk (n := n) hkWF hnK hinvK hNR hKpre
+            refine ⟨VK, stK, ?_⟩
+            rw [hst]
+            have : b2w (decide (cond.denote env)) = 0 := by simp [hc, b2w_false]
+            have hselE : selectSwitch evm (b2w (decide (cond.denote env)))
+                [(YulSemantics.Literal.number 0, eB.stmts)] (some eA.stmts) =
+                  eB.stmts := by
+              simp [hc, b2w]; exact selectSwitch_zero
+            have hsw := exec_switch (funs := List.replicate n []) hcond hselE
+              (hoist_emitCore tag hB)
+              (by simpa [List.replicate_succ] using hexecB)
+            rw [hrestB] at hsw
+            exact execStmts_append_open (execStmts_lift_nils (calls := toCalls o) hsw) hexeck
+          | error err =>
+            simp only [hrun, except_error_prod] at ihB
+            obtain ⟨V', st', bytes, hexec, hh, herr⟩ := ihB
+            refine ⟨restore V V', st', ?_⟩
+            rw [hst]
+            have : b2w (decide (cond.denote env)) = 0 := by simp [hc, b2w_false]
+            have hsel' : selectSwitch (yulD (toCalls o)) (b2w (decide (cond.denote env)))
+                [(YulSemantics.Literal.number 0, eB.stmts)] (some eA.stmts) =
+                  eB.stmts := by
+              simpa [this] using hsel
+            exact execStmts_append_halt_open
+              (exec_switch_halt_open hcond' hsel'
+                (hoist_yulD_of_evm (hoist_emitCore tag hB))
+                (execStmts_lift_nils hexec))
+      | word | addr | flag =>
+        intro hS2 hwf hn hem
+        have ⟨hC, hth, hel, hk⟩ := s2frag_seqIf.mp hS2
+        have htWL : retTyWordLike (coreRetTy th) := trivial
+        have ⟨hcWF, hthWF, helWF, hkWF⟩ := (coreWF_seqIf_wordLike htWL).mp hwf
+        obtain ⟨eA, eB, eK, hA, hB, hKpre, hst⟩ :=
+          emitCore_seqIf_wordLike_prefix (tag := tag) htWL hem
+        have ⟨hthD, helD, h1D, hkD⟩ := seqIf_wordLike_depth_le htWL cond th el k
+        have hn1 : identsNodup tag (env.length + 1) = true :=
+          identsNodup_mono tag (Nat.add_le_add_left h1D _) hn
+        have hnA : identsNodup tag (env.length + coreExtraDepth th) = true :=
+          identsNodup_mono tag (Nat.add_le_add_left hthD _) hn
+        have hnB : identsNodup tag (env.length + coreExtraDepth el) = true :=
+          identsNodup_mono tag (Nat.add_le_add_left helD _) hn
+        have hnK : identsNodup tag ((env.length + 1) + coreExtraDepth k) = true :=
+          identsNodup_mono tag (by
+            rw [show (env.length + 1) + coreExtraDepth k =
+                  env.length + (coreExtraDepth k + 1) by omega]
+            exact Nat.add_le_add_left hkD env.length) hn
+        have hokΦ : localsOK tag env
+            ((identPhi tag env.length, (0 : U256)) ::
+              (identV tag env.length, (0 : U256)) :: V) :=
+          localsOK_phi_dest (tag := tag) 0 0 hn1 hinv.venv
+        have hinvΦ : Inv tag Γ c κ ctx w env
+            ((identPhi tag env.length, (0 : U256)) ::
+              (identV tag env.length, (0 : U256)) :: V) st :=
+          ⟨hokΦ, hinv.wf, hinv.rel, hinv.ctxr⟩
+        have hgetΦ : VEnv.get
+            ((identPhi tag env.length, (0 : U256)) ::
+              (identV tag env.length, (0 : U256)) :: V)
+            (identPhi tag env.length) = some 0 := by
+          rw [VEnv.get_cons, if_pos rfl]
+        have hneΦ : ∀ n, identPhi tag env.length ≠ identV tag n :=
+          fun n => identPhi_ne_identV tag env.length n
+        have hcond := eval_cond_ok tag (st := st)
+          (List.replicate (n + 1) []) hokΦ hinv.wf hC hcWF
+        rw [hst]
+        by_cases hc : cond.denote env
+        · have hsel := selectSwitch_nonzero
+            (eA := eA.stmts) (eB := eB.stmts)
+            (b2w_ne_zero.mpr (decide_eq_true hc))
+          have hthSim :=
+            core_toVar_sim (tag := tag) hΓ hκ hlen th hth htWL
+              (identPhi tag env.length) hneΦ hgetΦ
+              (List.replicate (n + 2) []) hthWF hnA hinvΦ hA
+          cases hrun : Tx.run (Core.denote Γ th env) ctx w with
+          | ok q =>
+            simp only [hrun, except_ok_prod] at hthSim
+            obtain ⟨VA, stA, hexecA, hgetA, hRA, hctxA, hrestA, hvA⟩ := hthSim
+            rcases q with ⟨v, wA⟩
+            have hpre :=
+              exec_seqIfWord_ok (tag := tag)
+                (funs := List.replicate n []) hcond hsel
+                (hoist_emitCoreToVar tag hA)
+                (by simpa [List.replicate_succ] using hexecA) hrestA
+            have hinvK : Inv tag Γ c κ ctx wA (retAsNat v :: env)
+                ((identV tag env.length, BitVec.ofNat 256 (retAsNat v)) :: V) stA :=
+              ⟨localsOK_cons (tag := tag) (retAsNat v) hn1 hinv.venv,
+                envWF_cons hvA hinv.wf, hRA, hctxA⟩
+            have ⟨VK, stK, hexeck⟩ :=
+              ihk hk (env := retAsNat v :: env) (n := n) hkWF hnK hinvK hNR hKpre
+            refine ⟨VK, stK, ?_⟩
+            exact execStmts_append_open
+              (execStmts_lift_nils (calls := toCalls o) (n := n) hpre) hexeck
+          | error err =>
+            simp only [hrun, except_error_prod] at hthSim
+            obtain ⟨VA, stA, bytes, hexecA, hh, herr⟩ := hthSim
+            refine ⟨
+              restore ((identV tag env.length, (0 : U256)) :: V)
+                (restore
+                  ((identPhi tag env.length, (0 : U256)) ::
+                    (identV tag env.length, (0 : U256)) :: V) VA),
+              stA, ?_⟩
+            exact execStmts_append_halt_open
+              (execStmts_lift_nils (calls := toCalls o) (n := n)
+                (exec_seqIfWord_halt (tag := tag)
+                  (funs := List.replicate n []) hcond hsel
+                  (hoist_emitCoreToVar tag hA) hexecA))
+        · have hsel :
+              selectSwitch evm (b2w (decide (cond.denote env)))
+                [(YulSemantics.Literal.number 0, eB.stmts)] (some eA.stmts) =
+                  eB.stmts := by
+            simp [hc, b2w]; exact selectSwitch_zero
+          have helSim :=
+            core_toVar_sim (tag := tag) hΓ hκ hlen el hel htWL
+              (identPhi tag env.length) hneΦ hgetΦ
+              (List.replicate (n + 2) []) helWF hnB hinvΦ hB
+          cases hrun : Tx.run (Core.denote Γ el env) ctx w with
+          | ok q =>
+            simp only [hrun, except_ok_prod] at helSim
+            obtain ⟨VB, stB, hexecB, hgetB, hRB, hctxB, hrestB, hvB⟩ := helSim
+            rcases q with ⟨v, wB⟩
+            have hpre :=
+              exec_seqIfWord_ok (tag := tag)
+                (funs := List.replicate n []) hcond hsel
+                (hoist_emitCoreToVar tag hB)
+                (by simpa [List.replicate_succ] using hexecB) hrestB
+            have hinvK : Inv tag Γ c κ ctx wB (retAsNat v :: env)
+                ((identV tag env.length, BitVec.ofNat 256 (retAsNat v)) :: V) stB :=
+              ⟨localsOK_cons (tag := tag) (retAsNat v) hn1 hinv.venv,
+                envWF_cons hvB hinv.wf, hRB, hctxB⟩
+            have ⟨VK, stK, hexeck⟩ :=
+              ihk hk (env := retAsNat v :: env) (n := n) hkWF hnK hinvK hNR hKpre
+            refine ⟨VK, stK, ?_⟩
+            exact execStmts_append_open
+              (execStmts_lift_nils (calls := toCalls o) (n := n) hpre) hexeck
+          | error err =>
+            simp only [hrun, except_error_prod] at helSim
+            obtain ⟨VB, stB, bytes, hexecB, hh, herr⟩ := helSim
+            refine ⟨
+              restore ((identV tag env.length, (0 : U256)) :: V)
+                (restore
+                  ((identPhi tag env.length, (0 : U256)) ::
+                    (identV tag env.length, (0 : U256)) :: V) VB),
+              stB, ?_⟩
+            exact execStmts_append_halt_open
+              (execStmts_lift_nils (calls := toCalls o) (n := n)
+                (exec_seqIfWord_halt (tag := tag)
+                  (funs := List.replicate n []) hcond hsel
+                  (hoist_emitCoreToVar tag hB) hexecB))
 
 /-! ## Function and dispatcher progress -/
 
@@ -608,13 +828,15 @@ theorem toYulFn_progress {S E ε : Type}
   have hdec := decodeArgs_runtime (f := f) (cd := st0.env.calldata) hf
   have hpar := params_sim (tag := f.name) (funs := List.replicate n []) st0 4 f.params.length hbound
   have hpar' := execStmts_lift_nils (calls := toCalls o) (n := n) hpar
-  have hinv : Inv f.name Γ c κ ctx w args.reverse (toVEnv f.name args.reverse) st0 :=
-    ⟨rfl, henv, hR, hctx⟩
-  obtain ⟨e0, h0, hst⟩ := emitCore_prefix (tag := f.name) hem
   have hn : identsNodup f.name (f.params.length + coreExtraDepth f.core) = true := by
     simpa [maxDepth] using hnod
   have hn' : identsNodup f.name (args.reverse.length + coreExtraDepth f.core) = true := by
     simpa [args, decodeArgs_length, List.length_reverse] using hn
+  have hnEnv : identsNodup f.name args.reverse.length = true :=
+    identsNodup_mono f.name (Nat.le_add_right _ _) hn'
+  have hinv : Inv f.name Γ c κ ctx w args.reverse (toVEnv f.name args.reverse) st0 :=
+    Inv.of_eq (tag := f.name) rfl hnEnv henv hR hctx
+  obtain ⟨e0, h0, hst⟩ := emitCore_prefix (tag := f.name) hem
   have h0' : emitCore f.name c {} args.reverse.length true f.core (locks f) = some e0 := by
     simpa [args, decodeArgs_length, List.length_reverse] using h0
   have ⟨V', st', hexec⟩ :=

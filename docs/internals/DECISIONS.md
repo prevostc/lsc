@@ -327,3 +327,11 @@ Receiving native value without `[Payable]` is a compile error.
 chain has no gas token, so payable functions and native sends are compile
 errors. Multiple fee tokens do not change contract semantics. The example
 wrapper is `WNative`, not a built-in ETH type.
+
+## 2026-09-15 — `seqIf`: shared continuation for effectful `if`
+
+`Core.ite` is expression-level and duplicates a bind continuation (`Tx.bind_ite`).
+`seqIf c th el k` runs `th` or `el` then `k` once. The emitter uses `switch` plus a
+shared tail; word-like branches write dest/phi then keep `k` at depth+1. Reify
+turns `do` `if`/`__do_jp` into `seqIf`. User syntax is ordinary Lean `do` `if`/`else`.
+

@@ -15,14 +15,38 @@ variable (tag : String)
 open YulSemantics
 open YulSemantics.EVM
 
-/-- Simulation invariant: Yul `VEnv` is `toVEnv tag env`, locals are words, `R` and `ctxRel` hold. -/
+/-- Simulation invariant: Yul locals agree with `env` (`localsOK`; dest/phi may
+sit in front of `toVEnv` inside a word `seqIf`), values fit in a word, `R` and
+`ctxRel` hold. -/
 structure Inv {S X E ε} (Γ : ContractSchema S X E ε) (c : ContractDef)
     (κ : List UInt8 → U256) (ctx : Ctx) (w : World S X E)
     (env : List Nat) (V : VEnv evm) (st : EvmState) : Prop where
-  venv : V = toVEnv tag env
+  venv : localsOK tag env V
   wf : EnvWF env
   rel : R c Γ κ w st
   ctxr : ctxRel ctx st
+
+theorem Inv.of_eq {S X E ε} {Γ : ContractSchema S X E ε} {c : ContractDef}
+    {κ ctx w env V st}
+    (hV : V = toVEnv tag env) (hn : identsNodup tag env.length = true)
+    (henv : EnvWF env) (hR : R c Γ κ w st) (hctx : ctxRel ctx st) :
+    Inv tag Γ c κ ctx w env V st :=
+  ⟨localsOK_of_eq (tag := tag) hV hn, henv, hR, hctx⟩
+
+theorem Inv.at_toVEnv {S X E ε} {Γ : ContractSchema S X E ε} {c : ContractDef}
+    {κ ctx w env V st} (hinv : Inv tag Γ c κ ctx w env V st)
+    (hn : identsNodup tag env.length = true) :
+    Inv tag Γ c κ ctx w env (toVEnv tag env) st :=
+  ⟨localsOK_toVEnv tag env hn, hinv.wf, hinv.rel, hinv.ctxr⟩
+
+theorem Inv.cons {S X E ε} {Γ : ContractSchema S X E ε} {c : ContractDef}
+    {κ ctx w env V st} (v : Nat)
+    (hn : identsNodup tag (env.length + 1) = true)
+    (hinv : Inv tag Γ c κ ctx w env V st) (hv : v < wordBound)
+    {st' : EvmState} (hR : R c Γ κ w st') (hctx : ctxRel ctx st') :
+    Inv tag Γ c κ ctx w (v :: env)
+      ((identV tag env.length, BitVec.ofNat 256 v) :: V) st' :=
+  ⟨localsOK_cons (tag := tag) v hn hinv.venv, envWF_cons hv hinv.wf, hR, hctx⟩
 
 def MemOnly (st st' : EvmState) : Prop :=
   st'.storage = st.storage ∧

@@ -320,33 +320,28 @@ theorem hn1_of_base {env : List Nat} :
 
 theorem eval_atomE_nils {calls : ExternalCalls} {n : Nat}
     {env : List Nat} {V : VEnv evm} {st : EvmState} {a : Atom}
-    (hV : V = toVEnv tag env ∨
-      V = (identV tag env.length, (0 : U256)) :: toVEnv tag env)
-    (hn : identsNodup tag env.length = true)
-    (hn1 : V = (identV tag env.length, (0 : U256)) :: toVEnv tag env →
-        identsNodup tag (env.length + 1) = true) :
+    (hok : localsOK tag env V) :
     EvalExpr (yulD calls) (List.replicate n []) V st (atomE tag env.length a)
       (.vals [BitVec.ofNat 256 (a.eval env)] st) := by
   simpa using evalExpr_lift_nils (calls := calls) (n := n)
-    (eval_atom_pre tag (List.replicate n []) st hV hn hn1 a)
+    (eval_atom_pre tag (List.replicate n []) st hok a)
 
 theorem op_call_progress {S E ε : Type}
     {c : ContractDef} {Γ : ContractSchema S ExtState E ε}
     {κ ctx} {w : World S ExtState E} {env : List Nat}
-    (o : ExtOracle) {n : Nat} {st : EvmState}
+    (o : ExtOracle) {n : Nat} {V : VEnv evm} {st : EvmState}
     {target : Atom} {sel : Nat} {args : List Atom} {ret : AbiRet}
-    (hinv : Inv tag Γ c κ ctx w env (toVEnv tag env) st)
+    (hinv : Inv tag Γ c κ ctx w env V st)
     (hNR : ExtOracle.NoReentry o ctx.self)
     (hwfCall : callWF target args = true) (hsel : sel < 2 ^ 32)
     (hn : identsNodup tag env.length = true)
     (hn1 : identsNodup tag (env.length + 1) = true) :
     ∃ V' st' out,
-      ExecStmts (yulD (toCalls o)) (List.replicate n []) (toVEnv tag env) st
+      ExecStmts (yulD (toCalls o)) (List.replicate n []) V st
         ((emitLetOp tag c {} env.length (.call target sel args ret)).getD {}).stmts
         V' st' out ∧
       (out = .halt ∨
-        (out = .normal ∧ ∃ v, V' = toVEnv tag (v :: env) ∧
-          Inv tag Γ c κ ctx w (v :: env) V' st')) := by
+        (out = .normal ∧ ∃ v, Inv tag Γ c κ ctx w (v :: env) V' st')) := by
   obtain ⟨_, hvals, hn3⟩ := callWF_elim hwfCall
   have hR := hinv.rel
   have hctx := hinv.ctxr
@@ -355,17 +350,19 @@ theorem op_call_progress {S E ε : Type}
   let d := env.length
   let funsN : FunEnv (yulD (toCalls o)) := List.replicate n []
   let funsN1 : FunEnv (yulD (toCalls o)) := List.replicate (n + 1) []
-  have hlet0 : ExecStmt (yulD (toCalls o)) funsN (toVEnv tag env) st
+  have hlet0 : ExecStmt (yulD (toCalls o)) funsN V st
       (.letDecl [identV tag d] (some (lit 0)))
-      ((identV tag d, (0 : U256)) :: toVEnv tag env) st .normal :=
+      ((identV tag d, (0 : U256)) :: V) st .normal :=
     Step.letVal (D := yulD (toCalls o)) Step.lit rfl
-  let pre : VEnv evm := (identV tag d, (0 : U256)) :: toVEnv tag env
+  let pre : VEnv evm := (identV tag d, (0 : U256)) :: V
+  have hokPre : localsOK tag env pre :=
+    localsOK_identV_front (tag := tag) 0 hn1 hinv.venv
   obtain ⟨st1, hpre, hpack, hMO, hstatic, _, _⟩ :=
     call_prefix_fwd tag (funs := List.replicate (n + 1) []) sel args
-      (.inr rfl) hn (fun _ => hn1) hctx henv hn3 hvals hsel
+      hokPre hctx henv hn3 hvals hsel
   have hpre' := execStmts_lift_nils (calls := toCalls o) (n := n + 1) hpre
   have htgt := eval_atomE_nils tag (calls := toCalls o) (n := n + 1)
-    (.inr rfl) hn (fun _ => hn1) (a := target) (st := st1)
+    hokPre (a := target) (st := st1)
   obtain ⟨resp, hlet, hCall⟩ :=
     exec_let_call_fwd (calls := toCalls o) htot funsN1 htgt hstatic
       (ok := extOk tag d) (gas := extCallGas) (insize := 4 + 32 * args.length)
@@ -453,35 +450,35 @@ theorem op_call_progress {S E ε : Type}
     let vU : U256 := suffixVal ret st2
     have hne : extOk tag d ≠ identV tag d := (identV_ne_extOk tag d d).symm
     have hset : VEnv.set V2 (identV tag d) vU =
-        (extOk tag d, resp.flag) :: (identV tag d, vU) :: toVEnv tag env := by
+        (extOk tag d, resp.flag) :: (identV tag d, vU) :: V := by
       rw [VEnv.set_cons_ne hne]
       simp [VEnv.set, pre]
-    have hV3 : V3 = (extOk tag d, resp.flag) :: (identV tag d, vU) :: toVEnv tag env := by
+    have hV3 : V3 = (extOk tag d, resp.flag) :: (identV tag d, vU) :: V := by
       rw [hVeq]; exact hset
-    have hrest : restore pre V3 = (identV tag d, vU) :: toVEnv tag env := by
-      rw [hV3]; exact restore_call_assign
-    refine ⟨restore pre V3, st3, .normal, ?_, .inr ⟨rfl, vU.toNat, ?_, ?_⟩⟩
+    have hrest : restore pre V3 =
+        (identV tag d, BitVec.ofNat 256 vU.toNat) :: V := by
+      rw [hV3]; exact (restore_call_assign).trans (by rw [ofNat_toNat_u256])
+    refine ⟨restore pre V3, st3, .normal, ?_, .inr ⟨rfl, vU.toNat, ?_⟩⟩
     · exact Step.seqCons hlet0 (Step.seqCons hblk Step.seqNil)
-    · exact hrest.trans (toVEnv_cons_u256 tag vU env).symm
-    · exact ⟨hrest.trans (toVEnv_cons_u256 tag vU env).symm,
-        envWF_cons (u256_lt_word vU) henv, hR3, hctx3⟩
+    · exact hrest ▸
+        ⟨localsOK_cons (tag := tag) vU.toNat hn1 hinv.venv,
+          envWF_cons (u256_lt_word vU) henv, hR3, hctx3⟩
 
 theorem op_view_progress {S E ε : Type}
     {c : ContractDef} {Γ : ContractSchema S ExtState E ε}
     {κ ctx} {w : World S ExtState E} {env : List Nat}
-    (o : ExtOracle) {n : Nat} {st : EvmState}
+    (o : ExtOracle) {n : Nat} {V : VEnv evm} {st : EvmState}
     {target : Atom} {sel : Nat} {args : List Atom} {ret : AbiRet}
-    (hinv : Inv tag Γ c κ ctx w env (toVEnv tag env) st)
+    (hinv : Inv tag Γ c κ ctx w env V st)
     (hwfCall : callWF target args = true) (hsel : sel < 2 ^ 32)
     (hn : identsNodup tag env.length = true)
     (hn1 : identsNodup tag (env.length + 1) = true) :
     ∃ V' st' out,
-      ExecStmts (yulD (toCalls o)) (List.replicate n []) (toVEnv tag env) st
+      ExecStmts (yulD (toCalls o)) (List.replicate n []) V st
         ((emitLetOp tag c {} env.length (.view target sel args ret)).getD {}).stmts
         V' st' out ∧
       (out = .halt ∨
-        (out = .normal ∧ ∃ v, V' = toVEnv tag (v :: env) ∧
-          Inv tag Γ c κ ctx w (v :: env) V' st')) := by
+        (out = .normal ∧ ∃ v, Inv tag Γ c κ ctx w (v :: env) V' st')) := by
   obtain ⟨_, hvals, hn3⟩ := callWF_elim hwfCall
   have hR := hinv.rel
   have hctx := hinv.ctxr
@@ -490,17 +487,19 @@ theorem op_view_progress {S E ε : Type}
   let d := env.length
   let funsN : FunEnv (yulD (toCalls o)) := List.replicate n []
   let funsN1 : FunEnv (yulD (toCalls o)) := List.replicate (n + 1) []
-  have hlet0 : ExecStmt (yulD (toCalls o)) funsN (toVEnv tag env) st
+  have hlet0 : ExecStmt (yulD (toCalls o)) funsN V st
       (.letDecl [identV tag d] (some (lit 0)))
-      ((identV tag d, (0 : U256)) :: toVEnv tag env) st .normal :=
+      ((identV tag d, (0 : U256)) :: V) st .normal :=
     Step.letVal (D := yulD (toCalls o)) Step.lit rfl
-  let pre : VEnv evm := (identV tag d, (0 : U256)) :: toVEnv tag env
+  let pre : VEnv evm := (identV tag d, (0 : U256)) :: V
+  have hokPre : localsOK tag env pre :=
+    localsOK_identV_front (tag := tag) 0 hn1 hinv.venv
   obtain ⟨st1, hpre, _, hMO, _, _, _⟩ :=
     call_prefix_fwd tag (funs := List.replicate (n + 1) []) sel args
-      (.inr rfl) hn (fun _ => hn1) hctx henv hn3 hvals hsel
+      hokPre hctx henv hn3 hvals hsel
   have hpre' := execStmts_lift_nils (calls := toCalls o) (n := n + 1) hpre
   have htgt := eval_atomE_nils tag (calls := toCalls o) (n := n + 1)
-    (.inr rfl) hn (fun _ => hn1) (a := target) (st := st1)
+    hokPre (a := target) (st := st1)
   obtain ⟨resp, hlet, _⟩ :=
     exec_let_staticcall_fwd (calls := toCalls o) htot funsN1 htgt
       (ok := extOk tag d) (gas := extCallGas) (insize := 4 + 32 * args.length)
@@ -561,34 +560,34 @@ theorem op_view_progress {S E ε : Type}
     let vU : U256 := suffixVal ret st2
     have hne : extOk tag d ≠ identV tag d := (identV_ne_extOk tag d d).symm
     have hset : VEnv.set V2 (identV tag d) vU =
-        (extOk tag d, resp.flag) :: (identV tag d, vU) :: toVEnv tag env := by
+        (extOk tag d, resp.flag) :: (identV tag d, vU) :: V := by
       rw [VEnv.set_cons_ne hne]
       simp [VEnv.set, pre]
-    have hV3 : V3 = (extOk tag d, resp.flag) :: (identV tag d, vU) :: toVEnv tag env := by
+    have hV3 : V3 = (extOk tag d, resp.flag) :: (identV tag d, vU) :: V := by
       rw [hVeq]; exact hset
-    have hrest : restore pre V3 = (identV tag d, vU) :: toVEnv tag env := by
-      rw [hV3]; exact restore_call_assign
-    refine ⟨restore pre V3, st3, .normal, ?_, .inr ⟨rfl, vU.toNat, ?_, ?_⟩⟩
+    have hrest : restore pre V3 =
+        (identV tag d, BitVec.ofNat 256 vU.toNat) :: V := by
+      rw [hV3]; exact (restore_call_assign).trans (by rw [ofNat_toNat_u256])
+    refine ⟨restore pre V3, st3, .normal, ?_, .inr ⟨rfl, vU.toNat, ?_⟩⟩
     · exact Step.seqCons hlet0 (Step.seqCons hblk Step.seqNil)
-    · exact hrest.trans (toVEnv_cons_u256 tag vU env).symm
-    · exact ⟨hrest.trans (toVEnv_cons_u256 tag vU env).symm,
-        envWF_cons (u256_lt_word vU) henv, hR3, hctx3⟩
+    · exact hrest ▸
+        ⟨localsOK_cons (tag := tag) vU.toNat hn1 hinv.venv,
+          envWF_cons (u256_lt_word vU) henv, hR3, hctx3⟩
 
 theorem stmt_call_progress {S E ε : Type}
     {c : ContractDef} {Γ : ContractSchema S ExtState E ε}
     {κ ctx} {w : World S ExtState E} {env : List Nat}
-    (o : ExtOracle) {n : Nat} {st : EvmState}
+    (o : ExtOracle) {n : Nat} {V : VEnv evm} {st : EvmState}
     {target : Atom} {sel : Nat} {args : List Atom} {ret : AbiRet}
-    (hinv : Inv tag Γ c κ ctx w env (toVEnv tag env) st)
+    (hinv : Inv tag Γ c κ ctx w env V st)
     (hNR : ExtOracle.NoReentry o ctx.self)
     (hwfCall : callWF target args = true) (hsel : sel < 2 ^ 32)
     (hn : identsNodup tag env.length = true) :
     ∃ V' st' out,
-      ExecStmts (yulD (toCalls o)) (List.replicate n []) (toVEnv tag env) st
+      ExecStmts (yulD (toCalls o)) (List.replicate n []) V st
         (emitStmt tag c {} env.length (.call target sel args ret)).stmts V' st' out ∧
       (out = .halt ∨
-        (out = .normal ∧ V' = toVEnv tag env ∧
-          Inv tag Γ c κ ctx w env V' st')) := by
+        (out = .normal ∧ Inv tag Γ c κ ctx w env V' st')) := by
   obtain ⟨_, hvals, hn3⟩ := callWF_elim hwfCall
   have hR := hinv.rel
   have hctx := hinv.ctxr
@@ -597,13 +596,13 @@ theorem stmt_call_progress {S E ε : Type}
   let d := env.length
   let funsN : FunEnv (yulD (toCalls o)) := List.replicate n []
   let funsN1 : FunEnv (yulD (toCalls o)) := List.replicate (n + 1) []
-  let pre : VEnv evm := toVEnv tag env
+  let pre : VEnv evm := V
   obtain ⟨st1, hpre, hpack, hMO, hstatic, _, _⟩ :=
     call_prefix_fwd tag (funs := List.replicate (n + 1) []) sel args
-      (.inl rfl) hn (hn1_of_base tag) hctx henv hn3 hvals hsel
+      hinv.venv hctx henv hn3 hvals hsel
   have hpre' := execStmts_lift_nils (calls := toCalls o) (n := n + 1) hpre
   have htgt := eval_atomE_nils tag (calls := toCalls o) (n := n + 1)
-    (.inl rfl) hn (hn1_of_base tag) (a := target) (st := st1)
+    hinv.venv (a := target) (st := st1)
   obtain ⟨resp, hlet, hCall⟩ :=
     exec_let_call_fwd (calls := toCalls o) htot funsN1 htgt hstatic
       (ok := extOk tag d) (gas := extCallGas) (insize := 4 + 32 * args.length)
@@ -683,25 +682,24 @@ theorem stmt_call_progress {S E ε : Type}
         (ctxRel_finishCall hctx1 .call resp abiPtr (4 + 32 * args.length) abiPtr 32)
         hMO2
     have hV3 : V3 = V2 := by simpa using hVeq
-    have hrest : restore pre V3 = toVEnv tag env := by
+    have hrest : restore pre V3 = V := by
       rw [hV3]; exact restore_drop1
     refine ⟨restore pre V3, st3, .normal, Step.seqCons hblk Step.seqNil,
-      .inr ⟨rfl, hrest, ⟨hrest.symm ▸ rfl, henv, hR3, hctx3⟩⟩⟩
+      .inr ⟨rfl, ⟨hrest.symm ▸ hinv.venv, henv, hR3, hctx3⟩⟩⟩
 
 theorem stmt_view_progress {S E ε : Type}
     {c : ContractDef} {Γ : ContractSchema S ExtState E ε}
     {κ ctx} {w : World S ExtState E} {env : List Nat}
-    (o : ExtOracle) {n : Nat} {st : EvmState}
+    (o : ExtOracle) {n : Nat} {V : VEnv evm} {st : EvmState}
     {target : Atom} {sel : Nat} {args : List Atom} {ret : AbiRet}
-    (hinv : Inv tag Γ c κ ctx w env (toVEnv tag env) st)
+    (hinv : Inv tag Γ c κ ctx w env V st)
     (hwfCall : callWF target args = true) (hsel : sel < 2 ^ 32)
     (hn : identsNodup tag env.length = true) :
     ∃ V' st' out,
-      ExecStmts (yulD (toCalls o)) (List.replicate n []) (toVEnv tag env) st
+      ExecStmts (yulD (toCalls o)) (List.replicate n []) V st
         (emitStmt tag c {} env.length (.view target sel args ret)).stmts V' st' out ∧
       (out = .halt ∨
-        (out = .normal ∧ V' = toVEnv tag env ∧
-          Inv tag Γ c κ ctx w env V' st')) := by
+        (out = .normal ∧ Inv tag Γ c κ ctx w env V' st')) := by
   obtain ⟨_, hvals, hn3⟩ := callWF_elim hwfCall
   have hR := hinv.rel
   have hctx := hinv.ctxr
@@ -710,13 +708,13 @@ theorem stmt_view_progress {S E ε : Type}
   let d := env.length
   let funsN : FunEnv (yulD (toCalls o)) := List.replicate n []
   let funsN1 : FunEnv (yulD (toCalls o)) := List.replicate (n + 1) []
-  let pre : VEnv evm := toVEnv tag env
+  let pre : VEnv evm := V
   obtain ⟨st1, hpre, _, hMO, _, _, _⟩ :=
     call_prefix_fwd tag (funs := List.replicate (n + 1) []) sel args
-      (.inl rfl) hn (hn1_of_base tag) hctx henv hn3 hvals hsel
+      hinv.venv hctx henv hn3 hvals hsel
   have hpre' := execStmts_lift_nils (calls := toCalls o) (n := n + 1) hpre
   have htgt := eval_atomE_nils tag (calls := toCalls o) (n := n + 1)
-    (.inl rfl) hn (hn1_of_base tag) (a := target) (st := st1)
+    hinv.venv (a := target) (st := st1)
   obtain ⟨resp, hlet, _⟩ :=
     exec_let_staticcall_fwd (calls := toCalls o) htot funsN1 htgt
       (ok := extOk tag d) (gas := extCallGas) (insize := 4 + 32 * args.length)
@@ -770,10 +768,10 @@ theorem stmt_view_progress {S E ε : Type}
           (4 + 32 * args.length) abiPtr 32)
         hMO2
     have hV3 : V3 = V2 := by simpa using hVeq
-    have hrest : restore pre V3 = toVEnv tag env := by
+    have hrest : restore pre V3 = V := by
       rw [hV3]; exact restore_drop1
     refine ⟨restore pre V3, st3, .normal, Step.seqCons hblk Step.seqNil,
-      .inr ⟨rfl, hrest, ⟨hrest.symm ▸ rfl, henv, hR3, hctx3⟩⟩⟩
+      .inr ⟨rfl, ⟨hrest.symm ▸ hinv.venv, henv, hR3, hctx3⟩⟩⟩
 
 /-! ## Memoryguard prefix on `yulD` -/
 

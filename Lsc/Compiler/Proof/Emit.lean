@@ -31,6 +31,43 @@ theorem emitAssign_acc (e : Emit) (n : YIdent) (x : YExpr) :
 theorem emitBlock_acc (e : Emit) (body : YBlock) :
     emitBlock e body = { acc := (emitBlock ({} : Emit) body).acc ++ e.acc } := rfl
 
+theorem emitSeqIfWord_acc (e : Emit) (d : Nat) (cond : Cond) (eA eB : Emit) :
+    emitSeqIfWord tag e d cond eA eB =
+      { acc := (emitSeqIfWord tag {} d cond eA eB).acc ++ e.acc } := by
+  unfold emitSeqIfWord
+  rw [emitBlock_acc, emitLet_acc]
+  conv => rhs; rw [emitBlock_acc]
+  simp [List.append_assoc]
+
+theorem emitBlock_stmts (e : Emit) (body : YBlock) :
+    (emitBlock e body).stmts = e.stmts ++ [.block body] :=
+  Emit.stmts_push _ _
+
+theorem seqIfWordInner_eq (d : Nat) (cond : Cond) (eA eB : Emit) :
+    seqIfWordInner tag d cond eA eB =
+      [.letDecl [identPhi tag d] (some (lit 0)),
+        .switch (emitCond tag d cond)
+          [(YulSemantics.Literal.number 0, eB.stmts)] (some eA.stmts),
+        .assign [identV tag d] (var (identPhi tag d))] := by
+  simp [seqIfWordInner, emitAssign, emitLet, Emit.push, Emit.stmts,
+    List.reverse_cons, List.reverse_nil, List.nil_append]
+
+theorem emitSeqIfWord_nil_stmts (d : Nat) (cond : Cond) (eA eB : Emit) :
+    (emitSeqIfWord tag {} d cond eA eB).stmts =
+      [.letDecl [identV tag d] (some (lit 0)),
+        .block (seqIfWordInner tag d cond eA eB)] := by
+  unfold emitSeqIfWord
+  rw [emitBlock_stmts]
+  have hlet : (emitLet ({} : Emit) (identV tag d) (lit 0)).stmts =
+      [.letDecl [identV tag d] (some (lit 0))] := by
+    simp [emitLet, Emit.push, Emit.stmts]
+  rw [hlet]
+  rfl
+
+theorem hoist_seqIfWordInner (d : Nat) (cond : Cond) (eA eB : Emit) :
+    hoist evm (seqIfWordInner tag d cond eA eB) = [] := by
+  simp [seqIfWordInner_eq, hoist]
+
 theorem emitIf_acc (e : Emit) (cnd : YExpr) (body : YBlock) :
     emitIf e cnd body = { acc := (emitIf ({} : Emit) cnd body).acc ++ e.acc } := rfl
 
@@ -483,6 +520,42 @@ theorem emitCore_acc tag {c : ContractDef} {halt : Bool} {clearLock : Bool} {t :
       cases emitCore tag c {} d halt b clearLock with
       | none => simp
       | some _ => simp [Emit.push]
+  | @seqIf tBr _ cond th el k _ _ ihk =>
+    intro e d
+    cases tBr with
+    | unit =>
+      simp only [emitCore]
+      cases hA : emitCore tag c {} d false th false with
+      | none => simp
+      | some eA =>
+        cases hB : emitCore tag c {} d false el false with
+        | none => simp
+        | some eB =>
+          simp only [hA, hB, Bind.bind, Option.bind, Pure.pure]
+          rw [ihk (e.push (.switch (emitCond tag d cond)
+                [(YulSemantics.Literal.number 0, eB.stmts)] (some eA.stmts))) d]
+          rw [ihk (({} : Emit).push (.switch (emitCond tag d cond)
+                [(YulSemantics.Literal.number 0, eB.stmts)] (some eA.stmts))) d]
+          cases emitCore tag c {} d halt k clearLock with
+          | none => simp
+          | some _ => simp [Emit.push, List.append_assoc]
+    | word | addr | flag =>
+      simp only [emitCore]
+      cases hA : emitCoreToVar tag c {} d (identPhi tag d) th with
+      | none => simp
+      | some eA =>
+        cases hB : emitCoreToVar tag c {} d (identPhi tag d) el with
+        | none => simp
+        | some eB =>
+          simp only [hA, hB, Bind.bind, Option.bind, Pure.pure]
+          rw [emitSeqIfWord_acc]
+          rw [ihk ({ acc := (emitSeqIfWord tag {} d cond eA eB).acc ++ e.acc } : Emit)
+            (d + 1)]
+          rw [ihk (emitSeqIfWord tag {} d cond eA eB) (d + 1)]
+          cases emitCore tag c {} (d + 1) halt k clearLock with
+          | none => simp
+          | some _ => simp [List.append_assoc]
+    | pair _ _ => simp [emitCore]
 
 theorem emitCore_prefix {c halt clearLock t} {core : Core t}
     {e e' : Emit} {d : Nat} (hem : emitCore tag c e d halt core clearLock = some e') :
@@ -496,10 +569,187 @@ theorem emitCore_prefix {c halt clearLock t} {core : Core t}
     simp [h0] at hem
     exact ⟨e0, rfl, by cases hem; exact Emit.cat_stmts e e0⟩
 
-theorem emitCore_some tag {c halt t} (core : Core t) (e : Emit) (d : Nat)
-    (clearLock : Bool := false) :
+theorem emitCoreToVar_acc tag {c : ContractDef} {t : RetTy} (core : Core t)
+    (e : Emit) (d : Nat) (dest : YIdent) :
+    emitCoreToVar tag c e d dest core =
+      (emitCoreToVar tag c {} d dest core).map fun e0 =>
+        { acc := e0.acc ++ e.acc } := by
+  induction core generalizing e d dest with
+  | ret r =>
+    cases r with
+    | word a | addr a | flag a =>
+      simp only [emitCoreToVar, emitAssignRet]
+      rw [emitAssign_acc]
+      rfl
+    | unit | pair _ _ =>
+      simp only [emitCoreToVar, emitAssignRet, Option.map_some]
+      simp [List.nil_append]
+  | opTail op | opTailAddr op | opTailFlag op =>
+    simp only [emitCoreToVar]
+    rw [emitLetOp_acc]
+    cases emitLetOp tag c {} d op with
+    | none => simp
+    | some e0 =>
+      simp only [Option.map_some, Bind.bind, Option.bind]
+      rw [emitAssign_acc, emitAssign_acc (e := e0)]
+      simp [List.append_assoc]
+  | stmtTail s =>
+    simp only [emitCoreToVar]
+    rw [emitStmt_acc]
+    rfl
+  | revertTail err args =>
+    simp only [emitCoreToVar]
+    rw [emitCustomError_acc]
+    rfl
+  | letOp op k ih =>
+    simp only [emitCoreToVar]
+    rw [emitLetOp_acc]
+    cases emitLetOp tag c {} d op with
+    | none => simp
+    | some e0 =>
+      simp only [Option.map_some, Bind.bind, Option.bind]
+      rw [ih { acc := e0.acc ++ e.acc } (d + 1), ih e0 (d + 1)]
+      cases emitCoreToVar tag c {} (d + 1) dest k with
+      | none => simp
+      | some _ => simp [List.append_assoc]
+  | seq s k ih =>
+    simp only [emitCoreToVar]
+    rw [emitStmt_acc]
+    rw [ih { acc := (emitStmt tag c {} d s).acc ++ e.acc } d, ih (emitStmt tag c {} d s) d]
+    cases emitCoreToVar tag c {} d dest k with
+    | none => simp
+    | some _ => simp [List.append_assoc]
+  | letPure p args k ih =>
+    simp only [emitCoreToVar]
+    rw [emitLet_acc]
+    rw [ih { acc := (emitLet {} (identV tag d) (emitPrim tag d p args)).acc ++ e.acc }
+        (d + 1),
+      ih (emitLet {} (identV tag d) (emitPrim tag d p args)) (d + 1)]
+    cases emitCoreToVar tag c {} (d + 1) dest k with
+    | none => simp
+    | some _ => simp [List.append_assoc]
+  | ite cond a b =>
+    simp only [emitCoreToVar]
+    cases emitCoreToVar tag c {} d dest a with
+    | none => simp
+    | some _ =>
+      cases emitCoreToVar tag c {} d dest b with
+      | none => simp
+      | some _ => simp [Emit.push]
+  | @seqIf tBr _ cond th el k _ _ ihk =>
+    cases tBr with
+    | unit =>
+      simp only [emitCoreToVar]
+      cases hA : emitCoreToVar tag c {} d dest th with
+      | none => simp
+      | some eA =>
+        cases hB : emitCoreToVar tag c {} d dest el with
+        | none => simp
+        | some eB =>
+          simp only [hA, hB, Bind.bind, Option.bind, Pure.pure]
+          rw [ihk (e.push (.switch (emitCond tag d cond)
+                [(YulSemantics.Literal.number 0, eB.stmts)] (some eA.stmts))) d]
+          rw [ihk (({} : Emit).push (.switch (emitCond tag d cond)
+                [(YulSemantics.Literal.number 0, eB.stmts)] (some eA.stmts))) d]
+          cases emitCoreToVar tag c {} d dest k with
+          | none => simp
+          | some _ => simp [Emit.push, List.append_assoc]
+    | word | addr | flag =>
+      simp only [emitCoreToVar]
+      cases hA : emitCoreToVar tag c {} d (identPhi tag d) th with
+      | none => simp
+      | some eA =>
+        cases hB : emitCoreToVar tag c {} d (identPhi tag d) el with
+        | none => simp
+        | some eB =>
+          simp only [hA, hB, Bind.bind, Option.bind, Pure.pure]
+          rw [emitSeqIfWord_acc]
+          rw [ihk ({ acc := (emitSeqIfWord tag {} d cond eA eB).acc ++ e.acc } : Emit)
+            (d + 1)]
+          rw [ihk (emitSeqIfWord tag {} d cond eA eB) (d + 1)]
+          cases emitCoreToVar tag c {} (d + 1) dest k with
+          | none => simp
+          | some _ => simp [List.append_assoc]
+    | pair _ _ => simp [emitCoreToVar]
+
+theorem emitCoreToVar_prefix {c t} {core : Core t}
+    {e e' : Emit} {d : Nat} {dest : YIdent}
+    (hem : emitCoreToVar tag c e d dest core = some e') :
+    ∃ e0, emitCoreToVar tag c {} d dest core = some e0 ∧
+      e'.stmts = e.stmts ++ e0.stmts := by
+  have h := emitCoreToVar_acc tag (c := c) core e d dest
+  rw [h] at hem
+  cases h0 : emitCoreToVar tag c {} d dest core with
+  | none => simp [h0] at hem
+  | some e0 =>
+    simp [h0] at hem
+    exact ⟨e0, rfl, by cases hem; exact Emit.cat_stmts e e0⟩
+
+/-- On unit cores, `emitCoreToVar` ignores `dest` and matches `emitCore` with
+`haltUnit = false`. -/
+theorem emitCoreToVar_eq_emitCore_unit_gen tag {c : ContractDef} {t : RetTy}
+    (core : Core t) (e : Emit) (d : Nat) (dest : YIdent) (ht : t = .unit) :
+    emitCoreToVar tag c e d dest core = emitCore tag c e d false core false := by
+  induction core generalizing e d dest with
+  | ret r =>
+    cases r with
+    | unit => simp [emitCoreToVar, emitAssignRet, emitCore, emitRet, emitReturnUnit]
+    | word _ | addr _ | flag _ | pair _ _ => cases ht
+  | opTail _ | opTailAddr _ | opTailFlag _ => cases ht
+  | stmtTail s =>
+    simp [emitCoreToVar, emitCore, emitReturnUnit]
+  | revertTail err args =>
+    simp [emitCoreToVar, emitCore]
+  | letOp op k ih =>
+    simp only [emitCoreToVar, emitCore]
+    cases emitLetOp tag c e d op with
+    | none => simp
+    | some e1 => exact ih e1 (d + 1) dest ht
+  | seq s k ih =>
+    simp [emitCoreToVar, emitCore]
+    exact ih _ d dest ht
+  | letPure p args k ih =>
+    simp [emitCoreToVar, emitCore]
+    exact ih _ (d + 1) dest ht
+  | ite cond a b iha ihb =>
+    simp only [emitCoreToVar, emitCore]
+    rw [iha {} d dest ht, ihb {} d dest ht]
+  | @seqIf tBr _ cond th el k ihth ihel ihk =>
+    cases tBr with
+    | unit =>
+      simp only [emitCoreToVar, emitCore]
+      rw [ihth {} d dest rfl, ihel {} d dest rfl]
+      cases emitCore tag c {} d false th false with
+      | none => simp
+      | some eA =>
+        cases emitCore tag c {} d false el false with
+        | none => simp
+        | some eB =>
+          simp only [Bind.bind, Option.bind, Pure.pure]
+          exact ihk _ d dest ht
+    | word | addr | flag =>
+      simp only [emitCoreToVar, emitCore]
+      cases emitCoreToVar tag c {} d (identPhi tag d) th with
+      | none => simp
+      | some eA =>
+        cases emitCoreToVar tag c {} d (identPhi tag d) el with
+        | none => simp
+        | some eB =>
+          simp only [Bind.bind, Option.bind, Pure.pure]
+          exact ihk (emitSeqIfWord tag e d cond eA eB) (d + 1) dest ht
+    | pair _ _ =>
+      simp [emitCoreToVar, emitCore]
+
+theorem emitCoreToVar_eq_emitCore_unit tag {c : ContractDef} (core : Core .unit)
+    (e : Emit) (d : Nat) (dest : YIdent) :
+    emitCoreToVar tag c e d dest core = emitCore tag c e d false core false :=
+  emitCoreToVar_eq_emitCore_unit_gen tag core e d dest rfl
+
+mutual
+theorem emitCore_some tag {c t} (core : Core t) (e : Emit) (d : Nat)
+    (halt : Bool) (clearLock : Bool := false) :
     ∃ e', emitCore tag c e d halt core clearLock = some e' := by
-  induction core generalizing e d with
+  induction core generalizing e d halt clearLock with
   | ret _ => simp [emitCore]
   | opTail op | opTailAddr op | opTailFlag op =>
     obtain ⟨e1, h1⟩ := emitLetOp_some tag c e d op
@@ -507,14 +757,66 @@ theorem emitCore_some tag {c halt t} (core : Core t) (e : Emit) (d : Nat)
   | stmtTail _ | revertTail _ _ => simp [emitCore]
   | letOp op k ih =>
     obtain ⟨e1, h1⟩ := emitLetOp_some tag c e d op
-    simp [emitCore, h1]; exact ih e1 (d + 1)
-  | seq s k ih => simp [emitCore]; exact ih (emitStmt tag c e d s) d
+    simp [emitCore, h1]; exact ih e1 (d + 1) halt clearLock
+  | seq s k ih => simp [emitCore]; exact ih (emitStmt tag c e d s) d halt clearLock
   | letPure p args k ih =>
     simp [emitCore]; exact ih (emitLet e (identV tag d) (emitPrim tag d p args)) (d + 1)
+      halt clearLock
   | ite _ a b iha ihb =>
-    obtain ⟨eA, hA⟩ := iha ({} : Emit) d
-    obtain ⟨eB, hB⟩ := ihb ({} : Emit) d
+    obtain ⟨eA, hA⟩ := iha ({} : Emit) d halt clearLock
+    obtain ⟨eB, hB⟩ := ihb ({} : Emit) d halt clearLock
     simp [emitCore, hA, hB]
+  | @seqIf tBr _ cond th el k ihth ihel ihk =>
+    cases tBr with
+    | unit =>
+      obtain ⟨eA, hA⟩ := ihth ({} : Emit) d false false
+      obtain ⟨eB, hB⟩ := ihel ({} : Emit) d false false
+      simp [emitCore, hA, hB]
+      exact ihk _ d halt clearLock
+    | word | addr | flag =>
+      obtain ⟨eA, hA⟩ := emitCoreToVar_some tag (c := c) th ({} : Emit) d
+        (identPhi tag d)
+      obtain ⟨eB, hB⟩ := emitCoreToVar_some tag (c := c) el ({} : Emit) d
+        (identPhi tag d)
+      simp [emitCore, hA, hB]
+      exact ihk _ (d + 1) halt clearLock
+    | pair _ _ => simp [emitCore]
+
+theorem emitCoreToVar_some tag {c t} (core : Core t) (e : Emit) (d : Nat)
+    (dest : YIdent) :
+    ∃ e', emitCoreToVar tag c e d dest core = some e' := by
+  induction core generalizing e d dest with
+  | ret r =>
+    cases r <;> simp [emitCoreToVar, emitAssignRet]
+  | opTail op | opTailAddr op | opTailFlag op =>
+    obtain ⟨e1, h1⟩ := emitLetOp_some tag c e d op
+    simp [emitCoreToVar, h1]
+  | stmtTail _ | revertTail _ _ => simp [emitCoreToVar]
+  | letOp op k ih =>
+    obtain ⟨e1, h1⟩ := emitLetOp_some tag c e d op
+    simp [emitCoreToVar, h1]; exact ih e1 (d + 1) dest
+  | seq s k ih => simp [emitCoreToVar]; exact ih (emitStmt tag c e d s) d dest
+  | letPure p args k ih =>
+    simp [emitCoreToVar]
+    exact ih (emitLet e (identV tag d) (emitPrim tag d p args)) (d + 1) dest
+  | ite _ a b iha ihb =>
+    obtain ⟨eA, hA⟩ := iha ({} : Emit) d dest
+    obtain ⟨eB, hB⟩ := ihb ({} : Emit) d dest
+    simp [emitCoreToVar, hA, hB]
+  | @seqIf tBr _ cond th el k ihth ihel ihk =>
+    cases tBr with
+    | unit =>
+      obtain ⟨eA, hA⟩ := ihth ({} : Emit) d dest
+      obtain ⟨eB, hB⟩ := ihel ({} : Emit) d dest
+      simp [emitCoreToVar, hA, hB]
+      exact ihk _ d dest
+    | word | addr | flag =>
+      obtain ⟨eA, hA⟩ := ihth ({} : Emit) d (identPhi tag d)
+      obtain ⟨eB, hB⟩ := ihel ({} : Emit) d (identPhi tag d)
+      simp [emitCoreToVar, hA, hB]
+      exact ihk _ (d + 1) dest
+    | pair _ _ => simp [emitCoreToVar]
+end
 
 /-! ## `funDef`-freedom so `hoist` of emitted blocks is `[]` -/
 
@@ -747,6 +1049,95 @@ theorem noFun_core tag {c halt clearLock t} :
       b ({} : Emit) d
     simp [hA, hB] at hem; cases hem
     exact noFun_push he rfl
+  | @seqIf tBr _ cond th el k _ _ ihk =>
+    intro e d e' hem he
+    cases tBr with
+    | unit =>
+      simp [emitCore] at hem
+      obtain ⟨eA, hA⟩ := emitCore_some tag (c := c) (halt := false) (clearLock := false)
+        th ({} : Emit) d
+      obtain ⟨eB, hB⟩ := emitCore_some tag (c := c) (halt := false) (clearLock := false)
+        el ({} : Emit) d
+      simp [hA, hB] at hem
+      exact ihk _ d hem (noFun_push he notFunDef_switch)
+    | word | addr | flag =>
+      simp [emitCore] at hem
+      obtain ⟨eA, hA⟩ := emitCoreToVar_some tag (c := c) th ({} : Emit) d (identPhi tag d)
+      obtain ⟨eB, hB⟩ := emitCoreToVar_some tag (c := c) el ({} : Emit) d (identPhi tag d)
+      simp [hA, hB] at hem
+      exact ihk _ (d + 1) hem (noFun_block (noFun_let he))
+    | pair _ _ =>
+      simp [emitCore] at hem; cases hem; exact he
+
+theorem noFun_coreToVar tag {c t} :
+    ∀ (core : Core t) (e : Emit) (d : Nat) (dest : YIdent) {e' : Emit},
+      emitCoreToVar tag c e d dest core = some e' → e.noFun → e'.noFun := by
+  intro core
+  induction core with
+  | ret r =>
+    intro e d dest e' hem he
+    cases r with
+    | word _ | addr _ | flag _ =>
+      simp [emitCoreToVar, emitAssignRet] at hem; cases hem; exact noFun_assign he
+    | unit | pair _ _ =>
+      simp [emitCoreToVar, emitAssignRet] at hem; cases hem; exact he
+  | opTail op | opTailAddr op | opTailFlag op =>
+    intro e d dest e' hem he
+    simp [emitCoreToVar] at hem
+    obtain ⟨e1, h1⟩ := emitLetOp_some tag c e d op
+    simp [h1] at hem; cases hem
+    exact noFun_assign (noFun_letOp tag c e d op he h1)
+  | stmtTail s =>
+    intro e d dest e' hem he
+    simp [emitCoreToVar] at hem; cases hem
+    exact noFun_stmt tag c e d s he
+  | revertTail err args =>
+    intro e d dest e' hem he
+    simp [emitCoreToVar] at hem; cases hem
+    exact noFun_customError c e err _ he
+  | letOp op k ih =>
+    intro e d dest e' hem he
+    simp [emitCoreToVar] at hem
+    obtain ⟨e1, h1⟩ := emitLetOp_some tag c e d op
+    simp [h1] at hem
+    exact ih e1 (d + 1) dest hem (noFun_letOp tag c e d op he h1)
+  | seq s k ih =>
+    intro e d dest e' hem he
+    simp [emitCoreToVar] at hem
+    exact ih (emitStmt tag c e d s) d dest hem (noFun_stmt tag c e d s he)
+  | letPure p args k ih =>
+    intro e d dest e' hem he
+    simp [emitCoreToVar] at hem
+    exact ih _ (d + 1) dest hem (noFun_let he)
+  | ite cond a b =>
+    intro e d dest e' hem he
+    simp [emitCoreToVar] at hem
+    obtain ⟨eA, hA⟩ := emitCoreToVar_some tag (c := c) a ({} : Emit) d dest
+    obtain ⟨eB, hB⟩ := emitCoreToVar_some tag (c := c) b ({} : Emit) d dest
+    simp [hA, hB] at hem; cases hem
+    exact noFun_push he notFunDef_switch
+  | @seqIf tBr _ cond th el k _ _ ihk =>
+    intro e d dest e' hem he
+    cases tBr with
+    | unit =>
+      simp [emitCoreToVar] at hem
+      obtain ⟨eA, hA⟩ := emitCoreToVar_some tag (c := c) th ({} : Emit) d dest
+      obtain ⟨eB, hB⟩ := emitCoreToVar_some tag (c := c) el ({} : Emit) d dest
+      simp [hA, hB] at hem
+      exact ihk _ d dest hem (noFun_push he notFunDef_switch)
+    | word | addr | flag =>
+      simp [emitCoreToVar] at hem
+      obtain ⟨eA, hA⟩ := emitCoreToVar_some tag (c := c) th ({} : Emit) d (identPhi tag d)
+      obtain ⟨eB, hB⟩ := emitCoreToVar_some tag (c := c) el ({} : Emit) d (identPhi tag d)
+      simp [hA, hB] at hem
+      exact ihk _ (d + 1) dest hem (noFun_block (noFun_let he))
+    | pair _ _ =>
+      simp [emitCoreToVar] at hem; cases hem; exact he
+
+theorem hoist_emitCoreToVar tag {c t} {core : Core t} {e' d dest}
+    (hem : emitCoreToVar tag c {} d dest core = some e') :
+    hoist evm e'.stmts = [] :=
+  hoist_nil_of (Emit.noFun_stmts (noFun_coreToVar tag core {} d dest hem noFun_nil))
 
 theorem hoist_emitCore tag {c halt clearLock t} {core : Core t} {e' d}
     (hem : emitCore tag c {} d halt core clearLock = some e') :
@@ -933,6 +1324,20 @@ theorem noExt_emitCond (d : Nat) : ∀ c, noExtExpr (emitCond tag d c) = true :=
     exact noExt_bop (op := YulSemantics.EVM.Op.iszero) rfl
       (noExtExprs_cons_true ih noExtExprs_nil)
   | tt | ff => exact noExt_lit _
+
+theorem noExt_seqIfWordInner (d : Nat) (cond : Cond) (eA eB : Emit)
+    (hA : noExtBlock eA.stmts = true) (hB : noExtBlock eB.stmts = true) :
+    noExtBlock (seqIfWordInner tag d cond eA eB) = true := by
+  rw [seqIfWordInner_eq]
+  simp [noExtBlock, noExtStmts, noExtStmt, noExtCases, noExt_emitCond, noExt_lit,
+    noExtExpr]
+  simpa [noExtBlock, noExt_var] using And.intro hB hA
+
+theorem noExt_emitSeqIfWord (e : Emit) (d : Nat) (cond : Cond) (eA eB : Emit)
+    (he : noExtBlock e.stmts = true)
+    (hA : noExtBlock eA.stmts = true) (hB : noExtBlock eB.stmts = true) :
+    noExtBlock (emitSeqIfWord tag e d cond eA eB).stmts = true :=
+  noExt_block (noExt_let he (noExt_lit 0)) (noExt_seqIfWordInner tag d cond eA eB hA hB)
 
 theorem noExt_emitPrim (d : Nat) (p : Prim) (args : List Atom) :
     noExtExpr (emitPrim tag d p args) = true := by

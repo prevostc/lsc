@@ -98,6 +98,11 @@ only witnesses `compileRuntime C.contract`.
 let (out, protoFee) ← swapOut r0 r1 amountIn coeff
 ```
 
+Effectful `if`/`else` is ordinary Lean `do`-notation (`if c then … else …`).
+The reifier emits `Core.seqIf` so the continuation after the `if` is compiled
+once (not copied into both branches). A pure `let x := if c then a else b` stays
+`Core.ite`.
+
 `#lsc_obligations` prints the security statements to prove. It does not
 import the security library.
 

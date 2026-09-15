@@ -41,7 +41,7 @@ theorem stmt_sim_emit0 {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E �
       ExecStmts evm funs V st (emitStmt tag c {} env.length (.emit ev [])).stmts
         V st' .normal ∧
       Inv tag Γ c κ ctx w' env V st' := by
-  rcases hinv with ⟨hV, henv, hR, hctx⟩
+  rcases hinv with ⟨hok, henv, hR, hctx⟩
   have ⟨ed, hed, _⟩ := (eventOK_iff c ev 0).mp (by simpa [stmtWF] using hwf)
   have hev : ev < c.events.length := (List.getElem?_eq_some_iff.mp hed).1
   have hstatic := ctxRel_static hctx
@@ -77,7 +77,7 @@ theorem stmt_sim_emit0 {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E �
         rw [hget] at hl'
         exact hl'
       · simpa [stL, appendLog, touchMemory] using hk
-    exact ⟨hV, henv, hR',
+    exact ⟨hok, henv, hR',
       ctxRel_appendLog hctx [BitVec.ofNat 256 ed.topic0]
         (BitVec.ofNat 256 abiPtr) (BitVec.ofNat 256 0)⟩
 

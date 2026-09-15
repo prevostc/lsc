@@ -86,9 +86,10 @@ def constructor (owner t0 t1 : Address) : M Unit := do
 /-- Uniswap-v2 minimum liquidity burned to address 0 on the first mint. -/
 def MINIMUM_LIQUIDITY : Amount lpShare := 1000
 
-/-- Mint `n` shares to `to`. -/
+/-- Mint `n` shares to `to` and bump `totalShares`. -/
 @[lsc_inline] def mint (to : Address) (n : Amount lpShare) : M Unit := do
   write shares[to] (← (← read shares[to]) +? n)
+  write totalShares (← (← read totalShares) +? n)
 
 /-- Deposit `a0`/`a1`. First mint relabels `a0` as LP shares (two-asset pools
 have no single decimals; Uniswap-v2 convention) and burns
@@ -103,10 +104,13 @@ def addLiquidity (a0 : Amount asset0) (a1 : Amount asset1) : M (Amount lpShare) 
   let ts ← read totalShares
   let minted ←
     if ts = 0 then
+      -- two-asset LP shares have no single decimals; Uniswap-v2 convention:
+      -- token0's raw amount, minus MINIMUM_LIQUIDITY locked at address 0
       let raw := a0.asUnchecked lpShare
       Tx.require (MINIMUM_LIQUIDITY < raw) .InsufficientLiquidity
+      mint 0 MINIMUM_LIQUIDITY
       raw -? MINIMUM_LIQUIDITY
-    else do
+    else
       Tx.require (0 < r0) .Zero
       Tx.require (0 < r1) .Zero
       let s0 ← ts mulDiv↓ a0 / r0
@@ -115,11 +119,6 @@ def addLiquidity (a0 : Amount asset0) (a1 : Amount asset1) : M (Amount lpShare) 
   Tx.require (0 < minted) .ZeroShares
   write reserve0 (← r0 +? a0)
   write reserve1 (← r1 +? a1)
-  if ts = 0 then
-    write totalShares (← ts +? (a0.asUnchecked lpShare))
-    write shares[0] MINIMUM_LIQUIDITY
-  if ts ≠ 0 then
-    write totalShares (← ts +? minted)
   mint who minted
   let t0 ← read token0
   let t1 ← read token1

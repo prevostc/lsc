@@ -12,7 +12,9 @@ buckets move only on swaps and `collectProtocolFees`; `removeLiquidity` pays
 the floor pro-rata of each reserve; `addLiquidity` mints the floor-min of
 the two reserve ratios, or `a0 − 1000` on the first mint, locking
 `MINIMUM_LIQUIDITY` at address 0 (`addLiquidity_min_liquidity` on a first
-mint). Owner admin does not touch the buckets.
+mint). `mint` updates both `shares[to]` and `totalShares`; first mint
+calls `mint 0 MINIMUM_LIQUIDITY` then `mint who minted`. Owner admin does
+not touch the buckets.
 
 **Proved (spec):** share-count anti-extraction
 (`cpamm_no_unauthorized_extraction`) and solvency of LP claims plus protocol

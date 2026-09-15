@@ -268,6 +268,22 @@ theorem noYulCall_emitBlock (e : Emit) (body : YBlock)
     noYulCallStmts (e.push (.block body)).stmts = true := by
   exact noYulCall_emit_push e _ he (by simp [noYulCallStmt, hb])
 
+theorem noYulCall_seqIfWordInner tag (d : Nat) (cond : Cond) (eA eB : Emit)
+    (hA : noYulCallStmts eA.stmts = true) (hB : noYulCallStmts eB.stmts = true) :
+    noYulCallStmts (seqIfWordInner tag d cond eA eB) = true := by
+  rw [seqIfWordInner_eq]
+  simp [noYulCallStmts, noYulCallStmt, noYulCall_emitCond, noYulCallExpr_lit,
+    noYulCallExpr_var, noYulCallCases, hA, hB]
+
+theorem noYulCall_emitSeqIfWord tag (e : Emit) (d : Nat) (cond : Cond) (eA eB : Emit)
+    (he : noYulCallStmts e.stmts = true)
+    (hA : noYulCallStmts eA.stmts = true) (hB : noYulCallStmts eB.stmts = true) :
+    noYulCallStmts (emitSeqIfWord tag e d cond eA eB).stmts = true :=
+  noYulCall_emitBlock (emitLet e (identV tag d) (lit 0)) _
+    (noYulCall_emitLet e _ _ he (noYulCallExpr_lit 0))
+    (noYulCall_seqIfWordInner tag d cond eA eB hA hB)
+
+
 theorem noYulCallExprs_two (a b : YExpr)
     (ha : noYulCallExpr a = true) (hb : noYulCallExpr b = true) :
     noYulCallExprs [a, b] = true := by
@@ -705,12 +721,114 @@ theorem noYulCall_emitParams tag (e : Emit) (offset n : Nat)
     simp [noYulCallStmts_append, noYulCallStmts, ih e he, noYulCallStmt,
       noYulCall_bop, noYulCallExprs, noYulCallExpr, lit]
 
+theorem noYulCall_emitCoreToVar tag (c : ContractDef) {t} (core : Core t) :
+    ∀ (e : Emit) (d : Nat) (dest : YIdent), noYulCallStmts e.stmts = true →
+      ∀ e', emitCoreToVar tag c e d dest core = some e' →
+        noYulCallStmts e'.stmts = true := by
+  induction core with
+  | ret r =>
+    intro e d dest he e' h
+    simp [emitCoreToVar, emitAssignRet] at h
+    cases r <;> (try cases h; exact he)
+    all_goals
+      cases h
+      exact noYulCall_emitAssign e dest (atomE tag d _) he (noYulCall_atom tag d _)
+  | opTail op | opTailAddr op | opTailFlag op =>
+    intro e d dest he e' h
+    simp only [emitCoreToVar, Bind.bind, Option.bind, Pure.pure] at h
+    cases hop : emitLetOp tag c e d op with
+    | none => simp [hop] at h
+    | some e1 =>
+      simp [hop] at h
+      cases h
+      exact noYulCall_emitAssign e1 dest (var (identV tag d))
+        (noYulCall_emitLetOp tag c e d op he hop) (noYulCallExpr_var _)
+  | stmtTail s =>
+    intro e d dest he e' h
+    simp [emitCoreToVar] at h
+    cases h
+    exact noYulCall_emitStmt tag c e d s he
+  | revertTail err args =>
+    intro e d dest he e' h
+    simp [emitCoreToVar] at h
+    cases h
+    exact noYulCall_emitCustomError c e err (args.map (atomE tag d)) he
+      (noYulCallExprs_map_atom tag d args)
+  | letOp op k ih =>
+    intro e d dest he e' h
+    simp only [emitCoreToVar, Bind.bind, Option.bind] at h
+    cases hop : emitLetOp tag c e d op with
+    | none => simp [hop] at h
+    | some e1 =>
+      simp [hop] at h
+      exact ih e1 (d + 1) dest (noYulCall_emitLetOp tag c e d op he hop) e' h
+  | seq s k ih =>
+    intro e d dest he e' h
+    simp only [emitCoreToVar] at h
+    exact ih (emitStmt tag c e d s) d dest (noYulCall_emitStmt tag c e d s he) e' h
+  | letPure p args k ih =>
+    intro e d dest he e' h
+    simp only [emitCoreToVar] at h
+    exact ih (emitLet e (identV tag d) (emitPrim tag d p args)) (d + 1) dest
+      (noYulCall_emitLet e _ _ he (noYulCall_emitPrim tag d p args)) e' h
+  | ite cond a b iha ihb =>
+    intro e d dest he e' h
+    simp only [emitCoreToVar, Bind.bind, Option.bind, Pure.pure] at h
+    cases ha : emitCoreToVar tag c {} d dest a with
+    | none => simp [ha] at h
+    | some eA =>
+      simp [ha] at h
+      cases hb : emitCoreToVar tag c {} d dest b with
+      | none => simp [hb] at h
+      | some eB =>
+        simp [hb] at h
+        cases h
+        exact noYulCall_emit_push e _ he (by
+          simp [noYulCallStmt, noYulCall_emitCond tag d cond, noYulCallCases,
+            noYulCallStmts, iha {} d dest noYulCall_nilEmit _ ha,
+            ihb {} d dest noYulCall_nilEmit _ hb])
+  | @seqIf tBr _ cond th el k ihth ihel ihk =>
+    intro e d dest he e' h
+    cases tBr with
+    | pair _ _ =>
+      simp [emitCoreToVar] at h; cases h; exact he
+    | unit =>
+      simp only [emitCoreToVar, Bind.bind, Option.bind, Pure.pure] at h
+      cases ha : emitCoreToVar tag c {} d dest th with
+      | none => simp [ha] at h
+      | some eA =>
+        simp [ha] at h
+        cases hb : emitCoreToVar tag c {} d dest el with
+        | none => simp [hb] at h
+        | some eB =>
+          simp [ha, hb] at h
+          exact ihk (e.push (.switch (emitCond tag d cond)
+              [(YulSemantics.Literal.number 0, eB.stmts)] (some eA.stmts))) d dest
+            (noYulCall_emit_push e _ he (by
+              simp [noYulCallStmt, noYulCall_emitCond tag d cond, noYulCallCases,
+                noYulCallStmts, ihth {} d dest noYulCall_nilEmit _ ha,
+                ihel {} d dest noYulCall_nilEmit _ hb])) e' h
+    | word | addr | flag =>
+      simp only [emitCoreToVar, Bind.bind, Option.bind, Pure.pure] at h
+      cases ha : emitCoreToVar tag c {} d (identPhi tag d) th with
+      | none => simp [ha] at h
+      | some eA =>
+        simp [ha] at h
+        cases hb : emitCoreToVar tag c {} d (identPhi tag d) el with
+        | none => simp [hb] at h
+        | some eB =>
+          simp [ha, hb] at h
+          exact ihk (emitSeqIfWord tag e d cond eA eB) (d + 1) dest
+            (noYulCall_emitSeqIfWord tag e d cond eA eB he
+              (ihth {} d (identPhi tag d) noYulCall_nilEmit _ ha)
+              (ihel {} d (identPhi tag d) noYulCall_nilEmit _ hb)) e' h
+
 theorem noYulCall_emitCore tag (c : ContractDef) (halt : Bool)
     {clearLock : Bool} {t} (core : Core t) :
     ∀ (e : Emit) (d : Nat), noYulCallStmts e.stmts = true →
       ∀ e', emitCore tag c e d halt core clearLock = some e' →
         noYulCallStmts e'.stmts = true := by
-  induction core with
+  induction core generalizing halt clearLock with
   | ret r =>
     intro e d he e' h
     simp only [emitCore] at h
@@ -752,15 +870,15 @@ theorem noYulCall_emitCore tag (c : ContractDef) (halt : Bool)
     | none => simp [hop] at h
     | some e1 =>
       simp [hop] at h
-      exact ih e1 (d + 1) (noYulCall_emitLetOp tag c e d op he hop) e' h
+      exact ih (halt := halt) (clearLock := clearLock) e1 (d + 1) (noYulCall_emitLetOp tag c e d op he hop) e' h
   | seq s k ih =>
     intro e d he e' h
     simp only [emitCore] at h
-    exact ih (emitStmt tag c e d s) d (noYulCall_emitStmt tag c e d s he) e' h
+    exact ih (halt := halt) (clearLock := clearLock) (emitStmt tag c e d s) d (noYulCall_emitStmt tag c e d s he) e' h
   | letPure p args k ih =>
     intro e d he e' h
     simp only [emitCore] at h
-    exact ih (emitLet e (identV tag d) (emitPrim tag d p args)) (d + 1)
+    exact ih (halt := halt) (clearLock := clearLock) (emitLet e (identV tag d) (emitPrim tag d p args)) (d + 1)
       (noYulCall_emitLet e _ _ he (noYulCall_emitPrim tag d p args)) e' h
   | ite cond a b iha ihb =>
     intro e d he e' h
@@ -774,10 +892,49 @@ theorem noYulCall_emitCore tag (c : ContractDef) (halt : Bool)
       | some eB =>
         simp [hb] at h
         cases h
-        have hA := iha {} d noYulCall_nilEmit _ ha
-        have hB := ihb {} d noYulCall_nilEmit _ hb
+        have hA := iha (halt := halt) (clearLock := clearLock) {} d noYulCall_nilEmit _ ha
+        have hB := ihb (halt := halt) (clearLock := clearLock) {} d noYulCall_nilEmit _ hb
         exact noYulCall_emit_push e _ he (by
           simp [noYulCallStmt, noYulCall_emitCond tag d cond, noYulCallCases, noYulCallStmts, hA, hB])
+  | @seqIf tBr _ cond th el k ihth ihel ihk =>
+    intro e d he e' h
+    cases tBr with
+    | pair _ _ =>
+      simp [emitCore] at h; cases h; exact he
+    | unit =>
+      simp only [emitCore, Bind.bind, Option.bind, Pure.pure] at h
+      cases ha : emitCore tag c {} d false th false with
+      | none => simp [ha] at h
+      | some eA =>
+        simp [ha] at h
+        cases hb : emitCore tag c {} d false el false with
+        | none => simp [hb] at h
+        | some eB =>
+          simp [ha, hb] at h
+          have hA := ihth (halt := false) (clearLock := false) {} d noYulCall_nilEmit _ ha
+          have hB := ihel (halt := false) (clearLock := false) {} d noYulCall_nilEmit _ hb
+          exact ihk (halt := halt) (clearLock := clearLock) (e.push (.switch (emitCond tag d cond)
+              [(YulSemantics.Literal.number 0, eB.stmts)] (some eA.stmts))) d
+            (noYulCall_emit_push e _ he (by
+              simp [noYulCallStmt, noYulCall_emitCond tag d cond, noYulCallCases,
+                noYulCallStmts, hA, hB])) e' h
+    | word | addr | flag =>
+      simp only [emitCore, Bind.bind, Option.bind, Pure.pure] at h
+      cases ha : emitCoreToVar tag c {} d (identPhi tag d) th with
+      | none => simp [ha] at h
+      | some eA =>
+        simp [ha] at h
+        cases hb : emitCoreToVar tag c {} d (identPhi tag d) el with
+        | none => simp [hb] at h
+        | some eB =>
+          simp [ha, hb] at h
+          have hA := noYulCall_emitCoreToVar tag c th {} d (identPhi tag d)
+            noYulCall_nilEmit _ ha
+          have hB := noYulCall_emitCoreToVar tag c el {} d (identPhi tag d)
+            noYulCall_nilEmit _ hb
+          exact ihk (halt := halt) (clearLock := clearLock)
+            (emitSeqIfWord tag e d cond eA eB) (d + 1)
+            (noYulCall_emitSeqIfWord tag e d cond eA eB he hA hB) e' h
 
 theorem toYulFn_noYulCall {c f yul} (h : toYulFn c f = some yul) :
     noYulCallStmts yul = true := by

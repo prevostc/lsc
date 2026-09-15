@@ -340,14 +340,15 @@ theorem panic_sim (funs : FunEnv evm) (V : VEnv evm) (st : EvmState) (code : Nat
 theorem op_sim_load {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx} {w : World S X E} {env V st} {f : Nat}
     (funs : FunEnv evm) (hinv : Inv tag Γ c κ ctx w env V st)
-    (hwf : opWF c (.load f) = true) :
+    (hwf : opWF c (.load f) = true)
+    (hn : identsNodup tag (env.length + 1) = true) :
     let v := Γ.st.scalar f w.self
     ∃ st',
       ExecStmts evm funs V st
         (emitLet {} (identV tag env.length) (bop Op.sload [lit f])).stmts
         ((identV tag env.length, BitVec.ofNat 256 v) :: V) st' .normal ∧
       Inv tag Γ c κ ctx w (v :: env) ((identV tag env.length, BitVec.ofNat 256 v) :: V) st' := by
-  rcases hinv with ⟨hV, henv, ⟨hs, hl, hκe, hW⟩, hctx⟩
+  rcases hinv with ⟨hok, henv, ⟨hs, hl, hκe, hW⟩, hctx⟩
   have ⟨fd, hfd, hk⟩ := (fieldKindOK_iff c f FieldKind.scalar).mp (by simpa [opWF] using hwf)
   have hslot : st.storage (BitVec.ofNat 256 f) = BitVec.ofNat 256 (Γ.st.scalar f w.self) := by
     have := hs f fd hfd
@@ -372,8 +373,8 @@ theorem op_sim_load {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
       Step.letVal hsload rfl
     rw [hslot] at hlet
     exact Step.seqCons hlet Step.seqNil
-  · refine ⟨?_, envWF_cons hv henv, ⟨hs, hl, hκe, hW⟩, hctx⟩
-    rw [hV, toVEnv_cons]
+  · exact ⟨localsOK_cons (tag := tag) (Γ.st.scalar f w.self) hn hok,
+      envWF_cons hv henv, ⟨hs, hl, hκe, hW⟩, hctx⟩
 
 theorem op_sim_addChecked {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx} {w : World S X E} {env V st} {a b : Atom}
@@ -395,14 +396,14 @@ theorem op_sim_addChecked {S X E ε} {c : ContractDef} {Γ : ContractSchema S X 
             V' st' .halt ∧
           st'.halted = some (.revert, bytes) ∧
           haltError c Γ e bytes := by
-  rcases hinv with ⟨hV, henv, hR, hctx⟩
+  rcases hinv with ⟨hok, henv, hR, hctx⟩
   have hwf' : atomWF a = true ∧ atomWF b = true := by
     simpa [opWF, Bool.and_eq_true] using hwf
   have ha := atom_eval_lt henv hwf'.1
   have hb := atom_eval_lt henv hwf'.2
   have hn0 : identsNodup tag env.length = true := identsNodup_mono tag (by omega) hn
-  have hea := eval_atom tag funs (st := st) hV hn0 a
-  have heb := eval_atom tag funs (st := st) hV hn0 b
+  have hea := eval_atom_ok tag funs (st := st) hok a
+  have heb := eval_atom_ok tag funs (st := st) hok b
   have hadd :
       EvalExpr evm funs V st
         (bop Op.add [atomE tag env.length a, atomE tag env.length b])
@@ -422,7 +423,7 @@ theorem op_sim_addChecked {S X E ε} {c : ContractDef} {Γ : ContractSchema S X 
           (BitVec.ofNat 256 (a.eval env)))] st) :=
     Step.builtinOk
       (Step.argsCons (Step.argsCons Step.argsNil
-          (eval_atom_cons tag funs st (BitVec.ofNat 256 (a.eval env + b.eval env)) hV hn a))
+          (eval_atom_ok_cons tag funs st (BitVec.ofNat 256 (a.eval env + b.eval env)) hok hn a))
         (Step.var (by
           simp only [V₁]
           rw [VEnv.get_cons, if_pos rfl])))
@@ -439,7 +440,8 @@ theorem op_sim_addChecked {S X E ε} {c : ContractDef} {Γ : ContractSchema S X 
     · simp only [emitAddChecked_stmts, Emit.stmts_nil, List.nil_append]
       refine Step.seqCons hlet (Step.seqCons (Step.ifFalse hlt ?_) Step.seqNil)
       simp [hult, b2w, Dialect.zero, litValue]
-    · exact ⟨by rw [hV, toVEnv_cons], envWF_cons hsum henv, hR, hctx⟩
+    · exact ⟨localsOK_cons (tag := tag) (a.eval env + b.eval env) hn hok,
+        envWF_cons hsum henv, hR, hctx⟩
   · simp
     have hult :
         (BitVec.ofNat 256 (a.eval env + b.eval env)).ult (BitVec.ofNat 256 (a.eval env))
@@ -481,12 +483,12 @@ theorem stmt_sim_store {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E �
     ∃ st',
       ExecStmts evm funs V st (emitStmt tag c {} env.length (.store f val)).stmts V st' .normal ∧
       Inv tag Γ c κ ctx w' env V st' := by
-  rcases hinv with ⟨hV, henv, hR, hctx⟩
+  rcases hinv with ⟨hok, henv, hR, hctx⟩
   have hwf' : fieldKindOK c f .scalar = true ∧ atomWF val = true := by
     simpa [stmtWF, Bool.and_eq_true] using hwf
   have hv := atom_eval_lt henv hwf'.2
   have hstatic := ctxRel_static hctx
-  have hev := eval_atom tag funs (st := st) hV hn val
+  have hev := eval_atom_ok tag funs (st := st) hok val
   let st' :=
     { st with
       storage := upd st.storage (BitVec.ofNat 256 f) (BitVec.ofNat 256 (val.eval env))
@@ -500,7 +502,7 @@ theorem stmt_sim_store {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E �
       (by
         simp only [evm_litValue_number, step_sstore st _ _ hstatic]
         rfl))) Step.seqNil
-  · exact ⟨hV, henv, R_sstore hR hctx hΓ hκ hlen hwf'.1 hv, ctxRel_sstore hctx _ _⟩
+  · exact ⟨hok, henv, R_sstore hR hctx hΓ hκ hlen hwf'.1 hv, ctxRel_sstore hctx _ _⟩
 
 theorem stmt_sim_emit {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx} {w : World S X E} {env V st} {ev : Nat} {a : Atom}
@@ -512,14 +514,14 @@ theorem stmt_sim_emit {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε
     ∃ st',
       ExecStmts evm funs V st (emitStmt tag c {} env.length (.emit ev [a])).stmts V st' .normal ∧
       Inv tag Γ c κ ctx w' env V st' := by
-  rcases hinv with ⟨hV, henv, hR, hctx⟩
+  rcases hinv with ⟨hok, henv, hR, hctx⟩
   have hwf' : eventOK c ev 1 = true ∧ atomWF a = true := by
     simpa [stmtWF, Bool.and_eq_true] using hwf
   have ⟨ed, hed, _hplen⟩ := (eventOK_iff c ev 1).mp hwf'.1
   have hev : ev < c.events.length := (List.getElem?_eq_some_iff.mp hed).1
   have hv := atom_eval_lt henv hwf'.2
   have hstatic := ctxRel_static hctx
-  have hea := eval_atom tag funs (st := st) hV hn a
+  have hea := eval_atom_ok tag funs (st := st) hok a
   have hptr := toNat_abiPtr
   have hn32 := toNat_32
   let stM :=
@@ -570,7 +572,7 @@ theorem stmt_sim_emit {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε
         rw [hget] at hl'
         exact hl'
       · simpa [stL, appendLog, touchMemory, stM] using hk
-    exact ⟨hV, henv, hR',
+    exact ⟨hok, henv, hR',
       ctxRel_appendLog (st := stM)
         (ctxRel_memOnly hctx (by simp [MemOnly, stM, touchMemory]))
         [BitVec.ofNat 256 ed.topic0]

@@ -86,16 +86,16 @@ theorem op_sim_mulDivDown {S X E ε} {c : ContractDef} {Γ : ContractSchema S X 
             V' st' .halt ∧
           st'.halted = some (.revert, bytes) ∧
           haltError c Γ e bytes := by
-  rcases hinv with ⟨hV, henv, hR, hctx⟩
+  rcases hinv with ⟨hok, henv, hR, hctx⟩
   have hwf' : (atomWF a = true ∧ atomWF b = true) ∧ atomWF d = true := by
     simpa [opWF, Bool.and_eq_true] using hwf
   have ha := atom_eval_lt henv hwf'.1.1
   have hb := atom_eval_lt henv hwf'.1.2
   have hd := atom_eval_lt henv hwf'.2
   have hn0 : identsNodup tag env.length = true := identsNodup_mono tag (by omega) hn
-  have hea := eval_atom tag funs (st := st) hV hn0 a
-  have heb := eval_atom tag funs (st := st) hV hn0 b
-  have hed := eval_atom tag funs (st := st) hV hn0 d
+  have hea := eval_atom_ok tag funs (st := st) hok a
+  have heb := eval_atom_ok tag funs (st := st) hok b
+  have hed := eval_atom_ok tag funs (st := st) hok d
   have hisz := eval_iszero_ofNat hd hed
   let name := identV tag env.length
   simp only [Op.denote, Tx.run_mulDivDown]
@@ -114,9 +114,9 @@ theorem op_sim_mulDivDown {S X E ε} {c : ContractDef} {Γ : ContractSchema S X 
         (.letDecl [name] (some (bop Op.mul [atomE tag env.length a, atomE tag env.length b])))
         V₁ st .normal :=
       Step.letVal hmul rfl
-    have hea1 := eval_atom_cons tag funs st (BitVec.ofNat 256 (a.eval env * b.eval env)) hV hn a
-    have heb1 := eval_atom_cons tag funs st (BitVec.ofNat 256 (a.eval env * b.eval env)) hV hn b
-    have hed1 := eval_atom_cons tag funs st (BitVec.ofNat 256 (a.eval env * b.eval env)) hV hn d
+    have hea1 := eval_atom_ok_cons tag funs st (BitVec.ofNat 256 (a.eval env * b.eval env)) hok hn a
+    have heb1 := eval_atom_ok_cons tag funs st (BitVec.ofNat 256 (a.eval env * b.eval env)) hok hn b
+    have hed1 := eval_atom_ok_cons tag funs st (BitVec.ofNat 256 (a.eval env * b.eval env)) hok hn d
     have hep : EvalExpr evm funs V₁ st (var name)
         (.vals [BitVec.ofNat 256 (a.eval env * b.eval env)] st) :=
       Step.var (by
@@ -150,7 +150,7 @@ theorem op_sim_mulDivDown {S X E ε} {c : ContractDef} {Γ : ContractSchema S X 
           (Step.seqCons hlet
             (Step.seqCons (Step.ifFalse hguard (by simp [hcvG, Dialect.zero, litValue]))
               (Step.seqCons hassign Step.seqNil)))
-      · exact ⟨by rw [hV, toVEnv_cons],
+      · exact ⟨localsOK_cons (tag := tag) _ hn hok,
           envWF_cons (Nat.lt_of_le_of_lt (Nat.div_le_self _ _) hfit) henv, hR, hctx⟩
     · rw [if_neg hfit]; simp
       obtain ⟨st', hp, hh⟩ := panic_ifTrue funs V₁ st 0x11 hguard (by
@@ -182,16 +182,16 @@ theorem op_sim_mulDivUp {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E 
             V' st' .halt ∧
           st'.halted = some (.revert, bytes) ∧
           haltError c Γ e bytes := by
-  rcases hinv with ⟨hV, henv, hR, hctx⟩
+  rcases hinv with ⟨hok, henv, hR, hctx⟩
   have hwf' : (atomWF a = true ∧ atomWF b = true) ∧ atomWF d = true := by
     simpa [opWF, Bool.and_eq_true] using hwf
   have ha := atom_eval_lt henv hwf'.1.1
   have hb := atom_eval_lt henv hwf'.1.2
   have hd := atom_eval_lt henv hwf'.2
   have hn0 : identsNodup tag env.length = true := identsNodup_mono tag (by omega) hn
-  have hea := eval_atom tag funs (st := st) hV hn0 a
-  have heb := eval_atom tag funs (st := st) hV hn0 b
-  have hed := eval_atom tag funs (st := st) hV hn0 d
+  have hea := eval_atom_ok tag funs (st := st) hok a
+  have heb := eval_atom_ok tag funs (st := st) hok b
+  have hed := eval_atom_ok tag funs (st := st) hok d
   have hisz := eval_iszero_ofNat hd hed
   let name := identV tag env.length
   simp only [Op.denote, Tx.run_mulDivUp]
@@ -210,9 +210,9 @@ theorem op_sim_mulDivUp {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E 
         (.letDecl [name] (some (bop Op.mul [atomE tag env.length a, atomE tag env.length b])))
         V₁ st .normal :=
       Step.letVal hmul rfl
-    have hea1 := eval_atom_cons tag funs st (BitVec.ofNat 256 (a.eval env * b.eval env)) hV hn a
-    have heb1 := eval_atom_cons tag funs st (BitVec.ofNat 256 (a.eval env * b.eval env)) hV hn b
-    have hed1 := eval_atom_cons tag funs st (BitVec.ofNat 256 (a.eval env * b.eval env)) hV hn d
+    have hea1 := eval_atom_ok_cons tag funs st (BitVec.ofNat 256 (a.eval env * b.eval env)) hok hn a
+    have heb1 := eval_atom_ok_cons tag funs st (BitVec.ofNat 256 (a.eval env * b.eval env)) hok hn b
+    have hed1 := eval_atom_ok_cons tag funs st (BitVec.ofNat 256 (a.eval env * b.eval env)) hok hn d
     have hep : EvalExpr evm funs V₁ st (var name)
         (.vals [BitVec.ofNat 256 (a.eval env * b.eval env)] st) :=
       Step.var (by
@@ -224,7 +224,7 @@ theorem op_sim_mulDivUp {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E 
       have hcvG : b2w (decide (wordBound ≤ a.eval env * b.eval env)) = 0 := by
         simp [Nat.not_le.mpr hfit, b2w]
       let funsB : FunEnv evm := [] :: funs
-      have hed1B := eval_atom_cons tag funsB st (BitVec.ofNat 256 (a.eval env * b.eval env)) hV hn d
+      have hed1B := eval_atom_ok_cons tag funsB st (BitVec.ofNat 256 (a.eval env * b.eval env)) hok hn d
       have hepB : EvalExpr evm funsB V₁ st (var name)
           (.vals [BitVec.ofNat 256 (a.eval env * b.eval env)] st) :=
         Step.var (by
@@ -288,7 +288,7 @@ theorem op_sim_mulDivUp {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E 
             (Step.seqCons hlet
               (Step.seqCons (Step.ifFalse hguard (by simp [hcvG, Dialect.zero, litValue]))
                 (Step.seqCons hsw Step.seqNil)))
-        · exact ⟨by rw [hV, toVEnv_cons],
+        · exact ⟨localsOK_cons (tag := tag) _ hn hok,
             envWF_cons (Nat.lt_of_le_of_lt (Nat.div_le_self _ _) hfit) henv, hR, hctx⟩
       · have hsel :
             selectSwitch evm (BitVec.ofNat 256 r)
@@ -341,7 +341,7 @@ theorem op_sim_mulDivUp {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E 
             (Step.seqCons hlet
               (Step.seqCons (Step.ifFalse hguard (by simp [hcvG, Dialect.zero, litValue]))
                 (Step.seqCons hsw Step.seqNil)))
-        · exact ⟨by rw [hV, toVEnv_cons], envWF_cons hq1 henv, hR, hctx⟩
+        · exact ⟨localsOK_cons (tag := tag) _ hn hok, envWF_cons hq1 henv, hR, hctx⟩
     · rw [if_neg hfit]; simp
       obtain ⟨st', hp, hh⟩ := panic_ifTrue funs V₁ st 0x11 hguard (by
         simp [Nat.le_of_not_gt hfit, b2w, Dialect.zero, litValue]) code_0x11_lt

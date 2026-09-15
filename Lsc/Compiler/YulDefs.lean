@@ -161,6 +161,9 @@ section IdentV
 switch cases do not reuse names (`addLiquidity_0` vs `swap0for1_0`). -/
 def identV (tag : String) (i : Nat) : YIdent := s!"{tag}_{i}"
 
+/-- Join-result scratch; not an `identV` so switch-case lets can reuse `{tag}_{depth}`. -/
+def identPhi (tag : String) (i : Nat) : YIdent := s!"{tag}__phi_{i}"
+
 /-- De Bruijn `i` at environment length `depth` is `{tag}_{depth-1-i}`.
 Parameters occupy `{tag}_0 … {tag}_{n-1}` in ABI order (first parameter first). -/
 def atomE (tag : String) (depth : Nat) : Atom → YExpr
@@ -276,6 +279,11 @@ def coreWF (c : ContractDef) : {t : RetTy} → Core t → Bool
   | _, .seq s k => stmtWF c s && coreWF c k
   | _, .letPure _ args k => args.all atomWF && coreWF c k
   | _, .ite cond a b => condWF cond && coreWF c a && coreWF c b
+  | _, .seqIf (t := t) cond th el k =>
+      condWF cond && coreWF c th && coreWF c el && coreWF c k &&
+        match t with
+        | .pair _ _ => false
+        | _ => true
 
 /-- Extra `let`s under `f` (`opTail` desugars to one). `maxDepth f = params + extra`. -/
 def coreExtraDepth : {t : RetTy} → Core t → Nat
@@ -289,6 +297,11 @@ def coreExtraDepth : {t : RetTy} → Core t → Nat
   | _, .seq _ k => coreExtraDepth k
   | _, .letPure _ _ k => coreExtraDepth k + 1
   | _, .ite _ a b => max (coreExtraDepth a) (coreExtraDepth b)
+  | _, .seqIf (t := t) _ th el k =>
+      let br := max (coreExtraDepth th) (coreExtraDepth el)
+      match t with
+      | .word | .addr | .flag => max br (coreExtraDepth k + 1)
+      | .unit | .pair _ _ => max br (coreExtraDepth k)
 
 def maxDepth (f : FnDef) : Nat := f.params.length + coreExtraDepth f.core
 
@@ -681,8 +694,30 @@ def emitRet (tag : String) (e : Emit) (depth : Nat) (haltUnit : Bool)
   | .unit => emitReturnUnit e haltUnit
   | _ => emitReturnWords e ((retAtoms r).map (atomE tag depth))
 
-def emitCore (tag : String) (c : ContractDef) (e : Emit) (depth : Nat) (haltUnit : Bool)
-    {t : RetTy} (core : Core t) (clearLock : Bool := false) : Option Emit :=
+/-- Inner block of a word-like `seqIf`: `let phi := 0; switch; dest := phi`. -/
+def seqIfWordInner (tag : String) (d : Nat) (cond : Cond)
+    (eA eB : Emit) : YBlock :=
+  (emitAssign
+    ((emitLet {} (identPhi tag d) (lit 0)).push
+      (.switch (emitCond tag d cond)
+        [(YulSemantics.Literal.number 0, eB.stmts)] (some eA.stmts)))
+    (identV tag d) (var (identPhi tag d))).stmts
+
+/-- `let dest := 0 { seqIfWordInner }` so restore drops `phi` and keeps `dest`. -/
+def emitSeqIfWord (tag : String) (e : Emit) (d : Nat) (cond : Cond)
+    (eA eB : Emit) : Emit :=
+  emitBlock (emitLet e (identV tag d) (lit 0)) (seqIfWordInner tag d cond eA eB)
+
+def emitAssignRet (tag : String) (e : Emit) (depth : Nat) (dest : YIdent)
+    {t : RetTy} (r : RetExpr t) : Option Emit :=
+  match r with
+  | .word a | .addr a | .flag a => some (emitAssign e dest (atomE tag depth a))
+  | .unit | .pair _ _ => some e
+
+mutual
+def emitCore (tag : String) (c : ContractDef) (e : Emit) (depth : Nat)
+    (haltUnit : Bool) {t : RetTy} (core : Core t) (clearLock : Bool := false) :
+    Option Emit :=
   match core with
   | .ret r => some (emitRet tag e depth haltUnit r clearLock)
   | .opTail op => do
@@ -710,6 +745,65 @@ def emitCore (tag : String) (c : ContractDef) (e : Emit) (depth : Nat) (haltUnit
       let eB ← emitCore tag c {} depth haltUnit b clearLock
       some (e.push (.switch (emitCond tag depth cond)
         [(YulSemantics.Literal.number 0, eB.stmts)] (some eA.stmts)))
+  | .seqIf (t := tBr) cond th el k =>
+    match tBr with
+    | .unit => do
+        let eA ← emitCore tag c {} depth false th false
+        let eB ← emitCore tag c {} depth false el false
+        emitCore tag c (e.push (.switch (emitCond tag depth cond)
+          [(YulSemantics.Literal.number 0, eB.stmts)] (some eA.stmts)))
+          depth haltUnit k clearLock
+    | .word | .addr | .flag => do
+        let eA ← emitCoreToVar tag c {} depth (identPhi tag depth) th
+        let eB ← emitCoreToVar tag c {} depth (identPhi tag depth) el
+        emitCore tag c (emitSeqIfWord tag e depth cond eA eB)
+          (depth + 1) haltUnit k clearLock
+    | .pair _ _ => some e
+
+/-- Compile `core` as statements that assign `dest` and fall through. -/
+def emitCoreToVar (tag : String) (c : ContractDef) (e : Emit) (depth : Nat)
+    (dest : YIdent) {t : RetTy} (core : Core t) : Option Emit :=
+  match core with
+  | .ret r => emitAssignRet tag e depth dest r
+  | .opTail op => do
+      let e ← emitLetOp tag c e depth op
+      some (emitAssign e dest (var (identV tag depth)))
+  | .opTailAddr op => do
+      let e ← emitLetOp tag c e depth op
+      some (emitAssign e dest (var (identV tag depth)))
+  | .opTailFlag op => do
+      let e ← emitLetOp tag c e depth op
+      some (emitAssign e dest (var (identV tag depth)))
+  | .stmtTail s => some (emitStmt tag c e depth s)
+  | .revertTail err args =>
+      some (emitCustomError c e err (args.map (atomE tag depth)))
+  | .letOp op k => do
+      let e ← emitLetOp tag c e depth op
+      emitCoreToVar tag c e (depth + 1) dest k
+  | .seq s k => emitCoreToVar tag c (emitStmt tag c e depth s) depth dest k
+  | .letPure p args k =>
+      emitCoreToVar tag c (emitLet e (identV tag depth) (emitPrim tag depth p args))
+        (depth + 1) dest k
+  | .ite cond a b => do
+      let eA ← emitCoreToVar tag c {} depth dest a
+      let eB ← emitCoreToVar tag c {} depth dest b
+      some (e.push (.switch (emitCond tag depth cond)
+        [(YulSemantics.Literal.number 0, eB.stmts)] (some eA.stmts)))
+  | .seqIf (t := tBr) cond th el k =>
+    match tBr with
+    | .unit => do
+        let eA ← emitCoreToVar tag c {} depth dest th
+        let eB ← emitCoreToVar tag c {} depth dest el
+        emitCoreToVar tag c (e.push (.switch (emitCond tag depth cond)
+          [(YulSemantics.Literal.number 0, eB.stmts)] (some eA.stmts)))
+          depth dest k
+    | .word | .addr | .flag => do
+        let eA ← emitCoreToVar tag c {} depth (identPhi tag depth) th
+        let eB ← emitCoreToVar tag c {} depth (identPhi tag depth) el
+        emitCoreToVar tag c (emitSeqIfWord tag e depth cond eA eB)
+          (depth + 1) dest k
+    | .pair _ _ => some e
+end
 
 end IdentV
 
