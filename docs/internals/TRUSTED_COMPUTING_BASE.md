@@ -55,7 +55,9 @@ precompile, empty call stack). Gas is existential (`∃ b` from `compile_correct
 `EvmStartOK` is `FrameOK`, `StateMatch`, `pc = 0`, empty stack.
 
 **(b) Compiler acceptance.** `runtimeBlock c = some rt` and
-`compileBlock rt = some is` (erase path or powdr spill).
+`compileBlock rt = some is` (erase path or powdr spill). CREATE installs
+exactly those `compileRuntime` bytes (`deploy_installs_runtime`), so
+every runtime theorem covers the deployed code.
 
 **(c) Well-formedness.** `WorldWF`, `CtxWF`, ABI args and addresses used as keys
 `< 2^256`, `KeccakSep`, field/param length bounds.

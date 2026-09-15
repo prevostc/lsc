@@ -294,6 +294,14 @@ Every runtime emits the transient lock. `NoReentry` is a lemma about `toCall`
 (restore of `self` storage / transient / self-logs), not a hypothesis of
 S2/transport. `@[reentrant]` (8C-3) skips acquire/release only.
 
+## 2026-09-15 — Deploy installs `compileRuntime` bytes
+
+`compileDeploy` compiled a nested `"runtime"` object through the source
+optimizer, so CREATE-installed code was not the `compileRuntime` bytes
+runtime theorems talk about (~20% smaller). Decision: embed those bytes
+as `data "runtime"` and `datacopy`/`return` them (`deploy_installs_runtime`).
+Re-enabling the optimizer belongs inside `compileRuntime`, under the theorems.
+
 ## 2026-09-15 — `@[reentrant]` skips lock acquire/release (8C-3)
 
 Default is non-reentrant (Vyper inverted). The runtime prologue still

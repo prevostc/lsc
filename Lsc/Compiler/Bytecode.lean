@@ -4,7 +4,6 @@ import YulEvmCompiler.Compile
 import YulEvmCompiler.ObjectCompile
 import YulEvmCompiler.Optimizer.Implementation.MemorySpill
 import YulEvmCompiler.Optimizer.Implementation.MemorySpillSelect
-import YulEvmCompiler.Optimizer.Implementation.Pipeline
 
 /-!
 # Yul → EVM bytecode via powdr
@@ -12,16 +11,15 @@ import YulEvmCompiler.Optimizer.Implementation.Pipeline
 `compileRuntime` compiles the memoryguard-erased dispatcher, or — when that
 needs `DUP17+` — powdr's verified spill of the raw guarded runtime. Locals are
 `{f.name}_{i}`, so `spillBlock?` `selectedWF` holds without `disambiguate`.
-`compileDeploy` uses `spillObjectWithFallback` on the raw object (constructor
-stays unguarded; the nested `"runtime"` object carries the guard).
+`compileDeploy` embeds those bytes as `data "runtime"` and compiles only the
+constructor object (`compileObject`); the source optimizer is not run on the
+runtime. CREATE therefore installs `compileRuntime` (`deploy_installs_runtime`).
 -/
 
 namespace Lsc.Compiler
 
 open Lsc
-open YulSemantics.EVM (Op ExternalCalls ExternalCreates ExternalGas)
 open YulEvmCompiler
-open YulEvmCompiler.Optimizer
 open YulEvmCompiler.Optimizer.MemorySpill
 open YulEvmCompiler.Optimizer.MemorySpillSelect
 
@@ -55,15 +53,12 @@ def compileAsmBlock (b : YBlock) : Option (List Asm) :=
     | some r => compileAsm r.block
     | none => none
 
-/-- Fallback when a node does not spill: verified object pipeline after erase. -/
-def deployFallback (o : YObject) : YObject :=
-  optimizerPipelineObject (calls := ExternalCalls.none) (creates := ExternalCreates.none)
-    (gasOracle := ExternalGas.any) (eraseMemoryGuardObject o)
-
-def compileDeploy (c : ContractDef) : Option (List UInt8) := do
-  let o ← deployObject c
-  let spilled ← spillObjectWithFallback o (deployFallback o)
-  let L ← compileObject spilled.object
-  return L.code
+/-- Init bytecode: embed `compileRuntime` as `data "runtime"`, compile the
+constructor object. The constructor is unguarded (`datacopy` would smash spill
+scratch) and small enough for raw `compileObject`. -/
+def compileDeploy (c : ContractDef) : Option (List UInt8) :=
+  compileRuntime c >>= fun rt =>
+    deployObject c rt >>= fun o =>
+      (compileObject o).map (·.code)
 
 end Lsc.Compiler

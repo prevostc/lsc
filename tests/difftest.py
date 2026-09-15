@@ -4,11 +4,9 @@
 Reads export JSON produced by `scripts/export_bytecode.lean` (optionally wrapped in
 BEGIN_LSC_EXPORT / END_LSC_EXPORT markers from `#eval`).
 
-CREATE-installed code is not required to equal `compileRuntime` bytes:
-`compileDeploy` takes the object/spill/optimizer path (`compileObject` STOP
-seam); `compileRuntime` is erase then `compile`. The spec is Tx.run vs EVM.
-Cases run against the exported runtime and, when CREATE succeeds, against
-the installed code (non-empty + 8A/8B lock prefix).
+CREATE-installed code must equal exported `compileRuntime` bytes
+(`deploy_installs_runtime`). Cases run against the exported runtime and,
+when CREATE succeeds, against that installed code.
 """
 from __future__ import annotations
 
@@ -138,25 +136,6 @@ def first_diff_byte(expected: str, actual: str) -> int:
     while i < n and e[i] == a[i]:
         i += 1
     return i // 2
-
-
-# 8A/8B prologue. compileRuntime keeps the memoryguard no-op
-# (`PUSH2 256; ISZERO; POP`); compileDeploy's object-optimizer fallback DCEs it.
-# Both then emit PUSH0; TLOAD; ISZERO; PUSH2 dest; JUMPI; PUSH0; PUSH0; REVERT;
-# JUMPDEST (labelWidth = 2).
-_LOCK_MG_NOOP = bytes.fromhex("6101001550")
-_LOCK_TLOAD = bytes.fromhex("5f5c15")
-_LOCK_JUMPI_REVERT = bytes.fromhex("575f5ffd5b")
-
-
-def starts_with_lock_prefix(code: str | None) -> bool:
-    raw = bytes.fromhex(norm_hex(code)[2:])
-    if raw.startswith(_LOCK_MG_NOOP):
-        raw = raw[len(_LOCK_MG_NOOP) :]
-    if not raw.startswith(_LOCK_TLOAD):
-        return False
-    rest = raw[len(_LOCK_TLOAD) :]
-    return len(rest) >= 8 and rest[0] == 0x61 and rest[3:8] == _LOCK_JUMPI_REVERT
 
 
 def pad32(s: str) -> str:
@@ -467,50 +446,26 @@ def run_call_case(node: Anvil, addr: str, case: dict[str, Any], row: Row) -> Non
 def check_created_runtime(
     node: Anvil, row: Row, contract: dict[str, Any], created: str
 ) -> bool:
-    """Sanity-check CREATE-installed code.
-
-    `compileRuntime` is erase then `compile` (block). `compileDeploy` is
-    `spillObjectWithFallback` then `compileObject`: when the nested runtime
-    does not spill, the fallback is the verified source-optimizer object
-    pipeline, and `compileObject` appends a STOP seam. Byte equality is not
-    the spec — Tx.run vs EVM is. Require non-empty code that starts with the
-    8A/8B lock prefix.
-    """
+    """CREATE-installed code must equal exported `compileRuntime` bytes."""
     actual = node.code(created)
+    runtime = contract.get("runtime")
     n_got = hex_len(actual)
+    n_rt = hex_len(runtime)
     if n_got == 0:
         row.fail(f"CREATE installed empty code at {created}")
         return False
-    if not starts_with_lock_prefix(actual):
-        runtime = contract.get("runtime")
+    if not hex_eq(actual, runtime):
         row.fail(
-            "CREATE-installed code does not start with the lock prefix\n"
+            "CREATE-installed code != compileRuntime bytes\n"
             f"    address {created}\n"
-            f"    actual  {actual[:74]}… ({n_got} bytes)\n"
+            f"    installed {n_got} bytes, runtime {n_rt} bytes, "
+            f"first diff at byte {first_diff_byte(runtime or '0x', actual)}\n"
             + hex_suffix_diff(runtime or "0x", actual)
         )
         return False
-    runtime = contract.get("runtime")
-    n_rt = hex_len(runtime)
     row.status = "ok/ok"
-    row.ret = "lock+ok"
+    row.ret = "eq"
     row.storage = "n/a"
-    got, exp = norm_hex(actual), norm_hex(runtime)
-    extra = got[len(exp) :]
-    if got == exp:
-        row.ret = "lock+eq"
-    elif got.startswith(exp) and extra and set(extra) <= {"0"}:
-        row.ret = "lock+STOP"
-        print(
-            f"note: {contract['name']} CREATE-installed is compileRuntime + "
-            f"{len(extra) // 2} trailing STOP byte(s) (compileObject seam)"
-        )
-    else:
-        print(
-            f"note: {contract['name']} CREATE-installed {n_got} bytes vs "
-            f"compileRuntime {n_rt} bytes; first diff at byte "
-            f"{first_diff_byte(runtime, actual)}"
-        )
     return True
 
 

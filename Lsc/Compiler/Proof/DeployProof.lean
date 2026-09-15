@@ -1,13 +1,13 @@
-import Lsc.Compiler.Proof.ConstructorProof
 import Lsc.Compiler.Bytecode
+import Lsc.Compiler.CorrectnessDefs
 import YulEvmCompiler.ObjectCompile
-import YulEvmCompiler.OpStep
 
 set_option linter.unusedSimpArgs false
 set_option linter.unusedVariables false
 
 /-!
-Proof of `bytecode_deploy_correct`. Statement lives in `DeployTheorems`.
+Proof of `bytecode_deploy_correct` and `deploy_installs_runtime`.
+Statements live in `DeployTheorems`.
 -/
 
 namespace Lsc.Compiler
@@ -18,10 +18,8 @@ open YulEvmCompiler
 open EvmSemantics.EVM (State Steps)
 
 namespace Proof
-/-- Object compiler correctness, specialized to our deploy objects. Returned
-bytes (on `.halt` / `HaltedMatch`) are the Yul halt payload; they are **not**
-identified with `compileRuntime` (`Layout.Consistent` covers data segments,
-not nested `"runtime"` subobjects). -/
+
+/-- Object compiler correctness, specialized to our deploy objects. -/
 theorem bytecode_deploy_correct
     [model : ExternalModel] (hexternal : ExternalsRealized model)
     {o : Object YulSemantics.EVM.Op} {L : Layout}
@@ -36,6 +34,51 @@ theorem bytecode_deploy_correct
         ((out = .normal ∧ s'.halt = .Success ∧ s'.hReturn = .empty) ∨
          (out = .halt ∧ HaltedMatch yst s')) :=
   compileObject_correct hexternal hcomp hrun
+
+theorem deployObject_dataSegs {c : ContractDef} {rt : List UInt8} {o : YObject}
+    (h : deployObject c rt = some o) :
+    o.dataSegs = [("runtime", Data.hex rt)] ∧ o.subObjects = [] := by
+  simp only [deployObject, Option.map_eq_some_iff] at h
+  obtain ⟨_, _, rfl⟩ := h
+  exact ⟨rfl, rfl⟩
+
+theorem compileDeploy_inv {c : ContractDef} {d : List UInt8}
+    (hd : compileDeploy c = some d) :
+    ∃ rt o L,
+      compileRuntime c = some rt ∧
+      deployObject c rt = some o ∧
+      compileObject o = some L ∧
+      L.code = d := by
+  simp only [compileDeploy, Option.bind_eq_bind] at hd
+  obtain ⟨rt, hrt, hd⟩ := Option.bind_eq_some_iff.mp hd
+  obtain ⟨o, ho, hd⟩ := Option.bind_eq_some_iff.mp hd
+  obtain ⟨L, hL, hd⟩ := Option.map_eq_some_iff.mp hd
+  exact ⟨rt, o, L, hrt, ho, hL, hd⟩
+
+theorem deploy_installs_runtime {c : ContractDef} {rt d : List UInt8}
+    (hrt : compileRuntime c = some rt)
+    (hd : compileDeploy c = some d) :
+    ∃ (o : YObject) (L : Layout),
+      deployObject c rt = some o ∧
+      compileObject o = some L ∧
+      L.code = d ∧
+      o.dataSegs = [("runtime", Data.hex rt)] ∧
+      L.Consistent o ∧
+      readBytes (byteFrom L.code)
+        (L.dataOffset (litValue (.string "runtime"))).toNat rt.length = rt := by
+  simp only [compileDeploy] at hd
+  rw [hrt] at hd
+  change (deployObject c rt).bind
+      (fun o => (compileObject o).map (·.code)) = some d at hd
+  obtain ⟨o, ho, hd⟩ := Option.bind_eq_some_iff.mp hd
+  obtain ⟨L, hL, hcode⟩ := Option.map_eq_some_iff.mp hd
+  have hseg := (deployObject_dataSegs ho).1
+  have hcons : L.Consistent o := compileObject_consistent hL
+  have hmem : ("runtime", Data.hex rt) ∈ o.dataSegs := by
+    simp [hseg]
+  obtain ⟨_, hbytes⟩ := hcons _ hmem
+  refine ⟨o, L, ho, hL, hcode, hseg, hcons, ?_⟩
+  simpa [Data.size, Data.bytes] using hbytes
 
 end Proof
 

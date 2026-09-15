@@ -18,16 +18,16 @@ Stages, in order. This module does not change them; it names them.
    (`Lsc/Compiler/Yul.lean`). Dispatcher is `switch shr(224, calldataload(0))`.
 4. **powdr compile** — `compileBlock` (`Lsc/Compiler/Bytecode.lean`): erase
    `memoryguard` then compile, or powdr memory-spill if erasure needs `DUP17+`.
-   Deploy is `compileDeploy` (`spillObjectWithFallback`).
+   Deploy is `compileDeploy` (`compileObject` of the constructor + data segment).
 5. **Bytecode** — `assembleBytes` of the `Instr` list; deploy is `Layout.code`.
 6. **ABI / selectors** — `Lsc.Tools.contractAbiJson` and `selectorsJson` below
    (keccak selectors already on `FnDef` / `ErrorDef`).
-7. **Deploy object** — `deployObject` then `compileDeploy`; init code returns
-   the nested `"runtime"` slice (`constructorCode`).
+7. **Deploy object** — `deployObject c rt` embeds `compileRuntime` bytes as
+   `data "runtime"`; the constructor `datacopy`/`return`s them
+   (`deploy_installs_runtime`).
 
 `compileContract` (alias `artifacts`) is the function `scripts/export_bytecode.lean`
-calls so compilation lives in one place. Behaviour of `runtimeBlock` /
-`compileBlock` / `compileDeploy` is unchanged.
+calls so compilation lives in one place. `runtimeHex` is `compileRuntime`.
 -/
 
 namespace Lsc.Compiler
@@ -96,17 +96,21 @@ def compileRuntimeArtifacts (c : ContractDef) :
           ("// compileAsm rejected (stackOK2/wfCheck); hex not emitted.\n" ++
             printAsmFile c asm))
 
-/-- Deploy Yul listing (`deployObject`), or a failure comment. -/
+/-- Deploy Yul listing (`deployObject` with `compileRuntime` bytes), or a
+failure comment. -/
 def compileDeployYul (c : ContractDef) : String :=
-  match deployObject c with
-  | none => "// deployObject failed\n"
-  | some o => printYulFile c (printYulObject o)
+  match compileRuntime c with
+  | none => "// compileRuntime failed\n"
+  | some rt =>
+    match deployObject c rt with
+    | none => "// deployObject failed\n"
+    | some o => printYulFile c (printYulObject o)
 
-/-- All artifacts for `c`. Hex paths are `compileRuntimeArtifacts` (runtime)
-and `compileDeploy` (init code). Does not interpret `Tx.run`. -/
+/-- All artifacts for `c`. Hex paths are `compileRuntime` (runtime) and
+`compileDeploy` (init code). Does not interpret `Tx.run`. -/
 def compileContract (c : ContractDef) : Artifacts :=
   let rt := compileRuntimeArtifacts c
-  { runtimeHex := rt.1
+  { runtimeHex := compileRuntime c
     deployHex := compileDeploy c
     abi := contractAbiJson c
     yul := rt.2.1

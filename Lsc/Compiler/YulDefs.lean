@@ -773,16 +773,19 @@ def runtimeBlock (c : ContractDef) : Option YBlock :=
       [YulSemantics.Stmt.block guard,
         YulSemantics.Stmt.switch sel cases (some [revert00])])
 
-/-- Deploy object: ctor body (if any) then `constructorCode "runtime"`, nested `"runtime"`. -/
-def deployObject (c : ContractDef) : Option YObject := do
-  let rt ← runtimeBlock c
-  let ctor ←
-    match c.ctor with
-    | none => some (constructorCode "runtime")
-    | some f =>
-      let body ← toYulCtor c f
-      some (body ++ constructorCode "runtime")
-  some (YulSemantics.Object.mk c.name ctor [YulSemantics.Object.mk "runtime" rt [] []] [])
+/-- Constructor body (if any) followed by `constructorCode "runtime"`. -/
+def deployCtorBlock (c : ContractDef) : Option YBlock :=
+  match c.ctor with
+  | none => some (constructorCode "runtime")
+  | some f => (toYulCtor c f).map (fun body => body ++ constructorCode "runtime")
+
+/-- Deploy object: ctor body (if any), then `constructorCode "runtime"`, with
+compiled runtime bytes as `data "runtime"` (not a nested object). CREATE
+therefore installs exactly `compileRuntime` — see `deploy_installs_runtime`. -/
+def deployObject (c : ContractDef) (rt : List UInt8) : Option YObject :=
+  (deployCtorBlock c).map fun ctor =>
+    YulSemantics.Object.mk c.name ctor []
+      [("runtime", YulSemantics.Data.hex rt)]
 
 /-- Pretty-printer (powdr's `EVM.print`); feed to `solc --strict-assembly`. -/
 def printYul (b : YBlock) : String :=

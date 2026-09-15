@@ -42,7 +42,9 @@ For contracts that call out: theorems that mention the token take
 is memory-blind (other contracts cannot see this contract's private
 memory, which is true of the EVM) and is a function of the request and
 observable world. The compiler may have used either the erase path or
-powdr spill. The oracle model restores `self`'s storage, transient
+powdr spill. CREATE installs exactly those `compileRuntime` bytes
+(`deploy_installs_runtime`), so every runtime theorem covers the
+deployed code. The oracle model restores `self`'s storage, transient
 storage, and self-attributed logs after every external CALL. This is
 justified because (i) in the EVM only a frame executing at address `self`
 can write `self`'s storage or emit `self`'s logs (no EXTSLOAD/EXTSSTORE;

@@ -83,7 +83,8 @@ def toyRuntimeHas (needle : String) : Bool :=
 
 #guard (runtimeBlock YulTestsToy.contract).isSome
 #guard (compileRuntime YulTestsToy.contract).isSome
-#guard (deployObject YulTestsToy.contract).isSome
+#guard (Option.bind (compileRuntime YulTestsToy.contract)
+    (deployObject YulTestsToy.contract)).isSome
 #guard (compileDeploy YulTestsToy.contract).isSome
 #guard toyCtorHas "codecopy"
 #guard toyCtorHas "codesize"
