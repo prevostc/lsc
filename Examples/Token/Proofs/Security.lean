@@ -354,7 +354,11 @@ theorem totalSupply_auth : NoUnauthorizedDecreaseFn spec Inv claim Auth .totalSu
   exact (Nat.lt_irrefl _ hdec).elim
 
 theorem token_no_unauth : NoUnauthorizedDecrease spec Inv claim Auth :=
-  NoUnauthorizedDecrease.of_fns fun fn =>
+  NoUnauthorizedDecrease.of_fns
+    (fun _w _v hw => hw)
+    (fun _w _v _a => rfl)
+    (fun _w _v _a _c h => h)
+    fun fn =>
     match fn with
     | .transfer => transfer_auth
     | .transferFrom => transferFrom_auth
@@ -484,8 +488,9 @@ theorem mint_conservesFn : ConservesFn spec Inv claim inflow .mint := by
     · by_cases hsupply : (w.self.totalSupply + amount).raw < wordBound
       · by_cases hadd : (w.self.balances dst + amount).raw < wordBound
         · have hrun := mint_ok ctx w dst amount howner hsupply hadd
-          simp [worldAfter, hrun]
-          simp [claim, mintPost, credit, inflow, Call.ofCtx, Call.toCtx, hrun]
+          simp [Amount.raw_add] at hsupply hadd
+          simp [worldAfter, hrun, claim, mintPost, credit, inflow,
+            Call.ofCtx, Call.toCtx, howner, hsupply, hadd]
         · have hrun := mint_reverts_on_balance_overflow ctx w dst amount howner hsupply
             (Nat.not_lt.mp hadd)
           simp [worldAfter, hrun]
@@ -560,7 +565,11 @@ theorem totalSupply_conservesFn : ConservesFn spec Inv claim inflow .totalSupply
     simp [claim, inflow, Call.ofCtx]
 
 theorem token_conservation : Conservation spec Inv claim inflow :=
-  Conservation.of_fns fun fn =>
+  Conservation.of_fns
+    (fun _w _v hw => hw)
+    (fun _w _v _a => rfl)
+    (fun _c _w => rfl)
+    fun fn =>
     match fn with
     | .transfer => transfer_conservesFn
     | .transferFrom => transferFrom_conservesFn
@@ -667,7 +676,7 @@ theorem totalSupply_preserves_inv : PreservesInvFn spec Inv .totalSupply := by
   exact hInv
 
 theorem token_preserves_inv : PreservesInv spec Inv :=
-  PreservesInv.of_fns fun fn =>
+  PreservesInv.of_fns (fun _w _v hw => hw) fun fn =>
     match fn with
     | .transfer => transfer_preserves_inv
     | .transferFrom => transferFrom_preserves_inv

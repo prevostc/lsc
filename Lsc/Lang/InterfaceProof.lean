@@ -587,6 +587,53 @@ theorem viewAsNat_bool_bind_require_bind {β : Type} (addr : Address) (sel : Nat
     addr sel args err
   rw [← bind_assoc, h, bind_assoc]
 
+/-- `require (ok = true)` after `sendRaw` matches Core `require (boolBit ok = 1)`. -/
+theorem sendRaw_require_eq_true_iff_bit (to amount : Nat) (err : ε) :
+    sendRaw (S := S) (X := X) (E := E) (ε := ε) to amount >>=
+        (fun ok => require (ok = true) err) =
+      sendRaw (S := S) (X := X) (E := E) (ε := ε) to amount >>=
+        (fun a => require (boolBit a = 1) err) := by
+  refine congrArg (fun k => sendRaw to amount >>= k) ?_
+  funext ok
+  exact require_bool_eq_true_iff_bit ok err
+
+/-- Continuation form of `sendRaw_require_eq_true_iff_bit`. -/
+theorem sendRaw_require_eq_true_iff_bit_bind {β : Type} (to amount : Nat)
+    (err : ε) (k : Tx S X E ε β) :
+    sendRaw (S := S) (X := X) (E := E) (ε := ε) to amount >>=
+        (fun ok => require (ok = true) err >>= fun _ => k) =
+      sendRaw (S := S) (X := X) (E := E) (ε := ε) to amount >>=
+        (fun a => require (boolBit a = 1) err >>= fun _ => k) := by
+  refine congrArg (fun f => sendRaw to amount >>= f) ?_
+  funext ok
+  exact congrArg (fun r => r >>= fun _ => k)
+    (require_bool_eq_true_iff_bit ok err)
+
+/-- `require (ok = true)` after `sendRaw` is the Core `boolBit <$> sendRaw` bit-test. -/
+theorem sendRaw_bool_bind_require (to amount : Nat) (err : ε) :
+    sendRaw (S := S) (X := X) (E := E) (ε := ε) to amount >>=
+        (fun ok => require (ok = true) err) =
+      (boolBit <$> sendRaw (S := S) (X := X) (E := E) (ε := ε) to amount) >>=
+        (fun n => require (n = 1) err) := by
+  have hreq :
+      (fun ok : Bool => require (S := S) (X := X) (E := E) (ok = true) err) =
+        fun ok => require (boolBit ok = 1) err := by
+    funext ok
+    exact require_bool_eq_true_iff_bit ok err
+  rw [hreq]
+  exact (bind_map boolBit (sendRaw to amount)
+    (fun n => require (n = 1) err)).symm
+
+/-- `require (ok = true)` then a continuation after `sendRaw`. -/
+theorem sendRaw_bool_bind_require_bind {β : Type} (to amount : Nat) (err : ε)
+    (k : Tx S X E ε β) :
+    sendRaw (S := S) (X := X) (E := E) (ε := ε) to amount >>=
+        (fun ok => require (ok = true) err >>= fun _ => k) =
+      (boolBit <$> sendRaw (S := S) (X := X) (E := E) (ε := ε) to amount) >>=
+        (fun n => require (n = 1) err >>= fun _ => k) := by
+  have h := sendRaw_bool_bind_require (S := S) (X := X) (E := E) to amount err
+  rw [← bind_assoc, h, bind_assoc]
+
 /-- Discarded Bool CALL: Core `boolOpt` vs surface `Bool`. -/
 theorem callAsNat_bool_bind_unit (addr : Address) (sel : Nat) (args : List Word) :
     call (S := S) (X := X) (E := E) (α := Bool) addr sel args >>=

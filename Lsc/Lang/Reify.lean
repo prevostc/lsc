@@ -1869,7 +1869,12 @@ def certifyDenote (fn : Name) (ci : ContractInfo) (lhs lhsRaw rhs coreE : Expr) 
   -- burns the heartbeat budget; skip it when inlines are present.
   -- Skip it when a closed `10 ^ d` is present: reducible `isDefEq` unfolds
   -- kernel `Nat.pow` and hits `maxRecDepth`.
-  if inlines.isEmpty && scales.isEmpty then
+  let info ← getConstInfoDefn fn
+  let send? := info.value.getUsedConstants.any fun n =>
+    n == ``Lsc.Tx.sendRaw || n == ``Lsc.Native.send
+  -- `sendRaw` / `Native.send` are `boolBit <$> sendRaw` in Core; reducible
+  -- `isDefEq` against the Bool surface times out (same class as inlines).
+  if inlines.isEmpty && scales.isEmpty && !send? then
     -- Default `isDefEq` on a large mismatched `do` block burns heartbeats.
     -- Reducible equality is the fast path; otherwise fall through to simp.
     if ← withNewMCtxDepth (withReducible (isDefEq lhs rhs)) then
@@ -1921,6 +1926,11 @@ def certifyDenote (fn : Name) (ci : ContractInfo) (lhs lhsRaw rhs coreE : Expr) 
     mkIdent ``Lsc.Tx.viewAsNat_bool_bind_require,
     mkIdent ``Lsc.Tx.callAsNat_bool_bind_require_bind,
     mkIdent ``Lsc.Tx.viewAsNat_bool_bind_require_bind,
+    mkIdent ``Lsc.Tx.sendRaw_bool_bind_require,
+    mkIdent ``Lsc.Tx.sendRaw_bool_bind_require_bind,
+    mkIdent ``Lsc.Tx.require_bool_eq_true_iff_bit,
+    mkIdent ``Lsc.Tx.sendRaw_require_eq_true_iff_bit,
+    mkIdent ``Lsc.Tx.sendRaw_require_eq_true_iff_bit_bind,
     mkIdent ``Lsc.Tx.callAsNat_bool_bind_unit,
     mkIdent ``Lsc.Tx.viewAsNat_bool_bind_unit,
     mkIdent ``Lsc.Tx.viewAsNat_word_bind_const,
@@ -2114,6 +2124,14 @@ def certifyDenote (fn : Name) (ci : ContractInfo) (lhs lhsRaw rhs coreE : Expr) 
           Lsc.map_denote_opTailFlag, Lsc.map_denote_opTailAddr,
           Lsc.map_denote_stmtTail, Lsc.map_denote_revertTail,
           Lsc.Tx.map_pure, Lsc.Tx.natToBool_one])
+    try simp (config := { maxSteps := 512 }) only
+      [Lsc.Core.denote, Lsc.Op.denote, Lsc.Stmt.denote,
+        Lsc.Tx.require_bool_eq_true_iff_bit,
+        Lsc.Tx.sendRaw_require_eq_true_iff_bit,
+        Lsc.Tx.sendRaw_require_eq_true_iff_bit_bind,
+        Lsc.Tx.sendRaw_bool_bind_require_bind,
+        Lsc.Tx.sendRaw_bool_bind_require,
+        Lsc.Address.toWord, Lsc.Amount.raw]
     simp (config := { maxSteps := 20000 }) only [$[$idsAmount:ident],*]
     try (conv =>
       lhs
@@ -2143,6 +2161,10 @@ def certifyDenote (fn : Name) (ci : ContractInfo) (lhs lhsRaw rhs coreE : Expr) 
       Lsc.Tx.callAsNat_bool_bind_require, Lsc.Tx.viewAsNat_bool_bind_require,
       Lsc.Tx.callAsNat_bool_bind_require_bind,
       Lsc.Tx.viewAsNat_bool_bind_require_bind,
+      Lsc.Tx.sendRaw_bool_bind_require, Lsc.Tx.sendRaw_bool_bind_require_bind,
+      Lsc.Tx.require_bool_eq_true_iff_bit,
+      Lsc.Tx.sendRaw_require_eq_true_iff_bit,
+      Lsc.Tx.sendRaw_require_eq_true_iff_bit_bind,
       Lsc.Tx.map_bind, Lsc.Tx.bind_map, Lsc.Tx.map_bind_ofWord,
       Lsc.Tx.map_bind_ofWord_pair, Lsc.Tx.map_discard_ofWord_pair,
       Lsc.Tx.map_pure_ofWord_pair,
@@ -3074,6 +3096,7 @@ def mkCoreEqAlt (ns fn : Name) : MetaM (TSyntax ``Lean.Parser.Tactic.inductionAl
   let surf ← fnSurface fn
   let n := surf.params.size
   let coreDenote := mkIdent (fn ++ `core_denote)
+  let coreDenoteApp ← applyCaps ⟨coreDenote⟩ surf.capKinds
   let specExec := mkIdent (ns ++ Name.mkSimple s!"spec_exec_{fn.getString!}")
   let fnDefId := mkIdent (ns ++ `fnDef)
   let encodeId := mkIdent (ns ++ `encode)
@@ -3093,19 +3116,19 @@ def mkCoreEqAlt (ns fn : Name) : MetaM (TSyntax ``Lean.Parser.Tactic.inductionAl
           apply Lsc.Lang.worldAfter_wrap_eq
             (f := Lsc.Amount.ofWord (a := $aT))
           rw [$specExec:ident]
-          apply $coreDenote)
+          apply $coreDenoteApp)
     else if ← isBoolTy surf.ρ then
       `(Lean.Parser.Tactic.tacticSeq|
           apply Lsc.Lang.worldAfter_wrap_eq (f := Lsc.Tx.natToBool)
           rw [$specExec:ident]
-          apply $coreDenote)
+          apply $coreDenoteApp)
     else if ← isRefTy surf.ρ then
       let ρT ← exprToTerm surf.ρ
       `(Lean.Parser.Tactic.tacticSeq|
           apply Lsc.Lang.worldAfter_wrap_eq
             (f := fun n => ({ addr := n } : $ρT))
           rw [$specExec:ident]
-          apply $coreDenote)
+          apply $coreDenoteApp)
     else if ← isProdTy surf.ρ then
       let ρ ← whnfD surf.ρ
       let α ← whnfD (ρ.getArg! 0)
@@ -3119,12 +3142,12 @@ def mkCoreEqAlt (ns fn : Name) : MetaM (TSyntax ``Lean.Parser.Tactic.inductionAl
             (f := fun v => (Lsc.Amount.ofWord (a := $aT) v.1,
               Lsc.Amount.ofWord (a := $bT) v.2))
           rw [$specExec:ident]
-          apply $coreDenote)
+          apply $coreDenoteApp)
     else
       -- Flag/Nat/Unit views: `simp only` can leave `worldAfter f = worldAfter f`.
       -- `all_goals try rfl` is a no-op when simp already closed.
       `(Lean.Parser.Tactic.tacticSeq|
-          simp only [$coreDenote:ident, $specExec:ident]
+          simp only [$coreDenoteApp:term, $specExec:ident]
           all_goals try rfl)
   let tac ←
     match n with

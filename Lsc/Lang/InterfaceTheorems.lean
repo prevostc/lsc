@@ -505,6 +505,40 @@ theorem viewAsNat_bool_bind_require_bind {β : Type} (addr : Address) (sel : Nat
         (fun n => require (n = 1) err >>= fun _ => k) :=
   by apply Proof.viewAsNat_bool_bind_require_bind
 
+/-- `require (ok = true)` after `sendRaw` matches Core `require (boolBit ok = 1)`. -/
+theorem sendRaw_require_eq_true_iff_bit (to amount : Nat) (err : ε) :
+    sendRaw (S := S) (X := X) (E := E) (ε := ε) to amount >>=
+        (fun ok => require (ok = true) err) =
+      sendRaw (S := S) (X := X) (E := E) (ε := ε) to amount >>=
+        (fun a => require (boolBit a = 1) err) :=
+  by apply Proof.sendRaw_require_eq_true_iff_bit
+
+/-- Continuation form of `sendRaw_require_eq_true_iff_bit`. -/
+theorem sendRaw_require_eq_true_iff_bit_bind {β : Type} (to amount : Nat)
+    (err : ε) (k : Tx S X E ε β) :
+    sendRaw (S := S) (X := X) (E := E) (ε := ε) to amount >>=
+        (fun ok => require (ok = true) err >>= fun _ => k) =
+      sendRaw (S := S) (X := X) (E := E) (ε := ε) to amount >>=
+        (fun a => require (boolBit a = 1) err >>= fun _ => k) :=
+  by apply Proof.sendRaw_require_eq_true_iff_bit_bind
+
+/-- `require (ok = true)` after `sendRaw` is the Core `boolBit <$> sendRaw` bit-test. -/
+theorem sendRaw_bool_bind_require (to amount : Nat) (err : ε) :
+    sendRaw (S := S) (X := X) (E := E) (ε := ε) to amount >>=
+        (fun ok => require (ok = true) err) =
+      (boolBit <$> sendRaw (S := S) (X := X) (E := E) (ε := ε) to amount) >>=
+        (fun n => require (n = 1) err) :=
+  by apply Proof.sendRaw_bool_bind_require
+
+/-- `require (ok = true)` then a continuation after `sendRaw`. -/
+theorem sendRaw_bool_bind_require_bind {β : Type} (to amount : Nat) (err : ε)
+    (k : Tx S X E ε β) :
+    sendRaw (S := S) (X := X) (E := E) (ε := ε) to amount >>=
+        (fun ok => require (ok = true) err >>= fun _ => k) =
+      (boolBit <$> sendRaw (S := S) (X := X) (E := E) (ε := ε) to amount) >>=
+        (fun n => require (n = 1) err >>= fun _ => k) :=
+  by apply Proof.sendRaw_bool_bind_require_bind
+
 /-- Discarded Bool CALL: Core `boolOpt` vs surface `Bool`. -/
 theorem callAsNat_bool_bind_unit (addr : Address) (sel : Nat) (args : List Word) :
     call (S := S) (X := X) (E := E) (α := Bool) addr sel args >>=

@@ -25,13 +25,15 @@ def Auth : AuthPred spec :=
     | .transferFrom, (src, _, amount) => src = a ∧ amount ≤ s.allowances src c.sender
     | _, _ => False
 
-/-- Mint is the only inflow; it is `0` on revert. -/
+/-- Mint is the only inflow; it is `0` on revert. Storage-only so
+`inflow` is unchanged by `World.creditValue`. -/
 def inflow (c : Call spec) (w : World Storage ExtState Event) : Nat :=
   match c.fn, c.args with
   | .mint, (dst, amt) =>
-    match Tx.run (mint dst amt) c.toCtx w with
-    | .ok _ => amt.raw
-    | .error _ => 0
+    if c.toCtx.sender = w.self.owner ∧
+        (w.self.totalSupply + amt).raw < wordBound ∧
+        (w.self.balances dst + amt).raw < wordBound
+    then amt.raw else 0
   | _, _ => 0
 
 /-- Token holdings are the recorded `totalSupply`. The address is ignored. -/
