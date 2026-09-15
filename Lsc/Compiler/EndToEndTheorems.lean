@@ -218,7 +218,7 @@ theorem evmCallRun_of_correct {S X E ε : Type} (c : ContractDef)
     (hctx : ctxRel ctx yst0) (hR : R c Γ evmKeccak w yst0)
     (himm0 : ∀ k, yst0.env.immutable k = 0) (hLock : LockFree yst0) :
     ∃ σ', EvmCallRun is yst0 σ' ∧
-      match selectedFn c yst0.env.calldata with
+      match dispatchedFn c yst0.env.calldata ctx.value with
       | none => σ' = yst0.storage
       | some f =>
         match Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse) ctx w with
@@ -338,13 +338,14 @@ theorem evmCallRun_fnCalldata {S X E ε : Type} (c : ContractDef)
     (hctxWF : CtxWF ctx)
     (hs : storageRel c Γ evmKeccak w.self σ)
     (hlog : w.log = []) (hwf : WorldWF c Γ w)
-    (hcd : (fnCalldata f args).length < wordBound) :
+    (hcd : (fnCalldata f args).length < wordBound)
+    (hvo : valueOk f ctx.value) :
     let yst0 := mkEvmState (fnCalldata f args) σ evmKeccak ctx
     ∃ σ', EvmCallRun is yst0 σ' ∧
       (match Tx.run (Core.denote Γ f.core args.reverse) ctx w with
         | .ok (_, w') => storageRel c Γ evmKeccak w'.self σ' ∧ WorldWF c Γ w'
         | .error _ => σ' = σ) :=
-  Proof.evmCallRun_fnCalldata c Γ hΓ hκ hcf hctor hlen hbound hnd rt hrt is hcomp ctx f args w σ hf hk hlenA hW hctxWF hs hlog hwf hcd
+  Proof.evmCallRun_fnCalldata c Γ hΓ hκ hcf hctor hlen hbound hnd rt hrt is hcomp ctx f args w σ hf hk hlenA hW hctxWF hs hlog hwf hcd hvo
 
 /-- Forward transport of encoded Core calls. Env/log stripping: each step is run
 from `{w with log := []}` Yul state; `σ'` tracks `.self` only. Converse is open. -/
@@ -365,7 +366,8 @@ theorem bytecode_trace_transport {S X E ε : Type} (c : ContractDef)
     (hcalls : ∀ p ∈ calls,
         p.2.1 ∈ c.functions ∧ p.2.1.kind ≠ .constructor ∧
         p.2.2.length = p.2.1.params.length ∧ (∀ n ∈ p.2.2, n < wordBound) ∧
-        CtxWF p.1 ∧ (fnCalldata p.2.1 p.2.2).length < wordBound) :
+        CtxWF p.1 ∧ (fnCalldata p.2.1 p.2.2).length < wordBound ∧
+        valueOk p.2.1 p.1.value) :
     ∃ σ', EvmTraceRun is (calls.map fun p => ⟨p.1, fnCalldata p.2.1 p.2.2⟩) σ σ' ∧
       storageRel c Γ evmKeccak (coreRun Γ calls { w with log := [] }).self σ' ∧
       WorldWF c Γ (coreRun Γ calls { w with log := [] }) :=
@@ -420,7 +422,8 @@ theorem bytecode_trace_all {S X E ε : Type} (c : ContractDef)
     (hcalls : ∀ p ∈ calls,
         p.2.1 ∈ c.functions ∧ p.2.1.kind ≠ .constructor ∧
         p.2.2.length = p.2.1.params.length ∧ (∀ n ∈ p.2.2, n < wordBound) ∧
-        CtxWF p.1 ∧ (fnCalldata p.2.1 p.2.2).length < wordBound)
+        CtxWF p.1 ∧ (fnCalldata p.2.1 p.2.2).length < wordBound ∧
+        valueOk p.2.1 p.1.value)
     (hE : EvmTraceRunAll is (calls.map fun p => ⟨p.1, fnCalldata p.2.1 p.2.2⟩) σ σ') :
     storageRel c Γ evmKeccak (coreRun Γ calls { w with log := [] }).self σ' ∧
     WorldWF c Γ (coreRun Γ calls { w with log := [] }) :=

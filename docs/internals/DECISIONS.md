@@ -2,6 +2,15 @@
 
 Short dated records.
 
+## 2026-09-15 — `[Payable]` / `[Reentrant]` instance binders (17a)
+
+Empty `Prop` marker classes; no user instances. `lsc_contract` reads
+`[Payable]` / `[Reentrant]` / `[Reentrant.Unsafe]` and sets `FnDef`
+flags. Non-payable selectors emit `if callvalue() { revert(0,0) }` after
+the size guard (`dispatchedFn` folds the reject into the unknown-selector
+shape). `Tx.value` stays untyped until the native-asset profile (slice 18).
+The old `@[reentrant]` attribute is deleted.
+
 ## 2026-09-07 — Memory-blind external-call adversary
 
 S2 theorems take a CALL oracle. powdr's spill theorem needs

@@ -2,7 +2,7 @@ import Lsc.Lang.Reify
 import Lsc.Compiler.Yul
 
 /-!
-`@[reentrant]` (slice 8C-3). Stdlib cannot import the compiler, so the
+`[Reentrant]` (slice 17a / 8C-3). Stdlib cannot import the compiler, so the
 `lsc_contract` toys live here. No EVM interpreter: ExtCallTests already
 runs CALL/lock bytecode.
 -/
@@ -27,7 +27,7 @@ inductive Error
 abbrev M := Tx Storage ExtState Event Error
 
 /-- Flash-loan entry point: the callee is expected to call back into this contract. -/
-@[reentrant] def flashLoan (target : Address) : M Word :=
+def flashLoan [Reentrant] (target : Address) : M Word :=
   Tx.call (α := Word) target 0x11111111 []
 
 /-- Mutating sibling with an outgoing CALL: still takes the lock. -/
@@ -54,8 +54,8 @@ inductive Error
 
 abbrev M := Tx Storage ExtState Event Error
 
-/-- Store after CALL: rejected at `lsc_contract` unless `unsafe := true`. -/
-@[reentrant] def bad (target : Address) : M Unit := do
+/-- Store after CALL: rejected at `lsc_contract` unless `[Reentrant.Unsafe]`. -/
+def bad [Reentrant] (target : Address) : M Unit := do
   let _ ← Tx.call (α := Word) target 0x11111111 []
   write dummy 1
 
@@ -64,7 +64,7 @@ end ReentrantBad
 lsc_schema ReentrantBad
 
 /--
-error: lsc_contract: `ReentrantBad.bad` is `@[reentrant]` but writes storage after an external call. Checks-effects-interactions is then the only protection; move stores before the call, or use `@[reentrant (unsafe := true)]`.
+error: lsc_contract: `ReentrantBad.bad` is `[Reentrant]` but writes storage after an external call. Checks-effects-interactions is then the only protection; move stores before the call, or use `[Reentrant.Unsafe]`.
 -/
 #guard_msgs in
 lsc_contract ReentrantBad bad
@@ -97,10 +97,13 @@ def runtimeYul (c : ContractDef) : String :=
     | [flash, poke] =>
         flash.reentrant && !flash.reentrantUnsafe && !poke.reentrant &&
           !locks flash && locks poke &&
+          !flash.payable && !poke.payable &&
           !(fnYul ReentrantToy.contract flash).contains "tstore" &&
           (fnYul ReentrantToy.contract poke).contains "tstore" &&
           !(caseYul ReentrantToy.contract flash).contains "tstore" &&
-          (caseYul ReentrantToy.contract poke).contains "tstore"
+          (caseYul ReentrantToy.contract poke).contains "tstore" &&
+          (caseYul ReentrantToy.contract flash).contains "callvalue" &&
+          (caseYul ReentrantToy.contract poke).contains "callvalue"
     | _ => false)
 
 #guard Core.storeAfterCall

@@ -118,7 +118,7 @@ theorem TransportSetup.nodup (T : TransportSetup S X E ε) :
 /-- `none` = dispatcher reject (EVM revert, no state change). -/
 def decodeCall (T : TransportSetup S X E ε) (ctx : Ctx) (cd : List UInt8) :
     Option (Call T.spec) :=
-  match selectedFn T.c cd with
+  match dispatchedFn T.c cd ctx.value with
   | none => none
   | some f =>
     match T.codec.decodeFn f with
@@ -164,6 +164,7 @@ def EncodeBounded (T : TransportSetup S X E ε) : List (Step T.spec) → Prop
   | [] => True
   | .call c :: tr =>
     CtxWF c.toCtx ∧ (∀ n ∈ T.codec.encode c.fn c.args, n < wordBound) ∧
+      valueOk (T.codec.fnDef c.fn) c.toCtx.value ∧
       EncodeBounded T tr
   | .env _ :: tr => EncodeBounded T tr
 
@@ -192,12 +193,12 @@ theorem wf_decodeTrace (T : TransportSetup S X E ε) (self : Address)
     have ⟨ht, hs, _, _⟩ := h call (List.mem_cons.mpr (Or.inl rfl))
     have hrest : CallsWF T self rest := fun c hc =>
       h c (List.mem_cons_of_mem _ hc)
-    cases hsel : selectedFn T.c call.calldata with
+    cases hsel : dispatchedFn T.c call.calldata call.ctx.value with
     | none =>
       simp [decodeTrace, decodeCall, hsel]
       exact ih hrest
     | some f =>
-      obtain ⟨fn, hfn, _⟩ := T.codec.decodeFn_of_mem f (selectedFn_mem hsel)
+      obtain ⟨fn, hfn, _⟩ := T.codec.decodeFn_of_mem f (dispatchedFn_mem hsel)
       simp [decodeTrace, decodeCall, hsel, hfn, Call.ofCtx]
       exact ⟨ht, hs, ih hrest⟩
 
@@ -229,13 +230,14 @@ theorem step_ofCtx (T : TransportSetup S X E ε) (ctx : Ctx) (fn : T.spec.Fn)
       worldAfter (T.spec.exec fn args) ctx w := rfl
 
 theorem encodeCall_decode (T : TransportSetup S X E ε) (c : Call T.spec)
-    (hW : ∀ n ∈ T.codec.encode c.fn c.args, n < wordBound) :
+    (hW : ∀ n ∈ T.codec.encode c.fn c.args, n < wordBound)
+    (hvo : valueOk (T.codec.fnDef c.fn) c.toCtx.value) :
     decodeCall T c.toCtx (encodeCall T c).calldata = some c := by
   have hf := T.codec.mem c.fn
   have hk := T.hctor _ hf
   have hlenA := T.codec.encode_length c.fn c.args
-  have hsel := selectedFn_fnCalldata T.c (T.codec.fnDef c.fn)
-    (T.codec.encode c.fn c.args) hf T.nodup hlenA
+  have hsel := dispatchedFn_fnCalldata T.c (T.codec.fnDef c.fn)
+    (T.codec.encode c.fn c.args) c.toCtx.value hf T.nodup hlenA hvo
   have hdec := decodeArgs_fnCalldata (T.codec.fnDef c.fn)
     (T.codec.encode c.fn c.args) hk hlenA hW
   have hfn := T.codec.decodeFn_fnDef c.fn
@@ -252,8 +254,8 @@ theorem decodeTrace_encodeCalls (T : TransportSetup S X E ε)
     | .env _ =>
       simpa [encodeCalls, callsOf] using ih (by simpa [EncodeBounded] using hb)
     | .call c =>
-      rcases hb with ⟨_, hWargs, htlB⟩
-      have hdec := encodeCall_decode T c hWargs
+      rcases hb with ⟨_, hWargs, hvo, htlB⟩
+      have hdec := encodeCall_decode T c hWargs hvo
       simp [encodeCall] at hdec
       simp [decodeTrace, encodeCalls, encodeCall, hdec, callsOf]
       exact ih htlB
@@ -278,7 +280,7 @@ theorem encodeCalls_WF (T : TransportSetup S X E ε) (self : Address)
     | .env _ =>
       exact ih hW (by simpa [EncodeBounded] using hb)
     | .call c =>
-      rcases hb with ⟨hctxWF, hWargs, htlB⟩
+      rcases hb with ⟨hctxWF, hWargs, hvo, htlB⟩
       rcases hW with ⟨htgt, hne, hWtl⟩
       intro call hmem
       simp [encodeCalls] at hmem

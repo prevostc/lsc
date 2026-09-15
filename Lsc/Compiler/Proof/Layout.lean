@@ -126,6 +126,15 @@ theorem ctxRel_address {ctx st} (h : ctxRel ctx st) :
   rcases h with ⟨_, _, _, _, ha, _⟩
   exact ha
 
+theorem ctxRel_callvalue {ctx st} (h : ctxRel ctx st) :
+    st.env.callvalue = BitVec.ofNat 256 ctx.value := by
+  rcases h with ⟨_, hv, _⟩
+  exact hv
+
+theorem ctxRel_value_lt {ctx st} (h : ctxRel ctx st) : ctx.value < wordBound := by
+  rcases h with ⟨_, _, _, _, _, _, _, _, hwf⟩
+  exact hwf.2.1
+
 theorem ctxRel_static {ctx st} (h : ctxRel ctx st) : st.env.static = false := by
   rcases h with ⟨_, _, _, _, _, hs, _, _, _⟩
   exact hs

@@ -954,13 +954,28 @@ theorem staticSafe_lockSetPrefix (f : FnDef) :
   · simp [lockSetPrefix, hlocks, staticSafeStmts]
   · simp [lockSetPrefix, hlocks, staticSafeStmts, staticSafe_lockSetStmt]
 
+theorem staticSafe_callvalue :
+    staticSafeExpr memoryGuardK (bop Op.callvalue []) = true := by
+  simp [bop, staticSafeExpr_builtin, staticSafeOp, staticSafeExprs]
+
+theorem staticSafe_valueCheckStmt :
+    staticSafeStmt memoryGuardK valueCheckStmt = true := by
+  simp [valueCheckStmt, staticSafeStmt_cond, staticSafe_callvalue, staticSafeStmts,
+    staticSafe_revert00]
+
+theorem staticSafe_valueCheckPrefix (f : FnDef) :
+    staticSafeStmts memoryGuardK (valueCheckPrefix f) = true := by
+  cases hpay : f.payable
+  · simp [valueCheckPrefix, hpay, staticSafeStmts, staticSafe_valueCheckStmt]
+  · simp [valueCheckPrefix, hpay, staticSafeStmts]
+
 theorem staticSafe_entryCase {c f p} (h : entryCase c f = some p) :
     staticSafeStmts memoryGuardK p.2 = true := by
   simp [entryCase, Bind.bind, Option.bind] at h
   cases hb : toYulFn c f <;> simp [hb] at h
   cases h
   simp [staticSafeStmts, staticSafeStmt, staticSafe_guardLt, staticSafeStmts_append,
-    staticSafe_lockSetPrefix f, staticSafe_toYulFn hb]
+    staticSafe_valueCheckPrefix f, staticSafe_lockSetPrefix f, staticSafe_toYulFn hb]
 
 theorem staticSafe_mapM_entryCase {c : ContractDef} :
     ∀ {fs : List FnDef} {cases : List (Literal × YBlock)},

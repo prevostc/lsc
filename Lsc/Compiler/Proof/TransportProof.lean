@@ -124,7 +124,7 @@ theorem transport_exists (T : TransportSetup S X E ε)
       simpa [encodeCalls] using
         ih (w := w) (σ := σ) hs hwf (by simpa [EncodeBounded] using hb)
     | .call c =>
-      rcases hb with ⟨hctxWF, hWargs, htlB⟩
+      rcases hb with ⟨hctxWF, hWargs, hvo, htlB⟩
       have hf := T.codec.mem c.fn
       have hk := T.hctor _ hf
       have hlenA := T.codec.encode_length c.fn c.args
@@ -136,8 +136,8 @@ theorem transport_exists (T : TransportSetup S X E ε)
         evmCallRun_fnCalldata T.c T.Γ T.lawful T.hκ hcf T.hctor T.hlen T.hbound
           T.nodup T.rt T.hrt T.is T.hcomp c.toCtx (T.codec.fnDef c.fn)
           (T.codec.encode c.fn c.args) { w with log := [] } σ hf hk hlenA hWargs
-          hctxWF (by simpa using hs) rfl (WorldWF_log [] hwf) hcd
-      have hdecC := encodeCall_decode T c hWargs
+          hctxWF (by simpa using hs) rfl (WorldWF_log [] hwf) hcd hvo
+      have hdecC := encodeCall_decode T c hWargs hvo
       have hwa := T.codec.core_exec c.fn c.args c.toCtx { w with log := [] }
       let w1 : World S X E :=
         { worldAfter (T.spec.exec c.fn c.args) c.toCtx { w with log := [] }
@@ -423,9 +423,9 @@ theorem transport_exists_ext (T : TransportSetup S ExtState E ε)
         ih (w := w) (σ := σ) (ξ := ξ) hs hwf
           (by simpa [EncodeBounded] using hb) hW hw
     | .call c =>
-      rcases hb with ⟨hctxWF, hWargs, htlB⟩
+      rcases hb with ⟨hctxWF, hWargs, hvo, htlB⟩
       rcases hW with ⟨htgt, hne, hWtl⟩
-      have hdecC := encodeCall_decode T c hWargs
+      have hdecC := encodeCall_decode T c hWargs hvo
       have hcd : (encodeCall T c).calldata.length < wordBound := by
         simp only [encodeCall]
         rw [length_fnCalldata, T.codec.encode_length]
@@ -502,10 +502,10 @@ theorem transport_exists_claim_ext (T : TransportSetup S ExtState E ε)
         ih (w := w) (σ := σ) (ξ := ξ) hs hwf
           (by simpa [EncodeBounded] using hb) hW hw hA
     | .call c =>
-      rcases hb with ⟨hctxWF, hWargs, htlB⟩
+      rcases hb with ⟨hctxWF, hWargs, hvo, htlB⟩
       rcases hW with ⟨htgt, hne, hWtl⟩
       rcases hA with ⟨hna, hAtl⟩
-      have hdecC := encodeCall_decode T c hWargs
+      have hdecC := encodeCall_decode T c hWargs hvo
       have hcd : (encodeCall T c).calldata.length < wordBound := by
         simp only [encodeCall]
         rw [length_fnCalldata, T.codec.encode_length]

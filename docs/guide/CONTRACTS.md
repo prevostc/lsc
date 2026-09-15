@@ -110,14 +110,32 @@ The language has no loops, inline assembly, `delegatecall`, `selfdestruct`,
 or untyped calls. External calls go only through an `I.Ref` of a declared
 interface (`deriving Interface`).
 
-## `@[reentrant]`
+## Capabilities: `[Payable]` and `[Reentrant]`
+
+Write them as instance binders on the function. There are no user
+instances: a helper that asks for `[Payable]` is callable only from a
+function that already has the binder. Binder order does not matter.
+
+```lean
+def deposit [Payable] : M Unit := do
+  -- `[Payable]` admits value; `Tx.value` arrives with the native-asset
+  -- chain profile (slice 18).
+def flashLoan [Reentrant] (to : Address) (amount : Amount usdc) : M Unit := do
+  -- …
+def both [Payable] [Reentrant] … : M Unit := do
+  -- …
+```
+
+Non-payable functions revert on a nonzero `callvalue` (`if callvalue() {
+revert(0, 0) }` after the per-function size guard). `[Payable]` skips
+that check for that selector.
 
 By default every runtime function is non-reentrant: the compiled runtime
 `tload`s transient slot 0 on every entry (including views and unknown
 selectors) and reverts if the slot is set. Mutating functions that make
 an external CALL/STATICCALL also `tstore` the slot around the body.
 
-Use `@[reentrant]` on a flash-loan (or similar) entry point whose callee
+Use `[Reentrant]` on a flash-loan (or similar) entry point whose callee
 is expected to call back into this contract. That function does not
 acquire or release the lock, so a callback can run while it is on the
 stack. What is lost: while this function runs, nested calls into it are
@@ -127,19 +145,12 @@ reverts even this function. The CALL model restores `self` storage after
 an external call (`ExtOracle.noReentry`); that restore is justified by
 the lock for non-reentrant functions.
 
-A `@[reentrant]` function may not write storage after an external call
+A `[Reentrant]` function may not write storage after an external call
 (CALL or STATICCALL), checked syntactically on the reified Core along
 every path. That checks-effects-interactions rule is then the only
-protection. Override with `@[reentrant (unsafe := true)]`.
+protection. Override with `[Reentrant.Unsafe]`.
 
-```lean
-/-- Flash-loan entry point: the callee is expected to call back into this contract. -/
-@[reentrant] def flashLoan (…) : M Unit := do
-  -- …
-```
-
-Place the attribute on the function definition in `Contract.lean`.
-Constructors cannot be `@[reentrant]`.
+Constructors cannot be `[Reentrant]`.
 
 ---
 

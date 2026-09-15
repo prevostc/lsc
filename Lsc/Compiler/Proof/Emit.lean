@@ -1275,6 +1275,16 @@ theorem noExt_lockCheckStmt : noExtStmt lockCheckStmt = true := by
     (noExtExprs_cons_true (noExt_lit _) noExtExprs_nil)]
   simp [noExtStmts, noExt_revert00]
 
+theorem noExt_valueCheckStmt : noExtStmt valueCheckStmt = true := by
+  unfold valueCheckStmt noExtStmt
+  rw [noExt_bop (op := YulSemantics.EVM.Op.callvalue) rfl noExtExprs_nil]
+  simp [noExtStmts, noExt_revert00]
+
+theorem noExt_valueCheckPrefix (f : FnDef) : noExtStmts (valueCheckPrefix f) = true := by
+  cases hpay : f.payable
+  · simp [valueCheckPrefix, hpay, noExtStmts, noExt_valueCheckStmt]
+  · simp [valueCheckPrefix, hpay, noExtStmts]
+
 theorem noExt_lockClear (e : Emit) (he : noExtBlock e.stmts = true) :
     noExtBlock (emitLockClear e).stmts = true :=
   noExt_push he noExt_lockClearStmt

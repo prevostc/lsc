@@ -3,7 +3,7 @@ import Lsc.Lang.CoreTheorems
 import Lsc.Lang.Contract
 import Lsc.Lang.ExtState
 import Lsc.Lang.Inline
-import Lsc.Lang.Reentrant
+import Lsc.Lang.Capability
 import Lsc.Lang.Spec
 import Lsc.Lang.TxTheorems
 
@@ -79,9 +79,10 @@ per-field `@[simp]` reductions `C.schema_read_<field>` / `C.schema_write_<field>
 language-level `C.spec` (`C.Fn` / `C.entry` / `C.spec_exec_*`), and `C.impl_<I>`
 (`C.impl` when there is exactly one `implements` clause). Function kind
 (`view` / `tx`) is decided by effects (`Core.isPureRead`: no writes, emits,
-or CALLs ⇒ `view`), never by return type. `@[reentrant]` opts a function
+or CALLs ⇒ `view`), never by return type. `[Reentrant]` opts a function
 out of lock acquire/release; a reentrant function that stores after an
-external call is rejected unless it also has `@[reentrant (unsafe := true)]`.
+external call is rejected unless it also has `[Reentrant.Unsafe]`.
+`[Payable]` skips the dispatcher `callvalue()` revert.
 `#lsc_obligations C` prints the security theorems to prove; it does not
 import `Lsc.Security`.
 
@@ -2092,13 +2093,68 @@ def encodeEnvAtom (p : Expr) : MetaM Expr := do
   else if (← whnfR ty).isConstOf ``Lsc.Address then mkAppM ``Lsc.Address.toWord #[p]
   else pure p
 
+/-- Instance-binder capabilities `lsc_contract` records on `FnDef`. -/
+inductive CapKind
+  | payable
+  | reentrant
+  | reentrantUnsafe
+  deriving DecidableEq, Repr
+
+def capKind? (ty : Expr) : MetaM (Option CapKind) := do
+  let ty ← whnf ty
+  if ty.isConstOf ``Lsc.Payable then return some .payable
+  if ty.isConstOf ``Lsc.Reentrant then return some .reentrant
+  if ty.isConstOf ``Lsc.Reentrant.Unsafe then return some .reentrantUnsafe
+  return none
+
+def capWitnessTerm : CapKind → Term
+  | .payable => ⟨mkIdent ``Lsc.Payable.entrypoint⟩
+  | .reentrant => ⟨mkIdent ``Lsc.Reentrant.entrypoint⟩
+  | .reentrantUnsafe => ⟨mkIdent ``Lsc.Reentrant.Unsafe.entrypoint⟩
+
+/-- ABI parameters vs `[Payable]` / `[Reentrant]` / `[Reentrant.Unsafe]`. -/
+structure FnBinders where
+  capKinds : Array CapKind
+  params : Array Expr
+  payable : Bool
+  reentrant : Bool
+  reentrantUnsafe : Bool
+
+def splitFnBinders (xs : Array Expr) : MetaM FnBinders := do
+  let mut capKinds : Array CapKind := #[]
+  let mut params : Array Expr := #[]
+  let mut payable := false
+  let mut reentrant := false
+  let mut reentrantUnsafe := false
+  for x in xs do
+    let bi ← x.fvarId!.getBinderInfo
+    let ty ← inferType x
+    if bi.isInstImplicit then
+      match ← capKind? ty with
+      | some .payable =>
+        payable := true
+        capKinds := capKinds.push .payable
+      | some .reentrant =>
+        reentrant := true
+        capKinds := capKinds.push .reentrant
+      | some .reentrantUnsafe =>
+        reentrant := true
+        reentrantUnsafe := true
+        capKinds := capKinds.push .reentrantUnsafe
+      | none =>
+        throwError "lsc_contract: unknown instance binder{indentExpr ty}; \
+          only [Payable], [Reentrant], and [Reentrant.Unsafe] are allowed"
+    else
+      params := params.push x
+  return { capKinds, params, payable, reentrant, reentrantUnsafe }
+
 /-- Reify `fn` and add `fn.core` and `fn.core_denote` to the environment. -/
 def reifyFunction (fn : Name) : TermElabM Unit := do
   let info ← getConstInfoDefn fn
   for n in info.value.getUsedConstants do
     if isTryHead n then
       throwTryCall (mkConst n)
-  forallTelescope info.type fun params body => do
+  forallTelescope info.type fun xs body => do
     let txTy ← whnfToTx body
     let S := txTy.getArg! 0
     let X := txTy.getArg! 1
@@ -2109,9 +2165,10 @@ def reifyFunction (fn : Name) : TermElabM Unit := do
     let ns := sName.getPrefix
     let ci ← contractInfo ns
     let t ← retTyOf ρ
-    -- Peel the parameters off the definition body.
-    let value := info.value.beta params
-    let env : Env t := { vars := (params.map (·.fvarId!)).toList.reverse }
+    let binders ← splitFnBinders xs
+    -- Peel every binder, including capability instances, off the definition.
+    let value := info.value.beta xs
+    let env : Env t := { vars := (binders.params.map (·.fvarId!)).toList.reverse }
     let core ← reify ci t env value
     let coreName := fn ++ `core
     let coreTy := mkApp (Lean.mkConst ``Core) (toExpr t)
@@ -2119,7 +2176,7 @@ def reifyFunction (fn : Name) : TermElabM Unit := do
     -- Certificate: `Core.denote schema core env = f`, or `ofWord <$> Core.denote = f`
     -- when the surface returns `Amount`.
     let schema := Lean.mkConst ci.schema
-    let envAtoms : List Expr ← params.toList.reverse.mapM fun p => encodeEnvAtom p
+    let envAtoms : List Expr ← binders.params.toList.reverse.mapM fun p => encodeEnvAtom p
     let envList ← mkListLit (Lean.mkConst ``Nat) envAtoms
     let coreDenote :=
       mkAppN (Lean.mkConst ``Core.denote)
@@ -2129,12 +2186,12 @@ def reifyFunction (fn : Name) : TermElabM Unit := do
         #[S, X, E, ε, schema, toExpr t, core.toExpr, envList]
     let lhs ← wrapDenote ρ coreDenote
     let lhsRaw ← wrapDenote ρ coreDenoteRaw
-    let rhs := mkAppN (Lean.mkConst fn) params
+    let rhs := mkAppN (Lean.mkConst fn) xs
     let eq ← mkEq lhs rhs
     let pf ← withDeclName (fn ++ `core_denote) <|
       certifyDenote fn ci lhs lhsRaw rhs core.toExpr
-    let stmt ← mkForallFVars params eq
-    let proof ← mkLambdaFVars params pf
+    let stmt ← mkForallFVars xs eq
+    let proof ← mkLambdaFVars xs pf
     addDecl <| .thmDecl { name := fn ++ `core_denote, levelParams := [], type := stmt, value := proof }
     trace[Lsc.reify] "reified {fn} : Core {repr t}\n{repr core}"
 
@@ -2158,23 +2215,24 @@ def fnKindOf (fn : Name) : MetaM FnKind := do
   let e ← reduce (skipTypes := true) e
   if e.isConstOf ``Bool.true then return .view else return .tx
 
-def fnMeta (fn : Name) : MetaM (List Param × RetTy × FnKind) := do
+def fnMeta (fn : Name) : MetaM (List Param × RetTy × FnKind × FnBinders) := do
   let info ← getConstInfoDefn fn
   forallTelescope info.type fun xs body => do
     let txTy ← whnfToTx body
     let t ← retTyOf (txTy.getArg! 4)
-    let params ← xs.toList.mapM fun x => do
+    let binders ← splitFnBinders xs
+    let params ← binders.params.toList.mapM fun x => do
       let n := (← x.fvarId!.getUserName).getString!
       let abi ← abiTyOf (← inferType x)
       pure { name := n, ty := abi }
     let kind ← fnKindOf fn
-    pure (params, t, kind)
+    pure (params, t, kind, binders)
 
 def mkFnDefExpr (name : String) (decl : Name) (kind : FnKind) (params : List Param)
-    (ret : RetTy) (coreName : Name) (reentrant reentrantUnsafe : Bool) : Expr :=
+    (ret : RetTy) (coreName : Name) (payable reentrant reentrantUnsafe : Bool) : Expr :=
   mkAppN (Lean.mkConst ``FnDef.mk) #[
     toExpr name, toExpr decl, toExpr kind, toExpr params, toExpr ret,
-    Lean.mkConst coreName, toExpr reentrant, toExpr reentrantUnsafe]
+    Lean.mkConst coreName, toExpr payable, toExpr reentrant, toExpr reentrantUnsafe]
 
 /-- Head constructor of a whnf'd inductive application. -/
 def appCtor (e : Expr) : MetaM Name := do
@@ -2237,9 +2295,9 @@ partial def storeAfterCallExpr (seen : Bool) (e : Expr) : MetaM Bool := do
 def checkStoreAfterCall (fn : Name) : MetaM Unit := do
   let bad ← storeAfterCallExpr false (mkConst (fn ++ `core))
   if bad then
-    throwError "lsc_contract: `{fn}` is `@[reentrant]` but writes storage after \
+    throwError "lsc_contract: `{fn}` is `[Reentrant]` but writes storage after \
       an external call. Checks-effects-interactions is then the only protection; \
-      move stores before the call, or use `@[reentrant (unsafe := true)]`."
+      move stores before the call, or use `[Reentrant.Unsafe]`."
 
 def fieldKindToAbi : FieldKind → Lsc.FieldKind
   | .scalar => .scalar
@@ -2265,14 +2323,14 @@ def assembleContract (ns : Name) (fns : Array Name) : TermElabM Unit := do
   let mut fnDefs : Array Expr := #[]
   let mut ctorE : Expr := mkApp (Lean.mkConst ``Option.none [Level.zero]) (Lean.mkConst ``FnDef)
   for fn in fns do
-    let (params, ret, kind) ← fnMeta fn
-    let (reent, uns) := reentrantFlags (← getEnv) fn
-    if kind == .constructor && reent then
-      throwError "lsc_contract: `@[reentrant]` is not allowed on `{fn}` \
+    let (params, ret, kind, binders) ← fnMeta fn
+    if kind == .constructor && binders.reentrant then
+      throwError "lsc_contract: `[Reentrant]` is not allowed on `{fn}` \
         (constructors are not in the runtime lock)"
-    if reent && !uns then
+    if binders.reentrant && !binders.reentrantUnsafe then
       checkStoreAfterCall fn
-    let e := mkFnDefExpr fn.getString! fn kind params ret (fn ++ `core) reent uns
+    let e := mkFnDefExpr fn.getString! fn kind params ret (fn ++ `core)
+      binders.payable binders.reentrant binders.reentrantUnsafe
     if kind == .constructor then
       ctorE := mkApp2 (Lean.mkConst ``Option.some [Level.zero]) (Lean.mkConst ``FnDef) e
     else
@@ -2343,8 +2401,13 @@ def mkNestedProj (p : Term) (n i : Nat) : MetaM Term := do
     e ← `($e.1)
   return e
 
-def mkRunTerm (fn : Name) (arity : Nat) : MetaM Term := do
-  let f : Term := ⟨mkIdent fn⟩
+def applyCaps (f : Term) (caps : Array CapKind) : MetaM Term := do
+  let ws := caps.map capWitnessTerm
+  if ws.isEmpty then return f
+  `(@$f $ws*)
+
+def mkRunTerm (fn : Name) (caps : Array CapKind) (arity : Nat) : MetaM Term := do
+  let f ← applyCaps ⟨mkIdent fn⟩ caps
   match arity with
   | 0 => `(fun _ => $f)
   | 1 => return f
@@ -2362,6 +2425,7 @@ structure FnSurface where
   X : Expr
   E : Expr
   ε : Expr
+  capKinds : Array CapKind
   params : Array (Name × Expr)
   ρ : Expr
 
@@ -2369,17 +2433,19 @@ def fnSurface (fn : Name) : MetaM FnSurface := do
   let info ← getConstInfoDefn fn
   forallTelescope info.type fun xs body => do
     let txTy ← whnfToTx body
-    let params ← xs.mapIdxM fun i x => do
+    let binders ← splitFnBinders xs
+    let params ← binders.params.mapIdxM fun i x => do
       let n := ← x.fvarId!.getUserName
       let n := if n.hasMacroScopes then Name.mkSimple s!"a{i}" else n
       pure (n, ← inferType x)
     pure {
       S := txTy.getArg! 0, X := txTy.getArg! 1, E := txTy.getArg! 2
-      ε := txTy.getArg! 3, params, ρ := txTy.getArg! 4 }
+      ε := txTy.getArg! 3, capKinds := binders.capKinds, params,
+      ρ := txTy.getArg! 4 }
 
 def entrypointFns (fns : Array Name) : MetaM (Array Name) :=
   fns.filterM fun fn => do
-    let (_, _, kind) ← fnMeta fn
+    let (_, _, kind, _) ← fnMeta fn
     return kind != .constructor
 
 def mkEntryRhs (fn : Name) : MetaM Term := do
@@ -2387,14 +2453,14 @@ def mkEntryRhs (fn : Name) : MetaM Term := do
   let argTys ← surf.params.mapM fun (_, ty) => exprToTerm ty
   let argsTy ← mkProdType argTys
   let retTy ← exprToTerm surf.ρ
-  let run ← mkRunTerm fn surf.params.size
+  let run ← mkRunTerm fn surf.capKinds surf.params.size
   `(⟨$argsTy, $retTy, $run⟩)
 
 def mkSpecExecCommand (ns fn : Name) : MetaM (TSyntax `command) := do
   let surf ← fnSurface fn
   let ctor := ctorIdent fn
   let specId : Term := ⟨mkIdent (ns ++ `spec)⟩
-  let f : Term := ⟨mkIdent fn⟩
+  let f ← applyCaps ⟨mkIdent fn⟩ surf.capKinds
   let args : Array Term := surf.params.map fun (n, _) => ⟨mkIdent n⟩
   let argStx ← mkTuple args
   let rhs ← `($f $args*)
@@ -2589,7 +2655,7 @@ def implMethodBody (ns : Name) (m : IfaceMethod) : MetaM Term := do
   let fn := ns ++ m.name
   let surf ← fnSurface fn
   let ids : Array Ident := surf.params.map fun (n, _) => mkIdent n
-  let f : Term := ⟨mkIdent fn⟩
+  let f ← applyCaps ⟨mkIdent fn⟩ surf.capKinds
   if m.isView then
     let w := mkIdent `w
     let run ←
@@ -2737,7 +2803,7 @@ def dummyTerm (ty : Expr) : MetaM Term := do
 
 def mkFnDefAlt (fn : Name) : MetaM (TSyntax ``Lean.Parser.Term.matchAlt) := do
   let ctor := ctorIdent fn
-  let (params, ret, kind) ← fnMeta fn
+  let (params, ret, kind, binders) ← fnMeta fn
   let nameLit := Syntax.mkStrLit fn.getString!
   let kindT ← match kind with
     | .tx => `(Lsc.FnKind.tx)
@@ -2748,14 +2814,14 @@ def mkFnDefAlt (fn : Name) : MetaM (TSyntax ``Lean.Parser.Term.matchAlt) := do
   let paramsT ← `([$paramTs,*])
   let coreT : Term := ⟨mkIdent (fn ++ `core)⟩
   let declT := quote fn
-  let (reent, uns) := reentrantFlags (← getEnv) fn
-  let reentT := quote reent
-  let unsT := quote uns
+  let payT := quote binders.payable
+  let reentT := quote binders.reentrant
+  let unsT := quote binders.reentrantUnsafe
   `(Lean.Parser.Term.matchAltExpr|
       | .$ctor:ident =>
         { name := $nameLit, decl := $declT, kind := $kindT,
           params := $paramsT, ret := $retT, core := $coreT,
-          reentrant := $reentT, reentrantUnsafe := $unsT })
+          payable := $payT, reentrant := $reentT, reentrantUnsafe := $unsT })
 
 def mkEncodeAlt (fn : Name) : MetaM (TSyntax ``Lean.Parser.Term.matchAlt) := do
   let ctor := ctorIdent fn
@@ -3154,10 +3220,10 @@ syntax (name := lscReify) "lsc_reify " ident+ : command
 /-- `lsc_contract C f₁ … fₙ implements I args, …` reifies each `C.fᵢ` if needed, then
 defines `C.contract`, `C.Fn` / `C.entry` / `C.spec`, the transport codec, and
 `C.impl_<I>` (`C.impl` when there is exactly one `implements` clause). A function
-named `constructor` is the constructor; otherwise the kind is `view` when
+`named `constructor` is the constructor; otherwise the kind is `view` when
 `Core.isPureRead` (no writes, emits, or CALLs) and `tx` otherwise.
-`@[reentrant]` is recorded on `FnDef`; store-after-call is rejected unless
-`unsafe := true`. -/
+`[Payable]` / `[Reentrant]` / `[Reentrant.Unsafe]` instance binders are
+recorded on `FnDef`; store-after-call is rejected unless `[Reentrant.Unsafe]`. -/
 syntax (name := lscContract)
   "lsc_contract " ident ident+
     ("implements " ident term:arg* (", " ident term:arg*)*)* : command

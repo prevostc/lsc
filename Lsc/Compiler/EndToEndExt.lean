@@ -37,7 +37,7 @@ theorem evmCallRun_of_correct_ext {S E ε : Type}
     (himm0 : ∀ k, yst0.env.immutable k = 0)
     (hLock : LockFree yst0) :
     ∃ σ' ξ', EvmCallRunξ is yst0 σ' ξ' ∧
-      match selectedFn c yst0.env.calldata with
+      match dispatchedFn c yst0.env.calldata ctx.value with
       | none => σ' = yst0.storage ∧ ξ' = evmForeign yst0
       | some f =>
           match Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse)
@@ -58,7 +58,7 @@ theorem evmCallRun_of_correct_ext {S E ε : Type}
   refine ⟨stObs.storage, evmForeign stObs, hEvm, ?_⟩
   simp only [EvmCallRunExt] at hpred
   have hhalted : stObs.halted = st'.halted := committedState_halted yst0 st'
-  cases hsel : selectedFn c yst0.env.calldata with
+  cases hsel : dispatchedFn c yst0.env.calldata ctx.value with
   | none =>
     simp only [hsel] at hpred ⊢
     rcases hpred with ⟨_, ⟨hh, _⟩⟩
@@ -109,7 +109,8 @@ theorem evmCallRun_fnCalldata_ext {S E ε : Type}
     (hcd : (fnCalldata f args).length < wordBound)
     (hAgr : ExtAgree ctx.self w.ext
       (mkEvmStateExt (fnCalldata f args) σ ξ evmKeccak ctx))
-    (hOr : w.oracle = Oracle.ofExt o) :
+    (hOr : w.oracle = Oracle.ofExt o)
+    (hvo : valueOk f ctx.value) :
     let yst0 := mkEvmStateExt (fnCalldata f args) σ ξ evmKeccak ctx
     ∃ σ' ξ', EvmCallRunξ is yst0 σ' ξ' ∧
       match Tx.run (Core.denote Γ f.core args.reverse) ctx w with
@@ -119,8 +120,8 @@ theorem evmCallRun_fnCalldata_ext {S E ε : Type}
               R c Γ evmKeccak w' stObs ∧ ExtAgree ctx.self w'.ext stObs
       | .error _ => σ' = σ ∧ ξ' = evmForeign yst0 := by
   intro yst0
-  have hsel : selectedFn c (fnCalldata f args) = some f :=
-    selectedFn_fnCalldata c f args hf hnd hlenA
+  have hsel : dispatchedFn c (fnCalldata f args) ctx.value = some f :=
+    dispatchedFn_fnCalldata c f args ctx.value hf hnd hlenA hvo
   have hdec : decodeArgs f (fnCalldata f args) = args :=
     decodeArgs_fnCalldata f args hk hlenA hW
   have hctx : ctxRel ctx yst0 := ctxRel_mkEvmStateExt _ _ _ _ _ hctxWF hcd

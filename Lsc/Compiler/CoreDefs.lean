@@ -210,7 +210,7 @@ theorem locks_eq_false_of_callFree {f : FnDef} (h : CallFree f.core) :
     locks f = false := by
   simp [locks, CallFree_not_hasExtCall h]
 
-/-- `@[reentrant]` functions do not acquire or release the lock. -/
+/-- `[Reentrant]` functions do not acquire or release the lock. -/
 theorem locks_eq_false_of_reentrant {f : FnDef} (h : f.reentrant = true) :
     locks f = false := by
   simp [locks, h]

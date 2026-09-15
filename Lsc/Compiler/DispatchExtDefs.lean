@@ -23,7 +23,7 @@ def RuntimeBlockCorrectExt {S E ε : Type}
         (YulEvmCompiler.Optimizer.MemorySpill.eraseMemoryGuardStmts yul)
         st0 [] st' out →
       let stObs := committedState st0 st'
-      match selectedFn c st0.env.calldata with
+      match dispatchedFn c st0.env.calldata ctx.value with
       | none =>
           out = Outcome.halt ∧ stObs.halted = some (.revert, []) ∧ R c Γ κ w stObs
       | some f =>

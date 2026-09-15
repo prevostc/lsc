@@ -126,9 +126,9 @@ Not derived from powdr:
   S2/transport theorems do not take `hNR`; isolation of `self`'s
   storage/transient/self-logs is the `toCall` restore
   (`ExtOracle.noReentry`). ETH balances are not covered (`SELFDESTRUCT`
-  to `self`, foreign `balanceOf`). `@[reentrant]` skips acquire/release
+  to `self`, foreign `balanceOf`). `[Reentrant]` skips acquire/release
   (prologue still checks); store-after-call is rejected unless
-  `unsafe := true`. CALLCODE/DELEGATECALL are not emitted. The EVM fact
+  `[Reentrant.Unsafe]`. CALLCODE/DELEGATECALL are not emitted. The EVM fact
   that only a `self` frame can write `self` storage/logs is not
   mechanized (TCB §(d)).
 - Core outside `S2Frag` (e.g. wrapping `letPure` other than `id`, nested pair

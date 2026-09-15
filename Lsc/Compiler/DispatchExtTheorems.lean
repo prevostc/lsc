@@ -21,7 +21,8 @@ open YulSemantics.EVM
 
 /-- A compiled runtime that may CALL out agrees with the high-level model
 on every calldata: a known selector runs the matching function under
-`w.oracle = Oracle.ofExt o`; an unknown selector reverts with storage
+`w.oracle = Oracle.ofExt o` unless a non-payable function is sent native
+value; an unknown selector or a value reject reverts with storage
 unchanged. Reentrancy into this contract reverts while the transient
 lock is held (`ExtOracle.noReentry`); everything else about the callee
 is adversarial. This is the Yul dispatcher that

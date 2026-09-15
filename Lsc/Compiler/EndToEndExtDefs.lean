@@ -38,7 +38,7 @@ def EvmCallRunExt {S E ε : Type}
     (o : ExtOracle) (ctx : Ctx) (w : World S ExtState E)
     (yst0 st' : EvmState) (out : Outcome) : Prop :=
   let stObs := committedState yst0 st'
-  match selectedFn c yst0.env.calldata with
+  match dispatchedFn c yst0.env.calldata ctx.value with
   | none =>
       out = Outcome.halt ∧ stObs.halted = some (.revert, []) ∧ R c Γ κ w stObs
   | some f =>
@@ -79,7 +79,7 @@ def EvmCallRunExtAll {S E ε : Type}
     (∃ s', Steps s0 s' ∧ Halted s') ∧
     ∀ s', Steps s0 s' → Halted s' →
       σ' = postStorage yst0 s' ∧ ξ' = postForeign yst0 s' ∧
-      match selectedFn c yst0.env.calldata with
+      match dispatchedFn c yst0.env.calldata ctx.value with
       | none => σ' = yst0.storage ∧ ξ' = evmForeign yst0
       | some f =>
           match Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse)

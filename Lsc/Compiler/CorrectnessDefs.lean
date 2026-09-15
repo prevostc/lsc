@@ -88,6 +88,18 @@ def selectedFn (c : ContractDef) (cd : List UInt8) : Option FnDef :=
     | some f =>
       if cd.length < 4 + 32 * f.params.length then none else some f
 
+/-- Non-payable functions reject a nonzero `callvalue`. Payable functions
+and `value = 0` are accepted. -/
+def valueOk (f : FnDef) (value : Nat) : Bool :=
+  f.payable || decide (value = 0)
+
+/-- `selectedFn`, or `none` when a non-payable function is sent native
+value (same revert shape as an unknown selector). -/
+def dispatchedFn (c : ContractDef) (cd : List UInt8) (value : Nat) : Option FnDef :=
+  match selectedFn c cd with
+  | none => none
+  | some f => if valueOk f value then some f else none
+
 /-- Storage values (and mapping keys) used by `R` fit in an EVM word. -/
 def WorldWF {S X E ε} (c : ContractDef) (Γ : ContractSchema S X E ε) (w : World S X E) : Prop :=
   ∀ (i : Nat) (fd : FieldDef), c.fields[i]? = some fd →

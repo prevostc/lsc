@@ -95,11 +95,11 @@ are not in that EVM model**. Runtime theorems exclude constructors.
 Vault/Cpamm constructors that `CALL` are out of scope.
 
 The runtime emits `if tload(0) { revert(0,0) }` on every entry
-(`lockCheckStmt`), including `@[reentrant]` functions. Functions with
+(`lockCheckStmt`), including `[Reentrant]` functions. Functions with
 `locks f` (`¬reentrant ∧ hasExtCall ∧ ¬ isPureRead`) `tstore(0,1)` after
 the size guard and `tstore(0,0)` before committing `return`/`stop`.
-`@[reentrant]` skips acquire/release; a store after an external call is
-rejected unless `unsafe := true`. Held lock ⇒ revert, empty returndata,
+`[Reentrant]` skips acquire/release; a store after an external call is
+rejected unless `[Reentrant.Unsafe]`. Held lock ⇒ revert, empty returndata,
 committed storage/transient/logs unchanged (`lock_held_reverts_yul`,
 `lock_held_reverts_yul_open`, `lock_held_reverts_evm`; no oracle
 hypothesis). A nested CALL/STATICCALL into the compiled runtime while the

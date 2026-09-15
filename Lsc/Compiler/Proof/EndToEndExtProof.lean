@@ -67,7 +67,7 @@ theorem bytecode_call_correct_ext {S E ε : Type}
   have hH : Halted s' := Halted_of_compile_out hcs hOut
   have ho : out = Outcome.halt := by
     simp only [EvmCallRunExt] at hpred
-    cases hsel : selectedFn c yst0.env.calldata with
+    cases hsel : dispatchedFn c yst0.env.calldata ctx.value with
     | none =>
       simp only [hsel] at hpred
       exact hpred.1
@@ -88,7 +88,7 @@ theorem bytecode_call_correct_ext {S E ε : Type}
     · exact HaltedMatch_of_ystF hH' hhalt
   have hpost : stObs.storage = postStorage yst0 s' := by
     simp only [EvmCallRunExt] at hpred
-    cases hsel : selectedFn c yst0.env.calldata with
+    cases hsel : dispatchedFn c yst0.env.calldata ctx.value with
     | none =>
       simp only [hsel] at hpred
       rcases hpred with ⟨_, ⟨hh, _⟩⟩
@@ -119,7 +119,7 @@ theorem bytecode_call_correct_ext {S E ε : Type}
         rw [postStorage_reverted hr.1, obs_storage_rollback hobs hhalted hh]
   have hpostξ : evmForeign stObs = postForeign yst0 s' := by
     simp only [EvmCallRunExt] at hpred
-    cases hsel : selectedFn c yst0.env.calldata with
+    cases hsel : dispatchedFn c yst0.env.calldata ctx.value with
     | none =>
       simp only [hsel] at hpred
       rcases hpred with ⟨_, ⟨hh, _⟩⟩
@@ -188,7 +188,7 @@ theorem evmCallRunExtAll_of_progress {S E ε : Type}
   refine ⟨(huni s'' hS hH).1, (huni s'' hS hH).2, ?_⟩
   simp only [EvmCallRunExt] at hpred
   have hhalted : stObs.halted = st'.halted := committedState_halted yst0 st'
-  cases hsel : selectedFn c yst0.env.calldata with
+  cases hsel : dispatchedFn c yst0.env.calldata ctx.value with
   | none =>
     simp only [hsel] at hpred ⊢
     rcases hpred with ⟨_, ⟨hh, _⟩⟩

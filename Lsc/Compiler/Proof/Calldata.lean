@@ -413,5 +413,42 @@ theorem selectedFn_mem {c : ContractDef} {cd : List UInt8} {f : FnDef}
         · cases hfind; simp
         · exact List.mem_cons_of_mem _ (ih hfind)
 
+theorem dispatchedFn_none_of_selected_none {c : ContractDef} {cd : List UInt8}
+    {v : Nat} (h : selectedFn c cd = none) : dispatchedFn c cd v = none := by
+  simp [dispatchedFn, h]
+
+theorem dispatchedFn_of_selected_some {c : ContractDef} {cd : List UInt8}
+    {f : FnDef} {v : Nat} (h : selectedFn c cd = some f) :
+    dispatchedFn c cd v = if valueOk f v then some f else none := by
+  simp [dispatchedFn, h]
+
+theorem valueOk_of_zero (f : FnDef) : valueOk f 0 = true := by
+  simp [valueOk]
+
+theorem valueOk_of_payable {f : FnDef} {v : Nat} (h : f.payable = true) :
+    valueOk f v = true := by
+  simp [valueOk, h]
+
+theorem valueOk_false {f : FnDef} {v : Nat} (hp : f.payable = false)
+    (hv : v ≠ 0) : valueOk f v = false := by
+  simp [valueOk, hp, hv]
+
+theorem dispatchedFn_mem {c : ContractDef} {cd : List UInt8} {v : Nat} {f : FnDef}
+    (h : dispatchedFn c cd v = some f) : f ∈ c.functions := by
+  cases hsel : selectedFn c cd with
+  | none => simp [dispatchedFn, hsel] at h
+  | some f' =>
+    simp [dispatchedFn, hsel] at h
+    exact selectedFn_mem (h.2 ▸ hsel)
+
+theorem dispatchedFn_fnCalldata (c : ContractDef) (f : FnDef) (args : List Nat)
+    (v : Nat)
+    (hf : f ∈ c.functions)
+    (hnd : selectorsNodup c = true)
+    (hlen : args.length = f.params.length)
+    (hvo : valueOk f v = true) :
+    dispatchedFn c (fnCalldata f args) v = some f := by
+  simp [dispatchedFn, selectedFn_fnCalldata c f args hf hnd hlen, hvo]
+
 end Lsc.Compiler
 

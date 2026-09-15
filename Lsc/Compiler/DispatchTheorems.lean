@@ -17,8 +17,9 @@ open YulSemantics
 open YulSemantics.EVM
 
 /-- A compiled call-free runtime agrees with the high-level model on every
-calldata: a known selector runs the matching function; an unknown
-selector or short calldata reverts with storage unchanged. Every runtime
+calldata: a known selector runs the matching function unless a
+non-payable function is sent native value; an unknown selector, short
+calldata, or a value reject reverts with storage unchanged. Every runtime
 function must never CALL out and must not be a constructor. This is the
 Yul dispatcher that `bytecode_call_correct` lifts to EVM bytecode. -/
 theorem runtimeBlock_correct_callFree {S X E ε : Type} (c : ContractDef)

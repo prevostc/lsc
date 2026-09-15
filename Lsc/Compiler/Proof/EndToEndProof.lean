@@ -282,7 +282,7 @@ theorem evmCallRun_of_correct {S X E ε : Type} (c : ContractDef)
     (hctx : ctxRel ctx yst0) (hR : R c Γ evmKeccak w yst0)
     (himm0 : ∀ k, yst0.env.immutable k = 0) (hLock : LockFree yst0) :
     ∃ σ', EvmCallRun is yst0 σ' ∧
-      match selectedFn c yst0.env.calldata with
+      match dispatchedFn c yst0.env.calldata ctx.value with
       | none => σ' = yst0.storage
       | some f =>
         match Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse) ctx w with
@@ -327,7 +327,7 @@ theorem evmCallRun_of_correct {S X E ε : Type} (c : ContractDef)
       · cases hn
       · exact hH'
     have hpost : stObs.storage = postStorage yst0 s' := by
-      cases hsel : selectedFn c yst0.env.calldata with
+      cases hsel : dispatchedFn c yst0.env.calldata ctx.value with
       | none =>
         simp only [hsel] at hconcl
         obtain ⟨hh, _⟩ := hconcl
@@ -358,7 +358,7 @@ theorem evmCallRun_of_correct {S X E ε : Type} (c : ContractDef)
     intro s'' hS'' hH''
     rw [steps_halted_unique hS'' hSteps hH'' hH]
     exact hpost
-  · cases hsel : selectedFn c yst0.env.calldata with
+  · cases hsel : dispatchedFn c yst0.env.calldata ctx.value with
     | none =>
       simp only [hsel] at hconcl ⊢
       obtain ⟨hh, _⟩ := hconcl
@@ -477,15 +477,16 @@ theorem evmCallRun_fnCalldata {S X E ε : Type} (c : ContractDef)
     (hctxWF : CtxWF ctx)
     (hs : storageRel c Γ evmKeccak w.self σ)
     (hlog : w.log = []) (hwf : WorldWF c Γ w)
-    (hcd : (fnCalldata f args).length < wordBound) :
+    (hcd : (fnCalldata f args).length < wordBound)
+    (hvo : valueOk f ctx.value) :
     let yst0 := mkEvmState (fnCalldata f args) σ evmKeccak ctx
     ∃ σ', EvmCallRun is yst0 σ' ∧
       (match Tx.run (Core.denote Γ f.core args.reverse) ctx w with
         | .ok (_, w') => storageRel c Γ evmKeccak w'.self σ' ∧ WorldWF c Γ w'
         | .error _ => σ' = σ) := by
   intro yst0
-  have hsel : selectedFn c (fnCalldata f args) = some f :=
-    selectedFn_fnCalldata c f args hf hnd hlenA
+  have hsel : dispatchedFn c (fnCalldata f args) ctx.value = some f :=
+    dispatchedFn_fnCalldata c f args ctx.value hf hnd hlenA hvo
   have hdec : decodeArgs f (fnCalldata f args) = args :=
     decodeArgs_fnCalldata f args hk hlenA hW
   have hctx : ctxRel ctx yst0 := ctxRel_mkEvmState _ _ _ _ hctxWF hcd
@@ -521,7 +522,8 @@ theorem bytecode_trace_transport {S X E ε : Type} (c : ContractDef)
     (hcalls : ∀ p ∈ calls,
         p.2.1 ∈ c.functions ∧ p.2.1.kind ≠ .constructor ∧
         p.2.2.length = p.2.1.params.length ∧ (∀ n ∈ p.2.2, n < wordBound) ∧
-        CtxWF p.1 ∧ (fnCalldata p.2.1 p.2.2).length < wordBound) :
+        CtxWF p.1 ∧ (fnCalldata p.2.1 p.2.2).length < wordBound ∧
+        valueOk p.2.1 p.1.value) :
     ∃ σ', EvmTraceRun is (calls.map fun p => ⟨p.1, fnCalldata p.2.1 p.2.2⟩) σ σ' ∧
       storageRel c Γ evmKeccak (coreRun Γ calls { w with log := [] }).self σ' ∧
       WorldWF c Γ (coreRun Γ calls { w with log := [] }) := by
@@ -533,14 +535,14 @@ theorem bytecode_trace_transport {S X E ε : Type} (c : ContractDef)
   | cons p rest ih =>
     rcases p with ⟨ctx, f, args⟩
     have hp := hcalls ⟨ctx, f, args⟩ (List.mem_cons.mpr (Or.inl rfl))
-    rcases hp with ⟨hf, hk, hlenA, hW, hctxWF, hcd⟩
+    rcases hp with ⟨hf, hk, hlenA, hW, hctxWF, hcd, hvo⟩
     have hrest : ∀ q ∈ rest, _ := fun q hq =>
       hcalls q (List.mem_cons_of_mem _ hq)
     let yst0 := mkEvmState (fnCalldata f args) σ evmKeccak ctx
     obtain ⟨σ₁, h1, hpost⟩ :=
       evmCallRun_fnCalldata c Γ hΓ hκ hcf hctor hlen hbound hnd rt hrt is hcomp
         ctx f args { w with log := [] } σ hf hk hlenA hW hctxWF (by simpa using hs) rfl
-        (WorldWF_log [] hwf) hcd
+        (WorldWF_log [] hwf) hcd hvo
     let w1 : World S X E :=
       let w' := Security.worldAfter (Core.denote Γ f.core args.reverse) ctx { w with log := [] }
       { w' with log := [] }
@@ -639,7 +641,7 @@ theorem bytecode_call_correct_spill {S X E ε : Type} (c : ContractDef)
     rw [← hhaltF]
     exact hh
   refine ⟨s', hSteps, hcs, ?_⟩
-  cases hsel : selectedFn c yst0.env.calldata with
+  cases hsel : dispatchedFn c yst0.env.calldata ctx.value with
   | none =>
     simp only [hsel] at hconcl ⊢
     obtain ⟨hh, _⟩ := hconcl
@@ -708,7 +710,7 @@ theorem bytecode_call_correct {S X E ε : Type} (c : ContractDef)
     have hhalted : stObs.halted = yst'.halted := by
       rw [hobs, committedState_halted]
     refine ⟨s', hSteps, hcs, ?_⟩
-    cases hsel : selectedFn c yst0.env.calldata with
+    cases hsel : dispatchedFn c yst0.env.calldata ctx.value with
     | none =>
       simp only [hsel] at hconcl ⊢
       obtain ⟨hh, _⟩ := hconcl
@@ -751,7 +753,8 @@ theorem bytecode_trace_all {S X E ε : Type} (c : ContractDef)
     (hcalls : ∀ p ∈ calls,
         p.2.1 ∈ c.functions ∧ p.2.1.kind ≠ .constructor ∧
         p.2.2.length = p.2.1.params.length ∧ (∀ n ∈ p.2.2, n < wordBound) ∧
-        CtxWF p.1 ∧ (fnCalldata p.2.1 p.2.2).length < wordBound)
+        CtxWF p.1 ∧ (fnCalldata p.2.1 p.2.2).length < wordBound ∧
+        valueOk p.2.1 p.1.value)
     (hE : EvmTraceRunAll is (calls.map fun p => ⟨p.1, fnCalldata p.2.1 p.2.2⟩) σ σ') :
     storageRel c Γ evmKeccak (coreRun Γ calls { w with log := [] }).self σ' ∧
     WorldWF c Γ (coreRun Γ calls { w with log := [] }) := by
@@ -764,7 +767,7 @@ theorem bytecode_trace_all {S X E ε : Type} (c : ContractDef)
   | cons p rest ih =>
     rcases p with ⟨ctx, f, args⟩
     have hp := hcalls ⟨ctx, f, args⟩ (List.mem_cons.mpr (Or.inl rfl))
-    rcases hp with ⟨hf, hk, hlenA, hW, hctxWF, hcd⟩
+    rcases hp with ⟨hf, hk, hlenA, hW, hctxWF, hcd, hvo⟩
     have hrest : ∀ q ∈ rest, _ := fun q hq =>
       hcalls q (List.mem_cons_of_mem _ hq)
     have hE' : EvmTraceRunAll is
@@ -776,7 +779,7 @@ theorem bytecode_trace_all {S X E ε : Type} (c : ContractDef)
       obtain ⟨σp, hRun, hpost⟩ :=
         evmCallRun_fnCalldata c Γ hΓ hκ hcf hctor hlen hbound hnd rt hrt is hcomp
           ctx f args { w with log := [] } σ hf hk hlenA hW hctxWF (by simpa using hs) rfl
-          (WorldWF_log [] hwf) hcd
+          (WorldWF_log [] hwf) hcd hvo
       have heq := evmCallRun_eq_of_start h1 hRun hstart
       rw [heq] at htl
       let w1 : World S X E :=

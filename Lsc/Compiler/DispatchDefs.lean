@@ -22,7 +22,7 @@ def RuntimeBlockCorrectCallFree {S X E ε : Type} (c : ContractDef)
     (yul : YBlock) (ctx : Ctx) (w : World S X E) (st0 : EvmState) : Prop :=
   ∃ stObs, RunCommitted (YulEvmCompiler.Optimizer.MemorySpill.eraseMemoryGuardStmts yul)
       st0 [] stObs .halt ∧
-    match selectedFn c st0.env.calldata with
+    match dispatchedFn c st0.env.calldata ctx.value with
     | none => stObs.halted = some (.revert, []) ∧ R c Γ κ w stObs
     | some f =>
       match Tx.run (Core.denote Γ f.core (decodeArgs f st0.env.calldata).reverse) ctx w with

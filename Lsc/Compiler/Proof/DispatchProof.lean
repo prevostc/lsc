@@ -75,13 +75,23 @@ theorem hoist_lockSetPrefix (f : FnDef) : hoist evm (lockSetPrefix f) = [] := by
   · simp [lockSetPrefix, hlocks, hoist]
   · simp [lockSetPrefix, hlocks, hoist, lockSetStmt]
 
+theorem hoist_valueCheckStmt : hoist evm [valueCheckStmt] = [] := by
+  simp [valueCheckStmt, hoist]
+
+theorem hoist_valueCheckPrefix (f : FnDef) : hoist evm (valueCheckPrefix f) = [] := by
+  cases hpay : f.payable
+  · simp [valueCheckPrefix, hpay, hoist, valueCheckStmt]
+  · simp [valueCheckPrefix, hpay, hoist]
+
 theorem hoist_entryCaseBody (f : FnDef) (guard body : YBlock) :
     hoist evm
       (YulSemantics.Stmt.block guard ::
-        lockSetPrefix f ++ [YulSemantics.Stmt.block body]) = [] := by
-  cases hlocks : locks f
-  · simp [lockSetPrefix, hlocks, hoist]
-  · simp [lockSetPrefix, hlocks, hoist, lockSetStmt]
+        (valueCheckPrefix f ++ (lockSetPrefix f ++ [YulSemantics.Stmt.block body]))) = [] := by
+  cases hpay : f.payable <;> cases hlocks : locks f
+  · simp [valueCheckPrefix, hpay, lockSetPrefix, hlocks, hoist, valueCheckStmt]
+  · simp [valueCheckPrefix, hpay, lockSetPrefix, hlocks, hoist, valueCheckStmt, lockSetStmt]
+  · simp [valueCheckPrefix, hpay, lockSetPrefix, hlocks, hoist]
+  · simp [valueCheckPrefix, hpay, lockSetPrefix, hlocks, hoist, lockSetStmt]
 
 theorem hoist_two_blocks (g b : YBlock) :
     hoist evm [.block g, .block b] = [] := by simp [hoist]
@@ -248,11 +258,76 @@ theorem guardLt_ok {funs V st n}
     simp [hfalse, b2w, Dialect.zero, litValue]
   simpa [emitGuardLt_stmts] using Step.seqCons hif Step.seqNil
 
+theorem eval_callvalue (funs : FunEnv evm) (V : VEnv evm) (st : EvmState) :
+    EvalExpr evm funs V st (bop Op.callvalue [])
+      (.vals [st.env.callvalue] st) :=
+  Step.builtinOk Step.argsNil (step_callvalue _)
+
+theorem ofNat256_eq_zero_iff {n : Nat} (hn : n < wordBound) :
+    BitVec.ofNat 256 n = 0 ↔ n = 0 := by
+  constructor
+  · intro h
+    have := congrArg BitVec.toNat h
+    simpa [BitVec.toNat_zero, toNat_ofNat_of_lt hn] using this
+  · rintro rfl
+    rfl
+
+theorem exec_valueCheck_ok {funs V st}
+    (h : st.env.callvalue = 0) :
+    ExecStmt evm funs V st valueCheckStmt V st .normal := by
+  refine Step.ifFalse (D := evm) (eval_callvalue funs V st) ?_
+  simpa [valueCheckStmt, Dialect.zero, litValue] using h
+
+theorem exec_valueCheck_halt {funs V st}
+    (h : st.env.callvalue ≠ 0) :
+    ExecStmt evm funs V st valueCheckStmt V
+      { touchMemory st 0 0 with halted := some (.revert, []) } .halt := by
+  have inner :
+      ExecStmts evm (hoist evm [revert00] :: funs) V st [revert00] V
+        { touchMemory st 0 0 with halted := some (.revert, []) } .halt := by
+    rw [hoist_revert00]
+    exact revert00_exec _ _ _
+  refine Step.ifTrue (D := evm) (eval_callvalue funs V st) ?_ ?_
+  · simpa [Dialect.zero, litValue] using h
+  · simpa [restore_self, valueCheckStmt] using Step.block (D := evm) inner
+
+theorem exec_valueCheckPrefix_ok {funs V st f}
+    (h : f.payable = true ∨ st.env.callvalue = 0) :
+    ExecStmts evm funs V st (valueCheckPrefix f) V st .normal := by
+  cases hpay : f.payable
+  · have hv : st.env.callvalue = 0 := by
+      cases h with
+      | inl hp => simp [hp] at hpay
+      | inr hv => exact hv
+    simp [valueCheckPrefix, hpay]
+    exact Step.seqCons (exec_valueCheck_ok hv) Step.seqNil
+  · simp [valueCheckPrefix, hpay]
+    exact Step.seqNil
+
+theorem exec_valueCheckPrefix_halt {funs V st f}
+    (hp : f.payable = false) (hv : st.env.callvalue ≠ 0) :
+    ExecStmts evm funs V st (valueCheckPrefix f) V
+      { touchMemory st 0 0 with halted := some (.revert, []) } .halt := by
+  simp [valueCheckPrefix, hp]
+  exact Step.seqStop (exec_valueCheck_halt hv) halt_ne_normal
+
+theorem callvalue_eq_zero_iff {ctx st} (h : ctxRel ctx st) :
+    st.env.callvalue = 0 ↔ ctx.value = 0 := by
+  rw [ctxRel_callvalue h, ofNat256_eq_zero_iff (ctxRel_value_lt h)]
+
+theorem valueOk_to_callvalue {f ctx st} (hctx : ctxRel ctx st)
+    (hvo : valueOk f ctx.value = true) :
+    f.payable = true ∨ st.env.callvalue = 0 := by
+  simp [valueOk] at hvo
+  cases hpay : f.payable
+  · exact Or.inr ((callvalue_eq_zero_iff hctx).mpr (by simpa [hpay] using hvo))
+  · exact Or.inl rfl
+
 theorem entryCase_inv {c f p} (h : entryCase c f = some p) :
     ∃ body, toYulFn c f = some body ∧
       p = (YulSemantics.Literal.number f.selector,
         YulSemantics.Stmt.block (emitGuardLt {} (4 + 32 * f.params.length)).stmts ::
-          lockSetPrefix f ++ [YulSemantics.Stmt.block body]) := by
+          (valueCheckPrefix f ++ (lockSetPrefix f ++ [YulSemantics.Stmt.block body]))) := by
   simp [entryCase, Bind.bind, Option.bind] at h
   cases hb : toYulFn c f <;> simp [hb] at h
   exact ⟨_, rfl, by cases h; rfl⟩
@@ -288,7 +363,7 @@ theorem selectSwitch_mapM {c : ContractDef} {sel : Nat} (hsel : sel < wordBound)
             selectSwitch evm (BitVec.ofNat 256 sel) cases (some [revert00]) =
               YulSemantics.Stmt.block
                 (emitGuardLt {} (4 + 32 * f.params.length)).stmts ::
-                lockSetPrefix f ++ [YulSemantics.Stmt.block body]
+                (valueCheckPrefix f ++ (lockSetPrefix f ++ [YulSemantics.Stmt.block body]))
   | [], cases, hmap => by
     simp [List.mapM_nil] at hmap
     subst cases
@@ -435,7 +510,7 @@ theorem runtimeBlock_correct_callFree {S X E ε : Type} (c : ContractDef)
     have hRC := obs_revert (yul := erasedRuntime cases) hR
       (run_of_exec hhoist hexec) hhRev
     refine ⟨committedState st0 stRev, hRC.1, ?_⟩
-    simp only [hnone]
+    simp [dispatchedFn, hnone]
     exact ⟨hRC.2.1, hRC.2.2⟩
   · have hge4 : 4 ≤ cd.length := Nat.le_of_not_gt hshort
     have hguard := guardLt_ok (funs := [[], []]) (V := []) (st := stA)
@@ -457,7 +532,7 @@ theorem runtimeBlock_correct_callFree {S X E ε : Type} (c : ContractDef)
       have hRC := obs_revert (yul := erasedRuntime cases) hR
         (run_of_exec hhoist hexec) hhRev
       refine ⟨committedState st0 stRev, hRC.1, ?_⟩
-      simp only [hnone]
+      simp [dispatchedFn, hnone]
       exact ⟨hRC.2.1, hRC.2.2⟩
     | some f =>
       have hfmem : f ∈ c.functions := mem_of_find? hfind
@@ -468,14 +543,16 @@ theorem runtimeBlock_correct_callFree {S X E ε : Type} (c : ContractDef)
               cases (some [revert00]) =
                 YulSemantics.Stmt.block
                   (emitGuardLt {} (4 + 32 * f.params.length)).stmts ::
-                  lockSetPrefix f ++ [YulSemantics.Stmt.block body] := by
+                  (valueCheckPrefix f ++ (lockSetPrefix f ++
+                    [YulSemantics.Stmt.block body])) := by
         simpa [hfind] using hswM
       have hlocks : locks f = false := locks_eq_false_of_callFree (hcf f hfmem)
       simp [lockSetPrefix, hlocks] at hswEq
       set caseBody : YBlock :=
-        [YulSemantics.Stmt.block (emitGuardLt {} (4 + 32 * f.params.length)).stmts,
-          YulSemantics.Stmt.block body]
-      have hcaseH : hoist evm caseBody = [] := hoist_two_blocks _ _
+        YulSemantics.Stmt.block (emitGuardLt {} (4 + 32 * f.params.length)).stmts ::
+          (valueCheckPrefix f ++ [YulSemantics.Stmt.block body])
+      have hcaseH : hoist evm caseBody = [] := by
+        simpa [lockSetPrefix, hlocks] using hoist_entryCaseBody f _ body
       by_cases hshortF : cd.length < 4 + 32 * f.params.length
       · have hnone : selectedFn c cd = none := by
           simp [selectedFn, hshort, hfind, hshortF]
@@ -492,9 +569,9 @@ theorem runtimeBlock_correct_callFree {S X E ε : Type} (c : ContractDef)
         have hRC := obs_revert (yul := erasedRuntime cases) hR
           (run_of_exec hhoist hexec) hhRev
         refine ⟨committedState st0 stRev, hRC.1, ?_⟩
-        simp only [hnone]
+        simp [dispatchedFn, hnone]
         exact ⟨hRC.2.1, hRC.2.2⟩
-      · have hsome : selectedFn c cd = some f := by
+      · have hselF : selectedFn c cd = some f := by
           simp [selectedFn, hshort, hfind, hshortF]
         have hgeF : 4 + 32 * f.params.length ≤ cd.length := Nat.le_of_not_gt hshortF
         have hgF := guardLt_ok (funs := [[], [], []]) (V := []) (st := stA)
@@ -503,52 +580,85 @@ theorem runtimeBlock_correct_callFree {S X E ε : Type} (c : ContractDef)
         have hblkF := exec_block_ok (funs := [[], []]) (V := [])
           (hoist_guardLt (4 + 32 * f.params.length)) hgF
         rw [restore_self] at hblkF
-        have hsim := toYulFn_execStmts_callFree (c := c) (Γ := Γ) hΓ κ hκ f
-          (hctor f hfmem) (hcf f hfmem) hlen (hbound f hfmem) body hbody
-          ctx w stA hctxA hRA [[], [], []]
-        have hfH := toYulFn_hoist hbody (hctor f hfmem)
-        have hargs : cd = st0.env.calldata := rfl
-        simp only [cd, hcdA] at hsim hsome
-        cases hrun : Tx.run (Core.denote Γ f.core
-            (decodeArgs f st0.env.calldata).reverse) ctx w with
-        | ok p =>
-          simp only [hrun, except_ok_prod, hcdA] at hsim
-          obtain ⟨V', st', hexecB, hsucc, hR'⟩ := hsim
-          have hbodyStmt :
-              ExecStmt evm [[], []] [] stA (.block body) [] st' .halt := by
-            have hb := exec_block_halt (funs := [[], []]) (V := []) hfH hexecB
-            rw [restore_nil] at hb
-            exact hb
-          have hcase : ExecStmts evm [[], []] [] stA caseBody [] st' .halt :=
-            exec_pair_halt hblkF hbodyStmt
+        by_cases hvo : valueOk f ctx.value = true
+        · have hsome : dispatchedFn c cd ctx.value = some f := by
+            simp [dispatchedFn, hselF, hvo]
+          have hval : ExecStmts evm [[], []] [] stA (valueCheckPrefix f) [] stA .normal :=
+            exec_valueCheckPrefix_ok (valueOk_to_callvalue hctxA hvo)
+          have hsim := toYulFn_execStmts_callFree (c := c) (Γ := Γ) hΓ κ hκ f
+            (hctor f hfmem) (hcf f hfmem) hlen (hbound f hfmem) body hbody
+            ctx w stA hctxA hRA [[], [], []]
+          have hfH := toYulFn_hoist hbody (hctor f hfmem)
+          simp only [cd, hcdA] at hsim hsome
+          cases hrun : Tx.run (Core.denote Γ f.core
+              (decodeArgs f st0.env.calldata).reverse) ctx w with
+          | ok p =>
+            simp only [hrun, except_ok_prod, hcdA] at hsim
+            obtain ⟨V', st', hexecB, hsucc, hR'⟩ := hsim
+            have hbodyStmt :
+                ExecStmt evm [[], []] [] stA (.block body) [] st' .halt := by
+              have hb := exec_block_halt (funs := [[], []]) (V := []) hfH hexecB
+              rw [restore_nil] at hb
+              exact hb
+            have hcase : ExecStmts evm [[], []] [] stA caseBody [] st' .halt :=
+              exec_cons_normal hblkF
+                (execStmts_append hval (exec_head_halt hbodyStmt))
+            have hswStmt := switch_halt_nil hselE hswEq hcaseH hcase
+            have hexec :=
+              exec_cons_normal hG (exec_cons_normal hLockChk (exec_pair_halt hblk4 hswStmt))
+            have hRun := run_of_exec hhoist hexec
+            obtain ⟨k, bs, hh, hk⟩ := haltSuccess_commits hsucc
+            refine ⟨st', ⟨st', hRun, (committedState_commit hh hk).symm⟩, ?_⟩
+            rw [hsome]
+            simp only [cd]
+            simp only [hrun, except_ok_prod]
+            exact ⟨hsucc, hR'⟩
+          | error err =>
+            simp only [hrun, except_error_prod, hcdA] at hsim
+            obtain ⟨V', st', bytes, hexecB, hh, herr⟩ := hsim
+            have hbodyStmt :
+                ExecStmt evm [[], []] [] stA (.block body) [] st' .halt := by
+              have hb := exec_block_halt (funs := [[], []]) (V := []) hfH hexecB
+              rw [restore_nil] at hb
+              exact hb
+            have hcase : ExecStmts evm [[], []] [] stA caseBody [] st' .halt :=
+              exec_cons_normal hblkF
+                (execStmts_append hval (exec_head_halt hbodyStmt))
+            have hswStmt := switch_halt_nil hselE hswEq hcaseH hcase
+            have hexec :=
+              exec_cons_normal hG (exec_cons_normal hLockChk (exec_pair_halt hblk4 hswStmt))
+            have hRun := run_of_exec hhoist hexec
+            refine ⟨committedState st0 st', ⟨st', hRun, rfl⟩, ?_⟩
+            rw [hsome]
+            simp only [cd]
+            simp only [hrun, except_error_prod]
+            refine ⟨bytes, ?_, herr, R_rollback_obs hR hh HaltKind.revert_commits⟩
+            simp [committedState_rollback hh HaltKind.revert_commits, hh]
+        · have hnone : dispatchedFn c cd ctx.value = none := by
+            simp [dispatchedFn, hselF, hvo]
+          have hp : f.payable = false := by
+            simp [valueOk] at hvo
+            cases hpay : f.payable
+            · rfl
+            · simp [hpay] at hvo
+          have hvnz : ctx.value ≠ 0 := by
+            simp [valueOk, hp] at hvo
+            exact hvo
+          have hcv : stA.env.callvalue ≠ 0 := by
+            intro heq
+            exact hvnz ((callvalue_eq_zero_iff hctxA).mp heq)
+          have hvalH : ExecStmts evm [[], []] [] stA (valueCheckPrefix f) [] stRev .halt :=
+            exec_valueCheckPrefix_halt hp hcv
+          have hcase : ExecStmts evm [[], []] [] stA caseBody [] stRev .halt :=
+            exec_cons_normal hblkF (execStmts_append_halt hvalH)
           have hswStmt := switch_halt_nil hselE hswEq hcaseH hcase
-          have hexec := exec_cons_normal hG (exec_cons_normal hLockChk (exec_pair_halt hblk4 hswStmt))
-          have hRun := run_of_exec hhoist hexec
-          obtain ⟨k, bs, hh, hk⟩ := haltSuccess_commits hsucc
-          refine ⟨st', ⟨st', hRun, (committedState_commit hh hk).symm⟩, ?_⟩
-          rw [hsome]
-          simp only [cd]
-          simp only [hrun, except_ok_prod]
-          exact ⟨hsucc, hR'⟩
-        | error err =>
-          simp only [hrun, except_error_prod, hcdA] at hsim
-          obtain ⟨V', st', bytes, hexecB, hh, herr⟩ := hsim
-          have hbodyStmt :
-              ExecStmt evm [[], []] [] stA (.block body) [] st' .halt := by
-            have hb := exec_block_halt (funs := [[], []]) (V := []) hfH hexecB
-            rw [restore_nil] at hb
-            exact hb
-          have hcase : ExecStmts evm [[], []] [] stA caseBody [] st' .halt :=
-            exec_pair_halt hblkF hbodyStmt
-          have hswStmt := switch_halt_nil hselE hswEq hcaseH hcase
-          have hexec := exec_cons_normal hG (exec_cons_normal hLockChk (exec_pair_halt hblk4 hswStmt))
-          have hRun := run_of_exec hhoist hexec
-          refine ⟨committedState st0 st', ⟨st', hRun, rfl⟩, ?_⟩
-          rw [hsome]
-          simp only [cd]
-          simp only [hrun, except_error_prod]
-          refine ⟨bytes, ?_, herr, R_rollback_obs hR hh HaltKind.revert_commits⟩
-          simp [committedState_rollback hh HaltKind.revert_commits, hh]
+          have hexec :=
+            exec_cons_normal hG (exec_cons_normal hLockChk (exec_pair_halt hblk4 hswStmt))
+          have hRC := obs_revert (yul := erasedRuntime cases) hR
+            (run_of_exec hhoist hexec) hhRev
+          refine ⟨committedState st0 stRev, hRC.1, ?_⟩
+          simp [dispatchedFn, hselF, hvo, cd]
+          exact ⟨hRC.2.1, hRC.2.2⟩
 
 end Lsc.Compiler.Proof
 

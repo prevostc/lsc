@@ -43,14 +43,14 @@ theorem transport_step (T : TransportSetup S X E ε)
       T.rt T.hrt T.is T.hcomp ctx w yst0 hctx hR himm0 hLock
   refine ⟨σ', hRun, ?_⟩
   rw [mkEvmState_calldata] at hpost
-  cases hsel : selectedFn T.c cd with
+  cases hsel : dispatchedFn T.c cd ctx.value with
   | none =>
     have hdec : decodeCall T ctx cd = none := by simp [decodeCall, hsel]
     simp only [hsel] at hpost
     simp [hdec]
     simpa [yst0, mkEvmState_storage] using hpost
   | some f =>
-    obtain ⟨fn, hfn, heq⟩ := T.codec.decodeFn_of_mem f (selectedFn_mem hsel)
+    obtain ⟨fn, hfn, heq⟩ := T.codec.decodeFn_of_mem f (dispatchedFn_mem hsel)
     have hdec : decodeCall T ctx cd =
         some (Call.ofCtx ctx fn (T.codec.decode fn (decodeArgs f cd))) := by
       simp [decodeCall, hsel, hfn]
@@ -104,14 +104,14 @@ theorem transport_step_ext (T : TransportSetup S ExtState E ε)
       T.rt T.hrt T.is T.hcomp ctx w yst0 hctx hR hAgr hOr himm0 hLock
   refine ⟨σ', ξ', hRun, ?_⟩
   rw [mkEvmStateExt_calldata] at hpost
-  cases hsel : selectedFn T.c cd with
+  cases hsel : dispatchedFn T.c cd ctx.value with
   | none =>
     have hdec : decodeCall T ctx cd = none := by simp [decodeCall, hsel]
     simp only [hsel] at hpost
     simp [hdec]
     simpa [yst0, mkEvmStateExt_storage] using hpost
   | some f =>
-    obtain ⟨fn, hfn, heq⟩ := T.codec.decodeFn_of_mem f (selectedFn_mem hsel)
+    obtain ⟨fn, hfn, heq⟩ := T.codec.decodeFn_of_mem f (dispatchedFn_mem hsel)
     have hdec : decodeCall T ctx cd =
         some (Call.ofCtx ctx fn (T.codec.decode fn (decodeArgs f cd))) := by
       simp [decodeCall, hsel, hfn]

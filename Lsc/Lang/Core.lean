@@ -794,8 +794,8 @@ def Core.countSeqIf : {t : RetTy} → Core t → Nat
 
 /-- Syntactic checks-effects-interactions: some path has an `Op`/`Stmt`
 store after an external CALL/STATICCALL in program order. Used to reject
-`@[reentrant]` functions that write after a call, unless they also carry
-`@[reentrant (unsafe := true)]`. Tail calls are not followed by a store. -/
+`[Reentrant]` functions that write after a call, unless they also carry
+`[Reentrant.Unsafe]`. Tail calls are not followed by a store. -/
 def Core.storeAfterCall {t : RetTy} (c : Core t) : Bool :=
   Core.storeAfterCallSeen false c
 

@@ -798,6 +798,20 @@ theorem exec_lockCheck_halt_nils {calls : ExternalCalls} {n : Nat}
     (exec_lockCheck_halt (List.replicate n []) V st h)
   rwa [funEnvCast_replicate_nil] at h'
 
+theorem exec_valueCheckPrefix_ok_nils {calls : ExternalCalls} {n : Nat}
+    {V : VEnv evm} {st : EvmState} {f : FnDef}
+    (h : f.payable = true ∨ st.env.callvalue = 0) :
+    ExecStmts (yulD calls) (List.replicate n []) V st (valueCheckPrefix f) V st
+      .normal :=
+  execStmts_lift_nils (exec_valueCheckPrefix_ok h)
+
+theorem exec_valueCheckPrefix_halt_nils {calls : ExternalCalls} {n : Nat}
+    {V : VEnv evm} {st : EvmState} {f : FnDef}
+    (hp : f.payable = false) (hv : st.env.callvalue ≠ 0) :
+    ExecStmts (yulD calls) (List.replicate n []) V st (valueCheckPrefix f) V
+      { touchMemory st 0 0 with halted := some (.revert, []) } .halt :=
+  execStmts_lift_nils (exec_valueCheckPrefix_halt hp hv)
+
 theorem exec_lockSetStmt_nils {calls : ExternalCalls} {n : Nat}
     {V : VEnv evm} {st : EvmState} (hstatic : st.env.static = false) :
     ExecStmt (yulD calls) (List.replicate n []) V st lockSetStmt V

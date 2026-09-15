@@ -143,7 +143,7 @@ def BytecodeCallCorrect {S X E ε : Type} (c : ContractDef)
     FrameOK (assemble is) s0 → StateMatch yst0 s0 →
     s0.pc = EvmSemantics.UInt256.ofNat 0 → s0.stack = [] → b ≤ s0.gasAvailable →
     ∃ s', Steps s0 s' ∧ s'.callStack = [] ∧
-      match selectedFn c yst0.env.calldata with
+      match dispatchedFn c yst0.env.calldata ctx.value with
       | none => s'.halt = .Reverted ∧ s'.hReturn.toList = []
       | some f =>
         match Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse) ctx w with

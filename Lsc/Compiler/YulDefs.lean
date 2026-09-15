@@ -17,11 +17,11 @@ declared outside and assigned inside. `toYulFn` does **not** return `none` on
 calls.
 
 Every runtime entry checks `tload(0)` and reverts if the slot is set
-(including `@[reentrant]` functions: the prologue is per-runtime, not
+(including `[Reentrant]` functions: the prologue is per-runtime, not
 per-function). Mutating non-reentrant functions with an outgoing
 CALL/STATICCALL (`locks f`) `tstore(0,1)` after the per-function size
 guard and `tstore(0,0)` before each committing `return`/`stop`.
-`@[reentrant]` functions, pure-read views (including those with `Op.view`),
+`[Reentrant]` functions, pure-read views (including those with `Op.view`),
 and call-free mutators do not write the lock. Constructor (`toYulCtor`) is
 unchanged. Not emitted: `for`, `delegatecall`, `selfdestruct`, `create`.
 `ite` is `switch` (Yul `if` has no else). Dispatcher is
@@ -136,7 +136,7 @@ storage; Lsc emits no other `tstore`. -/
 def reentrancyLockSlot : Nat := 0
 
 /-- Mutating non-reentrant functions with any outgoing CALL/STATICCALL take
-the lock. `@[reentrant]` functions never acquire or release it. Pure-read
+the lock. `[Reentrant]` functions never acquire or release it. Pure-read
 views with an outgoing `staticcall` do not: they have no inconsistent
 window and must stay honest `view`s (STATICCALL-callable). -/
 def locks (f : FnDef) : Bool :=
@@ -177,7 +177,7 @@ def stopStmt : YStmt :=
   YulSemantics.Stmt.exprStmt (bop YulSemantics.EVM.Op.stop [])
 
 /-- `if tload(0) { revert(0,0) }`. Every runtime entry, including views,
-`@[reentrant]` functions, and the default selector. -/
+`[Reentrant]` functions, and the default selector. -/
 def lockCheckStmt : YStmt :=
   .cond (bop YulSemantics.EVM.Op.tload [lit reentrancyLockSlot]) [revert00]
 
@@ -194,6 +194,17 @@ def lockClearStmt : YStmt :=
 definitionally the historical `[block guard, block body]`. -/
 def lockSetPrefix (f : FnDef) : YBlock :=
   if locks f then [lockSetStmt] else []
+
+/-- `if callvalue() { revert(0,0) }`. Solidity non-payable: a nonzero
+value reverts with empty data, same shape as the unknown-selector path. -/
+def valueCheckStmt : YStmt :=
+  .cond (bop YulSemantics.EVM.Op.callvalue []) [revert00]
+
+/-- Empty when `f.payable`, so payable `entryCase` stays the historical
+guard / lock / body layout. Non-payable cases insert `valueCheckStmt`
+after the calldata-size guard and before lock acquire. -/
+def valueCheckPrefix (f : FnDef) : YBlock :=
+  if f.payable then [] else [valueCheckStmt]
 
 /-- Canonical constructor from `YulSemantics.EVM.constructorCode`. Nested `dataoffset` /
 `datasize` are required by powdr's object layout. -/
@@ -830,14 +841,17 @@ def toYulCtor (c : ContractDef) (f : FnDef) : Option YBlock :=
       f.params.length false f.core).map
       Emit.stmts
 
-/-- `if lt(calldatasize(), 4+32n) { revert(0,0) }`, then `tstore(0,1)` when
-`locks f`, then the function body. Non-locking cases stay two blocks. -/
+/-- `if lt(calldatasize(), 4+32n) { revert(0,0) }`, then
+`if callvalue() { revert(0,0) }` when `¬f.payable`, then `tstore(0,1)`
+when `locks f`, then the function body. Payable non-locking cases stay
+two blocks. -/
 def entryCase (c : ContractDef) (f : FnDef) : Option (YulSemantics.Literal × YBlock) := do
   let body ← toYulFn c f
   let min := 4 + 32 * f.params.length
   let guard := (emitGuardLt {} min).stmts
   some (YulSemantics.Literal.number f.selector,
-    YulSemantics.Stmt.block guard :: lockSetPrefix f ++ [YulSemantics.Stmt.block body])
+    YulSemantics.Stmt.block guard ::
+      (valueCheckPrefix f ++ (lockSetPrefix f ++ [YulSemantics.Stmt.block body])))
 
 /-- Discarded `memoryguard(k)` marker (`if memoryguard(k) {}`). powdr collects
 any `.call "memoryguard" [lit k]`; the dialect has no `pop`, and a truthiness

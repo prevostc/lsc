@@ -960,13 +960,21 @@ theorem noYulCall_lockSetPrefix (f : FnDef) : noYulCallStmts (lockSetPrefix f) =
   simp [lockSetPrefix]
   split <;> simp [noYulCallStmts, noYulCall_lockSetStmt]
 
+theorem noYulCall_valueCheckStmt : noYulCallStmt valueCheckStmt = true := by
+  simp [valueCheckStmt, noYulCallStmt, noYulCall_bop, noYulCallExprs, noYulCallExpr,
+    noYulCallStmts, noYulCall_revert00]
+
+theorem noYulCall_valueCheckPrefix (f : FnDef) : noYulCallStmts (valueCheckPrefix f) = true := by
+  simp [valueCheckPrefix]
+  split <;> simp [noYulCallStmts, noYulCall_valueCheckStmt]
+
 theorem entryCase_noYulCall {c f p} (h : entryCase c f = some p) :
     noYulCallStmts p.2 = true := by
   simp [entryCase, Bind.bind, Option.bind] at h
   cases hb : toYulFn c f <;> simp [hb] at h
   cases h
   simp [noYulCallStmts, noYulCallStmt, noYulCall_guardLt, noYulCallStmts_append,
-    noYulCall_lockSetPrefix f, toYulFn_noYulCall hb]
+    noYulCall_valueCheckPrefix f, noYulCall_lockSetPrefix f, toYulFn_noYulCall hb]
 
 theorem mapM_entryCase_noYulCall {c : ContractDef} :
     ∀ {fs : List FnDef} {cases : List (Literal × YBlock)},

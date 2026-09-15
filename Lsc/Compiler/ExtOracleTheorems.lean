@@ -56,7 +56,7 @@ storage as they were, and appends no log attributed to this contract.
 ETH balances may still change: a callee can `SELFDESTRUCT` to this
 address without running our code, and `balanceOf` of other accounts is
 a real CALL effect. Justified for non-reentrant callers by the held-lock
-prefix (`nested_lock_reverts`); `@[reentrant]` functions do not take the
+prefix (`nested_lock_reverts`); `[Reentrant]` functions do not take the
 lock, so a store after their external call is rejected unless
 `unsafe := true`. -/
 theorem noInterfere_of_lock (o : ExtOracle) (req : CallRequest) (st : EvmState) :
@@ -71,7 +71,7 @@ at every address: the wrapper scrubs `self` on the way in and restores
 storage / transient / self-logs on the way out. ETH balances are not
 constrained (`SELFDESTRUCT` to this address, foreign `balanceOf`).
 The restore matches a nested CALL into a non-reentrant runtime while
-the lock is held; `@[reentrant]` functions do not acquire the lock. -/
+the lock is held; `[Reentrant]` functions do not acquire the lock. -/
 theorem ExtOracle.noReentry (o : ExtOracle) (self : Address) :
     ExtOracle.NoReentry o self :=
   Proof.ExtOracle.noReentry o self

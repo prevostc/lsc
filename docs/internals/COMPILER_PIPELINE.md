@@ -19,7 +19,7 @@ Proof chain: [`PROOF_CHAIN.md`](PROOF_CHAIN.md).
 
 - **Wrong selector / ABI JSON** — `Lsc/Lang/Contract.lean` (keccak), `Tools/AbiJson.lean`, `Pipeline.selectorsJson`.
 - **Wrong Yul / dispatcher** — `Yul.lean` (`runtimeBlock`, `entryCase`, `toYulFn`); Core→Yul theorems in `CoreTheorems` / `DispatchTheorems` (S1) or `CoreExtSimTheorems` / `DispatchExtTheorems` (S2).
-- **Reentrancy lock** — `YulDefs.lean` (`reentrancyLockSlot`, `locks`, `lockCheckStmt` / `lockSetPrefix` / `emitLockClear`). Every runtime entry `tload(0)`s; locking functions (`¬reentrant ∧ hasExtCall ∧ ¬ isPureRead`) `tstore(0,1)` after the per-function size guard and `tstore(0,0)` on committing `return`/`stop`. `@[reentrant]` skips acquire/release. Constructor path is unchanged. `NoReentry` is a lemma (`ExtOracle.noReentry`).
+- **Reentrancy lock** — `YulDefs.lean` (`reentrancyLockSlot`, `locks`, `lockCheckStmt` / `lockSetPrefix` / `emitLockClear`). Every runtime entry `tload(0)`s; locking functions (`¬reentrant ∧ hasExtCall ∧ ¬ isPureRead`) `tstore(0,1)` after the per-function size guard and `tstore(0,0)` on committing `return`/`stop`. `[Reentrant]` skips acquire/release. Constructor path is unchanged. `NoReentry` is a lemma (`ExtOracle.noReentry`).
 - **Compiles in solc, rejected here** — `Bytecode.compileBlock`: erasure needs `DUP17+` → spill; `memoryguard` marker; `gas()` only via fused `gasCall`.
 - **Runtime hex ≠ `compileRuntime`** — `Pipeline.compileRuntimeArtifacts` follows the exporter (`compileAsmBlock` then `lowerProg`), not `compile`'s peephole wrapper; deploy hex is `compileDeploy`.
 - **Deploy / constructor args** — `constructor_correct` at Yul; EVM `bytecode_deploy_correct` has no trailing CREATE args (`DeployTheorems`).

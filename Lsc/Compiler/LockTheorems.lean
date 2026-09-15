@@ -212,10 +212,10 @@ modelled by the `toCall` restore rather than an induction on every
 account; this compiler does not emit them. CREATE2 cannot overwrite
 existing code at `self`.
 
-8C-3: `@[reentrant]` opts a function out of lock acquire/release
+8C-3: `[Reentrant]` opts a function out of lock acquire/release
 (`locks f` is false). The runtime prologue still checks the slot, so
 `lock_held_reverts_*` / `runtime_prefix` / `nested_lock_*` keep their
-statements. Store-after-call is rejected unless `unsafe := true`.
+statements. Store-after-call is rejected unless `[Reentrant.Unsafe]`.
 -/
 
 end Lsc.Compiler

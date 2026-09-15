@@ -937,17 +937,19 @@ theorem yul_progress {S E ε : Type}
               cases (some [revert00]) =
                 YulSemantics.Stmt.block
                   (emitGuardLt {} (4 + 32 * f.params.length)).stmts ::
-                  lockSetPrefix f ++ [YulSemantics.Stmt.block body] := by
+                  (valueCheckPrefix f ++ (lockSetPrefix f ++
+                    [YulSemantics.Stmt.block body])) := by
         simpa [hfind] using hswM
       have hswEq : selectSwitch (yulD (toCalls o)) (BitVec.ofNat 256 (calldataSelector cd))
           cases (some [revert00]) =
             YulSemantics.Stmt.block
               (emitGuardLt {} (4 + 32 * f.params.length)).stmts ::
-              lockSetPrefix f ++ [YulSemantics.Stmt.block body] := by
+              (valueCheckPrefix f ++ (lockSetPrefix f ++
+                [YulSemantics.Stmt.block body])) := by
         rw [selectSwitch_uncast]; exact hswEqE
       set caseBody : YBlock :=
         YulSemantics.Stmt.block (emitGuardLt {} (4 + 32 * f.params.length)).stmts ::
-          lockSetPrefix f ++ [YulSemantics.Stmt.block body]
+          (valueCheckPrefix f ++ (lockSetPrefix f ++ [YulSemantics.Stmt.block body]))
       have hcaseH : hoist (yulD (toCalls o)) caseBody = [] :=
         hoist_yulD_of_evm (hoist_entryCaseBody f _ _)
       by_cases hshortF : cd.length < 4 + 32 * f.params.length
@@ -970,56 +972,85 @@ theorem yul_progress {S E ε : Type}
         have hblkF := exec_block_ok_open (funs := [[], []]) (V := [])
           (hoist_yulD_of_evm (hoist_guardLt (4 + 32 * f.params.length))) hgF
         rw [restore_self_open] at hblkF
-        by_cases hlocks : locks f
-        · have hpre : lockSetPrefix f = [lockSetStmt] := by simp [lockSetPrefix, hlocks]
-          have hstatic := ctxRel_static hctxA
-          have hset := exec_lockSetStmt_nils (calls := toCalls o) (n := 2) (V := [])
-            hstatic
-          set stL : EvmState :=
-            stTstore stA (BitVec.ofNat 256 reentrancyLockSlot) 1
-          have hMOL := memOnly_tstore stA
-            (BitVec.ofNat 256 reentrancyLockSlot) 1
-          have hctxL := ctxRel_memOnly hctxA hMOL
-          have hRL := R_memOnly hRA hMOL
-          have ⟨V', st', hexecB⟩ :=
-            toYulFn_progress hΓ hκ hlen o f
-              (hctor f hfmem) (hS2 f hfmem) (hbound f hfmem)
-              body hbody w stL hctxL hRL hNR (n := 3)
-          have hfH := hoist_yulD_of_evm (calls := toCalls o)
-            (toYulFn_hoist hbody (hctor f hfmem))
-          have hbodyStmt :
-              ExecStmt (yulD (toCalls o)) [[], []] [] stL (.block body) [] st' .halt := by
-            have hb := exec_block_halt_open (funs := [[], []]) (V := []) hfH hexecB
-            rw [restore_nil_any (D := yulD (toCalls o))] at hb
-            exact hb
-          have hcase : ExecStmts (yulD (toCalls o)) [[], []] [] stA caseBody [] st' .halt := by
-            simp [caseBody, hpre]
-            exact exec_cons_normal_open hblkF
-              (exec_cons_normal_open hset (exec_head_halt_open hbodyStmt))
+        by_cases hvo : valueOk f ctx.value = true
+        · have hval := exec_valueCheckPrefix_ok_nils (calls := toCalls o) (n := 2)
+            (V := []) (valueOk_to_callvalue hctxA hvo)
+          by_cases hlocks : locks f
+          · have hpre : lockSetPrefix f = [lockSetStmt] := by
+              simp [lockSetPrefix, hlocks]
+            have hstatic := ctxRel_static hctxA
+            have hset := exec_lockSetStmt_nils (calls := toCalls o) (n := 2) (V := [])
+              hstatic
+            set stL : EvmState :=
+              stTstore stA (BitVec.ofNat 256 reentrancyLockSlot) 1
+            have hMOL := memOnly_tstore stA
+              (BitVec.ofNat 256 reentrancyLockSlot) 1
+            have hctxL := ctxRel_memOnly hctxA hMOL
+            have hRL := R_memOnly hRA hMOL
+            have ⟨V', st', hexecB⟩ :=
+              toYulFn_progress hΓ hκ hlen o f
+                (hctor f hfmem) (hS2 f hfmem) (hbound f hfmem)
+                body hbody w stL hctxL hRL hNR (n := 3)
+            have hfH := hoist_yulD_of_evm (calls := toCalls o)
+              (toYulFn_hoist hbody (hctor f hfmem))
+            have hbodyStmt :
+                ExecStmt (yulD (toCalls o)) [[], []] [] stL (.block body) [] st' .halt := by
+              have hb := exec_block_halt_open (funs := [[], []]) (V := []) hfH hexecB
+              rw [restore_nil_any (D := yulD (toCalls o))] at hb
+              exact hb
+            have hcase : ExecStmts (yulD (toCalls o)) [[], []] [] stA caseBody [] st' .halt := by
+              simp [caseBody, hpre]
+              exact exec_cons_normal_open hblkF
+                (execStmts_append_open hval
+                  (exec_cons_normal_open hset (exec_head_halt_open hbodyStmt)))
+            have hswStmt := switch_halt_nil_open (calls := toCalls o) (funs := [[]])
+              hselE hswEq hcaseH hcase
+            exact ⟨st', .halt,
+              run_of_execStmts_open hhoist
+                (exec_cons_normal_open hG (exec_cons_normal_open hLockChk
+                  (exec_pair_halt_open hblk4 hswStmt)))⟩
+          · have hpre : lockSetPrefix f = [] := by simp [lockSetPrefix, hlocks]
+            have ⟨V', st', hexecB⟩ :=
+              toYulFn_progress hΓ hκ hlen o f
+                (hctor f hfmem) (hS2 f hfmem) (hbound f hfmem)
+                body hbody w stA hctxA hRA hNR (n := 3)
+            have hfH := hoist_yulD_of_evm (calls := toCalls o)
+              (toYulFn_hoist hbody (hctor f hfmem))
+            have hbodyStmt :
+                ExecStmt (yulD (toCalls o)) [[], []] [] stA (.block body) [] st' .halt := by
+              have hb := exec_block_halt_open (funs := [[], []]) (V := []) hfH hexecB
+              rw [restore_nil_any (D := yulD (toCalls o))] at hb
+              exact hb
+            have hcase : ExecStmts (yulD (toCalls o)) [[], []] [] stA caseBody [] st' .halt := by
+              simp [caseBody, hpre]
+              exact exec_cons_normal_open hblkF
+                (execStmts_append_open hval (exec_head_halt_open hbodyStmt))
+            have hswStmt := switch_halt_nil_open (calls := toCalls o) (funs := [[]])
+              hselE hswEq hcaseH hcase
+            exact ⟨st', .halt,
+              run_of_execStmts_open hhoist
+                (exec_cons_normal_open hG (exec_cons_normal_open hLockChk
+                  (exec_pair_halt_open hblk4 hswStmt)))⟩
+        · have hp : f.payable = false := by
+            simp [valueOk] at hvo
+            cases hpay : f.payable
+            · rfl
+            · simp [hpay] at hvo
+          have hvnz : ctx.value ≠ 0 := by
+            simp [valueOk, hp] at hvo
+            exact hvo
+          have hcv : stA.env.callvalue ≠ 0 := by
+            intro heq
+            exact hvnz ((callvalue_eq_zero_iff hctxA).mp heq)
+          have hvalH := exec_valueCheckPrefix_halt_nils (calls := toCalls o) (n := 2)
+            (V := []) hp hcv
+          have hcase : ExecStmts (yulD (toCalls o)) [[], []] [] stA caseBody [] stRev .halt :=
+            exec_cons_normal_open hblkF
+              (execStmts_append_halt_open (ss2 := lockSetPrefix f ++
+                [YulSemantics.Stmt.block body]) hvalH)
           have hswStmt := switch_halt_nil_open (calls := toCalls o) (funs := [[]])
             hselE hswEq hcaseH hcase
-          exact ⟨st', .halt,
-            run_of_execStmts_open hhoist
-              (exec_cons_normal_open hG (exec_cons_normal_open hLockChk
-                (exec_pair_halt_open hblk4 hswStmt)))⟩
-        · have hpre : lockSetPrefix f = [] := by simp [lockSetPrefix, hlocks]
-          have ⟨V', st', hexecB⟩ :=
-            toYulFn_progress hΓ hκ hlen o f
-              (hctor f hfmem) (hS2 f hfmem) (hbound f hfmem)
-              body hbody w stA hctxA hRA hNR (n := 3)
-          have hfH := hoist_yulD_of_evm (calls := toCalls o)
-            (toYulFn_hoist hbody (hctor f hfmem))
-          have hbodyStmt :
-              ExecStmt (yulD (toCalls o)) [[], []] [] stA (.block body) [] st' .halt := by
-            have hb := exec_block_halt_open (funs := [[], []]) (V := []) hfH hexecB
-            rw [restore_nil_any (D := yulD (toCalls o))] at hb
-            exact hb
-          have hcase : ExecStmts (yulD (toCalls o)) [[], []] [] stA caseBody [] st' .halt := by
-            simp [caseBody, hpre]
-            exact exec_pair_halt_open hblkF hbodyStmt
-          have hswStmt := switch_halt_nil_open (calls := toCalls o) (funs := [[]])
-            hselE hswEq hcaseH hcase
-          exact ⟨st', .halt,
+          exact ⟨stRev, .halt,
             run_of_execStmts_open hhoist
               (exec_cons_normal_open hG (exec_cons_normal_open hLockChk
                 (exec_pair_halt_open hblk4 hswStmt)))⟩
