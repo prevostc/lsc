@@ -5,7 +5,9 @@ Exactly:
 - `Contract.lean` — module docstring (what the contract does, for a Solidity
   developer, ≤8 lines); `Asset` constants; `Storage`, `Event`, `Error`; the
   user-facing functions, each with a one-line docstring; the single
-  `lsc_contract` line. FORBIDDEN: `theorem`, `lemma`, `example`, `instance`,
+  `lsc_contract` line. `@[reentrant]` (and `@[reentrant (unsafe := true)]`)
+  may sit on a user-facing function. FORBIDDEN: `theorem`, `lemma`, `example`,
+  `instance`,
   `@[simp]`, `#guard`, `#eval`, `#check`, `#guard_msgs`, any
   `.core`/`core_denote`/`Core.*`/`Spec.exec` mention, `Amount.ofWord`/`.raw`/
   word-level plumbing, helper duplicates (`*Raw`, `*U`, `*Unit`, `*Impl`

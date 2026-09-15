@@ -105,6 +105,37 @@ The language has no loops, inline assembly, `delegatecall`, `selfdestruct`,
 or untyped calls. External calls go only through an `I.Ref` of a declared
 interface (`deriving Interface`).
 
+## `@[reentrant]`
+
+By default every runtime function is non-reentrant: the compiled runtime
+`tload`s transient slot 0 on every entry (including views and unknown
+selectors) and reverts if the slot is set. Mutating functions that make
+an external CALL/STATICCALL also `tstore` the slot around the body.
+
+Use `@[reentrant]` on a flash-loan (or similar) entry point whose callee
+is expected to call back into this contract. That function does not
+acquire or release the lock, so a callback can run while it is on the
+stack. What is lost: while this function runs, nested calls into it are
+not blocked by the lock (it did not take the slot). The prologue still
+`tload`s on every selector, so a *sibling* that holds the lock still
+reverts even this function. The CALL model restores `self` storage after
+an external call (`ExtOracle.noReentry`); that restore is justified by
+the lock for non-reentrant functions.
+
+A `@[reentrant]` function may not write storage after an external call
+(CALL or STATICCALL), checked syntactically on the reified Core along
+every path. That checks-effects-interactions rule is then the only
+protection. Override with `@[reentrant (unsafe := true)]`.
+
+```lean
+/-- Flash-loan entry point: the callee is expected to call back into this contract. -/
+@[reentrant] def flashLoan (…) : M Unit := do
+  -- …
+```
+
+Place the attribute on the function definition in `Contract.lean`.
+Constructors cannot be `@[reentrant]`.
+
 ---
 
 For the curious: the theorem behind reification is the generated

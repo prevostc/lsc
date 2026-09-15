@@ -12,7 +12,7 @@ DeFi-oriented cut of SWC / OWASP Smart Contract Top 10 / Solodit. Status is
 
 | Class | Status | Evidence | Gap/Next |
 |---|---|---|---|
-| Reentrancy (classic, RO, cross-fn) | Assumed | lock emitted + held-lock revert proved; `NoReentry` hypothesis remains until 8C | Compiler: drop `hNR` (8C) |
+| Reentrancy (classic, RO, cross-fn) | Proved | lock prologue + held-lock revert; `NoReentry` is a lemma. `@[reentrant]` skips acquire/release; store-after-call rejected unless `unsafe := true` | `@[reentrant]` is not covered by the lock while that function runs |
 | Integer overflow/underflow | Impossible | `Tx.addChecked` / `+?` revert; wrapping only `+↻` (`Prim.addWrap`) | Don’t use `+↻` in money paths |
 | Rounding / precision loss | Proved | `mulDiv↓`/`↑`; `swap0for1_k`; `removeLiquidity_paid`; `vault_solvent` (floor dust) | 512-bit `mulDiv` (Cpamm docstring) |
 | First-depositor / share inflation / donation | Proved | Vault: `Shares` virtual offset `10^6`; `deposit_inflation_bounded` / `Shares.inflation_bound_raw` (`V · (x − r) ≤ A + V`); Cpamm: Uniswap-v2 `MINIMUM_LIQUIDITY` lock, `addLiquidity_min_liquidity` (first mint → `1000 ≤ totalShares`) | Weaker `r ≥ x − x/V − 1` is false when the mint is 0; attacker-cost form is what is proved |
@@ -47,7 +47,7 @@ DeFi-oriented cut of SWC / OWASP Smart Contract Top 10 / Solodit. Status is
 
 Ordered by value/cost. One cheapest close each.
 
-1. **Reentrancy hyp `hNR`** — compiler: finish 8C; lock emitted + held-lock revert proved; `NoReentry` hypothesis remains until 8C.
+1. **`@[reentrant]` callbacks** — the lock does not cover a reentrant function while it runs; CEI lint is syntactic. `unsafe := true` is a human override.
 2. **Fee-on-transfer / down-rebase** — model: `IERC20.Spec` from `Δ balanceOf`, not stated `amount`.
 3. **`implements_to_conforms`** — model: Lsc callee discharges `Conforms` (DECISIONS only).
 4. **Deadline + `minOut`** — stdlib + one Cpamm theorem (`out ≥ minOut`, `timestamp ≤ deadline`).

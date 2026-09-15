@@ -35,8 +35,9 @@ structure Param where
   ty : AbiTy
   deriving DecidableEq, Repr, Lean.ToExpr
 
-/-- Entrypoint kinds. `tx` mutates state (and, once the lock lands, acquires it); `view`
-must have no writes/emits (checked at assembly); `constructor` runs once at deployment. -/
+/-- Entrypoint kinds. `tx` mutates state (and acquires the lock when `locks f`);
+`view` must have no writes/emits (checked at assembly); `constructor` runs
+once at deployment. `@[reentrant]` skips lock acquire/release. -/
 inductive FnKind
   | tx
   | view
@@ -67,6 +68,13 @@ structure FnDef where
   params : List Param
   ret : RetTy
   core : Core ret
+  /-- `@[reentrant]`: do not acquire/release the transient lock. Default
+  `false` (Vyper-style inverted: every function is non-reentrant unless
+  opted out). The runtime prologue still `tload`s the slot. -/
+  reentrant : Bool := false
+  /-- `@[reentrant (unsafe := true)]`: allow a storage write after an
+  external call. Ignored when `reentrant = false`. -/
+  reentrantUnsafe : Bool := false
 
 structure EventDef where
   name : String

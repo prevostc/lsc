@@ -31,9 +31,9 @@ Core  --toYul (ours)-->  Yul AST (powdr yul-semantics)  --powdr compile_correct-
 - Storage is a Lean `structure`; mappings are `K → V` with default zero (≤ 2 keys).
 - Reentrancy during a call is not modelled at Tx (`self` is unchanged). The
   runtime emits `if tload(0) { revert(0,0) }` on every entry; `locks f`
-  acquire/release the slot. Held-lock revert is proved (`lock_held_reverts_*`);
-  S2/transport still take `NoReentry` until 8C (`YUL_TARGET.md`,
-  `TRUSTED_COMPUTING_BASE.md`).
+  acquire/release the slot unless `@[reentrant]`. Held-lock revert is proved
+  (`lock_held_reverts_*`); S2/transport use `ExtOracle.noReentry`
+  (`YUL_TARGET.md`, `TRUSTED_COMPUTING_BASE.md`).
 - Not in the language: loops, inline assembly, `delegatecall`, `selfdestruct`, untyped low-level
   calls, dynamic arrays/bytes in storage. External calls go only through an `I.Ref` of a
   declared interface (`deriving Interface`; see `INTERFACE_MODEL.md`).

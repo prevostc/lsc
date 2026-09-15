@@ -660,6 +660,44 @@ def Core.hasExtCall {t : RetTy} (c : Core t) : Bool :=
   let e := Core.effects c
   !e.calls.isEmpty || !e.views.isEmpty
 
+/-- `Op.call` / `Op.view` (CALL / STATICCALL). -/
+def Op.isExtCall : Op → Bool
+  | .call .. | .view .. => true
+  | _ => false
+
+/-- `Stmt.call` / `Stmt.view` (discarded CALL / STATICCALL). -/
+def Stmt.isExtCall : Stmt → Bool
+  | .call .. | .view .. => true
+  | _ => false
+
+/-- A storage write (`store` / `storeMap` / `storeMap2`). -/
+def Stmt.isStore : Stmt → Bool
+  | .store .. | .storeMap .. | .storeMap2 .. => true
+  | _ => false
+
+/-- `seen` is whether some prefix already contained an external call.
+Structural in the Core (same shape as `Core.effects`) so `lsc_contract`
+can reduce it. -/
+def Core.storeAfterCallSeen {t : RetTy} (seen : Bool) : Core t → Bool
+  | .ret _ => false
+  | .opTail _ | .opTailAddr _ | .opTailFlag _ => false
+  | .stmtTail s => seen && Stmt.isStore s
+  | .revertTail .. => false
+  | .letOp op k => Core.storeAfterCallSeen (seen || Op.isExtCall op) k
+  | .seq s k =>
+    (seen && Stmt.isStore s) ||
+      Core.storeAfterCallSeen (seen || Stmt.isExtCall s) k
+  | .letPure _ _ k => Core.storeAfterCallSeen seen k
+  | .ite _ a b =>
+    Core.storeAfterCallSeen seen a || Core.storeAfterCallSeen seen b
+
+/-- Syntactic checks-effects-interactions: some path has an `Op`/`Stmt`
+store after an external CALL/STATICCALL in program order. Used to reject
+`@[reentrant]` functions that write after a call, unless they also carry
+`@[reentrant (unsafe := true)]`. Tail calls are not followed by a store. -/
+def Core.storeAfterCall {t : RetTy} (c : Core t) : Bool :=
+  Core.storeAfterCallSeen false c
+
 theorem Op.effects_writes (op : Op) : (Op.effects op).writes = [] := by
   cases op <;> rfl
 

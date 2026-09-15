@@ -283,14 +283,23 @@ Three-slice plan:
     self-logs (`noInterfere_of_lock`, `ExtOracle.noReentry`). ETH conjuncts
     dropped. `hNR` removed from S2/transport/E2E; foreign-frame isolation is
     the oracle restore, not a `StepRunning` induction. Residual trust: TCB §(d).
-  - **8C-3**: `@[reentrant]` opt-out (lock not emitted); human re-pin of
-    `Checks.lean` if the public type change is recorded there.
+  - **8C-3** (this): `@[reentrant]` skips lock acquire/release
+    (`locks f` includes `¬f.reentrant`). The runtime prologue still
+    `tload`s, so 8C-1/8C-2 statements are unchanged. Store-after-call
+    on a reentrant function is rejected unless `unsafe := true`.
 
 ## 2026-09-14 — Lock always emitted; `NoReentry` is a model-level lemma (8C-2)
 
 Every runtime emits the transient lock. `NoReentry` is a lemma about `toCall`
 (restore of `self` storage / transient / self-logs), not a hypothesis of
-S2/transport. Opt-out via `@[reentrant]` (lock not emitted) is 8C-3.
+S2/transport. `@[reentrant]` (8C-3) skips acquire/release only.
+
+## 2026-09-15 — `@[reentrant]` skips lock acquire/release (8C-3)
+
+Default is non-reentrant (Vyper inverted). The runtime prologue still
+`tload`s, so 8C-1/8C-2 theorem *statements* are unchanged. `locks f` is
+`¬reentrant ∧ hasExtCall ∧ ¬isPureRead`. A reentrant function that stores
+after a CALL/STATICCALL is rejected unless `unsafe := true`.
 
 ## 2026-09-14 — Payability is declared, never inferred
 

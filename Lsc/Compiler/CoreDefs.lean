@@ -186,6 +186,11 @@ theorem locks_eq_false_of_callFree {f : FnDef} (h : CallFree f.core) :
     locks f = false := by
   simp [locks, CallFree_not_hasExtCall h]
 
+/-- `@[reentrant]` functions do not acquire or release the lock. -/
+theorem locks_eq_false_of_reentrant {f : FnDef} (h : f.reentrant = true) :
+    locks f = false := by
+  simp [locks, h]
+
 /-- Non-locking functions emit no `tstore(0,1)` prefix. -/
 theorem lockSetPrefix_nil_of_unlocked {f : FnDef} (h : locks f = false) :
     lockSetPrefix f = [] := by

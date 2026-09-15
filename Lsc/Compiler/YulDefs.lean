@@ -16,11 +16,13 @@ live inside the block so `restore` drops them; the Core result variable is
 declared outside and assigned inside. `toYulFn` does **not** return `none` on
 calls.
 
-Every runtime entry checks `tload(0)` and reverts if the slot is set.
-Mutating functions with an outgoing CALL/STATICCALL (`locks f`) `tstore(0,1)`
-after the per-function size guard and `tstore(0,0)` before each committing
-`return`/`stop`. Pure-read views (including those with `Op.view`) and
-call-free mutators do not write the lock. Constructor (`toYulCtor`) is
+Every runtime entry checks `tload(0)` and reverts if the slot is set
+(including `@[reentrant]` functions: the prologue is per-runtime, not
+per-function). Mutating non-reentrant functions with an outgoing
+CALL/STATICCALL (`locks f`) `tstore(0,1)` after the per-function size
+guard and `tstore(0,0)` before each committing `return`/`stop`.
+`@[reentrant]` functions, pure-read views (including those with `Op.view`),
+and call-free mutators do not write the lock. Constructor (`toYulCtor`) is
 unchanged. Not emitted: `for`, `delegatecall`, `selfdestruct`, `create`.
 `ite` is `switch` (Yul `if` has no else). Dispatcher is
 `switch shr(224, calldataload(0))`. Sub-expressions are nested Yul builtins
@@ -133,11 +135,12 @@ def memoryGuardK : Nat := 256
 storage; Lsc emits no other `tstore`. -/
 def reentrancyLockSlot : Nat := 0
 
-/-- Mutating functions with any outgoing CALL/STATICCALL take the lock.
-Pure-read views with an outgoing `staticcall` do not: they have no
-inconsistent window and must stay honest `view`s (STATICCALL-callable). -/
+/-- Mutating non-reentrant functions with any outgoing CALL/STATICCALL take
+the lock. `@[reentrant]` functions never acquire or release it. Pure-read
+views with an outgoing `staticcall` do not: they have no inconsistent
+window and must stay honest `view`s (STATICCALL-callable). -/
 def locks (f : FnDef) : Bool :=
-  Core.hasExtCall f.core && !Core.isPureRead f.core
+  !f.reentrant && Core.hasExtCall f.core && !Core.isPureRead f.core
 
 /-- Aligned ABI words at `abiPtr` fit in `[0, memoryGuardK)`. Equivalent to `n ≤ 4`. -/
 def fitsGuardWords (n : Nat) : Bool := decide (abiPtr + 32 * n ≤ memoryGuardK)
@@ -170,8 +173,8 @@ def revert00 : YStmt :=
 def stopStmt : YStmt :=
   YulSemantics.Stmt.exprStmt (bop YulSemantics.EVM.Op.stop [])
 
-/-- `if tload(0) { revert(0,0) }`. Every runtime entry, including views and
-the default selector. -/
+/-- `if tload(0) { revert(0,0) }`. Every runtime entry, including views,
+`@[reentrant]` functions, and the default selector. -/
 def lockCheckStmt : YStmt :=
   .cond (bop YulSemantics.EVM.Op.tload [lit reentrancyLockSlot]) [revert00]
 

@@ -1519,10 +1519,13 @@ theorem codeSize_lockPrefixAsmOptPre_byteWidth (k : Nat) (hk : k < 2 ^ 256) :
     codeSize (lockPrefixAsmOptPre k) = 13 + Instr.byteWidth k := by
   rw [codeSize_lockPrefixAsmOptPre, conv_toNat_ofNat_of_lt hk]
 
+theorem pow_256_32 : (256 : Nat) ^ 32 = 2 ^ 256 :=
+  have h8 : (256 : Nat) = 2 ^ 8 := rfl
+  h8 ▸ (Nat.pow_mul 2 8 32).symm
+
 theorem byteWidth_le_32_of_lt {k : Nat} (hk : k < 2 ^ 256) :
-    Instr.byteWidth k ≤ 32 := by
-  have hpow : (256 : Nat) ^ 32 = 2 ^ 256 := by native_decide
-  exact Instr.byteWidth_le_of_lt_pow k 32 (hpow ▸ hk)
+    Instr.byteWidth k ≤ 32 :=
+  Instr.byteWidth_le_of_lt_pow k 32 (pow_256_32 ▸ hk)
 
 theorem dest_lockPrefix_lt_256 (k : Nat) (hk : k < 2 ^ 256) :
     13 + Instr.byteWidth k < 256 := by

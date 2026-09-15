@@ -78,14 +78,13 @@ Decisions for `Lsc/Compiler` fixed by the study of `yul-semantics`, `evm_semanti
 - Dispatcher → `if tload(0) { revert(0,0) }` (every entry, including views and
   `default`), then `if lt(calldatasize(), 4) { revert(0,0) }`, then
   `switch shr(224, calldataload(0))` with one `case <selector>` per entrypoint and `default { revert(0,0) }`.
-  A case that `locks f` (`hasExtCall ∧ ¬ isPureRead`) inserts `tstore(0,1)` after the
+  A case that `locks f` (`¬reentrant ∧ hasExtCall ∧ ¬ isPureRead`) inserts `tstore(0,1)` after the
   per-function size guard; committing `return`/`stop` is prefixed with `tstore(0,0)`.
-  Pure-read views (including those with an outgoing `staticcall`) and call-free mutators
+  `@[reentrant]` functions, pure-read views (including those with an outgoing `staticcall`) and call-free mutators
   do not write the slot. `require`/`revert`/call-failed paths rely on Yul/EVM rollback.
   Slot `0` is the only `tstore` Lsc emits; the constructor (`toYulCtor`) is unchanged.
-- Reentrancy: the lock is emitted as above. S2 theorems still take `ExtOracle.NoReentry`
-  (`TRUSTED_COMPUTING_BASE.md`) until slice 8C derives it from the lock. Slice 8B is
-  `lock_held_reverts`.
+- Reentrancy: the lock is emitted as above. S2 uses `ExtOracle.noReentry` (a lemma).
+  Slice 8B is `lock_held_reverts`; 8C-3 is `@[reentrant]`.
 - Never emitted: `for`, `delegatecall`, `selfdestruct`, `create`, `gas`, `datasize`/`dataoffset`
   outside the constructor.
 

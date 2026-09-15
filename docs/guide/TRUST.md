@@ -93,14 +93,17 @@ are not in that EVM model**. Runtime theorems exclude constructors.
 Vault/Cpamm constructors that `CALL` are out of scope.
 
 The runtime emits `if tload(0) { revert(0,0) }` on every entry
-(`lockCheckStmt`); functions with `locks f` (`hasExtCall ∧ ¬ isPureRead`)
-`tstore(0,1)` after the size guard and `tstore(0,0)` before committing
-`return`/`stop`. Held lock ⇒ revert, empty returndata, committed
-storage/transient/logs unchanged (`lock_held_reverts_yul`,
+(`lockCheckStmt`), including `@[reentrant]` functions. Functions with
+`locks f` (`¬reentrant ∧ hasExtCall ∧ ¬ isPureRead`) `tstore(0,1)` after
+the size guard and `tstore(0,0)` before committing `return`/`stop`.
+`@[reentrant]` skips acquire/release; a store after an external call is
+rejected unless `unsafe := true`. Held lock ⇒ revert, empty returndata,
+committed storage/transient/logs unchanged (`lock_held_reverts_yul`,
 `lock_held_reverts_yul_open`, `lock_held_reverts_evm`; no oracle
 hypothesis). A nested CALL/STATICCALL into the compiled runtime while the
 lock is held reverts in the prefix and restores the parent snapshot
-(`nested_lock_reverts`). Core outside the supported
+(`nested_lock_reverts`). These lock theorems keep their current
+statements (the prologue is still per-runtime). Core outside the supported
 fragment (including most `letPure`, nested pair returns, and unusual
 require/revert/emit arities) is not compiled. Bytecode glue talks about
 word-level core; Vault's Amount ABI is identified with the reifier

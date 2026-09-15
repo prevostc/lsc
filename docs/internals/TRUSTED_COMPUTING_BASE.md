@@ -115,18 +115,20 @@ Not derived from powdr:
   with `call` are out of scope.
 
 - Reentrancy: lock emitted (`runtimeBlock` / `lockCheckStmt`; `locks f`
-  acquire/release). Held lock ⇒ revert, empty returndata, committed
-  storage/transient/logs unchanged (`lock_held_reverts_yul` /
-  `lock_held_reverts_yul_open` / `lock_held_reverts_evm`; no oracle).
-  Nested CALL/STATICCALL into the compiled runtime with the lock held
-  reverts in the prefix and restores the parent snapshot
-  (`nested_lock_reverts`, `nested_lock_restores_self`). S2/transport
-  theorems do not take `hNR`; isolation of `self`'s storage/transient/
-  self-logs is the `toCall` restore (`ExtOracle.noReentry`). ETH balances
-  are not covered (`SELFDESTRUCT` to `self`, foreign `balanceOf`).
-  Opt-out via `@[reentrant]` is 8C-3. CALLCODE/DELEGATECALL are not
-  emitted. The EVM fact that only a `self` frame can write `self`
-  storage/logs is not mechanized (TCB §(d)).
+  acquire/release when `¬f.reentrant`). Held lock ⇒ revert, empty
+  returndata, committed storage/transient/logs unchanged
+  (`lock_held_reverts_yul` / `lock_held_reverts_yul_open` /
+  `lock_held_reverts_evm`; no oracle). Nested CALL/STATICCALL into the
+  compiled runtime with the lock held reverts in the prefix and restores
+  the parent snapshot (`nested_lock_reverts`, `nested_lock_restores_self`).
+  S2/transport theorems do not take `hNR`; isolation of `self`'s
+  storage/transient/self-logs is the `toCall` restore
+  (`ExtOracle.noReentry`). ETH balances are not covered (`SELFDESTRUCT`
+  to `self`, foreign `balanceOf`). `@[reentrant]` skips acquire/release
+  (prologue still checks); store-after-call is rejected unless
+  `unsafe := true`. CALLCODE/DELEGATECALL are not emitted. The EVM fact
+  that only a `self` frame can write `self` storage/logs is not
+  mechanized (TCB §(d)).
 - Core outside `S2Frag` (e.g. wrapping `letPure` other than `id`, nested pair
   returns, `require`/`revert`/`emit` arities other than 0/1/3/4).
 - Amount-typed compiler in general: bytecode glue is `Core.denote` (Nat).

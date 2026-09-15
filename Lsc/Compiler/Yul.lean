@@ -14,8 +14,9 @@ declared outside and assigned inside. `toYulFn` does **not** return `none` on
 calls.
 
 Every runtime entry checks `tload(0)` and reverts if set. Locking functions
-(`hasExtCall ∧ ¬ isPureRead`) `tstore(0,1)` on entry and `tstore(0,0)` on
-committing exits. Not emitted: `for`, `delegatecall`, `selfdestruct`, `create`.
+(`¬reentrant ∧ hasExtCall ∧ ¬ isPureRead`) `tstore(0,1)` on entry and
+`tstore(0,0)` on committing exits. `@[reentrant]` skips acquire/release.
+Not emitted: `for`, `delegatecall`, `selfdestruct`, `create`.
 `ite` is `switch` (Yul `if` has no else). Dispatcher is
 `switch shr(224, calldataload(0))`. Sub-expressions are nested Yul builtins
 (no flatten / `t_i` temps); `{ … }` wraps `if` bodies, `switch` cases, and

@@ -3,6 +3,7 @@ import Lsc.Lang.CoreTheorems
 import Lsc.Lang.Contract
 import Lsc.Lang.ExtState
 import Lsc.Lang.Inline
+import Lsc.Lang.Reentrant
 import Lsc.Lang.Spec
 import Lsc.Lang.TxTheorems
 
@@ -78,8 +79,11 @@ per-field `@[simp]` reductions `C.schema_read_<field>` / `C.schema_write_<field>
 language-level `C.spec` (`C.Fn` / `C.entry` / `C.spec_exec_*`), and `C.impl_<I>`
 (`C.impl` when there is exactly one `implements` clause). Function kind
 (`view` / `tx`) is decided by effects (`Core.isPureRead`: no writes, emits,
-or CALLs ⇒ `view`), never by return type. `#lsc_obligations C`
-prints the security theorems to prove; it does not import `Lsc.Security`.
+or CALLs ⇒ `view`), never by return type. `@[reentrant]` opts a function
+out of lock acquire/release; a reentrant function that stores after an
+external call is rejected unless it also has `@[reentrant (unsafe := true)]`.
+`#lsc_obligations C` prints the security theorems to prove; it does not
+import `Lsc.Security`.
 
 The reifier only accepts the *reifiable fragment* — the fixed set of
 `Tx` primitives combined with `do`, `let`, `if` on decidable word comparisons, and
@@ -2108,9 +2112,69 @@ def fnMeta (fn : Name) : MetaM (List Param × RetTy × FnKind) := do
     pure (params, t, kind)
 
 def mkFnDefExpr (name : String) (decl : Name) (kind : FnKind) (params : List Param)
-    (ret : RetTy) (coreName : Name) : Expr :=
+    (ret : RetTy) (coreName : Name) (reentrant reentrantUnsafe : Bool) : Expr :=
   mkAppN (Lean.mkConst ``FnDef.mk) #[
-    toExpr name, toExpr decl, toExpr kind, toExpr params, toExpr ret, Lean.mkConst coreName]
+    toExpr name, toExpr decl, toExpr kind, toExpr params, toExpr ret,
+    Lean.mkConst coreName, toExpr reentrant, toExpr reentrantUnsafe]
+
+/-- Head constructor of a whnf'd inductive application. -/
+def appCtor (e : Expr) : MetaM Name := do
+  let e ← whnf e
+  match e.getAppFn.constName? with
+  | some n => return n
+  | none => throwError "lsc_contract: expected an inductive constructor{indentExpr e}"
+
+def isExtCallOp (e : Expr) : MetaM Bool := do
+  let n ← appCtor e
+  return n == ``Lsc.Op.call || n == ``Lsc.Op.view
+
+def isExtCallStmt (e : Expr) : MetaM Bool := do
+  let n ← appCtor e
+  return n == ``Lsc.Stmt.call || n == ``Lsc.Stmt.view
+
+def isStoreStmt (e : Expr) : MetaM Bool := do
+  let n ← appCtor e
+  return n == ``Lsc.Stmt.store || n == ``Lsc.Stmt.storeMap ||
+    n == ``Lsc.Stmt.storeMap2
+
+/-- Syntactic `Core.storeAfterCall` on the already-reified `f.core` Expr.
+Walks constructors after `whnf` instead of kernel-reducing the Bool
+function (nested well-founded recursors do not reduce in MetaM). -/
+partial def storeAfterCallExpr (seen : Bool) (e : Expr) : MetaM Bool := do
+  let e ← whnf e
+  if e.isAppOf ``Lsc.Core.ret || e.isAppOf ``Lsc.Core.revertTail then
+    return false
+  if e.isAppOf ``Lsc.Core.opTail || e.isAppOf ``Lsc.Core.opTailAddr ||
+      e.isAppOf ``Lsc.Core.opTailFlag then
+    return false
+  if e.isAppOf ``Lsc.Core.stmtTail then
+    return seen && (← isStoreStmt e.appArg!)
+  if e.isAppOf ``Lsc.Core.letOp then
+    let k := e.appArg!
+    let op := e.appFn!.appArg!
+    storeAfterCallExpr (seen || (← isExtCallOp op)) k
+  else if e.isAppOf ``Lsc.Core.seq then
+    let k := e.appArg!
+    let s := e.appFn!.appArg!
+    if seen && (← isStoreStmt s) then
+      return true
+    storeAfterCallExpr (seen || (← isExtCallStmt s)) k
+  else if e.isAppOf ``Lsc.Core.letPure then
+    storeAfterCallExpr seen e.appArg!
+  else if e.isAppOf ``Lsc.Core.ite then
+    let b := e.appArg!
+    let a := e.appFn!.appArg!
+    return (← storeAfterCallExpr seen a) || (← storeAfterCallExpr seen b)
+  else
+    let n ← appCtor e
+    throwError "lsc_contract: could not decide store-after-call (stuck at {n})"
+
+def checkStoreAfterCall (fn : Name) : MetaM Unit := do
+  let bad ← storeAfterCallExpr false (mkConst (fn ++ `core))
+  if bad then
+    throwError "lsc_contract: `{fn}` is `@[reentrant]` but writes storage after \
+      an external call. Checks-effects-interactions is then the only protection; \
+      move stores before the call, or use `@[reentrant (unsafe := true)]`."
 
 def fieldKindToAbi : FieldKind → Lsc.FieldKind
   | .scalar => .scalar
@@ -2137,7 +2201,13 @@ def assembleContract (ns : Name) (fns : Array Name) : TermElabM Unit := do
   let mut ctorE : Expr := mkApp (Lean.mkConst ``Option.none [Level.zero]) (Lean.mkConst ``FnDef)
   for fn in fns do
     let (params, ret, kind) ← fnMeta fn
-    let e := mkFnDefExpr fn.getString! fn kind params ret (fn ++ `core)
+    let (reent, uns) := reentrantFlags (← getEnv) fn
+    if kind == .constructor && reent then
+      throwError "lsc_contract: `@[reentrant]` is not allowed on `{fn}` \
+        (constructors are not in the runtime lock)"
+    if reent && !uns then
+      checkStoreAfterCall fn
+    let e := mkFnDefExpr fn.getString! fn kind params ret (fn ++ `core) reent uns
     if kind == .constructor then
       ctorE := mkApp2 (Lean.mkConst ``Option.some [Level.zero]) (Lean.mkConst ``FnDef) e
     else
@@ -2613,10 +2683,14 @@ def mkFnDefAlt (fn : Name) : MetaM (TSyntax ``Lean.Parser.Term.matchAlt) := do
   let paramsT ← `([$paramTs,*])
   let coreT : Term := ⟨mkIdent (fn ++ `core)⟩
   let declT := quote fn
+  let (reent, uns) := reentrantFlags (← getEnv) fn
+  let reentT := quote reent
+  let unsT := quote uns
   `(Lean.Parser.Term.matchAltExpr|
       | .$ctor:ident =>
         { name := $nameLit, decl := $declT, kind := $kindT,
-          params := $paramsT, ret := $retT, core := $coreT })
+          params := $paramsT, ret := $retT, core := $coreT,
+          reentrant := $reentT, reentrantUnsafe := $unsT })
 
 def mkEncodeAlt (fn : Name) : MetaM (TSyntax ``Lean.Parser.Term.matchAlt) := do
   let ctor := ctorIdent fn
@@ -3016,7 +3090,9 @@ syntax (name := lscReify) "lsc_reify " ident+ : command
 defines `C.contract`, `C.Fn` / `C.entry` / `C.spec`, the transport codec, and
 `C.impl_<I>` (`C.impl` when there is exactly one `implements` clause). A function
 named `constructor` is the constructor; otherwise the kind is `view` when
-`Core.isPureRead` (no writes, emits, or CALLs) and `tx` otherwise. -/
+`Core.isPureRead` (no writes, emits, or CALLs) and `tx` otherwise.
+`@[reentrant]` is recorded on `FnDef`; store-after-call is rejected unless
+`unsafe := true`. -/
 syntax (name := lscContract)
   "lsc_contract " ident ident+
     ("implements " ident term:arg* (", " ident term:arg*)*)* : command

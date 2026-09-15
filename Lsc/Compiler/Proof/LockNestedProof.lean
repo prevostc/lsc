@@ -91,13 +91,20 @@ theorem revertTotal_zero (s : State) :
 
 theorem readPadded_zero_toList (bs : ByteArray) :
     (MachineState.readPadded bs 0 0).toList = [] := by
-  unfold MachineState.readPadded
-  simp [Nat.zero_min, Nat.min_zero]
-  native_decide
+  have hread :
+      MachineState.readPadded bs 0 0 =
+        bs.extract 0 0 ++ ByteArray.mk (Array.replicate 0 0) := by
+    unfold MachineState.readPadded
+    simp [Nat.min_zero, Nat.zero_min]
+  have hmk : ByteArray.mk (Array.replicate 0 (0 : UInt8)) = ByteArray.empty := by
+    apply ByteArray.ext
+    simp [Array.replicate, ByteArray.data_empty]
+  rw [hread, ByteArray.extract_same, hmk, ByteArray.empty_append]
+  exact ByteArray.toList_empty
 
 theorem pushMin_zero : Instr.pushMin ⟨0⟩ = Instr.push ⟨0, by decide⟩ ⟨0⟩ := by
   have h0 : (⟨0⟩ : UInt256).toNat = 0 := rfl
-  have hz : Instr.byteWidth 0 = 0 := by native_decide
+  have hz : Instr.byteWidth 0 = 0 := by simp [Instr.byteWidth]
   have hw : Instr.widthOf ⟨0⟩ = ⟨0, by decide⟩ :=
     Fin.ext (by
       change Instr.byteWidth (⟨0⟩ : UInt256).toNat = 0
