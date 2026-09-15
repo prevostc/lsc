@@ -224,10 +224,14 @@ theorem post_congr_run {C : Spec S X E ε}
       obtain ⟨hs1, he1⟩ := hpc c.fn c.args c.toCtx w w' hs he
       simpa [run, step] using ih (step (.call c) w) (step (.call c) w') hs1 he1
 
-theorem step_ofCtx (T : TransportSetup S X E ε) (ctx : Ctx) (fn : T.spec.Fn)
+theorem step_ofCtx [HasCreditValue X] (T : TransportSetup S X E ε) (ctx : Ctx)
+    (fn : T.spec.Fn)
     (args : T.spec.Args fn) (w : World S X E) :
     step (.call (Call.ofCtx ctx fn args)) w =
-      worldAfter (T.spec.exec fn args) ctx w := rfl
+      match T.spec.exec fn args ctx (World.creditValue w ctx.value) with
+      | .ok (_, w') => w'
+      | .error _ => w :=
+  rfl
 
 theorem encodeCall_decode (T : TransportSetup S X E ε) (c : Call T.spec)
     (hW : ∀ n ∈ T.codec.encode c.fn c.args, n < wordBound)

@@ -184,6 +184,38 @@ theorem emitLetOp_view_stmts (d : Nat) (t : Atom) (sel : Nat) (args : List Atom)
         .block (emitExtCallBody tag d t sel args ret true (some (identV tag d)))] := by
   simp [emitLetOp_view, emitExtCall_stmts, Emit.stmts_nil]
 
+theorem emitLetOp_send_stmts (d : Nat) (t amt : Atom) :
+    ((emitLetOp tag ({} : ContractDef) {} d (.send t amt)).getD {}).stmts =
+      [.letDecl [identV tag d] (some (lit 0)),
+        .block (emitExtSendBody tag d t amt (some (identV tag d)))] := by
+  simp [emitLetOp_send, emitExtSend_stmts, Emit.stmts_nil]
+
+theorem emitExtSendBody_stmts (d : Nat) (target amount : Atom)
+    (assign : Option YIdent) :
+    emitExtSendBody tag d target amount assign =
+      [.letDecl [extOk tag d]
+        (some (emitExtSendOp (atomE tag d target) (atomE tag d amount)))] ++
+      match assign with
+      | none => []
+      | some name => [.assign [name] (var (extOk tag d))] := by
+  cases assign with
+  | none => simp [emitExtSendBody, emitLet_stmts, Emit.stmts_nil]
+  | some _ => simp [emitExtSendBody, emitLet_stmts, emitAssign_stmts, Emit.stmts_nil]
+
+theorem notFunDef_emitExtSendBody (d : Nat) (target amount : Atom)
+    (assign : Option YIdent) :
+    ∀ s ∈ emitExtSendBody tag d target amount assign, notFunDef s = true := by
+  intro s hs
+  have hall : (emitExtSendBody tag d target amount assign).all notFunDef = true := by
+    rw [emitExtSendBody_stmts]
+    cases assign <;> simp [notFunDef, emitExtSendOp]
+  exact (List.all_eq_true.mp hall) s hs
+
+theorem hoist_emitExtSendBody {calls : ExternalCalls} (d : Nat)
+    (target amount : Atom) (assign : Option YIdent) :
+    hoist (yulD calls) (emitExtSendBody tag d target amount assign) = [] :=
+  hoist_nil_open (notFunDef_emitExtSendBody tag d target amount assign)
+
 theorem emitStmt_call_stmts (c : ContractDef) (d : Nat) (t : Atom) (sel : Nat)
     (args : List Atom) (ret : AbiRet) :
     (emitStmt tag c {} d (.call t sel args ret)).stmts =
@@ -1155,6 +1187,11 @@ theorem flag_eq_zero_iff (resp : CallResponse) :
 theorem flag_ne_zero_iff (resp : CallResponse) :
     resp.flag ≠ 0 ↔ resp.success = true := by
   simp [CallResponse.flag_of]
+
+theorem flag_toNat_boolBit (resp : CallResponse) :
+    resp.flag.toNat = Tx.boolBit resp.success := by
+  simp [CallResponse.flag_of, Tx.boolBit]
+  cases resp.success <;> simp
 
 theorem execStmts_one {D : Dialect} [DecidableEq D.Value]
     {funs : FunEnv D} {V : VEnv D} {st : D.State} {s : YulSemantics.Stmt D.Op}

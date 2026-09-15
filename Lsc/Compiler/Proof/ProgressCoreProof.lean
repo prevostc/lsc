@@ -242,9 +242,30 @@ theorem core_progress {S E ε}
           obtain ⟨V1, st1, out, hexec, ho⟩ := hcallP
           rw [hE] at hexec
           exact finish_opTail_word tag clearLock hexec ho
-      | inr hM1 =>
-        exact core_progress_callFree tag hhalt hΓ hκ hlen (calls := toCalls o)
-          (.opTail op) (by simpa [CallFree, M1Frag] using hM1) hwf hn hinv hem
+      | inr hrest2 =>
+        cases hrest2 with
+        | inl hsend =>
+          obtain ⟨target, amount, rfl⟩ := hsend
+          simp only [emitCore] at hem
+          cases hE : emitLetOp tag c {} env.length (.send target amount) with
+          | none => simp [hE] at hem
+          | some e1 =>
+            simp only [hE] at hem
+            cases hem
+            rw [emitRet_word_stmts_if tag e1 (env.length + 1) haltUnit (.var 0) clearLock]
+            have hn0 : identsNodup tag env.length = true :=
+              identsNodup_mono tag (by simp [coreExtraDepth]) hn
+            have hn1 : identsNodup tag (env.length + 1) = true :=
+              identsNodup_mono tag (by simp [coreExtraDepth]) hn
+            have hsendP :=
+              op_send_progress tag o (n := n) (target := target) (amount := amount)
+                hinv hNR hn0 hn1
+            obtain ⟨V1, st1, out, hexec, ho⟩ := hsendP
+            rw [hE] at hexec
+            exact finish_opTail_word tag clearLock hexec ho
+        | inr hM1 =>
+          exact core_progress_callFree tag hhalt hΓ hκ hlen (calls := toCalls o)
+            (.opTail op) (by simpa [CallFree, M1Frag] using hM1) hwf hn hinv hem
   | opTailAddr op =>
     intro hS2 w env V st n hwf hn hinv hNR clearLock e' hem
     cases s2op_elim (by simpa [S2Frag] using hS2) with
@@ -290,9 +311,30 @@ theorem core_progress {S E ε}
           obtain ⟨V1, st1, out, hexec, ho⟩ := hcallP
           rw [hE] at hexec
           exact finish_opTail_word tag clearLock hexec ho
-      | inr hM1 =>
-        exact core_progress_callFree tag hhalt hΓ hκ hlen (calls := toCalls o)
-          (.opTailAddr op) (by simpa [CallFree, M1Frag] using hM1) hwf hn hinv hem
+      | inr hrest2 =>
+        cases hrest2 with
+        | inl hsend =>
+          obtain ⟨target, amount, rfl⟩ := hsend
+          simp only [emitCore] at hem
+          cases hE : emitLetOp tag c {} env.length (.send target amount) with
+          | none => simp [hE] at hem
+          | some e1 =>
+            simp only [hE] at hem
+            cases hem
+            rw [emitRet_addr_stmts_if tag e1 (env.length + 1) haltUnit (.var 0) clearLock]
+            have hn0 : identsNodup tag env.length = true :=
+              identsNodup_mono tag (by simp [coreExtraDepth]) hn
+            have hn1 : identsNodup tag (env.length + 1) = true :=
+              identsNodup_mono tag (by simp [coreExtraDepth]) hn
+            have hsendP :=
+              op_send_progress tag o (n := n) (target := target) (amount := amount)
+                hinv hNR hn0 hn1
+            obtain ⟨V1, st1, out, hexec, ho⟩ := hsendP
+            rw [hE] at hexec
+            exact finish_opTail_word tag clearLock hexec ho
+        | inr hM1 =>
+          exact core_progress_callFree tag hhalt hΓ hκ hlen (calls := toCalls o)
+            (.opTailAddr op) (by simpa [CallFree, M1Frag] using hM1) hwf hn hinv hem
   | opTailFlag op =>
     intro hS2 w env V st n hwf hn hinv hNR clearLock e' hem
     cases s2op_elim (by simpa [S2Frag] using hS2) with
@@ -338,9 +380,30 @@ theorem core_progress {S E ε}
           obtain ⟨V1, st1, out, hexec, ho⟩ := hcallP
           rw [hE] at hexec
           exact finish_opTail_word tag clearLock hexec ho
-      | inr hM1 =>
-        exact core_progress_callFree tag hhalt hΓ hκ hlen (calls := toCalls o)
-          (.opTailFlag op) (by simpa [CallFree, M1Frag] using hM1) hwf hn hinv hem
+      | inr hrest2 =>
+        cases hrest2 with
+        | inl hsend =>
+          obtain ⟨target, amount, rfl⟩ := hsend
+          simp only [emitCore] at hem
+          cases hE : emitLetOp tag c {} env.length (.send target amount) with
+          | none => simp [hE] at hem
+          | some e1 =>
+            simp only [hE] at hem
+            cases hem
+            rw [emitRet_flag_stmts_if tag e1 (env.length + 1) haltUnit (.var 0) clearLock]
+            have hn0 : identsNodup tag env.length = true :=
+              identsNodup_mono tag (by simp [coreExtraDepth]) hn
+            have hn1 : identsNodup tag (env.length + 1) = true :=
+              identsNodup_mono tag (by simp [coreExtraDepth]) hn
+            have hsendP :=
+              op_send_progress tag o (n := n) (target := target) (amount := amount)
+                hinv hNR hn0 hn1
+            obtain ⟨V1, st1, out, hexec, ho⟩ := hsendP
+            rw [hE] at hexec
+            exact finish_opTail_word tag clearLock hexec ho
+        | inr hM1 =>
+          exact core_progress_callFree tag hhalt hΓ hκ hlen (calls := toCalls o)
+            (.opTailFlag op) (by simpa [CallFree, M1Frag] using hM1) hwf hn hinv hem
   | stmtTail s =>
     intro hS2 w env V st n hwf hn hinv hNR clearLock e' hem
     cases s2stmt_elim (by simpa [S2Frag] using hS2) with
@@ -420,23 +483,40 @@ theorem core_progress {S E ε}
             hinv1 hNR h0
           obtain ⟨V2, st2, hk⟩ := ihk
           exact ⟨V2, st2, execStmts_append_open hexec hk⟩
-      | inr hM1 =>
-        have hsim := op_sim tag (List.replicate n []) hinv hΓ hκ hlen hM1 hwfOp hn1
-        cases hrun : Tx.run (Op.denote Γ env op) ctx w with
-        | ok p =>
-          simp only [hrun, except_ok_prod] at hsim
-          obtain ⟨st1, hexec, hinv1⟩ := hsim
+      | inr hrest2 =>
+        cases hrest2 with
+        | inl hsend =>
+          obtain ⟨target, amount, rfl⟩ := hsend
+          have hsendP :=
+            op_send_progress tag o (n := n) (target := target) (amount := amount)
+              hinv hNR hn0 hn1
+          obtain ⟨V1, st1, out, hexec, ho⟩ := hsendP
           simp only [h1] at hexec
-          rcases p with ⟨v, w'⟩
-          have hexec' := execStmts_lift_nils (calls := toCalls o) (n := n) hexec
-          have ihk := ih hkS2 (env := v :: env) (n := n) hwfK hnK hinv1 hNR h0
-          obtain ⟨V2, st2, hk⟩ := ihk
-          exact ⟨V2, st2, execStmts_append_open hexec' hk⟩
-        | error e =>
-          simp only [hrun, except_error_prod] at hsim
-          obtain ⟨V1, st1, _, hexec, _, _⟩ := hsim
-          simp only [h1] at hexec
-          exact ⟨V1, st1, execStmts_append_halt_open (execStmts_lift_nils hexec)⟩
+          rcases ho with ho | ⟨ho, v, hinv1⟩
+          · subst ho
+            exact ⟨V1, st1, execStmts_append_halt_open hexec⟩
+          · subst ho
+            have ihk := ih hkS2 (env := v :: env) (n := n) hwfK hnK
+              hinv1 hNR h0
+            obtain ⟨V2, st2, hk⟩ := ihk
+            exact ⟨V2, st2, execStmts_append_open hexec hk⟩
+        | inr hM1 =>
+          have hsim := op_sim tag (List.replicate n []) hinv hΓ hκ hlen hM1 hwfOp hn1
+          cases hrun : Tx.run (Op.denote Γ env op) ctx w with
+          | ok p =>
+            simp only [hrun, except_ok_prod] at hsim
+            obtain ⟨st1, hexec, hinv1⟩ := hsim
+            simp only [h1] at hexec
+            rcases p with ⟨v, w'⟩
+            have hexec' := execStmts_lift_nils (calls := toCalls o) (n := n) hexec
+            have ihk := ih hkS2 (env := v :: env) (n := n) hwfK hnK hinv1 hNR h0
+            obtain ⟨V2, st2, hk⟩ := ihk
+            exact ⟨V2, st2, execStmts_append_open hexec' hk⟩
+          | error e =>
+            simp only [hrun, except_error_prod] at hsim
+            obtain ⟨V1, st1, _, hexec, _, _⟩ := hsim
+            simp only [h1] at hexec
+            exact ⟨V1, st1, execStmts_append_halt_open (execStmts_lift_nils hexec)⟩
   | seq s k ih =>
     intro hS2 w env V st n hwf hn hinv hNR clearLock e' hem
     have ⟨hsS2, hkS2⟩ := s2frag_seq.mp hS2

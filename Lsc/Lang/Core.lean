@@ -319,6 +319,10 @@ inductive Op
   | call (target : Atom) (sel : Nat) (args : List Atom) (ret : AbiRet)
   /-- STATICCALL: same payload as `call`; denotation is `Tx.viewAsNat`. -/
   | view (target : Atom) (sel : Nat) (args : List Atom) (ret : AbiRet)
+  /-- Value-carrying CALL, empty calldata. Denotation is `boolBit <$> Tx.sendRaw`. -/
+  | send (target : Atom) (amount : Atom)
+  /-- `selfbalance()` of the executing account. -/
+  | selfBalance
   | pure (a : Atom)
   deriving DecidableEq, Repr, Lean.ToExpr
 
@@ -432,10 +436,11 @@ def Op.denote (Γ : ContractSchema S X E ε) (env : List Nat) : Op → Tx S X E 
   | .loadMap f k => Tx.loadMap (Γ.st.map1 f) (k.eval env)
   | .loadMap2 f k₁ k₂ => Tx.loadMap2 (Γ.st.map2 f) (k₁.eval env) (k₂.eval env)
   | .sender => Tx.sender
-  | .value => Tx.value
+  | .value => Tx.valueRaw
   | .timestamp => Tx.timestamp
   | .blockNumber => Tx.blockNumber
   | .selfAddress => Tx.selfAddress
+  | .selfBalance => Tx.selfBalanceRaw
   | .addChecked a b => Tx.addChecked (a.eval env) (b.eval env)
   | .subChecked a b => Tx.subChecked (a.eval env) (b.eval env)
   | .mulChecked a b => Tx.mulChecked (a.eval env) (b.eval env)
@@ -447,6 +452,8 @@ def Op.denote (Γ : ContractSchema S X E ε) (env : List Nat) : Op → Tx S X E 
     Tx.callAsNat ret (t.eval env) sel (args.map (·.eval env))
   | .view t sel args ret =>
     Tx.viewAsNat ret (t.eval env) sel (args.map (·.eval env))
+  | .send t amt =>
+    Tx.boolBit <$> Tx.sendRaw (t.eval env) (amt.eval env)
   | .pure a => Pure.pure (a.eval env)
 
 def Stmt.denote (Γ : ContractSchema S X E ε) (env : List Nat) : Stmt → Tx S X E ε Unit
@@ -540,6 +547,8 @@ def Op.rename (ρ : Nat → Atom) : Op → Op
   | .pow10 d => .pow10 (d.rename ρ)
   | .call t sel args ret => .call (t.rename ρ) sel (args.map (·.rename ρ)) ret
   | .view t sel args ret => .view (t.rename ρ) sel (args.map (·.rename ρ)) ret
+  | .send t amt => .send (t.rename ρ) (amt.rename ρ)
+  | .selfBalance => .selfBalance
   | .pure a => .pure (a.rename ρ)
 
 def Stmt.rename (ρ : Nat → Atom) : Stmt → Stmt
@@ -714,6 +723,7 @@ def Op.effects : Op → Effects
   | .loadMap2 f _ _ => { reads := [f] }
   | .call _ sel _ _ => { calls := [sel] }
   | .view _ sel _ _ => { views := [sel] }
+  | .send _ _ => { calls := [0] }
   | _ => {}
 
 def Stmt.effects : Stmt → Effects
@@ -752,7 +762,7 @@ def Core.hasExtCall {t : RetTy} (c : Core t) : Bool :=
 
 /-- `Op.call` / `Op.view` (CALL / STATICCALL). -/
 def Op.isExtCall : Op → Bool
-  | .call .. | .view .. => true
+  | .call .. | .view .. | .send .. => true
   | _ => false
 
 /-- `Stmt.call` / `Stmt.view` (discarded CALL / STATICCALL). -/

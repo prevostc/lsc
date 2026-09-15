@@ -3,6 +3,7 @@ import Lsc.Compiler.Proof.CoreProof
 import Lsc.Security.Trace
 
 set_option linter.unusedSimpArgs false
+set_option linter.unusedSectionVars false
 
 /-!
 Call-free `Core.denote` depends on `self`/`ext` only, so `transport_trace`'s
@@ -33,6 +34,8 @@ theorem m1op_run_self_ext {Γ : ContractSchema S X E ε} {op : Lsc.Op}
   cases op with
   | call _ _ _ _ => exact (show False from h).elim
   | view _ _ _ _ => exact (show False from h).elim
+  | send _ _ => exact (show False from h).elim
+  | selfBalance => exact (show False from h).elim
   | load f =>
     simp [Lsc.Op.denote, Tx.run_load, exceptSelfExt, hs, he]
   | loadMap f k =>

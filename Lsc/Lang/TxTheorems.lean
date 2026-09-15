@@ -138,10 +138,39 @@ theorem require_iff {c d : Prop} [Decidable c] [Decidable d] (e : ε)
     run (sender (S := S) (X := X) (E := E) (ε := ε)) ctx w = .ok (ctx.sender, w) :=
   Proof.run_sender ctx w
 
-/-- `value` returns `ctx.value` and does not change the world. -/
+/-- `valueRaw` returns `ctx.value` and does not change the world. -/
 @[simp] theorem run_value (ctx : Ctx) (w : World S X E) :
-    run (value (S := S) (X := X) (E := E) (ε := ε)) ctx w = .ok (ctx.value, w) :=
+    run (valueRaw (S := S) (X := X) (E := E) (ε := ε)) ctx w = .ok (ctx.value, w) :=
   Proof.run_value ctx w
+
+/-- `selfBalanceRaw` returns the `HasSelfBalance` projection of `ext`. -/
+@[simp] theorem run_selfBalance [HasSelfBalance X] (ctx : Ctx) (w : World S X E) :
+    run (selfBalanceRaw (S := S) (X := X) (E := E) (ε := ε)) ctx w =
+      .ok (HasSelfBalance.get w.ext, w) :=
+  Proof.run_selfBalance ctx w
+
+/-- `sendRaw` is `oracle.send`: failure is `false` and leaves `w`. -/
+@[simp] theorem run_sendRaw (to amount : Nat) (ctx : Ctx) (w : World S X E) :
+    run (sendRaw (S := S) (E := E) (ε := ε) to amount) ctx w =
+      match w.oracle.send to amount w.ext with
+      | none => .ok (false, w)
+      | some x' => .ok (true, { w with ext := x' }) :=
+  Proof.run_sendRaw to amount ctx w
+
+/-- A successful `sendRaw` updates only `ext`. -/
+theorem sendRaw_self (to amount : Nat)
+    {ctx : Ctx} {w : World S X E} {v : Bool} {w' : World S X E}
+    (h : run (sendRaw (S := S) (E := E) (ε := ε) to amount) ctx w = .ok (v, w')) :
+    w'.self = w.self :=
+  Proof.sendRaw_self to amount h
+
+/-- `boolBit <$> sendRaw` is the Core denotation of `Op.send`. -/
+@[simp] theorem run_sendAsNat (to amount : Nat) (ctx : Ctx) (w : World S X E) :
+    run (boolBit <$> sendRaw (S := S) (E := E) (ε := ε) to amount) ctx w =
+      match w.oracle.send to amount w.ext with
+      | none => .ok (0, w)
+      | some x' => .ok (1, { w with ext := x' }) :=
+  Proof.run_sendAsNat to amount ctx w
 
 /-- `timestamp` returns `ctx.timestamp` and does not change the world. -/
 @[simp] theorem run_timestamp (ctx : Ctx) (w : World S X E) :

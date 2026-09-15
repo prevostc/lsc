@@ -143,7 +143,7 @@ def abiWords (bs : List UInt8) : List Nat :=
   else (List.range (n / 32)).map fun i => (wordFrom bs (32 * i)).toNat
 
 /-- CALL / STATICCALL request with packed `sel ‖ args` and the `extCallGas`
-stipend. -/
+stipend. ABI calls carry value `0`. -/
 def mkCallReq (kind : CallKind) (addr : Address) (sel : Nat) (args : List Nat) :
     CallRequest where
   kind := kind
@@ -151,6 +151,14 @@ def mkCallReq (kind : CallKind) (addr : Address) (sel : Nat) (args : List Nat) :
   target := BitVec.ofNat 256 addr
   value := 0
   input := selectorBytes sel ++ args.flatMap wordBytes
+
+/-- Value-carrying CALL, empty calldata (`Native.send`). -/
+def mkSendReq (addr : Address) (value : Nat) : CallRequest where
+  kind := .call
+  gas := BitVec.ofNat 256 extCallGas
+  target := BitVec.ofNat 256 addr
+  value := BitVec.ofNat 256 value
+  input := []
 
 /-- Install a successful CALL's `CallWorld` onto an `ExtState` (mirrors
 `CallWorld.install`, without memory). -/
@@ -227,5 +235,8 @@ def _root_.Lsc.Oracle.ofExt (o : ExtOracle) : Lsc.Oracle Lsc.ExtState where
   view addr sel args x :=
     let resp := callRaw o (mkCallReq .staticcall addr sel args) x
     if resp.success then abiWords resp.returndata else [0, 0]
+  send addr value x :=
+    let resp := callRaw o (mkSendReq addr value) x
+    if resp.success then some (ofCallSuccess x resp) else none
 
 end Lsc.Compiler

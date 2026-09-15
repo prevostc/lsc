@@ -108,6 +108,23 @@ theorem finishCall_logs_fail (kind st resp iOff iSz oOff oSz)
     (finishCall kind st resp iOff iSz oOff oSz).logs = st.logs := by
   simp [finishCall, h, touchMemory2, touchMemory]
 
+/-- A failed CALL/STATICCALL only touches memory / returndata / `msize`. -/
+theorem memOnly_finishCall_fail (kind : CallKind) (st : EvmState)
+    (resp : CallResponse) (iOff iSz oOff oSz : Nat)
+    (h : resp.success = false) :
+    MemOnly st (finishCall kind st resp iOff iSz oOff oSz) :=
+  ⟨finishCall_storage_fail_eq kind st resp iOff iSz oOff oSz h,
+    finishCall_logs_fail kind st resp iOff iSz oOff oSz h,
+    finishCall_caller kind st resp iOff iSz oOff oSz,
+    finishCall_callvalue kind st resp iOff iSz oOff oSz,
+    finishCall_timestamp kind st resp iOff iSz oOff oSz,
+    finishCall_number kind st resp iOff iSz oOff oSz,
+    finishCall_address kind st resp iOff iSz oOff oSz,
+    finishCall_static kind st resp iOff iSz oOff oSz,
+    finishCall_keccak kind st resp iOff iSz oOff oSz,
+    finishCall_calldata kind st resp iOff iSz oOff oSz,
+    finishCall_halted kind st resp iOff iSz oOff oSz⟩
+
 theorem finishCall_logs_success (kind st resp iOff iSz oOff oSz)
     (hs : resp.success = true) (hk : kind ≠ .staticcall) :
     (finishCall kind st resp iOff iSz oOff oSz).logs = st.logs ++ resp.world.logs := by

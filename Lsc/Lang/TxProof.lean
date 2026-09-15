@@ -1,4 +1,5 @@
 import Lsc.Lang.Tx
+import Lsc.Lang.Interface
 
 /-!
 Proofs of the `Tx.run` peeling lemmas, monad laws, and `Lang.worldAfter`
@@ -111,8 +112,28 @@ theorem run_sender (ctx : Ctx) (w : World S X E) :
   rfl
 
 theorem run_value (ctx : Ctx) (w : World S X E) :
-    run (value (S := S) (X := X) (E := E) (ε := ε)) ctx w = .ok (ctx.value, w) :=
+    run (valueRaw (S := S) (X := X) (E := E) (ε := ε)) ctx w = .ok (ctx.value, w) :=
   rfl
+
+theorem run_selfBalance [HasSelfBalance X] (ctx : Ctx) (w : World S X E) :
+    run (selfBalanceRaw (S := S) (X := X) (E := E) (ε := ε)) ctx w =
+      .ok (HasSelfBalance.get w.ext, w) :=
+  rfl
+
+theorem run_sendRaw (to amount : Nat) (ctx : Ctx) (w : World S X E) :
+    run (sendRaw (S := S) (E := E) (ε := ε) to amount) ctx w =
+      match w.oracle.send to amount w.ext with
+      | none => .ok (false, w)
+      | some x' => .ok (true, { w with ext := x' }) :=
+  rfl
+
+/-- A successful `sendRaw` updates only `ext`. -/
+theorem sendRaw_self (to amount : Nat)
+    {ctx : Ctx} {w : World S X E} {v : Bool} {w' : World S X E}
+    (h : run (sendRaw (S := S) (E := E) (ε := ε) to amount) ctx w = .ok (v, w')) :
+    w'.self = w.self := by
+  rw [run_sendRaw] at h
+  split at h <;> cases h <;> rfl
 
 theorem run_timestamp (ctx : Ctx) (w : World S X E) :
     run (timestamp (S := S) (X := X) (E := E) (ε := ε)) ctx w =
@@ -167,6 +188,15 @@ theorem map_apply {β : Type} (f : α → β) (x : Tx S X E ε α) (ctx : Ctx) (
       | .ok (a, w') => .ok (f a, w')
       | .error e => .error e :=
   run_map f x ctx w
+
+/-- `boolBit <$> sendRaw` is the Core denotation of `Op.send`. -/
+theorem run_sendAsNat (to amount : Nat) (ctx : Ctx) (w : World S X E) :
+    run (boolBit <$> sendRaw (S := S) (E := E) (ε := ε) to amount) ctx w =
+      match w.oracle.send to amount w.ext with
+      | none => .ok (0, w)
+      | some x' => .ok (1, { w with ext := x' }) := by
+  rw [run_map, run_sendRaw]
+  cases w.oracle.send to amount w.ext <;> rfl
 
 theorem run_ite (c : Prop) [Decidable c] (x y : Tx S X E ε α) (ctx : Ctx)
     (w : World S X E) :

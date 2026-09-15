@@ -30,7 +30,8 @@ contract that *is* the interface (Token) still has `C.impl` over `World`.
 Fn fields of `I.Impl` are `Option` (no error parameter): a successful
 `Tx.run` is that `some` via `Tx.run_ok_toOption`.
 
-TODO: payable methods are not modelled yet.
+Payable entrypoints use `[Payable]` and typed `Tx.value` (`Chain.lean`).
+`Native.send` is a value-carrying CALL with empty calldata.
 -/
 
 namespace Lsc

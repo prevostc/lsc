@@ -39,6 +39,7 @@ def mkEvmState (calldata : List UInt8) (storage : U256 → U256)
         timestamp := BitVec.ofNat 256 ctx.timestamp
         number := BitVec.ofNat 256 ctx.blockNumber
         keccakOf := keccak
+        selfBalance := BitVec.ofNat 256 ctx.value
         storageOf := fun addr slot =>
           if accountKey addr = accountKey self then storage slot else 0 } }
 

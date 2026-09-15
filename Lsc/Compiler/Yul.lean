@@ -8,6 +8,7 @@ import Lsc.Compiler.YulTheorems
 `Stmt.call` / `Op.view` / `Stmt.view` are emitted as a scoped Yul block: ABI
 pack at `0x80` (`mstore(0x80, shl(224, sel))`, args at `0x84+`), then
 `call(extCallGas, target, 0, …)` or `staticcall(extCallGas, target, …)`,
+or `call(extCallGas, target, value, 0, 0, 0, 0)` for `Op.send`,
 `if iszero(ok) { revert(0,0) }`, then `AbiRet` decode. Temporaries `_ok_*`
 live inside the block so `restore` drops them; the Core result variable is
 declared outside and assigned inside. `toYulFn` does **not** return `none` on

@@ -436,6 +436,39 @@ theorem noGas_emitExtCall tag (e : Emit) (depth : Nat) (target : Atom) (sel : Na
     exact noGas_emitBlock _ _ hl
       (noGas_emitExtCallBody tag depth target sel args ret isView (some name))
 
+theorem noGas_emitExtSendOp (target value : YExpr)
+    (ht : noGasExpr target = true) (hv : noGasExpr value = true) :
+    noGasExpr (emitExtSendOp target value) = true := by
+  simp [emitExtSendOp, emitCallGas, bop, noGasExpr, noGasOp, noGasExprs, lit, ht, hv]
+
+theorem noGas_emitExtSendBody tag (depth : Nat) (target amount : Atom)
+    (assign : Option YIdent) :
+    noGasStmts (emitExtSendBody tag depth target amount assign) = true := by
+  have h0 : noGasStmts ({} : Emit).stmts = true := noGas_nilEmit
+  have hcall := noGas_emitLet ({} : Emit) (extOk tag depth)
+    (emitExtSendOp (atomE tag depth target) (atomE tag depth amount)) h0
+    (noGas_emitExtSendOp _ _ (noGas_atom tag depth target) (noGas_atom tag depth amount))
+  cases assign with
+  | none =>
+    convert hcall using 1
+    simp [emitExtSendBody]
+  | some name =>
+    convert (noGas_emitAssign _ name (var (extOk tag depth)) hcall
+      (by simp [noGasExpr, var])) using 1
+    simp [emitExtSendBody]
+
+theorem noGas_emitExtSend tag (e : Emit) (depth : Nat) (target amount : Atom)
+    (bind : Option YIdent) (he : noGasStmts e.stmts = true) :
+    noGasStmts (emitExtSend tag e depth target amount bind).stmts = true := by
+  cases bind with
+  | none =>
+    simp [emitExtSend, emitBlock]
+    exact noGas_emitBlock e _ he (noGas_emitExtSendBody tag depth target amount none)
+  | some name =>
+    simp [emitExtSend, emitBlock]
+    have hl := noGas_emitLet e name (lit 0) he (by simp [noGasExpr, lit])
+    exact noGas_emitBlock _ _ hl (noGas_emitExtSendBody tag depth target amount (some name))
+
 theorem noGas_emitLetOp tag (c : ContractDef) (e : Emit) (d : Nat) (op : Lsc.Op)
     (he : noGasStmts e.stmts = true) {e'}
     (h : emitLetOp tag c e d op = some e') :
@@ -456,7 +489,7 @@ theorem noGas_emitLetOp tag (c : ContractDef) (e : Emit) (d : Nat) (op : Lsc.Op)
       (noGas_atom tag d k₁) (noGas_atom tag d k₂)
     exact noGas_emitLet _ _ (bop Op.sload [keccak064]) hp
       (by simp [bop, noGasExpr, noGasOp, noGasExprs, noGas_keccak064])
-  | sender | value | timestamp | blockNumber | selfAddress =>
+  | sender | value | timestamp | blockNumber | selfAddress | selfBalance =>
     simp only [emitLetOp, Option.some.injEq] at h; subst e'
     exact noGas_emitLet e _ _ he (by simp [bop, noGasExpr, noGasOp, noGasExprs])
   | addChecked a b =>
@@ -495,6 +528,9 @@ theorem noGas_emitLetOp tag (c : ContractDef) (e : Emit) (d : Nat) (op : Lsc.Op)
   | view t sel args ret =>
     simp only [emitLetOp, Option.some.injEq] at h; subst e'
     exact noGas_emitExtCall tag e d t sel args ret true (some (identV tag d)) he
+  | send t amt =>
+    simp only [emitLetOp, Option.some.injEq] at h; subst e'
+    exact noGas_emitExtSend tag e d t amt (some (identV tag d)) he
 
 theorem noGas_emitStmt tag (c : ContractDef) (e : Emit) (d : Nat) (s : Lsc.Stmt)
     (he : noGasStmts e.stmts = true) :

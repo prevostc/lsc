@@ -506,10 +506,28 @@ theorem core_sim_ext {S E ε}
             (fun h => by simpa [Core.denote, RetTy.denote] using h)
             (fun h => by simpa [Core.denote, RetTy.denote] using h)
             funs hfuns hwfCall hsel hn1 hinv hAgr hOr hNR hE hexec
-      | inr hM1 =>
-        exact core_sim_ext_callFree tag hhalt hΓ hκ hlen (.opTail op)
-          (by simpa [CallFree, M1Frag] using hM1)
-          w env V st funs hfuns hwf hn hinv hAgr hOr hNR hem hexec
+      | inr hrest2 =>
+        cases hrest2 with
+        | inl hsend =>
+          obtain ⟨target, amount, rfl⟩ := hsend
+          simp only [emitCore] at hem
+          cases hE : emitLetOp tag c {} env.length (.send target amount) with
+          | none => simp [hE] at hem
+          | some e1 =>
+            simp only [hE] at hem
+            cases hem
+            have hretE := emitRet_word_stmts_if tag e1 (env.length + 1) haltUnit (.var 0) clearLock
+            rw [hretE] at hexec
+            have hn1 : identsNodup tag (env.length + 1) = true :=
+              identsNodup_mono tag (by simp [coreExtraDepth]) hn
+            exact sim_ext_op_send_return tag
+              (core := .opTail (.send target amount)) id haltSuccess_word
+              (fun h => by simpa [Core.denote, RetTy.denote] using h)
+              funs hfuns hn1 hinv hAgr hOr hNR hE hexec
+        | inr hM1 =>
+          exact core_sim_ext_callFree tag hhalt hΓ hκ hlen (.opTail op)
+            (by simpa [CallFree, M1Frag] using hM1)
+            w env V st funs hfuns hwf hn hinv hAgr hOr hNR hem hexec
   | opTailAddr op =>
     intro hS2 w env V st funs hfuns hwf hn hinv hAgr hOr hNR clearLock e' hem V' st' out hexec
     cases s2op_elim (by simpa [S2Frag] using hS2) with
@@ -559,10 +577,29 @@ theorem core_sim_ext {S E ε}
             (fun h => by simpa [Core.denote, RetTy.denote, Address] using h)
             (fun h => by simpa [Core.denote, RetTy.denote, Address] using h)
             funs hfuns hwfCall hsel hn1 hinv hAgr hOr hNR hE hexec
-      | inr hM1 =>
-        exact core_sim_ext_callFree tag hhalt hΓ hκ hlen (.opTailAddr op)
-          (by simpa [CallFree, M1Frag] using hM1)
-          w env V st funs hfuns hwf hn hinv hAgr hOr hNR hem hexec
+      | inr hrest2 =>
+        cases hrest2 with
+        | inl hsend =>
+          obtain ⟨target, amount, rfl⟩ := hsend
+          simp only [emitCore] at hem
+          cases hE : emitLetOp tag c {} env.length (.send target amount) with
+          | none => simp [hE] at hem
+          | some e1 =>
+            simp only [hE] at hem
+            cases hem
+            have hretE := emitRet_addr_stmts_if tag e1 (env.length + 1) haltUnit (.var 0) clearLock
+            rw [hretE] at hexec
+            have hn1 : identsNodup tag (env.length + 1) = true :=
+              identsNodup_mono tag (by simp [coreExtraDepth]) hn
+            exact sim_ext_op_send_return tag
+              (core := .opTailAddr (.send target amount))
+              (fun n => (n : Address)) haltSuccess_addr
+              (fun h => by simpa [Core.denote, RetTy.denote, Address] using h)
+              funs hfuns hn1 hinv hAgr hOr hNR hE hexec
+        | inr hM1 =>
+          exact core_sim_ext_callFree tag hhalt hΓ hκ hlen (.opTailAddr op)
+            (by simpa [CallFree, M1Frag] using hM1)
+            w env V st funs hfuns hwf hn hinv hAgr hOr hNR hem hexec
   | opTailFlag op =>
     intro hS2 w env V st funs hfuns hwf hn hinv hAgr hOr hNR clearLock e' hem V' st' out hexec
     cases s2op_elim (by simpa [S2Frag] using hS2) with
@@ -612,10 +649,29 @@ theorem core_sim_ext {S E ε}
             (fun h => by simpa [Core.denote, RetTy.denote, Flag] using h)
             (fun h => by simpa [Core.denote, RetTy.denote, Flag] using h)
             funs hfuns hwfCall hsel hn1 hinv hAgr hOr hNR hE hexec
-      | inr hM1 =>
-        exact core_sim_ext_callFree tag hhalt hΓ hκ hlen (.opTailFlag op)
-          (by simpa [CallFree, M1Frag] using hM1)
-          w env V st funs hfuns hwf hn hinv hAgr hOr hNR hem hexec
+      | inr hrest2 =>
+        cases hrest2 with
+        | inl hsend =>
+          obtain ⟨target, amount, rfl⟩ := hsend
+          simp only [emitCore] at hem
+          cases hE : emitLetOp tag c {} env.length (.send target amount) with
+          | none => simp [hE] at hem
+          | some e1 =>
+            simp only [hE] at hem
+            cases hem
+            have hretE := emitRet_flag_stmts_if tag e1 (env.length + 1) haltUnit (.var 0) clearLock
+            rw [hretE] at hexec
+            have hn1 : identsNodup tag (env.length + 1) = true :=
+              identsNodup_mono tag (by simp [coreExtraDepth]) hn
+            exact sim_ext_op_send_return tag
+              (core := .opTailFlag (.send target amount))
+              (fun n => (n : Flag)) haltSuccess_flag
+              (fun h => by simpa [Core.denote, RetTy.denote, Flag] using h)
+              funs hfuns hn1 hinv hAgr hOr hNR hE hexec
+        | inr hM1 =>
+          exact core_sim_ext_callFree tag hhalt hΓ hκ hlen (.opTailFlag op)
+            (by simpa [CallFree, M1Frag] using hM1)
+            w env V st funs hfuns hwf hn hinv hAgr hOr hNR hem hexec
   | stmtTail s =>
     intro hS2
     cases s2stmt_elim (by simpa [S2Frag] using hS2) with
@@ -648,17 +704,23 @@ theorem core_sim_ext {S E ε}
         exact sim_ext_letOp_view (target := target) (sel := sel)
           (args := args) (ret := ret) tag
           (ih hk : SimExt tag c Γ κ o ctx haltUnit k)
-      | inr hM1 =>
-        intro w env V st funs hfuns hwf hn hinv hAgr hOr hNR clearLock e' hem V' st' out hexec
-        have ⟨hopWF0, hkWF⟩ := coreWF_letOp.mp hwf
-        obtain ⟨e1, e0, hE, h0, hst⟩ := emitCore_letOp_split tag hem
-        rw [hst] at hexec
-        have hn1 : identsNodup tag (env.length + 1) = true :=
-          identsNodup_mono tag (by simp [coreExtraDepth]; try omega) hn
-        have hnK : identsNodup tag ((env.length + 1) + coreExtraDepth k) = true := by
-          simpa [coreExtraDepth, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using hn
-        exact sim_ext_letOp_m1 tag hΓ hκ hlen hM1 (ih hk)
-          funs hfuns hopWF0 hkWF hn1 hnK hinv hAgr hOr hNR hE h0 hexec
+      | inr hrest2 =>
+        cases hrest2 with
+        | inl hsend =>
+          obtain ⟨target, amount, rfl⟩ := hsend
+          exact sim_ext_letOp_send (target := target) (amount := amount) tag
+            (ih hk : SimExt tag c Γ κ o ctx haltUnit k)
+        | inr hM1 =>
+          intro w env V st funs hfuns hwf hn hinv hAgr hOr hNR clearLock e' hem V' st' out hexec
+          have ⟨hopWF0, hkWF⟩ := coreWF_letOp.mp hwf
+          obtain ⟨e1, e0, hE, h0, hst⟩ := emitCore_letOp_split tag hem
+          rw [hst] at hexec
+          have hn1 : identsNodup tag (env.length + 1) = true :=
+            identsNodup_mono tag (by simp [coreExtraDepth]; try omega) hn
+          have hnK : identsNodup tag ((env.length + 1) + coreExtraDepth k) = true := by
+            simpa [coreExtraDepth, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using hn
+          exact sim_ext_letOp_m1 tag hΓ hκ hlen hM1 (ih hk)
+            funs hfuns hopWF0 hkWF hn1 hnK hinv hAgr hOr hNR hE h0 hexec
   | seq s k ih =>
     intro hS2
     have ⟨hs, hk⟩ := s2frag_seq.mp hS2

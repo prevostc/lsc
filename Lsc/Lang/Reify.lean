@@ -4,6 +4,7 @@ import Lsc.Lang.Contract
 import Lsc.Lang.ExtState
 import Lsc.Lang.Inline
 import Lsc.Lang.Capability
+import Lsc.Lang.Chain
 import Lsc.Lang.Spec
 import Lsc.Lang.TxTheorems
 
@@ -914,12 +915,14 @@ def isDeltaStop : Name → Bool
   | ``Lsc.Tx.HMulChecked.hMul | ``Lsc.Tx.HDivChecked.hDiv
   | ``Lsc.Tx.HMulDivDown.hMulDivDown | ``Lsc.Tx.HMulDivUp.hMulDivUp
   | ``Lsc.Tx.call | ``Lsc.Tx.view | ``Lsc.Tx.callAsNat | ``Lsc.Tx.viewAsNat
-  | ``Lsc.Tx.tryCall | ``Lsc.Tx.tryView
+  | ``Lsc.Tx.tryCall | ``Lsc.Tx.tryView | ``Lsc.Tx.sendRaw
+  | ``Lsc.Native.try.send
   | ``Lsc.Tx.load | ``Lsc.Tx.loadMap | ``Lsc.Tx.loadMap2
   | ``Lsc.Tx.store | ``Lsc.Tx.storeMap | ``Lsc.Tx.storeMap2
   | ``Lsc.Tx.require | ``Lsc.Tx.emit | ``Lsc.Tx.revert
-  | ``Lsc.Tx.sender | ``Lsc.Tx.value | ``Lsc.Tx.timestamp | ``Lsc.Tx.blockNumber
-  | ``Lsc.Tx.selfAddress
+  | ``Lsc.Tx.sender | ``Lsc.Tx.value | ``Lsc.Tx.valueRaw | ``Lsc.Tx.timestamp
+  | ``Lsc.Tx.blockNumber | ``Lsc.Tx.selfAddress | ``Lsc.Tx.selfBalance
+  | ``Lsc.Tx.selfBalanceRaw
   | ``Bind.bind | ``Pure.pure | ``CoeTail.coe | ``ite
   | ``Lsc.Amount.add | ``Lsc.Amount.sub
   | ``Lsc.Amount.mulScalar | ``Lsc.Amount.divScalar
@@ -1151,10 +1154,19 @@ def opOf (ci : ContractInfo) (env : Env t) (x : Expr) : MetaM (Option Op) := do
     unless f.kind == .map2 do throwError "reify: `read {f.name}[k₁, k₂]` has the wrong number of keys"
     return some (.loadMap2 f.idx (← atom args[8]!) (← atom args[9]!))
   | some ``Lsc.Tx.sender, 4 => return some .sender
-  | some ``Lsc.Tx.value, 4 => return some .value
+  | some ``Lsc.Tx.value, _ => return some .value
+  | some ``Lsc.Tx.valueRaw, 4 => return some .value
   | some ``Lsc.Tx.timestamp, 4 => return some .timestamp
   | some ``Lsc.Tx.blockNumber, 4 => return some .blockNumber
   | some ``Lsc.Tx.selfAddress, 4 => return some .selfAddress
+  | some ``Lsc.Tx.selfBalance, _ => return some .selfBalance
+  | some ``Lsc.Tx.selfBalanceRaw, _ => return some .selfBalance
+  | some ``Lsc.Tx.sendRaw, n =>
+    if n < 2 then return none
+    return some (.send (← atom args[n - 2]!) (← atom args[n - 1]!))
+  | some ``Lsc.Native.try.send, n =>
+    if n < 2 then return none
+    return some (.send (← atom args[n - 2]!) (← atom args[n - 1]!))
   | some ``Lsc.Tx.addChecked, 6 => return some (.addChecked (← atom args[4]!) (← atom args[5]!))
   | some ``Lsc.Tx.subChecked, 6 => return some (.subChecked (← atom args[4]!) (← atom args[5]!))
   | some ``Lsc.Tx.mulChecked, 6 => return some (.mulChecked (← atom args[4]!) (← atom args[5]!))

@@ -253,13 +253,14 @@ def opWF (c : ContractDef) : Lsc.Op → Bool
   | .load f => fieldKindOK c f .scalar
   | .loadMap f k => fieldKindOK c f .map1 && atomWF k
   | .loadMap2 f k₁ k₂ => fieldKindOK c f .map2 && atomWF k₁ && atomWF k₂
-  | .sender | .value | .timestamp | .blockNumber | .selfAddress => true
+  | .sender | .value | .timestamp | .blockNumber | .selfAddress | .selfBalance => true
   | .addChecked a b | .subChecked a b | .mulChecked a b | .divChecked a b =>
       atomWF a && atomWF b
   | .mulDivDown a b d | .mulDivUp a b d => atomWF a && atomWF b && atomWF d
   | .pow10 d => atomWF d
   | .call t sel args _ => callWF t args && decide (sel < 2 ^ 32)
   | .view t sel args _ => callWF t args && decide (sel < 2 ^ 32)
+  | .send t amt => atomWF t && atomWF amt
   | .pure a => atomWF a
 
 def stmtWF (c : ContractDef) : Lsc.Stmt → Bool
@@ -620,6 +621,28 @@ def emitExtCall (tag : String) (e : Emit) (depth : Nat) (target : Atom) (sel : N
     emitBlock (emitLet e name (lit 0))
       (emitExtCallBody tag depth target sel args ret isView (some name))
 
+/-- `call(extCallGas, to, value, 0, 0, 0, 0)` — empty calldata, keep the
+success bit. No `revert(0,0)`: `Tx.sendRaw` returns `Bool`. -/
+def emitExtSendOp (target : YExpr) (value : YExpr) : YExpr :=
+  bop YulSemantics.EVM.Op.call
+    [emitCallGas, target, value, lit 0, lit 0, lit 0, lit 0]
+
+def emitExtSendBody (tag : String) (depth : Nat) (target : Atom) (amount : Atom)
+    (assignResult : Option YIdent) : YBlock :=
+  let ok := extOk tag depth
+  let e := emitLet {} ok (emitExtSendOp (atomE tag depth target) (atomE tag depth amount))
+  match assignResult with
+  | none => e.stmts
+  | some name => (emitAssign e name (var ok)).stmts
+
+def emitExtSend (tag : String) (e : Emit) (depth : Nat) (target : Atom)
+    (amount : Atom) (bindResult : Option YIdent) : Emit :=
+  match bindResult with
+  | none => emitBlock e (emitExtSendBody tag depth target amount none)
+  | some name =>
+    emitBlock (emitLet e name (lit 0))
+      (emitExtSendBody tag depth target amount (some name))
+
 def emitLetOp (tag : String) (_c : ContractDef) (e : Emit) (depth : Nat) : Lsc.Op → Option Emit
   | .load f => some (emitLet e (identV tag depth) (bop YulSemantics.EVM.Op.sload [lit f]))
   | .loadMap f k =>
@@ -633,6 +656,7 @@ def emitLetOp (tag : String) (_c : ContractDef) (e : Emit) (depth : Nat) : Lsc.O
   | .timestamp => some (emitLet e (identV tag depth) (bop YulSemantics.EVM.Op.timestamp []))
   | .blockNumber => some (emitLet e (identV tag depth) (bop YulSemantics.EVM.Op.number []))
   | .selfAddress => some (emitLet e (identV tag depth) (bop YulSemantics.EVM.Op.address []))
+  | .selfBalance => some (emitLet e (identV tag depth) (bop YulSemantics.EVM.Op.selfbalance []))
   | .addChecked a b =>
       some (emitAddChecked e (identV tag depth) (atomE tag depth a) (atomE tag depth b))
   | .subChecked a b =>
@@ -652,6 +676,8 @@ def emitLetOp (tag : String) (_c : ContractDef) (e : Emit) (depth : Nat) : Lsc.O
       some (emitExtCall tag e depth t sel args ret false (some (identV tag depth)))
   | .view t sel args ret =>
       some (emitExtCall tag e depth t sel args ret true (some (identV tag depth)))
+  | .send t amt =>
+      some (emitExtSend tag e depth t amt (some (identV tag depth)))
 
 def emitPrim (tag : String) (depth : Nat) (p : Prim) (args : List Atom) : YExpr :=
   match p, args with

@@ -104,6 +104,11 @@ theorem stmtWF_view {c t sel args ret}
     callWF t args = true ∧ sel < 2 ^ 32 :=
   Proof.stmtWF_view h
 
+/-- A well-formed `Op.send` has well-formed target and amount atoms. -/
+theorem opWF_send {c t amt} (h : opWF c (.send t amt) = true) :
+    atomWF t = true ∧ atomWF amt = true :=
+  Proof.opWF_send h
+
 /-- Up to four ABI words after `abiPtr` fit under `memoryGuardK`. -/
 theorem abiWords_le {n : Nat} (h : n ≤ 4) : abiPtr + 32 * n ≤ memoryGuardK :=
   Proof.abiWords_le h

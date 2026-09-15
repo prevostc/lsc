@@ -13,7 +13,7 @@ namespace Lsc
 
 /-- This entrypoint may receive native value. The dispatcher skips the
 `callvalue()` revert. No user instances. `Tx.value` arrives with the
-native-asset chain profile (slice 18). -/
+native-asset chain profile (`Chain.native`). -/
 class Payable : Prop
 
 /-- This entrypoint does not acquire or release the transient reentrancy

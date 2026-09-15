@@ -25,9 +25,13 @@ theorem Op.effects_frame {Γ : ContractSchema S X E ε} (op : Op) (env : List Na
     exact congrArg World.self
       (Tx.viewAsNat_world (S := S) (X := X) (E := E) ret
         (Atom.eval env t) sel (args.map (Atom.eval env)) h)
-  | load _ | loadMap _ _ | loadMap2 _ _ _ | value | timestamp | blockNumber | pure _ =>
+  | load _ | loadMap _ _ | loadMap2 _ _ _ | value | timestamp | blockNumber | selfBalance | pure _ =>
     simp [Op.denote] at h
     rw [h.2]
+  | send t amt =>
+    rw [Op.denote] at h
+    rw [Tx.run_sendAsNat (t.eval env) (amt.eval env)] at h
+    split at h <;> cases h <;> rfl
   | sender =>
     have hs : Tx.run (Op.denote Γ env .sender) ctx w = .ok ((ctx.sender : Nat), w) := rfl
     rw [hs] at h

@@ -82,6 +82,17 @@ theorem emitExtCall_stmts (e : Emit) (depth : Nat) (target : Atom) (sel : Nat)
            .block (emitExtCallBody tag depth target sel args ret isView (some name))] := by
   cases bind <;> simp [emitExtCall, emitBlock, emitLet, Emit.stmts_push]
 
+theorem emitExtSend_stmts (e : Emit) (depth : Nat) (target amount : Atom)
+    (bind : Option YIdent) :
+    (emitExtSend tag e depth target amount bind).stmts =
+      e.stmts ++
+        match bind with
+        | none => [.block (emitExtSendBody tag depth target amount none)]
+        | some name =>
+          [.letDecl [name] (some (lit 0)),
+           .block (emitExtSendBody tag depth target amount (some name))] := by
+  cases bind <;> simp [emitExtSend, emitBlock, emitLet, Emit.stmts_push]
+
 theorem emitReturnUnit_acc (e : Emit) (halt : Bool) :
     emitReturnUnit e halt = { acc := (emitReturnUnit {} halt).acc ++ e.acc } := by
   cases halt <;> rfl
@@ -248,6 +259,16 @@ theorem emitExtCall_acc tag (e : Emit) (depth : Nat) (target : Atom) (sel : Nat)
   | some name =>
     simp [emitExtCall, emitLet, emitBlock, Emit.push]
 
+theorem emitExtSend_acc tag (e : Emit) (depth : Nat) (target amount : Atom)
+    (bindResult : Option YIdent) :
+    emitExtSend tag e depth target amount bindResult =
+      { acc := (emitExtSend tag {} depth target amount bindResult).acc ++ e.acc } := by
+  cases bindResult with
+  | none =>
+    simp [emitExtSend, emitBlock, Emit.push]
+  | some name =>
+    simp [emitExtSend, emitLet, emitBlock, Emit.push]
+
 theorem emitLetOp_acc (c : ContractDef) (e : Emit) (d : Nat) (op : Lsc.Op) :
     emitLetOp tag c e d op =
       (emitLetOp tag c {} d op).map fun e0 => { acc := e0.acc ++ e.acc } := by
@@ -261,7 +282,7 @@ theorem emitLetOp_acc (c : ContractDef) (e : Emit) (d : Nat) (op : Lsc.Op) :
   | loadMap2 f k₁ k₂ =>
     simp only [emitLetOp, Option.map_some]
     rw [emitMap2SlotPrep_acc, emitLet_cat]
-  | sender | value | timestamp | blockNumber | selfAddress | pure _ =>
+  | sender | value | timestamp | blockNumber | selfAddress | selfBalance | pure _ =>
     simp only [emitLetOp, Option.map_some]; exact congrArg some (emitLet_acc _ _ _)
   | addChecked _ _ =>
     simp only [emitLetOp, Option.map_some]; exact congrArg some (emitAddChecked_acc _ _ _ _)
@@ -283,6 +304,9 @@ theorem emitLetOp_acc (c : ContractDef) (e : Emit) (d : Nat) (op : Lsc.Op) :
   | view t sel args ret =>
     simp only [emitLetOp, Option.map_some]
     exact congrArg some (emitExtCall_acc tag e _ t sel args ret true _)
+  | send t amt =>
+    simp only [emitLetOp, Option.map_some]
+    exact congrArg some (emitExtSend_acc tag e _ t amt _)
 
 theorem emitLetOp_some tag (c : ContractDef) (e : Emit) (d : Nat) (op : Lsc.Op) :
     ∃ e', emitLetOp tag c e d op = some e' := by
@@ -947,10 +971,21 @@ theorem noFun_extCall tag (e : Emit) (depth : Nat) (target : Atom) (sel : Nat)
     simp only [emitExtCall]
     exact noFun_block (noFun_let he)
 
+theorem noFun_extSend tag (e : Emit) (depth : Nat) (target amount : Atom)
+    (bindResult : Option YIdent) (he : e.noFun) :
+    (emitExtSend tag e depth target amount bindResult).noFun := by
+  cases bindResult with
+  | none =>
+    simp only [emitExtSend]
+    exact noFun_block he
+  | some name =>
+    simp only [emitExtSend]
+    exact noFun_block (noFun_let he)
+
 theorem noFun_letOp (c : ContractDef) (e : Emit) (d : Nat) (op : Lsc.Op) (he : e.noFun)
     {e1} (h1 : emitLetOp tag c e d op = some e1) : e1.noFun := by
   cases op with
-  | load _ | sender | value | timestamp | blockNumber | selfAddress | pure _ =>
+  | load _ | sender | value | timestamp | blockNumber | selfAddress | selfBalance | pure _ =>
     simp [emitLetOp] at h1; cases h1; exact noFun_let he
   | loadMap _ _ =>
     simp [emitLetOp] at h1; cases h1; exact noFun_let (noFun_mapSlotPrep _ _ _ he)
@@ -969,6 +1004,9 @@ theorem noFun_letOp (c : ContractDef) (e : Emit) (d : Nat) (op : Lsc.Op) (he : e
   | view t sel args ret =>
     simp [emitLetOp] at h1; cases h1
     exact noFun_extCall tag e _ t sel args ret true _ he
+  | send t amt =>
+    simp [emitLetOp] at h1; cases h1
+    exact noFun_extSend tag e _ t amt _ he
 
 theorem noFun_stmt tag (c : ContractDef) (e : Emit) (d : Nat) (s : Lsc.Stmt) (he : e.noFun) :
     (emitStmt tag c e d s).noFun := by

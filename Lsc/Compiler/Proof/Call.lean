@@ -227,6 +227,154 @@ theorem eval_call_inv {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
   | builtinArgsHalt hargs =>
     exact (eval_call_args_ne_halt ht hargs).elim
 
+theorem eval_send_args_inv {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
+    {V : VEnv (yulD calls)} {st st' : EvmState}
+    {targetE valueE : YExpr} {target value : U256} {gas : Nat} {vs : List U256}
+    (ht : ∀ {st0 r}, EvalExpr (yulD calls) funs V st0 targetE r →
+      r = .vals [target] st0)
+    (hv : ∀ {st0 r}, EvalExpr (yulD calls) funs V st0 valueE r →
+      r = .vals [value] st0)
+    (h : EvalArgs (yulD calls) funs V st
+      [lit gas, targetE, valueE, lit 0, lit 0, lit 0, lit 0]
+      (.vals vs st')) :
+    vs = [BitVec.ofNat 256 gas, target, value, 0, 0, 0, 0] ∧
+    st' = st := by
+  obtain ⟨vs1, ⟨e1, h1⟩⟩ := evalArgs_cons_lit_inv h
+  subst e1
+  obtain ⟨vT, vs2, stT, e2, h2, htgt⟩ := evalArgs_cons_vals_inv h1
+  subst e2
+  injection (ht htgt) with hlist hstT
+  injection hlist with hvT
+  subst hvT; subst hstT
+  obtain ⟨vV, vs3, stV, e3, h3, hval⟩ := evalArgs_cons_vals_inv h2
+  subst e3
+  injection (hv hval) with hlist2 hstV
+  injection hlist2 with hvV
+  subst hvV; subst hstV
+  obtain ⟨vs4, ⟨e4, h4⟩⟩ := evalArgs_cons_lit_inv h3
+  subst e4
+  obtain ⟨vs5, ⟨e5, h5⟩⟩ := evalArgs_cons_lit_inv h4
+  subst e5
+  obtain ⟨vs6, ⟨e6, h6⟩⟩ := evalArgs_cons_lit_inv h5
+  subst e6
+  obtain ⟨vs7, ⟨e7, h7⟩⟩ := evalArgs_cons_lit_inv h6
+  subst e7
+  obtain ⟨hnil, hst⟩ := evalArgs_nil_inv h7
+  subst hnil; subst hst
+  exact ⟨rfl, rfl⟩
+
+theorem eval_send_args_ne_halt {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
+    {V : VEnv (yulD calls)} {st st' : EvmState}
+    {targetE valueE : YExpr} {target value : U256} {gas : Nat}
+    (ht : ∀ {st0 r}, EvalExpr (yulD calls) funs V st0 targetE r →
+      r = .vals [target] st0)
+    (hv : ∀ {st0 r}, EvalExpr (yulD calls) funs V st0 valueE r →
+      r = .vals [value] st0)
+    (h : EvalArgs (yulD calls) funs V st
+      [lit gas, targetE, valueE, lit 0, lit 0, lit 0, lit 0]
+      (.halt st')) : False := by
+  refine evalArgs_unique_ne_halt ?_ h
+  intro e he st0 r hr
+  simp at he
+  rcases he with rfl | rfl | rfl | rfl
+  · exact ⟨_, eval_lit_unique hr⟩
+  · exact ⟨_, ht hr⟩
+  · exact ⟨_, hv hr⟩
+  · exact ⟨_, eval_lit_unique hr⟩
+
+theorem eval_send_inv {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
+    {V : VEnv (yulD calls)} {st : EvmState}
+    {targetE valueE : YExpr} {target value : U256} {gas : Nat} {r}
+    (ht : ∀ {st0 r}, EvalExpr (yulD calls) funs V st0 targetE r →
+      r = .vals [target] st0)
+    (hv : ∀ {st0 r}, EvalExpr (yulD calls) funs V st0 valueE r →
+      r = .vals [value] st0)
+    (hstatic : st.env.static = false)
+    (h : EvalExpr (yulD calls) funs V st
+      (bop YulSemantics.EVM.Op.call
+        [lit gas, targetE, valueE, lit 0, lit 0, lit 0, lit 0]) r) :
+    ∃ resp : CallResponse,
+      r = .vals [resp.flag]
+        (finishCall .call st resp 0 0 0 0) ∧
+      calls.Call
+        { kind := .call
+          gas := BitVec.ofNat 256 gas
+          target := target
+          value := value
+          input := readBytes st.memory 0 0 }
+        st resp := by
+  cases h with
+  | builtinOk hargs hbu =>
+    obtain ⟨hvs, hst⟩ := eval_send_args_inv ht hv hargs
+    subst hvs; subst hst
+    dsimp [yulD, evmWithExternal] at hbu
+    simp only [builtinWithExternal, hstatic, Bool.false_and, ↓reduceIte] at hbu
+    rcases hbu with ⟨resp, hCall, hres⟩
+    injection hres with hrets hst
+    subst hrets; subst hst
+    exact ⟨resp, rfl, hCall⟩
+  | builtinHalt hargs hbu =>
+    obtain ⟨hvs, hst⟩ := eval_send_args_inv ht hv hargs
+    subst hvs; subst hst
+    dsimp [yulD, evmWithExternal] at hbu
+    simp only [builtinWithExternal, hstatic, Bool.false_and, ↓reduceIte] at hbu
+    rcases hbu with ⟨_, _, hres⟩
+    cases hres
+  | builtinArgsHalt hargs =>
+    exact (eval_send_args_ne_halt ht hv hargs).elim
+
+theorem readBytes_nil (mem : Nat → UInt8) (p : Nat) : readBytes mem p 0 = [] := by
+  simp [readBytes]
+
+theorem exec_let_send_inv {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
+    {V : VEnv (yulD calls)} {st : EvmState}
+    {ok : YIdent} {targetE valueE : YExpr} {target value : U256} {gas : Nat}
+    {V' : VEnv (yulD calls)} {st' : EvmState} {o : Outcome}
+    (ht : ∀ {st0 r}, EvalExpr (yulD calls) funs V st0 targetE r →
+      r = .vals [target] st0)
+    (hv : ∀ {st0 r}, EvalExpr (yulD calls) funs V st0 valueE r →
+      r = .vals [value] st0)
+    (hstatic : st.env.static = false)
+    (h : ExecStmt (yulD calls) funs V st
+      (.letDecl [ok] (some (bop YulSemantics.EVM.Op.call
+        [lit gas, targetE, valueE, lit 0, lit 0, lit 0, lit 0])))
+      V' st' o) :
+    ∃ resp, o = .normal ∧ V' = (ok, resp.flag) :: V ∧
+      st' = finishCall .call st resp 0 0 0 0 ∧
+      calls.Call
+        { kind := .call
+          gas := BitVec.ofNat 256 gas
+          target := target
+          value := value
+          input := readBytes st.memory 0 0 }
+        st resp := by
+  cases h with
+  | letVal he hlen =>
+    obtain ⟨resp, hr, hCall⟩ := eval_send_inv ht hv hstatic he
+    injection hr with hvs hst
+    subst hvs; subst hst
+    exact ⟨resp, rfl, rfl, rfl, hCall⟩
+  | letHalt he =>
+    obtain ⟨resp, hr, _⟩ := eval_send_inv ht hv hstatic he
+    injection hr
+
+theorem exec_assign_var_inv {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
+    {V : VEnv (yulD calls)} {st : EvmState}
+    {ok name : YIdent} {v : U256}
+    {V' : VEnv (yulD calls)} {st' : EvmState} {o : Outcome}
+    (hget : VEnv.get V ok = some v)
+    (h : ExecStmt (yulD calls) funs V st (.assign [name] (var ok)) V' st' o) :
+    o = .normal ∧ st' = st ∧ V' = VEnv.set V name v := by
+  cases h with
+  | assignVal he hlen =>
+    have hr := eval_var_unique hget he
+    injection hr with hvs hst
+    subst hvs; subst hst
+    simp [VEnv.setMany] at hlen ⊢
+  | assignHalt he =>
+    have hr := eval_var_unique hget he
+    injection hr
+
 theorem haltSuccess_unit_stop {h} (hh : h = some (.stop, ([] : List UInt8))) :
     haltSuccess .unit () h := by
   simp [haltSuccess, hh]
@@ -685,6 +833,10 @@ theorem emitLetOp_view (e : Emit) (d : Nat) (t : Atom) (sel : Nat)
     (args : List Atom) (ret : AbiRet) :
     emitLetOp tag ({} : ContractDef) e d (.view t sel args ret) =
       some (emitExtCall tag e d t sel args ret true (some (identV tag d))) := rfl
+
+theorem emitLetOp_send (e : Emit) (d : Nat) (t amt : Atom) :
+    emitLetOp tag ({} : ContractDef) e d (.send t amt) =
+      some (emitExtSend tag e d t amt (some (identV tag d))) := rfl
 
 theorem emitStmt_call (c : ContractDef) (e : Emit) (d : Nat) (t : Atom)
     (sel : Nat) (args : List Atom) (ret : AbiRet) :

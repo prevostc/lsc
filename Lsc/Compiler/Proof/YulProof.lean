@@ -82,6 +82,10 @@ theorem stmtWF_view {c t sel args ret}
     callWF t args = true ∧ sel < 2 ^ 32 := by
   simpa [stmtWF, Bool.and_eq_true, decide_eq_true_eq] using h
 
+theorem opWF_send {c t amt} (h : opWF c (.send t amt) = true) :
+    atomWF t = true ∧ atomWF amt = true := by
+  simpa [opWF, Bool.and_eq_true] using h
+
 theorem abiWords_le {n : Nat} (h : n ≤ 4) : abiPtr + 32 * n ≤ memoryGuardK := by
   unfold abiPtr memoryGuardK; omega
 

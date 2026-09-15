@@ -37,10 +37,12 @@ theorem inv_run_at {C : Spec S X E ε} {Inv : World S X E → Prop} {rely : X �
     Inv (run tr w) :=
   Proof.inv_run_at hC hE hw tr hW hR
 
-/-- `PreservesInv` follows from the per-entrypoint form. -/
+/-- `PreservesInv` follows from the per-entrypoint form and invariance of
+`Inv` under the incoming-value credit. -/
 theorem PreservesInv.of_fns {C : Spec S X E ε} {Inv : World S X E → Prop}
+    (hcredit : ∀ (w : World S X E) (v : Nat), Inv w → Inv (World.creditValue w v))
     (h : ∀ fn, PreservesInvFn C Inv fn) : PreservesInv C Inv :=
-  Proof.PreservesInv.of_fns h
+  Proof.PreservesInv.of_fns hcredit h
 
 /-- Reduce `PreservesInvFn` to the success path: a revert leaves the world unchanged. -/
 theorem PreservesInvFn_of_ok {C : Spec S X E ε} {Inv : World S X E → Prop} {fn : C.Fn}
@@ -50,10 +52,13 @@ theorem PreservesInvFn_of_ok {C : Spec S X E ε} {Inv : World S X E → Prop} {f
     PreservesInvFn C Inv fn :=
   Proof.PreservesInvFn_of_ok hok
 
-/-- `PreservesInvAt` follows from the per-entrypoint form at `self`. -/
-theorem PreservesInvAt.of_fns {C : Spec S X E ε} {Inv : World S X E → Prop} {self : Address}
+/-- `PreservesInvAt` follows from the per-entrypoint form at `self` and
+invariance of `Inv` under the incoming-value credit. -/
+theorem PreservesInvAt.of_fns {C : Spec S X E ε} {Inv : World S X E → Prop}
+    {self : Address}
+    (hcredit : ∀ (w : World S X E) (v : Nat), Inv w → Inv (World.creditValue w v))
     (h : ∀ fn, PreservesInvFnAt C Inv self fn) : PreservesInvAt C Inv self :=
-  Proof.PreservesInvAt.of_fns h
+  Proof.PreservesInvAt.of_fns hcredit h
 
 /-- Reduce `PreservesInvFnAt` to the success path: a revert leaves the world unchanged. -/
 theorem PreservesInvFnAt_of_ok {C : Spec S X E ε} {Inv : World S X E → Prop}

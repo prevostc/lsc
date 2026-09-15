@@ -111,11 +111,18 @@ theorem ClaimMonoEnv.of_self (c : Address → S → Nat) (rely : X → X → Pro
     ClaimMonoEnv (Claim.ofSelf (S := S) (X := X) (E := E) c) rely :=
   Proof.ClaimMonoEnv.of_self c rely
 
-/-- `NoUnauthorizedDecrease` follows from the per-entrypoint form. -/
-theorem NoUnauthorizedDecrease.of_fns {Inv : World S X E → Prop} {claim : Claim S X E}
-    {Auth : AuthPred C} (h : ∀ fn, NoUnauthorizedDecreaseFn C Inv claim Auth fn) :
+/-- `NoUnauthorizedDecrease` follows from the per-entrypoint form, invariance
+of `Inv` and `claim` under the incoming-value credit. -/
+theorem NoUnauthorizedDecrease.of_fns {Inv : World S X E → Prop}
+    {claim : Claim S X E} {Auth : AuthPred C}
+    (hcredit : ∀ (w : World S X E) (v : Nat), Inv w → Inv (World.creditValue w v))
+    (hclaim : ∀ (w : World S X E) (v : Nat) (a : Address),
+      claim a (World.creditValue w v) = claim a w)
+    (hauth : ∀ (w : World S X E) (v : Nat) (a : Address) (c : Call C),
+      Auth a c (World.creditValue w v) → Auth a c w)
+    (h : ∀ fn, NoUnauthorizedDecreaseFn C Inv claim Auth fn) :
     NoUnauthorizedDecrease C Inv claim Auth :=
-  Proof.NoUnauthorizedDecrease.of_fns h
+  Proof.NoUnauthorizedDecrease.of_fns hcredit hclaim hauth h
 
 /-- Reduce `NoUnauthorizedDecreaseFn` to the success path: a revert cannot decrease `claim`. -/
 theorem NoUnauthorizedDecreaseFn_of_ok {Inv : World S X E → Prop} {claim : Claim S X E}
@@ -128,10 +135,17 @@ theorem NoUnauthorizedDecreaseFn_of_ok {Inv : World S X E → Prop} {claim : Cla
     NoUnauthorizedDecreaseFn C Inv claim Auth fn :=
   Proof.NoUnauthorizedDecreaseFn_of_ok hok
 
-/-- `Conservation` follows from the per-entrypoint form. -/
-theorem Conservation.of_fns {Inv : World S X E → Prop} {claim : Claim S X E} {inflow : Inflow C}
+/-- `Conservation` follows from the per-entrypoint form, invariance of
+`Inv` / `claim` / `inflow` under the incoming-value credit. -/
+theorem Conservation.of_fns {Inv : World S X E → Prop} {claim : Claim S X E}
+    {inflow : Inflow C}
+    (hcredit : ∀ (w : World S X E) (v : Nat), Inv w → Inv (World.creditValue w v))
+    (hclaim : ∀ (w : World S X E) (v : Nat) (a : Address),
+      claim a (World.creditValue w v) = claim a w)
+    (hin : ∀ (c : Call C) (w : World S X E),
+      inflow c (World.creditValue w c.value) = inflow c w)
     (h : ∀ fn, ConservesFn C Inv claim inflow fn) : Conservation C Inv claim inflow :=
-  Proof.Conservation.of_fns h
+  Proof.Conservation.of_fns hcredit hclaim hin h
 
 /-- Reduce `ConservesFn` to the success path: a revert is conservation with empty touch-set. -/
 theorem ConservesFn_of_ok {Inv : World S X E → Prop} {claim : Claim S X E}

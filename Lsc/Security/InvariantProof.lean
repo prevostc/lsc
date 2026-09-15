@@ -42,9 +42,18 @@ theorem inv_run_at {C : Spec S X E ε} {Inv : World S X E → Prop} {rely : X �
       exact ih (hE w x' hw hr) hW htl
 
 theorem PreservesInv.of_fns {C : Spec S X E ε} {Inv : World S X E → Prop}
+    (hcredit : ∀ (w : World S X E) (v : Nat), Inv w → Inv (World.creditValue w v))
     (h : ∀ fn, PreservesInvFn C Inv fn) : PreservesInv C Inv := by
   intro c w hc
-  simpa [step] using h c.fn c.args c.toCtx w hc
+  have hw1 : Inv (World.creditValue w c.value) := hcredit w c.value hc
+  have hwa : Inv (worldAfter (C.exec c.fn c.args) c.toCtx (World.creditValue w c.value)) :=
+    h c.fn c.args c.toCtx (World.creditValue w c.value) hw1
+  rw [step_eq_run]
+  cases hrun : C.exec c.fn c.args c.toCtx (World.creditValue w c.value) with
+  | error _ => exact hc
+  | ok p =>
+    simp only [worldAfter, Tx.run, hrun] at hwa
+    exact hwa
 
 theorem PreservesInvFn_of_ok {C : Spec S X E ε} {Inv : World S X E → Prop} {fn : C.Fn}
     (hok : ∀ (args : C.Args fn) (ctx : Ctx) (w : World S X E) (a : C.Ret fn)
@@ -54,10 +63,20 @@ theorem PreservesInvFn_of_ok {C : Spec S X E ε} {Inv : World S X E → Prop} {f
   intro args ctx w hInv
   exact worldAfter_preserves hInv (fun a w' h => hok args ctx w a w' hInv h)
 
-theorem PreservesInvAt.of_fns {C : Spec S X E ε} {Inv : World S X E → Prop} {self : Address}
+theorem PreservesInvAt.of_fns {C : Spec S X E ε} {Inv : World S X E → Prop}
+    {self : Address}
+    (hcredit : ∀ (w : World S X E) (v : Nat), Inv w → Inv (World.creditValue w v))
     (h : ∀ fn, PreservesInvFnAt C Inv self fn) : PreservesInvAt C Inv self := by
   intro c w ht hs hc
-  simpa [step, Call.toCtx] using h c.fn c.args c.toCtx w ht hs hc
+  have hw1 : Inv (World.creditValue w c.value) := hcredit w c.value hc
+  have hwa : Inv (worldAfter (C.exec c.fn c.args) c.toCtx (World.creditValue w c.value)) :=
+    h c.fn c.args c.toCtx (World.creditValue w c.value) ht hs hw1
+  rw [step_eq_run]
+  cases hrun : C.exec c.fn c.args c.toCtx (World.creditValue w c.value) with
+  | error _ => exact hc
+  | ok p =>
+    simp only [worldAfter, Tx.run, hrun] at hwa
+    exact hwa
 
 theorem PreservesInvFnAt_of_ok {C : Spec S X E ε} {Inv : World S X E → Prop}
     {self : Address} {fn : C.Fn}

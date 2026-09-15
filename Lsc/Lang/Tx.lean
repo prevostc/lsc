@@ -55,16 +55,60 @@ structure Ctx where
 
 /-- Deterministic, memory-blind callee oracle over opaque external state `X`.
 `call` is CALL: `none` is revert. `view` is STATICCALL: total, no `ext` update.
+`send` is a value-carrying CALL with empty calldata (`none` is revert).
 Argument/return lists are ABI words (`Word` = `Nat`). -/
 structure Oracle (X : Type) where
   call : Address → Nat → List Nat → X → Option (List Nat × X) :=
     fun _ _ _ _ => none
   view : Address → Nat → List Nat → X → List Nat :=
     fun _ _ _ _ => []
+  send : Address → Nat → X → Option X :=
+    fun _ _ _ => none
 
 /-- Always-revert / empty-view oracle. `World.oracle` defaults to this so
 `{ self := …, ext := … }` still elaborates. -/
 def Oracle.reject (X : Type) : Oracle X := {}
+
+/-- Read the executing account's native balance from `ext`. Default `0`
+when `X` is not `ExtState`. -/
+class HasSelfBalance (X : Type) where
+  get : X → Nat
+
+instance (priority := low) {X : Type} : HasSelfBalance X where
+  get _ := 0
+
+instance : HasSelfBalance ExtState where
+  get x := x.env.selfBalance.toNat
+
+/-- Add `v` wei to the executing account's native balance. Default is a
+no-op when `X` is not `ExtState`. The trace call step uses this so the
+body sees the EVM post-transfer world (`self`'s balance already includes
+`ctx.value`). -/
+class HasCreditValue (X : Type) where
+  credit : X → Nat → X
+  credit_zero : ∀ x, credit x 0 = x
+
+instance (priority := low) {X : Type} : HasCreditValue X where
+  credit x _ := x
+  credit_zero _ := rfl
+
+/-- Incoming CALL value, already credited when the body runs. -/
+def ExtState.creditValue (x : ExtState) (v : Nat) : ExtState :=
+  { x with env := { x.env with
+      selfBalance := BitVec.ofNat 256 (x.env.selfBalance.toNat + v) } }
+
+@[simp] theorem ExtState.creditValue_zero (x : ExtState) :
+    ExtState.creditValue x 0 = x := by
+  unfold ExtState.creditValue
+  have h : BitVec.ofNat 256 (x.env.selfBalance.toNat + 0) = x.env.selfBalance := by
+    apply BitVec.eq_of_toNat_eq
+    have hlt : x.env.selfBalance.toNat < 2 ^ 256 := x.env.selfBalance.isLt
+    rw [Nat.add_zero, BitVec.toNat_ofNat, Nat.mod_eq_of_lt hlt]
+  rw [h]
+
+instance : HasCreditValue ExtState where
+  credit := ExtState.creditValue
+  credit_zero := ExtState.creditValue_zero
 
 /-- The world a contract executes in: own storage `self`, external ghosts `ext`,
 the event log, and the callee `oracle`. `X` is a parameter of `World`/`Tx`;
@@ -94,6 +138,24 @@ def view (w : World S X E) : WorldView X where
 @[simp] theorem view_set_ext (w : World S X E) (x' : X) :
     ({ w with ext := x' } : World S X E).view =
       { ext := x', oracle := w.oracle } := rfl
+/-- Native balance of the executing account (`ext.env.selfBalance`). -/
+def nativeBalance {S E : Type} (w : World S ExtState E) : Nat :=
+  w.ext.env.selfBalance.toNat
+/-- Credit `v` wei onto `self`'s native balance (EVM CALL is post-transfer
+when the body runs). No-op when `HasCreditValue` is the default. -/
+def creditValue [HasCreditValue X] (w : World S X E) (v : Nat) : World S X E :=
+  { w with ext := HasCreditValue.credit w.ext v }
+@[simp] theorem creditValue_self [HasCreditValue X] (w : World S X E) (v : Nat) :
+    (creditValue w v).self = w.self := rfl
+@[simp] theorem creditValue_log [HasCreditValue X] (w : World S X E) (v : Nat) :
+    (creditValue w v).log = w.log := rfl
+@[simp] theorem creditValue_oracle [HasCreditValue X] (w : World S X E) (v : Nat) :
+    (creditValue w v).oracle = w.oracle := rfl
+@[simp] theorem creditValue_view_oracle [HasCreditValue X] (w : World S X E) (v : Nat) :
+    (creditValue w v).view.oracle = w.oracle := rfl
+@[simp] theorem creditValue_zero [HasCreditValue X] (w : World S X E) :
+    creditValue w 0 = w := by
+  simp [creditValue, HasCreditValue.credit_zero]
 end World
 
 /-- Reasons an arithmetic primitive reverts (Solidity `Panic` codes 0x11/0x12). -/
@@ -188,10 +250,21 @@ def emit (ev : E) : Tx S X E ε Unit :=
 /-! ### Context -/
 
 def sender : Tx S X E ε Address := fun ctx w => .ok (ctx.sender, w)
-def value : Tx S X E ε Nat := fun ctx w => .ok (ctx.value, w)
+/-- Untyped `callvalue`. Core denotes `.value` as this. Typed `Tx.value`
+(`Amount`, `[Payable]`) lives in `Chain.lean`. -/
+def valueRaw : Tx S X E ε Nat := fun ctx w => .ok (ctx.value, w)
 def timestamp : Tx S X E ε Nat := fun ctx w => .ok (ctx.timestamp, w)
 def blockNumber : Tx S X E ε Nat := fun ctx w => .ok (ctx.blockNumber, w)
 def selfAddress : Tx S X E ε Address := fun ctx w => .ok (ctx.self, w)
+/-- Untyped `selfbalance` of `ext`. Typed `Tx.selfBalance` lives in `Chain.lean`. -/
+def selfBalanceRaw [HasSelfBalance X] : Tx S X E ε Nat :=
+  fun _ctx w => .ok (HasSelfBalance.get w.ext, w)
+/-- Value-carrying CALL, empty calldata. `none` is `false` and leaves `w`. -/
+def sendRaw (to : Nat) (amount : Nat) : Tx S X E ε Bool :=
+  fun _ctx w =>
+    match w.oracle.send to amount w.ext with
+    | none => .ok (false, w)
+    | some x' => .ok (true, { w with ext := x' })
 
 /-! ### Checked arithmetic (reverts like Solidity ≥ 0.8) -/
 

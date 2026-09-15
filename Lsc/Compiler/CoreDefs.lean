@@ -49,7 +49,7 @@ def m1OpB : Lsc.Op → Bool
   | .sender | .value | .timestamp | .blockNumber | .selfAddress => true
   | .addChecked _ _ | .subChecked _ _ | .mulChecked _ _ | .divChecked _ _ => true
   | .mulDivDown _ _ _ | .mulDivUp _ _ _ | .pow10 _ | .pure _ => true
-  | .call _ _ _ _ | .view _ _ _ _ => false
+  | .call _ _ _ _ | .view _ _ _ _ | .send _ _ | .selfBalance => false
 
 def m1StmtB : Lsc.Stmt → Bool
   | .store _ _ | .storeMap _ _ _ | .storeMap2 _ _ _ _ => true

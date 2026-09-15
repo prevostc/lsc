@@ -105,11 +105,34 @@ theorem ClaimMonoEnv.of_self (c : Address → S → Nat) (rely : X → X → Pro
     ClaimMonoEnv (Claim.ofSelf (S := S) (X := X) (E := E) c) rely := by
   intro _ _ _ _; exact Nat.le_refl _
 
-theorem NoUnauthorizedDecrease.of_fns {Inv : World S X E → Prop} {claim : Claim S X E}
-    {Auth : AuthPred C} (h : ∀ fn, NoUnauthorizedDecreaseFn C Inv claim Auth fn) :
+theorem NoUnauthorizedDecrease.of_fns {Inv : World S X E → Prop}
+    {claim : Claim S X E} {Auth : AuthPred C}
+    (hcredit : ∀ (w : World S X E) (v : Nat), Inv w → Inv (World.creditValue w v))
+    (hclaim : ∀ (w : World S X E) (v : Nat) (a : Address),
+      claim a (World.creditValue w v) = claim a w)
+    (hauth : ∀ (w : World S X E) (v : Nat) (a : Address) (c : Call C),
+      Auth a c (World.creditValue w v) → Auth a c w)
+    (h : ∀ fn, NoUnauthorizedDecreaseFn C Inv claim Auth fn) :
     NoUnauthorizedDecrease C Inv claim Auth := by
   intro c w a hInv hlt
-  simpa [step, Call.ofCtx_toCtx] using h c.fn c.args c.toCtx w a hInv hlt
+  rw [step_eq_run] at hlt
+  cases hrun : C.exec c.fn c.args c.toCtx (World.creditValue w c.value) with
+  | error _ =>
+    simp [hrun] at hlt
+  | ok p =>
+    simp [hrun] at hlt
+    have hw1 := hcredit w c.value hInv
+    have hc1 := hclaim w c.value a
+    have hwa :
+        worldAfter (C.exec c.fn c.args) c.toCtx (World.creditValue w c.value) = p.2 := by
+      simp [worldAfter, Tx.run, hrun]
+    have hdec :
+        claim a (worldAfter (C.exec c.fn c.args) c.toCtx (World.creditValue w c.value)) <
+          claim a (World.creditValue w c.value) := by
+      rw [hwa, hc1]; exact hlt
+    exact hauth w c.value a c <| by
+      simpa [Call.ofCtx_toCtx] using
+        h c.fn c.args c.toCtx (World.creditValue w c.value) a hw1 hdec
 
 theorem NoUnauthorizedDecreaseFn_of_ok {Inv : World S X E → Prop} {claim : Claim S X E}
     {Auth : AuthPred C} {fn : C.Fn}
@@ -125,10 +148,28 @@ theorem NoUnauthorizedDecreaseFn_of_ok {Inv : World S X E → Prop} {claim : Cla
   | ok p =>
     exact hok args ctx w a p.1 p.2 hInv h (by simpa [worldAfter_ok h] using hdec)
 
-theorem Conservation.of_fns {Inv : World S X E → Prop} {claim : Claim S X E} {inflow : Inflow C}
+theorem Conservation.of_fns {Inv : World S X E → Prop} {claim : Claim S X E}
+    {inflow : Inflow C}
+    (hcredit : ∀ (w : World S X E) (v : Nat), Inv w → Inv (World.creditValue w v))
+    (hclaim : ∀ (w : World S X E) (v : Nat) (a : Address),
+      claim a (World.creditValue w v) = claim a w)
+    (hin : ∀ (c : Call C) (w : World S X E),
+      inflow c (World.creditValue w c.value) = inflow c w)
     (h : ∀ fn, ConservesFn C Inv claim inflow fn) : Conservation C Inv claim inflow := by
   intro c w hInv
-  simpa [step, Call.ofCtx_toCtx] using h c.fn c.args c.toCtx w hInv
+  rw [step_eq_run]
+  cases hrun : C.exec c.fn c.args c.toCtx (World.creditValue w c.value) with
+  | error _ =>
+    refine ⟨∅, fun _ _ => rfl, by simp⟩
+  | ok p =>
+    have hw1 := hcredit w c.value hInv
+    obtain ⟨T, hfr, hsum⟩ := h c.fn c.args c.toCtx (World.creditValue w c.value) hw1
+    refine ⟨T, ?_, ?_⟩
+    · intro a ha
+      have := hfr a ha
+      simpa [worldAfter, Tx.run, hrun, hclaim] using this
+    · have := hsum
+      simpa [worldAfter, Tx.run, hrun, hclaim, hin, Call.ofCtx_toCtx] using this
 
 theorem ConservesFn_of_ok {Inv : World S X E → Prop} {claim : Claim S X E}
     {inflow : Inflow C} {fn : C.Fn}

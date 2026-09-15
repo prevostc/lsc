@@ -236,6 +236,83 @@ theorem exec_let_staticcall_fwd {calls : ExternalCalls} (htot : CallsTotal calls
   obtain ⟨resp, he, hCall⟩ := eval_staticcall_fwd htot funs ht (gas := gas) (insize := insize)
   exact ⟨resp, Step.letVal he rfl, hCall⟩
 
+theorem eval_send_args_fwd {calls : ExternalCalls}
+    (funs : FunEnv (yulD calls)) {V : VEnv (yulD calls)} {st : EvmState}
+    {targetE valueE : YExpr} {target value : U256} {gas : Nat}
+    (ht : EvalExpr (yulD calls) funs V st targetE (.vals [target] st))
+    (hv : EvalExpr (yulD calls) funs V st valueE (.vals [value] st)) :
+    EvalArgs (yulD calls) funs V st
+      [lit gas, targetE, valueE, lit 0, lit 0, lit 0, lit 0]
+      (.vals [BitVec.ofNat 256 gas, target, value, 0, 0, 0, 0] st) :=
+  Step.argsCons
+    (Step.argsCons
+      (Step.argsCons
+        (Step.argsCons
+          (Step.argsCons
+            (Step.argsCons
+              (Step.argsCons Step.argsNil Step.lit) Step.lit)
+            Step.lit)
+          Step.lit)
+        hv)
+      ht)
+    Step.lit
+
+theorem eval_send_fwd {calls : ExternalCalls} (htot : CallsTotal calls)
+    (funs : FunEnv (yulD calls)) {V : VEnv (yulD calls)} {st : EvmState}
+    {targetE valueE : YExpr} {target value : U256} {gas : Nat}
+    (ht : EvalExpr (yulD calls) funs V st targetE (.vals [target] st))
+    (hv : EvalExpr (yulD calls) funs V st valueE (.vals [value] st))
+    (hstatic : st.env.static = false) :
+    ∃ resp : CallResponse,
+      EvalExpr (yulD calls) funs V st
+        (bop YulSemantics.EVM.Op.call
+          [lit gas, targetE, valueE, lit 0, lit 0, lit 0, lit 0])
+        (.vals [resp.flag] (finishCall .call st resp 0 0 0 0)) ∧
+      calls.Call
+        { kind := .call
+          gas := BitVec.ofNat 256 gas
+          target := target
+          value := value
+          input := readBytes st.memory 0 0 }
+        st resp := by
+  let req : CallRequest :=
+    { kind := .call
+      gas := BitVec.ofNat 256 gas
+      target := target
+      value := value
+      input := readBytes st.memory 0 0 }
+  obtain ⟨resp, hCall⟩ := htot req st
+  refine ⟨resp, ?_, hCall⟩
+  have hargs := eval_send_args_fwd (calls := calls) (st := st) funs ht hv
+    (gas := gas)
+  refine Step.builtinOk hargs ?_
+  dsimp [yulD, evmWithExternal]
+  simp only [builtinWithExternal, hstatic, Bool.false_and, ↓reduceIte]
+  exact ⟨resp, hCall, rfl⟩
+
+theorem exec_let_send_fwd {calls : ExternalCalls} (htot : CallsTotal calls)
+    (funs : FunEnv (yulD calls)) {V : VEnv (yulD calls)} {st : EvmState}
+    {ok : YIdent} {targetE valueE : YExpr} {target value : U256} {gas : Nat}
+    (ht : EvalExpr (yulD calls) funs V st targetE (.vals [target] st))
+    (hv : EvalExpr (yulD calls) funs V st valueE (.vals [value] st))
+    (hstatic : st.env.static = false) :
+    ∃ resp : CallResponse,
+      ExecStmt (yulD calls) funs V st
+        (.letDecl [ok] (some (bop YulSemantics.EVM.Op.call
+          [lit gas, targetE, valueE, lit 0, lit 0, lit 0, lit 0])))
+        ((ok, resp.flag) :: V)
+        (finishCall .call st resp 0 0 0 0)
+        .normal ∧
+      calls.Call
+        { kind := .call
+          gas := BitVec.ofNat 256 gas
+          target := target
+          value := value
+          input := readBytes st.memory 0 0 }
+        st resp := by
+  obtain ⟨resp, he, hCall⟩ := eval_send_fwd htot funs ht hv hstatic (gas := gas)
+  exact ⟨resp, Step.letVal he rfl, hCall⟩
+
 /-! ## Guard / selector on `yulD` -/
 
 theorem guardLt_halt_nils {calls : ExternalCalls} {n m : Nat}
@@ -573,6 +650,121 @@ theorem op_view_progress {S E ε : Type}
     · exact hrest ▸
         ⟨localsOK_cons (tag := tag) vU.toNat hn1 hinv.venv,
           envWF_cons (u256_lt_word vU) henv, hR3, hctx3⟩
+
+theorem op_send_progress {S E ε : Type}
+    {c : ContractDef} {Γ : ContractSchema S ExtState E ε}
+    {κ ctx} {w : World S ExtState E} {env : List Nat}
+    (o : ExtOracle) {n : Nat} {V : VEnv evm} {st : EvmState}
+    {target amount : Atom}
+    (hinv : Inv tag Γ c κ ctx w env V st)
+    (hNR : ExtOracle.NoReentry o ctx.self)
+    (hn : identsNodup tag env.length = true)
+    (hn1 : identsNodup tag (env.length + 1) = true) :
+    ∃ V' st' out,
+      ExecStmts (yulD (toCalls o)) (List.replicate n []) V st
+        ((emitLetOp tag c {} env.length (.send target amount)).getD {}).stmts
+        V' st' out ∧
+      (out = .halt ∨
+        (out = .normal ∧ ∃ v, Inv tag Γ c κ ctx w (v :: env) V' st')) := by
+  have hR := hinv.rel
+  have hctx := hinv.ctxr
+  have henv := hinv.wf
+  have htot := Proof.toCalls_total o
+  let d := env.length
+  let funsN : FunEnv (yulD (toCalls o)) := List.replicate n []
+  let funsN1 : FunEnv (yulD (toCalls o)) := List.replicate (n + 1) []
+  have hlet0 : ExecStmt (yulD (toCalls o)) funsN V st
+      (.letDecl [identV tag d] (some (lit 0)))
+      ((identV tag d, (0 : U256)) :: V) st .normal :=
+    Step.letVal (D := yulD (toCalls o)) Step.lit rfl
+  let pre : VEnv evm := (identV tag d, (0 : U256)) :: V
+  have hokPre : localsOK tag env pre :=
+    localsOK_identV_front (tag := tag) 0 hn1 hinv.venv
+  have hstatic : st.env.static = false := ctxRel_static hctx
+  have htgt := eval_atomE_nils tag (calls := toCalls o) (n := n + 1)
+    hokPre (a := target) (st := st)
+  have hvamt := eval_atomE_nils tag (calls := toCalls o) (n := n + 1)
+    hokPre (a := amount) (st := st)
+  obtain ⟨resp, hlet, hCall⟩ :=
+    exec_let_send_fwd (calls := toCalls o) htot funsN1 htgt hvamt hstatic
+      (ok := extOk tag d) (gas := extCallGas)
+  let st2 := finishCall .call st resp 0 0 0 0
+  let V2 : VEnv evm := (extOk tag d, resp.flag) :: pre
+  have hgetOk : VEnv.get V2 (extOk tag d) = some resp.flag := by
+    rw [VEnv.get_cons, if_pos rfl]
+  let V3 : VEnv evm := VEnv.set V2 (identV tag d) resp.flag
+  have hAsgEvm : ExecStmt evm (List.replicate (n + 1) []) V2 st2
+      (.assign [identV tag d] (var (extOk tag d)))
+      V3 st2 .normal :=
+    Step.assignVal (D := evm) (Step.var hgetOk) rfl
+  have hAsg : ExecStmt (yulD (toCalls o)) funsN1 V2 st2
+      (.assign [identV tag d] (var (extOk tag d)))
+      V3 st2 .normal := by
+    have hL := execStmt_lift (calls := toCalls o) .none .none hAsgEvm
+    simpa [funsN1] using (funEnvCast_replicate_nil (toCalls o) (n + 1) ▸ hL)
+  have hbody : ExecStmts (yulD (toCalls o)) funsN1 pre st
+      (emitExtSendBody tag d target amount (some (identV tag d)))
+      V3 st2 .normal := by
+    rw [emitExtSendBody_stmts]
+    have hlet' : ExecStmt (yulD (toCalls o)) funsN1 pre st
+        (.letDecl [extOk tag d]
+          (some (emitExtSendOp (atomE tag d target) (atomE tag d amount))))
+        V2 st2 .normal := by
+      simp only [emitExtSendOp, emitCallGas, V2, st2, d, pre]
+      exact hlet
+    exact Step.seqCons (D := yulD (toCalls o)) hlet'
+      (Step.seqCons (D := yulD (toCalls o)) hAsg
+        (Step.seqNil (D := yulD (toCalls o)) (funs := funsN1) (V := V3) (st := st2)))
+  have hfuns : funsN1 = [] :: funsN := by simp [funsN1, funsN, List.replicate_succ]
+  rw [hfuns] at hbody
+  have hh := hoist_emitExtSendBody tag (calls := toCalls o) d target amount
+    (some (identV tag d))
+  have hemit :
+      ((emitLetOp tag c {} env.length (.send target amount)).getD {}).stmts =
+        ((emitLetOp tag ({} : ContractDef) {} env.length
+          (.send target amount)).getD {}).stmts := rfl
+  rw [hemit, emitLetOp_send_stmts]
+  have hblk := exec_block_ok_open (funs := funsN) hh hbody
+  have hreq :
+      ({ kind := .call
+         gas := BitVec.ofNat 256 extCallGas
+         target := BitVec.ofNat 256 (target.eval env)
+         value := BitVec.ofNat 256 (amount.eval env)
+         input := readBytes st.memory 0 0 } : CallRequest) =
+        mkSendReq (target.eval env) (amount.eval env) :=
+    mkSendReq_of_eval st (target.eval env) (amount.eval env)
+  have hresp : resp = toCall o (mkSendReq (target.eval env) (amount.eval env)) st := by
+    have hY := (toCalls_call o _ st resp).mp hCall
+    rw [hreq] at hY
+    exact hY
+  have ⟨hNoI, _⟩ := hNR
+  have haddr : st.env.address = BitVec.ofNat 256 ctx.self := ctxRel_address hctx
+  have hR2 : R c Γ κ w st2 := by
+    by_cases hsucc : resp.success = true
+    · have hni := hNoI (mkSendReq (target.eval env) (amount.eval env)) st haddr
+      have hni' : resp.world.storage = st.storage ∧
+          resp.world.transient = st.transient ∧
+          (∀ l ∈ resp.world.logs, l.address ≠ st.env.address) := by
+        simpa [hresp] using hni
+      exact R_finishCall_success (resp := resp) (iOff := 0) (iSz := 0)
+        (oOff := 0) (oSz := 0) hR hsucc hni'.1 hni'.2.2
+    · have hfail : resp.success = false := by simpa using hsucc
+      exact R_memOnly hR (memOnly_finishCall_fail .call st resp 0 0 0 0 hfail)
+  have hctx2 : ctxRel ctx st2 := ctxRel_finishCall hctx .call resp 0 0 0 0
+  have hne : extOk tag d ≠ identV tag d := (identV_ne_extOk tag d d).symm
+  have hset : VEnv.set V2 (identV tag d) resp.flag =
+      (extOk tag d, resp.flag) :: (identV tag d, resp.flag) :: V := by
+    rw [VEnv.set_cons_ne hne]
+    simp [VEnv.set, pre]
+  have hV3 : V3 = (extOk tag d, resp.flag) :: (identV tag d, resp.flag) :: V := hset
+  have hrest : restore pre V3 =
+      (identV tag d, BitVec.ofNat 256 resp.flag.toNat) :: V := by
+    rw [hV3]; exact (restore_call_assign).trans (by rw [ofNat_toNat_u256])
+  refine ⟨restore pre V3, st2, .normal, ?_, .inr ⟨rfl, resp.flag.toNat, ?_⟩⟩
+  · exact Step.seqCons hlet0 (Step.seqCons hblk Step.seqNil)
+  · exact hrest ▸
+      ⟨localsOK_cons (tag := tag) resp.flag.toNat hn1 hinv.venv,
+        envWF_cons (u256_lt_word resp.flag) henv, hR2, hctx2⟩
 
 theorem stmt_call_progress {S E ε : Type}
     {c : ContractDef} {Γ : ContractSchema S ExtState E ε}

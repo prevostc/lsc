@@ -57,16 +57,27 @@ theorem run_append (tr₁ tr₂ : List (Step C)) (w : World S X E) :
     run (tr₁ ++ tr₂) w = run tr₂ (run tr₁ w) :=
   Proof.run_append tr₁ tr₂ w
 
-/-- A reverting call step leaves the world unchanged. -/
-theorem step_of_revert {c : Call C} {w : World S X E} {e : Err ε}
-    (h : Tx.run (C.exec c.fn c.args) c.toCtx w = .error e) :
+/-- A reverting call step leaves the world unchanged. The run is on the
+post-transfer (value-credited) world. -/
+theorem step_of_revert [HasCreditValue X] {c : Call C} {w : World S X E} {e : Err ε}
+    (h : C.exec c.fn c.args c.toCtx (World.creditValue w c.value) = .error e) :
     step (.call c) w = w :=
   Proof.step_of_revert h
 
-/-- A call step is `worldAfter` of the entrypoint. -/
-theorem step_eq_worldAfter (c : Call C) (w : World S X E) :
+/-- A call step is `Tx.run` of the entrypoint on the post-transfer world. -/
+theorem step_eq_run [HasCreditValue X] (c : Call C) (w : World S X E) :
+    step (.call c) w =
+      match C.exec c.fn c.args c.toCtx (World.creditValue w c.value) with
+      | .ok (_, w') => w'
+      | .error _ => w :=
+  Proof.step_eq_run c w
+
+/-- When `creditValue` is the identity, a call step is `worldAfter`. -/
+theorem step_eq_worldAfter_of_credit_id [HasCreditValue X]
+    (c : Call C) (w : World S X E)
+    (h : World.creditValue w c.value = w) :
     step (.call c) w = worldAfter (C.exec c.fn c.args) c.toCtx w :=
-  Proof.step_eq_worldAfter c w
+  Proof.step_eq_worldAfter_of_credit_id c w h
 
 /-- The empty trace is well-formed at any `self`. -/
 theorem Wf.nil (self : Address) : Wf (C := C) self [] :=

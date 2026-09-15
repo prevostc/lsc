@@ -51,14 +51,26 @@ theorem run_append (tr₁ tr₂ : List (Step C)) (w : World S X E) :
   | nil => rfl
   | cons _ _ ih => rw [List.cons_append, run_cons, ih, run_cons]
 
-theorem step_of_revert {c : Call C} {w : World S X E} {e : Err ε}
-    (h : Tx.run (C.exec c.fn c.args) c.toCtx w = .error e) :
-    step (.call c) w = w :=
-  worldAfter_error h
+theorem step_of_revert [HasCreditValue X] {c : Call C} {w : World S X E} {e : Err ε}
+    (h : C.exec c.fn c.args c.toCtx (World.creditValue w c.value) = .error e) :
+    step (.call c) w = w := by
+  simp [step, stepCall, h]
 
-theorem step_eq_worldAfter (c : Call C) (w : World S X E) :
-    step (.call c) w = worldAfter (C.exec c.fn c.args) c.toCtx w :=
+theorem step_eq_run [HasCreditValue X] (c : Call C) (w : World S X E) :
+    step (.call c) w =
+      match C.exec c.fn c.args c.toCtx (World.creditValue w c.value) with
+      | .ok (_, w') => w'
+      | .error _ => w :=
   rfl
+
+theorem step_eq_worldAfter_of_credit_id [HasCreditValue X]
+    (c : Call C) (w : World S X E)
+    (h : World.creditValue w c.value = w) :
+    step (.call c) w = worldAfter (C.exec c.fn c.args) c.toCtx w := by
+  rw [step_eq_run, h]
+  cases hrun : C.exec c.fn c.args c.toCtx w with
+  | ok p => simp [worldAfter, Tx.run, hrun]
+  | error e => simp [worldAfter, Tx.run, hrun]
 
 theorem Wf.nil (self : Address) : Wf (C := C) self [] :=
   trivial

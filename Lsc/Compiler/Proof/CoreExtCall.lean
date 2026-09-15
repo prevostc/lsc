@@ -131,6 +131,14 @@ theorem denote_view_ok_world {S E ε : Type} {Γ : ContractSchema S ExtState E �
   exact Tx.viewAsNat_world (S := S) (X := ExtState) (E := E) (ε := ε) ret
     (Atom.eval env t) sel (args.map (Atom.eval env)) h
 
+theorem denote_send_ok_oracle {S E ε : Type} {Γ : ContractSchema S ExtState E ε}
+    {env : List Nat} {ctx : Ctx} {w : World S ExtState E}
+    {t amt : Atom} {v : Nat} {w' : World S ExtState E}
+    (h : Tx.run (Op.denote Γ env (.send t amt)) ctx w = .ok (v, w')) :
+    w'.oracle = w.oracle := by
+  simp only [Op.denote, Tx.run_sendAsNat] at h
+  split at h <;> cases h <;> rfl
+
 theorem stmt_call_ok_op {S E ε : Type} {Γ : ContractSchema S ExtState E ε}
     {env : List Nat} {ctx : Ctx} {w w0 : World S ExtState E}
     {target : Atom} {sel : Nat} {args : List Atom} {ret : AbiRet} {u : Unit}
@@ -322,6 +330,97 @@ theorem sim_ext_op_view_return {S E ε : Type} {t : RetTy}
     | error e =>
       simp only [hrun, except_error_prod] at hbit
       cases hbit.1
+    | ok p =>
+      rcases p with ⟨v, w0⟩
+      simp only [hrun, except_ok_prod] at hbit
+      obtain ⟨-, hInv0, hAgr0⟩ := hbit
+      have hstatic := ctxRel_static hInv0.ctxr
+      have hrest' :=
+        s1_match_prefix_ok hfuns (noExt_maybeLock clearLock) hrest
+          (execStmts_maybeLock clearLock hstatic)
+      have hMO := memOnly_stAfterLockClear clearLock st1
+      have hInv1 := Inv_memOnly tag hInv0 hMO
+      have haddr0 := ctxRel_address hInv0.ctxr
+      have hAgr1 := ExtAgree_stAfterLockClear clearLock hAgr0 haddr0
+      have he := eval_atom_ok tag (funEnvUncast (toCalls o) funs)
+        (st := stAfterLockClear clearLock st1) hInv0.venv (.var 0)
+      have hv : v < wordBound := hInv0.wf v (by simp)
+      obtain ⟨_stR, hret, hh, hR'⟩ :=
+        return_word_sim (funEnvUncast (toCalls o) funs) V1 hv he hInv1.rel
+      have hnoRet := noExt_returnVar tag (env.length + 1)
+      have hdesc := execStmts_descend hfuns hnoRet hrest'
+      obtain ⟨hVeq', hsteq, hoeq⟩ := execStmts_det_evm hdesc hret
+      subst hVeq'; subst hsteq; subst hoeq
+      have haddr := ctxRel_address hInv1.ctxr
+      have hAgr' := ExtAgree_noExt hAgr1 haddr hfuns hnoRet hrest'
+      rw [hokCore hrun]
+      simp only [except_ok_prod]
+      exact ⟨trivial, hsucc hh, hR', hAgr'⟩
+
+/-- `Op.send` as a tail. Never reverts: the Core word is the CALL flag. -/
+theorem sim_ext_op_send_return {S E ε : Type} {t : RetTy}
+    {c : ContractDef} {Γ : ContractSchema S ExtState E ε} {κ : List UInt8 → U256}
+    {ctx : Ctx} {o : ExtOracle}
+    {core : Core t} {target amount : Atom}
+    (toVal : Nat → t.denote)
+    (hsucc : ∀ {v : Nat} {h}, h = some (.ret, wordBytes v) → haltSuccess t (toVal v) h)
+    (hokCore : ∀ {v : Nat} {w' : World S ExtState E} {env : List Nat}
+        {w : World S ExtState E},
+      Tx.run (Op.denote Γ env (.send target amount)) ctx w = .ok (v, w') →
+      Tx.run (Core.denote Γ core env) ctx w = .ok (toVal v, w'))
+    {w : World S ExtState E} {env : List Nat}
+    {V : VEnv (yulD (toCalls o))} {st : EvmState}
+    (funs : FunEnv (yulD (toCalls o)))
+    (hfuns : noExtFuns funs = true)
+    (hn1 : identsNodup tag (env.length + 1) = true)
+    (hinv : Inv tag Γ c κ ctx w env V st)
+    (hAgr : ExtAgree ctx.self w.ext st)
+    (hOr : w.oracle = Oracle.ofExt o)
+    (hNR : ExtOracle.NoReentry o ctx.self)
+    {clearLock : Bool} {e1 : Emit}
+    (hE : emitLetOp tag c {} env.length (.send target amount) = some e1)
+    {V' : VEnv (yulD (toCalls o))} {st' : EvmState} {out : Outcome}
+    (hexec : ExecStmts (yulD (toCalls o)) funs V st
+      (e1.stmts ++ ((if clearLock then [lockClearStmt] else []) ++
+        (emitReturnWords {} [atomE tag (env.length + 1) (.var 0)]).stmts))
+      V' st' out) :
+    match Tx.run (Core.denote Γ core env) ctx w with
+    | .ok (v, w') =>
+        out = Outcome.halt ∧ haltSuccess t v st'.halted ∧
+          R c Γ κ w' st' ∧ ExtAgree ctx.self w'.ext st'
+    | .error e =>
+        ∃ bytes, out = Outcome.halt ∧ st'.halted = some (HaltKind.revert, bytes) ∧
+          haltError c Γ e bytes := by
+  have hE' : emitLetOp tag ({} : ContractDef) {} env.length
+      (.send target amount) = some e1 := by
+    simpa [emitLetOp] using hE
+  cases execStmts_append_inv hexec with
+  | inr hstop =>
+    have hexec1 : ExecStmts (yulD (toCalls o)) funs V st
+        ((emitLetOp tag ({} : ContractDef) {} env.length
+          (.send target amount)).getD {}).stmts V' st' out := by
+      simpa [hE'] using hstop.2
+    have hbit :=
+      op_sim_send_bwd tag o hinv hAgr hOr hNR hfuns hn1 hexec1
+    cases hrun : Tx.run (Op.denote Γ env (.send target amount)) ctx w with
+    | ok p =>
+      simp only [hrun, except_ok_prod] at hbit
+      exact (hstop.1 hbit.1).elim
+    | error e =>
+      rw [hrun] at hbit
+      exact hbit.elim
+  | inl hokPre =>
+    obtain ⟨V1, st1, hcallE, hrest⟩ := hokPre
+    have hexec1 : ExecStmts (yulD (toCalls o)) funs V st
+        ((emitLetOp tag ({} : ContractDef) {} env.length
+          (.send target amount)).getD {}).stmts V1 st1 .normal := by
+      simpa [hE'] using hcallE
+    have hbit :=
+      op_sim_send_bwd tag o hinv hAgr hOr hNR hfuns hn1 hexec1
+    cases hrun : Tx.run (Op.denote Γ env (.send target amount)) ctx w with
+    | error e =>
+      rw [hrun] at hbit
+      exact hbit.elim
     | ok p =>
       rcases p with ⟨v, w0⟩
       simp only [hrun, except_ok_prod] at hbit
@@ -593,6 +692,63 @@ theorem sim_ext_letOp_view {S E ε : Type} {t : RetTy}
       obtain ⟨-, hInv0, hAgr0⟩ := hbit
       have hOr0 : w0.oracle = Oracle.ofExt o := by
         rw [denote_view_ok_world hrun, hOr]
+      have hsim :=
+        ih w0 (v :: env) V1 st1 funs hfuns hkWF (by simpa using hnK)
+          hInv0 hAgr0 hOr0 hNR h0 hrest
+      simp only [Core.denote, Tx.run_bind, hrun]
+      exact hsim
+
+/-- `op_sim_send_bwd` composed with the continuation `ih`. -/
+theorem sim_ext_letOp_send {S E ε : Type} {t : RetTy}
+    {c : ContractDef} {Γ : ContractSchema S ExtState E ε} {κ : List UInt8 → U256}
+    {ctx : Ctx} {haltUnit : Bool} {o : ExtOracle}
+    {k : Core t} {target amount : Atom}
+    (ih : SimExt tag c Γ κ o ctx haltUnit k) :
+    SimExt tag c Γ κ o ctx haltUnit (.letOp (.send target amount) k) := by
+  intro w env V st funs hfuns hwf hn hinv hAgr hOr hNR clearLock e' hem V' st' out hexec
+  have ⟨hopWF0, hkWF⟩ := coreWF_letOp.mp hwf
+  obtain ⟨e1, e0, hE, h0, hst⟩ := emitCore_letOp_split tag hem
+  rw [hst] at hexec
+  have hn1 : identsNodup tag (env.length + 1) = true :=
+    identsNodup_mono tag (by simp [coreExtraDepth]; try omega) hn
+  have hnK : identsNodup tag ((env.length + 1) + coreExtraDepth k) = true := by
+    simpa [coreExtraDepth, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using hn
+  have hE' : emitLetOp tag ({} : ContractDef) {} env.length
+      (.send target amount) = some e1 := by
+    simpa [emitLetOp] using hE
+  cases execStmts_append_inv hexec with
+  | inr hstop =>
+    have hexec1 : ExecStmts (yulD (toCalls o)) funs V st
+        ((emitLetOp tag ({} : ContractDef) {} env.length
+          (.send target amount)).getD {}).stmts V' st' out := by
+      simpa [hE'] using hstop.2
+    have hbit :=
+      op_sim_send_bwd tag o hinv hAgr hOr hNR hfuns hn1 hexec1
+    cases hrun : Tx.run (Op.denote Γ env (.send target amount)) ctx w with
+    | ok p =>
+      simp only [hrun, except_ok_prod] at hbit
+      exact (hstop.1 hbit.1).elim
+    | error e =>
+      rw [hrun] at hbit
+      exact hbit.elim
+  | inl hokPre =>
+    obtain ⟨V1, st1, hcallE, hrest⟩ := hokPre
+    have hexec1 : ExecStmts (yulD (toCalls o)) funs V st
+        ((emitLetOp tag ({} : ContractDef) {} env.length
+          (.send target amount)).getD {}).stmts V1 st1 .normal := by
+      simpa [hE'] using hcallE
+    have hbit :=
+      op_sim_send_bwd tag o hinv hAgr hOr hNR hfuns hn1 hexec1
+    cases hrun : Tx.run (Op.denote Γ env (.send target amount)) ctx w with
+    | error e =>
+      rw [hrun] at hbit
+      exact hbit.elim
+    | ok p =>
+      rcases p with ⟨v, w0⟩
+      simp only [hrun, except_ok_prod] at hbit
+      obtain ⟨-, hInv0, hAgr0⟩ := hbit
+      have hOr0 : w0.oracle = Oracle.ofExt o :=
+        (denote_send_ok_oracle hrun).trans hOr
       have hsim :=
         ih w0 (v :: env) V1 st1 funs hfuns hkWF (by simpa using hnK)
           hInv0 hAgr0 hOr0 hNR h0 hrest

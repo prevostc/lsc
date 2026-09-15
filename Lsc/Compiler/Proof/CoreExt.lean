@@ -26,6 +26,7 @@ open Lsc hiding Op Stmt
 def S2Op : Lsc.Op → Prop
   | .call _ _ _ _ => True
   | .view _ _ _ _ => True
+  | .send _ _ => True
   | op => M1Op op
 
 def S2Stmt : Lsc.Stmt → Prop
@@ -57,6 +58,7 @@ def S2Frag : {t : RetTy} → Core t → Prop
 def s2OpB : Lsc.Op → Bool
   | .call _ _ _ _ => true
   | .view _ _ _ _ => true
+  | .send _ _ => true
   | op => m1OpB op
 
 def s2StmtB : Lsc.Stmt → Bool
@@ -89,6 +91,7 @@ theorem s2OpB_eq (op : Lsc.Op) : s2OpB op = true ↔ S2Op op := by
   cases op with
   | call _ _ _ _ => simp [s2OpB, S2Op]
   | view _ _ _ _ => simp [s2OpB, S2Op]
+  | send _ _ => simp [s2OpB, S2Op]
   | _ => simp [s2OpB, S2Op, m1OpB_eq, M1Op]
 
 theorem s2StmtB_eq (s : Lsc.Stmt) : s2StmtB s = true ↔ S2Stmt s := by
@@ -146,11 +149,13 @@ theorem s2stmt_of_m1 {s} (h : M1Stmt s) : S2Stmt s := by
 
 theorem s2op_elim {op} (h : S2Op op) :
     (∃ t sel args ret, op = .call t sel args ret) ∨
-      (∃ t sel args ret, op = .view t sel args ret) ∨ M1Op op := by
+      (∃ t sel args ret, op = .view t sel args ret) ∨
+      (∃ t amt, op = .send t amt) ∨ M1Op op := by
   cases op with
   | call t sel args ret => exact .inl ⟨t, sel, args, ret, rfl⟩
   | view t sel args ret => exact .inr (.inl ⟨t, sel, args, ret, rfl⟩)
-  | _ => exact .inr (.inr h)
+  | send t amt => exact .inr (.inr (.inl ⟨t, amt, rfl⟩))
+  | _ => exact .inr (.inr (.inr h))
 
 theorem s2stmt_elim {s} (h : S2Stmt s) :
     (∃ t sel args ret, s = .call t sel args ret) ∨
@@ -288,7 +293,8 @@ theorem noExt_letOp_m1 {c : ContractDef} {e : Emit} {d : Nat} {op : Lsc.Op} {e' 
   | pure a =>
     simp [emitLetOp] at h1; cases h1
     exact noExt_let he (noExt_atomE tag d a)
-  | call _ _ _ _ | view _ _ _ _ => exact (show False from hM1).elim
+  | call _ _ _ _ | view _ _ _ _ | send _ _ | selfBalance =>
+    exact (show False from hM1).elim
 
 theorem noExt_stmt_m1 {c : ContractDef} {e : Emit} {d : Nat} {s : Lsc.Stmt}
     (hM1 : M1Stmt s) (he : noExtBlock e.stmts = true) :
@@ -533,7 +539,8 @@ theorem m1op_preserves_ghost {S X E ε} {Γ : ContractSchema S X E ε}
     (hok : Lsc.Op.denote Γ env op ctx w = .ok (v, w')) :
     w'.ext = w.ext ∧ w'.oracle = w.oracle := by
   cases op with
-  | call _ _ _ _ | view _ _ _ _ => exact (show False from h).elim
+  | call _ _ _ _ | view _ _ _ _ | send _ _ | selfBalance =>
+    exact (show False from h).elim
   | load f =>
     have hred : Lsc.Op.denote Γ env (.load f) ctx w =
         .ok (Γ.st.scalar f w.self, w) := rfl
@@ -611,7 +618,8 @@ theorem m1op_world {S X E ε} {Γ : ContractSchema S X E ε}
     {v : Nat} {w' : World S X E}
     (hok : Lsc.Op.denote Γ env op ctx w = .ok (v, w')) : w' = w := by
   cases op with
-  | call _ _ _ _ | view _ _ _ _ => exact (show False from h).elim
+  | call _ _ _ _ | view _ _ _ _ | send _ _ | selfBalance =>
+    exact (show False from h).elim
   | load f =>
     have hred : Lsc.Op.denote Γ env (.load f) ctx w =
         .ok (Γ.st.scalar f w.self, w) := rfl

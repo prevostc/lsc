@@ -538,6 +538,10 @@ theorem op_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     exact (show False from hM1).elim
   | .view .. =>
     exact (show False from hM1).elim
+  | .send .. =>
+    exact (show False from hM1).elim
+  | .selfBalance =>
+    exact (show False from hM1).elim
 
 /-- Structural size for the `core_sim_fall` / `core_toVar_sim` mutual. -/
 def coreSize : {t : RetTy} → Core t → Nat

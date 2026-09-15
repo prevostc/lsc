@@ -453,6 +453,44 @@ theorem staticSafe_emitExtCall (e : Emit) (depth : Nat) (target : Atom) (sel : N
     exact staticSafe_emitBlock _ _ hl
       (staticSafe_emitExtCallBody tag depth target sel args ret isView (some name) hn)
 
+theorem staticSafe_emitExtSendOp (target value : YExpr)
+    (ht : staticSafeExpr memoryGuardK target = true)
+    (hv : staticSafeExpr memoryGuardK value = true) :
+    staticSafeExpr memoryGuardK (emitExtSendOp target value) = true := by
+  simp [emitExtSendOp, emitCallGas, bop, staticSafeExpr_builtin, staticSafeExprs,
+    staticSafeOp, litNat?, rangeBelow, rangeBelow_iff, lit, ht, hv]
+
+theorem staticSafe_emitExtSendBody (depth : Nat) (target amount : Atom)
+    (assign : Option YIdent) :
+    staticSafeStmts memoryGuardK (emitExtSendBody tag depth target amount assign) = true := by
+  have h0 := staticSafe_nilEmit memoryGuardK
+  have hcall := staticSafe_emitLet ({} : Emit) (extOk tag depth)
+    (emitExtSendOp (atomE tag depth target) (atomE tag depth amount)) h0
+    (staticSafe_emitExtSendOp _ _ (staticSafe_atomE _ _ _ _) (staticSafe_atomE _ _ _ _))
+  cases assign with
+  | none =>
+    convert hcall using 1
+    simp [emitExtSendBody]
+  | some name =>
+    convert (staticSafe_emitAssign _ name (var (extOk tag depth)) hcall
+      (by simp [staticSafeExpr_var])) using 1
+    simp [emitExtSendBody]
+
+theorem staticSafe_emitExtSend (e : Emit) (depth : Nat) (target amount : Atom)
+    (bind : Option YIdent) (he : staticSafeStmts memoryGuardK e.stmts = true) :
+    staticSafeStmts memoryGuardK
+      (emitExtSend tag e depth target amount bind).stmts = true := by
+  cases bind with
+  | none =>
+    simp [emitExtSend, emitBlock]
+    exact staticSafe_emitBlock e _ he
+      (staticSafe_emitExtSendBody tag depth target amount none)
+  | some name =>
+    simp [emitExtSend, emitBlock]
+    have hl := staticSafe_emitLet e name (lit 0) he (staticSafeExpr_lit _ _)
+    exact staticSafe_emitBlock _ _ hl
+      (staticSafe_emitExtSendBody tag depth target amount (some name))
+
 theorem callWF_fits (target : Atom) (args : List Atom)
     (h : callWF target args = true) : args.length ≤ 3 := by
   simp [callWF, Bool.and_eq_true, fitsGuardCall_iff] at h
@@ -489,7 +527,7 @@ theorem staticSafe_emitLetOp (c : ContractDef) (e : Emit) (d : Nat) (op : Lsc.Op
     exact staticSafe_emitLet _ _ (bop Op.sload [keccak064]) hp
       (by simp [bop, staticSafeExpr_builtin, staticSafeOp, staticSafeExprs,
         staticSafe_keccak064 memoryGuardK (by simp [memoryGuardK])])
-  | sender | value | timestamp | blockNumber | selfAddress =>
+  | sender | value | timestamp | blockNumber | selfAddress | selfBalance =>
     simp only [emitLetOp, Option.some.injEq] at h; subst e'
     exact staticSafe_emitLet e _ _ he
       (by simp [bop, staticSafeExpr_builtin, staticSafeOp, staticSafeExprs])
@@ -531,6 +569,9 @@ theorem staticSafe_emitLetOp (c : ContractDef) (e : Emit) (d : Nat) (op : Lsc.Op
     simp only [emitLetOp, Option.some.injEq] at h; subst e'
     exact staticSafe_emitExtCall tag e d t sel args ret true (some (identV tag d)) he
       (callWF_fits t args (opWF_view hwf).1)
+  | send t amt =>
+    simp only [emitLetOp, Option.some.injEq] at h; subst e'
+    exact staticSafe_emitExtSend tag e d t amt (some (identV tag d)) he
 
 theorem staticSafe_emitStmt (c : ContractDef) (e : Emit) (d : Nat) (s : Lsc.Stmt)
     (he : staticSafeStmts memoryGuardK e.stmts = true)

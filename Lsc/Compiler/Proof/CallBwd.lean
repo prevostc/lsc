@@ -90,6 +90,45 @@ theorem staticcall_step_inv {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
   rw [toNat_abiPtr, toNat_insize hn3] at hCall
   exact ⟨resp, ho, hV', hst, hCall⟩
 
+theorem send_step_inv {calls : ExternalCalls} {funs : FunEnv (yulD calls)}
+    {V : VEnv (yulD calls)} {st : EvmState}
+    {env : List Nat} {target amount : Atom}
+    {V' : VEnv (yulD calls)} {st' : EvmState} {o : Outcome}
+    (hok : localsOK tag env V)
+    (hstatic : st.env.static = false)
+    (h : ExecStmt (yulD calls) funs V st
+      (.letDecl [extOk tag env.length]
+        (some (emitExtSendOp (atomE tag env.length target)
+          (atomE tag env.length amount)))) V' st' o) :
+    ∃ resp, o = .normal ∧ V' = (extOk tag env.length, resp.flag) :: V ∧
+      st' = finishCall .call st resp 0 0 0 0 ∧
+      calls.Call
+        { kind := .call
+          gas := BitVec.ofNat 256 extCallGas
+          target := BitVec.ofNat 256 (target.eval env)
+          value := BitVec.ofNat 256 (amount.eval env)
+          input := readBytes st.memory 0 0 }
+        st resp := by
+  unfold emitExtSendOp emitCallGas at h
+  have ht : ∀ {st0 r},
+      EvalExpr (yulD calls) funs V st0 (atomE tag env.length target) r →
+        r = .vals [BitVec.ofNat 256 (target.eval env)] st0 :=
+    fun {_ _} hr => eval_atomE_unique tag hok hr
+  have hv : ∀ {st0 r},
+      EvalExpr (yulD calls) funs V st0 (atomE tag env.length amount) r →
+        r = .vals [BitVec.ofNat 256 (amount.eval env)] st0 :=
+    fun {_ _} hr => eval_atomE_unique tag hok hr
+  exact exec_let_send_inv ht hv hstatic h
+
+theorem mkSendReq_of_eval (st : EvmState) (addr value : Nat) :
+    ({ kind := .call
+       gas := BitVec.ofNat 256 extCallGas
+       target := BitVec.ofNat 256 addr
+       value := BitVec.ofNat 256 value
+       input := readBytes st.memory 0 0 } : CallRequest) =
+      mkSendReq addr value := by
+  simp [mkSendReq, readBytes_nil]
+
 /-! ## ABI words ↔ Core decode -/
 
 theorem rdsNat_le (bs : List UInt8) : rdsNat bs ≤ bs.length := by
@@ -764,15 +803,284 @@ theorem stmt_sim_call_bwd {S E ε : Type}
     execStmts_one h
   have hbit := extCall_block_bwd tag o hR hctx henv hAgr hOr hNR hfuns hwfCall hsel
     hok (.inl rfl) hblkStmt
-  rw [stmt_run_call]
   cases hrun : Tx.run (Op.denote Γ env (.call target sel args ret)) ctx w with
   | error e =>
+    simp [Stmt.denote, Tx.run_bind, hrun]
     simpa [hrun] using hbit
   | ok p =>
     rcases p with ⟨v, w'⟩
+    simp [Stmt.denote, Tx.run_bind, Tx.run_pure, hrun]
     rw [hrun] at hbit
     rcases hbit with ⟨ho, -, hAgr', hImp, -⟩
     exact ⟨ho, hImp (by simp), hAgr'⟩
+
+/-- `emitExtSendBody` under `{ … }`. No ABI pack and no revert-on-fail:
+the Core word is the CALL success flag. `assign = none` is unused by
+`Op.send` (always bound); `some (identV tag d)` is `let v := 0 { … v := ok }`. -/
+theorem extSend_block_bwd {S E ε : Type}
+    {c : ContractDef} {Γ : ContractSchema S ExtState E ε}
+    {κ ctx} {w : World S ExtState E} {env : List Nat}
+    (o : ExtOracle) {funs : FunEnv (yulD (toCalls o))}
+    {pre : VEnv (yulD (toCalls o))} {st : EvmState}
+    {target amount : Atom} {assign : Option YIdent}
+    {V' : VEnv (yulD (toCalls o))} {st' : EvmState} {out : Outcome}
+    (hR : R c Γ κ w st) (hctx : ctxRel ctx st) (henv : EnvWF env)
+    (hAgr : ExtAgree ctx.self w.ext st)
+    (hOr : w.oracle = Oracle.ofExt o)
+    (hNR : ExtOracle.NoReentry o ctx.self)
+    (hfuns : noExtFuns funs = true)
+    (htail : localsOK tag env pre)
+    (hassign :
+      (assign = none) ∨
+      (assign = some (identV tag env.length) ∧
+        identsNodup tag (env.length + 1) = true ∧
+        ∃ V0, pre = (identV tag env.length, (0 : U256)) :: V0))
+    (h : ExecStmt (yulD (toCalls o)) funs pre st
+      (.block (emitExtSendBody tag env.length target amount assign))
+      V' st' out) :
+    match Tx.run (Op.denote Γ env (.send target amount)) ctx w with
+    | .error _ => False
+    | .ok (v, w') =>
+        out = .normal ∧
+          R c Γ κ w' st' ∧ ExtAgree ctx.self w'.ext st' ∧
+          (assign = none → Inv tag Γ c κ ctx w' env V' st') ∧
+          (assign.isSome → Inv tag Γ c κ ctx w' (v :: env) V' st') := by
+  let d := env.length
+  rcases hNR with ⟨hNoI, hIgn⟩
+  obtain ⟨Vb, hbody, hrestore⟩ := exec_block_inv h
+  have hhoist := hoist_emitExtSendBody tag (calls := toCalls o) d target amount assign
+  rw [hhoist] at hbody
+  rw [emitExtSendBody_stmts] at hbody
+  have hstatic : st.env.static = false := ctxRel_static hctx
+  cases execStmts_cons_inv hbody with
+  | inr hstop =>
+    have ⟨resp, ho, _, _, _⟩ :=
+      send_step_inv tag htail hstatic hstop.2
+    exact (hstop.1 ho).elim
+  | inl hCok =>
+    obtain ⟨V1, st1, hLet, hS⟩ := hCok
+    obtain ⟨resp, _, hV1, hst1, hCallR⟩ :=
+      send_step_inv tag htail hstatic hLet
+    rw [hV1, hst1] at hS
+    have hgetOk :
+        VEnv.get ((extOk tag d, resp.flag) :: pre) (extOk tag d) = some resp.flag := by
+      simp [VEnv.get]
+    have hreq := mkSendReq_of_eval st (target.eval env) (amount.eval env)
+    have haddr : st.env.address = BitVec.ofNat 256 ctx.self := ctxRel_address hctx
+    have hY : resp = toCall o (mkSendReq (target.eval env) (amount.eval env)) st := by
+      have hY := (toCalls_call o _ st resp).mp hCallR
+      rwa [hreq] at hY
+    have hign := hIgn (mkSendReq (target.eval env) (amount.eval env)) w.ext st haddr hAgr
+    let raw := callRaw o (mkSendReq (target.eval env) (amount.eval env))
+      (ExtView.ofState st)
+    have hcore :
+        w.oracle.send (target.eval env) (amount.eval env) w.ext =
+          if resp.success then some (ofCallSuccess w.ext raw) else none := by
+      simp [hOr, Oracle.ofExt, hign]
+      have hs : resp.success = raw.success := by
+        change _ = (callRaw o _ _).success; rw [hY]; rfl
+      simp [hs, raw]
+    by_cases hsucc : resp.success = true
+    · have hni := hNoI (mkSendReq (target.eval env) (amount.eval env)) st haddr
+      have hni' : resp.world.storage = st.storage ∧
+          resp.world.transient = st.transient ∧
+          (∀ l ∈ resp.world.logs, l.address ≠ st.env.address) := by
+        simpa [hY] using hni
+      have hR2 := R_finishCall_success (resp := resp) (iOff := 0) (iSz := 0)
+        (oOff := 0) (oSz := 0) hR hsucc hni'.1 hni'.2.2
+      have hsuccRaw : raw.success = true := by
+        have hs : resp.success = raw.success := by
+          change _ = (callRaw o _ _).success; rw [hY]; rfl
+        exact hs.symm.trans hsucc
+      have hAgr2 := ExtAgree_finishCall_restored (raw := raw) (iOff := 0)
+        (iSz := 0) (oOff := 0) (oSz := 0) hAgr hsuccRaw
+      have hAgr2' : ExtAgree ctx.self (ofCallSuccess w.ext raw)
+          (finishCall .call st resp 0 0 0 0) := by
+        convert hAgr2
+        rw [hY]; rfl
+      have hctx2 := ctxRel_finishCall hctx .call resp 0 0 0 0
+      let w' : World S ExtState E := { w with ext := ofCallSuccess w.ext raw }
+      have hR4 := R_with_ext (ofCallSuccess w.ext raw) hR2
+      have hrun' : Tx.run (Op.denote Γ env (.send target amount)) ctx w =
+          .ok (resp.flag.toNat, w') := by
+        simp only [Op.denote]
+        erw [Tx.run_sendAsNat]
+        simp [hcore, hsucc, w', flag_toNat_boolBit, Tx.boolBit]
+      cases hAs : assign with
+      | none =>
+        simp [hAs, List.nil_append] at hS
+        cases hS
+        rw [hrestore]
+        have hVeq' : restore pre ((extOk tag d, resp.flag) :: pre) = pre := restore_drop1
+        rw [hVeq']
+        simp [hrun']
+        exact ⟨hR4, hAgr2', ⟨htail, henv, hR4, hctx2⟩⟩
+      | some name =>
+        simp [hAs, List.nil_append] at hS
+        cases execStmts_cons_inv hS with
+        | inr hAstop =>
+          have ⟨ho, _, _⟩ := exec_assign_var_inv hgetOk hAstop.2
+          exact (hAstop.1 ho).elim
+        | inl hAok =>
+          obtain ⟨V2, st2, hAsg, hnil⟩ := hAok
+          cases hnil
+          obtain ⟨_, hstA, hV2⟩ := exec_assign_var_inv hgetOk hAsg
+          subst hstA
+          rw [hrestore, hV2]
+          simp [hrun']
+          have ⟨hn1, V0, hpreEq⟩ : identsNodup tag (env.length + 1) = true ∧
+              ∃ V0, pre = (identV tag d, (0 : U256)) :: V0 := by
+            cases hassign with
+            | inl h =>
+              have : none = some name := h.symm.trans hAs
+              cases this
+            | inr h =>
+              cases hAs
+              exact ⟨h.2.1, h.2.2⟩
+          have hname' : name = identV tag d := by
+            cases hassign with
+            | inl h =>
+              rw [h] at hAs
+              cases hAs
+            | inr h =>
+              cases hAs
+              cases h.1
+              rfl
+          subst hname'
+          have hok0 : localsOK tag env V0 :=
+            localsOK_of_identV_front (tag := tag) hn1 (hpreEq ▸ htail)
+          have hset :
+              VEnv.set ((extOk tag d, resp.flag) :: pre) (identV tag d) resp.flag =
+                (extOk tag d, resp.flag) :: (identV tag d, resp.flag) :: V0 := by
+            rw [hpreEq, VEnv.set_cons_ne_open (identV_ne_extOk tag d d).symm,
+              VEnv.set_head_open]
+          have hInv : Inv tag Γ c κ ctx w' (resp.flag.toNat :: env)
+              ((identV tag d, resp.flag) :: V0)
+              (finishCall .call st resp 0 0 0 0) :=
+            ⟨by simpa [ofNat_toNat_u256] using
+                localsOK_cons (tag := tag) resp.flag.toNat hn1 hok0,
+              envWF_cons (u256_lt_word resp.flag) henv, hR4, hctx2⟩
+          rw [hset, hpreEq, restore_call_assign]
+          exact ⟨hR4, hAgr2', hInv⟩
+    · have hfail : resp.success = false := by simpa using hsucc
+      have hMO := memOnly_finishCall_fail .call st resp 0 0 0 0 hfail
+      have hR2 := R_memOnly hR hMO
+      have hAgr2 := ExtAgree_finishCall_noInstall (kind := .call)
+        (iOff := 0) (iSz := 0) (oOff := 0) (oSz := 0) hAgr (.inl hfail)
+      have hctx2 := ctxRel_finishCall hctx .call resp 0 0 0 0
+      have hrun' : Tx.run (Op.denote Γ env (.send target amount)) ctx w =
+          .ok (resp.flag.toNat, w) := by
+        simp only [Op.denote]
+        erw [Tx.run_sendAsNat]
+        simp [hcore, hfail, flag_toNat_boolBit, Tx.boolBit]
+      cases hAs : assign with
+      | none =>
+        simp [hAs, List.nil_append] at hS
+        cases hS
+        rw [hrestore]
+        have hVeq' : restore pre ((extOk tag d, resp.flag) :: pre) = pre := restore_drop1
+        rw [hVeq']
+        simp [hrun']
+        exact ⟨hR2, hAgr2, ⟨htail, henv, hR2, hctx2⟩⟩
+      | some name =>
+        simp [hAs, List.nil_append] at hS
+        cases execStmts_cons_inv hS with
+        | inr hAstop =>
+          have ⟨ho, _, _⟩ := exec_assign_var_inv hgetOk hAstop.2
+          exact (hAstop.1 ho).elim
+        | inl hAok =>
+          obtain ⟨V2, st2, hAsg, hnil⟩ := hAok
+          cases hnil
+          obtain ⟨_, hstA, hV2⟩ := exec_assign_var_inv hgetOk hAsg
+          subst hstA
+          rw [hrestore, hV2]
+          simp [hrun']
+          have ⟨hn1, V0, hpreEq⟩ : identsNodup tag (env.length + 1) = true ∧
+              ∃ V0, pre = (identV tag d, (0 : U256)) :: V0 := by
+            cases hassign with
+            | inl h =>
+              have : none = some name := h.symm.trans hAs
+              cases this
+            | inr h =>
+              cases hAs
+              exact ⟨h.2.1, h.2.2⟩
+          have hname' : name = identV tag d := by
+            cases hassign with
+            | inl h =>
+              rw [h] at hAs
+              cases hAs
+            | inr h =>
+              cases hAs
+              cases h.1
+              rfl
+          subst hname'
+          have hok0 : localsOK tag env V0 :=
+            localsOK_of_identV_front (tag := tag) hn1 (hpreEq ▸ htail)
+          have hset :
+              VEnv.set ((extOk tag d, resp.flag) :: pre) (identV tag d) resp.flag =
+                (extOk tag d, resp.flag) :: (identV tag d, resp.flag) :: V0 := by
+            rw [hpreEq, VEnv.set_cons_ne_open (identV_ne_extOk tag d d).symm,
+              VEnv.set_head_open]
+          have hInv : Inv tag Γ c κ ctx w (resp.flag.toNat :: env)
+              ((identV tag d, resp.flag) :: V0)
+              (finishCall .call st resp 0 0 0 0) :=
+            ⟨by simpa [ofNat_toNat_u256] using
+                localsOK_cons (tag := tag) resp.flag.toNat hn1 hok0,
+              envWF_cons (u256_lt_word resp.flag) henv, hR2, hctx2⟩
+          rw [hset, hpreEq, restore_call_assign]
+          exact ⟨hR2, hAgr2, hInv⟩
+
+theorem op_sim_send_bwd {S E ε : Type}
+    {c : ContractDef} {Γ : ContractSchema S ExtState E ε}
+    {κ ctx} {w : World S ExtState E} {env : List Nat}
+    (o : ExtOracle) {funs : FunEnv (yulD (toCalls o))}
+    {V : VEnv (yulD (toCalls o))} {st : EvmState}
+    {target amount : Atom}
+    {V' : VEnv (yulD (toCalls o))} {st' : EvmState} {out : Outcome}
+    (hinv : Inv tag Γ c κ ctx w env V st)
+    (hAgr : ExtAgree ctx.self w.ext st)
+    (hOr : w.oracle = Oracle.ofExt o)
+    (hNR : ExtOracle.NoReentry o ctx.self)
+    (hfuns : noExtFuns funs = true)
+    (hn : identsNodup tag (env.length + 1) = true)
+    (h : ExecStmts (yulD (toCalls o)) funs V st
+      ((emitLetOp tag ({} : ContractDef) {} env.length
+          (.send target amount)).getD {}).stmts V' st' out) :
+    match Tx.run (Op.denote Γ env (.send target amount)) ctx w with
+    | .error _ => False
+    | .ok (v, w') =>
+        out = .normal ∧
+          Inv tag Γ c κ ctx w' (v :: env) V' st' ∧
+          ExtAgree ctx.self w'.ext st' := by
+  let d := env.length
+  rcases hinv with ⟨hok, henv, hR, hctx⟩
+  rw [emitLetOp_send_stmts] at h
+  cases execStmts_cons_inv h with
+  | inr hstop =>
+    have ⟨ho, _, _⟩ := exec_let_lit_inv hstop.2
+    exact (hstop.1 ho).elim
+  | inl hlet =>
+    obtain ⟨V1, st1, hdoLet, hblkStmts⟩ := hlet
+    have ⟨_, hst1, hV1⟩ := exec_let_lit_inv hdoLet
+    rw [hst1, hV1] at hblkStmts
+    have hblkStmt : ExecStmt (yulD (toCalls o)) funs
+        ((identV tag d, (0 : U256)) :: V) st
+        (.block (emitExtSendBody tag d target amount (some (identV tag d))))
+        V' st' out :=
+      execStmts_one hblkStmts
+    have hokPre : localsOK tag env ((identV tag d, (0 : U256)) :: V) :=
+      localsOK_identV_front (tag := tag) 0 hn hok
+    have hbit := extSend_block_bwd tag o hR hctx henv hAgr hOr hNR hfuns
+      hokPre (.inr ⟨rfl, hn, V, rfl⟩) hblkStmt
+    cases hrun : Tx.run (Op.denote Γ env (.send target amount)) ctx w with
+    | error e =>
+      rw [hrun] at hbit
+      exact hbit.elim
+    | ok p =>
+      rcases p with ⟨v, w'⟩
+      rw [hrun] at hbit
+      rcases hbit with ⟨ho, -, hAgr', -, hImp⟩
+      exact ⟨ho, hImp (by simp), hAgr'⟩
 
 /-- `emitExtCallBody` of a STATICCALL under `{ … }`. `assign = none` is
 `Stmt.view`; `some (identV tag d)` is `Op.view` after `let v := 0`.
@@ -1159,12 +1467,13 @@ theorem stmt_sim_view_bwd {S E ε : Type}
     execStmts_one h
   have hbit := extView_block_bwd tag o hR hctx henv hAgr hOr hNR hfuns hwfCall hsel
     hok (.inl rfl) hblkStmt
-  rw [stmt_run_view]
   cases hrun : Tx.run (Op.denote Γ env (.view target sel args ret)) ctx w with
   | error e =>
+    simp [Stmt.denote, Tx.run_bind, hrun]
     simpa [hrun] using hbit
   | ok p =>
     rcases p with ⟨v, w'⟩
+    simp [Stmt.denote, Tx.run_bind, Tx.run_pure, hrun]
     rw [hrun] at hbit
     rcases hbit with ⟨ho, -, hAgr', hImp, -⟩
     exact ⟨ho, hImp (by simp), hAgr'⟩
