@@ -1,14 +1,16 @@
 import Lsc.Compiler.CoreExtSimDefs
 import Lsc.Compiler.Proof.CoreExtSimProof
 import Lsc.Compiler.CoreDefs
+import Lsc.Compiler.ExtOracleTheorems
 
 set_option linter.unusedVariables false
 
 /-!
 Core to Yul for functions that may CALL out. A Yul run, which sees the
 EVM CALL success bit, is predicted by the high-level model under
-`Oracle.ofExt`. Reentrancy is not modelled (`NoReentry` is the only
-callee hypothesis); everything else about the callee is adversarial.
+`Oracle.ofExt`. Reentrancy into this contract reverts while the
+transient lock is held (`ExtOracle.noReentry`); everything else about
+the callee is adversarial.
 Constructors are excluded.
 -/
 
@@ -36,10 +38,10 @@ theorem core_sim_ext_callFree {S E ε}
 /-- If the compiler accepted a runtime function that may CALL out, every
 Yul run of the emitted block is predicted by the high-level model with
 `w.oracle = Oracle.ofExt o`, and `ExtAgree` holds on success.
-`NoReentry o ctx.self` is the only assumption about the callee
-(reentrancy is not modelled); everything else is adversarial. Unlike
-`toYulFn_correct_callFree` this is backward (every Yul run, not every
-high-level outcome). -/
+Reentrancy into this contract reverts while the transient lock is held
+(`ExtOracle.noReentry`); everything else about the callee is
+adversarial. Unlike `toYulFn_correct_callFree` this is backward (every
+Yul run, not every high-level outcome). -/
 theorem toYulFn_correct_ext {S E ε : Type}
     {c : ContractDef} {Γ : ContractSchema S ExtState E ε}
     (hΓ : Γ.st.Lawful c.fields) (κ : List UInt8 → U256) (hκ : KeccakSep c κ)
@@ -50,10 +52,9 @@ theorem toYulFn_correct_ext {S E ε : Type}
     (ctx : Ctx) (w : World S ExtState E) (st0 : EvmState)
     (hctx : ctxRel ctx st0) (hR : R c Γ κ w st0)
     (hAgr : ExtAgree ctx.self w.ext st0)
-    (hOr : w.oracle = Oracle.ofExt o)
-    (hNR : ExtOracle.NoReentry o ctx.self) :
+    (hOr : w.oracle = Oracle.ofExt o) :
     ToYulFnCorrectExt c Γ κ o f yul ctx w st0 :=
   Proof.toYulFn_correct_ext hΓ κ hκ o f hf hS2 hlen hbound yul hyul
-    ctx w st0 hctx hR hAgr hOr hNR
+    ctx w st0 hctx hR hAgr hOr (ExtOracle.noReentry o ctx.self)
 
 end Lsc.Compiler

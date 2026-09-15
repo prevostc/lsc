@@ -39,14 +39,14 @@ theorem bytecode_call_correct_ext {S E ε : Type}
     (hctx : ctxRel ctx yst0) (hR : R c Γ evmKeccak w yst0)
     (hAgr : ExtAgree ctx.self w.ext yst0)
     (hOr : w.oracle = Oracle.ofExt o)
-    (hNR : ExtOracle.NoReentry o ctx.self)
     (himm0 : ∀ k, yst0.env.immutable k = 0)
     (hLock : LockFree yst0) :
     BytecodeCallCorrectExt c Γ evmKeccak o ctx w yst0 rt is := by
   intro st' out hrun
   have hpred : EvmCallRunExt c Γ evmKeccak o ctx w yst0 st' out :=
     runtimeBlock_correct_ext c Γ hΓ evmKeccak hκ o
-      hctor hS2 hlen hbound rt hrt ctx w yst0 hctx hR hAgr hOr hNR hLock
+      hctor hS2 hlen hbound rt hrt ctx w yst0 hctx hR hAgr hOr
+      (ExtOracle.noReentry o ctx.self) hLock
       st' out hrun
   refine ⟨hpred, ?_⟩
   have himm : ∀ key, unpatchedImmutables key =
@@ -167,16 +167,15 @@ theorem evmCallRunExtAll_of_progress {S E ε : Type}
     (hctx : ctxRel ctx yst0) (hR : R c Γ evmKeccak w yst0)
     (hAgr : ExtAgree ctx.self w.ext yst0)
     (hOr : w.oracle = Oracle.ofExt o)
-    (hNR : ExtOracle.NoReentry o ctx.self)
     (himm0 : ∀ k, yst0.env.immutable k = 0)
     (hLock : LockFree yst0) :
     ∃ σ' ξ', EvmCallRunExtAll c Γ evmKeccak o ctx w is yst0 σ' ξ' := by
   obtain ⟨st', out, hrun⟩ :=
     yul_progress c Γ hΓ evmKeccak hκ o hctor hS2 hlen hbound rt hrt
-      ctx w yst0 hctx hR hNR
+      ctx w yst0 hctx hR (ExtOracle.noReentry o ctx.self)
   have ⟨hpred, hEvm⟩ :=
     bytecode_call_correct_ext c Γ hΓ hκ o hCalls hctor hS2
-      hlen hbound rt hrt is hcomp ctx w yst0 hctx hR hAgr hOr hNR himm0 hLock
+      hlen hbound rt hrt is hcomp ctx w yst0 hctx hR hAgr hOr himm0 hLock
       st' out hrun
   set stObs := committedState yst0 st'
   refine ⟨stObs.storage, evmForeign stObs, ?_⟩

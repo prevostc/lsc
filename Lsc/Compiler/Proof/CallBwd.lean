@@ -1,4 +1,5 @@
 import Lsc.Compiler.Proof.CallFwd
+import Lsc.Compiler.Proof.ExtOracleProof
 
 set_option linter.unusedSimpArgs false
 set_option linter.unusedVariables false
@@ -208,7 +209,7 @@ theorem mkCallReq_input (kind : CallKind) (addr : Address) (sel : Nat)
 
 theorem toCalls_call (o : ExtOracle) (req : CallRequest) (st : EvmState)
     (resp : CallResponse) :
-    (toCalls o).Call req st resp ↔ resp = o req (ExtView.ofState st) :=
+    (toCalls o).Call req st resp ↔ resp = toCall o req st :=
   Iff.rfl
 
 theorem VEnv.set_cons_ne_open {D : Dialect} {x y : Ident} {vx vy : D.Value}
@@ -372,7 +373,8 @@ theorem stmt_run_view {S X E ε} {Γ : ContractSchema S X E ε}
 
 /-- `emitExtCallBody` of a CALL under `{ … }`. `assign = none` is `Stmt.call`;
 `some (identV tag d)` is `Op.call` after `let v := 0`. Reentrancy is excluded
-by `NoReentry`; everything else about the callee is adversarial. -/
+by the runtime lock (`toCall` restores `self`); everything else about the
+callee is adversarial. -/
 theorem extCall_block_bwd {S E ε : Type}
     {c : ContractDef} {Γ : ContractSchema S ExtState E ε}
     {κ ctx} {w : World S ExtState E} {env : List Nat}
@@ -472,19 +474,25 @@ theorem extCall_block_bwd {S E ε : Type}
       have haddrP : stP.env.address = BitVec.ofNat 256 ctx.self := by
         rcases hMO with ⟨_, _, _, _, _, _, ha, _, _, _, _⟩
         exact ha.trans (ctxRel_address hctx)
-      have hresp : resp = o (mkCallReq .call (target.eval env) sel
-          (args.map (·.eval env))) w.ext := by
+      have hY : resp = toCall o (mkCallReq .call (target.eval env) sel
+          (args.map (·.eval env))) stP := by
         have hY := (toCalls_call o _ stP resp).mp hCallR
-        have hign := hIgn (mkCallReq .call (target.eval env) sel
-            (args.map (·.eval env))) w.ext stP haddrP hAgrP
-        rw [hreq] at hY
-        exact hY.trans hign.symm
+        rwa [hreq] at hY
+      have hign := hIgn (mkCallReq .call (target.eval env) sel
+          (args.map (·.eval env))) w.ext stP haddrP hAgrP
+      let raw := callRaw o (mkCallReq .call (target.eval env) sel
+        (args.map (·.eval env))) (ExtView.ofState stP)
       have hcore_call :
           w.oracle.call (target.eval env) sel (args.map (·.eval env)) w.ext =
             if resp.success then
-              some (abiWords resp.returndata, ofCallSuccess w.ext resp)
+              some (abiWords resp.returndata, ofCallSuccess w.ext raw)
             else none := by
-        simp [hOr, Oracle.ofExt, hresp]
+        simp [hOr, Oracle.ofExt, hign]
+        have hs : resp.success = raw.success := by
+          change _ = (callRaw o _ _).success; rw [hY]; rfl
+        have hr : resp.returndata = raw.returndata := by
+          change _ = (callRaw o _ _).returndata; rw [hY]; rfl
+        simp [hs, hr, raw]
       by_cases hsucc : resp.success = true
       · have hflag : resp.flag ≠ 0 := (flag_ne_zero_iff resp).mpr hsucc
         have hmload : 32 ≤ resp.returndata.length →
@@ -500,31 +508,30 @@ theorem extCall_block_bwd {S E ε : Type}
             stP haddrP
           have hni' : resp.world.storage = stP.storage ∧
               resp.world.transient = stP.transient ∧
-              resp.world.selfBalance = stP.env.selfBalance ∧
-              resp.world.balanceOf = stP.env.balanceOf ∧
               (∀ l ∈ resp.world.logs, l.address ≠ stP.env.address) := by
-            have heq : o (mkCallReq .call (target.eval env) sel
-                  (args.map (·.eval env))) w.ext =
-                o (mkCallReq .call (target.eval env) sel
-                  (args.map (·.eval env))) (ExtView.ofState stP) :=
-              hIgn _ w.ext stP haddrP hAgrP
-            have hni' := hni
-            rw [← heq, ← hresp] at hni'
-            exact hni'
+            simpa [hY] using hni
           have hR2 := R_finishCall_success (resp := resp) (iOff := abiPtr)
             (iSz := 4 + 32 * args.length) (oOff := abiPtr) (oSz := 32)
-            (R_memOnly hR hMO) hsucc hni'.1 hni'.2.2.2.2
+            (R_memOnly hR hMO) hsucc hni'.1 hni'.2.2
           have hR3 := R_memOnly hR2 hMOS
-          have hAgr2 := ExtAgree_finishCall_success (resp := resp) (iOff := abiPtr)
-            (iSz := 4 + 32 * args.length) (oOff := abiPtr) (oSz := 32) hAgrP hsucc
-          have hAgr3 := ExtAgree_memOnly hAgr2 hEVS
+          have hsuccRaw : raw.success = true := by
+            have hs : resp.success = raw.success := by
+              change _ = (callRaw o _ _).success; rw [hY]; rfl
+            exact hs.symm.trans hsucc
+          have hAgr2 := ExtAgree_finishCall_restored (raw := raw) (iOff := abiPtr)
+            (iSz := 4 + 32 * args.length) (oOff := abiPtr) (oSz := 32) hAgrP hsuccRaw
+          have hAgr2' : ExtAgree ctx.self (ofCallSuccess w.ext raw)
+              (finishCall .call stP resp abiPtr (4 + 32 * args.length) abiPtr 32) := by
+            convert hAgr2
+            rw [hY]; rfl
+          have hAgr3 := ExtAgree_memOnly hAgr2' hEVS
           have hctx2 := ctxRel_memOnly
             (ctxRel_finishCall (ctxRel_memOnly hctx hMO) .call resp
               abiPtr (4 + 32 * args.length) abiPtr 32) hMOS
           let sval := suffixVal ret stCall
           let vNat := sval.toNat
-          let w' : World S ExtState E := { w with ext := ofCallSuccess w.ext resp }
-          have hR4 := R_with_ext (ofCallSuccess w.ext resp) hR3
+          let w' : World S ExtState E := { w with ext := ofCallSuccess w.ext raw }
+          have hR4 := R_with_ext (ofCallSuccess w.ext raw) hR3
           have hrun : Tx.run (Op.denote Γ env (.call target sel args ret)) ctx w =
               .ok (vNat, w') := by
             simp [Op.denote]
@@ -901,17 +908,25 @@ theorem extView_block_bwd {S E ε : Type}
       have haddrP : stP.env.address = BitVec.ofNat 256 ctx.self := by
         rcases hMO with ⟨_, _, _, _, _, _, ha, _, _, _, _⟩
         exact ha.trans (ctxRel_address hctx)
-      have hresp : resp = o (mkCallReq .staticcall (target.eval env) sel
-          (args.map (·.eval env))) w.ext := by
+      have hY : resp = toCall o (mkCallReq .staticcall (target.eval env) sel
+          (args.map (·.eval env))) stP := by
         have hY := (toCalls_call o _ stP resp).mp hCallR
-        have hign := hIgn (mkCallReq .staticcall (target.eval env) sel
-            (args.map (·.eval env))) w.ext stP haddrP hAgrP
-        rw [hreq] at hY
-        exact hY.trans hign.symm
+        rwa [hreq] at hY
+      have hign := hIgn (mkCallReq .staticcall (target.eval env) sel
+          (args.map (·.eval env))) w.ext stP haddrP hAgrP
       have hcore_view :
           w.oracle.view (target.eval env) sel (args.map (·.eval env)) w.ext =
             if resp.success then abiWords resp.returndata else [0, 0] := by
-        simp [hOr, Oracle.ofExt, hresp]
+        simp [hOr, Oracle.ofExt, hign]
+        have hs : resp.success =
+            (callRaw o (mkCallReq .staticcall (target.eval env) sel
+              (args.map (·.eval env))) (ExtView.ofState stP)).success := by
+          rw [hY]; rfl
+        have hr : resp.returndata =
+            (callRaw o (mkCallReq .staticcall (target.eval env) sel
+              (args.map (·.eval env))) (ExtView.ofState stP)).returndata := by
+          rw [hY]; rfl
+        simp [hs, hr]
       have hmload : 32 ≤ resp.returndata.length →
           loadWord stCall.memory abiPtr = wordFrom resp.returndata 0 :=
         fun hlen =>

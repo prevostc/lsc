@@ -66,9 +66,18 @@ Other contracts cannot see this contract's private memory or `msize`,
 which is true of the EVM. Wrapping with `toCalls` yields `ExternalCalls`
 that is scratch-insensitive on every reservation interval (needed by
 powdr's spill theorem) and total (`toCalls_total`). The oracle is a
-function of the request and the observable world. `NoReentry` (`hNR`) is
-still the only callee hypothesis of the S2/transport theorems (slice 8C
-drops it). Example theorems that mention the token take `IERC20.Spec`.
+function of the request and the observable world. The oracle model
+restores `self`'s storage, transient storage, and self-attributed logs
+after every external CALL. This is justified because (i) in the EVM
+only a frame executing at address `self` can write `self`'s storage or
+emit `self`'s logs (no EXTSLOAD/EXTSSTORE; CALLCODE/DELEGATECALL by
+others run at *their* address) — an EVM fact not mechanized here — and
+(ii) such a frame is a CALL/STATICCALL into our runtime, which reverts in
+the 11-step lock prefix with the parent snapshot restored
+(`nested_lock_reverts`, mechanized in 8C-1 against evm-semantics). ETH
+balances are not restored: a callee can credit `self` via `SELFDESTRUCT`
+without running our code, and `balanceOf` of other accounts is a real
+CALL effect. Example theorems that mention the token take `IERC20.Spec`.
 S1 uses a closed model instead.
 
 **(e) Adversary scope** (`SECURITY_MODEL.md`): any call sequence from any
@@ -109,8 +118,15 @@ Not derived from powdr:
   acquire/release). Held lock ⇒ revert, empty returndata, committed
   storage/transient/logs unchanged (`lock_held_reverts_yul` /
   `lock_held_reverts_yul_open` / `lock_held_reverts_evm`; no oracle).
-  `hNR : ExtOracle.NoReentry` remains on S2/transport until 8C
-  (nested-frame `compile_correct`, code-at-self pin, isolation lemma).
+  Nested CALL/STATICCALL into the compiled runtime with the lock held
+  reverts in the prefix and restores the parent snapshot
+  (`nested_lock_reverts`, `nested_lock_restores_self`). S2/transport
+  theorems do not take `hNR`; isolation of `self`'s storage/transient/
+  self-logs is the `toCall` restore (`ExtOracle.noReentry`). ETH balances
+  are not covered (`SELFDESTRUCT` to `self`, foreign `balanceOf`).
+  Opt-out via `@[reentrant]` is 8C-3. CALLCODE/DELEGATECALL are not
+  emitted. The EVM fact that only a `self` frame can write `self`
+  storage/logs is not mechanized (TCB §(d)).
 - Core outside `S2Frag` (e.g. wrapping `letPure` other than `id`, nested pair
   returns, `require`/`revert`/`emit` arities other than 0/1/3/4).
 - Amount-typed compiler in general: bytecode glue is `Core.denote` (Nat).

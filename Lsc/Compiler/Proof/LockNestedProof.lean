@@ -694,6 +694,39 @@ theorem nested_lock_reverts {c : ContractDef} {rt : YBlock} {is : List Instr}
   · exact Step.returning (StepReturn.callReturnRevert sR f rest hhaltR hcsR'
       hcreate)
 
+/-- Nested held-lock CALL/STATICCALL restores `self`'s storage, transient
+storage, code, and nonce from the parent snapshot. Balance is not
+claimed. -/
+theorem nested_lock_restores_self {c : ContractDef} {rt : YBlock} {is : List Instr}
+    {self : AccountAddress} {s : State} {f : Frame} {rest : List Frame}
+    (hrt : runtimeBlock c = some rt) (hcomp : compileBlock rt = some is)
+    (hf : NestedFrame (assemble is) s)
+    (hself : s.executionEnv.address = self)
+    (hacc : (s.accountMap self).code = assemble is)
+    (hpc : s.pc = EvmSemantics.UInt256.ofNat 0)
+    (hstack : s.stack = [])
+    (hlock : (s.accountMap self).tstorage ⟨0⟩ ≠ ⟨0⟩)
+    (hcs : s.callStack = f :: rest)
+    (hcreate : f.createAddr = none) :
+    ∃ b, b ≤ lockPrefixGasBound ∧
+      (b ≤ s.gasAvailable →
+        ∃ sR sP, Steps s sR ∧ sR.halt = .Reverted ∧ sR.hReturn.toList = [] ∧
+          sR.callStack = f :: rest ∧ Step sR sP ∧
+          (sP.accountMap self).storage = (f.snapAccountMap self).storage ∧
+          (sP.accountMap self).tstorage = (f.snapAccountMap self).tstorage ∧
+          (sP.accountMap self).code = (f.snapAccountMap self).code ∧
+          (sP.accountMap self).nonce = (f.snapAccountMap self).nonce ∧
+          sP.substate = f.snapSubstate) := by
+  obtain ⟨b, hb, hpath⟩ :=
+    nested_lock_reverts hrt hcomp hf hself hacc hpc hstack hlock hcs hcreate
+  refine ⟨b, hb, fun hgas => ?_⟩
+  obtain ⟨sR, sP, hS, hhalt, hret, hcs', hstep, ham, hsub⟩ := hpath hgas
+  refine ⟨sR, sP, hS, hhalt, hret, hcs', hstep, ?_, ?_, ?_, ?_, hsub⟩
+  · rw [ham]
+  · rw [ham]
+  · rw [ham]
+  · rw [ham]
+
 end Proof
 
 end Lsc.Compiler

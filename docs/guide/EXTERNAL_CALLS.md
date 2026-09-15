@@ -7,8 +7,8 @@ table, typed calls, `I.Impl`, and `Impl.ofRef`. `asset.impl` is that
 `Impl` over `WorldView` (oracle plus `ext`). `I.Spec` is a user-written
 `Prop` over `T : I.Impl …` (success as
 hypothesis, state delta as conclusion). The callee is the world's `Oracle`;
-a `Spec` hypothesis restricts it. Reentrancy during a call is not modelled
-(`self` is unchanged).
+a `Spec` hypothesis restricts it. Reentrancy into this contract while the
+transient lock is held reverts; the CALL model restores `self` storage.
 
 ## Binding a token
 
@@ -31,7 +31,9 @@ safeTransferFrom tok who me assets .TransferFailed
 
 Cpamm binds two tokens, `token0` and `token1`, and requires `t0 ≠ t1` in
 the constructor. External transfers run **after** requires and storage
-updates. That is sound only because reentrancy is not modelled.
+updates. A nested CALL/STATICCALL into this contract while the runtime
+lock is held reverts; the CALL model restores `self` storage / transient /
+self-logs (`ExtOracle.noReentry`). ETH balances are not restored.
 
 ## What `IERC20.Spec` means here
 

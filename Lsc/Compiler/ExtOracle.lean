@@ -50,9 +50,66 @@ theorem ExtView.ofState_congr {l r : EvmState}
 /-- External-call oracle that is memory-free by construction. -/
 abbrev ExtOracle := CallRequest → ExtView → CallResponse
 
-/-- Apply a memory-blind oracle to a full Yul state by dropping memory/`msize`. -/
+/-- Drop executing-account storage/transient, the `storageOf`/`transientOf`
+slices at `self`, and caller-local logs/returndata/halt/selfdestructs. A
+real callee cannot observe those fields without reentering `self`. -/
+def scrubSelfWord (self : U256) (x : Lsc.ExtState) : Lsc.ExtState :=
+  let selfKey := accountKey self
+  { x with
+    storage := fun _ => 0
+    transient := fun _ => 0
+    logs := []
+    returndata := []
+    halted := none
+    selfdestructs := []
+    env := { x.env with
+      storageOf := fun a k =>
+        if accountKey a = selfKey then 0 else x.env.storageOf a k
+      transientOf := fun a k =>
+        if accountKey a = selfKey then 0 else x.env.transientOf a k } }
+
+/-- `scrubSelfWord` at the EVM encoding of an `Address`. -/
+def scrubSelf (self : Address) (x : Lsc.ExtState) : Lsc.ExtState :=
+  scrubSelfWord (BitVec.ofNat 256 self) x
+
+/-- Two views agree on everything a callee can see without reentering `self`. -/
+def agreeExceptSelf (self : Address) (x y : Lsc.ExtState) : Prop :=
+  scrubSelf self x = scrubSelf self y
+
+/-- `w.ext` matches the callee-visible part of `st` (our storage may lag
+local `sstore`s; the next CALL refreshes it from the response world). -/
+def ExtAgree (self : Address) (x : Lsc.ExtState) (st : EvmState) : Prop :=
+  agreeExceptSelf self x (ExtView.ofState st)
+
+/-- Restore this contract's storage and transient storage from the
+pre-call view, and drop logs attributed to `self`. Justified by the
+runtime lock: a nested CALL/STATICCALL into the compiled runtime with
+`tstorage[0] ≠ 0` reverts in the 11-step prefix and
+`callReturnRevert` restores the parent snapshot
+(`nested_lock_reverts`). ETH balances are not restored: a callee can
+credit `self` via `SELFDESTRUCT` without executing our code, and
+`balanceOf` of foreign accounts is a real CALL effect. -/
+def restoreSelfWorld (x : ExtView) (world : CallWorld) : CallWorld :=
+  { world with
+    storage := x.storage
+    transient := x.transient
+    logs := world.logs.filter (fun l => l.address ≠ x.env.address) }
+
+/-- Apply `o` to the callee-visible (self-scrubbed) view. -/
+def callRaw (o : ExtOracle) (req : CallRequest) (x : ExtView) : CallResponse :=
+  o req (scrubSelfWord x.env.address x)
+
+/-- Install the lock restore on a raw oracle response. -/
+def restoreCall (x : ExtView) (resp : CallResponse) : CallResponse :=
+  { resp with world := restoreSelfWorld x resp.world }
+
+/-- Apply a memory-blind oracle to a full Yul state by dropping memory/`msize`,
+hiding `self`'s storage from the callee, and restoring `self`'s storage /
+transient / self-logs after the call (the lock makes those writes
+uncommitable). -/
 def toCall (o : ExtOracle) (req : CallRequest) (st : EvmState) : CallResponse :=
-  o req (ExtView.ofState st)
+  let x := ExtView.ofState st
+  restoreCall x (callRaw o req x)
 
 /-- `ExternalCalls` wrapper: the unique response is `toCall o req st`. -/
 def toCalls (o : ExtOracle) : ExternalCalls where
@@ -117,54 +174,24 @@ def installWorld (x : Lsc.ExtState) (world : CallWorld) : Lsc.ExtState where
 def ofCallSuccess (x : Lsc.ExtState) (resp : CallResponse) : Lsc.ExtState :=
   { installWorld x resp.world with returndata := resp.returndata }
 
-/-- Drop executing-account storage/transient, the `storageOf`/`transientOf`
-slices at `self`, and caller-local logs/returndata/halt/selfdestructs. A
-real callee cannot observe those fields without reentering `self`. -/
-def scrubSelf (self : Address) (x : Lsc.ExtState) : Lsc.ExtState :=
-  let selfKey := accountKey (BitVec.ofNat 256 self)
-  { x with
-    storage := fun _ => 0
-    transient := fun _ => 0
-    logs := []
-    returndata := []
-    halted := none
-    selfdestructs := []
-    env := { x.env with
-      storageOf := fun a k =>
-        if accountKey a = selfKey then 0 else x.env.storageOf a k
-      transientOf := fun a k =>
-        if accountKey a = selfKey then 0 else x.env.transientOf a k } }
-
-/-- Two views agree on everything a callee can see without reentering `self`. -/
-def agreeExceptSelf (self : Address) (x y : Lsc.ExtState) : Prop :=
-  scrubSelf self x = scrubSelf self y
-
-/-- `w.ext` matches the callee-visible part of `st` (our storage may lag
-local `sstore`s; the next CALL refreshes it from the response world). -/
-def ExtAgree (self : Address) (x : Lsc.ExtState) (st : EvmState) : Prop :=
-  agreeExceptSelf self x (ExtView.ofState st)
-
-/-- Reentrancy is not modelled. This is the only assumption S2 theorems make
-about the callee; everything else is adversarial.
-
-On the true Yul view (`ExtView.ofState st` at `self`), a response must not
-change this contract's storage, transient storage, or ETH balances, and must
-not emit logs attributed to `self`. The oracle also ignores those caller-local
-fields of the request view, so Core's `w.ext` may lag local `sstore`s until
-the next CALL installs the response world. -/
+/-- The lock restore plus input scrub: a CALL through `toCall` cannot
+overwrite this contract's storage or transient storage, and cannot
+append a log attributed to `self`. ETH balances are not constrained
+(`SELFDESTRUCT`-to-self and foreign `balanceOf` updates are real
+effects of a non-reentering callee). The oracle is not given
+caller-local storage: Core's lagged `w.ext` and the Yul view agree
+after `scrubSelf`. -/
 structure ExtOracle.NoReentry (o : ExtOracle) (self : Address) : Prop where
   noInterfere : ∀ (req : CallRequest) (st : EvmState),
     st.env.address = BitVec.ofNat 256 self →
-      let resp := o req (ExtView.ofState st)
+      let resp := toCall o req st
       resp.world.storage = st.storage ∧
       resp.world.transient = st.transient ∧
-      resp.world.selfBalance = st.env.selfBalance ∧
-      resp.world.balanceOf = st.env.balanceOf ∧
       (∀ l ∈ resp.world.logs, l.address ≠ st.env.address)
   ignoresSelf : ∀ (req : CallRequest) (x : ExtView) (st : EvmState),
     st.env.address = BitVec.ofNat 256 self →
     agreeExceptSelf self x (ExtView.ofState st) →
-      o req x = o req (ExtView.ofState st)
+      callRaw o req x = callRaw o req (ExtView.ofState st)
 
 /-- Decode ABI return data against a Core word. `boolOpt` is empty → `1`, or
 exactly one ABI word with `v = 0/1` from the word being zero/nonzero.
@@ -187,16 +214,18 @@ def abiInput (sel : Nat) (args : List Nat) : List UInt8 :=
 issues a CALL request with packed `sel ‖ args`; failure (`success = false`)
 is `none`. `view` issues a STATICCALL request and is total (a failed
 STATICCALL becomes a two-word poison so `word`/`boolOpt` decode fails).
-The post-`ext` of a successful CALL is the response world; STATICCALL does
-not update `ext`. -/
+Both apply `o` to the self-scrubbed view (`callRaw`), matching `toCall`'s
+input. The post-`ext` of a successful CALL is the unrestored response
+world (self storage is not part of `ExtAgree`); STATICCALL does not
+update `ext`. -/
 def _root_.Lsc.Oracle.ofExt (o : ExtOracle) : Lsc.Oracle Lsc.ExtState where
   call addr sel args x :=
-    let resp := o (mkCallReq .call addr sel args) x
+    let resp := callRaw o (mkCallReq .call addr sel args) x
     if resp.success then
       some (abiWords resp.returndata, ofCallSuccess x resp)
     else none
   view addr sel args x :=
-    let resp := o (mkCallReq .staticcall addr sel args) x
+    let resp := callRaw o (mkCallReq .staticcall addr sel args) x
     if resp.success then abiWords resp.returndata else [0, 0]
 
 end Lsc.Compiler

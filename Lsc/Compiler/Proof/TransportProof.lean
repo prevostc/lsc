@@ -208,7 +208,6 @@ theorem transport_trace_ext (T : TransportSetup S ExtState E ε)
     (hlog : w.log = []) (hwf : WorldWF T.c T.Γ w)
     (hWF : CallsWF T self calls)
     (hOr : w.oracle = Oracle.ofExt Xpkg.oracle)
-    (hNR : ExtOracle.NoReentry Xpkg.oracle self)
     (Inv : World S ExtState E → Prop)
     (hP : PreservesInvAt T.spec Inv self)
     (hInvR : InvReframe Inv Xpkg.oracle)
@@ -247,15 +246,13 @@ theorem transport_trace_ext (T : TransportSetup S ExtState E ε)
     | cons hstart h1 htl =>
       let wF := reframeExt Xpkg.oracle w call.calldata σ ξ call.ctx
       have hAgr := ExtAgree_reframeExt Xpkg.oracle w call.calldata σ ξ call.ctx
-      have hNR' : ExtOracle.NoReentry Xpkg.oracle call.ctx.self := by
-        simpa [htgt] using hNR
       have hsF : storageRel T.c T.Γ evmKeccak wF.self σ := by simpa [wF] using hs
       have hlogF : wF.log = [] := by simpa [wF] using hlog
       have hwfF : WorldWF T.c T.Γ wF :=
         WorldWF_of_self (w := w) (by simp [wF]) hwf
       obtain ⟨σ₁, ξ₁, hRun, hpost⟩ :=
         transport_step_ext T Xpkg call.ctx call.calldata wF σ ξ hctxWF hcd
-          hsF hlogF hwfF hAgr (by simp [wF]) hNR'
+          hsF hlogF hwfF hAgr (by simp [wF])
       have heq := evmCallRunξ_eq_of_start h1 hRun hstart
       rw [heq.1, heq.2] at htl
       cases hdec : decodeCall T call.ctx call.calldata with
@@ -302,7 +299,6 @@ theorem transport_claim_ext (T : TransportSetup S ExtState E ε)
     (hlog : w.log = []) (hwf : WorldWF T.c T.Γ w)
     (hWF : CallsWF T self calls)
     (hOr : w.oracle = Oracle.ofExt Xpkg.oracle)
-    (hNR : ExtOracle.NoReentry Xpkg.oracle self)
     (hA : NoAuthAlong Auth a (decodeTrace T calls) w)
     (hw : Inv w)
     (hE : EvmTraceRunExtAll T.is calls σ ξ σ' ξ') :
@@ -335,15 +331,13 @@ theorem transport_claim_ext (T : TransportSetup S ExtState E ε)
     | cons hstart h1 htl =>
       let wF := reframeExt Xpkg.oracle w call.calldata σ ξ call.ctx
       have hAgr := ExtAgree_reframeExt Xpkg.oracle w call.calldata σ ξ call.ctx
-      have hNR' : ExtOracle.NoReentry Xpkg.oracle call.ctx.self := by
-        simpa [htgt] using hNR
       have hsF : storageRel T.c T.Γ evmKeccak wF.self σ := by simpa [wF] using hs
       have hlogF : wF.log = [] := by simpa [wF] using hlog
       have hwfF : WorldWF T.c T.Γ wF :=
         WorldWF_of_self (w := w) (by simp [wF]) hwf
       obtain ⟨σ₁, ξ₁, hRun, hpost⟩ :=
         transport_step_ext T Xpkg call.ctx call.calldata wF σ ξ hctxWF hcd
-          hsF hlogF hwfF hAgr (by simp [wF]) hNR'
+          hsF hlogF hwfF hAgr (by simp [wF])
       have heq := evmCallRunξ_eq_of_start h1 hRun hstart
       rw [heq.1, heq.2] at htl
       cases hdec : decodeCall T call.ctx call.calldata with
@@ -399,9 +393,8 @@ theorem transport_exists_ext (T : TransportSetup S ExtState E ε)
     (σ : U256 → U256) (ξ : Foreign)
     (hs : storageRel T.c T.Γ evmKeccak w.self σ)
     (hwf : WorldWF T.c T.Γ w)
-    (hb : EncodeBounded T tr) (hW : Wf self tr) (hw : Inv w)
-    (hOr : w.oracle = Oracle.ofExt Xpkg.oracle)
-    (hNR : ExtOracle.NoReentry Xpkg.oracle self) :
+    (hb : EncodeBounded T tr) (hW : Wf self tr)     (hw : Inv w)
+    (hOr : w.oracle = Oracle.ofExt Xpkg.oracle) :
     ∃ σ' ξ' w',
       EvmTraceRunExt T.is (encodeCalls T tr) σ ξ σ' ξ' ∧
       storageRel T.c T.Γ evmKeccak w'.self σ' ∧
@@ -441,13 +434,11 @@ theorem transport_exists_ext (T : TransportSetup S ExtState E ε)
       let wF := reframeExt Xpkg.oracle wL (encodeCall T c).calldata σ ξ c.toCtx
       have hAgr := ExtAgree_reframeExt Xpkg.oracle wL
         (encodeCall T c).calldata σ ξ c.toCtx
-      have hNR' : ExtOracle.NoReentry Xpkg.oracle c.toCtx.self := by
-        simpa [Call.toCtx, htgt] using hNR
       obtain ⟨σ₁, ξ₁, h1, hpost⟩ :=
         transport_step_ext T Xpkg c.toCtx (encodeCall T c).calldata
           wF σ ξ hctxWF hcd (by simpa [wF] using hs) (by simp [wF, wL])
           (WorldWF_of_self (w := wL) (by simp [wF]) (WorldWF_log [] hwf))
-          hAgr (by simp [wF]) hNR'
+          hAgr (by simp [wF])
       simp only [hdecC] at hpost
       let w1 : World S ExtState E := { step (.call c) wF with log := [] }
       rcases hpost with ⟨hs1, hwf1, stObs, _hσ, _hξobs, _hAgrObs⟩
@@ -480,8 +471,7 @@ theorem transport_exists_claim_ext (T : TransportSetup S ExtState E ε)
     (hwf : WorldWF T.c T.Γ w)
     (hb : EncodeBounded T tr) (hW : Wf self tr) (hw : Inv w)
     (hA : NoAuthAlong Auth a (callsOf tr) w)
-    (hOr : w.oracle = Oracle.ofExt Xpkg.oracle)
-    (hNR : ExtOracle.NoReentry Xpkg.oracle self) :
+    (hOr : w.oracle = Oracle.ofExt Xpkg.oracle) :
     ∃ σ' ξ' w',
       EvmTraceRunExt T.is (encodeCalls T tr) σ ξ σ' ξ' ∧
       storageRel T.c T.Γ evmKeccak w'.self σ' ∧
@@ -524,13 +514,11 @@ theorem transport_exists_claim_ext (T : TransportSetup S ExtState E ε)
       let wF := reframeExt Xpkg.oracle wL (encodeCall T c).calldata σ ξ c.toCtx
       have hAgr := ExtAgree_reframeExt Xpkg.oracle wL
         (encodeCall T c).calldata σ ξ c.toCtx
-      have hNR' : ExtOracle.NoReentry Xpkg.oracle c.toCtx.self := by
-        simpa [Call.toCtx, htgt] using hNR
       obtain ⟨σ₁, ξ₁, h1, hpost⟩ :=
         transport_step_ext T Xpkg c.toCtx (encodeCall T c).calldata
           wF σ ξ hctxWF hcd (by simpa [wF] using hs) (by simp [wF, wL])
           (WorldWF_of_self (w := wL) (by simp [wF]) (WorldWF_log [] hwf))
-          hAgr (by simp [wF]) hNR'
+          hAgr (by simp [wF])
       simp only [hdecC] at hpost
       let w1 : World S ExtState E := { step (.call c) wF with log := [] }
       rcases hpost with ⟨hs1, hwf1, stObs, _hσ, _hξobs, _hAgrObs⟩

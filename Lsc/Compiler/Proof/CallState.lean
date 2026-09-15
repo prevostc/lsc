@@ -149,8 +149,31 @@ theorem agreeExceptSelf_frame {self : Address} {x y : Lsc.ExtState}
   exact ⟨haddr, ho, hc, hv, hg, hct, hs', hcb, ht, hn, hpr, hgl, hci, hbf, hbb,
     hcd, hcode, hkec, hbh, hbh2, hdo, hds, himm⟩
 
+/-- Successful CALL: Core `ofCallSuccess` on the unrestored oracle response
+matches Yul `finishCall` of the lock-restored response, after `scrubSelf`
+(local storage / transient / logs / returndata are dropped). -/
+theorem ExtAgree_finishCall_restored {self : Address} {x : Lsc.ExtState}
+    {st : EvmState} {raw : CallResponse} {iOff iSz oOff oSz : Nat}
+    (h : ExtAgree self x st) (hs : raw.success = true) :
+    ExtAgree self (ofCallSuccess x raw)
+      (finishCall .call st (restoreCall (ExtView.ofState st) raw)
+        iOff iSz oOff oSz) := by
+  unfold ExtAgree agreeExceptSelf at h ⊢
+  have hf := agreeExceptSelf_frame (self := self) h
+  have hk : CallKind.call ≠ .staticcall := by decide
+  have hsY : (restoreCall (ExtView.ofState st) raw).success = true := by
+    simpa [restoreCall] using hs
+  simp only [ofCallSuccess, finishCall, hs, hsY, hk, and_true, ite_true]
+  unfold scrubSelf scrubSelfWord ExtView.ofState ExtState.ofState installWorld
+    CallWorld.install touchMemory2 touchMemory restoreCall restoreSelfWorld
+  rcases hf with ⟨haddr, ho, hc, hv, hg, hct, hs', hcb, ht, hn, hpr, hgl, hci, hbf, hbb,
+    hcd, hcode, hkec, hbh, hbh2, hdo, hds, himm⟩
+  simp [haddr, ho, hc, hv, hg, hct, hs', hcb, ht, hn, hpr, hgl, hci, hbf, hbb,
+    hcd, hcode, hkec, hbh, hbh2, hdo, hds, himm, ExtView.ofState, ExtState.ofState]
+
 /-- Successful CALL: Core `ofCallSuccess` matches the installed Yul world
-after `scrubSelf` (local storage/logs/returndata dropped). -/
+after `scrubSelf` (local storage/logs/returndata dropped). Same response
+on both sides (the restored `toCall` form). -/
 theorem ExtAgree_finishCall_success {self : Address} {x : Lsc.ExtState}
     {st : EvmState} {resp : CallResponse} {iOff iSz oOff oSz : Nat}
     (h : ExtAgree self x st) (hs : resp.success = true) :
@@ -160,8 +183,8 @@ theorem ExtAgree_finishCall_success {self : Address} {x : Lsc.ExtState}
   have hf := agreeExceptSelf_frame (self := self) h
   have hk : CallKind.call ≠ .staticcall := by decide
   simp only [ofCallSuccess, finishCall, hs, hk, and_true, ite_true]
-  unfold scrubSelf ExtView.ofState ExtState.ofState installWorld CallWorld.install
-    touchMemory2 touchMemory
+  unfold scrubSelf scrubSelfWord ExtView.ofState ExtState.ofState installWorld
+    CallWorld.install touchMemory2 touchMemory
   rcases hf with ⟨haddr, ho, hc, hv, hg, hct, hs', hcb, ht, hn, hpr, hgl, hci, hbf, hbb,
     hcd, hcode, hkec, hbh, hbh2, hdo, hds, himm⟩
   simp [haddr, ho, hc, hv, hg, hct, hs', hcb, ht, hn, hpr, hgl, hci, hbf, hbb,
@@ -183,7 +206,8 @@ theorem ExtAgree_finishCall_noInstall {self : Address} {x : Lsc.ExtState}
     | inl hf => simp [hf]
     | inr hk => simp [hk]
   simp only [finishCall, hpost]
-  simp [scrubSelf, ExtView.ofState, ExtState.ofState, touchMemory2, touchMemory] at h ⊢
+  simp [scrubSelf, scrubSelfWord, ExtView.ofState, ExtState.ofState,
+    touchMemory2, touchMemory] at h ⊢
   exact h
 
 end Lsc.Compiler

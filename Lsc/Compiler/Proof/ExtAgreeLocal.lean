@@ -61,7 +61,7 @@ theorem scrubSelf_sstore (self : Address) (st : EvmState) (slot val : U256)
         env := { st.env with
           storageOf := updAccount st.env.storageOf st.env.address slot val } }) =
       scrubSelf self (ExtView.ofState st) := by
-  unfold scrubSelf ExtView.ofState ExtState.ofState
+  unfold scrubSelf scrubSelfWord ExtView.ofState ExtState.ofState
   simp only [haddr]
   congr
   ext a k
@@ -75,7 +75,7 @@ theorem scrubSelf_tstore (self : Address) (st : EvmState) (slot val : U256)
         env := { st.env with
           transientOf := updAccount st.env.transientOf st.env.address slot val } }) =
       scrubSelf self (ExtView.ofState st) := by
-  unfold scrubSelf ExtView.ofState ExtState.ofState
+  unfold scrubSelf scrubSelfWord ExtView.ofState ExtState.ofState
   simp only [haddr]
   congr
   ext a k
@@ -84,13 +84,13 @@ theorem scrubSelf_tstore (self : Address) (st : EvmState) (slot val : U256)
 theorem scrubSelf_touch (self : Address) (st : EvmState) (p n : Nat) :
     scrubSelf self (ExtView.ofState (touchMemory st p n)) =
       scrubSelf self (ExtView.ofState st) := by
-  simp [scrubSelf, ExtView.ofState, ExtState.ofState, touchMemory]
+  simp [scrubSelf, scrubSelfWord, ExtView.ofState, ExtState.ofState, touchMemory]
 
 theorem scrubSelf_halt (self : Address) (st : EvmState)
     (h : Option (HaltKind × List UInt8)) :
     scrubSelf self (ExtView.ofState { st with halted := h }) =
       scrubSelf self (ExtView.ofState st) := by
-  simp [scrubSelf, ExtView.ofState, ExtState.ofState]
+  simp [scrubSelf, scrubSelfWord, ExtView.ofState, ExtState.ofState]
 
 theorem noExt_all_loop {c post body}
     (hc : noExtExpr c = true) (hp : noExtBlock post = true)
@@ -117,11 +117,11 @@ theorem stepOp_ok_scrub {self : Address} {op : EVM.Op} {args : List U256}
   all_goals (try exact ⟨scrubSelf_sstore self st _ _ haddr, rfl⟩)
   all_goals (try exact ⟨scrubSelf_tstore self st _ _ haddr, rfl⟩)
   all_goals (try exact ⟨by
-      simp [scrubSelf, ExtView.ofState, ExtState.ofState, appendLog, touchMemory],
+      simp [scrubSelf, scrubSelfWord, ExtView.ofState, ExtState.ofState, appendLog, touchMemory],
     by simp [appendLog, touchMemory]⟩)
   all_goals (try exact ⟨scrubSelf_touch self st _ _, by simp [touchMemory]⟩)
   all_goals (try exact ⟨by
-      simp [scrubSelf, ExtView.ofState, ExtState.ofState, touchMemory, touchMemory2,
+      simp [scrubSelf, scrubSelfWord, ExtView.ofState, ExtState.ofState, touchMemory, touchMemory2,
         appendLog],
     by simp [touchMemory, touchMemory2, appendLog]⟩)
 

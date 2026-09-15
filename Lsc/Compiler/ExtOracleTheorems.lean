@@ -11,6 +11,7 @@ this instead of assuming totality.
 
 namespace Lsc.Compiler
 
+open Lsc
 open YulSemantics.EVM
 open YulEvmCompiler.Optimizer
 
@@ -49,5 +50,25 @@ an extra assumption. -/
 theorem guardedExternals_oracle (o : ExtOracle) (base reserved : Nat) :
     GuardedExternals (toCalls o) ExternalCreates.none base reserved :=
   Proof.guardedExternals_oracle o base reserved
+
+/-- A CALL through `toCall` leaves this contract's storage and transient
+storage as they were, and appends no log attributed to this contract.
+ETH balances may still change: a callee can `SELFDESTRUCT` to this
+address without running our code, and `balanceOf` of other accounts is
+a real CALL effect. -/
+theorem noInterfere_of_lock (o : ExtOracle) (req : CallRequest) (st : EvmState) :
+    let resp := toCall o req st
+    resp.world.storage = st.storage ∧
+      resp.world.transient = st.transient ∧
+      (∀ l ∈ resp.world.logs, l.address ≠ st.env.address) :=
+  Proof.noInterfere_of_lock o req st
+
+/-- Every memory-blind oracle, wrapped by `toCall`, satisfies `NoReentry`
+at every address: the wrapper scrubs `self` on the way in and restores
+storage / transient / self-logs on the way out. ETH balances are not
+constrained (`SELFDESTRUCT` to this address, foreign `balanceOf`). -/
+theorem ExtOracle.noReentry (o : ExtOracle) (self : Address) :
+    ExtOracle.NoReentry o self :=
+  Proof.ExtOracle.noReentry o self
 
 end Lsc.Compiler

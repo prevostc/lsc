@@ -42,10 +42,19 @@ For contracts that call out: theorems that mention the token take
 is memory-blind (other contracts cannot see this contract's private
 memory, which is true of the EVM) and is a function of the request and
 observable world. The compiler may have used either the erase path or
-powdr spill. S2/transport theorems still take `hNR : ExtOracle.NoReentry`.
-Security statements remain "for every starting world". Example authors
-apply `transport_claim_ext` / `transport_exists_claim_ext` rather than
-per-contract bytecode theorems.
+powdr spill. The oracle model restores `self`'s storage, transient
+storage, and self-attributed logs after every external CALL. This is
+justified because (i) in the EVM only a frame executing at address `self`
+can write `self`'s storage or emit `self`'s logs (no EXTSLOAD/EXTSSTORE;
+CALLCODE/DELEGATECALL by others run at *their* address) — an EVM fact
+not mechanized here — and (ii) such a frame is a CALL/STATICCALL into
+our runtime, which reverts in the 11-step lock prefix with the parent
+snapshot restored (`nested_lock_reverts`, mechanized in 8C-1 against
+evm-semantics). ETH balances are not restored: a callee can credit
+`self` via `SELFDESTRUCT` without running our code, and `balanceOf` of
+other accounts is a real CALL effect. Security statements remain "for
+every starting world". Example authors apply `transport_claim_ext` /
+`transport_exists_claim_ext` rather than per-contract bytecode theorems.
 
 Other contracts are modelled as deterministic functions of the call and
 the on-chain state they can see: the same call against the same
@@ -89,7 +98,9 @@ The runtime emits `if tload(0) { revert(0,0) }` on every entry
 `return`/`stop`. Held lock ⇒ revert, empty returndata, committed
 storage/transient/logs unchanged (`lock_held_reverts_yul`,
 `lock_held_reverts_yul_open`, `lock_held_reverts_evm`; no oracle
-hypothesis). Dropping `hNR` is slice 8C. Core outside the supported
+hypothesis). A nested CALL/STATICCALL into the compiled runtime while the
+lock is held reverts in the prefix and restores the parent snapshot
+(`nested_lock_reverts`). Core outside the supported
 fragment (including most `letPure`, nested pair returns, and unusual
 require/revert/emit arities) is not compiled. Bytecode glue talks about
 word-level core; Vault's Amount ABI is identified with the reifier

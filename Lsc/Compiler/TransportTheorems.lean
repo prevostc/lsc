@@ -10,9 +10,10 @@ Example authors fill in their contract and apply these lemmas.
 
 Call-free contracts (Token) get a full match between EVM storage and
 the high-level post-world. Contracts that CALL out (Vault, AMM) get a
-post-world whose storage matches the EVM under `Oracle.ofExt` and
-`NoReentry`; `ExtAgree` is with the `mkEvmStateExt` skeleton
-`EvmTraceRunExtAll` uses between calls (reentrancy is not modelled).
+post-world whose storage matches the EVM under `Oracle.ofExt`;
+`ExtAgree` is with the `mkEvmStateExt` skeleton `EvmTraceRunExtAll`
+uses between calls. Reentrancy into this contract reverts while the
+transient lock is held (`ExtOracle.noReentry`).
 
 Shared assumptions: the compiler accepted the contract, storage keys
 do not collide, starting storage matches, callers are not the contract.
@@ -123,9 +124,9 @@ theorem transport_step (T : TransportSetup S X E ε)
 
 /-- One compiled call that may CALL out has EVM post-storage predicted by
 the high-level model under `Oracle.ofExt`. Unknown selectors leave storage
-unchanged. `NoReentry` is the only assumption about the callee
-(reentrancy is not modelled); everything else is adversarial.
-`transport_trace_ext` is the iteration of this step. -/
+unchanged. Reentrancy into this contract reverts while the transient lock
+is held (`ExtOracle.noReentry`); everything else about the callee is
+adversarial. `transport_trace_ext` is the iteration of this step. -/
 theorem transport_step_ext (T : TransportSetup S ExtState E ε)
     (Xpkg : TransportBindings S E ε T)
     (ctx : Ctx) (cd : List UInt8) (w : World S ExtState E)
@@ -134,8 +135,7 @@ theorem transport_step_ext (T : TransportSetup S ExtState E ε)
     (hs : storageRel T.c T.Γ evmKeccak w.self σ)
     (hlog : w.log = []) (hwf : WorldWF T.c T.Γ w)
     (hAgr : ExtAgree ctx.self w.ext (mkEvmStateExt cd σ ξ evmKeccak ctx))
-    (hOr : w.oracle = Oracle.ofExt Xpkg.oracle)
-    (hNR : ExtOracle.NoReentry Xpkg.oracle ctx.self) :
+    (hOr : w.oracle = Oracle.ofExt Xpkg.oracle) :
     let yst0 := mkEvmStateExt cd σ ξ evmKeccak ctx
     ∃ σ' ξ', EvmCallRunξ T.is yst0 σ' ξ' ∧
       match decodeCall T ctx cd with
@@ -146,15 +146,16 @@ theorem transport_step_ext (T : TransportSetup S ExtState E ε)
             ∃ stObs : EvmState,
               stObs.storage = σ' ∧ evmForeign stObs = ξ' ∧
                 ExtAgree ctx.self w'.ext stObs :=
-  Proof.transport_step_ext T Xpkg ctx cd w σ ξ hctxWF hcd hs hlog hwf hAgr hOr hNR
+  Proof.transport_step_ext T Xpkg ctx cd w σ ξ hctxWF hcd hs hlog hwf hAgr hOr
 
 /-- Whatever sequence of calls an adversary sends to bytecode that CALLs
 out, there is a high-level post-world whose storage matches the EVM and
 which still satisfies the protocol invariant. Unknown selectors are
 ignored. Between calls both sides reframe through `mkEvmStateExt`
 (storage `σ` and foreign persistent storage `ξ`); `InvReframe` is that
-obligation on `Inv`. Reentrancy is not modelled (`NoReentry`); everything
-else about the callee is adversarial. -/
+obligation on `Inv`. Reentrancy into this contract reverts while the
+transient lock is held (`ExtOracle.noReentry`); everything else about the
+callee is adversarial. -/
 theorem transport_trace_ext (T : TransportSetup S ExtState E ε)
     (Xpkg : TransportBindings S E ε T)
     (self : Address) (calls : List EvmCall)
@@ -164,7 +165,6 @@ theorem transport_trace_ext (T : TransportSetup S ExtState E ε)
     (hlog : w.log = []) (hwf : WorldWF T.c T.Γ w)
     (hWF : CallsWF T self calls)
     (hOr : w.oracle = Oracle.ofExt Xpkg.oracle)
-    (hNR : ExtOracle.NoReentry Xpkg.oracle self)
     (Inv : World S ExtState E → Prop)
     (hP : PreservesInvAt T.spec Inv self)
     (hInvR : InvReframe Inv Xpkg.oracle)
@@ -180,15 +180,16 @@ theorem transport_trace_ext (T : TransportSetup S ExtState E ε)
           (mkEvmStateExt ([] : List UInt8) σ' ξ' evmKeccak (dummyCtx self)) ∧
         Inv w' :=
   Proof.transport_trace_ext T Xpkg self calls w σ ξ σ' ξ' hs hlog hwf hWF hOr
-    hNR Inv hP hInvR hInvL hw hE
+    Inv hP hInvR hInvL hw hE
 
 /-- After any halted calldata list against bytecode that CALLs out, an
 account's protocol claim is no lower than it started, provided that
 account authorised no decoded call and the protocol never lowers a
 claim except when authorised. `claim` is world-indexed; a storage-only
 measure is `Claim.ofSelf` (then `hC` holds). This is the lemma Vault
-and AMM bytecode anti-extraction use. Reentrancy is not modelled
-(`NoReentry`); everything else about the callee is adversarial. -/
+and AMM bytecode anti-extraction use. Reentrancy into this contract
+reverts while the transient lock is held (`ExtOracle.noReentry`);
+everything else about the callee is adversarial. -/
 theorem transport_claim_ext (T : TransportSetup S ExtState E ε)
     (Xpkg : TransportBindings S E ε T)
     (Inv : World S ExtState E → Prop) (claim : Claim S ExtState E)
@@ -207,7 +208,6 @@ theorem transport_claim_ext (T : TransportSetup S ExtState E ε)
     (hlog : w.log = []) (hwf : WorldWF T.c T.Γ w)
     (hWF : CallsWF T self calls)
     (hOr : w.oracle = Oracle.ofExt Xpkg.oracle)
-    (hNR : ExtOracle.NoReentry Xpkg.oracle self)
     (hA : NoAuthAlong Auth a (decodeTrace T calls) w)
     (hw : Inv w)
     (hE : EvmTraceRunExtAll T.is calls σ ξ σ' ξ') :
@@ -219,13 +219,14 @@ theorem transport_claim_ext (T : TransportSetup S ExtState E ε)
       Inv w' ∧
       claim a w ≤ claim a w' :=
   Proof.transport_claim_ext T Xpkg Inv claim Auth self a hN hP hInvR hInvL hAirr
-    hC calls w σ ξ σ' ξ' hs hlog hwf hWF hOr hNR hA hw hE
+    hC calls w σ ξ σ' ξ' hs hlog hwf hWF hOr hA hw hE
 
 /-- A well-formed high-level trace against a contract that CALLs out has
 some EVM execution of the encoded calldata whose post-storage matches a
 high-level world that still satisfies the invariant. Dual of
 `transport_trace_ext` when you start from a trace rather than raw
-calldata. Reentrancy is not modelled (`NoReentry`). -/
+calldata. Reentrancy into this contract reverts while the transient lock
+is held (`ExtOracle.noReentry`). -/
 theorem transport_exists_ext (T : TransportSetup S ExtState E ε)
     (Xpkg : TransportBindings S E ε T)
     (Inv : World S ExtState E → Prop)
@@ -238,8 +239,7 @@ theorem transport_exists_ext (T : TransportSetup S ExtState E ε)
     (hs : storageRel T.c T.Γ evmKeccak w.self σ)
     (hwf : WorldWF T.c T.Γ w)
     (hb : EncodeBounded T tr) (hW : Wf self tr) (hw : Inv w)
-    (hOr : w.oracle = Oracle.ofExt Xpkg.oracle)
-    (hNR : ExtOracle.NoReentry Xpkg.oracle self) :
+    (hOr : w.oracle = Oracle.ofExt Xpkg.oracle) :
     ∃ σ' ξ' w',
       EvmTraceRunExt T.is (encodeCalls T tr) σ ξ σ' ξ' ∧
       storageRel T.c T.Γ evmKeccak w'.self σ' ∧
@@ -248,15 +248,15 @@ theorem transport_exists_ext (T : TransportSetup S ExtState E ε)
         (mkEvmStateExt ([] : List UInt8) σ' ξ' evmKeccak (dummyCtx self)) ∧
       Inv w' :=
   Proof.transport_exists_ext T Xpkg Inv self hP hInvR hInvL tr w σ ξ hs hwf hb
-    hW hw hOr hNR
+    hW hw hOr
 
 /-- Encoding a high-level trace and running it on bytecode that CALLs out
 cannot decrease an account's claim when that account authorised no call
 in the trace. Combines `transport_exists_ext` with claim monotonicity;
 `claim` is world-indexed (`Claim.ofSelf` for a storage-only measure).
 Example authors apply this to a high-level anti-extraction theorem; the
-compiler already quantifies over all contracts. Reentrancy is not modelled
-(`NoReentry`). -/
+compiler already quantifies over all contracts. Reentrancy into this
+contract reverts while the transient lock is held (`ExtOracle.noReentry`). -/
 theorem transport_exists_claim_ext (T : TransportSetup S ExtState E ε)
     (Xpkg : TransportBindings S E ε T)
     (Inv : World S ExtState E → Prop) (claim : Claim S ExtState E)
@@ -274,8 +274,7 @@ theorem transport_exists_claim_ext (T : TransportSetup S ExtState E ε)
     (hwf : WorldWF T.c T.Γ w)
     (hb : EncodeBounded T tr) (hW : Wf self tr) (hw : Inv w)
     (hA : NoAuthAlong Auth a (callsOf tr) w)
-    (hOr : w.oracle = Oracle.ofExt Xpkg.oracle)
-    (hNR : ExtOracle.NoReentry Xpkg.oracle self) :
+    (hOr : w.oracle = Oracle.ofExt Xpkg.oracle) :
     ∃ σ' ξ' w',
       EvmTraceRunExt T.is (encodeCalls T tr) σ ξ σ' ξ' ∧
       storageRel T.c T.Γ evmKeccak w'.self σ' ∧
@@ -285,7 +284,7 @@ theorem transport_exists_claim_ext (T : TransportSetup S ExtState E ε)
       Inv w' ∧
       claim a w ≤ claim a w' :=
   Proof.transport_exists_claim_ext T Xpkg Inv claim Auth self a hN hP hInvR hInvL
-    hAirr hC tr w σ ξ hs hwf hb hW hw hA hOr hNR
+    hAirr hC tr w σ ξ hs hwf hb hW hw hA hOr
 
 /-- When EVM storage matches a high-level world, a scalar slot's EVM word
 is that world's field packed as a 256-bit word. Read total supply, owner,

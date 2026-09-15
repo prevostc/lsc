@@ -80,8 +80,7 @@ theorem transport_step_ext (T : TransportSetup S ExtState E ε)
     (hs : storageRel T.c T.Γ evmKeccak w.self σ)
     (hlog : w.log = []) (hwf : WorldWF T.c T.Γ w)
     (hAgr : ExtAgree ctx.self w.ext (mkEvmStateExt cd σ ξ evmKeccak ctx))
-    (hOr : w.oracle = Oracle.ofExt Xpkg.oracle)
-    (hNR : ExtOracle.NoReentry Xpkg.oracle ctx.self) :
+    (hOr : w.oracle = Oracle.ofExt Xpkg.oracle) :
     let yst0 := mkEvmStateExt cd σ ξ evmKeccak ctx
     ∃ σ' ξ', EvmCallRunξ T.is yst0 σ' ξ' ∧
       match decodeCall T ctx cd with
@@ -102,7 +101,7 @@ theorem transport_step_ext (T : TransportSetup S ExtState E ε)
   obtain ⟨σ', ξ', hRun, hpost⟩ :=
     evmCallRun_of_correct_ext T.c T.Γ T.lawful T.hκ
       Xpkg.oracle Xpkg.hCalls T.hctor Xpkg.hS2 T.hlen T.hbound
-      T.rt T.hrt T.is T.hcomp ctx w yst0 hctx hR hAgr hOr hNR himm0 hLock
+      T.rt T.hrt T.is T.hcomp ctx w yst0 hctx hR hAgr hOr himm0 hLock
   refine ⟨σ', ξ', hRun, ?_⟩
   rw [mkEvmStateExt_calldata] at hpost
   cases hsel : selectedFn T.c cd with

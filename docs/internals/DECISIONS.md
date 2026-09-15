@@ -279,9 +279,34 @@ Three-slice plan:
     evm-semantics `Step` / `callReturnRevert` (not via `compile_correct`,
     whose `FrameOK` needs an empty call stack) and restores the parent's
     snapshot of `accountMap` and `substate`. Gas budget `≤ 200`.
-  - **8C-2**: isolation invariant on a `CallsRealized` trace (self
-    storage/tstorage/self-logs unchanged; nested self-frames stay in the
-    prefix; CALLCODE/DELEGATECALL write the caller; CREATE2 collision
-    preserves the code pin). Weaken `NoReentry`: drop ETH conjuncts;
-    `toCall` already scrubs self.
-  - **8C-3**: drop `hNR` on S1/S2 glue; human re-pin of `Checks.lean`.
+  - **8C-2** (done): `toCall` scrubs `self` and restores storage / transient /
+    self-logs (`noInterfere_of_lock`, `ExtOracle.noReentry`). ETH conjuncts
+    dropped. `hNR` removed from S2/transport/E2E; foreign-frame isolation is
+    the oracle restore, not a `StepRunning` induction. Residual trust: TCB §(d).
+  - **8C-3**: `@[reentrant]` opt-out (lock not emitted); human re-pin of
+    `Checks.lean` if the public type change is recorded there.
+
+## 2026-09-14 — Lock always emitted; `NoReentry` is a model-level lemma (8C-2)
+
+Every runtime emits the transient lock. `NoReentry` is a lemma about `toCall`
+(restore of `self` storage / transient / self-logs), not a hypothesis of
+S2/transport. Opt-out via `@[reentrant]` (lock not emitted) is 8C-3.
+
+## 2026-09-14 — Payability is declared, never inferred
+
+A function is payable only if it carries the `[Payable]` capability. The
+compiler never infers payability from `msg.value` / `callvalue` uses.
+Receiving native value without `[Payable]` is a compile error.
+
+## 2026-09-14 — `Amount.as` requires equal decimals; `asUnchecked` is explicit
+
+`x.as b` requires `a.decimals? = b.decimals?` at compile time (rejects
+`USDC(6) → DAI(18)` and `none` vs `some`). Cross-scale relabelling uses
+`asUnchecked` and must be justified in the contract (Cpamm first mint).
+
+## 2026-09-14 — Native asset is a chain profile
+
+`Chain.native : Option Asset` (decimals from the profile). `none` means the
+chain has no gas token, so payable functions and native sends are compile
+errors. Multiple fee tokens do not change contract semantics. The example
+wrapper is `WNative`, not a built-in ETH type.

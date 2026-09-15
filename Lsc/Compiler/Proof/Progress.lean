@@ -433,8 +433,8 @@ theorem op_call_progress {S E ε : Type}
            input := readBytes st1.memory abiPtr (4 + 32 * args.length) } : CallRequest) =
           mkCallReq .call (target.eval env) sel (args.map (·.eval env)) := by
       simp [mkCallReq, hpack, List.flatMap_map]
-    have hresp : resp = o (mkCallReq .call (target.eval env) sel
-        (args.map (·.eval env))) (ExtView.ofState st1) := by
+    have hresp : resp = toCall o (mkCallReq .call (target.eval env) sel
+        (args.map (·.eval env))) st1 := by
       have hY := (toCalls_call o _ st1 resp).mp hCall
       rw [hreq] at hY
       exact hY
@@ -443,12 +443,9 @@ theorem op_call_progress {S E ε : Type}
       (mkCallReq .call (target.eval env) sel (args.map (·.eval env))) st1 haddr
     have hni' : resp.world.storage = st1.storage ∧
         resp.world.transient = st1.transient ∧
-        resp.world.selfBalance = st1.env.selfBalance ∧
-        resp.world.balanceOf = st1.env.balanceOf ∧
         (∀ l ∈ resp.world.logs, l.address ≠ st1.env.address) := by
-      rw [← hresp] at hni
-      exact hni
-    have hR2 : R c Γ κ w st2 := R_finishCall_success hR1 hsucc hni'.1 hni'.2.2.2.2
+      simpa [hresp] using hni
+    have hR2 : R c Γ κ w st2 := R_finishCall_success hR1 hsucc hni'.1 hni'.2.2
     have hctx2 : ctxRel ctx st2 :=
       ctxRel_finishCall hctx1 .call resp abiPtr (4 + 32 * args.length) abiPtr 32
     have hR3 : R c Γ κ w st3 := R_memOnly hR2 hMO2
@@ -667,8 +664,8 @@ theorem stmt_call_progress {S E ε : Type}
            input := readBytes st1.memory abiPtr (4 + 32 * args.length) } : CallRequest) =
           mkCallReq .call (target.eval env) sel (args.map (·.eval env)) := by
       simp [mkCallReq, hpack, List.flatMap_map]
-    have hresp : resp = o (mkCallReq .call (target.eval env) sel
-        (args.map (·.eval env))) (ExtView.ofState st1) := by
+    have hresp : resp = toCall o (mkCallReq .call (target.eval env) sel
+        (args.map (·.eval env))) st1 := by
       have hY := (toCalls_call o _ st1 resp).mp hCall
       rw [hreq] at hY
       exact hY
@@ -677,13 +674,10 @@ theorem stmt_call_progress {S E ε : Type}
       (mkCallReq .call (target.eval env) sel (args.map (·.eval env))) st1 haddr
     have hni' : resp.world.storage = st1.storage ∧
         resp.world.transient = st1.transient ∧
-        resp.world.selfBalance = st1.env.selfBalance ∧
-        resp.world.balanceOf = st1.env.balanceOf ∧
         (∀ l ∈ resp.world.logs, l.address ≠ st1.env.address) := by
-      rw [← hresp] at hni
-      exact hni
+      simpa [hresp] using hni
     have hR3 : R c Γ κ w st3 :=
-      R_memOnly (R_finishCall_success hR1 hsucc hni'.1 hni'.2.2.2.2) hMO2
+      R_memOnly (R_finishCall_success hR1 hsucc hni'.1 hni'.2.2) hMO2
     have hctx3 : ctxRel ctx st3 :=
       ctxRel_memOnly
         (ctxRel_finishCall hctx1 .call resp abiPtr (4 + 32 * args.length) abiPtr 32)

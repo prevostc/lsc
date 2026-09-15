@@ -663,7 +663,7 @@ theorem ExtAgree_sstore {self : Address} {x : Lsc.ExtState} {st : EvmState}
         env := { st.env with
           storageOf := updAccount st.env.storageOf st.env.address slot val } } := by
   apply ExtAgree_of_scrub h
-  unfold scrubSelf ExtView.ofState ExtState.ofState
+  unfold scrubSelf scrubSelfWord ExtView.ofState ExtState.ofState
   simp only [haddr]
   congr
   ext a k
@@ -680,7 +680,7 @@ theorem ExtAgree_tstore {self : Address} {x : Lsc.ExtState} {st : EvmState}
         env := { st.env with
           transientOf := updAccount st.env.transientOf st.env.address slot val } } := by
   apply ExtAgree_of_scrub h
-  unfold scrubSelf ExtView.ofState ExtState.ofState
+  unfold scrubSelf scrubSelfWord ExtView.ofState ExtState.ofState
   simp only [haddr]
   congr
   ext a k

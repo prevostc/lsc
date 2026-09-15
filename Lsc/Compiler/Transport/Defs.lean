@@ -55,7 +55,7 @@ structure TransportSetup (S X E ε : Type) where
 
 /-- S2 package: the memory-blind CALL oracle and the call-carrying fragment.
 There is no per-interface `BindEnv` / `RX` layer; `Oracle.ofExt` is the
-only Core bridge. `NoReentry` is a theorem hypothesis, not a field. -/
+only Core bridge. `NoReentry` is a lemma about `toCall`, not a field. -/
 structure TransportBindings (S E ε : Type)
     (T : TransportSetup S ExtState E ε) where
   oracle : ExtOracle

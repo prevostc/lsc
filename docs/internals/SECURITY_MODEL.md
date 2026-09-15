@@ -114,8 +114,11 @@ By construction (the reifiable fragment): no silent overflow (checked ops revert
 `Amount` is a `structure` so units do not mix by defeq; revert discards the world;
 no inline assembly, `delegatecall`, `selfdestruct` or untyped calls; external calls go
 only through an `I.Ref`. Reentrancy during a call is not modelled at Tx
-(`self` unchanged); lock emitted + held-lock revert proved; `NoReentry`
-remains until 8C (`TRUSTED_COMPUTING_BASE.md`). Proved: `effects_frame`
+(`self` unchanged). The compiled runtime emits a transient lock; a nested
+CALL/STATICCALL into this contract while the lock is held reverts
+(`nested_lock_reverts`). The CALL oracle restores `self` storage /
+transient / self-logs (`ExtOracle.noReentry`); ETH balances are not
+restored. Proved: `effects_frame`
 from `Core.effects`;
 ABI/dispatcher `runtimeBlock_correct_callFree` / `runtimeBlock_correct_ext`.
 
