@@ -544,8 +544,8 @@ private theorem deposit_head (assets : Amount vaultAsset)
           let ts' ← w.self.totalShares +? minted
           Tx.store (fun σ m => { σ with totalShares := Amount.ofWord m })
             ts'.raw
-          let bal ← Tx.loadMap (fun σ k => σ.shares k) ctx.sender
-          let bal' ← bal +? minted
+          let bal' ←
+            (Tx.loadMap (fun (σ : Storage) k => σ.shares k) ctx.sender) +? minted
           Tx.storeMap (fun σ k => (σ.shares k).raw)
             (fun σ m => { σ with shares := fun k => Amount.ofWord (m k) })
             ctx.sender bal'.raw
@@ -570,8 +570,8 @@ private theorem deposit_head_some (assets : Amount vaultAsset)
         let ts' ← w.self.totalShares +? minted
         Tx.store (fun σ m => { σ with totalShares := Amount.ofWord m })
           ts'.raw
-        let bal ← Tx.loadMap (fun σ k => σ.shares k) ctx.sender
-        let bal' ← bal +? minted
+        let bal' ←
+          (Tx.loadMap (fun (σ : Storage) k => σ.shares k) ctx.sender) +? minted
         Tx.storeMap (fun σ k => (σ.shares k).raw)
           (fun σ m => { σ with shares := fun k => Amount.ofWord (m k) })
           ctx.sender bal'.raw
@@ -595,9 +595,9 @@ private theorem deposit_after_mint (assets : Amount vaultAsset)
         let ts' ← Tx.HAddChecked.hAdd w.self.totalShares
           (⟨mintedShares w.self.totalShares ta assets⟩ : Amount vShare)
         Tx.store (fun σ m => { σ with totalShares := Amount.ofWord m }) ts'.raw
-        let bal ← Tx.loadMap (fun σ k => σ.shares k) ctx.sender
-        let bal' ← Tx.HAddChecked.hAdd bal
-          (⟨mintedShares w.self.totalShares ta assets⟩ : Amount vShare)
+        let bal' ←
+          (Tx.loadMap (fun (σ : Storage) k => σ.shares k) ctx.sender) +?
+            (⟨mintedShares w.self.totalShares ta assets⟩ : Amount vShare)
         Tx.storeMap (fun σ k => (σ.shares k).raw)
           (fun σ m => { σ with shares := fun k => Amount.ofWord (m k) })
           ctx.sender bal'.raw
@@ -882,7 +882,7 @@ theorem deposit_reverts_on_add_bal (assets : Amount vaultAsset)
     Tx.run (deposit assets) ctx w = .error (.arith .overflow) := by
   rw [deposit_after_mint assets hp hpos hview hV hA hmul hminted]
   conv => lhs; rw [run_hAdd_bind]; rw [if_pos haddS]
-  rw [run_store_bind, run_loadMap_bind]
+  rw [run_store_bind, Tx.hAdd_bind_left, Tx.bind_assoc, run_loadMap_bind]
   conv => lhs; rw [run_hAdd_bind]; rw [if_neg haddB]
 
 structure DepositOk (ctx : Ctx) (w : World Storage ExtState Event)
@@ -924,7 +924,7 @@ theorem deposit_to_tail (assets : Amount vaultAsset) (h : DepositOk ctx w assets
   rcases h with ⟨ta, hp, hpos, hview, hV, hA, hmul, hminted, haddS, haddB⟩
   rw [deposit_after_mint assets hp hpos hview hV hA hmul hminted]
   conv => lhs; rw [run_hAdd_bind]; rw [if_pos haddS]
-  rw [run_store_ts, run_loadMap_bind]
+  rw [run_store_ts, Tx.hAdd_bind_left, Tx.bind_assoc, run_loadMap_bind]
   conv => lhs; rw [run_hAdd_bind]; rw [if_pos haddB]
   rw [run_storeMap_shares]
   dsimp [depositTailWorld]

@@ -26,15 +26,13 @@ abbrev M := Tx Storage ExtState Event Error
 
 /-- Add one to `count`. -/
 def increment : M Unit := do
-  let c ← read count
-  write count (c +? 1)
+  write count (read count +? 1)
   Tx.emit (.Incremented 1)
 
 /-- Add `n` to `count`. Reverts when `n` is zero. -/
 def incrementBy (n : Nat) : M Unit := do
   Tx.require (n ≠ 0) .Zero
-  let c ← read count
-  write count (c +? n)
+  write count (read count +? n)
   Tx.emit (.Incremented n)
 
 /-- Subtract one, saturating at zero. -/

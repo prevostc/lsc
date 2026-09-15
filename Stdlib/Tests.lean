@@ -189,7 +189,18 @@ def doSeqIfLet (c x : Word) : M Word := do
   Tx.require (0 < y) .TransferFailed
   y +? 1
 
-/-- Nested effectful `if`. -/
+/-- Nested `read` as a `+?` operand; `write` elaborates the argument at `Tx`. -/
+def doWriteReadAdd : M Unit := do
+  write dummy (read dummy +? 1)
+
+/-- Pure operand of `+?` in a `write` (no `read`). -/
+def doWritePureAdd (n : Nat) : M Unit := do
+  write dummy (n +? 1)
+
+/-- Fused mulDiv of two reads, written into storage. -/
+def doWriteMulDivReads : M Unit := do
+  write dummy (read dummy mulDiv↓ (1 : Nat) / read dummy)
+
 def doSeqIfNested (c d x : Word) : M Word := do
   if c = 0 then
     if d = 0 then
@@ -219,6 +230,8 @@ lsc_reify StdlibTests.doVirt0 StdlibTests.doVirt3 StdlibTests.doVirt6
   StdlibTests.doVirt18
 lsc_reify StdlibTests.doSeqIfEffect StdlibTests.doSeqIfNoElse
   StdlibTests.doSeqIfLet StdlibTests.doSeqIfNested
+lsc_reify StdlibTests.doWriteReadAdd StdlibTests.doWritePureAdd
+  StdlibTests.doWriteMulDivReads
 
 #check StdlibTests.doCheckOk.core_denote
 #check StdlibTests.doSafeTransfer.core_denote
@@ -255,6 +268,9 @@ lsc_reify StdlibTests.doSeqIfEffect StdlibTests.doSeqIfNoElse
 #check StdlibTests.doSeqIfNoElse.core_denote
 #check StdlibTests.doSeqIfLet.core_denote
 #check StdlibTests.doSeqIfNested.core_denote
+#check StdlibTests.doWriteReadAdd.core_denote
+#check StdlibTests.doWritePureAdd.core_denote
+#check StdlibTests.doWriteMulDivReads.core_denote
 
 #guard (toString (repr StdlibTests.doToShares.core)).contains "1000000"
 #guard (toString (repr StdlibTests.doToAssets.core)).contains "1000000"

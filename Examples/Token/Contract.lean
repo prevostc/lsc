@@ -50,8 +50,7 @@ def transfer (to : Address) (amount : Amount tokenAsset) : M Bool := do
   let b ← read balances[src]
   Tx.require (amount ≤ b) .InsufficientBalance
   write balances[src] (b -? amount)
-  let r ← read balances[to]
-  write balances[to] (r +? amount)
+  write balances[to] (read balances[to] +? amount)
   Tx.emit (.Transfer src to amount)
   return true
 
@@ -72,8 +71,7 @@ def transferFrom (src to : Address) (amount : Amount tokenAsset) : M Bool := do
   Tx.require (amount ≤ b) .InsufficientBalance
   write allowances[src, spender] (a -? amount)
   write balances[src] (b -? amount)
-  let r ← read balances[to]
-  write balances[to] (r +? amount)
+  write balances[to] (read balances[to] +? amount)
   Tx.emit (.Transfer src to amount)
   return true
 
@@ -82,10 +80,8 @@ def mint (to : Address) (amount : Amount tokenAsset) : M Unit := do
   let caller ← Tx.sender
   let owner ← read owner
   Tx.require (caller = owner) .NotOwner
-  let supply ← read totalSupply
-  write totalSupply (supply +? amount)
-  let r ← read balances[to]
-  write balances[to] (r +? amount)
+  write totalSupply (read totalSupply +? amount)
+  write balances[to] (read balances[to] +? amount)
   Tx.emit (.Transfer 0 to amount)
 
 /-- Burn `amount` from the sender. -/
@@ -94,8 +90,7 @@ def burn (amount : Amount tokenAsset) : M Unit := do
   let b ← read balances[src]
   if amount ≤ b then
     write balances[src] (b -? amount)
-    let supply ← read totalSupply
-    write totalSupply (supply -? amount)
+    write totalSupply (read totalSupply -? amount)
   else
     Tx.revert .InsufficientBalance
   Tx.emit (.Transfer src 0 amount)

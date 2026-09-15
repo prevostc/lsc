@@ -689,27 +689,63 @@ partial def atomOf (env : Env t) (e : Expr) (fuel : Nat := 64) : MetaM Atom := d
   throwError "reify: `{e}` is not an atom; bind it first with `let x ← …` \
     (pure Nat arithmetic is not part of the language, use `+?` or `+↻`)"
 
+/-- Unfold `Field.get f` / `Field.set f` and constructor matches until a storage
+projection (or structure update) is visible. -/
+partial def reduceFieldApp (e : Expr) (fuel : Nat := 16) : MetaM Expr := do
+  if fuel = 0 then return e
+  let e ← whnf e.consumeMData
+  if e.isAppOf ``Lsc.Field.get || e.isAppOf ``Lsc.Field.set then
+    match ← unfoldDefinition? e with
+    | some e' => reduceFieldApp e' (fuel - 1)
+    | none => return e
+  else
+    match ← unfoldDefinition? e with
+    | some e' =>
+      if e' == e then return e
+      reduceFieldApp e' (fuel - 1)
+    | none => return e
+
 /-- The storage field a projection lambda `fun σ => σ.f` (or the projection function itself) denotes. -/
 def fieldOfProj (ci : ContractInfo) (proj : Expr) : MetaM FieldInfo := do
+  let proj ← reduceFieldApp proj
   let name? : Option Name ← lambdaTelescope proj fun _ body => do
+    let body ← reduceFieldApp body
     let body := body.consumeMData
     let body :=
-      if body.isAppOf ``Lsc.Amount.raw then
+      if body.isAppOf ``Lsc.Amount.raw || body.isAppOf ``Lsc.Amount.mk
+          || body.isAppOf ``Lsc.Address.toWord then
         body.appArg!
-      else
-        let body :=
-          if body.isAppOf ``Lsc.Address.toWord then body.appArg! else body
-        if let some n := body.getAppFn.constName? then
-          if n.getString! == "addr" && body.getAppNumArgs ≥ 1 then
-            body.getArg! (body.getAppNumArgs - 1)
-          else body
+      else if let some n := body.getAppFn.constName? then
+        if n.getString! == "addr" && body.getAppNumArgs ≥ 1 then
+          body.getArg! (body.getAppNumArgs - 1)
         else body
+      else body
+    let body ←
+      match body.consumeMData with
+      | Expr.proj _ 0 s => do
+        let sTy ← whnfD (← inferType s)
+        if sTy.isAppOf ``Lsc.Amount || sTy.isConstOf ``Lsc.Address
+            || (← isRefTy sTy) then
+          pure s
+        else pure body
+      | _ => pure body
+    let body ← reduceFieldApp body
     match body.getAppFn with
-    | .const n _ => pure (some n)
-    | _ =>
-      match body with
-      | .proj _ i _ => pure (ci.fields[i]?.map (fun f => ci.storage ++ f.name))
-      | _ => pure none
+    | Expr.const n _ => pure (some n)
+    | Expr.proj _ i s =>
+        let sTy ← whnfD (← inferType s)
+        if sTy.isConstOf ci.storage then
+          pure (ci.fields[i]?.map (fun f => ci.storage ++ f.name))
+        else
+          -- `Field.get f σ` may still be a projection of the Field structure.
+          let s ← reduceFieldApp s
+          match s.getAppFn with
+          | .const n _ =>
+            if n == ci.storage then
+              pure (ci.fields[i]?.map (fun f => ci.storage ++ f.name))
+            else pure none
+          | _ => pure none
+    | _ => pure none
   match name? with
   | some n =>
     match ci.fields.find? (fun f => ci.storage ++ f.name == n) with
@@ -720,9 +756,11 @@ def fieldOfProj (ci : ContractInfo) (proj : Expr) : MetaM FieldInfo := do
 /-- The storage field an update lambda `fun σ m => { σ with f := m }` denotes. -/
 def fieldOfUpd (ci : ContractInfo) (upd : Expr) : MetaM FieldInfo := do
   lambdaTelescope upd fun xs body => do
-    let body := body.consumeMData
+    let body ← reduceFieldApp body.consumeMData
     unless xs.size == 2 do throwError "reify: `{upd}` is not a storage update"
     let m := xs[1]!
+    -- `Field.set f σ (ofWord m)` reduces to a structure update.
+    let body ← reduceFieldApp body
     let args := body.getAppArgs
     let ctor := getStructureCtor (← getEnv) ci.storage
     unless body.getAppFn.isConstOf ctor.name && args.size == ctor.numParams + ci.fields.size do
@@ -837,9 +875,6 @@ def isTryHead : Name → Bool
 `I.Ref.transfer` → `Tx.call`, …). Compared as names so Reify need not import
 `Stdlib.ERC20`. -/
 def isSurfaceOp : Name → Bool
-  | ``Lsc.Tx.HAddChecked.hAdd | ``Lsc.Tx.HSubChecked.hSub
-  | ``Lsc.Tx.HMulChecked.hMul | ``Lsc.Tx.HDivChecked.hDiv
-  | ``Lsc.Tx.HMulDivDown.hMulDivDown | ``Lsc.Tx.HMulDivUp.hMulDivUp
   | ``Lsc.Tx.HMulFixedDown.hMulFixedDown | ``Lsc.Tx.HMulFixedUp.hMulFixedUp => true
   | .str (.str `Lsc "Amount") s =>
       s == "add" || s == "sub" || s == "mulScalar" || s == "divScalar"
@@ -869,6 +904,9 @@ def roundingOf (e : Expr) : MetaM Rounding := do
 def isDeltaStop : Name → Bool
   | ``Lsc.Tx.addChecked | ``Lsc.Tx.subChecked | ``Lsc.Tx.mulChecked | ``Lsc.Tx.divChecked
   | ``Lsc.Tx.mulDivDown | ``Lsc.Tx.mulDivUp | ``Lsc.Tx.pow10
+  | ``Lsc.Tx.HAddChecked.hAdd | ``Lsc.Tx.HSubChecked.hSub
+  | ``Lsc.Tx.HMulChecked.hMul | ``Lsc.Tx.HDivChecked.hDiv
+  | ``Lsc.Tx.HMulDivDown.hMulDivDown | ``Lsc.Tx.HMulDivUp.hMulDivUp
   | ``Lsc.Tx.call | ``Lsc.Tx.view | ``Lsc.Tx.callAsNat | ``Lsc.Tx.viewAsNat
   | ``Lsc.Tx.tryCall | ``Lsc.Tx.tryView
   | ``Lsc.Tx.load | ``Lsc.Tx.loadMap | ``Lsc.Tx.loadMap2
@@ -1286,6 +1324,61 @@ def purePayload? (x : Expr) : Option Expr :=
   else if x.isAppOfArity ``CoeTail.coe 4 then some (x.getArg! 3)
   else none
 
+/-- Checked-op methods whose instances lift over `Tx` operands. -/
+def isCheckedOpMethod : Name → Bool
+  | ``Lsc.Tx.HAddChecked.hAdd | ``Lsc.Tx.HSubChecked.hSub
+  | ``Lsc.Tx.HMulChecked.hMul | ``Lsc.Tx.HDivChecked.hDiv
+  | ``Lsc.Tx.HMulFixedDown.hMulFixedDown | ``Lsc.Tx.HMulFixedUp.hMulFixedUp
+  | ``Lsc.Tx.HMulDivDown.hMulDivDown | ``Lsc.Tx.HMulDivUp.hMulDivUp => true
+  | _ => false
+
+/-- `hAdd (load f) x` → `load f >>= fun a => hAdd a x`. Also peels `pure`/`CoeTail`
+operands so `hAdd (load f) (pure n)` becomes `load f >>= fun a => hAdd a n`. -/
+def liftCheckedBind? (e : Expr) : MetaM (Option Expr) := do
+  let e := e.consumeMData
+  let fn := e.getAppFn
+  let some n := fn.constName? | return none
+  unless isCheckedOpMethod n do return none
+  let args := e.getAppArgs
+  let nOp : Nat :=
+    if n == ``Lsc.Tx.HMulDivDown.hMulDivDown
+        || n == ``Lsc.Tx.HMulDivUp.hMulDivUp then 3 else 2
+  if args.size < nOp then return none
+  let start := args.size - nOp
+  let mut peeled : Array Expr := #[]
+  let mut anyTx := false
+  let mut anyPeel := false
+  for i in [start:args.size] do
+    let a := args[i]!
+    match purePayload? a with
+    | some v =>
+      peeled := peeled.push v
+      anyPeel := true
+    | none =>
+      peeled := peeled.push a
+      if (← txRet? (← inferType a)).isSome then
+        anyTx := true
+  unless anyTx || anyPeel do return none
+  if !anyTx then
+    let mut args' := args
+    for i in [0:nOp] do
+      args' := args'.set! (start + i) peeled[i]!
+    return some (mkAppN fn args')
+  let rec bindIdx (i : Nat) (curArgs : Array Expr) : MetaM Expr := do
+    if i >= nOp then
+      return mkAppN fn curArgs
+    let a := peeled[i]!
+    if (← txRet? (← inferType a)).isSome then
+      let some α ← txRet? (← inferType a)
+        | throwError "reify: expected a `Tx` operand"
+      withLocalDeclD `x α fun x => do
+        let inner ← bindIdx (i + 1) (curArgs.set! (start + i) x)
+        let k ← mkLambdaFVars #[x] inner
+        mkAppM ``Bind.bind #[a, k]
+    else
+      bindIdx (i + 1) (curArgs.set! (start + i) a)
+  return some (← bindIdx 0 args)
+
 /-- Apply `n` arguments, β-reducing leading lambdas. -/
 def betaN (f : Expr) (xs : Array Expr) : Expr :=
   if xs.isEmpty then f
@@ -1446,65 +1539,69 @@ partial def reify (ci : ContractInfo) (t : RetTy) (env : Env t) (e : Expr)
       | ``Bind.bind, 6 =>
         let x0 ← peelAmountWrap args[4]!
         let k ← ensureLambda args[5]!
-        let (x, seen) ← deltaUnfold x0
-        let inline? := seen.orElse fun _ => inline?
-        if x.isAppOfArity ``Bind.bind 6 then
-          reify ci t env (← assocBindRight x k args[3]!) inline?
-        else
-          let prodPure? : Option Expr ← do
-            match purePayload? x with
-            | some val =>
-              if ← isProdTy (← inferType val) then pure (some val) else pure none
-            | none => pure none
-          if let some val := prodPure? then
-            -- `pure (e₁, e₂, …) >>= k` is substitution; the tuple is never an atom.
-            reify ci t env (← reduceTupleCont k val) inline?
-          else if isIteExpr x then
-            -- `bind (if c then a else b) k` → `seqIf` (`k` once). Pair-valued
-            -- `if` still duplicates `k` through `Core.ite` (`Tx.bind_ite`).
-            let tBr ← retTyOf args[1]!
-            match tBr with
-            | .pair _ _ =>
-              let c ← condOf env (x.getArg! 1)
-              let mkBind (x' : Expr) :=
-                mkAppN f #[args[0]!, args[1]!, args[2]!, args[3]!, x', k]
-              let th ← reify ci t env (mkBind (x.getArg! 3)) inline?
-              let el ← reify ci t env (mkBind (x.getArg! 4)) inline?
-              return .ite c th el
-            | .unit | .word | .addr | .flag =>
-              let c ← condOf env (x.getArg! 1)
-              let envBr : Env tBr := env.cast
-              let th ← reify ci tBr envBr (x.getArg! 3) inline?
-              let el ← reify ci tBr envBr (x.getArg! 4) inline?
-              lambdaBoundedTelescope k 1 fun ys body => do
-                let isU ← isUnitTy args[1]!
-                let kEnv :=
-                  if isU then env else { env with vars := ys[0]!.fvarId! :: env.vars }
-                let kc ← reify ci t kEnv body inline?
-                return .seqIf (t := tBr) c th el kc
-          else if let some (i, c, th, el) ← firstIteArg? x then
-            -- `op (if c then a else b)` → split at this primitive, not at `let coeff := if`.
-            let c ← condOf env c
-            let xargs := x.getAppArgs
-            let mkBind (arg : Expr) :=
-              mkAppN f #[args[0]!, args[1]!, args[2]!, args[3]!,
-                mkAppN x.getAppFn (xargs.set! i arg), k]
-            let thc ← reify ci t env (mkBind th) inline?
-            let elc ← reify ci t env (mkBind el) inline?
-            return .ite c thc elc
-          else if let some op ← opOf ci env x then
-            lambdaBoundedTelescope k 1 fun ys body => do
-              let kc ← reify ci t { env with vars := ys[0]!.fvarId! :: env.vars } body inline?
-              return .letOp op kc
-          else if let some s ← stmtOf ci env x then
-            lambdaBoundedTelescope k 1 fun _ body => do
-              let kc ← reify ci t env body inline?
-              return .seq s kc
-          else if let some n := x.getAppFn.constName? then
-            if isTryHead n then throwTryCall x
-            else throwInlineOr inline? x m!"reify: `{x0}` is not a contract primitive"
+        if let some x' ← liftCheckedBind? x0 then
+          reify ci t env (mkAppN f #[args[0]!, args[1]!, args[2]!, args[3]!, x', k])
+            inline?
+        else do
+          let (x, seen) ← deltaUnfold x0
+          let inline? := seen.orElse fun _ => inline?
+          if x.isAppOfArity ``Bind.bind 6 then
+            reify ci t env (← assocBindRight x k args[3]!) inline?
           else
-            throwInlineOr inline? x m!"reify: `{x0}` is not a contract primitive"
+            let prodPure? : Option Expr ← do
+              match purePayload? x with
+              | some val =>
+                if ← isProdTy (← inferType val) then pure (some val) else pure none
+              | none => pure none
+            if let some val := prodPure? then
+              -- `pure (e₁, e₂, …) >>= k` is substitution; the tuple is never an atom.
+              reify ci t env (← reduceTupleCont k val) inline?
+            else if isIteExpr x then
+              -- `bind (if c then a else b) k` → `seqIf` (`k` once). Pair-valued
+              -- `if` still duplicates `k` through `Core.ite` (`Tx.bind_ite`).
+              let tBr ← retTyOf args[1]!
+              match tBr with
+              | .pair _ _ =>
+                let c ← condOf env (x.getArg! 1)
+                let mkBind (x' : Expr) :=
+                  mkAppN f #[args[0]!, args[1]!, args[2]!, args[3]!, x', k]
+                let th ← reify ci t env (mkBind (x.getArg! 3)) inline?
+                let el ← reify ci t env (mkBind (x.getArg! 4)) inline?
+                return .ite c th el
+              | .unit | .word | .addr | .flag =>
+                let c ← condOf env (x.getArg! 1)
+                let envBr : Env tBr := env.cast
+                let th ← reify ci tBr envBr (x.getArg! 3) inline?
+                let el ← reify ci tBr envBr (x.getArg! 4) inline?
+                lambdaBoundedTelescope k 1 fun ys body => do
+                  let isU ← isUnitTy args[1]!
+                  let kEnv :=
+                    if isU then env else { env with vars := ys[0]!.fvarId! :: env.vars }
+                  let kc ← reify ci t kEnv body inline?
+                  return .seqIf (t := tBr) c th el kc
+            else if let some (i, c, th, el) ← firstIteArg? x then
+              -- `op (if c then a else b)` → split at this primitive, not at `let coeff := if`.
+              let c ← condOf env c
+              let xargs := x.getAppArgs
+              let mkBind (arg : Expr) :=
+                mkAppN f #[args[0]!, args[1]!, args[2]!, args[3]!,
+                  mkAppN x.getAppFn (xargs.set! i arg), k]
+              let thc ← reify ci t env (mkBind th) inline?
+              let elc ← reify ci t env (mkBind el) inline?
+              return .ite c thc elc
+            else if let some op ← opOf ci env x then
+              lambdaBoundedTelescope k 1 fun ys body => do
+                let kc ← reify ci t { env with vars := ys[0]!.fvarId! :: env.vars } body inline?
+                return .letOp op kc
+            else if let some s ← stmtOf ci env x then
+              lambdaBoundedTelescope k 1 fun _ body => do
+                let kc ← reify ci t env body inline?
+                return .seq s kc
+            else if let some n := x.getAppFn.constName? then
+              if isTryHead n then throwTryCall x
+              else throwInlineOr inline? x m!"reify: `{x0}` is not a contract primitive"
+            else
+              throwInlineOr inline? x m!"reify: `{x0}` is not a contract primitive"
       | ``Pure.pure, 4 => return .ret (← retExprOf env t args[3]!)
       | ``CoeTail.coe, 4 => return .ret (← retExprOf env t args[3]!)
       | ``ite, 5 | ``dite, 5 =>
@@ -1543,6 +1640,8 @@ partial def reify (ci : ContractInfo) (t : RetTy) (env : Env t) (e : Expr)
           return .ite c thc elc
         else if e' != e then
           reify ci t env e' inline?
+        else if let some eLift ← liftCheckedBind? e then
+          reify ci t env eLift inline?
         else if let some op ← opOf ci env e then
           match opTailCore t op with
           | some c => return c
@@ -1564,6 +1663,8 @@ partial def reify (ci : ContractInfo) (t : RetTy) (env : Env t) (e : Expr)
         return .ite c thc elc
       else if e' != e then
         reify ci t env e' inline?
+      else if let some eLift ← liftCheckedBind? e then
+        reify ci t env eLift inline?
       else if let some op ← opOf ci env e then
         match opTailCore t op with
         | some c => return c
@@ -1886,22 +1987,30 @@ def certifyDenote (fn : Name) (ci : ContractInfo) (lhs lhsRaw rhs coreE : Expr) 
     mkIdent ``Lsc.Tx.HMulFixedUp.hMulFixedUp,
     mkIdent ``Lsc.Tx.hAdd_bind_left,
     mkIdent ``Lsc.Tx.hAdd_bind_right,
+    mkIdent ``Lsc.Tx.hAdd_bind_both,
     mkIdent ``Lsc.Tx.hSub_bind_left,
     mkIdent ``Lsc.Tx.hSub_bind_right,
+    mkIdent ``Lsc.Tx.hSub_bind_both,
     mkIdent ``Lsc.Tx.hMul_bind_left,
     mkIdent ``Lsc.Tx.hMul_bind_right,
+    mkIdent ``Lsc.Tx.hMul_bind_both,
     mkIdent ``Lsc.Tx.hDiv_bind_left,
     mkIdent ``Lsc.Tx.hDiv_bind_right,
+    mkIdent ``Lsc.Tx.hDiv_bind_both,
     mkIdent ``Lsc.Tx.hMulDivDown_bind_left,
     mkIdent ``Lsc.Tx.hMulDivDown_bind_mid,
     mkIdent ``Lsc.Tx.hMulDivDown_bind_right,
+    mkIdent ``Lsc.Tx.hMulDivDown_bind_all,
     mkIdent ``Lsc.Tx.hMulDivUp_bind_left,
     mkIdent ``Lsc.Tx.hMulDivUp_bind_mid,
     mkIdent ``Lsc.Tx.hMulDivUp_bind_right,
+    mkIdent ``Lsc.Tx.hMulDivUp_bind_all,
     mkIdent ``Lsc.Tx.hMulFixedDown_bind_left,
     mkIdent ``Lsc.Tx.hMulFixedDown_bind_right,
+    mkIdent ``Lsc.Tx.hMulFixedDown_bind_both,
     mkIdent ``Lsc.Tx.hMulFixedUp_bind_left,
     mkIdent ``Lsc.Tx.hMulFixedUp_bind_right,
+    mkIdent ``Lsc.Tx.hMulFixedUp_bind_both,
     mkIdent ``Lsc.Amount.raw,
     mkIdent ``Lsc.Prim.eval_id,
     mkIdent ``Lsc.RetExpr.eval_word,

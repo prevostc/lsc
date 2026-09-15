@@ -2,6 +2,16 @@
 
 Short dated records.
 
+## 2026-09-15 — `write f (read f op x)` elaborates (17c)
+
+Root cause: `+?` was plain infix `hAdd`, so instance search ran before
+`read` saw a `Tx` expected type. Fix: a binop elaborator (`lscHAdd` …)
+elaborates non-numeral operands at `Tx` (numerals last, at the result
+payload — there is no `OfNat Tx`); `write` elaborates the argument at
+`Tx S X E ε α` and `Bind.bind`s a non-`pure` result. Reify rewrites
+`hAdd (load f) x` to `load >>= fun a => hAdd a x` (`liftCheckedBind?`).
+Pure `write f v` / `write f (x +? y)` unchanged (`CoeTail`).
+
 ## 2026-09-15 — fallible ops and `write` accept `M` (17b)
 
 `+? -? *? /?`, `mulDiv↓`/`mulDiv↑`, and `*?↓`/`*?↑` take `Tx` on either

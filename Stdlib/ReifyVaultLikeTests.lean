@@ -57,10 +57,8 @@ def deposit (n : Amount tAsset) : M (Amount tShare) := do
   let one : Amount tAsset := 1
   let minted ← (Amount.ofWord (a := tShare) n.raw) mulDiv↓ one / one
   Tx.require (0 < minted) .ZeroShares
-  let ts ← read totalShares
-  write totalShares (ts +? minted)
-  let bal ← read shares[who]
-  write shares[who] (bal +? minted)
+  write totalShares (read totalShares +? minted)
+  write shares[who] (read shares[who] +? minted)
   Tx.emit (.Deposit who n minted)
   return minted
 
@@ -89,8 +87,7 @@ def transferShares (to : Address) (s : Amount tShare) : M Bool := do
   let bal ← read shares[who]
   Tx.require (s ≤ bal) .InsufficientShares
   write shares[who] (bal -? s)
-  let dst ← read shares[to]
-  write shares[to] (dst +? s)
+  write shares[to] (read shares[to] +? s)
   return true
 
 def sharesOf (a : Address) : M (Amount tShare) :=

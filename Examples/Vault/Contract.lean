@@ -74,8 +74,7 @@ def deposit (assets : Amount vaultAsset) : M (Amount vShare) := do
   let minted ← Shares.toShares offset assets ta ts
   Tx.require (0 < minted) .ZeroShares
   write totalShares (ts +? minted)
-  let bal ← read shares[who]
-  write shares[who] (bal +? minted)
+  write shares[who] (read shares[who] +? minted)
   safeTransferFrom tok who me assets .TransferFailed
   Tx.emit (.Deposit who assets minted)
   return minted

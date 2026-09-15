@@ -286,19 +286,186 @@ private def isRef (ty : Expr) : Bool :=
   | some n => n.getString! == "Ref"
   | none => false
 
+/-- Monad parameters `(S, X, E, ε, α)` of an expected `Tx` (or `M` / `ReaderT` unfold). -/
+def txParams? (ty? : Option Expr) :
+    TermElabM (Option (Expr × Expr × Expr × Expr × Expr)) := do
+  let some ty0 := ty? | return none
+  let ty0 ← instantiateMVars ty0
+  let tryTx (ty : Expr) : Option (Expr × Expr × Expr × Expr × Expr) :=
+    if ty.isAppOfArity ``Lsc.Tx 5 then
+      some (ty.getArg! 0, ty.getArg! 1, ty.getArg! 2, ty.getArg! 3, ty.getArg! 4)
+    else none
+  if let some p := tryTx ty0 then return some p
+  -- Reducible only: unfold `M` / `Tx`, not `StateT`.
+  let ty ← withReducible (whnf ty0)
+  if let some p := tryTx ty then return some p
+  if ty.isAppOf ``ReaderT && ty.getAppNumArgs ≥ 3 then
+    let α := ty.getArg! 2
+    let st ← withReducible (whnf (ty.getArg! 1))
+    if st.isAppOf ``StateT && st.getAppNumArgs ≥ 2 then
+      let w ← withReducible (whnf (st.getArg! 0))
+      if w.isAppOf ``Lsc.World && w.getAppNumArgs ≥ 3 then
+        let S := w.getArg! 0
+        let X := w.getArg! 1
+        let E := w.getArg! 2
+        let m ← withReducible (whnf (st.getArg! 1))
+        let ε ←
+          if m.isAppOf ``Except && m.getAppNumArgs ≥ 1 then
+            let err := m.getArg! 0
+            if err.isAppOf ``Lsc.Err && err.getAppNumArgs ≥ 1 then
+              pure (err.getArg! 0)
+            else mkFreshExprMVar none
+          else mkFreshExprMVar none
+        return some (S, X, E, ε, α)
+  return none
+
 /-- Storage type `S` of an expected `Tx S _ _ _ _` (or its `ReaderT` unfold). -/
 def txStorage? (ty? : Option Expr) : TermElabM (Option Expr) := do
-  let some ty0 := ty? | return none
-  let ty ← instantiateMVars ty0
-  -- Reducible only: unfold `M` / `Tx`, not `StateT`.
+  return (← txParams? ty?).map (·.1)
+
+/-- Payload of `pure v` / `CoeTail.coe v`. -/
+def peelCoePure? (e : Expr) : Option Expr :=
+  let e := e.consumeMData
+  if e.isAppOf ``Pure.pure && e.getAppNumArgs ≥ 1 then
+    some (e.getArg! (e.getAppNumArgs - 1))
+  else if e.isAppOf ``CoeTail.coe && e.getAppNumArgs ≥ 1 then
+    some (e.getArg! (e.getAppNumArgs - 1))
+  else none
+
+/-- `true` if `ty` is `Tx` or its `ReaderT` unfold. -/
+def isTxType (ty : Expr) : TermElabM Bool := do
   let ty ← withReducible (whnf ty)
-  if ty.isAppOf ``Lsc.Tx then return some (ty.getArg! 0)
+  if ty.isAppOf ``Lsc.Tx then return true
   if ty.isAppOf ``ReaderT then
-    let st := ty.getArg! 1
-    if st.isAppOf ``StateT then
-      let w ← withReducible (whnf (st.getArg! 0))
-      if w.isAppOf ``Lsc.World then return some (w.getArg! 0)
-  return none
+    let st ← withReducible (whnf (ty.getArg! 1))
+    return st.isAppOf ``StateT
+  return false
+
+/-- Re-pack a `Tx`/`ReaderT` operand type so instance search sees `Tx S X E ε α`. -/
+def packOperandTy (S X E ε ty : Expr) : TermElabM Expr := do
+  match ← txParams? (some ty) with
+  | some (_, _, _, _, α) =>
+    return mkAppN (mkConst ``Lsc.Tx) #[S, X, E, ε, ← instantiateMVars α]
+  | none => instantiateMVars ty
+
+/-- Apply a checked-op method with class parameters from the surrounding `Tx`. -/
+def applyChecked (className method : Name) (S X E ε γ : Expr) (args : Array Expr) :
+    TermElabM Expr := do
+  let tys ← args.mapM fun a => do
+    packOperandTy S X E ε (← inferType a)
+  let instTy := mkAppN (mkConst className) (#[S, X, E, ε] ++ tys ++ #[γ])
+  let inst ← synthInstance instTy
+  let f := mkAppN (mkConst method)
+    (#[S, X, E, ε] ++ tys ++ #[γ, inst])
+  return mkAppN f args
+
+/-- Numeral / `OfNat` syntax: no `OfNat Tx`, so do not probe at `Tx`. -/
+def isNumeralStx (stx : Syntax) : Bool :=
+  (stx.isNatLit?).isSome || stx.isOfKind `num
+
+/-- Inner payload of a `Tx` type, if `ty` is `Tx` / `M`. -/
+def txInnerTy? (ty : Expr) : TermElabM (Option Expr) := do
+  return (← txParams? (some ty)).map (·.2.2.2.2)
+
+/-- Elaborate one operand. Prefer a `Tx` expected type so `read` elaborates.
+Keep a successful `Tx` probe as `Tx` (do not peel `CoeTail`). -/
+def elabTxOperand (stx : Term) (S X E ε : Expr) : TermElabM Expr := do
+  let τ ← mkFreshExprMVar none
+  let txTy := mkAppN (mkConst ``Lsc.Tx) #[S, X, E, ε, τ]
+  match ← commitIfNoErrors? (elabTerm stx (some txTy)) with
+  | some e => instantiateMVars e
+  | none => instantiateMVars (← elabTerm stx none)
+
+/-- Apply `method` after elaborating operands at `Tx` (or as pure values).
+Numerals are elaborated last, at the result payload / sibling inner type,
+because `OfNat (Tx …) n` does not exist. -/
+def elabTxOp (className method : Name) (operands : Array Term)
+    (expectedType? : Option Expr) : TermElabM Expr := do
+  tryPostponeIfNoneOrMVar expectedType?
+  let some (S, X, E, ε, γ) ← txParams? expectedType? |
+    throwError "checked op: expected a `Tx` type (use in a contract `do` or `write`)"
+  let mut slots : Array (Option Expr) := .replicate operands.size none
+  for i in [0:operands.size] do
+    unless isNumeralStx operands[i]!.raw do
+      slots := slots.set! i (some (← elabTxOperand operands[i]! S X E ε))
+  let numTy ← do
+    let γ ← instantiateMVars γ
+    if !γ.isMVar then
+      pure γ
+    else
+      let mut found : Option Expr := none
+      for a? in slots do
+        if found.isNone then
+          if let some a := a? then
+            let ty ← inferType a
+            found := some ((← txInnerTy? ty).getD ty)
+      pure (found.getD (← mkFreshExprMVar none))
+  for i in [0:operands.size] do
+    if slots[i]!.isNone then
+      slots := slots.set! i (some (← elabTerm operands[i]! (some numTy)))
+  let args := slots.map (·.get!)
+  let e ← applyChecked className method S X E ε γ args
+  ensureHasType expectedType? e
+
+@[term_elab lscHAdd]
+def elabHAdd : TermElab := fun stx expectedType? =>
+  match stx with
+  | `($a:term +? $b:term) =>
+    elabTxOp ``Lsc.Tx.HAddChecked ``Lsc.Tx.HAddChecked.hAdd #[a, b] expectedType?
+  | _ => throwUnsupportedSyntax
+
+@[term_elab lscHSub]
+def elabHSub : TermElab := fun stx expectedType? =>
+  match stx with
+  | `($a:term -? $b:term) =>
+    elabTxOp ``Lsc.Tx.HSubChecked ``Lsc.Tx.HSubChecked.hSub #[a, b] expectedType?
+  | _ => throwUnsupportedSyntax
+
+@[term_elab lscHMul]
+def elabHMul : TermElab := fun stx expectedType? =>
+  match stx with
+  | `($a:term *? $b:term) =>
+    elabTxOp ``Lsc.Tx.HMulChecked ``Lsc.Tx.HMulChecked.hMul #[a, b] expectedType?
+  | _ => throwUnsupportedSyntax
+
+@[term_elab lscHDiv]
+def elabHDiv : TermElab := fun stx expectedType? =>
+  match stx with
+  | `($a:term /? $b:term) =>
+    elabTxOp ``Lsc.Tx.HDivChecked ``Lsc.Tx.HDivChecked.hDiv #[a, b] expectedType?
+  | _ => throwUnsupportedSyntax
+
+@[term_elab lscHMulFixedDown]
+def elabHMulFixedDown : TermElab := fun stx expectedType? =>
+  match stx with
+  | `($a:term *?↓ $b:term) =>
+    elabTxOp ``Lsc.Tx.HMulFixedDown ``Lsc.Tx.HMulFixedDown.hMulFixedDown
+      #[a, b] expectedType?
+  | _ => throwUnsupportedSyntax
+
+@[term_elab lscHMulFixedUp]
+def elabHMulFixedUp : TermElab := fun stx expectedType? =>
+  match stx with
+  | `($a:term *?↑ $b:term) =>
+    elabTxOp ``Lsc.Tx.HMulFixedUp ``Lsc.Tx.HMulFixedUp.hMulFixedUp
+      #[a, b] expectedType?
+  | _ => throwUnsupportedSyntax
+
+@[term_elab lscMulDivDown]
+def elabMulDivDown : TermElab := fun stx expectedType? =>
+  match stx with
+  | `($a:term mulDiv↓ $b:term / $c:term) =>
+    elabTxOp ``Lsc.Tx.HMulDivDown ``Lsc.Tx.HMulDivDown.hMulDivDown
+      #[a, b, c] expectedType?
+  | _ => throwUnsupportedSyntax
+
+@[term_elab lscMulDivUp]
+def elabMulDivUp : TermElab := fun stx expectedType? =>
+  match stx with
+  | `($a:term mulDiv↑ $b:term / $c:term) =>
+    elabTxOp ``Lsc.Tx.HMulDivUp ``Lsc.Tx.HMulDivUp.hMulDivUp
+      #[a, b, c] expectedType?
+  | _ => throwUnsupportedSyntax
 
 def elabFieldProj (f : Ident) (expectedType? : Option Expr) : TermElabM Expr := do
   let some S ← txStorage? expectedType? |
@@ -307,10 +474,11 @@ def elabFieldProj (f : Ident) (expectedType? : Option Expr) : TermElabM Expr := 
   let expected ← mkArrow S α
   elabTerm (← `(fun $(sigma) => $(projOf f))) expected
 
-/-- Value type of storage field `f` (scalar / map1 / map2). -/
+/-- Value type of storage field `f` (scalar / map1 / map2).
+Reducible-only: `Address` is a `def` newtype and must not unfold to `Nat`. -/
 def fieldValTy (f : Ident) (expectedType? : Option Expr) : TermElabM Expr := do
   forallTelescopeReducing (← inferType (← elabFieldProj f expectedType?)) fun _ body =>
-    whnfD body
+    withReducible (whnf body)
 
 /-- Number of mapping keys `f` expects (0 = scalar). -/
 def fieldKeyCount (f : Ident) (expectedType? : Option Expr) : TermElabM Nat := do
@@ -383,24 +551,62 @@ where
     let p := projOf f
     `($p $k₁ $k₂)
 
-/-- Elaborate `v` as the field type `α`, otherwise as `Tx S X E ε α`.
-The surrounding `write`'s `Tx` expected type supplies `S X E ε` so nested
-`read`s inside `v` can see the storage. -/
+/-- Elaborate `v` at `Tx S X E ε α` (the primary `write` signature). Pure values
+coerce via `CoeTail`; if the result is `pure v` we emit the store without a
+bind so `write paused Flag.off` stays a tail `store`. Nested `read`s see a
+`Tx` expected type, so `write f (read f +? x)` elaborates.
+
+`mkCont` is `fun x => store … x` (no bind). The `Tx` path uses `Bind.bind`
+on the already-elaborated argument so we never delab/`re-elab` a `read`. -/
 def writeArg (α : Expr) (v : Term) (expectedType? : Option Expr)
-    (mkPure mkTx : Term → TermElabM Term) : TermElabM Term := do
+    (mkPure : Term → TermElabM Term) (mkCont : TermElabM Term) : TermElabM Expr := do
   let αStx ← delab α
+  let (S, X, E, ε) ←
+    match ← txParams? expectedType? with
+    | some (S, X, E, ε, _) => pure (S, X, E, ε)
+    | none => do
+      pure (← mkFreshExprMVar none, ← mkFreshExprMVar none,
+            ← mkFreshExprMVar none, ← mkFreshExprMVar none)
+  let txTy := mkAppN (mkConst ``Lsc.Tx) #[S, X, E, ε, α]
   let saved ← saveState
-  let asPure ← observing? (withoutErrToSorry (elabTermEnsuringType v α))
-  saved.restore
-  if asPure.isSome then
-    mkPure (← `(($v : $αStx)))
-  else
-    match ← txStorage? expectedType? with
-    | some S =>
-      let SStx ← delab S
-      mkTx (← `(($v : Lsc.Tx $SStx _ _ _ $αStx)))
-    | none =>
-      mkTx (← `(($v : Lsc.Tx _ _ _ _ $αStx)))
+  match ← commitIfNoErrors? (elabTermEnsuringType v txTy) with
+  | some e =>
+    let e ← instantiateMVars e
+    if (peelCoePure? e).isSome then
+      saved.restore
+      elabTerm (← mkPure (← `(($v : $αStx)))) expectedType?
+    else
+      let txU := mkAppN (mkConst ``Lsc.Tx) #[S, X, E, ε, mkConst ``Unit]
+      let kTy ← mkArrow α txU
+      let k ← elabTerm (← mkCont) (some kTy)
+      mkAppM ``Bind.bind #[e, k]
+  | none =>
+    saved.restore
+    elabTerm (← mkPure (← `(($v : $αStx)))) expectedType?
+
+/-- Elaborate `d.f` as `Field S α` using the surrounding `Tx` storage. -/
+def elabFieldRef (d f : Ident) (expectedType? : Option Expr) : TermElabM Expr := do
+  let some S ← txStorage? expectedType? |
+    throwError "read/write: could not infer storage type (use in a `Tx` context)"
+  let α ← mkFreshExprMVar none
+  let fieldTy := mkAppN (mkConst ``Lsc.Field) #[S, α]
+  discard <| elabTerm (← `($d.$f)) (some fieldTy)
+  instantiateMVars (← whnfD α)
+
+@[term_elab lscReadField]
+def elabReadField : TermElab := fun stx expectedType? => do
+  tryPostponeIfNoneOrMVar expectedType?
+  match stx with
+  | `(read $d:ident.$f:ident) => do
+    let α ← elabFieldRef d f expectedType?
+    let load ←
+      if isRef α then
+        `(Lsc.Tx.load (fun $(sigma) =>
+            ((Lsc.Field.get ($d.$f) $(sigma)).addr : Nat)))
+      else
+        `(Lsc.Tx.load (Lsc.Field.get ($d.$f)))
+    wrapLoad α load expectedType?
+  | _ => throwUnsupportedSyntax
 
 @[term_elab lscWrite]
 def elabWrite : TermElab := fun stx expectedType? => do
@@ -410,7 +616,7 @@ def elabWrite : TermElab := fun stx expectedType? => do
     let n ← fieldKeyCount f expectedType?
     unless n == 0 do throwError "write: `{f.getId}` needs keys"
     let α ← fieldValTy f expectedType?
-    elabTerm (← storeScalar f α v expectedType?) expectedType?
+    storeScalar f α v expectedType?
   | `(write $f:ident [ $ks:term,* ] $v) => do
     let keys := ks.getElems
     let n ← fieldKeyCount f expectedType?
@@ -418,43 +624,39 @@ def elabWrite : TermElab := fun stx expectedType? => do
       throwError "write: `{f.getId}` expects {n} key(s)"
     let α ← fieldValTy f expectedType?
     match keys.toList with
-    | [k] => elabTerm (← storeMap1 f α k v expectedType?) expectedType?
-    | [k₁, k₂] => elabTerm (← storeMap2 f α k₁ k₂ v expectedType?) expectedType?
+    | [k] => storeMap1 f α k v expectedType?
+    | [k₁, k₂] => storeMap2 f α k₁ k₂ v expectedType?
     | _ => throwError "write: mappings have one or two keys"
   | _ => throwUnsupportedSyntax
 
 where
   storeScalar (f : Ident) (α : Expr) (v : Term) (expectedType? : Option Expr) :
-      TermElabM Term := do
-    let α ← whnfD α
+      TermElabM Expr := do
+    let α ← withReducible (whnf α)
     let σ := sigma
     if isAmount α then
       writeArg α v expectedType?
         (fun v =>
           `(Lsc.Tx.store (fun $σ m => { $σ with $f:ident := Lsc.Amount.ofWord m })
               (Lsc.Amount.raw $v)))
-        (fun m =>
-          `(($m) >>= fun x =>
-            Lsc.Tx.store (fun $σ y => { $σ with $f:ident := Lsc.Amount.ofWord y })
-              (Lsc.Amount.raw x)))
+        `(fun x =>
+          Lsc.Tx.store (fun $σ y => { $σ with $f:ident := Lsc.Amount.ofWord y })
+            (Lsc.Amount.raw x))
     else if isRef α then
       writeArg α v expectedType?
         (fun v =>
           `(Lsc.Tx.store (fun $σ m => { $σ with $f:ident := { addr := m } })
               ($v).addr))
-        (fun m =>
-          `(($m) >>= fun x =>
-            Lsc.Tx.store (fun $σ y => { $σ with $f:ident := { addr := y } })
-              x.addr))
+        `(fun x =>
+          Lsc.Tx.store (fun $σ y => { $σ with $f:ident := { addr := y } })
+            x.addr)
     else
       writeArg α v expectedType?
         (fun v => `(Lsc.Tx.store (fun $σ m => { $σ with $f:ident := m }) $v))
-        (fun m =>
-          `(($m) >>= fun x =>
-            Lsc.Tx.store (fun $σ y => { $σ with $f:ident := y }) x))
+        `(fun x => Lsc.Tx.store (fun $σ y => { $σ with $f:ident := y }) x)
   storeMap1 (f : Ident) (α : Expr) (k v : Term) (expectedType? : Option Expr) :
-      TermElabM Term := do
-    let α ← whnfD α
+      TermElabM Expr := do
+    let α ← withReducible (whnf α)
     let σ := sigma
     let p := projOf f
     let kk := mkIdent `k
@@ -465,34 +667,31 @@ where
           `(Lsc.Tx.storeMap (fun $σ $kk => Lsc.Amount.raw ($p $kk))
               (fun $σ $mm => { $σ with $f:ident := fun $kk => Lsc.Amount.ofWord ($mm $kk) })
               $k (Lsc.Amount.raw $v)))
-        (fun m =>
-          `(($m) >>= fun x =>
-            Lsc.Tx.storeMap (fun $σ $kk => Lsc.Amount.raw ($p $kk))
-              (fun $σ $mm => { $σ with $f:ident := fun $kk => Lsc.Amount.ofWord ($mm $kk) })
-              $k (Lsc.Amount.raw x)))
+        `(fun x =>
+          Lsc.Tx.storeMap (fun $σ $kk => Lsc.Amount.raw ($p $kk))
+            (fun $σ $mm => { $σ with $f:ident := fun $kk => Lsc.Amount.ofWord ($mm $kk) })
+            $k (Lsc.Amount.raw x))
     else if isRef α then
       writeArg α v expectedType?
         (fun v =>
           `(Lsc.Tx.storeMap (fun $σ $kk => ($p $kk).addr)
               (fun $σ $mm => { $σ with $f:ident := fun $kk => { addr := $mm $kk } })
               $k ($v).addr))
-        (fun m =>
-          `(($m) >>= fun x =>
-            Lsc.Tx.storeMap (fun $σ $kk => ($p $kk).addr)
-              (fun $σ $mm => { $σ with $f:ident := fun $kk => { addr := $mm $kk } })
-              $k x.addr))
+        `(fun x =>
+          Lsc.Tx.storeMap (fun $σ $kk => ($p $kk).addr)
+            (fun $σ $mm => { $σ with $f:ident := fun $kk => { addr := $mm $kk } })
+            $k x.addr)
     else
       writeArg α v expectedType?
         (fun v =>
           `(Lsc.Tx.storeMap (fun $σ => $p) (fun $σ $mm => { $σ with $f:ident := $mm })
               $k $v))
-        (fun m =>
-          `(($m) >>= fun x =>
-            Lsc.Tx.storeMap (fun $σ => $p) (fun $σ $mm => { $σ with $f:ident := $mm })
-              $k x))
+        `(fun x =>
+          Lsc.Tx.storeMap (fun $σ => $p) (fun $σ $mm => { $σ with $f:ident := $mm })
+            $k x)
   storeMap2 (f : Ident) (α : Expr) (k₁ k₂ v : Term) (expectedType? : Option Expr) :
-      TermElabM Term := do
-    let α ← whnfD α
+      TermElabM Expr := do
+    let α ← withReducible (whnf α)
     let σ := sigma
     let p := projOf f
     let a := mkIdent `k₁
@@ -504,31 +703,60 @@ where
           `(Lsc.Tx.storeMap2 (fun $σ $a $b => Lsc.Amount.raw ($p $a $b))
               (fun $σ $mm => { $σ with $f:ident := fun $a $b => Lsc.Amount.ofWord ($mm $a $b) })
               $k₁ $k₂ (Lsc.Amount.raw $v)))
-        (fun m =>
-          `(($m) >>= fun x =>
-            Lsc.Tx.storeMap2 (fun $σ $a $b => Lsc.Amount.raw ($p $a $b))
-              (fun $σ $mm => { $σ with $f:ident := fun $a $b => Lsc.Amount.ofWord ($mm $a $b) })
-              $k₁ $k₂ (Lsc.Amount.raw x)))
+        `(fun x =>
+          Lsc.Tx.storeMap2 (fun $σ $a $b => Lsc.Amount.raw ($p $a $b))
+            (fun $σ $mm => { $σ with $f:ident := fun $a $b => Lsc.Amount.ofWord ($mm $a $b) })
+            $k₁ $k₂ (Lsc.Amount.raw x))
     else if isRef α then
       writeArg α v expectedType?
         (fun v =>
           `(Lsc.Tx.storeMap2 (fun $σ $a $b => ($p $a $b).addr)
               (fun $σ $mm => { $σ with $f:ident := fun $a $b => { addr := $mm $a $b } })
               $k₁ $k₂ ($v).addr))
-        (fun m =>
-          `(($m) >>= fun x =>
-            Lsc.Tx.storeMap2 (fun $σ $a $b => ($p $a $b).addr)
-              (fun $σ $mm => { $σ with $f:ident := fun $a $b => { addr := $mm $a $b } })
-              $k₁ $k₂ x.addr))
+        `(fun x =>
+          Lsc.Tx.storeMap2 (fun $σ $a $b => ($p $a $b).addr)
+            (fun $σ $mm => { $σ with $f:ident := fun $a $b => { addr := $mm $a $b } })
+            $k₁ $k₂ x.addr)
     else
       writeArg α v expectedType?
         (fun v =>
           `(Lsc.Tx.storeMap2 (fun $σ => $p) (fun $σ $mm => { $σ with $f:ident := $mm })
               $k₁ $k₂ $v))
-        (fun m =>
-          `(($m) >>= fun x =>
-            Lsc.Tx.storeMap2 (fun $σ => $p) (fun $σ $mm => { $σ with $f:ident := $mm })
-              $k₁ $k₂ x))
+        `(fun x =>
+          Lsc.Tx.storeMap2 (fun $σ => $p) (fun $σ $mm => { $σ with $f:ident := $mm })
+            $k₁ $k₂ x)
+
+@[term_elab lscWriteField]
+def elabWriteField : TermElab := fun stx expectedType? => do
+  tryPostponeIfNoneOrMVar expectedType?
+  match stx with
+  | `(write $d:ident.$f:ident $v) => do
+    let α ← elabFieldRef d f expectedType?
+    let α ← withReducible (whnf α)
+    let σ := sigma
+    if isAmount α then
+      writeArg α v expectedType?
+        (fun v =>
+          `(Lsc.Tx.store (fun $σ m =>
+              Lsc.Field.set ($d.$f) $σ (Lsc.Amount.ofWord m))
+            (Lsc.Amount.raw $v)))
+        `(fun x =>
+          Lsc.Tx.store (fun $σ y =>
+              Lsc.Field.set ($d.$f) $σ (Lsc.Amount.ofWord y))
+            (Lsc.Amount.raw x))
+    else if isRef α then
+      writeArg α v expectedType?
+        (fun v =>
+          `(Lsc.Tx.store (fun $σ m => Lsc.Field.set ($d.$f) $σ { addr := m })
+              ($v).addr))
+        `(fun x =>
+          Lsc.Tx.store (fun $σ y => Lsc.Field.set ($d.$f) $σ { addr := y })
+            x.addr)
+    else
+      writeArg α v expectedType?
+        (fun v => `(Lsc.Tx.store (Lsc.Field.set ($d.$f)) $v))
+        `(fun x => Lsc.Tx.store (Lsc.Field.set ($d.$f)) x)
+  | _ => throwUnsupportedSyntax
 
 end Syntax
 

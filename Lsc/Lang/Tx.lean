@@ -110,6 +110,13 @@ inductive Err (ε : Type)
   | callFailed
   deriving DecidableEq, Repr
 
+/-- A storage field: getter plus in-place setter. `read`/`write` accept
+these as well as bare field names. After inlining, a `match` on a
+constructor reduces to today's `Storage` projection. -/
+structure Field (S : Type) (α : Type) where
+  get : S → α
+  set : S → α → S
+
 /-- The contract monad: read the context, thread the world, revert with `Err ε`.
 A revert discards state and logs, exactly like the EVM. -/
 abbrev Tx (S X E ε : Type) (α : Type) : Type :=
@@ -309,6 +316,34 @@ instance (priority := high) [HMulFixedUp S X E ε α β γ] :
     HMulFixedUp S X E ε α (Tx S X E ε β) γ where
   hMulFixedUp a mb := mb >>= fun b => HMulFixedUp.hMulFixedUp a b
 
+/-- Both operands in `Tx`. Used when a binop elaborator passes two loads. -/
+instance (priority := high) [HAddChecked S X E ε α β γ] :
+    HAddChecked S X E ε (Tx S X E ε α) (Tx S X E ε β) γ where
+  hAdd ma mb := ma >>= fun a => mb >>= fun b => HAddChecked.hAdd a b
+instance (priority := high) [HSubChecked S X E ε α β γ] :
+    HSubChecked S X E ε (Tx S X E ε α) (Tx S X E ε β) γ where
+  hSub ma mb := ma >>= fun a => mb >>= fun b => HSubChecked.hSub a b
+instance (priority := high) [HMulChecked S X E ε α β γ] :
+    HMulChecked S X E ε (Tx S X E ε α) (Tx S X E ε β) γ where
+  hMul ma mb := ma >>= fun a => mb >>= fun b => HMulChecked.hMul a b
+instance (priority := high) [HDivChecked S X E ε α β γ] :
+    HDivChecked S X E ε (Tx S X E ε α) (Tx S X E ε β) γ where
+  hDiv ma mb := ma >>= fun a => mb >>= fun b => HDivChecked.hDiv a b
+instance (priority := high) [HMulDivDown S X E ε α β γ δ] :
+    HMulDivDown S X E ε (Tx S X E ε α) (Tx S X E ε β) (Tx S X E ε γ) δ where
+  hMulDivDown ma mb mc :=
+    ma >>= fun a => mb >>= fun b => mc >>= fun c => HMulDivDown.hMulDivDown a b c
+instance (priority := high) [HMulDivUp S X E ε α β γ δ] :
+    HMulDivUp S X E ε (Tx S X E ε α) (Tx S X E ε β) (Tx S X E ε γ) δ where
+  hMulDivUp ma mb mc :=
+    ma >>= fun a => mb >>= fun b => mc >>= fun c => HMulDivUp.hMulDivUp a b c
+instance (priority := high) [HMulFixedDown S X E ε α β γ] :
+    HMulFixedDown S X E ε (Tx S X E ε α) (Tx S X E ε β) γ where
+  hMulFixedDown ma mb := ma >>= fun a => mb >>= fun b => HMulFixedDown.hMulFixedDown a b
+instance (priority := high) [HMulFixedUp S X E ε α β γ] :
+    HMulFixedUp S X E ε (Tx S X E ε α) (Tx S X E ε β) γ where
+  hMulFixedUp ma mb := ma >>= fun a => mb >>= fun b => HMulFixedUp.hMulFixedUp a b
+
 @[simp] theorem hAdd_bind_left [HAddChecked S X E ε α β γ]
     (ma : Tx S X E ε α) (b : β) :
     HAddChecked.hAdd ma b = (ma >>= fun a => HAddChecked.hAdd a b) := rfl
@@ -373,6 +408,40 @@ instance (priority := high) [HMulFixedUp S X E ε α β γ] :
     (a : α) (mb : Tx S X E ε β) :
     HMulFixedUp.hMulFixedUp a mb =
       (mb >>= fun b => HMulFixedUp.hMulFixedUp a b) := rfl
+@[simp] theorem hAdd_bind_both [HAddChecked S X E ε α β γ]
+    (ma : Tx S X E ε α) (mb : Tx S X E ε β) :
+    HAddChecked.hAdd ma mb =
+      (ma >>= fun a => mb >>= fun b => HAddChecked.hAdd a b) := rfl
+@[simp] theorem hSub_bind_both [HSubChecked S X E ε α β γ]
+    (ma : Tx S X E ε α) (mb : Tx S X E ε β) :
+    HSubChecked.hSub ma mb =
+      (ma >>= fun a => mb >>= fun b => HSubChecked.hSub a b) := rfl
+@[simp] theorem hMul_bind_both [HMulChecked S X E ε α β γ]
+    (ma : Tx S X E ε α) (mb : Tx S X E ε β) :
+    HMulChecked.hMul ma mb =
+      (ma >>= fun a => mb >>= fun b => HMulChecked.hMul a b) := rfl
+@[simp] theorem hDiv_bind_both [HDivChecked S X E ε α β γ]
+    (ma : Tx S X E ε α) (mb : Tx S X E ε β) :
+    HDivChecked.hDiv ma mb =
+      (ma >>= fun a => mb >>= fun b => HDivChecked.hDiv a b) := rfl
+@[simp] theorem hMulDivDown_bind_all [HMulDivDown S X E ε α β γ δ]
+    (ma : Tx S X E ε α) (mb : Tx S X E ε β) (mc : Tx S X E ε γ) :
+    HMulDivDown.hMulDivDown ma mb mc =
+      (ma >>= fun a => mb >>= fun b => mc >>= fun c =>
+        HMulDivDown.hMulDivDown a b c) := rfl
+@[simp] theorem hMulDivUp_bind_all [HMulDivUp S X E ε α β γ δ]
+    (ma : Tx S X E ε α) (mb : Tx S X E ε β) (mc : Tx S X E ε γ) :
+    HMulDivUp.hMulDivUp ma mb mc =
+      (ma >>= fun a => mb >>= fun b => mc >>= fun c =>
+        HMulDivUp.hMulDivUp a b c) := rfl
+@[simp] theorem hMulFixedDown_bind_both [HMulFixedDown S X E ε α β γ]
+    (ma : Tx S X E ε α) (mb : Tx S X E ε β) :
+    HMulFixedDown.hMulFixedDown ma mb =
+      (ma >>= fun a => mb >>= fun b => HMulFixedDown.hMulFixedDown a b) := rfl
+@[simp] theorem hMulFixedUp_bind_both [HMulFixedUp S X E ε α β γ]
+    (ma : Tx S X E ε α) (mb : Tx S X E ε β) :
+    HMulFixedUp.hMulFixedUp ma mb =
+      (ma >>= fun a => mb >>= fun b => HMulFixedUp.hMulFixedUp a b) := rfl
 
 /-! ### Wrapping arithmetic (pure, exactly the EVM) -/
 
@@ -402,9 +471,14 @@ end Lang
 syntax; their elaborators live in `Lsc.Lang.Interface` so they can wrap
 `Amount` / `Ref` fields to the schema's word form (`ofWord` / `.raw`,
 `{ addr := · }` / `.addr`). The reifier still matches `Tx.load` / `Tx.store`.
+`write`'s argument is elaborated at `Tx S X E ε α` (pure values via
+`CoeTail`). Checked `?` operators use a binop elaborator that elaborates
+each operand at `Tx`, so `write f (read f +? x)` sees a `Tx` expected type
+on `read` before instance synthesis.
 
 * `read f`, `read f[k]`, `read f[k₁, k₂]` — storage reads
-* `write f v`, `write f[k] v`, `write f[k₁, k₂] v` — storage writes
+* `read d.f`, `write d.f v` — `Field S α` (direction-indexed fields)
+* `write f v`, `write f[k] v`, `write f[k₁, k₂] v` — storage writes (`v` may be `Tx`)
 * `a +? b`, `a -? b`, `a *? b`, `a /? b` — checked arithmetic (operands may be `Tx`)
 * `a mulDiv↓ b / c`, `a mulDiv↑ b / c` — fused checked mulDiv (one op, not `*?` then `/?`)
 * `a *?↓ r`, `a *?↑ r` — scale an amount by a `Fixed d` (`⌊a * r / 10^d⌋` / ceil)
@@ -414,29 +488,27 @@ namespace Syntax
 open Lean
 
 scoped syntax:max (name := lscRead) "read " ident ("[" term,+ "]")? : term
+scoped syntax:max (name := lscReadField) "read " ident noWs "." ident : term
 scoped syntax:max (name := lscWrite) "write " ident ("[" term,+ "]")? ppSpace term:max : term
+scoped syntax:max (name := lscWriteField) "write " ident noWs "." ident ppSpace term:max : term
 
 def sigma : Ident := mkIdent `σ
 def projOf (f : Ident) : Ident := mkIdent (`σ ++ f.getId)
 
-scoped infixl:65 " +? " => Lsc.Tx.HAddChecked.hAdd
-scoped infixl:65 " -? " => Lsc.Tx.HSubChecked.hSub
-scoped infixl:70 " *? " => Lsc.Tx.HMulChecked.hMul
-scoped infixl:70 " /? " => Lsc.Tx.HDivChecked.hDiv
-scoped infixl:70 " *?↓ " => Lsc.Tx.HMulFixedDown.hMulFixedDown
-scoped infixl:70 " *?↑ " => Lsc.Tx.HMulFixedUp.hMulFixedUp
+scoped syntax:65 (name := lscHAdd) term:65 " +? " term:66 : term
+scoped syntax:65 (name := lscHSub) term:65 " -? " term:66 : term
+scoped syntax:70 (name := lscHMul) term:70 " *? " term:71 : term
+scoped syntax:70 (name := lscHDiv) term:70 " /? " term:71 : term
+scoped syntax:70 (name := lscHMulFixedDown) term:70 " *?↓ " term:71 : term
+scoped syntax:70 (name := lscHMulFixedUp) term:70 " *?↑ " term:71 : term
 scoped infixl:65 " +↻ " => Lsc.Tx.addWrap
 scoped infixl:65 " -↻ " => Lsc.Tx.subWrap
 scoped infixl:70 " *↻ " => Lsc.Tx.mulWrap
 
 /-- Fused `⌊a * b / c⌋`. Elaborates to `HMulDivDown` (`Nat` or `Amount`). -/
-scoped syntax:70 term:71 " mulDiv↓ " term:71 " / " term:70 : term
+scoped syntax:70 (name := lscMulDivDown) term:71 " mulDiv↓ " term:71 " / " term:70 : term
 /-- Fused `⌈a * b / c⌉`. -/
-scoped syntax:70 term:71 " mulDiv↑ " term:71 " / " term:70 : term
-
-macro_rules
-  | `($a mulDiv↓ $b / $c) => `(Lsc.Tx.HMulDivDown.hMulDivDown $a $b $c)
-  | `($a mulDiv↑ $b / $c) => `(Lsc.Tx.HMulDivUp.hMulDivUp $a $b $c)
+scoped syntax:70 (name := lscMulDivUp) term:71 " mulDiv↑ " term:71 " / " term:70 : term
 
 end Syntax
 

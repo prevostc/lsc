@@ -32,8 +32,7 @@ structure Storage where
   count : Nat
 
 def increment : M Unit := do
-  let c ← read count
-  write count (c +? 1)
+  write count (read count +? 1)
   Tx.emit (.Incremented 1)
 ```
 
@@ -60,8 +59,7 @@ def transfer (to : Address) (amount : Amount tokenAsset) : M Bool := do
   let b ← read balances[src]
   Tx.require (amount ≤ b) .InsufficientBalance
   write balances[src] (b -? amount)
-  let r ← read balances[to]
-  write balances[to] (r +? amount)
+  write balances[to] (read balances[to] +? amount)
   Tx.emit (.Transfer src to amount)
   return true
 ```

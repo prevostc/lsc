@@ -20,7 +20,8 @@ Core  --toYul (ours)-->  Yul AST (powdr yul-semantics)  --powdr compile_correct-
 - Arithmetic is checked by default (`+?`, `-?`, `*?`, `/?` revert on overflow/underflow/zero);
   fused `mulDiv↓` / `mulDiv↑` are `⌊x·y/z⌋` / `⌈x·y/z⌉` (`y`/`z` two `Amount`s or two `Word`s).
   `x *?↓ r` / `x *?↑ r` scale an `Amount` by a `Fixed d` (`⌊x·r/10^d⌋` / ceil). Either operand
-  of those ops (and the value of `write`) may be `Tx`. `x.as b` is the
+  of those ops (and the value of `write`) may be `Tx`; `write f (read f +? x)`
+  elaborates (`write` probes `Tx`, checked ops use a binop elaborator). `x.as b` is the
   1:1 retag. Wrapping ops are explicit and rare.
 - Units are types: `structure Amount (a : Asset) where raw : Word` (`Lsc/Lang/Amount.lean`).
   `Asset` is `{name : Lean.Name, decimals? : Option Nat}` — `some d` when static (LP shares),
