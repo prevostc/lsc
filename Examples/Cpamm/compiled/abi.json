@@ -25,5 +25,6 @@
 {"type":"error","name":"TransferFailed","inputs":[]},
 {"type":"error","name":"NotOwner","inputs":[]},
 {"type":"error","name":"FeeTooHigh","inputs":[]},
-{"type":"error","name":"NoFeeTo","inputs":[]}
+{"type":"error","name":"NoFeeTo","inputs":[]},
+{"type":"error","name":"InsufficientLiquidity","inputs":[]}
 ]

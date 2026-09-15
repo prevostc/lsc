@@ -117,73 +117,285 @@ object "Cpamm" {
                                 revert(128, 36)
                             }
                             sstore(3, addLiquidity_11)
-                            let addLiquidity_12 := add(addLiquidity_9, addLiquidity_6)
-                            if lt(addLiquidity_12, addLiquidity_9) {
-                                mstore(128, shl(224, 1313373041))
-                                mstore(132, 17)
-                                revert(128, 36)
-                            }
-                            sstore(4, addLiquidity_12)
-                            mstore(0, addLiquidity_2)
-                            mstore(32, 5)
-                            let addLiquidity_13 := sload(keccak256(0, 64))
-                            let addLiquidity_14 := add(addLiquidity_9, addLiquidity_13)
-                            if lt(addLiquidity_14, addLiquidity_9) {
-                                mstore(128, shl(224, 1313373041))
-                                mstore(132, 17)
-                                revert(128, 36)
-                            }
-                            mstore(0, addLiquidity_2)
-                            mstore(32, 5)
-                            sstore(keccak256(0, 64), addLiquidity_14)
-                            let addLiquidity_15 := sload(0)
-                            let addLiquidity_16 := sload(1)
-                            let addLiquidity_17 := 0
-                            {
-                                mstore(128, shl(224, 599290589))
-                                mstore(132, addLiquidity_2)
-                                mstore(164, addLiquidity_3)
-                                mstore(196, addLiquidity_0)
-                                let addLiquidity__ok_17 := call(1000000, addLiquidity_15, 0, 128, 100, 128, 32)
-                                if iszero(addLiquidity__ok_17) {
-                                    revert(0, 0)
+                            switch eq(addLiquidity_6, 0)
+                            case 0 {
+                                switch iszero(eq(addLiquidity_6, 0))
+                                case 0 {
+                                    mstore(0, addLiquidity_2)
+                                    mstore(32, 5)
+                                    let addLiquidity_12 := sload(keccak256(0, 64))
+                                    let addLiquidity_13 := add(addLiquidity_12, addLiquidity_9)
+                                    if lt(addLiquidity_13, addLiquidity_12) {
+                                        mstore(128, shl(224, 1313373041))
+                                        mstore(132, 17)
+                                        revert(128, 36)
+                                    }
+                                    mstore(0, addLiquidity_2)
+                                    mstore(32, 5)
+                                    sstore(keccak256(0, 64), addLiquidity_13)
+                                    let addLiquidity_14 := sload(0)
+                                    let addLiquidity_15 := sload(1)
+                                    let addLiquidity_16 := 0
+                                    {
+                                        mstore(128, shl(224, 599290589))
+                                        mstore(132, addLiquidity_2)
+                                        mstore(164, addLiquidity_3)
+                                        mstore(196, addLiquidity_0)
+                                        let addLiquidity__ok_16 := call(1000000, addLiquidity_14, 0, 128, 100, 128, 32)
+                                        if iszero(addLiquidity__ok_16) {
+                                            revert(0, 0)
+                                        }
+                                        if iszero(or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 32)), lt(returndatasize(), 64)))) {
+                                            revert(0, 0)
+                                        }
+                                        addLiquidity_16 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
+                                    }
+                                    if iszero(eq(addLiquidity_16, 1)) {
+                                        mstore(128, shl(224, 2428038168))
+                                        revert(128, 4)
+                                    }
+                                    let addLiquidity_17 := 0
+                                    {
+                                        mstore(128, shl(224, 599290589))
+                                        mstore(132, addLiquidity_2)
+                                        mstore(164, addLiquidity_3)
+                                        mstore(196, addLiquidity_1)
+                                        let addLiquidity__ok_17 := call(1000000, addLiquidity_15, 0, 128, 100, 128, 32)
+                                        if iszero(addLiquidity__ok_17) {
+                                            revert(0, 0)
+                                        }
+                                        if iszero(or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 32)), lt(returndatasize(), 64)))) {
+                                            revert(0, 0)
+                                        }
+                                        addLiquidity_17 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
+                                    }
+                                    if iszero(eq(addLiquidity_17, 1)) {
+                                        mstore(128, shl(224, 2428038168))
+                                        revert(128, 4)
+                                    }
+                                    mstore(128, addLiquidity_2)
+                                    mstore(160, addLiquidity_0)
+                                    mstore(192, addLiquidity_1)
+                                    mstore(224, addLiquidity_9)
+                                    log1(128, 128, 86256647852634439136012048383694880642795699201302061824315076091651743641550)
+                                    tstore(0, 0)
+                                    mstore(128, addLiquidity_9)
+                                    return(128, 32)
                                 }
-                                if iszero(or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 32)), lt(returndatasize(), 64)))) {
-                                    revert(0, 0)
+                                default {
+                                    let addLiquidity_12 := add(addLiquidity_6, addLiquidity_9)
+                                    if lt(addLiquidity_12, addLiquidity_6) {
+                                        mstore(128, shl(224, 1313373041))
+                                        mstore(132, 17)
+                                        revert(128, 36)
+                                    }
+                                    sstore(4, addLiquidity_12)
+                                    mstore(0, addLiquidity_2)
+                                    mstore(32, 5)
+                                    let addLiquidity_13 := sload(keccak256(0, 64))
+                                    let addLiquidity_14 := add(addLiquidity_13, addLiquidity_9)
+                                    if lt(addLiquidity_14, addLiquidity_13) {
+                                        mstore(128, shl(224, 1313373041))
+                                        mstore(132, 17)
+                                        revert(128, 36)
+                                    }
+                                    mstore(0, addLiquidity_2)
+                                    mstore(32, 5)
+                                    sstore(keccak256(0, 64), addLiquidity_14)
+                                    let addLiquidity_15 := sload(0)
+                                    let addLiquidity_16 := sload(1)
+                                    let addLiquidity_17 := 0
+                                    {
+                                        mstore(128, shl(224, 599290589))
+                                        mstore(132, addLiquidity_2)
+                                        mstore(164, addLiquidity_3)
+                                        mstore(196, addLiquidity_0)
+                                        let addLiquidity__ok_17 := call(1000000, addLiquidity_15, 0, 128, 100, 128, 32)
+                                        if iszero(addLiquidity__ok_17) {
+                                            revert(0, 0)
+                                        }
+                                        if iszero(or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 32)), lt(returndatasize(), 64)))) {
+                                            revert(0, 0)
+                                        }
+                                        addLiquidity_17 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
+                                    }
+                                    if iszero(eq(addLiquidity_17, 1)) {
+                                        mstore(128, shl(224, 2428038168))
+                                        revert(128, 4)
+                                    }
+                                    let addLiquidity_18 := 0
+                                    {
+                                        mstore(128, shl(224, 599290589))
+                                        mstore(132, addLiquidity_2)
+                                        mstore(164, addLiquidity_3)
+                                        mstore(196, addLiquidity_1)
+                                        let addLiquidity__ok_18 := call(1000000, addLiquidity_16, 0, 128, 100, 128, 32)
+                                        if iszero(addLiquidity__ok_18) {
+                                            revert(0, 0)
+                                        }
+                                        if iszero(or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 32)), lt(returndatasize(), 64)))) {
+                                            revert(0, 0)
+                                        }
+                                        addLiquidity_18 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
+                                    }
+                                    if iszero(eq(addLiquidity_18, 1)) {
+                                        mstore(128, shl(224, 2428038168))
+                                        revert(128, 4)
+                                    }
+                                    mstore(128, addLiquidity_2)
+                                    mstore(160, addLiquidity_0)
+                                    mstore(192, addLiquidity_1)
+                                    mstore(224, addLiquidity_9)
+                                    log1(128, 128, 86256647852634439136012048383694880642795699201302061824315076091651743641550)
+                                    tstore(0, 0)
+                                    mstore(128, addLiquidity_9)
+                                    return(128, 32)
                                 }
-                                addLiquidity_17 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
                             }
-                            if iszero(eq(addLiquidity_17, 1)) {
-                                mstore(128, shl(224, 2428038168))
-                                revert(128, 4)
-                            }
-                            let addLiquidity_18 := 0
-                            {
-                                mstore(128, shl(224, 599290589))
-                                mstore(132, addLiquidity_2)
-                                mstore(164, addLiquidity_3)
-                                mstore(196, addLiquidity_1)
-                                let addLiquidity__ok_18 := call(1000000, addLiquidity_16, 0, 128, 100, 128, 32)
-                                if iszero(addLiquidity__ok_18) {
-                                    revert(0, 0)
+                            default {
+                                let addLiquidity_12 := add(addLiquidity_6, addLiquidity_0)
+                                if lt(addLiquidity_12, addLiquidity_6) {
+                                    mstore(128, shl(224, 1313373041))
+                                    mstore(132, 17)
+                                    revert(128, 36)
                                 }
-                                if iszero(or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 32)), lt(returndatasize(), 64)))) {
-                                    revert(0, 0)
+                                sstore(4, addLiquidity_12)
+                                mstore(0, 0)
+                                mstore(32, 5)
+                                sstore(keccak256(0, 64), 1000)
+                                switch iszero(eq(addLiquidity_6, 0))
+                                case 0 {
+                                    mstore(0, addLiquidity_2)
+                                    mstore(32, 5)
+                                    let addLiquidity_13 := sload(keccak256(0, 64))
+                                    let addLiquidity_14 := add(addLiquidity_13, addLiquidity_9)
+                                    if lt(addLiquidity_14, addLiquidity_13) {
+                                        mstore(128, shl(224, 1313373041))
+                                        mstore(132, 17)
+                                        revert(128, 36)
+                                    }
+                                    mstore(0, addLiquidity_2)
+                                    mstore(32, 5)
+                                    sstore(keccak256(0, 64), addLiquidity_14)
+                                    let addLiquidity_15 := sload(0)
+                                    let addLiquidity_16 := sload(1)
+                                    let addLiquidity_17 := 0
+                                    {
+                                        mstore(128, shl(224, 599290589))
+                                        mstore(132, addLiquidity_2)
+                                        mstore(164, addLiquidity_3)
+                                        mstore(196, addLiquidity_0)
+                                        let addLiquidity__ok_17 := call(1000000, addLiquidity_15, 0, 128, 100, 128, 32)
+                                        if iszero(addLiquidity__ok_17) {
+                                            revert(0, 0)
+                                        }
+                                        if iszero(or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 32)), lt(returndatasize(), 64)))) {
+                                            revert(0, 0)
+                                        }
+                                        addLiquidity_17 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
+                                    }
+                                    if iszero(eq(addLiquidity_17, 1)) {
+                                        mstore(128, shl(224, 2428038168))
+                                        revert(128, 4)
+                                    }
+                                    let addLiquidity_18 := 0
+                                    {
+                                        mstore(128, shl(224, 599290589))
+                                        mstore(132, addLiquidity_2)
+                                        mstore(164, addLiquidity_3)
+                                        mstore(196, addLiquidity_1)
+                                        let addLiquidity__ok_18 := call(1000000, addLiquidity_16, 0, 128, 100, 128, 32)
+                                        if iszero(addLiquidity__ok_18) {
+                                            revert(0, 0)
+                                        }
+                                        if iszero(or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 32)), lt(returndatasize(), 64)))) {
+                                            revert(0, 0)
+                                        }
+                                        addLiquidity_18 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
+                                    }
+                                    if iszero(eq(addLiquidity_18, 1)) {
+                                        mstore(128, shl(224, 2428038168))
+                                        revert(128, 4)
+                                    }
+                                    mstore(128, addLiquidity_2)
+                                    mstore(160, addLiquidity_0)
+                                    mstore(192, addLiquidity_1)
+                                    mstore(224, addLiquidity_9)
+                                    log1(128, 128, 86256647852634439136012048383694880642795699201302061824315076091651743641550)
+                                    tstore(0, 0)
+                                    mstore(128, addLiquidity_9)
+                                    return(128, 32)
                                 }
-                                addLiquidity_18 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
+                                default {
+                                    let addLiquidity_13 := add(addLiquidity_6, addLiquidity_9)
+                                    if lt(addLiquidity_13, addLiquidity_6) {
+                                        mstore(128, shl(224, 1313373041))
+                                        mstore(132, 17)
+                                        revert(128, 36)
+                                    }
+                                    sstore(4, addLiquidity_13)
+                                    mstore(0, addLiquidity_2)
+                                    mstore(32, 5)
+                                    let addLiquidity_14 := sload(keccak256(0, 64))
+                                    let addLiquidity_15 := add(addLiquidity_14, addLiquidity_9)
+                                    if lt(addLiquidity_15, addLiquidity_14) {
+                                        mstore(128, shl(224, 1313373041))
+                                        mstore(132, 17)
+                                        revert(128, 36)
+                                    }
+                                    mstore(0, addLiquidity_2)
+                                    mstore(32, 5)
+                                    sstore(keccak256(0, 64), addLiquidity_15)
+                                    let addLiquidity_16 := sload(0)
+                                    let addLiquidity_17 := sload(1)
+                                    let addLiquidity_18 := 0
+                                    {
+                                        mstore(128, shl(224, 599290589))
+                                        mstore(132, addLiquidity_2)
+                                        mstore(164, addLiquidity_3)
+                                        mstore(196, addLiquidity_0)
+                                        let addLiquidity__ok_18 := call(1000000, addLiquidity_16, 0, 128, 100, 128, 32)
+                                        if iszero(addLiquidity__ok_18) {
+                                            revert(0, 0)
+                                        }
+                                        if iszero(or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 32)), lt(returndatasize(), 64)))) {
+                                            revert(0, 0)
+                                        }
+                                        addLiquidity_18 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
+                                    }
+                                    if iszero(eq(addLiquidity_18, 1)) {
+                                        mstore(128, shl(224, 2428038168))
+                                        revert(128, 4)
+                                    }
+                                    let addLiquidity_19 := 0
+                                    {
+                                        mstore(128, shl(224, 599290589))
+                                        mstore(132, addLiquidity_2)
+                                        mstore(164, addLiquidity_3)
+                                        mstore(196, addLiquidity_1)
+                                        let addLiquidity__ok_19 := call(1000000, addLiquidity_17, 0, 128, 100, 128, 32)
+                                        if iszero(addLiquidity__ok_19) {
+                                            revert(0, 0)
+                                        }
+                                        if iszero(or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 32)), lt(returndatasize(), 64)))) {
+                                            revert(0, 0)
+                                        }
+                                        addLiquidity_19 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
+                                    }
+                                    if iszero(eq(addLiquidity_19, 1)) {
+                                        mstore(128, shl(224, 2428038168))
+                                        revert(128, 4)
+                                    }
+                                    mstore(128, addLiquidity_2)
+                                    mstore(160, addLiquidity_0)
+                                    mstore(192, addLiquidity_1)
+                                    mstore(224, addLiquidity_9)
+                                    log1(128, 128, 86256647852634439136012048383694880642795699201302061824315076091651743641550)
+                                    tstore(0, 0)
+                                    mstore(128, addLiquidity_9)
+                                    return(128, 32)
+                                }
                             }
-                            if iszero(eq(addLiquidity_18, 1)) {
-                                mstore(128, shl(224, 2428038168))
-                                revert(128, 4)
-                            }
-                            mstore(128, addLiquidity_2)
-                            mstore(160, addLiquidity_0)
-                            mstore(192, addLiquidity_1)
-                            mstore(224, addLiquidity_9)
-                            log1(128, 128, 86256647852634439136012048383694880642795699201302061824315076091651743641550)
-                            tstore(0, 0)
-                            mstore(128, addLiquidity_9)
-                            return(128, 32)
                         }
                         default {
                             let addLiquidity_9 := addLiquidity_7
@@ -205,162 +417,596 @@ object "Cpamm" {
                                 revert(128, 36)
                             }
                             sstore(3, addLiquidity_11)
-                            let addLiquidity_12 := add(addLiquidity_9, addLiquidity_6)
-                            if lt(addLiquidity_12, addLiquidity_9) {
-                                mstore(128, shl(224, 1313373041))
-                                mstore(132, 17)
-                                revert(128, 36)
-                            }
-                            sstore(4, addLiquidity_12)
-                            mstore(0, addLiquidity_2)
-                            mstore(32, 5)
-                            let addLiquidity_13 := sload(keccak256(0, 64))
-                            let addLiquidity_14 := add(addLiquidity_9, addLiquidity_13)
-                            if lt(addLiquidity_14, addLiquidity_9) {
-                                mstore(128, shl(224, 1313373041))
-                                mstore(132, 17)
-                                revert(128, 36)
-                            }
-                            mstore(0, addLiquidity_2)
-                            mstore(32, 5)
-                            sstore(keccak256(0, 64), addLiquidity_14)
-                            let addLiquidity_15 := sload(0)
-                            let addLiquidity_16 := sload(1)
-                            let addLiquidity_17 := 0
-                            {
-                                mstore(128, shl(224, 599290589))
-                                mstore(132, addLiquidity_2)
-                                mstore(164, addLiquidity_3)
-                                mstore(196, addLiquidity_0)
-                                let addLiquidity__ok_17 := call(1000000, addLiquidity_15, 0, 128, 100, 128, 32)
-                                if iszero(addLiquidity__ok_17) {
-                                    revert(0, 0)
+                            switch eq(addLiquidity_6, 0)
+                            case 0 {
+                                switch iszero(eq(addLiquidity_6, 0))
+                                case 0 {
+                                    mstore(0, addLiquidity_2)
+                                    mstore(32, 5)
+                                    let addLiquidity_12 := sload(keccak256(0, 64))
+                                    let addLiquidity_13 := add(addLiquidity_12, addLiquidity_9)
+                                    if lt(addLiquidity_13, addLiquidity_12) {
+                                        mstore(128, shl(224, 1313373041))
+                                        mstore(132, 17)
+                                        revert(128, 36)
+                                    }
+                                    mstore(0, addLiquidity_2)
+                                    mstore(32, 5)
+                                    sstore(keccak256(0, 64), addLiquidity_13)
+                                    let addLiquidity_14 := sload(0)
+                                    let addLiquidity_15 := sload(1)
+                                    let addLiquidity_16 := 0
+                                    {
+                                        mstore(128, shl(224, 599290589))
+                                        mstore(132, addLiquidity_2)
+                                        mstore(164, addLiquidity_3)
+                                        mstore(196, addLiquidity_0)
+                                        let addLiquidity__ok_16 := call(1000000, addLiquidity_14, 0, 128, 100, 128, 32)
+                                        if iszero(addLiquidity__ok_16) {
+                                            revert(0, 0)
+                                        }
+                                        if iszero(or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 32)), lt(returndatasize(), 64)))) {
+                                            revert(0, 0)
+                                        }
+                                        addLiquidity_16 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
+                                    }
+                                    if iszero(eq(addLiquidity_16, 1)) {
+                                        mstore(128, shl(224, 2428038168))
+                                        revert(128, 4)
+                                    }
+                                    let addLiquidity_17 := 0
+                                    {
+                                        mstore(128, shl(224, 599290589))
+                                        mstore(132, addLiquidity_2)
+                                        mstore(164, addLiquidity_3)
+                                        mstore(196, addLiquidity_1)
+                                        let addLiquidity__ok_17 := call(1000000, addLiquidity_15, 0, 128, 100, 128, 32)
+                                        if iszero(addLiquidity__ok_17) {
+                                            revert(0, 0)
+                                        }
+                                        if iszero(or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 32)), lt(returndatasize(), 64)))) {
+                                            revert(0, 0)
+                                        }
+                                        addLiquidity_17 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
+                                    }
+                                    if iszero(eq(addLiquidity_17, 1)) {
+                                        mstore(128, shl(224, 2428038168))
+                                        revert(128, 4)
+                                    }
+                                    mstore(128, addLiquidity_2)
+                                    mstore(160, addLiquidity_0)
+                                    mstore(192, addLiquidity_1)
+                                    mstore(224, addLiquidity_9)
+                                    log1(128, 128, 86256647852634439136012048383694880642795699201302061824315076091651743641550)
+                                    tstore(0, 0)
+                                    mstore(128, addLiquidity_9)
+                                    return(128, 32)
                                 }
-                                if iszero(or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 32)), lt(returndatasize(), 64)))) {
-                                    revert(0, 0)
+                                default {
+                                    let addLiquidity_12 := add(addLiquidity_6, addLiquidity_9)
+                                    if lt(addLiquidity_12, addLiquidity_6) {
+                                        mstore(128, shl(224, 1313373041))
+                                        mstore(132, 17)
+                                        revert(128, 36)
+                                    }
+                                    sstore(4, addLiquidity_12)
+                                    mstore(0, addLiquidity_2)
+                                    mstore(32, 5)
+                                    let addLiquidity_13 := sload(keccak256(0, 64))
+                                    let addLiquidity_14 := add(addLiquidity_13, addLiquidity_9)
+                                    if lt(addLiquidity_14, addLiquidity_13) {
+                                        mstore(128, shl(224, 1313373041))
+                                        mstore(132, 17)
+                                        revert(128, 36)
+                                    }
+                                    mstore(0, addLiquidity_2)
+                                    mstore(32, 5)
+                                    sstore(keccak256(0, 64), addLiquidity_14)
+                                    let addLiquidity_15 := sload(0)
+                                    let addLiquidity_16 := sload(1)
+                                    let addLiquidity_17 := 0
+                                    {
+                                        mstore(128, shl(224, 599290589))
+                                        mstore(132, addLiquidity_2)
+                                        mstore(164, addLiquidity_3)
+                                        mstore(196, addLiquidity_0)
+                                        let addLiquidity__ok_17 := call(1000000, addLiquidity_15, 0, 128, 100, 128, 32)
+                                        if iszero(addLiquidity__ok_17) {
+                                            revert(0, 0)
+                                        }
+                                        if iszero(or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 32)), lt(returndatasize(), 64)))) {
+                                            revert(0, 0)
+                                        }
+                                        addLiquidity_17 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
+                                    }
+                                    if iszero(eq(addLiquidity_17, 1)) {
+                                        mstore(128, shl(224, 2428038168))
+                                        revert(128, 4)
+                                    }
+                                    let addLiquidity_18 := 0
+                                    {
+                                        mstore(128, shl(224, 599290589))
+                                        mstore(132, addLiquidity_2)
+                                        mstore(164, addLiquidity_3)
+                                        mstore(196, addLiquidity_1)
+                                        let addLiquidity__ok_18 := call(1000000, addLiquidity_16, 0, 128, 100, 128, 32)
+                                        if iszero(addLiquidity__ok_18) {
+                                            revert(0, 0)
+                                        }
+                                        if iszero(or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 32)), lt(returndatasize(), 64)))) {
+                                            revert(0, 0)
+                                        }
+                                        addLiquidity_18 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
+                                    }
+                                    if iszero(eq(addLiquidity_18, 1)) {
+                                        mstore(128, shl(224, 2428038168))
+                                        revert(128, 4)
+                                    }
+                                    mstore(128, addLiquidity_2)
+                                    mstore(160, addLiquidity_0)
+                                    mstore(192, addLiquidity_1)
+                                    mstore(224, addLiquidity_9)
+                                    log1(128, 128, 86256647852634439136012048383694880642795699201302061824315076091651743641550)
+                                    tstore(0, 0)
+                                    mstore(128, addLiquidity_9)
+                                    return(128, 32)
                                 }
-                                addLiquidity_17 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
                             }
-                            if iszero(eq(addLiquidity_17, 1)) {
-                                mstore(128, shl(224, 2428038168))
-                                revert(128, 4)
-                            }
-                            let addLiquidity_18 := 0
-                            {
-                                mstore(128, shl(224, 599290589))
-                                mstore(132, addLiquidity_2)
-                                mstore(164, addLiquidity_3)
-                                mstore(196, addLiquidity_1)
-                                let addLiquidity__ok_18 := call(1000000, addLiquidity_16, 0, 128, 100, 128, 32)
-                                if iszero(addLiquidity__ok_18) {
-                                    revert(0, 0)
+                            default {
+                                let addLiquidity_12 := add(addLiquidity_6, addLiquidity_0)
+                                if lt(addLiquidity_12, addLiquidity_6) {
+                                    mstore(128, shl(224, 1313373041))
+                                    mstore(132, 17)
+                                    revert(128, 36)
                                 }
-                                if iszero(or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 32)), lt(returndatasize(), 64)))) {
-                                    revert(0, 0)
+                                sstore(4, addLiquidity_12)
+                                mstore(0, 0)
+                                mstore(32, 5)
+                                sstore(keccak256(0, 64), 1000)
+                                switch iszero(eq(addLiquidity_6, 0))
+                                case 0 {
+                                    mstore(0, addLiquidity_2)
+                                    mstore(32, 5)
+                                    let addLiquidity_13 := sload(keccak256(0, 64))
+                                    let addLiquidity_14 := add(addLiquidity_13, addLiquidity_9)
+                                    if lt(addLiquidity_14, addLiquidity_13) {
+                                        mstore(128, shl(224, 1313373041))
+                                        mstore(132, 17)
+                                        revert(128, 36)
+                                    }
+                                    mstore(0, addLiquidity_2)
+                                    mstore(32, 5)
+                                    sstore(keccak256(0, 64), addLiquidity_14)
+                                    let addLiquidity_15 := sload(0)
+                                    let addLiquidity_16 := sload(1)
+                                    let addLiquidity_17 := 0
+                                    {
+                                        mstore(128, shl(224, 599290589))
+                                        mstore(132, addLiquidity_2)
+                                        mstore(164, addLiquidity_3)
+                                        mstore(196, addLiquidity_0)
+                                        let addLiquidity__ok_17 := call(1000000, addLiquidity_15, 0, 128, 100, 128, 32)
+                                        if iszero(addLiquidity__ok_17) {
+                                            revert(0, 0)
+                                        }
+                                        if iszero(or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 32)), lt(returndatasize(), 64)))) {
+                                            revert(0, 0)
+                                        }
+                                        addLiquidity_17 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
+                                    }
+                                    if iszero(eq(addLiquidity_17, 1)) {
+                                        mstore(128, shl(224, 2428038168))
+                                        revert(128, 4)
+                                    }
+                                    let addLiquidity_18 := 0
+                                    {
+                                        mstore(128, shl(224, 599290589))
+                                        mstore(132, addLiquidity_2)
+                                        mstore(164, addLiquidity_3)
+                                        mstore(196, addLiquidity_1)
+                                        let addLiquidity__ok_18 := call(1000000, addLiquidity_16, 0, 128, 100, 128, 32)
+                                        if iszero(addLiquidity__ok_18) {
+                                            revert(0, 0)
+                                        }
+                                        if iszero(or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 32)), lt(returndatasize(), 64)))) {
+                                            revert(0, 0)
+                                        }
+                                        addLiquidity_18 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
+                                    }
+                                    if iszero(eq(addLiquidity_18, 1)) {
+                                        mstore(128, shl(224, 2428038168))
+                                        revert(128, 4)
+                                    }
+                                    mstore(128, addLiquidity_2)
+                                    mstore(160, addLiquidity_0)
+                                    mstore(192, addLiquidity_1)
+                                    mstore(224, addLiquidity_9)
+                                    log1(128, 128, 86256647852634439136012048383694880642795699201302061824315076091651743641550)
+                                    tstore(0, 0)
+                                    mstore(128, addLiquidity_9)
+                                    return(128, 32)
                                 }
-                                addLiquidity_18 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
+                                default {
+                                    let addLiquidity_13 := add(addLiquidity_6, addLiquidity_9)
+                                    if lt(addLiquidity_13, addLiquidity_6) {
+                                        mstore(128, shl(224, 1313373041))
+                                        mstore(132, 17)
+                                        revert(128, 36)
+                                    }
+                                    sstore(4, addLiquidity_13)
+                                    mstore(0, addLiquidity_2)
+                                    mstore(32, 5)
+                                    let addLiquidity_14 := sload(keccak256(0, 64))
+                                    let addLiquidity_15 := add(addLiquidity_14, addLiquidity_9)
+                                    if lt(addLiquidity_15, addLiquidity_14) {
+                                        mstore(128, shl(224, 1313373041))
+                                        mstore(132, 17)
+                                        revert(128, 36)
+                                    }
+                                    mstore(0, addLiquidity_2)
+                                    mstore(32, 5)
+                                    sstore(keccak256(0, 64), addLiquidity_15)
+                                    let addLiquidity_16 := sload(0)
+                                    let addLiquidity_17 := sload(1)
+                                    let addLiquidity_18 := 0
+                                    {
+                                        mstore(128, shl(224, 599290589))
+                                        mstore(132, addLiquidity_2)
+                                        mstore(164, addLiquidity_3)
+                                        mstore(196, addLiquidity_0)
+                                        let addLiquidity__ok_18 := call(1000000, addLiquidity_16, 0, 128, 100, 128, 32)
+                                        if iszero(addLiquidity__ok_18) {
+                                            revert(0, 0)
+                                        }
+                                        if iszero(or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 32)), lt(returndatasize(), 64)))) {
+                                            revert(0, 0)
+                                        }
+                                        addLiquidity_18 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
+                                    }
+                                    if iszero(eq(addLiquidity_18, 1)) {
+                                        mstore(128, shl(224, 2428038168))
+                                        revert(128, 4)
+                                    }
+                                    let addLiquidity_19 := 0
+                                    {
+                                        mstore(128, shl(224, 599290589))
+                                        mstore(132, addLiquidity_2)
+                                        mstore(164, addLiquidity_3)
+                                        mstore(196, addLiquidity_1)
+                                        let addLiquidity__ok_19 := call(1000000, addLiquidity_17, 0, 128, 100, 128, 32)
+                                        if iszero(addLiquidity__ok_19) {
+                                            revert(0, 0)
+                                        }
+                                        if iszero(or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 32)), lt(returndatasize(), 64)))) {
+                                            revert(0, 0)
+                                        }
+                                        addLiquidity_19 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
+                                    }
+                                    if iszero(eq(addLiquidity_19, 1)) {
+                                        mstore(128, shl(224, 2428038168))
+                                        revert(128, 4)
+                                    }
+                                    mstore(128, addLiquidity_2)
+                                    mstore(160, addLiquidity_0)
+                                    mstore(192, addLiquidity_1)
+                                    mstore(224, addLiquidity_9)
+                                    log1(128, 128, 86256647852634439136012048383694880642795699201302061824315076091651743641550)
+                                    tstore(0, 0)
+                                    mstore(128, addLiquidity_9)
+                                    return(128, 32)
+                                }
                             }
-                            if iszero(eq(addLiquidity_18, 1)) {
-                                mstore(128, shl(224, 2428038168))
-                                revert(128, 4)
-                            }
-                            mstore(128, addLiquidity_2)
-                            mstore(160, addLiquidity_0)
-                            mstore(192, addLiquidity_1)
-                            mstore(224, addLiquidity_9)
-                            log1(128, 128, 86256647852634439136012048383694880642795699201302061824315076091651743641550)
-                            tstore(0, 0)
-                            mstore(128, addLiquidity_9)
-                            return(128, 32)
                         }
                     }
                     default {
                         let addLiquidity_7 := addLiquidity_0
-                        if iszero(lt(0, addLiquidity_7)) {
+                        if iszero(lt(1000, addLiquidity_7)) {
+                            mstore(128, shl(224, 3142974759))
+                            revert(128, 4)
+                        }
+                        if lt(addLiquidity_7, 1000) {
+                            mstore(128, shl(224, 1313373041))
+                            mstore(132, 17)
+                            revert(128, 36)
+                        }
+                        let addLiquidity_8 := sub(addLiquidity_7, 1000)
+                        if iszero(lt(0, addLiquidity_8)) {
                             mstore(128, shl(224, 2551308487))
                             revert(128, 4)
                         }
-                        let addLiquidity_8 := add(addLiquidity_4, addLiquidity_0)
-                        if lt(addLiquidity_8, addLiquidity_4) {
+                        let addLiquidity_9 := add(addLiquidity_4, addLiquidity_0)
+                        if lt(addLiquidity_9, addLiquidity_4) {
                             mstore(128, shl(224, 1313373041))
                             mstore(132, 17)
                             revert(128, 36)
                         }
-                        sstore(2, addLiquidity_8)
-                        let addLiquidity_9 := add(addLiquidity_5, addLiquidity_1)
-                        if lt(addLiquidity_9, addLiquidity_5) {
+                        sstore(2, addLiquidity_9)
+                        let addLiquidity_10 := add(addLiquidity_5, addLiquidity_1)
+                        if lt(addLiquidity_10, addLiquidity_5) {
                             mstore(128, shl(224, 1313373041))
                             mstore(132, 17)
                             revert(128, 36)
                         }
-                        sstore(3, addLiquidity_9)
-                        let addLiquidity_10 := add(addLiquidity_7, addLiquidity_6)
-                        if lt(addLiquidity_10, addLiquidity_7) {
-                            mstore(128, shl(224, 1313373041))
-                            mstore(132, 17)
-                            revert(128, 36)
-                        }
-                        sstore(4, addLiquidity_10)
-                        mstore(0, addLiquidity_2)
-                        mstore(32, 5)
-                        let addLiquidity_11 := sload(keccak256(0, 64))
-                        let addLiquidity_12 := add(addLiquidity_7, addLiquidity_11)
-                        if lt(addLiquidity_12, addLiquidity_7) {
-                            mstore(128, shl(224, 1313373041))
-                            mstore(132, 17)
-                            revert(128, 36)
-                        }
-                        mstore(0, addLiquidity_2)
-                        mstore(32, 5)
-                        sstore(keccak256(0, 64), addLiquidity_12)
-                        let addLiquidity_13 := sload(0)
-                        let addLiquidity_14 := sload(1)
-                        let addLiquidity_15 := 0
-                        {
-                            mstore(128, shl(224, 599290589))
-                            mstore(132, addLiquidity_2)
-                            mstore(164, addLiquidity_3)
-                            mstore(196, addLiquidity_0)
-                            let addLiquidity__ok_15 := call(1000000, addLiquidity_13, 0, 128, 100, 128, 32)
-                            if iszero(addLiquidity__ok_15) {
-                                revert(0, 0)
+                        sstore(3, addLiquidity_10)
+                        switch eq(addLiquidity_6, 0)
+                        case 0 {
+                            switch iszero(eq(addLiquidity_6, 0))
+                            case 0 {
+                                mstore(0, addLiquidity_2)
+                                mstore(32, 5)
+                                let addLiquidity_11 := sload(keccak256(0, 64))
+                                let addLiquidity_12 := add(addLiquidity_11, addLiquidity_8)
+                                if lt(addLiquidity_12, addLiquidity_11) {
+                                    mstore(128, shl(224, 1313373041))
+                                    mstore(132, 17)
+                                    revert(128, 36)
+                                }
+                                mstore(0, addLiquidity_2)
+                                mstore(32, 5)
+                                sstore(keccak256(0, 64), addLiquidity_12)
+                                let addLiquidity_13 := sload(0)
+                                let addLiquidity_14 := sload(1)
+                                let addLiquidity_15 := 0
+                                {
+                                    mstore(128, shl(224, 599290589))
+                                    mstore(132, addLiquidity_2)
+                                    mstore(164, addLiquidity_3)
+                                    mstore(196, addLiquidity_0)
+                                    let addLiquidity__ok_15 := call(1000000, addLiquidity_13, 0, 128, 100, 128, 32)
+                                    if iszero(addLiquidity__ok_15) {
+                                        revert(0, 0)
+                                    }
+                                    if iszero(or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 32)), lt(returndatasize(), 64)))) {
+                                        revert(0, 0)
+                                    }
+                                    addLiquidity_15 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
+                                }
+                                if iszero(eq(addLiquidity_15, 1)) {
+                                    mstore(128, shl(224, 2428038168))
+                                    revert(128, 4)
+                                }
+                                let addLiquidity_16 := 0
+                                {
+                                    mstore(128, shl(224, 599290589))
+                                    mstore(132, addLiquidity_2)
+                                    mstore(164, addLiquidity_3)
+                                    mstore(196, addLiquidity_1)
+                                    let addLiquidity__ok_16 := call(1000000, addLiquidity_14, 0, 128, 100, 128, 32)
+                                    if iszero(addLiquidity__ok_16) {
+                                        revert(0, 0)
+                                    }
+                                    if iszero(or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 32)), lt(returndatasize(), 64)))) {
+                                        revert(0, 0)
+                                    }
+                                    addLiquidity_16 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
+                                }
+                                if iszero(eq(addLiquidity_16, 1)) {
+                                    mstore(128, shl(224, 2428038168))
+                                    revert(128, 4)
+                                }
+                                mstore(128, addLiquidity_2)
+                                mstore(160, addLiquidity_0)
+                                mstore(192, addLiquidity_1)
+                                mstore(224, addLiquidity_8)
+                                log1(128, 128, 86256647852634439136012048383694880642795699201302061824315076091651743641550)
+                                tstore(0, 0)
+                                mstore(128, addLiquidity_8)
+                                return(128, 32)
                             }
-                            if iszero(or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 32)), lt(returndatasize(), 64)))) {
-                                revert(0, 0)
+                            default {
+                                let addLiquidity_11 := add(addLiquidity_6, addLiquidity_8)
+                                if lt(addLiquidity_11, addLiquidity_6) {
+                                    mstore(128, shl(224, 1313373041))
+                                    mstore(132, 17)
+                                    revert(128, 36)
+                                }
+                                sstore(4, addLiquidity_11)
+                                mstore(0, addLiquidity_2)
+                                mstore(32, 5)
+                                let addLiquidity_12 := sload(keccak256(0, 64))
+                                let addLiquidity_13 := add(addLiquidity_12, addLiquidity_8)
+                                if lt(addLiquidity_13, addLiquidity_12) {
+                                    mstore(128, shl(224, 1313373041))
+                                    mstore(132, 17)
+                                    revert(128, 36)
+                                }
+                                mstore(0, addLiquidity_2)
+                                mstore(32, 5)
+                                sstore(keccak256(0, 64), addLiquidity_13)
+                                let addLiquidity_14 := sload(0)
+                                let addLiquidity_15 := sload(1)
+                                let addLiquidity_16 := 0
+                                {
+                                    mstore(128, shl(224, 599290589))
+                                    mstore(132, addLiquidity_2)
+                                    mstore(164, addLiquidity_3)
+                                    mstore(196, addLiquidity_0)
+                                    let addLiquidity__ok_16 := call(1000000, addLiquidity_14, 0, 128, 100, 128, 32)
+                                    if iszero(addLiquidity__ok_16) {
+                                        revert(0, 0)
+                                    }
+                                    if iszero(or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 32)), lt(returndatasize(), 64)))) {
+                                        revert(0, 0)
+                                    }
+                                    addLiquidity_16 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
+                                }
+                                if iszero(eq(addLiquidity_16, 1)) {
+                                    mstore(128, shl(224, 2428038168))
+                                    revert(128, 4)
+                                }
+                                let addLiquidity_17 := 0
+                                {
+                                    mstore(128, shl(224, 599290589))
+                                    mstore(132, addLiquidity_2)
+                                    mstore(164, addLiquidity_3)
+                                    mstore(196, addLiquidity_1)
+                                    let addLiquidity__ok_17 := call(1000000, addLiquidity_15, 0, 128, 100, 128, 32)
+                                    if iszero(addLiquidity__ok_17) {
+                                        revert(0, 0)
+                                    }
+                                    if iszero(or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 32)), lt(returndatasize(), 64)))) {
+                                        revert(0, 0)
+                                    }
+                                    addLiquidity_17 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
+                                }
+                                if iszero(eq(addLiquidity_17, 1)) {
+                                    mstore(128, shl(224, 2428038168))
+                                    revert(128, 4)
+                                }
+                                mstore(128, addLiquidity_2)
+                                mstore(160, addLiquidity_0)
+                                mstore(192, addLiquidity_1)
+                                mstore(224, addLiquidity_8)
+                                log1(128, 128, 86256647852634439136012048383694880642795699201302061824315076091651743641550)
+                                tstore(0, 0)
+                                mstore(128, addLiquidity_8)
+                                return(128, 32)
                             }
-                            addLiquidity_15 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
                         }
-                        if iszero(eq(addLiquidity_15, 1)) {
-                            mstore(128, shl(224, 2428038168))
-                            revert(128, 4)
-                        }
-                        let addLiquidity_16 := 0
-                        {
-                            mstore(128, shl(224, 599290589))
-                            mstore(132, addLiquidity_2)
-                            mstore(164, addLiquidity_3)
-                            mstore(196, addLiquidity_1)
-                            let addLiquidity__ok_16 := call(1000000, addLiquidity_14, 0, 128, 100, 128, 32)
-                            if iszero(addLiquidity__ok_16) {
-                                revert(0, 0)
+                        default {
+                            let addLiquidity_11 := add(addLiquidity_6, addLiquidity_0)
+                            if lt(addLiquidity_11, addLiquidity_6) {
+                                mstore(128, shl(224, 1313373041))
+                                mstore(132, 17)
+                                revert(128, 36)
                             }
-                            if iszero(or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 32)), lt(returndatasize(), 64)))) {
-                                revert(0, 0)
+                            sstore(4, addLiquidity_11)
+                            mstore(0, 0)
+                            mstore(32, 5)
+                            sstore(keccak256(0, 64), 1000)
+                            switch iszero(eq(addLiquidity_6, 0))
+                            case 0 {
+                                mstore(0, addLiquidity_2)
+                                mstore(32, 5)
+                                let addLiquidity_12 := sload(keccak256(0, 64))
+                                let addLiquidity_13 := add(addLiquidity_12, addLiquidity_8)
+                                if lt(addLiquidity_13, addLiquidity_12) {
+                                    mstore(128, shl(224, 1313373041))
+                                    mstore(132, 17)
+                                    revert(128, 36)
+                                }
+                                mstore(0, addLiquidity_2)
+                                mstore(32, 5)
+                                sstore(keccak256(0, 64), addLiquidity_13)
+                                let addLiquidity_14 := sload(0)
+                                let addLiquidity_15 := sload(1)
+                                let addLiquidity_16 := 0
+                                {
+                                    mstore(128, shl(224, 599290589))
+                                    mstore(132, addLiquidity_2)
+                                    mstore(164, addLiquidity_3)
+                                    mstore(196, addLiquidity_0)
+                                    let addLiquidity__ok_16 := call(1000000, addLiquidity_14, 0, 128, 100, 128, 32)
+                                    if iszero(addLiquidity__ok_16) {
+                                        revert(0, 0)
+                                    }
+                                    if iszero(or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 32)), lt(returndatasize(), 64)))) {
+                                        revert(0, 0)
+                                    }
+                                    addLiquidity_16 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
+                                }
+                                if iszero(eq(addLiquidity_16, 1)) {
+                                    mstore(128, shl(224, 2428038168))
+                                    revert(128, 4)
+                                }
+                                let addLiquidity_17 := 0
+                                {
+                                    mstore(128, shl(224, 599290589))
+                                    mstore(132, addLiquidity_2)
+                                    mstore(164, addLiquidity_3)
+                                    mstore(196, addLiquidity_1)
+                                    let addLiquidity__ok_17 := call(1000000, addLiquidity_15, 0, 128, 100, 128, 32)
+                                    if iszero(addLiquidity__ok_17) {
+                                        revert(0, 0)
+                                    }
+                                    if iszero(or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 32)), lt(returndatasize(), 64)))) {
+                                        revert(0, 0)
+                                    }
+                                    addLiquidity_17 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
+                                }
+                                if iszero(eq(addLiquidity_17, 1)) {
+                                    mstore(128, shl(224, 2428038168))
+                                    revert(128, 4)
+                                }
+                                mstore(128, addLiquidity_2)
+                                mstore(160, addLiquidity_0)
+                                mstore(192, addLiquidity_1)
+                                mstore(224, addLiquidity_8)
+                                log1(128, 128, 86256647852634439136012048383694880642795699201302061824315076091651743641550)
+                                tstore(0, 0)
+                                mstore(128, addLiquidity_8)
+                                return(128, 32)
                             }
-                            addLiquidity_16 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
+                            default {
+                                let addLiquidity_12 := add(addLiquidity_6, addLiquidity_8)
+                                if lt(addLiquidity_12, addLiquidity_6) {
+                                    mstore(128, shl(224, 1313373041))
+                                    mstore(132, 17)
+                                    revert(128, 36)
+                                }
+                                sstore(4, addLiquidity_12)
+                                mstore(0, addLiquidity_2)
+                                mstore(32, 5)
+                                let addLiquidity_13 := sload(keccak256(0, 64))
+                                let addLiquidity_14 := add(addLiquidity_13, addLiquidity_8)
+                                if lt(addLiquidity_14, addLiquidity_13) {
+                                    mstore(128, shl(224, 1313373041))
+                                    mstore(132, 17)
+                                    revert(128, 36)
+                                }
+                                mstore(0, addLiquidity_2)
+                                mstore(32, 5)
+                                sstore(keccak256(0, 64), addLiquidity_14)
+                                let addLiquidity_15 := sload(0)
+                                let addLiquidity_16 := sload(1)
+                                let addLiquidity_17 := 0
+                                {
+                                    mstore(128, shl(224, 599290589))
+                                    mstore(132, addLiquidity_2)
+                                    mstore(164, addLiquidity_3)
+                                    mstore(196, addLiquidity_0)
+                                    let addLiquidity__ok_17 := call(1000000, addLiquidity_15, 0, 128, 100, 128, 32)
+                                    if iszero(addLiquidity__ok_17) {
+                                        revert(0, 0)
+                                    }
+                                    if iszero(or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 32)), lt(returndatasize(), 64)))) {
+                                        revert(0, 0)
+                                    }
+                                    addLiquidity_17 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
+                                }
+                                if iszero(eq(addLiquidity_17, 1)) {
+                                    mstore(128, shl(224, 2428038168))
+                                    revert(128, 4)
+                                }
+                                let addLiquidity_18 := 0
+                                {
+                                    mstore(128, shl(224, 599290589))
+                                    mstore(132, addLiquidity_2)
+                                    mstore(164, addLiquidity_3)
+                                    mstore(196, addLiquidity_1)
+                                    let addLiquidity__ok_18 := call(1000000, addLiquidity_16, 0, 128, 100, 128, 32)
+                                    if iszero(addLiquidity__ok_18) {
+                                        revert(0, 0)
+                                    }
+                                    if iszero(or(iszero(returndatasize()), and(iszero(lt(returndatasize(), 32)), lt(returndatasize(), 64)))) {
+                                        revert(0, 0)
+                                    }
+                                    addLiquidity_18 := or(iszero(returndatasize()), iszero(iszero(mload(128))))
+                                }
+                                if iszero(eq(addLiquidity_18, 1)) {
+                                    mstore(128, shl(224, 2428038168))
+                                    revert(128, 4)
+                                }
+                                mstore(128, addLiquidity_2)
+                                mstore(160, addLiquidity_0)
+                                mstore(192, addLiquidity_1)
+                                mstore(224, addLiquidity_8)
+                                log1(128, 128, 86256647852634439136012048383694880642795699201302061824315076091651743641550)
+                                tstore(0, 0)
+                                mstore(128, addLiquidity_8)
+                                return(128, 32)
+                            }
                         }
-                        if iszero(eq(addLiquidity_16, 1)) {
-                            mstore(128, shl(224, 2428038168))
-                            revert(128, 4)
-                        }
-                        mstore(128, addLiquidity_2)
-                        mstore(160, addLiquidity_0)
-                        mstore(192, addLiquidity_1)
-                        mstore(224, addLiquidity_7)
-                        log1(128, 128, 86256647852634439136012048383694880642795699201302061824315076091651743641550)
-                        tstore(0, 0)
-                        mstore(128, addLiquidity_7)
-                        return(128, 32)
                     }
                 }
             }
