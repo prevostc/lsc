@@ -69,22 +69,27 @@
         }
         {
             let decrement_0 := sload(0)
-            switch eq(decrement_0, 0)
-            case 0 {
-                if lt(decrement_0, 1) {
-                    mstore(128, shl(224, 1313373041))
-                    mstore(132, 17)
-                    revert(128, 36)
+            let decrement_1 := 0
+            {
+                let decrement__phi_1 := 0
+                switch eq(decrement_0, 0)
+                case 0 {
+                    if lt(decrement_0, 1) {
+                        mstore(128, shl(224, 1313373041))
+                        mstore(132, 17)
+                        revert(128, 36)
+                    }
+                    let decrement_1 := sub(decrement_0, 1)
+                    decrement__phi_1 := decrement_1
                 }
-                let decrement_1 := sub(decrement_0, 1)
-                sstore(0, decrement_1)
-                stop()
+                default {
+                    let decrement_1 := 0
+                    decrement__phi_1 := decrement_1
+                }
+                decrement_1 := decrement__phi_1
             }
-            default {
-                let decrement_1 := 0
-                sstore(0, decrement_1)
-                stop()
-            }
+            sstore(0, decrement_1)
+            stop()
         }
     }
     case 1833756220 { // get()

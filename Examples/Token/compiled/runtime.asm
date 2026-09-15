@@ -788,20 +788,6 @@ L34:    // JUMPDEST
     DUP1
     PUSH 0x01
     SSTORE
-    DUP5
-    PUSH 0x80
-    MSTORE
-    PUSH 0x00
-    PUSH 0xa0
-    MSTORE
-    DUP6
-    PUSH 0xc0
-    MSTORE
-    PUSH 0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef    // topic: Transfer(address,address,uint256)
-    PUSH 0x60
-    PUSH 0x80
-    LOG1
-    STOP
     POP
     POP
     POP
@@ -816,6 +802,7 @@ L32:    // JUMPDEST
     PUSH 0x04
     PUSH 0x80
     REVERT
+L31:    // JUMPDEST
     DUP2
     PUSH 0x80
     MSTORE
@@ -830,7 +817,6 @@ L32:    // JUMPDEST
     PUSH 0x80
     LOG1
     STOP
-L31:    // JUMPDEST
     POP
     POP
     POP

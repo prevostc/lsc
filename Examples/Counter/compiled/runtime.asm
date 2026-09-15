@@ -176,7 +176,9 @@ L12:    // JUMPDEST
     PUSH 0x00
     SLOAD
     PUSH 0x00
-    DUP2
+    PUSH 0x00
+    PUSH 0x00
+    DUP4
     EQ
     DUP1
     PUSH 0x00
@@ -185,15 +187,14 @@ L12:    // JUMPDEST
     POP
     PUSH 0x00
     DUP1
-    PUSH 0x00
-    SSTORE
-    STOP
+    SWAP2
+    POP
     POP
     JUMP L13
 L14:    // JUMPDEST
     POP
     PUSH 0x01
-    DUP2
+    DUP4
     LT
     ISZERO
     JUMPI L15
@@ -210,14 +211,22 @@ L14:    // JUMPDEST
     REVERT
 L15:    // JUMPDEST
     PUSH 0x01
-    DUP2
+    DUP4
     SUB
+    DUP1
+    SWAP2
+    POP
+    POP
+L13:    // JUMPDEST
+    DUP1
+    SWAP2
+    POP
+    POP
     DUP1
     PUSH 0x00
     SSTORE
     STOP
     POP
-L13:    // JUMPDEST
     POP
     JUMP L3
 L16:    // JUMPDEST
