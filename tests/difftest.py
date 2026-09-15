@@ -3,6 +3,12 @@
 
 Reads export JSON produced by `scripts/export_bytecode.lean` (optionally wrapped in
 BEGIN_LSC_EXPORT / END_LSC_EXPORT markers from `#eval`).
+
+CREATE-installed code is not required to equal `compileRuntime` bytes:
+`compileDeploy` takes the object/spill/optimizer path (`compileObject` STOP
+seam); `compileRuntime` is erase then `compile`. The spec is Tx.run vs EVM.
+Cases run against the exported runtime and, when CREATE succeeds, against
+the installed code (non-empty + 8A/8B lock prefix).
 """
 from __future__ import annotations
 
@@ -123,6 +129,34 @@ def hex_suffix_diff(expected: str, actual: str) -> str:
         f"    expected extra {e[i:] or '(none)'}\n"
         f"    actual extra   {a[i:] or '(none)'}"
     )
+
+
+def first_diff_byte(expected: str, actual: str) -> int:
+    e, a = norm_hex(expected)[2:], norm_hex(actual)[2:]
+    n = min(len(e), len(a))
+    i = 0
+    while i < n and e[i] == a[i]:
+        i += 1
+    return i // 2
+
+
+# 8A/8B prologue. compileRuntime keeps the memoryguard no-op
+# (`PUSH2 256; ISZERO; POP`); compileDeploy's object-optimizer fallback DCEs it.
+# Both then emit PUSH0; TLOAD; ISZERO; PUSH2 dest; JUMPI; PUSH0; PUSH0; REVERT;
+# JUMPDEST (labelWidth = 2).
+_LOCK_MG_NOOP = bytes.fromhex("6101001550")
+_LOCK_TLOAD = bytes.fromhex("5f5c15")
+_LOCK_JUMPI_REVERT = bytes.fromhex("575f5ffd5b")
+
+
+def starts_with_lock_prefix(code: str | None) -> bool:
+    raw = bytes.fromhex(norm_hex(code)[2:])
+    if raw.startswith(_LOCK_MG_NOOP):
+        raw = raw[len(_LOCK_MG_NOOP) :]
+    if not raw.startswith(_LOCK_TLOAD):
+        return False
+    rest = raw[len(_LOCK_TLOAD) :]
+    return len(rest) >= 8 and rest[0] == 0x61 and rest[3:8] == _LOCK_JUMPI_REVERT
 
 
 def pad32(s: str) -> str:
@@ -300,6 +334,39 @@ def parse_send_ok(r: subprocess.CompletedProcess[str]) -> tuple[bool, str]:
     raise HarnessError(f"cast send failed unexpectedly:\n{out}")
 
 
+def created_address(send: subprocess.CompletedProcess[str], out: str) -> str:
+    try:
+        js = json.loads(send.stdout or "{}")
+        addr = js.get("contractAddress") or js.get("contract_address") or ""
+        if addr:
+            return str(addr)
+    except json.JSONDecodeError:
+        pass
+    m = re.search(r"contractAddress[\"': ]+(0x[0-9a-fA-F]{40})", out)
+    return m.group(1) if m else ""
+
+
+def send_create(node: Anvil, initcode: str) -> tuple[bool, str, str]:
+    """CREATE `initcode`. Returns (ok, contractAddress or '', receipt text)."""
+    node.impersonate(ANVIL_DEFAULT_ADDR)
+    send = node.run_cast(
+        [
+            "send",
+            "--private-key",
+            ANVIL_DEFAULT_KEY,
+            "--gas-limit",
+            GAS_LIMIT,
+            "--json",
+            "--create",
+            initcode,
+        ]
+    )
+    ok, out = parse_send_ok(send)
+    if not ok:
+        return False, "", out
+    return True, created_address(send, out), out
+
+
 def start_anvil(anvil: str, cast: str) -> Anvil:
     last_err: str | None = None
     for fork in HARD_FORKS:
@@ -397,7 +464,81 @@ def run_call_case(node: Anvil, addr: str, case: dict[str, Any], row: Row) -> Non
     check_storage(node, addr, case.get("post_storage") or [], row)
 
 
-def run_deploy_create(node: Anvil, contract: dict[str, Any], rows: list[Row]) -> None:
+def check_created_runtime(
+    node: Anvil, row: Row, contract: dict[str, Any], created: str
+) -> bool:
+    """Sanity-check CREATE-installed code.
+
+    `compileRuntime` is erase then `compile` (block). `compileDeploy` is
+    `spillObjectWithFallback` then `compileObject`: when the nested runtime
+    does not spill, the fallback is the verified source-optimizer object
+    pipeline, and `compileObject` appends a STOP seam. Byte equality is not
+    the spec — Tx.run vs EVM is. Require non-empty code that starts with the
+    8A/8B lock prefix.
+    """
+    actual = node.code(created)
+    n_got = hex_len(actual)
+    if n_got == 0:
+        row.fail(f"CREATE installed empty code at {created}")
+        return False
+    if not starts_with_lock_prefix(actual):
+        runtime = contract.get("runtime")
+        row.fail(
+            "CREATE-installed code does not start with the lock prefix\n"
+            f"    address {created}\n"
+            f"    actual  {actual[:74]}… ({n_got} bytes)\n"
+            + hex_suffix_diff(runtime or "0x", actual)
+        )
+        return False
+    runtime = contract.get("runtime")
+    n_rt = hex_len(runtime)
+    row.status = "ok/ok"
+    row.ret = "lock+ok"
+    row.storage = "n/a"
+    got, exp = norm_hex(actual), norm_hex(runtime)
+    extra = got[len(exp) :]
+    if got == exp:
+        row.ret = "lock+eq"
+    elif got.startswith(exp) and extra and set(extra) <= {"0"}:
+        row.ret = "lock+STOP"
+        print(
+            f"note: {contract['name']} CREATE-installed is compileRuntime + "
+            f"{len(extra) // 2} trailing STOP byte(s) (compileObject seam)"
+        )
+    else:
+        print(
+            f"note: {contract['name']} CREATE-installed {n_got} bytes vs "
+            f"compileRuntime {n_rt} bytes; first diff at byte "
+            f"{first_diff_byte(runtime, actual)}"
+        )
+    return True
+
+
+def run_case_list(
+    node: Anvil,
+    addr: str,
+    cases: list[dict[str, Any]],
+    rows: list[Row],
+    contract: str,
+    prefix: str = "",
+) -> None:
+    if not cases:
+        return
+    snap = node.snapshot()
+    for case in cases:
+        label = case.get("name") or "?"
+        row = Row(contract=contract, case=f"{prefix}{label}" if prefix else label)
+        try:
+            run_call_case(node, addr, case, row)
+        except HarnessError as e:
+            row.fail(str(e))
+        finally:
+            node.revert(snap)
+            snap = node.snapshot()
+        rows.append(row)
+
+
+def run_deploy_create(node: Anvil, contract: dict[str, Any], rows: list[Row]) -> str | None:
     row = Row(contract=contract["name"], case="deploy_create")
     deploy = contract.get("deploy")
     runtime = contract.get("runtime")
@@ -405,68 +546,22 @@ def run_deploy_create(node: Anvil, contract: dict[str, Any], rows: list[Row]) ->
         row.status = "-/-"
         row.fail("missing deploy or runtime bytecode")
         rows.append(row)
-        return
-    node.impersonate(ANVIL_DEFAULT_ADDR)
-    send = node.run_cast(
-        [
-            "send",
-            "--private-key",
-            ANVIL_DEFAULT_KEY,
-            "--gas-limit",
-            GAS_LIMIT,
-            "--json",
-            "--create",
-            deploy,
-        ]
-    )
-    ok, out = parse_send_ok(send)
+        return None
+    ok, created, out = send_create(node, deploy)
     if not ok:
         row.status = "ok/revert"
         row.fail(f"CREATE reverted:\n{out[-800:]}")
         rows.append(row)
-        return
-    created = ""
-    try:
-        js = json.loads(send.stdout or "{}")
-        created = js.get("contractAddress") or js.get("contract_address") or ""
-    except json.JSONDecodeError:
-        created = ""
-    if not created:
-        m = re.search(r"contractAddress[\"': ]+(0x[0-9a-fA-F]{40})", out)
-        created = m.group(1) if m else ""
+        return None
     if not created:
         row.fail("CREATE receipt had no contractAddress")
         rows.append(row)
-        return
-    actual = node.code(created)
-    exp, got = norm_hex(runtime), norm_hex(actual)
-    extra = got[len(exp) :]
-    if got == exp:
-        row.status = "ok/ok"
-        row.ret = "runtime"
-        row.storage = "n/a"
-        row.result = "PASS"
-    elif got.startswith(exp) and extra and set(extra) <= {"0"}:
-        # compileObject appends an unreachable STOP to the runtime object; `compile` does not.
-        row.status = "ok/ok"
-        row.ret = "runtime+STOP"
-        row.storage = "n/a"
-        row.result = "PASS"
-        print(
-            f"note: {contract['name']} CREATE runtime is compileRuntime + "
-            f"{len(extra) // 2} trailing STOP byte(s) (powdr compileObject)"
-        )
-    else:
-        row.status = "ok/ok"
-        row.ret = "DIFF"
-        row.fail(
-            f"deployed runtime != exported runtime\n"
-            f"    address  {created}\n"
-            f"    expected {runtime[:74]}… ({hex_len(runtime)} bytes)\n"
-            f"    actual   {actual[:74]}… ({hex_len(actual)} bytes)\n"
-            + hex_suffix_diff(runtime, actual)
-        )
+        return None
+    if not check_created_runtime(node, row, contract, created):
+        rows.append(row)
+        return None
     rows.append(row)
+    return created
 
 
 def concat_initcode(deploy: str, ctor: str | None) -> str:
@@ -479,7 +574,9 @@ def concat_initcode(deploy: str, ctor: str | None) -> str:
     return "0x" + d[2:] + c[2:]
 
 
-def run_deploy_create_with_args(node: Anvil, contract: dict[str, Any], rows: list[Row]) -> None:
+def run_deploy_create_with_args(
+    node: Anvil, contract: dict[str, Any], rows: list[Row]
+) -> str | None:
     """CREATE `deploy || ctor_calldata`, then `ctor_checks` against the created account."""
     row = Row(contract=contract["name"], case="deploy_create_args")
     deploy = contract.get("deploy")
@@ -489,68 +586,31 @@ def run_deploy_create_with_args(node: Anvil, contract: dict[str, Any], rows: lis
         row.status = "-/-"
         row.fail("missing deploy or runtime bytecode")
         rows.append(row)
-        return
+        return None
     if not ctor:
         row.status = "-/-"
         row.fail("missing ctor_calldata")
         rows.append(row)
-        return
-    initcode = concat_initcode(deploy, ctor)
-    node.impersonate(ANVIL_DEFAULT_ADDR)
-    send = node.run_cast(
-        [
-            "send",
-            "--private-key",
-            ANVIL_DEFAULT_KEY,
-            "--gas-limit",
-            GAS_LIMIT,
-            "--json",
-            "--create",
-            initcode,
-        ]
-    )
-    ok, out = parse_send_ok(send)
+        return None
+    ok, created, out = send_create(node, concat_initcode(deploy, ctor))
     if not ok:
         row.status = "ok/revert"
         row.fail(f"CREATE with ctor args reverted:\n{out[-800:]}")
         rows.append(row)
-        return
-    created = ""
-    try:
-        js = json.loads(send.stdout or "{}")
-        created = js.get("contractAddress") or js.get("contract_address") or ""
-    except json.JSONDecodeError:
-        created = ""
-    if not created:
-        m = re.search(r"contractAddress[\"': ]+(0x[0-9a-fA-F]{40})", out)
-        created = m.group(1) if m else ""
+        return None
     if not created:
         row.fail("CREATE receipt had no contractAddress")
         rows.append(row)
-        return
-    actual = node.code(created)
-    exp, got = norm_hex(runtime), norm_hex(actual)
-    extra = got[len(exp) :]
-    if got == exp or (got.startswith(exp) and extra and set(extra) <= {"0"}):
-        row.status = "ok/ok"
-        row.ret = "runtime" if got == exp else "runtime+STOP"
-        row.storage = "n/a"
-        row.result = "PASS"
-    else:
-        row.status = "ok/ok"
-        row.ret = "DIFF"
-        row.fail(
-            f"deployed runtime != exported runtime (with ctor args)\n"
-            f"    address  {created}\n"
-            f"    expected {runtime[:74]}… ({hex_len(runtime)} bytes)\n"
-            f"    actual   {actual[:74]}… ({hex_len(actual)} bytes)\n"
-            + hex_suffix_diff(runtime, actual)
-        )
+        return None
+    if not check_created_runtime(node, row, contract, created):
         rows.append(row)
-        return
+        return None
     rows.append(row)
     for case in contract.get("ctor_checks") or []:
-        crow = Row(contract=contract["name"], case=f"deploy_create_args/{case.get('name') or '?'}")
+        crow = Row(
+            contract=contract["name"],
+            case=f"deploy_create_args/{case.get('name') or '?'}",
+        )
         try:
             case_nc = dict(case)
             case_nc["pre_storage"] = []
@@ -559,6 +619,7 @@ def run_deploy_create_with_args(node: Anvil, contract: dict[str, Any], rows: lis
         except HarnessError as e:
             crow.fail(str(e))
         rows.append(crow)
+    return created
 
 
 def print_table(rows: list[Row], evm_line: str) -> int:
@@ -641,34 +702,29 @@ def main(argv: list[str] | None = None) -> int:
                 row.fail("compileRuntime returned none")
                 rows.append(row)
                 continue
+            created: str | None = None
+            create_tag = ""
             if name == "Counter":
+                create_tag = "deploy_create/"
                 try:
-                    run_deploy_create(node, contract, rows)
+                    created = run_deploy_create(node, contract, rows)
                 except HarnessError as e:
                     row = Row(contract=name, case="deploy_create")
                     row.fail(str(e))
                     rows.append(row)
             if name == "Token":
+                create_tag = "deploy_create_args/"
                 try:
-                    run_deploy_create_with_args(node, contract, rows)
+                    created = run_deploy_create_with_args(node, contract, rows)
                 except HarnessError as e:
                     row = Row(contract=name, case="deploy_create_args")
                     row.fail(str(e))
                     rows.append(row)
-            snap = None
+            cases = contract.get("cases") or []
+            if created:
+                run_case_list(node, created, cases, rows, name, prefix=create_tag)
             node.set_code(addr, runtime)
-            snap = node.snapshot()
-            for case in contract.get("cases") or []:
-                row = Row(contract=name, case=case.get("name") or "?")
-                try:
-                    run_call_case(node, addr, case, row)
-                except HarnessError as e:
-                    row.fail(str(e))
-                finally:
-                    if snap:
-                        node.revert(snap)
-                        snap = node.snapshot()
-                rows.append(row)
+            run_case_list(node, addr, cases, rows, name)
     finally:
         node.stop()
     return print_table(rows, evm_line)
