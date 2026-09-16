@@ -31,7 +31,7 @@ def Auth : AuthPred spec :=
 def inflow (c : Call spec) (w : World) : Nat :=
   match c.fn, c.args with
   | .mint, (dst, amt) =>
-    if c.toCtx.sender = w.self.owner ∧
+    if c.sender = w.self.owner ∧
         (w.self.totalSupply + amt).raw < wordBound ∧
         (w.self.balances dst + amt).raw < wordBound
     then amt.raw else 0
@@ -54,7 +54,7 @@ instance : HasDeploy spec where
   pred w := w.self = default
 
 instance : HasRely spec where
-  rely := defaultRely (X := ExtState)
+  rely _ w x' := defaultRely w.ext x'
 
 /-- Amount this accepted call moved out on `a`'s authority. -/
 def spentCall (a : Address) (c : Call spec) : Amount tokenAsset :=

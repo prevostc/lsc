@@ -14,9 +14,10 @@ decrements allowance — the spec hypothesises `sender ≠ src`, so that policy
 is compatible.
 
 **Proved:** a successful transfer or `transferFrom` conserves the two balances.
-A successful `approve` sets the allowance. In any reachable state, recorded
-balances still sum to total supply. No sequence of calls by other parties
-lowers `a`'s balance except by the amount `a` itself authorised
+A successful `approve` sets the allowance. In any reachable `State`, any
+finite set of accounts together holds at most `totalSupply`
+(`token_solvent`). No sequence of calls by other parties lowers `a`'s
+balance except by the amount `a` itself authorised
 (`token_no_unauthorized_extraction`: `a`'s own `transfer`/`burn`, or a
 `transferFrom` of `a`'s tokens). Only accepted calls count.
 

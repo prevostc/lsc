@@ -353,7 +353,8 @@ theorem totalSupply_auth : NoUnauthorizedDecreaseFn spec Inv claim Auth .totalSu
   rw [totalSupply_returns_stored ctx w] at hdec
   exact (Nat.lt_irrefl _ hdec).elim
 
-theorem token_no_unauth : NoUnauthorizedDecrease spec Inv claim Auth :=
+theorem token_no_unauth {self : Address} :
+    NoUnauthorizedDecrease spec self Inv claim Auth :=
   NoUnauthorizedDecrease.of_fns (C := spec) fun fn =>
     match fn with
     | .transfer => transfer_auth
@@ -560,7 +561,8 @@ theorem totalSupply_conservesFn : ConservesFn spec Inv claim inflow .totalSupply
     rw [totalSupply_returns_stored ctx w]
     simp [claim, inflow, Call.ofCtx]
 
-theorem token_conservation : Conservation spec Inv claim inflow :=
+theorem token_conservation {self : Address} :
+    Conservation spec self Inv claim inflow :=
   Conservation.of_fns (C := spec) fun fn =>
     match fn with
     | .transfer => transfer_conservesFn
@@ -667,7 +669,7 @@ theorem totalSupply_preserves_inv : PreservesInvFn spec Inv .totalSupply := by
   rw [totalSupply_returns_stored ctx w]
   exact hInv
 
-theorem token_preserves_inv : PreservesInv spec Inv :=
+theorem token_preserves_inv {self : Address} : PreservesInv spec self Inv :=
   PreservesInv.of_fns (C := spec) fun fn =>
     match fn with
     | .transfer => transfer_preserves_inv
@@ -680,8 +682,8 @@ theorem token_preserves_inv : PreservesInv spec Inv :=
     | .totalSupply => totalSupply_preserves_inv
 
 /-- Environment steps are a no-op on storage-only `Inv`. -/
-theorem token_inv_rely :
-    PreservesInvEnv spec Inv (HasRely.rely (C := spec)) := by
+theorem token_inv_rely {self : Address} :
+    PreservesInvEnv spec Inv (HasRely.rely (C := spec) self) := by
   intro w x' hw _
   exact hw
 
@@ -745,64 +747,65 @@ private theorem balances_burnPost (σ : Storage) (src : Address)
     Function.update_apply, raw_ite] at hn ⊢
   exact nat_ite_burn (fun i => (σ.balances i).raw) src a n.raw hn
 
-private theorem spent_covers_ok (c : Call spec)
+private theorem spent_covers_ok (self : Address) (c : Call spec)
     (w w' : World) (a : Address) {r : spec.Ret c.fn}
-    (h : spec.exec c.fn c.args c.toCtx w = .ok (r, w')) :
+    (h : spec.exec c.fn c.args (c.toCtx self) w = .ok (r, w')) :
     w.self.balances a ≤ w'.self.balances a + spentCall a c := by
   revert r h
-  rcases c with ⟨sender, value, ts, bn, target, fn, args⟩
+  rcases c with ⟨sender, value, ts, bn, fn, args⟩
   cases fn <;> intro r h
   case transfer =>
     rcases args with ⟨dst, amount⟩
     have hrun : Tx.run (transfer dst amount)
-        ⟨sender, value, ts, bn, target⟩ w = .ok (r, w') := by
+        { sender, value, timestamp := ts, blockNumber := bn, self } w =
+          .ok (r, w') := by
       simpa [Tx.run, spec_exec_transfer, Call.toCtx] using h
-    have hr := transfer_returns_true ⟨sender, value, ts, bn, target⟩ w dst amount
+    have hr := transfer_returns_true { sender, value, timestamp := ts, blockNumber := bn, self } w dst amount
       hrun
     subst hr
     have ⟨hsub, _, hw'⟩ :=
-      transfer_ok_inv ⟨sender, value, ts, bn, target⟩ w dst amount hrun
+      transfer_ok_inv { sender, value, timestamp := ts, blockNumber := bn, self } w dst amount hrun
     simp [spentCall, hw', Call.toCtx]
     exact balances_transferPost w.self sender dst amount a hsub
   case burn =>
-    have hrun : Tx.run (burn args) ⟨sender, value, ts, bn, target⟩ w =
+    have hrun : Tx.run (burn args) { sender, value, timestamp := ts, blockNumber := bn, self } w =
         .ok (r, w') := by
       simpa [Tx.run, spec_exec_burn, Call.toCtx] using h
     by_cases hsub : args ≤ w.self.balances sender
     · by_cases hsupply : args ≤ w.self.totalSupply
-      · have hok := burn_ok ⟨sender, value, ts, bn, target⟩ w args hsub hsupply
+      · have hok := burn_ok { sender, value, timestamp := ts, blockNumber := bn, self } w args hsub hsupply
         rw [hok] at hrun
         obtain ⟨rfl, rfl⟩ := hrun
         simp [spentCall]
         exact balances_burnPost w.self sender args a hsub
       · have herr := burn_reverts_on_insufficient_supply
-          ⟨sender, value, ts, bn, target⟩ w args hsub (Nat.not_le.mp hsupply)
+          { sender, value, timestamp := ts, blockNumber := bn, self } w args hsub (Nat.not_le.mp hsupply)
         rw [herr] at hrun; cases hrun
     · have herr := burn_reverts_on_insufficient_balance
-        ⟨sender, value, ts, bn, target⟩ w args (Nat.not_le.mp hsub)
+        { sender, value, timestamp := ts, blockNumber := bn, self } w args (Nat.not_le.mp hsub)
       rw [herr] at hrun; cases hrun
   case transferFrom =>
     rcases args with ⟨src, dst, amount⟩
     have hrun : Tx.run (transferFrom src dst amount)
-        ⟨sender, value, ts, bn, target⟩ w = .ok (r, w') := by
+        { sender, value, timestamp := ts, blockNumber := bn, self } w = .ok (r, w') := by
       simpa [Tx.run, spec_exec_transferFrom, Call.toCtx] using h
-    have hr := transferFrom_returns_true ⟨sender, value, ts, bn, target⟩ w
+    have hr := transferFrom_returns_true { sender, value, timestamp := ts, blockNumber := bn, self } w
       src dst amount hrun
     subst hr
     have ⟨_, hsub, _, hw'⟩ :=
-      transferFrom_ok_inv ⟨sender, value, ts, bn, target⟩ w src dst amount hrun
+      transferFrom_ok_inv { sender, value, timestamp := ts, blockNumber := bn, self } w src dst amount hrun
     simp [spentCall, hw', Call.toCtx]
     exact balances_transferPost w.self src dst amount a hsub
   case mint =>
     rcases args with ⟨dst, amount⟩
     have hrun : Tx.run (mint dst amount)
-        ⟨sender, value, ts, bn, target⟩ w = .ok (r, w') := by
+        { sender, value, timestamp := ts, blockNumber := bn, self } w = .ok (r, w') := by
       simpa [Tx.run, spec_exec_mint, Call.toCtx] using h
     simp [spentCall]
     by_cases ho : sender = w.self.owner
     · by_cases hts : (w.self.totalSupply + amount).raw < wordBound
       · by_cases hb : (w.self.balances dst + amount).raw < wordBound
-        · have hok := mint_ok ⟨sender, value, ts, bn, target⟩ w dst amount
+        · have hok := mint_ok { sender, value, timestamp := ts, blockNumber := bn, self } w dst amount
             ho hts hb
           rw [hok] at hrun
           obtain ⟨rfl, rfl⟩ := hrun
@@ -812,69 +815,94 @@ private theorem spent_covers_ok (c : Call spec)
             exact Nat.le_add_right _ _
           · rw [Function.update_of_ne (Ne.symm hd)]
         · have herr := mint_reverts_on_balance_overflow
-            ⟨sender, value, ts, bn, target⟩ w dst amount ho hts
+            { sender, value, timestamp := ts, blockNumber := bn, self } w dst amount ho hts
             (Nat.not_lt.mp hb)
           rw [herr] at hrun; cases hrun
       · have herr := mint_reverts_on_overflow
-          ⟨sender, value, ts, bn, target⟩ w dst amount ho (Nat.not_lt.mp hts)
+          { sender, value, timestamp := ts, blockNumber := bn, self } w dst amount ho (Nat.not_lt.mp hts)
         rw [herr] at hrun; cases hrun
     · have herr := mint_reverts_for_non_owner
-        ⟨sender, value, ts, bn, target⟩ w dst amount ho
+        { sender, value, timestamp := ts, blockNumber := bn, self } w dst amount ho
       rw [herr] at hrun; cases hrun
   case approve =>
     rcases args with ⟨spender, amount⟩
     have hrun : Tx.run (approve spender amount)
-        ⟨sender, value, ts, bn, target⟩ w = .ok (r, w') := by
+        { sender, value, timestamp := ts, blockNumber := bn, self } w = .ok (r, w') := by
       simpa [Tx.run, spec_exec_approve, Call.toCtx] using h
     have ⟨_, hok, hb⟩ :=
-      approve_preserves_balances ⟨sender, value, ts, bn, target⟩ w spender amount
+      approve_preserves_balances { sender, value, timestamp := ts, blockNumber := bn, self } w spender amount
     simp [spentCall]
     rw [hok] at hrun
     obtain ⟨rfl, rfl⟩ := hrun
     simp [hb]
   case balanceOf =>
     have hrun : Tx.run (balanceOf args)
-        ⟨sender, value, ts, bn, target⟩ w = .ok (r, w') := by
+        { sender, value, timestamp := ts, blockNumber := bn, self } w = .ok (r, w') := by
       simpa [Tx.run, spec_exec_balanceOf, Call.toCtx] using h
-    rw [balanceOf_returns_stored_balance ⟨sender, value, ts, bn, target⟩ w args]
+    rw [balanceOf_returns_stored_balance { sender, value, timestamp := ts, blockNumber := bn, self } w args]
       at hrun
     obtain ⟨rfl, rfl⟩ := hrun
     simp [spentCall]
   case allowance =>
     rcases args with ⟨owner, spender⟩
     have hrun : Tx.run (allowance owner spender)
-        ⟨sender, value, ts, bn, target⟩ w = .ok (r, w') := by
+        { sender, value, timestamp := ts, blockNumber := bn, self } w = .ok (r, w') := by
       simpa [Tx.run, spec_exec_allowance, Call.toCtx] using h
-    rw [allowance_returns_stored ⟨sender, value, ts, bn, target⟩ w owner spender]
+    rw [allowance_returns_stored { sender, value, timestamp := ts, blockNumber := bn, self } w owner spender]
       at hrun
     obtain ⟨rfl, rfl⟩ := hrun
     simp [spentCall]
   case totalSupply =>
-    have hrun : Tx.run totalSupply ⟨sender, value, ts, bn, target⟩ w =
+    have hrun : Tx.run totalSupply { sender, value, timestamp := ts, blockNumber := bn, self } w =
         .ok (r, w') := by
       simpa [Tx.run, spec_exec_totalSupply, Call.toCtx] using h
-    rw [totalSupply_returns_stored ⟨sender, value, ts, bn, target⟩ w] at hrun
+    rw [totalSupply_returns_stored { sender, value, timestamp := ts, blockNumber := bn, self } w] at hrun
     obtain ⟨rfl, rfl⟩ := hrun
     simp [spentCall]
 
-private theorem spent_covers_accepted (c : Call spec)
+private theorem spent_covers_accepted (self : Address) (c : Call spec)
     (w : World) (a : Address)
-    (hacc : accepted c w = true) :
-    w.self.balances a ≤ (step (.call c) w).self.balances a + spentCall a c := by
+    (hacc : accepted self c w = true) :
+    w.self.balances a ≤ (step self (.call c) w).self.balances a +
+      spentCall a c := by
   obtain ⟨hvo, _, ⟨⟨r, w'⟩, hrun, hstep⟩⟩ := accepted_ok hacc
   have hv : c.value = 0 :=
     spec.value_eq_zero_of_valueOk (by cases c.fn <;> rfl) hvo
   rw [hv, World.creditValue_zero] at hrun
   rw [hstep]
-  exact spent_covers_ok c w w' a hrun
+  exact spent_covers_ok self c w w' a hrun
 
-theorem token_solvent (w : State) :
+private theorem token_balances_sum (w : State) :
     ∃ H : Finset Address,
       (∀ a, a ∉ H → w.self.balances a = 0) ∧
       H.sum (fun a => (w.self.balances a).raw) = w.self.totalSupply.raw :=
-  inv_of_reachable (C := spec) (rely := HasRely.rely (C := spec))
+  inv_of_reachable (C := spec) (rely := HasRely.rely (C := spec) w.addr)
     (self := w.addr) token_deployed_inv
     (PreservesInv.toAt token_preserves_inv) token_inv_rely w.reachable
+
+theorem token_solvent (w : State) :
+    ∀ A : Finset Address, ∑ a ∈ A, w.self.balances a ≤ w.self.totalSupply := by
+  intro A
+  obtain ⟨H, h0, hsum⟩ := token_balances_sum w
+  have hfilter :
+      ∑ a ∈ A, (w.self.balances a).raw =
+        ∑ a ∈ A.filter (· ∈ H), (w.self.balances a).raw := by
+    rw [Finset.sum_filter]
+    refine Finset.sum_congr rfl ?_
+    intro a _ha
+    split_ifs with hH
+    · rfl
+    · simp [h0 a hH]
+  have hsub : A.filter (· ∈ H) ⊆ H := fun a ha => (Finset.mem_filter.mp ha).2
+  have hle :
+      ∑ a ∈ A.filter (· ∈ H), (w.self.balances a).raw ≤
+        ∑ a ∈ H, (w.self.balances a).raw := by
+    rw [← Finset.sum_sdiff hsub]
+    exact Nat.le_add_left _ _
+  have : (∑ a ∈ A, w.self.balances a).raw ≤ w.self.totalSupply.raw := by
+    rw [Amount.sum_raw, hfilter, ← hsum]
+    exact hle
+  simpa [Amount.le_iff] using this
 
 private theorem foldAccepted_raw_add {s : State} (t : Txs s) (a : Address)
     (x : Amount tokenAsset) :
@@ -885,8 +913,8 @@ private theorem foldAccepted_raw_add {s : State} (t : Txs s) (a : Address)
   | @call s c hne rest ih =>
     simp [Txs.foldAccepted, Txs.spent]
     split_ifs
-    · have hx := ih (x + HasSpent.spentCall (C := spec) a (s.callOf c))
-      have hsc := ih (HasSpent.spentCall (C := spec) a (s.callOf c))
+    · have hx := ih (x + HasSpent.spentCall (C := spec) a (c))
+      have hsc := ih (HasSpent.spentCall (C := spec) a (c))
       rw [hx, hsc]
       exact Nat.add_assoc _ _ _
     · exact ih x
@@ -901,24 +929,24 @@ theorem token_no_unauthorized_extraction (w : State) (t : Txs w) (a : Address) :
     simp [Txs.spent, Txs.foldAccepted, Amount.le_iff, Amount.raw_add]
   | @call s c hne rest ih =>
     simp [Txs.spent, Txs.foldAccepted]
-    by_cases hacc : accepted (s.callOf c) s.w = true
-    · have hcov := spent_covers_accepted (s.callOf c) s.w a hacc
-      have hstepEq : (s.afterCall c hne).w = step (.call (s.callOf c)) s.w :=
+    by_cases hacc : accepted s.addr c s.w = true
+    · have hcov := spent_covers_accepted s.addr c s.w a hacc
+      have hstepEq : (s.afterCall c hne).w = step s.addr (.call c) s.w :=
         State.afterCall_w s c hne
       have hthis : s.self.balances a ≤
-          (s.afterCall c hne).self.balances a + spentCall a (s.callOf c) := by
+          (s.afterCall c hne).self.balances a + spentCall a c := by
         simpa [State.self, hstepEq] using hcov
       simp [Amount.le_iff, Amount.raw_add] at hthis ih
       have hfold := foldAccepted_raw_add rest a
-        (HasSpent.spentCall (C := spec) a (s.callOf c))
+        (HasSpent.spentCall (C := spec) a c)
       simp [Amount.le_iff, Amount.raw_add, Txs.spent, Txs.foldAccepted, hacc,
         HasSpent.spentCall] at hthis ih hfold ⊢
       rw [hfold]
       refine Nat.le_trans hthis ?_
-      have hih := Nat.add_le_add_right ih (spentCall a (s.callOf c)).raw
+      have hih := Nat.add_le_add_right ih (spentCall a c).raw
       convert hih using 1
       ac_rfl
-    · have hfalse : accepted (s.callOf c) s.w = false :=
+    · have hfalse : accepted s.addr c s.w = false :=
         Bool.eq_false_iff.mpr hacc
       have hstep := step_of_not_accepted hfalse
       have hs : (s.afterCall c hne).self = s.self := by

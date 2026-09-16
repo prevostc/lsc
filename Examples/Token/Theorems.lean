@@ -1,3 +1,4 @@
+import Lsc.Lang.AmountAlgebra
 import Stdlib.ERC20
 import Examples.Token.Spec
 import Examples.Token.Proofs.Tx
@@ -71,14 +72,12 @@ open Lsc Lsc.Security Token
 
 namespace Token
 
-/-- Recorded balances still sum to total supply on a finite support: every
-token is accounted for. Mint raises both sides together; burn lowers both;
-Token has no external asset that could drift. The sum uses `.raw` because
-`Amount` has no `AddCommMonoid` instance for `Finset.sum`. -/
+/-- Any finite group of accounts together holds at most `totalSupply`.
+Mint raises both sides together; burn lowers both; Token has no external
+asset that could drift. The exact sum over the finite support of balances
+is an internal lemma. -/
 theorem token_solvent (w : State) :
-    ∃ H : Finset Address,
-      (∀ a, a ∉ H → w.self.balances a = 0) ∧
-      H.sum (fun a => (w.self.balances a).raw) = w.self.totalSupply.raw :=
+    ∀ A : Finset Address, ∑ a ∈ A, w.self.balances a ≤ w.self.totalSupply :=
   Proof.token_solvent w
 
 /-- No sequence of calls by other parties lowers `a`'s balance except by the

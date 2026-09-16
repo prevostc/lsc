@@ -4,6 +4,7 @@ import Lsc.Lang.Amount
 import Lsc.Lang.Interface
 import Lsc.Lang.WordTheorems
 import Lsc.Lang.AmountTheorems
+import Lsc.Lang.AmountAlgebra
 import Lsc.Lang.TxTheorems
 import Lsc.Lang.InterfaceTheorems
 import Lsc.Lang.Core
