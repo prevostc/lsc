@@ -10,10 +10,8 @@ prints JSON on stdout (BEGIN_LSC_EXPORT … END_LSC_EXPORT) for `scripts/difftes
 
 Does not import example Tests files (their `#eval`/`#guard` would re-run).
 Case lists, senders, and mapping slots follow the old interpreter fixtures.
-Vault and CPAMM artefacts are *not* regenerated here: `lsc_contract` on
-those modules hits maximum recursion depth (~500s). Their `compiled/` trees
-stay at the last successful export. WNative has payable deposit /
-`Native.send` withdraw cases.
+Vault and CPAMM are exported for artifacts only (no Tx.run cases); constructors CALL out.
+WNative has payable deposit / Native.send withdraw cases.
 -/
 import Lsc.Compiler.Bytecode
 import Lsc.Compiler.Pipeline
@@ -23,6 +21,8 @@ import YulEvmCompiler.Compile
 import YulEvmCompiler.Optimizer.Implementation.MemorySpill
 import Examples.Counter.Contract
 import Examples.Token.Contract
+import Examples.Vault.Contract
+import Examples.Cpamm.Contract
 import Examples.WNative.Contract
 import Lsc.Lang.Capability
 import Lsc.Tools.AbiJson
@@ -435,6 +435,8 @@ def runtimeAddress : String := addrHex 0xC0DE
 
 def counterArt := compileContract Counter.contract
 def tokenArt := compileContract Token.contract
+def vaultArt := compileContract Vault.contract
+def cpammArt := compileContract Cpamm.contract
 def wnativeArt := compileContract WNative.contract
 
 def exportJson : String :=
@@ -445,6 +447,10 @@ def exportJson : String :=
       contractJson "Token" Token.contract tokenArt tokenCases
         (some (ctorCalldata [tokenCtorOwner, tokenCtorSupply]))
         tokenCtorChecks,
+      contractJson "Vault" Vault.contract vaultArt []
+        (some (ctorCalldata [1, 10])),
+      contractJson "Cpamm" Cpamm.contract cpammArt []
+        (some (ctorCalldata [1, 10, 11])),
       contractJson "WNative" WNative.contract wnativeArt wnativeCases
     ] ++ "]"
   ] ++ "}"
@@ -452,6 +458,8 @@ def exportJson : String :=
 def main : IO Unit := do
   writeContract "Counter" Counter.contract counterArt
   writeContract "Token" Token.contract tokenArt
+  writeContract "Vault" Vault.contract vaultArt
+  writeContract "Cpamm" Cpamm.contract cpammArt
   writeContract "WNative" WNative.contract wnativeArt
   IO.println "BEGIN_LSC_EXPORT"
   IO.println exportJson

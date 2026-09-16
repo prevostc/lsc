@@ -15,10 +15,9 @@ source scripts/heimdall_decompile.sh
 CONTRACTS=(Counter Token Vault Cpamm WNative)
 
 echo "==> lake build (bytecode exporter deps)"
-# Vault/Cpamm `lsc_contract` currently hits max recursion depth; do not rebuild.
 scripts/lean lake build Lsc.Compiler.Pipeline Lsc.Compiler.Bytecode Lsc.Tools.Disasm Lsc.Tools.AbiJson \
   Examples.Counter.Contract Examples.Token.Contract \
-  Examples.WNative.Contract
+  Examples.Vault.Contract Examples.Cpamm.Contract Examples.WNative.Contract
 echo "==> export bytecode / Yul / labelled Asm → Examples/*/compiled"
 scripts/lean lake env lean scripts/export_bytecode.lean >/dev/null
 echo "==> wrote Examples/<C>/compiled/{runtime,deploy}.{hex,yul} runtime.asm"
