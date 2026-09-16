@@ -3,7 +3,8 @@
 Exactly:
 
 - `Contract.lean` — module docstring (what the contract does, for a Solidity
-  developer, ≤8 lines); `Asset` / `Chain` constants (`def chain`, `def native`);
+  developer, ≤8 lines); `Asset` / `Chain` constants (`def chain : Chain := .ethereum`,
+  `abbrev native := Chain.native chain`);
   `Storage`, `Event`, `Error`; the
   user-facing functions, each with a one-line docstring; the single
   `lsc_contract` line. `[Payable]` / `[Reentrant]` / `[Reentrant.Unsafe]`

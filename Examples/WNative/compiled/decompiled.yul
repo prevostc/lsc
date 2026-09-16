@@ -26,38 +26,6 @@ object "DecompiledContract" {
             switch selector()
             
             /*
-            * @custom:signature    burn(uint256 arg0) public
-            * @param                arg0 ["uint256", "bytes32", "int256"]
-            */
-            case 0x42966c68 {
-                if iszero(lt(calldatasize(), 0x24)) {
-                    if iszero(callvalue()) { revert(0, 0); } else {
-                        mstore(0, caller())
-                        mstore(0x20, 0x02)
-                        if eq(0, iszero(lt(sload(sha3(0, 0x40)), calldataload(0x04)))) { revert(0x80, 0x04); } else {
-                            mstore(0x80, 0xf4d678b800000000000000000000000000000000000000000000000000000000)
-                            if iszero(lt(sload(sha3(0, 0x40)), calldataload(0x04))) {
-                                mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
-                                mstore(0x84, 0x11)
-                                mstore(0, caller())
-                                mstore(0x20, 0x02)
-                                sstore(sha3(0, 0x40), sub(sload(sha3(0, 0x40)), calldataload(0x04)))
-                                if iszero(lt(sload(0x01), calldataload(0x04))) { revert(0, 0); } else {
-                                    mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
-                                    mstore(0x84, 0x11)
-                                    sstore(0x01, sub(sload(0x01), calldataload(0x04)))
-                                    mstore(0x80, caller())
-                                    mstore(0xa0, 0)
-                                    mstore(0xc0, calldataload(0x04))
-                                    log1(0x80, 0x60, 0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            
-            /*
             * @custom:signature    workMyDirefulOwner(uint256 arg0, uint256 arg1) public returns (uint256)
             * @param                arg0 ["uint256", "bytes32", "int256"]
             * @param                arg1 ["uint256", "bytes32", "int256"]
@@ -66,22 +34,22 @@ object "DecompiledContract" {
                 if iszero(lt(calldatasize(), 0x44)) {
                     if iszero(callvalue()) { revert(0, 0); } else {
                         mstore(0, caller())
-                        mstore(0x20, 0x02)
+                        mstore(0x20, 0)
                         if iszero(lt(sload(sha3(0, 0x40)), calldataload(0x24))) { revert(0x80, 0x04); } else {
                             mstore(0x80, 0xf4d678b800000000000000000000000000000000000000000000000000000000)
                             if iszero(lt(sload(sha3(0, 0x40)), calldataload(0x24))) {
                                 mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
                                 mstore(0x84, 0x11)
                                 mstore(0, caller())
-                                mstore(0x20, 0x02)
+                                mstore(0x20, 0)
                                 sstore(sha3(0, 0x40), sub(sload(sha3(0, 0x40)), calldataload(0x24)))
                                 mstore(0, calldataload(0x04))
-                                mstore(0x20, 0x02)
+                                mstore(0x20, 0)
                                 if iszero(lt(add(sload(sha3(0, 0x40)), calldataload(0x24)), sload(sha3(0, 0x40)))) { revert(0, 0); } else {
                                     mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
                                     mstore(0x84, 0x11)
                                     mstore(0, calldataload(0x04))
-                                    mstore(0x20, 0x02)
+                                    mstore(0x20, 0)
                                     sstore(sha3(0, 0x40), add(sload(sha3(0, 0x40)), calldataload(0x24)))
                                     mstore(0x80, caller())
                                     mstore(0xa0, calldataload(0x04))
@@ -97,31 +65,32 @@ object "DecompiledContract" {
             }
             
             /*
-            * @custom:signature    Unresolved_40c10f19(uint256 arg0, uint256 arg1) public
+            * @custom:signature    withdraw(uint256 arg0) public
             * @param                arg0 ["uint256", "bytes32", "int256"]
-            * @param                arg1 ["uint256", "bytes32", "int256"]
             */
-            case 0x40c10f19 {
-                if iszero(lt(calldatasize(), 0x44)) {
+            case 0x2e1a7d4d {
+                if iszero(lt(calldatasize(), 0x24)) {
                     if iszero(callvalue()) { revert(0, 0); } else {
-                        if eq(caller(), sload(0)) { revert(0x80, 0x04); } else {
-                            mstore(0x80, 0x30cd747100000000000000000000000000000000000000000000000000000000)
-                            if iszero(lt(add(sload(0x01), calldataload(0x24)), sload(0x01))) {
+                        tstore(0, 0x01)
+                        mstore(0, caller())
+                        mstore(0x20, 0)
+                        if iszero(lt(sload(sha3(0, 0x40)), calldataload(0x04))) {
+                            mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
+                            mstore(0x84, 0x11)
+                            mstore(0, caller())
+                            mstore(0x20, 0)
+                            sstore(sha3(0, 0x40), sub(sload(sha3(0, 0x40)), calldataload(0x04)))
+                            if iszero(lt(sload(0x02), calldataload(0x04))) {
                                 mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
                                 mstore(0x84, 0x11)
-                                sstore(0x01, add(sload(0x01), calldataload(0x24)))
-                                mstore(0, calldataload(0x04))
-                                mstore(0x20, 0x02)
-                                if iszero(lt(add(sload(sha3(0, 0x40)), calldataload(0x24)), sload(sha3(0, 0x40)))) { revert(0, 0); } else {
-                                    mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
-                                    mstore(0x84, 0x11)
-                                    mstore(0, calldataload(0x04))
-                                    mstore(0x20, 0x02)
-                                    sstore(sha3(0, 0x40), add(sload(sha3(0, 0x40)), calldataload(0x24)))
-                                    mstore(0x80, 0)
+                                sstore(0x02, sub(sload(0x02), calldataload(0x04)))
+                                call(0x0f4240, caller(), calldataload(0x04), 0, 0, 0, 0)
+                                if eq(call(0x0f4240, caller(), calldataload(0x04), 0, 0, 0, 0), 0x01) { revert(0, 0); } else {
+                                    mstore(0x80, 0x90b8ec1800000000000000000000000000000000000000000000000000000000)
+                                    mstore(0x80, caller())
                                     mstore(0xa0, calldataload(0x04))
-                                    mstore(0xc0, calldataload(0x24))
-                                    log1(0x80, 0x60, 0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef)
+                                    log1(0x80, 0x40, 0x7fcf532c15f0a6db0bd6d0e038bea71d30d808c7d98cb3bf7268a95bf5081b65)
+                                    tstore(0, 0)
                                 }
                             }
                         }
@@ -138,7 +107,7 @@ object "DecompiledContract" {
                 if iszero(lt(calldatasize(), 0x44)) {
                     if iszero(callvalue()) { revert(0, 0); } else {
                         mstore(0, calldataload(0x04))
-                        mstore(0x20, 0x03)
+                        mstore(0x20, 0x01)
                         mstore(0x20, sha3(0, 0x40))
                         mstore(0, calldataload(0x24))
                         mstore(0x80, sload(sha3(0, 0x40)))
@@ -157,20 +126,20 @@ object "DecompiledContract" {
                 if iszero(lt(calldatasize(), 0x64)) {
                     if iszero(callvalue()) { revert(0, 0); } else {
                         mstore(0, calldataload(0x04))
-                        mstore(0x20, 0x03)
+                        mstore(0x20, 0x01)
                         mstore(0x20, sha3(0, 0x40))
                         mstore(0, caller())
                         if iszero(lt(sload(sha3(0, 0x40)), calldataload(0x44))) { revert(0x80, 0x04); } else {
                             mstore(0x80, 0x13be252b00000000000000000000000000000000000000000000000000000000)
                             mstore(0, calldataload(0x04))
-                            mstore(0x20, 0x02)
+                            mstore(0x20, 0)
                             if iszero(lt(sload(sha3(0, 0x40)), calldataload(0x44))) { revert(0x80, 0x04); } else {
                                 mstore(0x80, 0xf4d678b800000000000000000000000000000000000000000000000000000000)
                                 if iszero(lt(sload(sha3(0, 0x40)), calldataload(0x44))) {
                                     mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
                                     mstore(0x84, 0x11)
                                     mstore(0, calldataload(0x04))
-                                    mstore(0x20, 0x03)
+                                    mstore(0x20, 0x01)
                                     mstore(0x20, sha3(0, 0x40))
                                     mstore(0, caller())
                                     sstore(sha3(0, 0x40), sub(sload(sha3(0, 0x40)), calldataload(0x44)))
@@ -178,15 +147,15 @@ object "DecompiledContract" {
                                         mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
                                         mstore(0x84, 0x11)
                                         mstore(0, calldataload(0x04))
-                                        mstore(0x20, 0x02)
+                                        mstore(0x20, 0)
                                         sstore(sha3(0, 0x40), sub(sload(sha3(0, 0x40)), calldataload(0x44)))
                                         mstore(0, calldataload(0x24))
-                                        mstore(0x20, 0x02)
+                                        mstore(0x20, 0)
                                         if iszero(lt(add(sload(sha3(0, 0x40)), calldataload(0x44)), sload(sha3(0, 0x40)))) { revert(0, 0); } else {
                                             mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
                                             mstore(0x84, 0x11)
                                             mstore(0, calldataload(0x24))
-                                            mstore(0x20, 0x02)
+                                            mstore(0x20, 0)
                                             sstore(sha3(0, 0x40), add(sload(sha3(0, 0x40)), calldataload(0x44)))
                                             mstore(0x80, calldataload(0x04))
                                             mstore(0xa0, calldataload(0x24))
@@ -212,7 +181,7 @@ object "DecompiledContract" {
                 if iszero(lt(calldatasize(), 0x44)) {
                     if iszero(callvalue()) { revert(0, 0); } else {
                         mstore(0, caller())
-                        mstore(0x20, 0x03)
+                        mstore(0x20, 0x01)
                         mstore(0x20, sha3(0, 0x40))
                         mstore(0, calldataload(0x04))
                         sstore(sha3(0, 0x40), calldataload(0x24))
@@ -234,9 +203,34 @@ object "DecompiledContract" {
                 if iszero(lt(calldatasize(), 0x24)) {
                     if iszero(callvalue()) { revert(0, 0); } else {
                         mstore(0, calldataload(0x04))
-                        mstore(0x20, 0x02)
+                        mstore(0x20, 0)
                         mstore(0x80, sload(sha3(0, 0x40)))
                         return(0x80, 0x20)
+                    }
+                }
+            }
+            
+            /*
+            * @custom:signature    deposit() public payable
+            */
+            case 0xd0e30db0 {
+                if iszero(lt(calldatasize(), 0x04)) { revert(0, 0); } else {
+                    mstore(0, caller())
+                    mstore(0x20, 0)
+                    if iszero(lt(add(sload(sha3(0, 0x40)), callvalue()), sload(sha3(0, 0x40)))) {
+                        mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
+                        mstore(0x84, 0x11)
+                        mstore(0, caller())
+                        mstore(0x20, 0)
+                        sstore(sha3(0, 0x40), add(sload(sha3(0, 0x40)), callvalue()))
+                        if iszero(lt(add(sload(0x02), callvalue()), sload(0x02))) {
+                            mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
+                            mstore(0x84, 0x11)
+                            sstore(0x02, add(sload(0x02), callvalue()))
+                            mstore(0x80, caller())
+                            mstore(0xa0, callvalue())
+                            log1(0x80, 0x40, 0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c)
+                        }
                     }
                 }
             }
@@ -247,7 +241,7 @@ object "DecompiledContract" {
             case 0x18160ddd {
                 if iszero(lt(calldatasize(), 0x04)) { revert(0, 0); } else {
                     if iszero(callvalue()) { revert(0, 0); } else {
-                        mstore(0x80, sload(0x01))
+                        mstore(0x80, sload(0x02))
                         return(0x80, 0x20)
                     }
                 }

@@ -26,7 +26,7 @@ object "DecompiledContract" {
             switch selector()
             
             /*
-            * @custom:signature    Unresolved_4cdad506(uint256 arg0) public returns (uint256)
+            * @custom:signature    previewRedeem(uint256 arg0) public returns (uint256)
             * @param                arg0 ["uint256", "bytes32", "int256"]
             */
             case 0x4cdad506 {
@@ -62,7 +62,7 @@ object "DecompiledContract" {
             }
             
             /*
-            * @custom:signature    Unresolved_8456cb59() public
+            * @custom:signature    pause() public
             */
             case 0x8456cb59 {
                 if iszero(lt(calldatasize(), 0x04)) { revert(0, 0); } else {
@@ -77,7 +77,7 @@ object "DecompiledContract" {
             }
             
             /*
-            * @custom:signature    Unresolved_3f4ba83a() public
+            * @custom:signature    unpause() public
             */
             case 0x3f4ba83a {
                 if iszero(lt(calldatasize(), 0x04)) { revert(0, 0); } else {
@@ -92,7 +92,7 @@ object "DecompiledContract" {
             }
             
             /*
-            * @custom:signature    Unresolved_b187bd26() public view returns (uint256)
+            * @custom:signature    isPaused() public view returns (uint256)
             */
             case 0xb187bd26 {
                 if iszero(lt(calldatasize(), 0x04)) { revert(0, 0); } else {
@@ -104,7 +104,7 @@ object "DecompiledContract" {
             }
             
             /*
-            * @custom:signature    Unresolved_ef8b30f7(uint256 arg0) public returns (uint256)
+            * @custom:signature    previewDeposit(uint256 arg0) public returns (uint256)
             * @param                arg0 ["uint256", "bytes32", "int256"]
             */
             case 0xef8b30f7 {
@@ -140,7 +140,7 @@ object "DecompiledContract" {
             }
             
             /*
-            * @custom:signature    Unresolved_2e1a7d4d(uint256 arg0) public returns (uint256)
+            * @custom:signature    withdraw(uint256 arg0) public returns (uint256)
             * @param                arg0 ["uint256", "bytes32", "int256"]
             */
             case 0x2e1a7d4d {
@@ -219,7 +219,7 @@ object "DecompiledContract" {
             }
             
             /*
-            * @custom:signature    Unresolved_b6b55f25(uint256 arg0) public returns (uint256)
+            * @custom:signature    deposit(uint256 arg0) public returns (uint256)
             * @param                arg0 ["uint256", "bytes32", "int256"]
             */
             case 0xb6b55f25 {

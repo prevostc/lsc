@@ -209,7 +209,7 @@ object "DecompiledContract" {
             }
             
             /*
-            * @custom:signature    Unresolved_a1af5b9a() public returns (bytes memory)
+            * @custom:signature    collectProtocolFees() public returns (bytes memory)
             */
             case 0xa1af5b9a {
                 if iszero(lt(calldatasize(), 0x04)) { revert(0, 0); } else {
@@ -258,7 +258,7 @@ object "DecompiledContract" {
             }
             
             /*
-            * @custom:signature    Unresolved_1ad8b03b() public pure
+            * @custom:signature    protocolFees() public pure
             */
             case 0x1ad8b03b {
             }
@@ -294,7 +294,7 @@ object "DecompiledContract" {
             }
             
             /*
-            * @custom:signature    Unresolved_0902f1ac() public pure
+            * @custom:signature    getReserves() public pure
             */
             case 0x0902f1ac {
             }

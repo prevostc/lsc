@@ -20,18 +20,18 @@ contract DecompiledContract {
     bytes32 store_c;
     uint256 store_b;
     mapping(bytes32 => bytes32) storage_map_f;
-    uint256 public unresolved_b187bd26;
+    uint256 public isPaused;
     
-    event Event_90890809();
-    event Event_a45f47fd();
-    event Event_9e87fac8();
-    event Event_f279e6a1();
-    error CustomError_00000000();
+    event Deposit(address, uint256, uint256);
+    event Unpaused();
+    event Paused();
+    event Withdraw(address, uint256, uint256);
+    error NotOwner();
     
     /// @custom:selector    0x4cdad506
-    /// @custom:signature   Unresolved_4cdad506(uint256 arg0) public returns (uint256)
+    /// @custom:signature   previewRedeem(uint256 arg0) public returns (uint256)
     /// @param              arg0 ["uint256", "bytes32", "int256"]
-    function Unresolved_4cdad506(uint256 arg0) public returns (uint256) {
+    function previewRedeem(uint256 arg0) public returns (uint256) {
         require(!msg.data.length < 0x24);
         var_a = 0x70a0823100000000000000000000000000000000000000000000000000000000;
         address var_b = address(this);
@@ -47,25 +47,25 @@ contract DecompiledContract {
     }
     
     /// @custom:selector    0x8456cb59
-    /// @custom:signature   Unresolved_8456cb59() public
-    function Unresolved_8456cb59() public {
+    /// @custom:signature   pause() public
+    function pause() public {
         require(msg.sender == store_c, CustomError_30cd7471());
-        unresolved_b187bd26 = 0x01;
-        emit Event_9e87fac8();
+        isPaused = 0x01;
+        emit Paused();
     }
     
     /// @custom:selector    0x3f4ba83a
-    /// @custom:signature   Unresolved_3f4ba83a() public
-    function Unresolved_3f4ba83a() public {
+    /// @custom:signature   unpause() public
+    function unpause() public {
         require(msg.sender == store_c, CustomError_30cd7471());
-        unresolved_b187bd26 = 0;
-        emit Event_a45f47fd();
+        isPaused = 0;
+        emit Unpaused();
     }
     
     /// @custom:selector    0xef8b30f7
-    /// @custom:signature   Unresolved_ef8b30f7(uint256 arg0) public returns (uint256)
+    /// @custom:signature   previewDeposit(uint256 arg0) public returns (uint256)
     /// @param              arg0 ["uint256", "bytes32", "int256"]
-    function Unresolved_ef8b30f7(uint256 arg0) public returns (uint256) {
+    function previewDeposit(uint256 arg0) public returns (uint256) {
         require(!msg.data.length < 0x24);
         address var_b = address(this);
         (bool success, bytes memory ret0) = address(store_a).{ gas: 0x0f4240 }Unresolved_70a08231(var_b); // staticcall
@@ -81,12 +81,12 @@ contract DecompiledContract {
     }
     
     /// @custom:selector    0x2e1a7d4d
-    /// @custom:signature   Unresolved_2e1a7d4d(uint256 arg0) public returns (uint256)
+    /// @custom:signature   withdraw(uint256 arg0) public returns (uint256)
     /// @param              arg0 ["uint256", "bytes32", "int256"]
-    function Unresolved_2e1a7d4d(uint256 arg0) public returns (uint256) {
+    function withdraw(uint256 arg0) public returns (uint256) {
         require(!msg.data.length < 0x24);
         transient[0] = 0x01;
-        require(unresolved_b187bd26 == 0, CustomError_9e87fac8());
+        require(isPaused == 0, CustomError_9e87fac8());
         require(0 < arg0, CustomError_39996567());
         address var_b = msg.sender;
         require(!(storage_map_e[var_b] < arg0), CustomError_39996567());
@@ -112,19 +112,19 @@ contract DecompiledContract {
         require(!ret0.length | ((!ret0.length < 0x20) & (ret0.length < 0x40)), CustomError_90b8ec18());
         require((!ret0.length | var_a) == 0x01, CustomError_90b8ec18());
         address var_a = msg.sender;
-        emit Event_f279e6a1(msg.sender, ((var_a + 0x01) * arg0) / (store_b + 0x0f4240), arg0);
+        emit Withdraw(msg.sender, ((var_a + 0x01) * arg0) / (store_b + 0x0f4240), arg0);
         transient[0] = 0;
         var_a = ((var_a + 0x01) * arg0) / (store_b + 0x0f4240);
         return ((var_a + 0x01) * arg0) / (store_b + 0x0f4240);
     }
     
     /// @custom:selector    0xb6b55f25
-    /// @custom:signature   Unresolved_b6b55f25(uint256 arg0) public returns (uint256)
+    /// @custom:signature   deposit(uint256 arg0) public returns (uint256)
     /// @param              arg0 ["uint256", "bytes32", "int256"]
-    function Unresolved_b6b55f25(uint256 arg0) public returns (uint256) {
+    function deposit(uint256 arg0) public returns (uint256) {
         require(!msg.data.length < 0x24);
         transient[0] = 0x01;
-        require(unresolved_b187bd26 == 0, CustomError_9e87fac8());
+        require(isPaused == 0, CustomError_9e87fac8());
         require(0 < arg0);
         address var_b = address(this);
         (bool success, bytes memory ret0) = address(store_a).{ gas: 0x0f4240 }Unresolved_70a08231(var_b); // staticcall
@@ -151,7 +151,7 @@ contract DecompiledContract {
         require(!ret0.length | ((!ret0.length < 0x20) & (ret0.length < 0x40)), CustomError_90b8ec18());
         require((!ret0.length | var_a) == 0x01, CustomError_90b8ec18());
         address var_a = msg.sender;
-        emit Event_90890809(msg.sender, arg0, ((store_b + 0x0f4240) * arg0) / (var_a + 0x01));
+        emit Deposit(msg.sender, arg0, ((store_b + 0x0f4240) * arg0) / (var_a + 0x01));
         transient[0] = 0;
         var_a = ((store_b + 0x0f4240) * arg0) / (var_a + 0x01);
         return ((store_b + 0x0f4240) * arg0) / (var_a + 0x01);

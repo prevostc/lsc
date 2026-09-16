@@ -1,0 +1,1 @@
+{"functions":{"deposit":"0xd0e30db0","withdraw":"0x2e1a7d4d","transfer":"0xa9059cbb","transferFrom":"0x23b872dd","approve":"0x095ea7b3","totalSupply":"0x18160ddd","balanceOf":"0x70a08231","allowance":"0xdd62ed3e"},"errors":{"InsufficientBalance":"0xf4d678b8","InsufficientAllowance":"0x13be252b","TransferFailed":"0x90b8ec18"}}

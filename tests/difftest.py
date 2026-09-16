@@ -391,6 +391,15 @@ def run_call_case(node: Anvil, addr: str, case: dict[str, Any], row: Row) -> Non
     value = int(case.get("value") or 0)
     node.impersonate(sender)
     apply_pre(node, addr, case.get("pre_storage") or [])
+    self_bal = int(case.get("self_balance") or 0)
+    if self_bal:
+        r = node.rpc("anvil_setBalance", addr, hex(self_bal))
+        if r.returncode != 0:
+            raise HarnessError(
+                f"anvil_setBalance({addr}) failed: {r.stderr or r.stdout}"
+            )
+    for sc in case.get("set_code") or []:
+        node.set_code(sc["addr"], sc["code"])
 
     call_cmd = [
         "call",
@@ -661,7 +670,7 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             created: str | None = None
             create_tag = ""
-            if name == "Counter":
+            if name in ("Counter", "WNative"):
                 create_tag = "deploy_create/"
                 try:
                     created = run_deploy_create(node, contract, rows)

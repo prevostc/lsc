@@ -15,29 +15,14 @@ pragma solidity >=0.8.0;
 ///                       https://heimdall.rs
 
 contract DecompiledContract {
-    mapping(bytes32 => bytes32) storage_map_a;
-    mapping(bytes32 => bytes32) storage_map_d;
-    bytes32 store_c;
     uint256 public totalSupply;
+    mapping(bytes32 => bytes32) storage_map_a;
     
+    event Withdrawal(address, uint256);
     event Approval(address, address, uint256);
-    error NotOwner();
+    event Deposit(address, uint256);
+    error InsufficientBalance();
     event Transfer(address, address, uint256);
-    
-    /// @custom:selector    0x42966c68
-    /// @custom:signature   burn(uint256 arg0) public
-    /// @param              arg0 ["uint256", "bytes32", "int256"]
-    function burn(uint256 arg0) public {
-        require(!msg.data.length < 0x24);
-        address var_a = msg.sender;
-        require(0 == (!storage_map_a[var_a] < arg0), CustomError_f4d678b8());
-        require(!storage_map_a[var_a] < arg0);
-        var_a = msg.sender;
-        storage_map_a[var_a] = storage_map_a[var_a] - arg0;
-        require(!totalSupply < arg0);
-        totalSupply = totalSupply - arg0;
-        emit Transfer(msg.sender, 0, arg0);
-    }
     
     /// @custom:selector    0xa9059cbb
     /// @custom:signature   workMyDirefulOwner(uint256 arg0, uint256 arg1) public returns (uint256)
@@ -58,20 +43,22 @@ contract DecompiledContract {
         return 0x01;
     }
     
-    /// @custom:selector    0x40c10f19
-    /// @custom:signature   Unresolved_40c10f19(uint256 arg0, uint256 arg1) public
+    /// @custom:selector    0x2e1a7d4d
+    /// @custom:signature   withdraw(uint256 arg0) public
     /// @param              arg0 ["uint256", "bytes32", "int256"]
-    /// @param              arg1 ["uint256", "bytes32", "int256"]
-    function Unresolved_40c10f19(uint256 arg0, uint256 arg1) public {
-        require(!msg.data.length < 0x44);
-        require(msg.sender == store_c, CustomError_30cd7471());
-        require(!(totalSupply + arg1) < totalSupply);
-        totalSupply = totalSupply + arg1;
-        uint256 var_c = arg0;
-        require(!(storage_map_d[var_c] + arg1) < storage_map_d[var_c]);
-        var_c = arg0;
-        storage_map_d[var_c] = storage_map_d[var_c] + arg1;
-        emit Transfer(0, arg0, arg1);
+    function withdraw(uint256 arg0) public {
+        require(!msg.data.length < 0x24);
+        transient[0] = 0x01;
+        address var_a = msg.sender;
+        require(!(storage_map_a[var_a] < arg0), CustomError_90b8ec18());
+        var_a = msg.sender;
+        storage_map_a[var_a] = storage_map_a[var_a] - arg0;
+        require(!(totalSupply < arg0), CustomError_90b8ec18());
+        totalSupply = totalSupply - arg0;
+        (bool success, bytes memory ret0) = address(msg.sender).transfer(arg0);
+        require(success == 0x01, CustomError_90b8ec18());
+        emit Withdrawal(msg.sender, arg0);
+        transient[0] = 0;
     }
     
     /// @custom:selector    0xdd62ed3e
@@ -132,5 +119,19 @@ contract DecompiledContract {
         require(!msg.data.length < 0x24);
         uint256 var_a = arg0;
         return storage_map_a[var_a];
+    }
+    
+    /// @custom:selector    0xd0e30db0
+    /// @custom:signature   deposit() public payable
+    function deposit() public payable {
+        address var_a = msg.sender;
+        if (!(storage_map_a[var_a] + msg.value) < storage_map_a[var_a]) {
+            var_a = msg.sender;
+            storage_map_a[var_a] = storage_map_a[var_a] + msg.value;
+            if (!(totalSupply + msg.value) < totalSupply) {
+                totalSupply = totalSupply + msg.value;
+                emit Deposit(msg.sender, msg.value);
+            }
+        }
     }
 }
