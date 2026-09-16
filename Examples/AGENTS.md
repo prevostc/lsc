@@ -51,7 +51,9 @@ Exactly:
 - `compiled/` — generated artefacts (unchanged policy).
 
 `Checks.lean` imports `Examples.<Name>.Theorems` only. Agents update
-`Checks.lean` when a pinned theorem is added or renamed. This is the
+`Checks.lean` when a pinned theorem is added or renamed; a pinned theorem's
+statement change must edit the pin deliberately, and the commit message must
+say why. This is the
 example-level instance of the Theorems/Proof split in `Lsc/AGENTS.md`; the
 docstring checker treats `Theorems.lean` as a Theorems file (glob
 `*Theorems.lean` matches).

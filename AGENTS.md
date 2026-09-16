@@ -146,5 +146,6 @@ Tx.run (transfer to amount) ctx w = .ok ((), w') →
 
 Guarantee-module file split: `Lsc/AGENTS.md`. Example layout: `Examples/AGENTS.md`.
 `Checks.lean` imports `*Theorems` only. It pins the axiom footprint of the
-headline theorems; agents update it when a pinned theorem is added or
-renamed, and explain the change in the commit message.
+headline theorems and, beside each, the exact statement; a pinned theorem's
+statement change must edit the pin deliberately, and the commit message must
+say why.
