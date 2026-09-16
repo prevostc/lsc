@@ -57,6 +57,11 @@ required for invariant and solvency preservation and for the `_at`
 extraction theorems (Vault, Cpamm), not for Token-style unrestricted
 extraction.
 
+Incoming `callvalue` is credited onto `self`'s native balance in the
+trace `step` only for an accepted payable call (EVM CALL is post-transfer
+at the callee; a value-reject reverts the transfer). `Tx.run` itself is
+unchanged. Non-payable + nonzero value is a revert step.
+
 Token, Vault, and Cpamm instantiate this at the spec. The compiler lifts
 a trace fact onto bytecode with `transport_claim_ext` /
 `transport_exists_claim_ext`; examples do not ship `*_bytecode_*` theorems.

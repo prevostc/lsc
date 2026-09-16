@@ -53,25 +53,31 @@ inductive Step (C : Spec S X E ε)
   | call (c : Call C)
   | env (ext' : X)
 
-/-- Post-world of a call: credit incoming value, run the body, roll back on revert. -/
+/-- Post-world of a call. Incoming value is credited only when the target
+is payable (`C.payable`); a revert of that body rolls the credit back.
+A nonzero-value call to a non-payable function is a revert step (world
+unchanged), matching compiler `valueOk` / `dispatchedFn`. Non-payable
+success has `v = 0`, so `creditValue w 0 = w`. -/
 def stepCall [HasCreditValue X] (c : Call C) (w : World S X E) : World S X E :=
-  match C.exec c.fn c.args c.toCtx (World.creditValue w c.value) with
-  | .ok (_, w') => w'
-  | .error _ => w
+  if C.valueOk c.fn c.value then
+    match C.exec c.fn c.args c.toCtx (World.creditValue w c.value) with
+    | .ok (_, w') => w'
+    | .error _ => w
+  else
+    w
 
 /-- One step, reverting to the pre-world on a failed call.
 
 Incoming `c.value` is credited onto `self`'s native balance *before*
-`Tx.run` (EVM CALL is post-transfer at the callee). A revert rolls the
-credit back with the body (`Tx.run` is unchanged). Non-payable selectors
-are `valueOk`-forced to `v = 0` in the compiler, so the credit is a
-no-op there. -/
+`Tx.run` only for an accepted payable call (EVM CALL is post-transfer
+at the callee, and a value-reject reverts the transfer). `Tx.run` is
+unchanged. -/
 def step [HasCreditValue X] : Step C → World S X E → World S X E
   | .call c, w => stepCall c w
   | .env x', w => { w with ext := x' }
 
 /-- Left fold: first step first. -/
-def run (tr : List (Step C)) (w : World S X E) : World S X E :=
+def run [HasCreditValue X] (tr : List (Step C)) (w : World S X E) : World S X E :=
   tr.foldl (fun acc s => step s acc) w
 
 /-- Every call is aimed at `self` and is not a self-call. `env` steps are unrestricted. -/

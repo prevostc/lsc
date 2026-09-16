@@ -2705,7 +2705,25 @@ def mkSpecCommands (ns : Name) (fns : Array Name) : TermElabM (Array (TSyntax `c
   let specName := mkIdent (ns ++ `spec)
   let specCmd ←
     `(command| @[reducible] def $specName : Lsc.Spec $S $X $E $ε := ⟨$fnName, $entryName⟩)
+  let payInfo ← entries.mapM fun fn => do
+    let ctor := ctorIdent fn
+    let info ← getConstInfoDefn fn
+    let pay ← forallTelescope info.type fun xs _ => do
+      let binders ← splitFnBinders xs
+      pure binders.payable
+    let alt ←
+      `(Lean.Parser.Term.matchAltExpr| | .$ctor:ident => $(quote pay))
+    pure (pay, alt)
+  let anyPay := payInfo.any (·.1)
+  let payAlts : TSyntaxArray ``Lean.Parser.Term.matchAlt := payInfo.map (·.2)
   let mut cmds : Array (TSyntax `command) := #[fnCmd, entryCmd, specCmd]
+  if anyPay then
+    let instCmd ←
+      `(command| instance : Lsc.HasPayable $specName where
+          payable := fun fn =>
+            match fn with
+            $payAlts:matchAlt*)
+    cmds := cmds.push instCmd
   for fn in entries do
     cmds := cmds.push (← mkSpecExecCommand ns fn)
   return cmds
@@ -3508,7 +3526,8 @@ syntax (name := lscCodec) "lsc_codec " ident : command
         core_exec := fun fn args ctx w => by
           change $waL ($denoteId $schemaId ($fnDefId fn).core ($encodeId fn args).reverse) ctx w =
             $waL ($execId $specId fn args) ctx w
-          exact $coreEq fn args ctx w)
+          exact $coreEq fn args ctx w
+        payable_eq := fun fn => by cases fn <;> rfl)
     elabCommand cmd
   | _ => throwUnsupportedSyntax
 

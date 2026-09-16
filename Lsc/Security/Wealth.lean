@@ -31,7 +31,8 @@ def ClaimMonoEnv (claim : Claim S X E) (rely : X → X → Prop) : Prop :=
 /-- A decrease of `claim a` on a call from a world satisfying `Inv` is only possible
 when `Auth a` holds in the pre-state. Relative to `Inv`: a pro-rata `claim` is only
 monotone under the protocol invariant. -/
-def NoUnauthorizedDecrease (C : Spec S X E ε) (Inv : World S X E → Prop)
+def NoUnauthorizedDecrease [HasCreditValue X] (C : Spec S X E ε)
+    (Inv : World S X E → Prop)
     (claim : Claim S X E) (Auth : AuthPred C) : Prop :=
   ∀ (c : Call C) (w : World S X E) (a : Address),
     Inv w → claim a (step (.call c) w) < claim a w → Auth a c w
@@ -48,7 +49,8 @@ def NoUnauthorizedDecreaseFn (C : Spec S X E ε) (Inv : World S X E → Prop)
 `Auth` is state-dependent (allowance), so the hyp must follow the prefix state.
 Environment steps are skipped (`Auth` is only judged at calls).
 -/
-def NoAuthAlong (Auth : AuthPred C) (a : Address) : List (Step C) → World S X E → Prop
+def NoAuthAlong [HasCreditValue X] (Auth : AuthPred C) (a : Address) :
+    List (Step C) → World S X E → Prop
   | [], _ => True
   | .call c :: tr, w => ¬ Auth a c w ∧ NoAuthAlong Auth a tr (step (.call c) w)
   | .env x' :: tr, w => NoAuthAlong Auth a tr { w with ext := x' }
@@ -62,7 +64,8 @@ abbrev Inflow (C : Spec S X E ε) := Call C → World S X E → Nat
 
 /-- ∃ a touched set `T` closed for `claim`, and `T` conserves up to `inflow`.
 Stated from worlds satisfying `Inv` (a pro-rata `claim` is only conservative under `Inv`). -/
-def Conservation (C : Spec S X E ε) (Inv : World S X E → Prop) (claim : Claim S X E)
+def Conservation [HasCreditValue X] (C : Spec S X E ε) (Inv : World S X E → Prop)
+    (claim : Claim S X E)
     (inflow : Inflow C) : Prop :=
   ∀ (c : Call C) (w : World S X E),
     Inv w →

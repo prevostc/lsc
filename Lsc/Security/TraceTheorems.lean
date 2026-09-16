@@ -44,40 +44,60 @@ theorem worldAfter_eq_self {x : Tx S X E ε α} {ctx : Ctx} {w : World S X E}
   Proof.worldAfter_eq_self hok
 
 /-- The empty trace does not change the world. -/
-@[simp] theorem run_nil (w : World S X E) : run ([] : List (Step C)) w = w :=
+@[simp] theorem run_nil [HasCreditValue X] (w : World S X E) :
+    run ([] : List (Step C)) w = w :=
   Proof.run_nil w
 
 /-- `run` of a cons is `run` of the tail after one `step`. -/
-@[simp] theorem run_cons (s : Step C) (tr : List (Step C)) (w : World S X E) :
+@[simp] theorem run_cons [HasCreditValue X] (s : Step C) (tr : List (Step C))
+    (w : World S X E) :
     run (s :: tr) w = run tr (step s w) :=
   Proof.run_cons s tr w
 
 /-- `run` of an append is sequential composition. -/
-theorem run_append (tr₁ tr₂ : List (Step C)) (w : World S X E) :
+theorem run_append [HasCreditValue X] (tr₁ tr₂ : List (Step C)) (w : World S X E) :
     run (tr₁ ++ tr₂) w = run tr₂ (run tr₁ w) :=
   Proof.run_append tr₁ tr₂ w
 
 /-- A reverting call step leaves the world unchanged. The run is on the
-post-transfer (value-credited) world. -/
+post-transfer (value-credited) world when the call is `valueOk`. -/
 theorem step_of_revert [HasCreditValue X] {c : Call C} {w : World S X E} {e : Err ε}
+    (hvo : C.valueOk c.fn c.value = true)
     (h : C.exec c.fn c.args c.toCtx (World.creditValue w c.value) = .error e) :
     step (.call c) w = w :=
-  Proof.step_of_revert h
+  Proof.step_of_revert hvo h
 
-/-- A call step is `Tx.run` of the entrypoint on the post-transfer world. -/
+/-- Nonzero value to a non-payable function is a revert step. -/
+theorem step_reject_value [HasCreditValue X] {c : Call C} {w : World S X E}
+    (hp : C.payable c.fn = false) (hv : c.value ≠ 0) :
+    step (.call c) w = w :=
+  Proof.step_reject_value hp hv
+
+/-- A call step is `Tx.run` of the entrypoint on the post-transfer world
+when `valueOk`; otherwise it is the identity. -/
 theorem step_eq_run [HasCreditValue X] (c : Call C) (w : World S X E) :
     step (.call c) w =
-      match C.exec c.fn c.args c.toCtx (World.creditValue w c.value) with
-      | .ok (_, w') => w'
-      | .error _ => w :=
+      if C.valueOk c.fn c.value then
+        match C.exec c.fn c.args c.toCtx (World.creditValue w c.value) with
+        | .ok (_, w') => w'
+        | .error _ => w
+      else w :=
   Proof.step_eq_run c w
 
-/-- When `creditValue` is the identity, a call step is `worldAfter`. -/
+/-- When `valueOk` and `creditValue` is the identity, a call step is `worldAfter`. -/
 theorem step_eq_worldAfter_of_credit_id [HasCreditValue X]
     (c : Call C) (w : World S X E)
+    (hvo : C.valueOk c.fn c.value = true)
     (h : World.creditValue w c.value = w) :
     step (.call c) w = worldAfter (C.exec c.fn c.args) c.toCtx w :=
-  Proof.step_eq_worldAfter_of_credit_id c w h
+  Proof.step_eq_worldAfter_of_credit_id c w hvo h
+
+/-- Non-payable success is `v = 0`, so the call step is `worldAfter`. -/
+theorem step_eq_worldAfter_of_not_payable [HasCreditValue X]
+    (c : Call C) (w : World S X E)
+    (hp : C.payable c.fn = false) (hv : c.value = 0) :
+    step (.call c) w = worldAfter (C.exec c.fn c.args) c.toCtx w :=
+  Proof.step_eq_worldAfter_of_not_payable c w hp hv
 
 /-- The empty trace is well-formed at any `self`. -/
 theorem Wf.nil (self : Address) : Wf (C := C) self [] :=

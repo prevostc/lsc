@@ -52,10 +52,15 @@ unchanged; `env` constrained by `RelyAlong`):
 Design decisions fixed for `Lsc/Security` (Trace / Invariant / Wealth):
 
 - A contract is a `Spec` = finite `Fn` inductive + `entry : Fn → Entry` (own `Args`/`Ret` types,
-  `run : Args → Tx`). A trace mixes `call` and `env` steps; `step` of a call is `Tx.run`, revert
-  = identity; `env` is constrained by `RelyAlong`; `run` is a left fold. Well-formed traces
-  satisfy `Call.sender ≠ target` (the language has no self-call).
+  `run : Args → Tx`). The `[Payable]` table is `HasPayable` (default: none), not a `Spec`
+  field. A trace mixes `call` and `env` steps; `step` of a payable call credits `c.value` then
+  `Tx.run` (revert rolls the credit back); nonzero value to a non-payable function is a revert
+  step (world unchanged), matching compiler `valueOk` / `dispatchedFn`. `env` is constrained by
+  `RelyAlong`; `run` is a left fold. Well-formed traces satisfy `Call.sender ≠ target` (the
+  language has no self-call).
 - `Inv : World S X E → Prop`. One extra obligation per contract: `Inv` is preserved by `Rely`.
+  `of_fns` for contracts with no payable function uses `creditValue w 0 = w` and needs no
+  `hcredit`.
 - `Auth` is evaluated in the **pre-state** of each call (allowances are state-dependent). The
   hypothesis of `no_unauthorized_extraction` is the recursive `NoAuthAlong Auth a tr w`
   ("`a` authorised no call, judged at the state where it ran"), plus `Inv w₀` and preservation

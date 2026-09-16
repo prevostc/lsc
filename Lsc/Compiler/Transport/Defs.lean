@@ -36,6 +36,8 @@ structure TransportCodec {S X E ε : Type}
     ∀ fn args ctx w,
       worldAfter (Core.denote Γ (fnDef fn).core (encode fn args).reverse) ctx w =
       worldAfter (C.exec fn args) ctx w
+  /-- Language `Spec.payable` agrees with the compiled `FnDef` flag. -/
+  payable_eq : ∀ fn, C.payable fn = (fnDef fn).payable
 
 /-- Contract-parametric compile + codec hypotheses. Call-free vs S2 is extra. -/
 structure TransportSetup (S X E ε : Type) where
@@ -202,8 +204,9 @@ theorem wf_decodeTrace (T : TransportSetup S X E ε) (self : Address)
       simp [decodeTrace, decodeCall, hsel, hfn, Call.ofCtx]
       exact ⟨ht, hs, ih hrest⟩
 
-/-- S1 only: post-`.self` ignores `log` (Token `exec` does not read `log`). -/
-theorem post_congr_run {C : Spec S X E ε}
+/-- S1 only: post-`.self` ignores `log` (Token `exec` does not read `log`).
+Call-free contracts have no payable function, so `creditValue w 0 = w`. -/
+theorem post_congr_run [HasCreditValue X] {C : Spec S X E ε}
     (hpc : ∀ (fn : C.Fn) (args : C.Args fn) (ctx : Ctx) (w w' : World S X E),
       w.self = w'.self → w.ext = w'.ext →
         (worldAfter (C.exec fn args) ctx w).self =
@@ -211,7 +214,8 @@ theorem post_congr_run {C : Spec S X E ε}
         (worldAfter (C.exec fn args) ctx w).ext =
           (worldAfter (C.exec fn args) ctx w').ext)
     (tr : List (Step C)) (w w' : World S X E)
-    (hs : w.self = w'.self) (he : w.ext = w'.ext) :
+    (hs : w.self = w'.self) (he : w.ext = w'.ext)
+    (hnp : ∀ fn, C.payable fn = false := by intro fn; cases fn <;> rfl) :
     (run tr w).self = (run tr w').self := by
   induction tr generalizing w w' with
   | nil => simpa [run] using hs
@@ -221,17 +225,34 @@ theorem post_congr_run {C : Spec S X E ε}
       simpa [run, step] using
         ih (w := { w with ext := x }) (w' := { w' with ext := x }) hs rfl
     | .call c =>
-      obtain ⟨hs1, he1⟩ := hpc c.fn c.args c.toCtx w w' hs he
-      simpa [run, step] using ih (step (.call c) w) (step (.call c) w') hs1 he1
+      have hp : C.payable c.fn = false := hnp c.fn
+      rw [run_cons, run_cons]
+      by_cases hv : c.value = 0
+      · rw [step_eq_worldAfter_of_not_payable c w hp hv,
+          step_eq_worldAfter_of_not_payable c w' hp hv]
+        obtain ⟨hs1, he1⟩ := hpc c.fn c.args c.toCtx w w' hs he
+        exact ih _ _ hs1 he1
+      · rw [step_reject_value (c := c) (w := w) hp hv,
+          step_reject_value (c := c) (w := w') hp hv]
+        exact ih w w' hs he
 
 theorem step_ofCtx [HasCreditValue X] (T : TransportSetup S X E ε) (ctx : Ctx)
     (fn : T.spec.Fn)
-    (args : T.spec.Args fn) (w : World S X E) :
+    (args : T.spec.Args fn) (w : World S X E)
+    (hvo : T.spec.valueOk fn ctx.value = true) :
     step (.call (Call.ofCtx ctx fn args)) w =
       match T.spec.exec fn args ctx (World.creditValue w ctx.value) with
       | .ok (_, w') => w'
-      | .error _ => w :=
-  rfl
+      | .error _ => w := by
+  simp only [step, stepCall]
+  rw [Call.toCtx_ofCtx]
+  dsimp only [Call.ofCtx]
+  refine (if_pos hvo).trans ?_
+  cases hrun : T.spec.exec fn args ctx (World.creditValue w ctx.value) <;> rfl
+
+theorem valueOk_spec_fnDef (T : TransportSetup S X E ε) (fn : T.spec.Fn)
+    (v : Nat) : T.spec.valueOk fn v = valueOk (T.codec.fnDef fn) v := by
+  simp [Spec.valueOk, valueOk, T.codec.payable_eq]
 
 theorem encodeCall_decode (T : TransportSetup S X E ε) (c : Call T.spec)
     (hW : ∀ n ∈ T.codec.encode c.fn c.args, n < wordBound)

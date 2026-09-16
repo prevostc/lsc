@@ -433,6 +433,14 @@ theorem valueOk_false {f : FnDef} {v : Nat} (hp : f.payable = false)
     (hv : v ≠ 0) : valueOk f v = false := by
   simp [valueOk, hp, hv]
 
+theorem dispatchedFn_valueOk {c : ContractDef} {cd : List UInt8} {v : Nat}
+    {f : FnDef} (h : dispatchedFn c cd v = some f) : valueOk f v = true := by
+  cases hsel : selectedFn c cd with
+  | none => simp [dispatchedFn, hsel] at h
+  | some f' =>
+    simp [dispatchedFn, hsel] at h
+    exact h.2 ▸ h.1
+
 theorem dispatchedFn_mem {c : ContractDef} {cd : List UInt8} {v : Nat} {f : FnDef}
     (h : dispatchedFn c cd v = some f) : f ∈ c.functions := by
   cases hsel : selectedFn c cd with

@@ -19,6 +19,7 @@ namespace Proof
 
 theorem transport_step (T : TransportSetup S X E ε)
     (hcf : ∀ f ∈ T.c.functions, CallFree f.core)
+    (hnp : ∀ fn, T.spec.payable fn = false := by intro fn; cases fn <;> rfl)
     (ctx : Ctx) (cd : List UInt8) (w : World S X E) (σ : U256 → U256)
     (hctxWF : CtxWF ctx) (hcd : cd.length < wordBound)
     (hs : storageRel T.c T.Γ evmKeccak w.self σ)
@@ -56,7 +57,16 @@ theorem transport_step (T : TransportSetup S X E ε)
       simp [decodeCall, hsel, hfn]
     simp only [hsel] at hpost
     simp only [hdec]
-    rw [step_ofCtx]
+    have hvoF := dispatchedFn_valueOk hsel
+    have hvo : T.spec.valueOk fn ctx.value = true := by
+      simpa [valueOk_spec_fnDef, heq] using hvoF
+    have hp : T.spec.payable fn = false := hnp fn
+    have hv0 : ctx.value = 0 := T.spec.value_eq_zero_of_valueOk hp hvo
+    rw [step_eq_worldAfter_of_not_payable
+      (Call.ofCtx ctx fn (T.codec.decode fn (decodeArgs f cd))) w hp
+      (by simp [Call.ofCtx, hv0])]
+    simp only [Call.toCtx_ofCtx]
+    simp only [Call.ofCtx]
     have hwa := core_exec_cd T heq ctx w cd
     rw [← hwa]
     cases htx : Tx.run (Core.denote T.Γ f.core (decodeArgs f cd).reverse) ctx w with
@@ -74,6 +84,7 @@ theorem transport_step (T : TransportSetup S X E ε)
 
 theorem transport_step_ext (T : TransportSetup S ExtState E ε)
     (Xpkg : TransportBindings S E ε T)
+    (hnp : ∀ fn, T.spec.payable fn = false := by intro fn; cases fn <;> rfl)
     (ctx : Ctx) (cd : List UInt8) (w : World S ExtState E)
     (σ : U256 → U256) (ξ : Foreign)
     (hctxWF : CtxWF ctx) (hcd : cd.length < wordBound)
@@ -117,7 +128,16 @@ theorem transport_step_ext (T : TransportSetup S ExtState E ε)
       simp [decodeCall, hsel, hfn]
     simp only [hsel] at hpost
     simp only [hdec]
-    rw [step_ofCtx]
+    have hvoF := dispatchedFn_valueOk hsel
+    have hvo : T.spec.valueOk fn ctx.value = true := by
+      simpa [valueOk_spec_fnDef, heq] using hvoF
+    have hp : T.spec.payable fn = false := hnp fn
+    have hv0 : ctx.value = 0 := T.spec.value_eq_zero_of_valueOk hp hvo
+    rw [step_eq_worldAfter_of_not_payable
+      (Call.ofCtx ctx fn (T.codec.decode fn (decodeArgs f cd))) w hp
+      (by simp [Call.ofCtx, hv0])]
+    simp only [Call.toCtx_ofCtx]
+    simp only [Call.ofCtx]
     have hwa := core_exec_cd T heq ctx w cd
     rw [← hwa]
     cases htx : Tx.run (Core.denote T.Γ f.core (decodeArgs f cd).reverse)

@@ -758,7 +758,7 @@ theorem protocolFees_preserves_inv :
 
 theorem cpamm_preserves_inv :
     PreservesInvAt spec (InvT self t0 t1 oracle) self :=
-  PreservesInvAt.of_fns fun fn =>
+  PreservesInvAt.of_fns (C := spec) fun fn =>
     match fn with
     | .addLiquidity => addLiquidity_preserves_inv self t0 t1 oracle
     | .removeLiquidity => removeLiquidity_preserves_inv self t0 t1 oracle
@@ -886,7 +886,7 @@ theorem protocolFees_auth :
 
 theorem cpamm_no_unauth :
     NoUnauthorizedDecrease spec (InvT self t0 t1 oracle) claim Auth :=
-  NoUnauthorizedDecrease.of_fns fun fn =>
+  NoUnauthorizedDecrease.of_fns (C := spec) fun fn =>
     match fn with
     | .addLiquidity => addLiquidity_auth self t0 t1 oracle
     | .removeLiquidity => removeLiquidity_auth self t0 t1 oracle

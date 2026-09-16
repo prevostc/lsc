@@ -37,6 +37,11 @@ compiler accepted the contract. Worlds, contexts, ABI arguments, and
 addresses used as keys fit in a 256-bit word; keccak keys do not collide
 with scalar slots.
 
+The trace call step credits incoming value onto `self`'s native balance
+only for an accepted payable call; a nonzero-value call to a non-payable
+function is a revert step (world unchanged). That matches compiler
+`valueOk` / `dispatchedFn`.
+
 For contracts that call out: theorems that mention the token take
 `IERC20.Spec` as in [External calls](EXTERNAL_CALLS.md); the CALL oracle
 is memory-blind (other contracts cannot see this contract's private

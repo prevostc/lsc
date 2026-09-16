@@ -2,6 +2,14 @@
 
 Short dated records.
 
+## 2026-09-16 — D1': value credited only on accepted payable calls (18b)
+
+Trace `stepCall` credits `c.value` iff `HasPayable.payable fn`; a body
+revert rolls the credit back. Non-payable + `v ≠ 0` is a revert step
+(world unchanged), matching compiler `valueOk` / `dispatchedFn`. Spec
+stays `Fn`+`entry`; the payable table is a default-false `HasPayable`
+class so Vault `lsc_contract` stays 2-field. `of_fns` needs no `hcredit`.
+
 ## 2026-09-15 — Cpamm `SwapDirection`-indexed swap (18a)
 
 One `@[lsc_inline] swap d` with `Field Storage` accessors on `d`. Lean
@@ -361,6 +369,12 @@ Receiving native value without `[Payable]` is a compile error.
 chain has no gas token, so payable functions and native sends are compile
 errors. Multiple fee tokens do not change contract semantics. The example
 wrapper is `WNative`, not a built-in ETH type.
+
+## 2026-09-15 — `IERC20.Exact`; profile is `def chain`
+
+`IERC20.Exact T` extends `IERC20.Spec T` (class; `.toSpec` for Vault/Cpamm).
+A contract file picks `def chain : Chain := .ethereum` and
+`def native := Chain.native chain`. `lsc_contract` is unchanged.
 
 ## 2026-09-15 — `seqIf`: shared continuation for effectful `if`
 

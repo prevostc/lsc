@@ -18,7 +18,7 @@ environment step the token model allows, then the invariant still holds
 after any well-formed attack trace. Reverted calls leave the world
 unchanged, so they cannot break it. Token uses this to carry "balances
 sum to supply" from a single transaction to a whole attack. -/
-theorem inv_run {C : Spec S X E ε} {Inv : World S X E → Prop} {rely : X → X → Prop}
+theorem inv_run [HasCreditValue X] {C : Spec S X E ε} {Inv : World S X E → Prop} {rely : X → X → Prop}
     (hC : PreservesInv C Inv) (hE : PreservesInvEnv C Inv rely)
     {w : World S X E} (hw : Inv w) {self : Address} (tr : List (Step C))
     (hW : Wf self tr) (hR : RelyAlong rely tr w) :
@@ -29,7 +29,7 @@ theorem inv_run {C : Spec S X E ε} {Inv : World S X E → Prop} {rely : X → X
 survive calls that target this contract with a distinct sender. Vault and
 AMM need this because their invariant mentions this contract's token
 balance, which cannot be claimed for a call to some other address. -/
-theorem inv_run_at {C : Spec S X E ε} {Inv : World S X E → Prop} {rely : X → X → Prop}
+theorem inv_run_at [HasCreditValue X] {C : Spec S X E ε} {Inv : World S X E → Prop} {rely : X → X → Prop}
     {self : Address}
     (hC : PreservesInvAt C Inv self) (hE : PreservesInvEnv C Inv rely)
     {w : World S X E} (hw : Inv w) (tr : List (Step C))
@@ -37,12 +37,14 @@ theorem inv_run_at {C : Spec S X E ε} {Inv : World S X E → Prop} {rely : X �
     Inv (run tr w) :=
   Proof.inv_run_at hC hE hw tr hW hR
 
-/-- `PreservesInv` follows from the per-entrypoint form and invariance of
-`Inv` under the incoming-value credit. -/
-theorem PreservesInv.of_fns {C : Spec S X E ε} {Inv : World S X E → Prop}
-    (hcredit : ∀ (w : World S X E) (v : Nat), Inv w → Inv (World.creditValue w v))
-    (h : ∀ fn, PreservesInvFn C Inv fn) : PreservesInv C Inv :=
-  Proof.PreservesInv.of_fns hcredit h
+/-- `PreservesInv` follows from the per-entrypoint form. Non-payable
+contracts need no credit obligation: nonzero value is a revert step,
+and `creditValue w 0 = w`. -/
+theorem PreservesInv.of_fns [HasCreditValue X] {C : Spec S X E ε} {Inv : World S X E → Prop}
+    (h : ∀ fn, PreservesInvFn C Inv fn)
+    (hnp : ∀ fn, C.payable fn = false := by intro fn; cases fn <;> rfl) :
+    PreservesInv C Inv :=
+  Proof.PreservesInv.of_fns h hnp
 
 /-- Reduce `PreservesInvFn` to the success path: a revert leaves the world unchanged. -/
 theorem PreservesInvFn_of_ok {C : Spec S X E ε} {Inv : World S X E → Prop} {fn : C.Fn}
@@ -52,13 +54,14 @@ theorem PreservesInvFn_of_ok {C : Spec S X E ε} {Inv : World S X E → Prop} {f
     PreservesInvFn C Inv fn :=
   Proof.PreservesInvFn_of_ok hok
 
-/-- `PreservesInvAt` follows from the per-entrypoint form at `self` and
-invariance of `Inv` under the incoming-value credit. -/
-theorem PreservesInvAt.of_fns {C : Spec S X E ε} {Inv : World S X E → Prop}
+/-- `PreservesInvAt` follows from the per-entrypoint form at `self`.
+Non-payable contracts need no credit obligation. -/
+theorem PreservesInvAt.of_fns [HasCreditValue X] {C : Spec S X E ε} {Inv : World S X E → Prop}
     {self : Address}
-    (hcredit : ∀ (w : World S X E) (v : Nat), Inv w → Inv (World.creditValue w v))
-    (h : ∀ fn, PreservesInvFnAt C Inv self fn) : PreservesInvAt C Inv self :=
-  Proof.PreservesInvAt.of_fns hcredit h
+    (h : ∀ fn, PreservesInvFnAt C Inv self fn)
+    (hnp : ∀ fn, C.payable fn = false := by intro fn; cases fn <;> rfl) :
+    PreservesInvAt C Inv self :=
+  Proof.PreservesInvAt.of_fns h hnp
 
 /-- Reduce `PreservesInvFnAt` to the success path: a revert leaves the world unchanged. -/
 theorem PreservesInvFnAt_of_ok {C : Spec S X E ε} {Inv : World S X E → Prop}

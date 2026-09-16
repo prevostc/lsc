@@ -588,7 +588,7 @@ theorem previewRedeem_preserves_inv :
 
 theorem vault_preserves_inv :
     PreservesInvAt spec (InvT self asset oracle) self :=
-  PreservesInvAt.of_fns fun fn =>
+  PreservesInvAt.of_fns (C := spec) fun fn =>
     match fn with
     | .deposit => deposit_preserves_inv self asset oracle
     | .withdraw => withdraw_preserves_inv self asset oracle

@@ -43,6 +43,7 @@ theorem post_congr_callFree {S X E ε} (T : TransportSetup S X E ε)
 dropped). Requires `w.log = []`. -/
 theorem transport_trace (T : TransportSetup S X E ε)
     (hcf : ∀ f ∈ T.c.functions, CallFree f.core)
+    (hnp : ∀ fn, T.spec.payable fn = false := by intro fn; cases fn <;> rfl)
     (hpc : ∀ (fn : T.spec.Fn) (args : T.spec.Args fn) (ctx : Ctx) (w w' : World S X E),
       w.self = w'.self → w.ext = w'.ext →
         (worldAfter (T.spec.exec fn args) ctx w).self =
@@ -72,7 +73,7 @@ theorem transport_trace (T : TransportSetup S X E ε)
     cases hE with
     | cons hstart h1 htl =>
       obtain ⟨σ₁, hRun, hpost⟩ :=
-        transport_step T hcf call.ctx call.calldata w σ hctxWF hcd hs hlog hwf
+        transport_step T hcf hnp call.ctx call.calldata w σ hctxWF hcd hs hlog hwf
       have heq := evmCallRun_eq_of_start h1 hRun hstart
       rw [heq] at htl
       cases hdec : decodeCall T call.ctx call.calldata with
@@ -88,7 +89,7 @@ theorem transport_trace (T : TransportSetup S X E ε)
           ih (w := w1) (σ := σ₁) (σ' := σ') hpost.1 rfl hpost.2 hWFtl htl
         have hself : (run (.call c :: decodeTrace T rest) w).self =
             (run (decodeTrace T rest) w1).self :=
-          post_congr_run hpc (decodeTrace T rest) (step (.call c) w) w1 rfl rfl
+          post_congr_run hpc (decodeTrace T rest) (step (.call c) w) w1 rfl rfl hnp
         refine ⟨?_, ?_⟩
         · simp only [decodeTrace, hdec]
           rwa [hself]
@@ -98,6 +99,7 @@ theorem transport_trace (T : TransportSetup S X E ε)
 
 theorem transport_exists (T : TransportSetup S X E ε)
     (hcf : ∀ f ∈ T.c.functions, CallFree f.core)
+    (hnp : ∀ fn, T.spec.payable fn = false := by intro fn; cases fn <;> rfl)
     (hpc : ∀ (fn : T.spec.Fn) (args : T.spec.Args fn) (ctx : Ctx) (w w' : World S X E),
       w.self = w'.self → w.ext = w'.ext →
         (worldAfter (T.spec.exec fn args) ctx w).self =
@@ -178,8 +180,17 @@ theorem transport_exists (T : TransportSetup S X E ε)
           .call c :: decodeTrace T (encodeCalls T rest) := by
         simp [encodeCall] at hdecC
         simp [decodeTrace, encodeCall, hdecC]
+      have hp : T.spec.payable c.fn = false := hnp c.fn
+      have hv0 : c.value = 0 :=
+        T.spec.value_eq_zero_of_valueOk hp
+          (by simpa [valueOk_spec_fnDef, Call.toCtx] using hvo)
+      have hstep :
+          step (.call c) { w with log := [] } =
+            worldAfter (T.spec.exec c.fn c.args) c.toCtx { w with log := [] } :=
+        step_eq_worldAfter_of_not_payable c _ hp hv0
       have hself := post_congr_run hpc (decodeTrace T (encodeCalls T rest))
-          (step (.call c) { w with log := [] }) w1 rfl rfl
+          (step (.call c) { w with log := [] }) w1
+          (by simp [hstep, w1]) (by simp [hstep, w1]) hnp
       refine ⟨σ',
         EvmTraceRun.cons (call := encodeCall T c) (tr := encodeCalls T rest)
           (yst0 := mkEvmState (encodeCall T c).calldata σ evmKeccak c.toCtx)
@@ -201,6 +212,7 @@ the corresponding `Inv` obligation (it replaces `hInvF`).
 
 theorem transport_trace_ext (T : TransportSetup S ExtState E ε)
     (Xpkg : TransportBindings S E ε T)
+    (hnp : ∀ fn, T.spec.payable fn = false := by intro fn; cases fn <;> rfl)
     (self : Address) (calls : List EvmCall)
     (w : World S ExtState E) (σ : U256 → U256) (ξ : Foreign)
     (σ' : U256 → U256) (ξ' : Foreign)
@@ -251,7 +263,7 @@ theorem transport_trace_ext (T : TransportSetup S ExtState E ε)
       have hwfF : WorldWF T.c T.Γ wF :=
         WorldWF_of_self (w := w) (by simp [wF]) hwf
       obtain ⟨σ₁, ξ₁, hRun, hpost⟩ :=
-        transport_step_ext T Xpkg call.ctx call.calldata wF σ ξ hctxWF hcd
+        transport_step_ext T Xpkg hnp call.ctx call.calldata wF σ ξ hctxWF hcd
           hsF hlogF hwfF hAgr (by simp [wF])
       have heq := evmCallRunξ_eq_of_start h1 hRun hstart
       rw [heq.1, heq.2] at htl
@@ -283,6 +295,7 @@ from `transport_trace_ext`, when `Auth`/`Inv` ignore log and `claim`
 depends only on storage (`Claim.ofSelf`). -/
 theorem transport_claim_ext (T : TransportSetup S ExtState E ε)
     (Xpkg : TransportBindings S E ε T)
+    (hnp : ∀ fn, T.spec.payable fn = false := by intro fn; cases fn <;> rfl)
     (Inv : World S ExtState E → Prop) (claim : Claim S ExtState E)
     (Auth : AuthPred T.spec)
     (self : Address) (a : Address)
@@ -336,7 +349,7 @@ theorem transport_claim_ext (T : TransportSetup S ExtState E ε)
       have hwfF : WorldWF T.c T.Γ wF :=
         WorldWF_of_self (w := w) (by simp [wF]) hwf
       obtain ⟨σ₁, ξ₁, hRun, hpost⟩ :=
-        transport_step_ext T Xpkg call.ctx call.calldata wF σ ξ hctxWF hcd
+        transport_step_ext T Xpkg hnp call.ctx call.calldata wF σ ξ hctxWF hcd
           hsF hlogF hwfF hAgr (by simp [wF])
       have heq := evmCallRunξ_eq_of_start h1 hRun hstart
       rw [heq.1, heq.2] at htl
@@ -384,6 +397,7 @@ theorem transport_claim_ext (T : TransportSetup S ExtState E ε)
 
 theorem transport_exists_ext (T : TransportSetup S ExtState E ε)
     (Xpkg : TransportBindings S E ε T)
+    (hnp : ∀ fn, T.spec.payable fn = false := by intro fn; cases fn <;> rfl)
     (Inv : World S ExtState E → Prop)
     (self : Address)
     (hP : PreservesInvAt T.spec Inv self)
@@ -435,7 +449,7 @@ theorem transport_exists_ext (T : TransportSetup S ExtState E ε)
       have hAgr := ExtAgree_reframeExt Xpkg.oracle wL
         (encodeCall T c).calldata σ ξ c.toCtx
       obtain ⟨σ₁, ξ₁, h1, hpost⟩ :=
-        transport_step_ext T Xpkg c.toCtx (encodeCall T c).calldata
+        transport_step_ext T Xpkg hnp c.toCtx (encodeCall T c).calldata
           wF σ ξ hctxWF hcd (by simpa [wF] using hs) (by simp [wF, wL])
           (WorldWF_of_self (w := wL) (by simp [wF]) (WorldWF_log [] hwf))
           hAgr (by simp [wF])
@@ -456,6 +470,7 @@ theorem transport_exists_ext (T : TransportSetup S ExtState E ε)
 /-- Forward S2 with claim monotonicity along the reframed fold of `encodeCalls`. -/
 theorem transport_exists_claim_ext (T : TransportSetup S ExtState E ε)
     (Xpkg : TransportBindings S E ε T)
+    (hnp : ∀ fn, T.spec.payable fn = false := by intro fn; cases fn <;> rfl)
     (Inv : World S ExtState E → Prop) (claim : Claim S ExtState E)
     (Auth : AuthPred T.spec)
     (self a : Address)
@@ -515,7 +530,7 @@ theorem transport_exists_claim_ext (T : TransportSetup S ExtState E ε)
       have hAgr := ExtAgree_reframeExt Xpkg.oracle wL
         (encodeCall T c).calldata σ ξ c.toCtx
       obtain ⟨σ₁, ξ₁, h1, hpost⟩ :=
-        transport_step_ext T Xpkg c.toCtx (encodeCall T c).calldata
+        transport_step_ext T Xpkg hnp c.toCtx (encodeCall T c).calldata
           wF σ ξ hctxWF hcd (by simpa [wF] using hs) (by simp [wF, wL])
           (WorldWF_of_self (w := wL) (by simp [wF]) (WorldWF_log [] hwf))
           hAgr (by simp [wF])
