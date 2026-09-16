@@ -903,7 +903,7 @@ namespace Proof
 
 theorem cpamm_no_unauthorized_extraction (self : Address)
     (tr : List (Step spec)) (w : World Storage ExtState Event) (a : Address)
-    (hw : Inv self w) (hW : Wf self tr)
+    (hw : Inv self w) (hW : Wf self tr w)
     (hR : RelyAlong (cpammRely self w.self.token0 w.self.token1 w.oracle) tr w)
     (hT0 : IERC20.Spec (w.self.token0.impl : Token0Impl))
     (hT1 : IERC20.Spec (w.self.token1.impl : Token1Impl))
@@ -920,7 +920,7 @@ theorem cpamm_no_unauthorized_extraction (self : Address)
 
 theorem cpamm_solvent (self : Address) (tr : List (Step spec))
     (w : World Storage ExtState Event)
-    (hW : Wf self tr)
+    (hW : Wf self tr w)
     (hR : RelyAlong (cpammRely self w.self.token0 w.self.token1 w.oracle) tr w)
     (hT0 : IERC20.Spec (w.self.token0.impl : Token0Impl))
     (hT1 : IERC20.Spec (w.self.token1.impl : Token1Impl))

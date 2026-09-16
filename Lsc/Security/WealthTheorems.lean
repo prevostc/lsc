@@ -50,13 +50,14 @@ contract) is required here, not on `no_unauthorized_extraction`.
 Authorisation is still judged in the pre-state of each call, so allowances
 can change along the trace. -/
 theorem no_unauthorized_extraction_at [HasCreditValue X] [HasPayable C]
+    [HasSelfBalance X]
     {Inv : World S X E → Prop} {claim : Claim S X E}
     {Auth : AuthPred C} {rely : X → X → Prop} {self : Address}
     (hN : NoUnauthorizedDecrease C Inv claim Auth)
     (hP : PreservesInvAt C Inv self) (hE : PreservesInvEnv C Inv rely)
     (hM : ClaimMonoEnv claim rely)
     (tr : List (Step C)) (w : World S X E) (a : Address)
-    (hw : Inv w) (hW : Wf self tr) (hR : RelyAlong rely tr w)
+    (hw : Inv w) (hW : Wf self tr w) (hR : RelyAlong rely tr w)
     (hA : NoAuthAlong Auth a tr w) :
     claim a w ≤ claim a (run tr w) :=
   Proof.no_unauthorized_extraction_at hN hP hE hM tr w a hw hW hR hA
@@ -67,13 +68,13 @@ Per-step conservation of claims is not required: Vault's floor-rounded
 pro-rata shares can leak dust each step, and solvency is the statement
 that matters there. The invariant must hold at the start and survive
 every entrypoint and every environment step the token model allows. -/
-theorem solvent_run [HasCreditValue X] [HasPayable C]
+theorem solvent_run [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
     {Inv : World S X E → Prop} {claim : Claim S X E}
     {holdings : Holdings S X E} {rely : X → X → Prop}
     (hP : PreservesInv C Inv) (hE : PreservesInvEnv C Inv rely)
     (hS : ∀ self w, Inv w → Solvent claim holdings self w)
     {self : Address} {w : World S X E} (hw : Inv w) (tr : List (Step C))
-    (hW : Wf self tr) (hR : RelyAlong rely tr w) :
+    (hW : Wf self tr w) (hR : RelyAlong rely tr w) :
     Solvent claim holdings self (run tr w) :=
   Proof.solvent_run hP hE hS hw tr hW hR
 
@@ -81,13 +82,13 @@ theorem solvent_run [HasCreditValue X] [HasPayable C]
 calls that target this contract with a distinct sender. Vault and AMM use
 this form because "what the contract holds" is this contract's token
 balance, which is only meaningful on calls to this address. -/
-theorem solvent_run_at [HasCreditValue X] [HasPayable C]
+theorem solvent_run_at [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
     {Inv : World S X E → Prop} {claim : Claim S X E}
     {holdings : Holdings S X E} {rely : X → X → Prop} {self : Address}
     (hP : PreservesInvAt C Inv self) (hE : PreservesInvEnv C Inv rely)
     (hS : ∀ w, Inv w → Solvent claim holdings self w)
     {w : World S X E} (hw : Inv w) (tr : List (Step C))
-    (hW : Wf self tr) (hR : RelyAlong rely tr w) :
+    (hW : Wf self tr w) (hR : RelyAlong rely tr w) :
     Solvent claim holdings self (run tr w) :=
   Proof.solvent_run_at hP hE hS hw tr hW hR
 

@@ -59,8 +59,14 @@ Design decisions fixed for `Lsc/Security` (Trace / Invariant / Wealth):
   field. A trace mixes `call` and `env` steps; `step` of a payable call credits `c.value` then
   `Tx.run` (revert rolls the credit back); nonzero value to a non-payable function is a revert
   step (world unchanged), matching compiler `valueOk` / `dispatchedFn`. `env` is constrained by
-  `RelyAlong`; `run` is a left fold. Well-formed traces satisfy `Call.sender ≠ target` (the
-  language has no self-call).
+  `RelyAlong`; `run` is a left fold. Well-formed traces (`Wf self tr w`) target `self`, are
+  not self-calls, and never overflow a 256-bit native balance — true on every chain since
+  total native supply < `2^256`. Incoming `creditValue` still wraps (EVM `BitVec`); `Wf` is
+  what rules wrapping out of attack traces.
+- `Reachable C rely self w` is deployment (`Deployed`) followed by a well-formed `rely`
+  trace. `inv_of_reachable` turns that into `Inv` when deployment establishes `Inv` and
+  calls/`env` preserve it. WETH public theorems take `Reachable` rather than an `Inv`
+  hypothesis; `Inv` stays a proof device. Token/Vault/Cpamm still take `Inv` in this slice.
 - `Inv : World S X E → Prop`. One extra obligation per contract: `Inv` is preserved by `Rely`.
   `of_fns` for contracts with no payable function uses `creditValue w 0 = w` and needs no
   `hcredit`.
@@ -81,9 +87,11 @@ Design decisions fixed for `Lsc/Security` (Trace / Invariant / Wealth):
 - `Mapping` stays `K → V` for now. Finite support is a ghost in `Inv`
   (`∃ H : Finset Address, (∀ a ∉ H, claim a = 0) ∧ Σ_H claim = totalSupply`). Switching to `K →₀ V`
   is a possible later Core/layout change, not an S1 requirement.
-- Constructors are not trace entrypoints. A one-off `init_inv` theorem covers deployment from
-  empty storage. Consequence found by this design: Token's `init` was a public `tx`; only a
-  function named `constructor` is a constructor, so `init` must be renamed.
+- Constructors are not trace entrypoints. `Deployed` is storage right after a successful
+  constructor run from empty storage (any deployer/args); contracts without a constructor
+  deploy with default storage. Native balance and `ext` are arbitrary. Token's `init` was a
+  public `tx`; only a function named `constructor` is a constructor, so `init` must be
+  renamed.
 - `Trace.from A` (adversary address set) is available but unused by extraction; `Auth` is the
   victim-side filter.
 
@@ -100,7 +108,8 @@ constrained by `RelyAlong` (`vaultRely` / `cpammRely`). Compiler-level
 
 Any set of addresses `A`, any sequence of calls with arbitrary arguments from `A`, interleaved
 arbitrarily with honest calls; between our calls, `env` steps constrained by `RelyAlong`;
-well-formed traces have `sender ≠ self` (`Call.sender ≠ target`). External contracts behave per
+well-formed traces target `self`, are not self-calls, and never overflow a 256-bit native
+balance (`Wf`). External contracts behave per
 their declared `IERC20.Spec` / `RelyAlong`. Other contracts are modelled as unable to see this
 contract's private memory or `msize`, which is true of the EVM (`ExtOracle`).
 They are also modelled as deterministic functions of the call and the on-chain

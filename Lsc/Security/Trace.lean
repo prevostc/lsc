@@ -4,7 +4,9 @@ import Lsc.Lang.Spec
 /-!
 Trace semantics of one contract: `Call`, `Step`, `step`, and `run` over a language-level
 `Lsc.Spec`. A reverted call is a no-op on the world (EVM atomicity). `env` steps replace
-the ghost record; they are constrained by `RelyAlong` in `Invariant.lean`.
+the ghost record; they are constrained by `RelyAlong` in `Invariant.lean`. `Wf` is
+state-indexed: well-formed traces target `self`, are not self-calls, and never overflow
+a 256-bit native balance.
 -/
 
 namespace Lsc.Security
@@ -82,11 +84,20 @@ def run [HasCreditValue X] [HasPayable C] (tr : List (Step C)) (w : World S X E)
     World S X E :=
   tr.foldl (fun acc s => step s acc) w
 
-/-- Every call is aimed at `self` and is not a self-call. `env` steps are unrestricted. -/
-def Wf (self : Address) : List (Step C) → Prop
-  | [] => True
-  | .call c :: tr => c.target = self ∧ c.sender ≠ self ∧ Wf self tr
-  | .env _ :: tr => Wf self tr
+/-- Well-formed traces target `self`, are not self-calls, and never overflow a
+256-bit native balance — true on every chain since total native supply <
+`2^256`. Incoming `creditValue` still wraps (EVM `BitVec`); this predicate
+is what rules wrapping out of attack traces. `env` steps thread the world.
+On `ExtState`, `HasSelfBalance.get w.ext` is `World.nativeBalance w`. -/
+def Wf [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
+    (self : Address) : List (Step C) → World S X E → Prop
+  | [], _ => True
+  | .call c :: tr, w =>
+      c.target = self ∧ c.sender ≠ self ∧
+      HasSelfBalance.get w.ext + c.value < wordBound ∧
+      Wf self tr (step (.call c) w)
+  | .env x' :: tr, w =>
+      Wf self tr { w with ext := x' }
 
 /-- Every call in `tr` is sent from `A`. Environment steps are ignored. -/
 def Trace.from (A : Finset Address) : List (Step C) → Prop

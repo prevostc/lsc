@@ -8,7 +8,9 @@ the invariant still holds after any well-formed sequence of such steps.
 
 Token uses the unrestricted form (its invariant is only about its own
 storage). Vault and AMM use the form that only assumes preservation on
-calls that actually target this contract.
+calls that actually target this contract. `Reachable` is deployment
+followed by a well-formed `rely` trace; `inv_of_reachable` turns that
+into `Inv`.
 -/
 
 namespace Lsc.Security
@@ -19,10 +21,11 @@ after any well-formed attack trace. Reverted calls leave the world
 unchanged, so they cannot break it. Token uses this to carry "balances
 sum to supply" from a single transaction to a whole attack. -/
 theorem inv_run [HasCreditValue X] {C : Spec S X E ε} [HasPayable C]
+    [HasSelfBalance X]
     {Inv : World S X E → Prop} {rely : X → X → Prop}
     (hC : PreservesInv C Inv) (hE : PreservesInvEnv C Inv rely)
     {w : World S X E} (hw : Inv w) {self : Address} (tr : List (Step C))
-    (hW : Wf self tr) (hR : RelyAlong rely tr w) :
+    (hW : Wf self tr w) (hR : RelyAlong rely tr w) :
     Inv (run tr w) :=
   Proof.inv_run hC hE hw tr hW hR
 
@@ -31,11 +34,12 @@ survive calls that target this contract with a distinct sender. Vault and
 AMM need this because their invariant mentions this contract's token
 balance, which cannot be claimed for a call to some other address. -/
 theorem inv_run_at [HasCreditValue X] {C : Spec S X E ε} [HasPayable C]
+    [HasSelfBalance X]
     {Inv : World S X E → Prop} {rely : X → X → Prop}
     {self : Address}
     (hC : PreservesInvAt C Inv self) (hE : PreservesInvEnv C Inv rely)
     {w : World S X E} (hw : Inv w) (tr : List (Step C))
-    (hW : Wf self tr) (hR : RelyAlong rely tr w) :
+    (hW : Wf self tr w) (hR : RelyAlong rely tr w) :
     Inv (run tr w) :=
   Proof.inv_run_at hC hE hw tr hW hR
 
@@ -112,5 +116,29 @@ theorem PreservesInvFnAt_of_ok {C : Spec S X E ε} {Inv : World S X E → Prop}
       Tx.run (C.exec fn args) ctx w = .ok (a, w') → Inv w') :
     PreservesInvFnAt C Inv self fn :=
   Proof.PreservesInvFnAt_of_ok hok
+
+/-- A reachable world satisfies `Inv` when deployment establishes `Inv` and
+every well-formed call and `rely`-conformant environment step preserves it. -/
+theorem inv_of_reachable [HasCreditValue X] {C : Spec S X E ε} [HasPayable C]
+    [HasSelfBalance X] [HasDeploy C]
+    {Inv : World S X E → Prop} {rely : X → X → Prop} {self : Address}
+    {w : World S X E}
+    (hD : ∀ w, Deployed C w → Inv w)
+    (hP : PreservesInvAt C Inv self)
+    (hE : PreservesInvEnv C Inv rely)
+    (h : Reachable (C := C) rely self w) :
+    Inv w :=
+  Proof.inv_of_reachable hD hP hE h
+
+/-- Reachable states are closed under further well-formed, `rely`-conformant
+traces. -/
+theorem reachable_run [HasCreditValue X] {C : Spec S X E ε} [HasPayable C]
+    [HasSelfBalance X] [HasDeploy C]
+    {rely : X → X → Prop} {self : Address} {w : World S X E}
+    {tr : List (Step C)}
+    (h : Reachable (C := C) rely self w) (hW : Wf self tr w)
+    (hR : RelyAlong rely tr w) :
+    Reachable (C := C) rely self (run tr w) :=
+  Proof.reachable_run h hW hR
 
 end Lsc.Security

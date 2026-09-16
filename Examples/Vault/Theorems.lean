@@ -70,7 +70,7 @@ the token: it is a conforming ERC-20 per `IERC20.Spec`; no reentrancy is
 modelled. -/
 theorem vault_solvent (self : Address) (tr : List (Step spec))
     (w : World Storage ExtState Event)
-    (hW : Wf self tr)
+    (hW : Wf self tr w)
     (hR : RelyAlong (vaultRely self w.self.asset w.oracle) tr w)
     (hT : IERC20.Spec (w.self.asset.impl : AssetImpl))
     (h : Inv self w) :
@@ -87,7 +87,7 @@ ERC-20 per `IERC20.Spec`; no reentrancy is modelled. This is not liveness —
 pause can block withdrawal without reducing the recorded claim. -/
 theorem vault_no_unauthorized_extraction (self : Address)
     (tr : List (Step spec)) (w : World Storage ExtState Event) (a : Address)
-    (hw : Inv self w) (hW : Wf self tr)
+    (hw : Inv self w) (hW : Wf self tr w)
     (hR : RelyAlong (vaultRely self w.self.asset w.oracle) tr w)
     (hT : IERC20.Spec (w.self.asset.impl : AssetImpl))
     (hA : NoAuthAlong Auth a tr w) :

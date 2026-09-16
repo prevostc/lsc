@@ -26,11 +26,11 @@ DeFi-oriented cut of SWC / OWASP Smart Contract Top 10 / Solodit. Status is
 | Signature replay / malleability | Impossible | No `ecrecover`/`permit` in `Core.Op` | Add only with nonce `Spec` |
 | `delegatecall` / `selfdestruct` / proxy layout | Impossible | YulDefs: never emitted; `stepOp_delegatecall = none`; no `create` | — |
 | `tx.origin` auth | Impossible | Surface `Tx.sender` only; no `Tx.origin` | — |
-| Uninitialized state / constructor | Assumed | `Mapping` default 0; `constructor` not a trace step; TRUST.md EVM ctor-args gap; Vault/Cpamm ctor `CALL` out of scope | Model CREATE suffix; `init_inv` for S2 |
+| Uninitialized state / constructor | Assumed | `Mapping` default 0; `constructor` not a trace step; `Deployed` / `Reachable` (WETH); TRUST.md EVM ctor-args gap; Vault/Cpamm ctor `CALL` out of scope | Model CREATE suffix; Token/Vault/Cpamm `Reachable` |
 | Unbounded loops / gas DoS | Impossible | `Core` loop-free; Yul never `for`; gas griefing of *our* exec out of scope | — |
 | DoS via revert-in-callback / unexpected ETH | Assumed | Failed CALL reverts us (SECURITY.md); ABI `nonpayable`; no `receive` | Liveness vs token-revert griefing |
 | Timestamp / block dependence | Open | `Tx.timestamp` / `blockNumber` are `Core.Op` and compile | Lint/ban in `Auth` |
-| ETH / `payable` / stuck funds | Proved | `[Payable]` + typed `Tx.value`; dispatcher `callvalue` revert; `Native.send`; WETH `weth_backed`, `weth_no_unauthorized_extraction` | Trace `step` credits `ctx.value` before `Tx.run` |
+| ETH / `payable` / stuck funds | Proved | `[Payable]` + typed `Tx.value`; dispatcher `callvalue` revert; `Native.send`; WETH `weth_backed` / `weth_no_unauthorized_extraction` from `Reachable` (backing uses `Wf` so payable credit cannot wrap) | Trace `step` credits `ctx.value` before `Tx.run` |
 | Decimals mismatch / unit confusion | Proved | `Amount a` blocks mixed `+?`; `x.as b` requires `a.decimals? = b.decimals?` at elaboration (rejects `USDC(6)→DAI(18)` and `none` vs `some`); `asUnchecked` only for documented cross-scale retags (Cpamm first mint) | `decodeOrDefault` on views still fail-open |
 | Unsafe casts / silent truncation | Open | `Amount.ofWord`; `decodeOrDefault` on views | Fail closed on bad view ABI |
 | ERC-777 / token-hook reentrancy | Assumed | SECURITY.md ERC-777 hooks out of scope; `NoReentry` | 8C + token `Spec` |

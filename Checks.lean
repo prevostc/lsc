@@ -4,6 +4,7 @@ import Examples.Vault.Theorems
 import Examples.Cpamm.Theorems
 import Examples.WETH.Theorems
 import Lsc.Security.WealthTheorems
+import Lsc.Security.InvariantTheorems
 import Lsc.Compiler.DispatchTheorems
 import Lsc.Compiler.CoreTheorems
 import Lsc.Compiler.CoreExtSimTheorems
@@ -64,6 +65,9 @@ pinned theorem is added or renamed; the commit message records what moved.
 
 /-- info: 'WETH.weth_no_unauthorized_extraction' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms WETH.weth_no_unauthorized_extraction
+
+/-- info: 'Lsc.Security.inv_of_reachable' does not depend on any axioms -/
+#guard_msgs in #print axioms Lsc.Security.inv_of_reachable
 
 /-- info: 'WETH.deposit_delta' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms WETH.deposit_delta

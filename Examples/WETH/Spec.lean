@@ -4,10 +4,10 @@ import Examples.WETH.Contract
 /-!
 WETH spec: `claim` is the wrapped balance (redeemable native on `self`'s
 books; not a second `ofNative` summand). `Auth` is the holder's own
-`transfer` / `withdraw` or an allowance-backed `transferFrom`. `Inv` is
-finite-support conservation plus `totalSupply ≤` self's native balance
-and honest `Native.send`. Between our transactions, `rely` lets `ext`
-change except that this contract's native balance does not fall.
+`transfer` / `withdraw` or an allowance-backed `transferFrom`. Between
+our transactions, `rely` lets `ext` change except that this contract's
+native balance does not fall. The storage/backing invariant is a proof
+device in `Proofs/Security.lean`.
 -/
 
 open Lsc Lsc.Security WETH
@@ -42,25 +42,11 @@ Native ETH of `self` is `World.nativeBalance`, used by `weth_backed`. -/
 def holdings (_self : Address) (w : World Storage ExtState Event) : Nat :=
   w.self.totalSupply.raw
 
-/-- Finite support of balances. -/
-def InvStorage (s : Storage) : Prop :=
-  ∃ H : Finset Address,
-    (∀ a, a ∉ H → s.balances a = 0) ∧
-    H.sum (fun a => (s.balances a).raw) = s.totalSupply.raw
-
-/-- Balances have finite support summing to `totalSupply`, wrapped supply
-is covered by `self`'s native balance, and `oracle.send` debits that
-balance by the sent amount. -/
-def Inv (w : World Storage ExtState Event) : Prop :=
-  InvStorage w.self ∧
-    w.self.totalSupply.raw ≤ World.nativeBalance w ∧
-    DebitsOnSend w.oracle
-
 /-- Between our transactions the outside world may change `ext`
 arbitrarily, except that this contract's native balance does not fall
-(donations are allowed). That is what keeps `Inv`'s
-`totalSupply ≤ nativeBalance` across environment steps; `withdraw` is the
-only native outflow, and it burns matching wrapped tokens. -/
+(donations are allowed). That is what keeps wrapping backed across
+environment steps; `withdraw` is the only native outflow, and it burns
+matching wrapped tokens. -/
 def rely (x x' : ExtState) : Prop :=
   x.env.selfBalance.toNat ≤ x'.env.selfBalance.toNat
 

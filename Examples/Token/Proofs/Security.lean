@@ -711,7 +711,7 @@ theorem token_no_unauthorized_extraction
     tr w a hw hR hA
 
 theorem token_solvent (self : Address) (tr : List (Step spec)) (w : World Storage ExtState Event)
-    (hW : Wf self tr) (hR : RelyAlong (fun _ _ => True) tr w) (h : Inv w) :
+    (hW : Wf self tr w) (hR : RelyAlong (fun _ _ => True) tr w) (h : Inv w) :
     Inv (run tr w) :=
   inv_run token_preserves_inv token_inv_rely h tr hW hR
 

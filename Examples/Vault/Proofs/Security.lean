@@ -729,7 +729,7 @@ namespace Proof
 
 theorem vault_solvent (self : Address) (tr : List (Step spec))
     (w : World Storage ExtState Event)
-    (hW : Wf self tr)
+    (hW : Wf self tr w)
     (hR : RelyAlong (vaultRely self w.self.asset w.oracle) tr w)
     (hT : IERC20.Spec (w.self.asset.impl : AssetImpl))
     (h : Inv self w) :
@@ -742,7 +742,7 @@ theorem vault_solvent (self : Address) (tr : List (Step spec))
 
 theorem vault_no_unauthorized_extraction (self : Address)
     (tr : List (Step spec)) (w : World Storage ExtState Event) (a : Address)
-    (hw : Inv self w) (hW : Wf self tr)
+    (hw : Inv self w) (hW : Wf self tr w)
     (hR : RelyAlong (vaultRely self w.self.asset w.oracle) tr w)
     (hT : IERC20.Spec (w.self.asset.impl : AssetImpl))
     (hA : NoAuthAlong Auth a tr w) :
@@ -751,7 +751,7 @@ theorem vault_no_unauthorized_extraction (self : Address)
   let oracle := w.oracle
   have go : ∀ (tr : List (Step spec)) (w' : World Storage ExtState Event),
       InvT self asset oracle w' →
-      Wf self tr →
+      Wf self tr w' →
       RelyAlong (vaultRely self asset oracle) tr w' →
       NoAuthAlong Auth a tr w' →
       claim self a w' ≤ claim self a (run tr w') := by
@@ -770,7 +770,7 @@ theorem vault_no_unauthorized_extraction (self : Address)
         exact Nat.le_trans hle (ih { w' with ext := x' } hw'' hW htl hA)
       | .call c =>
         obtain ⟨hna, htl⟩ := hA
-        obtain ⟨ht, hs, hWtl⟩ := hW
+        obtain ⟨ht, hs, _, hWtl⟩ := hW
         have hw'' := vault_preserves_inv self asset oracle c w' ht hs hw'
         have hle := claim_le_call self asset oracle c w' a hw' ht hs hna
         exact Nat.le_trans hle (ih (step (.call c) w') hw'' hWtl hR htl)

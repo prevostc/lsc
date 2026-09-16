@@ -39,13 +39,14 @@ theorem no_unauthorized_extraction [HasCreditValue X] [HasPayable C]
       exact Nat.le_trans hle (ih { w with ext := x' } hw' htl hA)
 
 theorem no_unauthorized_extraction_at [HasCreditValue X] [HasPayable C]
+    [HasSelfBalance X]
     {Inv : World S X E → Prop} {claim : Claim S X E}
     {Auth : AuthPred C} {rely : X → X → Prop} {self : Address}
     (hN : NoUnauthorizedDecrease C Inv claim Auth)
     (hP : PreservesInvAt C Inv self) (hE : PreservesInvEnv C Inv rely)
     (hM : ClaimMonoEnv claim rely)
     (tr : List (Step C)) (w : World S X E) (a : Address)
-    (hw : Inv w) (hW : Wf self tr) (hR : RelyAlong rely tr w)
+    (hw : Inv w) (hW : Wf self tr w) (hR : RelyAlong rely tr w)
     (hA : NoAuthAlong Auth a tr w) :
     claim a w ≤ claim a (run tr w) := by
   induction tr generalizing w with
@@ -54,7 +55,7 @@ theorem no_unauthorized_extraction_at [HasCreditValue X] [HasPayable C]
     match s with
     | .call c =>
       obtain ⟨hna, htl⟩ := hA
-      have ⟨ht, hs, hWtl⟩ := hW
+      have ⟨ht, hs, _, hWtl⟩ := hW
       have hw' : Inv (step (.call c) w) := hP c w ht hs hw
       have hle : claim a w ≤ claim a (step (.call c) w) :=
         Nat.le_of_not_lt fun hlt => hna (hN c w a hw hlt)
@@ -65,23 +66,23 @@ theorem no_unauthorized_extraction_at [HasCreditValue X] [HasPayable C]
       have hle : claim a w ≤ claim a { w with ext := x' } := hM w x' a hr
       exact Nat.le_trans hle (ih { w with ext := x' } hw' hW htl hA)
 
-theorem solvent_run [HasCreditValue X] [HasPayable C]
+theorem solvent_run [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
     {Inv : World S X E → Prop} {claim : Claim S X E}
     {holdings : Holdings S X E} {rely : X → X → Prop}
     (hP : PreservesInv C Inv) (hE : PreservesInvEnv C Inv rely)
     (hS : ∀ self w, Inv w → Solvent claim holdings self w)
     {self : Address} {w : World S X E} (hw : Inv w) (tr : List (Step C))
-    (hW : Wf self tr) (hR : RelyAlong rely tr w) :
+    (hW : Wf self tr w) (hR : RelyAlong rely tr w) :
     Solvent claim holdings self (run tr w) :=
   hS self _ (inv_run hP hE hw tr hW hR)
 
-theorem solvent_run_at [HasCreditValue X] [HasPayable C]
+theorem solvent_run_at [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
     {Inv : World S X E → Prop} {claim : Claim S X E}
     {holdings : Holdings S X E} {rely : X → X → Prop} {self : Address}
     (hP : PreservesInvAt C Inv self) (hE : PreservesInvEnv C Inv rely)
     (hS : ∀ w, Inv w → Solvent claim holdings self w)
     {w : World S X E} (hw : Inv w) (tr : List (Step C))
-    (hW : Wf self tr) (hR : RelyAlong rely tr w) :
+    (hW : Wf self tr w) (hR : RelyAlong rely tr w) :
     Solvent claim holdings self (run tr w) :=
   hS _ (inv_run_at hP hE hw tr hW hR)
 

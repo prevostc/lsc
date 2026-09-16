@@ -92,10 +92,62 @@ theorem step_eq_worldAfter_of_not_payable [HasCreditValue X] [HasPayable C]
   step_eq_worldAfter_of_credit_id c w
     (by simp [Spec.valueOk, hp, hv]) (by rw [hv, World.creditValue_zero])
 
-theorem Wf.nil (self : Address) : Wf (C := C) self [] :=
+theorem Wf.nil [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
+    (self : Address) (w : World S X E) : Wf (C := C) self [] w :=
   trivial
 
 theorem Trace.from_nil (A : Finset Address) : Trace.from (C := C) A [] :=
   trivial
+
+theorem Wf.append [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
+    {self : Address} {tr₁ tr₂ : List (Step C)} {w : World S X E}
+    (h₁ : Wf self tr₁ w) (h₂ : Wf self tr₂ (run tr₁ w)) :
+    Wf self (tr₁ ++ tr₂) w := by
+  induction tr₁ generalizing w with
+  | nil => simpa [run] using h₂
+  | cons s rest ih =>
+    match s with
+    | .call c =>
+      have ⟨ht, hs, hb, htl⟩ := h₁
+      exact ⟨ht, hs, hb, ih htl h₂⟩
+    | .env x' =>
+      exact ih h₁ h₂
+
+/-- Crediting `v` wei does not wrap when the sum fits in a 256-bit word. -/
+theorem nativeBalance_creditValue {S E : Type} (w : World S ExtState E) (v : Nat)
+    (h : World.nativeBalance w + v < wordBound) :
+    World.nativeBalance (World.creditValue w v) = World.nativeBalance w + v := by
+  have hlt : w.ext.env.selfBalance.toNat + v < 2 ^ 256 := by
+    simpa [World.nativeBalance, wordBound] using h
+  change (BitVec.ofNat 256 (w.ext.env.selfBalance.toNat + v)).toNat =
+    w.ext.env.selfBalance.toNat + v
+  rw [BitVec.toNat_ofNat, Nat.mod_eq_of_lt hlt]
+
+theorem nativeBalance_lt_wordBound {S E : Type} (w : World S ExtState E) :
+    HasSelfBalance.get w.ext < wordBound :=
+  w.ext.env.selfBalance.isLt
+
+/-- On `ExtState`, zero-value well-formedness does not depend on the starting
+world: every native balance already fits in 256 bits. -/
+theorem Wf.irrel_extState {S E ε : Type} {C : Spec S ExtState E ε} [HasPayable C]
+    (self : Address) (tr : List (Step C))
+    (w w' : World S ExtState E)
+    (hz : ∀ (c : Call C), Step.call c ∈ tr → c.value = 0)
+    (h : Wf self tr w) : Wf self tr w' := by
+  induction tr generalizing w w' with
+  | nil => trivial
+  | cons s rest ih =>
+    match s with
+    | .env x =>
+      exact ih (w := { w with ext := x }) (w' := { w' with ext := x })
+        (fun c hc => hz c (List.mem_cons_of_mem _ hc)) h
+    | .call c =>
+      rcases h with ⟨ht, hs, _, htl⟩
+      have hv : c.value = 0 := hz c (List.mem_cons_self)
+      refine ⟨ht, hs, ?bound,
+        ih (w := step (.call c) w) (w' := step (.call c) w')
+          (fun c' hc => hz c' (List.mem_cons_of_mem _ hc)) htl⟩
+      have hlt := nativeBalance_lt_wordBound (S := S) (E := E) w'
+      simpa [hv, Nat.add_zero] using hlt
 
 end Lsc.Security.Proof

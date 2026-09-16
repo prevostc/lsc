@@ -158,7 +158,7 @@ ERC-20s per `IERC20.Spec`; a CALL on one does not change the other's
 fee-on-transfer. Callers must not be the pool itself. -/
 theorem cpamm_solvent (self : Address) (tr : List (Step spec))
     (w : World Storage ExtState Event)
-    (hW : Wf self tr)
+    (hW : Wf self tr w)
     (hR : RelyAlong (cpammRely self w.self.token0 w.self.token1 w.oracle) tr w)
     (hT0 : IERC20.Spec (w.self.token0.impl : Token0Impl))
     (hT1 : IERC20.Spec (w.self.token1.impl : Token1Impl))
@@ -177,7 +177,7 @@ other's views; no reentrancy is modelled; no fee-on-transfer. Between
 calls neither pool balance may fall. Callers must not be the pool itself. -/
 theorem cpamm_no_unauthorized_extraction (self : Address)
     (tr : List (Step spec)) (w : World Storage ExtState Event) (a : Address)
-    (hw : Inv self w) (hW : Wf self tr)
+    (hw : Inv self w) (hW : Wf self tr w)
     (hR : RelyAlong (cpammRely self w.self.token0 w.self.token1 w.oracle) tr w)
     (hT0 : IERC20.Spec (w.self.token0.impl : Token0Impl))
     (hT1 : IERC20.Spec (w.self.token1.impl : Token1Impl))

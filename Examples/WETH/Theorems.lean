@@ -50,30 +50,32 @@ theorem transfer_conserves (dst : Address) (amount : Amount native)
 theorem weth_exact : IERC20.Exact WETH.impl :=
   Proof.weth_exact
 
-/-- Under `Inv`, wrapped `totalSupply` is backed by `self`'s native balance. -/
-theorem weth_backed {w : World Storage ExtState Event} (h : Inv w) :
-    w.self.totalSupply.raw ≤ World.nativeBalance w :=
-  Proof.weth_backed h
-
 end WETH
 
 open Lsc Lsc.Security WETH
 
 namespace WETH
 
-/-- No sequence of calls by other parties lowers `a`'s wrapped balance:
-the only way `a`'s claim falls is `a`'s own `transfer` or `withdraw`, or a
-`transferFrom` within an allowance `a` granted. Deposit is payable and
-only credits the caller. Between calls the environment may not drop this
-contract's native balance (donations are allowed); that is what keeps
-`Inv`'s `totalSupply ≤ nativeBalance` across `env` steps. Well-formed
-traces have a distinct caller. Reverted calls leave every balance
+/-- Every wrapped token is backed: in any state the contract can actually reach, the supply
+never exceeds the native balance it holds. -/
+theorem weth_backed {self : Address} {w : World Storage ExtState Event}
+    (h : Reachable (C := spec) rely self w) :
+    w.self.totalSupply.raw ≤ World.nativeBalance w :=
+  Proof.weth_backed h
+
+/-- No sequence of calls by other parties lowers `a`'s balance; the only way `a`'s
+claim falls is `a`'s own `transfer` or `withdraw`, or a `transferFrom` within an
+allowance `a` granted. Deposit is payable and only credits the caller. Between
+calls the environment may not drop this contract's native balance (donations are
+allowed). Well-formed traces target this contract, have a distinct caller, and
+never overflow a 256-bit native balance. Reverted calls leave every balance
 unchanged. -/
 theorem weth_no_unauthorized_extraction (self : Address)
     (tr : List (Step spec)) (w : World Storage ExtState Event) (a : Address)
-    (hw : Inv w) (hW : Wf self tr) (hR : RelyAlong rely tr w)
+    (h : Reachable (C := spec) rely self w)
+    (hW : Wf self tr w) (hR : RelyAlong rely tr w)
     (hA : NoAuthAlong Auth a tr w) :
     claim a w ≤ claim a (run tr w) :=
-  Proof.weth_no_unauthorized_extraction self tr w a hw hW hR hA
+  Proof.weth_no_unauthorized_extraction self tr w a h hW hR hA
 
 end WETH

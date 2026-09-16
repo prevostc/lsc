@@ -80,8 +80,9 @@ each token's `totalSupply` view stays the same.
 - `Amount a` is a one-field structure (`raw : Word`); an abbrev would unify
   every amount back to `Word`. Reify erases `.mk`/`.raw`. Certificates are
   `Core.denote Γ f.core args = f`.
-- `Inv : World S X E → Prop`. Trace well-formedness `Wf self tr`: every call has
-  `target = self` and `sender ≠ self`.
+- `Inv : World S X E → Prop`. Trace well-formedness `Wf self tr w`: every call has
+  `target = self`, `sender ≠ self`, and `self`'s native balance plus `c.value`
+  fits in 256 bits.
 - `I.Ref` is `{ addr : Address }`, generated per interface; `Ref (IERC20 a)` is
   that type. Storage fields are `Ref (IERC20 …)`, not a parallel `Binding`.
 - `World.ext` is the fixed `Lsc.ExtState` for compiled contracts (DECISIONS

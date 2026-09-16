@@ -103,12 +103,40 @@ theorem step_eq_worldAfter_of_not_payable [HasCreditValue X] [HasPayable C]
     step (.call c) w = worldAfter (C.exec c.fn c.args) c.toCtx w :=
   Proof.step_eq_worldAfter_of_not_payable c w hp hv
 
-/-- The empty trace is well-formed at any `self`. -/
-theorem Wf.nil (self : Address) : Wf (C := C) self [] :=
-  Proof.Wf.nil self
+/-- The empty trace is well-formed at any `self` and world. -/
+theorem Wf.nil [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
+    (self : Address) (w : World S X E) : Wf (C := C) self [] w :=
+  Proof.Wf.nil self w
 
 /-- The empty trace is from any sender set. -/
 theorem Trace.from_nil (A : Finset Address) : Trace.from (C := C) A [] :=
   Proof.Trace.from_nil A
+
+/-- Well-formedness of sequential composition: the suffix is judged in the
+world after the prefix. -/
+theorem Wf.append [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
+    {self : Address} {tr₁ tr₂ : List (Step C)} {w : World S X E}
+    (h₁ : Wf self tr₁ w) (h₂ : Wf self tr₂ (run tr₁ w)) :
+    Wf self (tr₁ ++ tr₂) w :=
+  Proof.Wf.append h₁ h₂
+
+/-- On `ExtState`, the native balance always fits in a 256-bit word. -/
+theorem nativeBalance_lt_wordBound {S E : Type} (w : World S ExtState E) :
+    HasSelfBalance.get w.ext < wordBound :=
+  Proof.nativeBalance_lt_wordBound w
+
+/-- Crediting `v` wei does not wrap when the sum fits in a 256-bit word. -/
+theorem nativeBalance_creditValue {S E : Type} (w : World S ExtState E) (v : Nat)
+    (h : World.nativeBalance w + v < wordBound) :
+    World.nativeBalance (World.creditValue w v) = World.nativeBalance w + v :=
+  Proof.nativeBalance_creditValue w v h
+
+/-- On `ExtState`, a zero-value well-formed trace is well-formed at every world. -/
+theorem Wf.irrel_extState {S E ε : Type} {C : Spec S ExtState E ε} [HasPayable C]
+    (self : Address) (tr : List (Step C))
+    (w w' : World S ExtState E)
+    (hz : ∀ (c : Call C), Step.call c ∈ tr → c.value = 0)
+    (h : Wf self tr w) : Wf self tr w' :=
+  Proof.Wf.irrel_extState self tr w w' hz h
 
 end Lsc.Security

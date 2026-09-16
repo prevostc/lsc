@@ -94,7 +94,7 @@ drift. The generic solvency bound (sum of balances ≤ supply) is then
 immediate. -/
 theorem token_solvent (self : Address) (tr : List (Step spec))
     (w : World Storage ExtState Event)
-    (hW : Wf self tr) (hR : RelyAlong (fun _ _ => True) tr w) (h : Inv w) :
+    (hW : Wf self tr w) (hR : RelyAlong (fun _ _ => True) tr w) (h : Inv w) :
     Inv (run tr w) :=
   Proof.token_solvent self tr w hW hR h
 

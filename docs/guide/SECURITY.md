@@ -38,12 +38,17 @@ If those local facts hold, then:
   contract.
 - If the invariant implies solvency, solvency still holds after any
   well-formed trace. Vault and Cpamm use the `_at` variants, which do
-  require well-formedness (caller ≠ contract), because their invariant
-  talks about this contract's token balance.
+  require well-formedness (caller ≠ contract, native balance plus call
+  value fits in 256 bits), because their invariant talks about this
+  contract's token balance.
 - The invariant itself still holds along a well-formed trace.
+- WETH's public theorems replace an `Inv` hypothesis with `Reachable`:
+  deployment followed by any well-formed `rely` trace. Backing is proved
+  from that, not assumed.
 
 A reverted call leaves the world unchanged. Constructors are not trace
-steps; deployment from empty storage is a separate `init` fact when proved.
+steps; `Deployed` is the post-constructor (or default) storage, and
+`Reachable` is that state after a well-formed `rely` trace.
 
 ## What the adversary may do
 
@@ -52,7 +57,8 @@ interleaved with honest calls — sandwich of *our* calls is this
 quantifier (`run` in `Trace.lean`, `no_unauthorized_extraction`). Between our
 calls, the environment may update `ext` only in ways `vaultRely` /
 `cpammRely` allow (our token `balanceOf` does not fall; `totalSupply`
-stays put). Well-formedness — callers are not the contract itself — is
+stays put). Well-formedness — callers are not the contract itself, and
+the native balance plus call value never overflows 256 bits — is
 required for invariant and solvency preservation and for the `_at`
 extraction theorems (Vault, Cpamm), not for Token-style unrestricted
 extraction.

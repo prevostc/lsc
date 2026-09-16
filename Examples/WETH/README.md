@@ -12,7 +12,11 @@ payable and credits `msg.value`. `withdraw` burns wrapped tokens and
   unchanged on deposit: Lean does not auto-credit `Ctx.value`).
 - `transfer_conserves` — Token-style local conservation.
 - `weth_exact` — `IERC20.Exact WETH.impl`; Vault/Cpamm use `.toSpec`.
-- `weth_backed` — `Inv` implies `totalSupply ≤` self's native balance.
+- `weth_backed` — in any state the contract can actually reach, wrapped
+  `totalSupply` never exceeds the native balance it holds. Deployment
+  starts at supply 0; deposit credits and mints the same amount (`Wf`
+  forbids a wrapping credit); withdraw burns and sends; the environment
+  cannot lower `self`'s native balance.
 - `weth_no_unauthorized_extraction` — no sequence of calls by other
   parties lowers an account's wrapped balance; the only authorised
   reductions are that account's own `transfer`/`withdraw`, or a
@@ -26,12 +30,15 @@ payable and credits `msg.value`. `withdraw` burns wrapped tokens and
   debits `self`'s native balance by the sent amount.
 - Incoming call value is credited onto `self` in the trace `step` before
   the body; `Tx.run` itself does not.
+- Well-formed traces target this contract, are not self-calls, and never
+  overflow a 256-bit native balance — true on every chain since total
+  native supply is less than `2^256`.
 
 ## Files
 
 - `Contract.lean` — storage, events, functions, `lsc_contract`.
-- `Spec.lean` — `Inv`, `claim`, `Auth`, `inflow`, `holdings`, `rely`.
+- `Spec.lean` — `claim`, `Auth`, `inflow`, `holdings`, `rely`.
 - `Theorems.lean` — exported statements.
-- `Proofs/` — Tx, Implements, Security, Compile.
+- `Proofs/` — Tx, Implements, Security (`Inv`), Compile.
 - `Tests.lean` — smoke `#guard`s and `Exact.toSpec`.
 - `compiled/` — artefacts after `export_bytecode.sh`.

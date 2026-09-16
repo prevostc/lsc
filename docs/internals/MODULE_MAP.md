@@ -123,7 +123,7 @@ Each protocol is a directory (`Examples/AGENTS.md`):
 | Role | Files |
 |------|--------|
 | Contract | `Examples/C/Contract.lean` |
-| Spec | `Spec.lean` (`Inv`, `claim`, `Auth`, `holdings`) |
+| Spec | `Spec.lean` (`claim`, `Auth`, `rely`, `holdings`; `Inv` is a proof device — WETH keeps it in `Proofs/`) |
 | Exported theorems | `Theorems.lean` |
 | Proofs | `Proofs/Tx.lean`, `Proofs/Security.lean`, `Proofs/Compile.lean`, `Proofs/Implements.lean` |
 
@@ -135,7 +135,8 @@ Each protocol is a directory (`Examples/AGENTS.md`):
 - **Cpamm** — `Examples/Cpamm/`. S2, two `IERC20.Ref`. `swap0for1_k`,
   `cpamm_no_unauthorized_extraction`, `cpamm_solvent`.
 - **WETH** — `Examples/WETH/`. Wrapped native (`Chain` profile). `weth_exact`,
-  `weth_backed`, `deposit_delta`, `withdraw_delta`.
+  `weth_backed` (`Reachable`, not an `Inv` hypothesis), `deposit_delta`,
+  `withdraw_delta`.
 
 `Checks.lean` imports `Examples.<Name>.Theorems` only. Bytecode transport is
 the compiler family in `TransportTheorems.lean`, not per-example theorems.

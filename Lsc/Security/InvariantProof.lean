@@ -9,35 +9,37 @@ namespace Lsc.Security.Proof
 variable {S X E ε : Type}
 
 theorem inv_run [HasCreditValue X] {C : Spec S X E ε} [HasPayable C]
+    [HasSelfBalance X]
     {Inv : World S X E → Prop} {rely : X → X → Prop}
     (hC : PreservesInv C Inv) (hE : PreservesInvEnv C Inv rely)
     {w : World S X E} (hw : Inv w) {self : Address} (tr : List (Step C))
-    (hW : Wf self tr) (hR : RelyAlong rely tr w) :
+    (hW : Wf self tr w) (hR : RelyAlong rely tr w) :
     Inv (run tr w) := by
   induction tr generalizing w with
   | nil => simpa using hw
   | cons s tr ih =>
     match s with
     | .call c =>
-      have htl : Wf self tr := hW.2.2
+      have ⟨_, _, _, htl⟩ := hW
       exact ih (hC c w hw) htl hR
     | .env x' =>
       have ⟨hr, htl⟩ := hR
       exact ih (hE w x' hw hr) hW htl
 
 theorem inv_run_at [HasCreditValue X] {C : Spec S X E ε} [HasPayable C]
+    [HasSelfBalance X]
     {Inv : World S X E → Prop} {rely : X → X → Prop}
     {self : Address}
     (hC : PreservesInvAt C Inv self) (hE : PreservesInvEnv C Inv rely)
     {w : World S X E} (hw : Inv w) (tr : List (Step C))
-    (hW : Wf self tr) (hR : RelyAlong rely tr w) :
+    (hW : Wf self tr w) (hR : RelyAlong rely tr w) :
     Inv (run tr w) := by
   induction tr generalizing w with
   | nil => simpa using hw
   | cons s tr ih =>
     match s with
     | .call c =>
-      have ⟨ht, hs, htl⟩ := hW
+      have ⟨ht, hs, _, htl⟩ := hW
       exact ih (hC c w ht hs hw) htl hR
     | .env x' =>
       have ⟨hr, htl⟩ := hR
@@ -142,5 +144,42 @@ theorem PreservesInvCreditFnAt_of_fn [HasCreditValue X] {C : Spec S X E ε}
   rw [hv, World.creditValue_zero] at hrun
   have hw : worldAfter (C.exec fn args) ctx w = w' := worldAfter_ok hrun
   simpa [hw] using h args ctx w hself hsne hInv
+
+theorem RelyAlong.append [HasCreditValue X] {C : Spec S X E ε} [HasPayable C]
+    {rely : X → X → Prop} {tr₁ tr₂ : List (Step C)} {w : World S X E}
+    (h₁ : RelyAlong rely tr₁ w) (h₂ : RelyAlong rely tr₂ (run tr₁ w)) :
+    RelyAlong rely (tr₁ ++ tr₂) w := by
+  induction tr₁ generalizing w with
+  | nil => simpa [run] using h₂
+  | cons s rest ih =>
+    match s with
+    | .call c =>
+      exact ih h₁ h₂
+    | .env x' =>
+      have ⟨hr, htl⟩ := h₁
+      exact ⟨hr, ih htl h₂⟩
+
+theorem reachable_run [HasCreditValue X] {C : Spec S X E ε} [HasPayable C]
+    [HasSelfBalance X] [HasDeploy C]
+    {rely : X → X → Prop} {self : Address} {w : World S X E}
+    {tr : List (Step C)}
+    (h : Reachable (C := C) rely self w) (hW : Wf self tr w)
+    (hR : RelyAlong rely tr w) :
+    Reachable (C := C) rely self (run tr w) := by
+  obtain ⟨w₀, tr₀, hDep, hW₀, hR₀, rfl⟩ := h
+  refine ⟨w₀, tr₀ ++ tr, hDep, Wf.append hW₀ hW, RelyAlong.append hR₀ hR, ?_⟩
+  simp [run_append]
+
+theorem inv_of_reachable [HasCreditValue X] {C : Spec S X E ε} [HasPayable C]
+    [HasSelfBalance X] [HasDeploy C]
+    {Inv : World S X E → Prop} {rely : X → X → Prop} {self : Address}
+    {w : World S X E}
+    (hD : ∀ w, Deployed C w → Inv w)
+    (hP : PreservesInvAt C Inv self)
+    (hE : PreservesInvEnv C Inv rely)
+    (h : Reachable (C := C) rely self w) :
+    Inv w := by
+  obtain ⟨w₀, tr, hDep, hW, hR, rfl⟩ := h
+  exact inv_run_at hP hE (hD w₀ hDep) tr hW hR
 
 end Lsc.Security.Proof

@@ -170,6 +170,29 @@ def EncodeBounded (T : TransportSetup S X E ε) : List (Step T.spec) → Prop
       EncodeBounded T tr
   | .env _ :: tr => EncodeBounded T tr
 
+/-- `EncodeBounded` plus the codec payable table imply every encoded call has
+value 0 (transport is the non-payable fragment). -/
+theorem encodeBounded_value_zero (T : TransportSetup S X E ε)
+    {tr : List (Step T.spec)} (hb : EncodeBounded T tr)
+    {c : Call T.spec} (hc : Step.call c ∈ tr) : c.value = 0 := by
+  induction tr with
+  | nil => cases hc
+  | cons s rest ih =>
+    match s with
+    | .env _ =>
+      exact ih hb (by simpa using hc)
+    | .call c' =>
+      rcases hb with ⟨_, _, hvo, htlB⟩
+      simp only [List.mem_cons] at hc
+      rcases hc with hhere | htl
+      · cases hhere
+        have hpF : (T.codec.fnDef c.fn).payable = false := by
+          rw [← T.codec.payable_eq]
+          rfl
+        simp [valueOk, hpF, Call.toCtx] at hvo
+        exact of_decide_eq_true hvo
+      · exact ih htlB htl
+
 def callsOf {C : Spec S X E ε} : List (Step C) → List (Step C)
   | [] => []
   | .call c :: tr => .call c :: callsOf tr
@@ -186,10 +209,14 @@ theorem core_exec_cd (T : TransportSetup S X E ε) {f : FnDef} {fn : T.spec.Fn}
   rw [T.codec.encode_decode fn ns hlen] at hgoal
   exact hgoal
 
-theorem wf_decodeTrace (T : TransportSetup S X E ε) (self : Address)
-    (calls : List EvmCall) (h : CallsWF T self calls) :
-    Wf self (decodeTrace T calls) := by
-  induction calls with
+theorem wf_decodeTrace [HasCreditValue X] {T : TransportSetup S X E ε}
+    [HasPayable T.spec] [HasSelfBalance X]
+    (self : Address)
+    (calls : List EvmCall) (w : World S X E) (h : CallsWF T self calls)
+    (hlt : ∀ (w : World S X E), HasSelfBalance.get w.ext < wordBound)
+    (hnp : ∀ fn, T.spec.payable fn = false := by intro fn; cases fn <;> rfl) :
+    Wf self (decodeTrace T calls) w := by
+  induction calls generalizing w with
   | nil => trivial
   | cons call rest ih =>
     have ⟨ht, hs, _, _⟩ := h call (List.mem_cons.mpr (Or.inl rfl))
@@ -198,11 +225,25 @@ theorem wf_decodeTrace (T : TransportSetup S X E ε) (self : Address)
     cases hsel : dispatchedFn T.c call.calldata call.ctx.value with
     | none =>
       simp [decodeTrace, decodeCall, hsel]
-      exact ih hrest
+      exact ih (w := w) hrest
     | some f =>
-      obtain ⟨fn, hfn, _⟩ := T.codec.decodeFn_of_mem f (dispatchedFn_mem hsel)
+      obtain ⟨fn, hfn, heq⟩ := T.codec.decodeFn_of_mem f (dispatchedFn_mem hsel)
+      have hv : call.ctx.value = 0 := by
+        have hvoF := dispatchedFn_valueOk hsel
+        subst heq
+        have hpF : (T.codec.fnDef fn).payable = false := by
+          rw [← T.codec.payable_eq]
+          rfl
+        simp [valueOk, hpF] at hvoF
+        exact hvoF
+      have hb : HasSelfBalance.get w.ext +
+          (Call.ofCtx call.ctx fn (T.codec.decode fn (decodeArgs f call.calldata))).value <
+            wordBound := by
+        simp [Call.ofCtx, hv, hlt w]
       simp [decodeTrace, decodeCall, hsel, hfn, Call.ofCtx]
-      exact ⟨ht, hs, ih hrest⟩
+      refine ⟨ht, hs, hb, ?_⟩
+      exact ih (w := step (.call (Call.ofCtx call.ctx fn
+          (T.codec.decode fn (decodeArgs f call.calldata)))) w) hrest
 
 /-- S1 only: post-`.self` ignores `log` (Token `exec` does not read `log`).
 Call-free contracts have no payable function, so `creditValue w 0 = w`. -/
@@ -297,18 +338,22 @@ theorem CallsWF.head {T : TransportSetup S X E ε} {self call rest}
     CtxWF call.ctx ∧ call.calldata.length < wordBound :=
   h call (List.mem_cons.mpr (Or.inl rfl))
 
-theorem encodeCalls_WF (T : TransportSetup S X E ε) (self : Address)
-    (tr : List (Step T.spec)) (hW : Wf self tr) (hb : EncodeBounded T tr) :
+theorem encodeCalls_WF [HasCreditValue X] [HasSelfBalance X]
+    (T : TransportSetup S X E ε) [HasPayable T.spec]
+    (self : Address)
+    (tr : List (Step T.spec)) (w : World S X E)
+    (hW : Wf self tr w) (hb : EncodeBounded T tr) :
     CallsWF T self (encodeCalls T tr) := by
-  induction tr with
+  induction tr generalizing w with
   | nil => intro call h; cases h
   | cons s rest ih =>
     match s with
-    | .env _ =>
-      exact ih hW (by simpa [EncodeBounded] using hb)
+    | .env x' =>
+      exact ih (w := { w with ext := x' }) hW
+        (by simpa [EncodeBounded] using hb)
     | .call c =>
       rcases hb with ⟨hctxWF, hWargs, hvo, htlB⟩
-      rcases hW with ⟨htgt, hne, hWtl⟩
+      rcases hW with ⟨htgt, hne, _, hWtl⟩
       intro call hmem
       simp [encodeCalls] at hmem
       rcases hmem with hhere | htl
@@ -321,18 +366,26 @@ theorem encodeCalls_WF (T : TransportSetup S X E ε) (self : Address)
           simp [encodeCall]
           rw [length_fnCalldata, hlenA]
           exact T.hbound _ hf
-      · exact ih hWtl htlB call htl
+      · exact ih (w := step (.call c) w) hWtl htlB call htl
 
-theorem wf_callsOf {C : Spec S X E ε} (self : Address) (tr : List (Step C))
-    (h : Wf self tr) : Wf self (callsOf tr) := by
-  induction tr with
+theorem wf_callsOf [HasCreditValue X] {C : Spec S X E ε} [HasPayable C]
+    [HasSelfBalance X]
+    (self : Address) (tr : List (Step C)) (w : World S X E)
+    (h : Wf self tr w)
+    (henv : ∀ s ∈ tr, ∃ c, s = Step.call c) :
+    Wf self (callsOf tr) w := by
+  induction tr generalizing w with
   | nil => trivial
   | cons s rest ih =>
     match s with
-    | .env _ => exact ih h
+    | .env _ =>
+      obtain ⟨c, hne⟩ := henv _ (List.mem_cons_self)
+      cases hne
     | .call c =>
-      rcases h with ⟨ht, hs, htl⟩
-      exact ⟨ht, hs, ih htl⟩
+      rcases h with ⟨ht, hs, hb, htl⟩
+      exact ⟨ht, hs, hb,
+        ih (w := step (.call c) w) htl
+          (fun t ht => henv t (List.mem_cons_of_mem _ ht))⟩
 
 theorem relyAlong_calls {C : Spec S X E ε} {rely : X → X → Prop}
     (tr : List (Step C)) (w : World S X E)

@@ -46,12 +46,13 @@ theorem transport_trace (T : TransportSetup S X E ε)
     (hs : storageRel T.c T.Γ evmKeccak w.self σ)
     (hlog : w.log = []) (hwf : WorldWF T.c T.Γ w)
     (hWF : CallsWF T self calls)
+    (hlt : ∀ (w : World S X E), HasSelfBalance.get w.ext < wordBound)
     (hE : EvmTraceRunAll T.is calls σ σ') :
     let tr := decodeTrace T calls
-    Wf self tr ∧
+    Wf self tr w ∧
       storageRel T.c T.Γ evmKeccak (run tr w).self σ' ∧
       WorldWF T.c T.Γ { run tr w with log := [] } :=
-  Proof.transport_trace T hcf hnp hpc self calls w σ σ' hs hlog hwf hWF hE
+  Proof.transport_trace T hcf hnp hpc self calls w σ σ' hs hlog hwf hWF hlt hE
 
 /-- A function that never CALLs out has post-storage and external ghosts
 that depend only on the pre-storage and pre-ghosts, not on logs or on
@@ -177,7 +178,7 @@ theorem transport_trace_ext (T : TransportSetup S ExtState E ε)
     (hw : Inv w)
     (hE : EvmTraceRunExtAll T.is calls σ ξ σ' ξ') :
     let tr := decodeTrace T calls
-    Wf self tr ∧
+    Wf self tr w ∧
       ∃ w' : World S ExtState E,
         storageRel T.c T.Γ evmKeccak w'.self σ' ∧
         WorldWF T.c T.Γ w' ∧
@@ -245,7 +246,7 @@ theorem transport_exists_ext (T : TransportSetup S ExtState E ε)
     (σ : U256 → U256) (ξ : Foreign)
     (hs : storageRel T.c T.Γ evmKeccak w.self σ)
     (hwf : WorldWF T.c T.Γ w)
-    (hb : EncodeBounded T tr) (hW : Wf self tr) (hw : Inv w)
+    (hb : EncodeBounded T tr) (hW : Wf self tr w) (hw : Inv w)
     (hOr : w.oracle = Oracle.ofExt Xpkg.oracle) :
     ∃ σ' ξ' w',
       EvmTraceRunExt T.is (encodeCalls T tr) σ ξ σ' ξ' ∧
@@ -280,7 +281,7 @@ theorem transport_exists_claim_ext (T : TransportSetup S ExtState E ε)
     (σ : U256 → U256) (ξ : Foreign)
     (hs : storageRel T.c T.Γ evmKeccak w.self σ)
     (hwf : WorldWF T.c T.Γ w)
-    (hb : EncodeBounded T tr) (hW : Wf self tr) (hw : Inv w)
+    (hb : EncodeBounded T tr) (hW : Wf self tr w) (hw : Inv w)
     (hA : NoAuthAlong Auth a (callsOf tr) w)
     (hOr : w.oracle = Oracle.ofExt Xpkg.oracle) :
     ∃ σ' ξ' w',

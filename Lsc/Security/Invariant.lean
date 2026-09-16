@@ -70,4 +70,29 @@ def PreservesInvCreditFnAt [HasCreditValue X] (C : Spec S X E ε)
     Tx.run (C.exec fn args) ctx (World.creditValue w ctx.value) = .ok (ret, w') →
     Inv w'
 
+/-- How a spec deploys. Default: no constructor, storage is `default`.
+Native balance and `ext` are arbitrary. Contracts with a constructor
+override this with the post-state of a successful constructor run from
+empty storage (any deployer/args). -/
+class HasDeploy (C : Spec S X E ε) where
+  pred : World S X E → Prop
+
+/-- Storage right after a successful constructor run from empty storage, any
+deployer/args; contracts without a constructor deploy with default storage.
+Native balance and ext are arbitrary. -/
+def Deployed (C : Spec S X E ε) [HasDeploy C] (w : World S X E) : Prop :=
+  HasDeploy.pred (C := C) w
+
+instance (priority := low) {S X E ε : Type} [Inhabited S]
+    {C : Spec S X E ε} : HasDeploy C where
+  pred w := w.self = default
+
+/-- States the deployed contract can actually be in: deployment followed by
+any well-formed trace the environment may produce under `rely`. -/
+def Reachable [HasCreditValue X] {C : Spec S X E ε} [HasPayable C]
+    [HasSelfBalance X] [HasDeploy C]
+    (rely : X → X → Prop) (self : Address) (w : World S X E) : Prop :=
+  ∃ (w₀ : World S X E) (tr : List (Step C)),
+    Deployed C w₀ ∧ Wf self tr w₀ ∧ RelyAlong rely tr w₀ ∧ w = run tr w₀
+
 end Lsc.Security

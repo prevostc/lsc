@@ -14,12 +14,12 @@ attribute [local simp] Claim.ofSelf AuthPred.ofSelf
 namespace WETH
 
 /-!
-WETH anti-extraction: wrapped `claim` is storage-only. `withdraw` burns
-then `Native.send`s the same amount to the caller (`NativeOutflow`).
-`deposit` is payable and only increases claims. `Inv` carries finite
-support, `totalSupply ≤ nativeBalance`, and `DebitsOnSend`. Trace
-preservation uses the first and last conjuncts: BitVec wrap of a payable
-credit can drop `nativeBalance` below `totalSupply`.
+WETH anti-extraction and backing. Wrapped `claim` is storage-only.
+`withdraw` burns then `Native.send`s the same amount to the caller.
+`deposit` credits incoming value then mints it. `Inv` (finite support,
+`totalSupply ≤ nativeBalance`, honest send) is a proof device: public
+theorems take `Reachable`. `Wf` forbids wrapping `creditValue`, which is
+what makes backing preservable.
 -/
 
 lemma Auth_transfer (a : Address) (ctx : Ctx) (dst : Address)
@@ -38,6 +38,32 @@ lemma Auth_transferFrom (a : Address) (ctx : Ctx) (src dst : Address)
     Auth a (Call.ofCtx ctx .transferFrom (src, dst, n)) w ↔
       src = a ∧ n ≤ w.self.allowances src ctx.sender :=
   Iff.rfl
+
+/-- Finite support of balances. -/
+def InvStorage (s : Storage) : Prop :=
+  ∃ H : Finset Address,
+    (∀ a, a ∉ H → s.balances a = 0) ∧
+    H.sum (fun a => (s.balances a).raw) = s.totalSupply.raw
+
+/-- Balances have finite support summing to `totalSupply`, wrapped supply
+is covered by `self`'s native balance, and `oracle.send` debits that
+balance by the sent amount. -/
+def Inv (w : World Storage ExtState Event) : Prop :=
+  InvStorage w.self ∧
+    w.self.totalSupply.raw ≤ World.nativeBalance w ∧
+    DebitsOnSend w.oracle
+
+/-- Empty storage, honest `Native.send`. Native balance and `ext` are
+arbitrary. -/
+instance : HasDeploy spec where
+  pred w :=
+    (∀ a, w.self.balances a = 0) ∧
+    w.self.totalSupply = 0 ∧
+    DebitsOnSend w.oracle
+
+/-- Wrapped supply is covered by native ETH held by `self`. -/
+def Backed (w : World Storage ExtState Event) : Prop :=
+  w.self.totalSupply.raw ≤ World.nativeBalance w
 
 /-! ### Sum helpers for `Inv` -/
 
@@ -235,11 +261,8 @@ private theorem inv_of_withdrawPost (σ : Storage) (src : Address) (n : Amount n
     · simpa [withdrawPost, debit, hbals0, Function.update_eq_self, Amount.raw_zero,
         Amount.raw_sub, Nat.sub_zero] using hsum
 
-/-- Trace invariant: finite support and honest `Native.send`. Backing
-`totalSupply ≤ nativeBalance` is the extra conjunct of `Inv` used by
-`weth_backed`. Payable `creditValue` wraps `selfBalance` at `2^256`, so
-that conjunct is not preserved by `deposit` after a donation near the
-word bound; extraction of wrapped claims does not need it. -/
+/-- Finite support and honest `Native.send`. Extraction uses this; backing
+is proved separately from `Wf`'s native-balance bound. -/
 private abbrev InvTrace (w : World Storage ExtState Event) : Prop :=
   InvStorage w.self ∧ DebitsOnSend w.oracle
 
@@ -451,21 +474,212 @@ theorem weth_inv_rely : PreservesInvEnv spec InvTrace rely := by
   intro w x' hw _hr
   exact hw
 
+theorem backed_env {w : World Storage ExtState Event} {x' : ExtState}
+    (hr : rely w.ext x') (h : Backed w) : Backed { w with ext := x' } :=
+  Nat.le_trans h hr
+
+theorem backed_deposit {ctx : Ctx} {w : World Storage ExtState Event}
+    {ret : Unit} {w' : World Storage ExtState Event}
+    (hb : World.nativeBalance w + ctx.value < wordBound)
+    (hw : Inv w)
+    (hrun : Tx.run depositTx ctx (World.creditValue w ctx.value) = .ok (ret, w')) :
+    Backed w' := by
+  obtain ⟨_, _, rfl⟩ := deposit_ok_inv ctx (World.creditValue w ctx.value) hrun
+  have hnat :
+      World.nativeBalance
+        { World.creditValue w ctx.value with
+            self := depositPost (World.creditValue w ctx.value).self ctx.sender
+              ⟨ctx.value⟩
+            log := (World.creditValue w ctx.value).log ++
+              [.Deposit ctx.sender ⟨ctx.value⟩] } =
+      World.nativeBalance w + ctx.value := by
+    change World.nativeBalance (World.creditValue w ctx.value) = _
+    exact nativeBalance_creditValue w ctx.value hb
+  have hts :
+      (depositPost (World.creditValue w ctx.value).self ctx.sender
+        ⟨ctx.value⟩).totalSupply.raw =
+      w.self.totalSupply.raw + ctx.value := by
+    simp [depositPost, Amount.raw_add]
+  rw [Backed, hnat, hts]
+  exact Nat.add_le_add_right hw.2.1 ctx.value
+
+theorem backed_withdraw (amount : Amount native) {ctx : Ctx}
+    {w w' : World Storage ExtState Event}
+    (hw : Inv w)
+    (hrun : Tx.run (withdraw amount) ctx w = .ok ((), w')) :
+    Backed w' := by
+  obtain ⟨_, hsup, x', hsend, rfl⟩ := withdraw_ok_inv ctx w amount hrun
+  have hnat :
+      World.nativeBalance
+          { w with
+            self := withdrawPost w.self ctx.sender amount
+            ext := x'
+            log := w.log ++ [.Withdrawal ctx.sender amount] } +
+        amount.raw =
+      World.nativeBalance w := by
+    change HasSelfBalance.get x' + amount.raw = HasSelfBalance.get w.ext
+    exact hw.2.2 ctx.sender amount.raw w.ext x' hsend
+  have hts :
+      (withdrawPost w.self ctx.sender amount).totalSupply.raw + amount.raw =
+      w.self.totalSupply.raw := by
+    simp [withdrawPost, Amount.raw_sub]
+    exact Nat.sub_add_cancel hsup
+  have hle :
+      (withdrawPost w.self ctx.sender amount).totalSupply.raw + amount.raw ≤
+        World.nativeBalance
+            { w with
+              self := withdrawPost w.self ctx.sender amount
+              ext := x'
+              log := w.log ++ [.Withdrawal ctx.sender amount] } +
+          amount.raw := by
+    rw [hts, hnat]
+    exact hw.2.1
+  exact Nat.le_of_add_le_add_right hle
+
+theorem backed_transfer {ctx : Ctx} {w w' : World Storage ExtState Event}
+    (dst : Address) (amount : Amount native)
+    (hw : Inv w)
+    (hrun : Tx.run (transfer dst amount) ctx w = .ok (true, w')) :
+    Backed w' := by
+  obtain ⟨_, rfl⟩ := transfer_ok_inv ctx w dst amount hrun
+  simp [Backed, transferPost]
+  exact hw.2.1
+
+theorem backed_transferFrom {ctx : Ctx} {w w' : World Storage ExtState Event}
+    (src dst : Address) (amount : Amount native)
+    (hw : Inv w)
+    (hrun : Tx.run (transferFrom src dst amount) ctx w = .ok (true, w')) :
+    Backed w' := by
+  obtain ⟨_, _, rfl⟩ := transferFrom_ok_inv ctx w src dst amount hrun
+  simp [Backed, transferFromPost]
+  exact hw.2.1
+
+theorem backed_approve {ctx : Ctx} {w w' : World Storage ExtState Event}
+    (spender : Address) (amount : Amount native)
+    (hw : Inv w)
+    (hrun : Tx.run (approve spender amount) ctx w = .ok (true, w')) :
+    Backed w' := by
+  rw [approve_ok] at hrun
+  obtain ⟨rfl, rfl⟩ := hrun
+  simp [Backed, approvePost]
+  exact hw.2.1
+
+theorem backed_credit (fn : spec.Fn)
+    (args : spec.Args fn) (ctx : Ctx) (w : World Storage ExtState Event)
+    (ret : spec.Ret fn) (w' : World Storage ExtState Event)
+    (hb : World.nativeBalance w + ctx.value < wordBound)
+    (hw : Inv w)
+    (hvo : spec.valueOk fn ctx.value = true)
+    (hrun : Tx.run (spec.exec fn args) ctx (World.creditValue w ctx.value) =
+      .ok (ret, w')) :
+    Backed w' := by
+  cases fn with
+  | deposit =>
+    exact backed_deposit hb hw hrun
+  | withdraw =>
+    have hv : ctx.value = 0 := spec.value_eq_zero_of_valueOk (by rfl) hvo
+    rw [hv, World.creditValue_zero] at hrun
+    exact backed_withdraw args hw (by convert hrun)
+  | transfer =>
+    have hv : ctx.value = 0 := spec.value_eq_zero_of_valueOk (by rfl) hvo
+    rw [hv, World.creditValue_zero] at hrun
+    have ht : ret = true := transfer_returns_true ctx w args.1 args.2 (by convert hrun)
+    rw [ht] at hrun
+    exact backed_transfer args.1 args.2 hw (by convert hrun)
+  | transferFrom =>
+    have hv : ctx.value = 0 := spec.value_eq_zero_of_valueOk (by rfl) hvo
+    rw [hv, World.creditValue_zero] at hrun
+    have ht : ret = true :=
+      transferFrom_returns_true ctx w args.1 args.2.1 args.2.2 (by convert hrun)
+    rw [ht] at hrun
+    exact backed_transferFrom args.1 args.2.1 args.2.2 hw (by convert hrun)
+  | approve =>
+    have hv : ctx.value = 0 := spec.value_eq_zero_of_valueOk (by rfl) hvo
+    rw [hv, World.creditValue_zero] at hrun
+    rw [approve_ok args.1 args.2 (ctx := ctx) (w := w)] at hrun
+    obtain ⟨rfl, rfl⟩ := hrun
+    simp [Backed, approvePost]
+    exact hw.2.1
+  | balanceOf =>
+    have hv : ctx.value = 0 := spec.value_eq_zero_of_valueOk (by rfl) hvo
+    rw [hv, World.creditValue_zero] at hrun
+    rw [balanceOf_returns_stored_balance ctx w args] at hrun
+    obtain ⟨rfl, rfl⟩ := hrun
+    exact hw.2.1
+  | allowance =>
+    have hv : ctx.value = 0 := spec.value_eq_zero_of_valueOk (by rfl) hvo
+    rw [hv, World.creditValue_zero] at hrun
+    rw [allowance_returns_stored ctx w args.1 args.2] at hrun
+    obtain ⟨rfl, rfl⟩ := hrun
+    exact hw.2.1
+  | totalSupply =>
+    have hv : ctx.value = 0 := spec.value_eq_zero_of_valueOk (by rfl) hvo
+    rw [hv, World.creditValue_zero] at hrun
+    rw [totalSupply_returns_stored ctx w] at hrun
+    obtain ⟨rfl, rfl⟩ := hrun
+    exact hw.2.1
+
+theorem backed_step {c : Call spec} {w : World Storage ExtState Event}
+    (hb : World.nativeBalance w + c.value < wordBound)
+    (hw : Inv w) : Backed (step (.call c) w) := by
+  rw [step_eq_run]
+  split_ifs with hvo
+  · cases hrun : spec.exec c.fn c.args c.toCtx (World.creditValue w c.value) with
+    | error _ => exact hw.2.1
+    | ok p =>
+      exact backed_credit c.fn c.args c.toCtx w p.1 p.2 hb hw hvo hrun
+  · exact hw.2.1
+
+theorem weth_inv_run (self : Address) {w : World Storage ExtState Event}
+    {tr : List (Step spec)}
+    (hw : Inv w) (hW : Wf self tr w) (hR : RelyAlong rely tr w) :
+    Inv (run tr w) := by
+  induction tr generalizing w with
+  | nil => simpa using hw
+  | cons s rest ih =>
+    match s with
+    | .call c =>
+      have ⟨ht, hs, hb, htl⟩ := hW
+      have hTr : InvTrace (step (.call c) w) :=
+        weth_preserves_inv self c w ht hs (Inv_to_trace hw)
+      have hB : Backed (step (.call c) w) :=
+        backed_step (by simpa [World.nativeBalance] using hb) hw
+      exact ih ⟨hTr.1, hB, hTr.2⟩ htl hR
+    | .env x' =>
+      have ⟨hr, htl⟩ := hR
+      have hTr : InvTrace { w with ext := x' } :=
+        weth_inv_rely w x' (Inv_to_trace hw) hr
+      exact ih ⟨hTr.1, backed_env hr hw.2.1, hTr.2⟩ hW htl
+
+theorem deployed_inv {w : World Storage ExtState Event}
+    (h : Deployed spec w) : Inv w := by
+  obtain ⟨hbals, hts, hO⟩ := h
+  refine ⟨⟨∅, fun a _ => hbals a, ?sum⟩, ?backed, hO⟩
+  · simp [hts]
+  · simp [hts, Amount.raw_zero]
+
+theorem weth_inv_of_reachable {self : Address} {w : World Storage ExtState Event}
+    (h : Reachable (C := spec) rely self w) : Inv w := by
+  obtain ⟨w₀, tr, hDep, hW, hR, rfl⟩ := h
+  exact weth_inv_run self (deployed_inv hDep) hW hR
+
 namespace Proof
 
-theorem weth_backed {w : World Storage ExtState Event} (h : Inv w) :
+theorem weth_backed {self : Address} {w : World Storage ExtState Event}
+    (h : Reachable (C := spec) rely self w) :
     w.self.totalSupply.raw ≤ World.nativeBalance w :=
-  h.2.1
+  (weth_inv_of_reachable h).2.1
 
 theorem weth_no_unauthorized_extraction (self : Address)
     (tr : List (Step spec)) (w : World Storage ExtState Event) (a : Address)
-    (hw : Inv w) (hW : Wf self tr) (hR : RelyAlong rely tr w)
+    (h : Reachable (C := spec) rely self w)
+    (hW : Wf self tr w) (hR : RelyAlong rely tr w)
     (hA : NoAuthAlong Auth a tr w) :
     claim a w ≤ claim a (run tr w) :=
   no_unauthorized_extraction_at weth_no_unauth (weth_preserves_inv self)
     weth_inv_rely
     (ClaimMonoEnv.of_self (fun a (s : Storage) => (s.balances a).raw) rely)
-    tr w a (Inv_to_trace hw) hW hR hA
+    tr w a (Inv_to_trace (weth_inv_of_reachable h)) hW hR hA
 
 end Proof
 

@@ -110,6 +110,10 @@ Not derived from powdr:
   forward (`Yul Run → ∃ EVM Steps`). Progress (`toCalls_total` + `yul_progress`)
   supplies a Yul run and `steps_halted_unique` identifies every halted matching
   EVM run with it.
+- **Native-balance bound.** Well-formed traces target `self`, are not self-calls, and
+  never overflow a 256-bit native balance — true on every chain since total native
+  supply < `2^256`. `creditValue` still wraps (EVM `BitVec`); `Wf` is what rules
+  wrapping out of attack traces.
 
 ## Not covered
 
