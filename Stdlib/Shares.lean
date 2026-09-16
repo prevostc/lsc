@@ -48,7 +48,7 @@ variable {S X E ε : Type} {a s : Asset}
 
 /-- Shares minted for `assets` against live `totalAssets` / `totalShares`.
 `⌊(totalShares + 10^offset) · assets / (totalAssets + 1)⌋`. -/
-@[lsc_inline]
+@[internal inline]
 def toShares (o : Offset) (assets totalAssets : Amount a)
     (totalShares : Amount s) : Tx S X E ε (Amount s) := do
   let ts' ← Amount.add totalShares (virtualShares o)
@@ -57,7 +57,7 @@ def toShares (o : Offset) (assets totalAssets : Amount a)
 
 /-- Assets paid for `shares` against live `totalAssets` / `totalShares`.
 `⌊(totalAssets + 1) · shares / (totalShares + 10^offset)⌋`. -/
-@[lsc_inline]
+@[internal inline]
 def toAssets (o : Offset) (shares : Amount s) (totalAssets : Amount a)
     (totalShares : Amount s) : Tx S X E ε (Amount a) := do
   let ta' ← Amount.add totalAssets (1 : Amount a)

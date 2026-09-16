@@ -12,8 +12,8 @@ address 0 (no `sqrt`, no loop; revert `.InsufficientLiquidity` if
 `a0 ≤ 1000`). Later mint is `min(⌊a0·S/r0⌋, ⌊a1·S/r1⌋)` via a
 pure `if`. Both branches of the first-vs-later mint share one tail
 (`seqIf`): require nonzero shares, write reserves, `mint who minted`.
-`mint` is `@[lsc_inline]` and updates `shares[to]` and `totalShares`.
-Both swap directions are thin wrappers over one `@[lsc_inline]`
+`mint` is `@[internal]` and updates `shares[to]` and `totalShares`.
+Both swap directions are thin wrappers over one `@[internal]`
 `SwapDirection`-indexed `swap` (`read d.reserveIn` / `write d.reserveOut`,
 one `Swap` event with a `Bool` direction bit).
 `swap` quotes with `swapOut` (0.3%-fee notional, then

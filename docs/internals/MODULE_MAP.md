@@ -40,7 +40,7 @@ Lake libraries (`lakefile.lean`): `LscSemantics` (`Lsc.Lang`, `Lsc.Security`,
   Exports `f.core`, `f.core_denote`, `C.contract`, `C.Fn` / `C.entry` / `C.spec`,
   `C.impl` from `implements`. `#lsc_obligations C`.
 - `Contract.lean` — `ContractDef`, `FnDef`, ABI signatures, keccak selectors.
-- `Inline.lean` — `@[lsc_inline]` for stdlib helpers mid-`do`.
+- `Inline.lean` — `@[internal]` / `@[internal inline]` for non-entrypoint helpers.
 
 ## `Lsc/Security` — the security model
 
@@ -67,7 +67,7 @@ Does not import `Examples`. `Lsc` does not import `Stdlib`.
   `IERC20.Spec T`. Namespace `Lsc.Stdlib`.
 - `Scales.lean` — `WAD`, `RAY`, `USDC_SCALE`, `Q96`, `E8`; `Fixed` helpers.
 - `SafeERC20.lean` — `safeTransfer` / `safeTransferFrom` / `safeApprove`
-  (`@[lsc_inline]`).
+  (`@[internal inline]`).
 - Tests: `Tests.lean`, `InterfaceTests.lean`, `ReifyInterfaceTests.lean`,
   `ReifyVaultLikeTests.lean`.
 

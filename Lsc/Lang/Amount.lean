@@ -251,12 +251,12 @@ def mulDivUp (num : Amount b) (x y : Amount a) : Tx S X E ε (Amount b) :=
   ofWord <$> Tx.mulDivUp num.raw x.raw y.raw
 
 /-- `⌊x * r / 10^d⌋`. Reverts on product overflow; `10^d ≠ 0`. -/
-@[lsc_inline]
+@[internal inline]
 def mulFixedDown {d : Nat} (x : Amount a) (r : Fixed d) : Tx S X E ε (Amount a) :=
   mulDivDown x r (ofWord (Word.scale d))
 
 /-- `⌈x * r / 10^d⌉`. Reverts on product overflow; `10^d ≠ 0`. -/
-@[lsc_inline]
+@[internal inline]
 def mulFixedUp {d : Nat} (x : Amount a) (r : Fixed d) : Tx S X E ε (Amount a) :=
   mulDivUp x r (ofWord (Word.scale d))
 

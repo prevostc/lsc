@@ -72,7 +72,7 @@ per-field `@[simp]` reductions `C.schema_read_<field>` / `C.schema_write_<field>
   `bind_map` and the generated schema-read lemmas. Proved by `rfl`
   when the sides are definitionally equal;
   otherwise by the `Tx` monad laws (`bind` is not definitionally associative,
-  so an `@[lsc_inline]` helper mid-`do` needs them). A propositional
+  so an `@[internal]` helper mid-`do` needs them). A propositional
   certificate is not a trust extension: the kernel still checks
   `denote (reify f) = f`.
 
@@ -90,7 +90,7 @@ import `Lsc.Security`.
 The reifier only accepts the *reifiable fragment* — the fixed set of
 `Tx` primitives combined with `do`, `let`, `if` on decidable word comparisons, and
 `pure` of words/addresses/pairs (including a `CoeTail` lift of a plain value).
-Library helpers tagged `@[lsc_inline]` are
+Library helpers tagged `@[internal]` (optional `inline` flag) are
 delta-unfolded (β with arguments, fuel-bounded; recursive defs are rejected at
 the attribute) and reified from the resulting body. Anything else is rejected
 with the offending subterm, so a reifier bug or an out-of-fragment program is a
@@ -954,17 +954,17 @@ def isDeltaStop : Name → Bool
   | _ => false
 
 def isLscInline (n : Name) : MetaM Bool := do
-  return Lsc.lscInlineAttr.hasTag (← getEnv) n
+  return Lsc.isInternal (← getEnv) n
 
-/-- Error when an `@[lsc_inline]` body (or a non-primitive bind) is out of fragment. -/
+/-- Error when an `@[internal]` body (or a non-primitive bind) is out of fragment. -/
 def throwInlineOr {α : Type} (inline? : Option Name) (sub : Expr) (fallback : MessageData) :
     MetaM α :=
   match inline? with
   | some n =>
-    throwError "reify: `@[lsc_inline]` `{.ofConstName n}` body is outside the reifiable fragment; offending sub-term:{indentExpr sub}"
+    throwError "reify: `@[internal]` `{.ofConstName n}` body is outside the reifiable fragment; offending sub-term:{indentExpr sub}"
   | none => throwError fallback
 
-/-- Unfold `@[lsc_inline]` (and `isSurfaceOp` fallback), reducing `Rounding` matches.
+/-- Unfold `@[internal]` (and `isSurfaceOp` fallback), reducing `Rounding` matches.
 Before unfolding `rescale`, `roundingOf` requires a literal `.down`/`.up`. -/
 partial def deltaUnfold (e : Expr) (fuel : Nat := 8) : MetaM (Expr × Option Name) := do
   let rec go (e : Expr) (fuel : Nat) (seen : Option Name) : MetaM (Expr × Option Name) := do
@@ -1721,11 +1721,11 @@ partial def reify (ci : ContractInfo) (t : RetTy) (env : Env t) (e : Expr)
 
 /-! ## Commands -/
 
-/-- `@[lsc_inline]` helpers and generated `I.Ref.f` methods reachable from `fn`. -/
+/-- `@[internal]` helpers and generated `I.Ref.f` methods reachable from `fn`. -/
 def isCertUnfold (env : Environment) (n : Name) : Bool :=
-  Lsc.lscInlineAttr.hasTag env n || isRefMethod n
+  Lsc.isInternal env n || isRefMethod n
 
-/-- `@[lsc_inline]` names and `I.Ref` methods reachable from `fn`. -/
+/-- `@[internal]` names and `I.Ref` methods reachable from `fn`. -/
 def inlinesUsedBy (fn : Name) : MetaM (Array Name) := do
   let env ← getEnv
   let info ← getConstInfoDefn fn
@@ -1819,7 +1819,7 @@ def bindArgs? (e : Expr) : Option (Expr × Expr) :=
   if e.isAppOfArity ``Bind.bind 6 then some (e.getArg! 4, e.getArg! 5)
   else none
 
-/-- Unfold `Core.denote*` and `@[lsc_inline]` so a diagnostic can see the `bind`s. -/
+/-- Unfold `Core.denote*` and `@[internal]` so a diagnostic can see the `bind`s. -/
 partial def unfoldCertHead (e : Expr) (fuel : Nat := 16) : MetaM Expr := do
   let e := e.consumeMData
   if fuel = 0 then return e
@@ -3476,7 +3476,9 @@ defines `C.contract`, `C.Fn` / `C.entry` / `C.spec`, the transport codec, and
 `named `constructor` is the constructor; otherwise the kind is `view` when
 `Core.isPureRead` (no writes, emits, or CALLs) and `tx` otherwise.
 `[Payable]` / `[Reentrant]` / `[Reentrant.Unsafe]` instance binders are
-recorded on `FnDef`; store-after-call is rejected unless `[Reentrant.Unsafe]`. -/
+recorded on `FnDef`; store-after-call is rejected unless `[Reentrant.Unsafe]`.
+A listed function tagged `@[internal]` is rejected: it has no access control
+and must be exposed through an entrypoint of your own. -/
 syntax (name := lscContract)
   "lsc_contract " ident ident+
     ("implements " ident term:arg* (", " ident term:arg*)*)* : command
@@ -3494,6 +3496,9 @@ syntax (name := lscContract)
     for fn in fns do
       let n ← liftCoreM <|
         realizeGlobalConstNoOverloadWithInfo (mkIdent (nsName ++ fn.getId))
+      if Lsc.isInternal (← getEnv) n then
+        throwError "‘{n.getString!}’ is an internal function (no access control); \
+          expose it through an entrypoint of your own."
       resolved := resolved.push n
     let mut clauses : Array ImplementsClause := #[]
     for (id, args) in parseImplements stx[3] do

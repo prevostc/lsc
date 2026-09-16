@@ -112,7 +112,7 @@ inductive SwapDirection
   | .oneForZero => protocolFees1
 
 /-- Constant-product quote: 0.3% fee, output and protocol take; oversized take reverts. -/
-@[lsc_inline] def swapOut {a b : Asset} (rIn : Amount a) (rOut : Amount b)
+@[internal] def swapOut {a b : Asset} (rIn : Amount a) (rOut : Amount b)
     (amountIn : Amount a) (share : Bps) : M (Amount b × Amount a) := do
   let dxF ← amountIn mulDiv↓ 9970 / 10000
   let den ← rIn +? dxF
@@ -133,7 +133,7 @@ def constructor (owner t0 t1 : Address) : M Unit := do
 def MINIMUM_LIQUIDITY : Amount lpShare := 1000
 
 /-- Mint `n` shares to `to` and bump `totalShares`. -/
-@[lsc_inline] def mint (to : Address) (n : Amount lpShare) : M Unit := do
+@[internal] def mint (to : Address) (n : Amount lpShare) : M Unit := do
   write shares[to] (read shares[to] +? n)
   write totalShares (read totalShares +? n)
 
@@ -199,7 +199,7 @@ def removeLiquidity (s : Amount lpShare) : M (Amount asset0 × Amount asset1) :=
   return (out0, out1)
 
 /-- Sell `amountIn` on side `d`; reverts unless `out ≥ minOut`. -/
-@[lsc_inline] def swap (d : SwapDirection) (amountIn : Amount d.assetIn)
+@[internal] def swap (d : SwapDirection) (amountIn : Amount d.assetIn)
     (minOut : Amount d.assetOut) : M (Amount d.assetOut) := do
   Tx.require (0 < amountIn) .Zero
   let rIn ← read d.reserveIn

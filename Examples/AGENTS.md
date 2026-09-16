@@ -16,7 +16,8 @@ Exactly:
   `.core`/`core_denote`/`Core.*`/`Spec.exec` mention, `Amount.ofWord`/`.raw`/
   word-level plumbing, helper duplicates (`*Raw`, `*U`, `*Unit`, `*Impl`
   suffixes), named arithmetic where an operator exists (`+? -? *? /?`,
-  `mulDiv↓`/`mulDiv↑`).
+  `mulDiv↓`/`mulDiv↑`). `@[internal]` / `@[internal inline]` helpers are
+  allowed (not listed in `lsc_contract`).
 - `Spec.lean` — invariant, rely, authorisation/value predicates, named world
   readers (e.g. `holdings w`), and `spentCall` (amount an accepted call moved
   out on `a`'s authority). No theorems, no proofs. `Inv` / `Auth` / `claim`

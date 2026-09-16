@@ -11,7 +11,7 @@ words. Reify reduces closed numerals with `closedNat?`; they are not Core
 primitives.
 
 `x *?↓ r` / `x *?↑ r` scale an amount by a `Fixed d`. `Fixed.divDown` /
-`divUp` are `@[lsc_inline]` wrappers over dimensional `Amount.mulDivDown` /
+`divUp` are `@[internal inline]` wrappers over dimensional `Amount.mulDivDown` /
 `Up` with numerator `10^d`. `Amount.rescale` re-expresses an amount at a
 different decimal count.
 -/
@@ -51,7 +51,7 @@ namespace Amount
 
 /-- Re-express `x` from `srcDec` decimals to `tgtDec` decimals. `r` must be a
 literal so Reify can pick `mulDivDown` vs `mulDivUp`. -/
-@[lsc_inline]
+@[internal inline]
 def rescale (srcDec tgtDec : Word) (r : Rounding) (x : Amount a) :
     Tx S X E ε (Fixed tgtDec) :=
   ofWord <$> Tx.rescale srcDec tgtDec r x.raw
@@ -63,12 +63,12 @@ end Amount
 namespace Fixed
 
 /-- `⌊a * 10^d / x⌋`. -/
-@[lsc_inline]
+@[internal inline]
 def divDown {d : Nat} (a x : Fixed d) : Tx S X E ε (Fixed d) :=
   Amount.mulDivDown a (Amount.ofWord (Word.scale d)) x
 
 /-- `⌈a * 10^d / x⌉`. -/
-@[lsc_inline]
+@[internal inline]
 def divUp {d : Nat} (a x : Fixed d) : Tx S X E ε (Fixed d) :=
   Amount.mulDivUp a (Amount.ofWord (Word.scale d)) x
 

@@ -2,6 +2,19 @@
 
 Short dated records.
 
+## 2026-09-16 — `@[internal]` vs `[Payable]` / `[Reentrant]`
+
+An **attribute** (`@[internal]`, optional `inline` flag) is declaration
+metadata: it does not change a caller's type and does not propagate. A
+**binder** (`[Payable]`, `[Reentrant]`) is a capability: a helper that asks
+for it is callable only from a function that already has it.
+`lsc_contract` rejects a listed `@[internal]` function — internals have no
+access control and must be exposed through an entrypoint of your own.
+Today both `@[internal]` and `@[internal inline]` are substituted at call
+sites. The default will become a real Yul function call; `inline` stays
+substituted. Inline heuristics belong to the verified Yul optimizer, not
+the frontend. Do not use Lean's builtin `@[inline]`.
+
 ## 2026-09-16 — D1'': claims include native holdings (19b)
 
 `Claim` is `{tokens, native}` with `native` default 0; `claim a w` is the
@@ -20,7 +33,7 @@ class so Vault `lsc_contract` stays 2-field. `of_fns` needs no `hcredit`.
 
 ## 2026-09-15 — Cpamm `SwapDirection`-indexed swap (18a)
 
-One `@[lsc_inline] swap d` with `Field Storage` accessors on `d`. Lean
+One `@[internal] swap d` with `Field Storage` accessors on `d`. Lean
 lexes `d.reserveIn` as one hierarchical `ident`, so `read`/`write` split
 that name and emit `Field.get`/`set`. After inline, `d` is a constructor
 and Reify/`simp` reduce the match. `Event` cannot carry a user inductive

@@ -8,7 +8,7 @@ The surface language is plain Lean: contract functions are ordinary definitions 
 `Tx S X E ε` monad, written with `do` notation and a fixed set of primitives. Everything
 in this file is the *semantics*; the reifier (`Lsc.Lang.Reify`) recovers a `Core` term from
 such definitions and certifies `Core.denote core = f` by `rfl`, or by the monad laws below
-when an `@[lsc_inline]` helper sits mid-`do` (`bind` is not definitionally associative).
+when an `@[internal]` helper sits mid-`do` (`bind` is not definitionally associative).
 
 Design constraints that matter for the certificate:
 

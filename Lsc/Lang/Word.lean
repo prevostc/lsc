@@ -86,7 +86,7 @@ def pow10 (d : Nat) : Tx S X E ε Nat :=
 
 /-- Re-express `a` from `srcDec` decimals to `tgtDec` decimals. Same-scale is
 the identity. Otherwise `pow10` then `mulDiv`. `r` must be a literal. -/
-@[lsc_inline]
+@[internal inline]
 def rescale (srcDec tgtDec : Nat) (r : Rounding) (a : Nat) : Tx S X E ε Nat :=
   if srcDec = tgtDec then
     pure a

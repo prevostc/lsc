@@ -47,7 +47,7 @@ namespace Native
 variable {S X E ε : Type} {a : Asset}
 
 /-- CALL with `amount` wei and empty calldata. Reverts with `err` on failure. -/
-@[lsc_inline]
+@[internal inline]
 def send (to : Address) (amount : Amount a) (err : ε) : Tx S X E ε Unit := do
   let ok ← Tx.sendRaw to amount.raw
   Tx.require (ok = true) err

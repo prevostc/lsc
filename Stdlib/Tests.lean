@@ -4,7 +4,7 @@ import Stdlib.Scales
 import Stdlib.Shares
 
 /-!
-# Stdlib compile tests — `@[lsc_inline]` helpers, including mid-`do`
+# Stdlib compile tests — `@[internal inline]` helpers, including mid-`do`
 
 Whole-function helpers still certify (often by `rfl`). `doSafeTransferFromMid`
 puts a compound helper between other binds so the certificate must use the
@@ -95,7 +95,7 @@ def doQuote (r0 : Amount asset0) (r1 : Amount asset1) (dx : Amount asset0) :
   Amount.mulDivDown r1 dxF den
 
 /-- Inline helper returning a pair; consumed by `let (out, dxF) ← …`. -/
-@[lsc_inline] def quotePair (r0 : Amount asset0) (r1 : Amount asset1)
+@[internal inline] def quotePair (r0 : Amount asset0) (r1 : Amount asset1)
     (dx : Amount asset0) : M (Amount asset1 × Amount asset0) := do
   let dxF ← dx mulDiv↓ 9970 / 10000
   let den ← r0 +? dxF
@@ -103,7 +103,7 @@ def doQuote (r0 : Amount asset0) (r1 : Amount asset1) (dx : Amount asset0) :
   return (out, dxF)
 
 /-- Inline helper returning a triple; consumed by `let (out, fee, dxF) ← …`. -/
-@[lsc_inline] def quoteTriple (r0 : Amount asset0) (r1 : Amount asset1)
+@[internal inline] def quoteTriple (r0 : Amount asset0) (r1 : Amount asset1)
     (dx : Amount asset0) : M (Amount asset1 × Amount asset0 × Amount asset0) := do
   let dxF ← dx mulDiv↓ 9970 / 10000
   let den ← r0 +? dxF

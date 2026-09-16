@@ -34,6 +34,11 @@ Core  --toYul (ours)-->  Yul AST (powdr yul-semantics)  --powdr compile_correct-
   lens per field (`S.Fields.f`). Contract files `open Storage.Fields` so
   the field name *is* the lens. `read` / `write` take lens values;
   `read f[k]` is indexing sugar. Mappings are `K → V` with default zero (≤ 2 keys).
+- `@[internal]` marks a non-entrypoint function (Solidity `internal`);
+  optional `inline` is recorded on the declaration. Callers are unaffected.
+  `[Payable]` / `[Reentrant]` are binders (capabilities that propagate).
+  `lsc_contract` rejects a listed `@[internal]` function. Today both kinds
+  are substituted at call sites.
 - Reentrancy during a call is not modelled at Tx (`self` is unchanged). The
   runtime emits `if tload(0) { revert(0,0) }` on every entry; `locks f`
   acquire/release the slot unless `[Reentrant]`. Held-lock revert is proved

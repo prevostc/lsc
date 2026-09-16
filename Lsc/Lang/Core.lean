@@ -27,7 +27,7 @@ Storage fields, events and errors are referenced by index through a `ContractSch
 which `lsc_schema` generates from the user's Lean `structure`/`inductive`s. Every case of
 `denote` is *literally* the surface primitive applied to evaluated atoms, which is what
 makes `Core.denote (reify f) = f` hold by `rfl` for word-typed programs whose `bind`
-nesting already matches the ANF, and by the `Tx` monad laws when an `@[lsc_inline]`
+nesting already matches the ANF, and by the `Tx` monad laws when an `@[internal]`
 helper sits mid-`do`. `Amount a` / `Fixed d` are one-field structures over `Word`;
 Reify erases `.raw` / `ofWord` and certificates of Amount-returning functions are
 `Amount.ofWord <$> Core.denote`. The `map_denote_*` lemmas push that wrapper through

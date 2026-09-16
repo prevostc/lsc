@@ -9,7 +9,7 @@ OpenZeppelin-style `safe*` helpers: the CALL must succeed **and** return
 `true`; a revert or a `false` return both become `.user err`.
 
 Each wrapper takes the contract's `ε` error value so examples stay readable.
-`@[lsc_inline]` lets Reify delta-unfold an applied helper into `call` + `require`.
+`@[internal inline]` lets Reify delta-unfold an applied helper into `call` + `require`.
 -/
 
 namespace Lsc.Stdlib
@@ -19,21 +19,21 @@ open Lsc
 variable {S X E ε : Type} {a : Asset}
 
 /-- Pull `amt` to `to`; revert unless the CALL returns `true`. -/
-@[lsc_inline]
+@[internal inline]
 def safeTransfer (r : IERC20.Ref a) (to : Address) (amt : Amount a) (err : ε) :
     Tx S X E ε Unit := do
   let ok ← r.transfer to amt
   Tx.require (ok = true) err
 
 /-- Pull `amt` from `src` to `to`; revert unless the CALL returns `true`. -/
-@[lsc_inline]
+@[internal inline]
 def safeTransferFrom (r : IERC20.Ref a) (src to : Address) (amt : Amount a)
     (err : ε) : Tx S X E ε Unit := do
   let ok ← r.transferFrom src to amt
   Tx.require (ok = true) err
 
 /-- Set `spender`'s allowance to `amt`; revert unless the CALL returns `true`. -/
-@[lsc_inline]
+@[internal inline]
 def safeApprove (r : IERC20.Ref a) (spender : Address) (amt : Amount a) (err : ε) :
     Tx S X E ε Unit := do
   let ok ← r.approve spender amt
