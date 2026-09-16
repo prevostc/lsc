@@ -13,14 +13,14 @@ namespace Token
 
 variable (ctx : Ctx) (w : World)
 
-instance : ERC20.Fields.Lawful base := inferInstance
+instance : ERC20.Fields.Lawful erc20 := inferInstance
 
 @[simp] theorem balances_get (σ : Storage) (who : Address) :
-    base.balances.get σ who = σ.balances who := rfl
+    erc20.balances.get σ who = σ.balances who := rfl
 @[simp] theorem allowances_get (σ : Storage) (owner spender : Address) :
-    base.allowances.get σ owner spender = σ.allowances owner spender := rfl
+    erc20.allowances.get σ owner spender = σ.allowances owner spender := rfl
 @[simp] theorem totalSupply_get (σ : Storage) :
-    base.totalSupply.get σ = σ.totalSupply := rfl
+    erc20.totalSupply.get σ = σ.totalSupply := rfl
 @[simp] theorem events_transfer :
     ERC20.Events.transfer (E := Event) (a := tokenAsset) = Event.Transfer := rfl
 @[simp] theorem events_approval :
@@ -74,17 +74,17 @@ private theorem nat_sub_add_add (x y z : Nat) (h : y ≤ x) :
 theorem balanceOf_returns_stored_balance (who : Address) :
     Tx.run (balanceOf who) ctx w = .ok (w.self.balances who, w) := by
   simpa [balanceOf] using
-    ERC20.Proof.balanceOf_returns (ε := Error) base ctx w who
+    ERC20.Proof.balanceOf_returns (ε := Error) erc20 ctx w who
 
 theorem totalSupply_returns_stored :
     Tx.run totalSupply ctx w = .ok (w.self.totalSupply, w) := by
   simpa [totalSupply] using
-    ERC20.Proof.totalSupply_returns (ε := Error) base ctx w
+    ERC20.Proof.totalSupply_returns (ε := Error) erc20 ctx w
 
 theorem allowance_returns_stored (owner spender : Address) :
     Tx.run (allowance owner spender) ctx w = .ok (w.self.allowances owner spender, w) := by
   simpa [allowance] using
-    ERC20.Proof.allowance_returns (ε := Error) base ctx w owner spender
+    ERC20.Proof.allowance_returns (ε := Error) erc20 ctx w owner spender
 
 /-! ### constructor -/
 

@@ -40,49 +40,49 @@ instance : ERC20.Errors Error := ⟨.InsufficientBalance, .InsufficientAllowance
 
 abbrev M := Tx Storage ExtState Event Error
 
-@[reducible] def base : ERC20.Fields Storage tokenAsset := .ofParent toStorage
+@[reducible] def erc20 : ERC20.Fields Storage tokenAsset := .ofParent toStorage
 
 /-- Deployment: the deployer owns the whole initial supply. -/
 def constructor (owner : Address) (supply : Amount tokenAsset) : M Unit := do
   write owner owner
-  ERC20.mint base owner supply
+  ERC20.mint erc20 owner supply
 
 /-- Move `amount` from the sender to `to`. Returns `true` on success. -/
 def transfer (to : Address) (amount : Amount tokenAsset) : M Bool :=
-  ERC20.transfer base to amount
+  ERC20.transfer erc20 to amount
 
 /-- Set the sender's allowance for `spender`. Returns `true` on success. -/
 def approve (spender : Address) (amount : Amount tokenAsset) : M Bool :=
-  ERC20.approve base spender amount
+  ERC20.approve erc20 spender amount
 
 /-- Move `amount` from `src` to `to`, spending `allowances src sender`.
 Self-spend still requires and decrements that allowance. -/
 def transferFrom (src to : Address) (amount : Amount tokenAsset) : M Bool :=
-  ERC20.transferFrom base src to amount
+  ERC20.transferFrom erc20 src to amount
 
 /-- Owner-only: mint `amount` to `to`. -/
 def mint (to : Address) (amount : Amount tokenAsset) : M Unit := do
   let caller ← Tx.sender
   let owner ← read owner
   Tx.require (caller = owner) .NotOwner
-  ERC20.mint base to amount
+  ERC20.mint erc20 to amount
 
 /-- Burn `amount` from the sender. -/
 def burn (amount : Amount tokenAsset) : M Unit := do
   let src ← Tx.sender
-  ERC20.burn base src amount
+  ERC20.burn erc20 src amount
 
 /-- `who`'s token balance. -/
 def balanceOf (who : Address) : M (Amount tokenAsset) :=
-  ERC20.balanceOf base who
+  ERC20.balanceOf erc20 who
 
 /-- Remaining allowance of `spender` over `owner`'s tokens. -/
 def allowance (owner spender : Address) : M (Amount tokenAsset) :=
-  ERC20.allowance base owner spender
+  ERC20.allowance erc20 owner spender
 
 /-- Recorded total supply. -/
 def totalSupply : M (Amount tokenAsset) :=
-  ERC20.totalSupply base
+  ERC20.totalSupply erc20
 
 end Token
 

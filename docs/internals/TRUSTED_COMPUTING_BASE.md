@@ -12,7 +12,7 @@ commit message records what moved.
 Example security (pinned in `Checks.lean`):
 
 - Token (S1, call-free): `token_no_unauthorized_extraction`, `token_solvent`,
-  `erc20` (`Examples/Token/Theorems.lean`).
+  `token_spec` (`Examples/Token/Theorems.lean`).
 - Vault (S2, one `IERC20.Ref`): `vault_no_unauthorized_extraction`,
   `vault_solvent` (`Examples/Vault/Theorems.lean`).
 - Cpamm (S2, two `IERC20.Ref`): `cpamm_no_unauthorized_extraction`,

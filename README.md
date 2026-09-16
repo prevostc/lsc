@@ -38,7 +38,7 @@ read asset; tok.balanceOf me`, `safeTransferFrom`).
 
 `lsc_schema` and `lsc_contract` assemble the schema and the contract object.
 `lsc_contract … implements IERC20 …` emits `C.impl`; Token proves
-`theorem erc20 : IERC20.Spec Token.impl`, WETH proves
+`theorem token_spec : IERC20.Spec Token.impl`, WETH proves
 `theorem weth_exact : IERC20.Exact WETH.impl`. The native asset comes from
 the `Chain` profile, so the same contract is a wrapped-native token on
 any profile. Start from `Examples/Counter/Contract.lean`, then Token,

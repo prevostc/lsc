@@ -139,7 +139,7 @@ Each protocol is a directory (`Examples/AGENTS.md`):
 
 - **Counter** — `Examples/Counter/`. Tx deltas (`increment_adds`, …); no wealth theorem.
 - **Token** — `Examples/Token/`. S1. `token_no_unauthorized_extraction`,
-  `token_solvent`, `erc20` (`IERC20.Spec Token.impl`). Public theorems
+  `token_solvent`, `token_spec` (`IERC20.Spec Token.impl`). Public theorems
   take `State` / `Txs`.
 - **Vault** — `Examples/Vault/`. S2, one `IERC20.Ref`. `vault_no_unauthorized_extraction`,
   `vault_solvent` (`State` / `Txs`; `IERC20.Spec` lives in `HasDeploy` / `State`).

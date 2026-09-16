@@ -6,7 +6,7 @@ six IERC20 entrypoints are one-line re-exports of the ERC20 base;
 constructor and owner-`mint` call `ERC20.mint`.
 
 `lsc_contract Token … implements IERC20 Token.tokenAsset` checks names and signatures
-against `IERC20` and emits `Token.impl`. `Token.erc20` proves every field of
+against `IERC20` and emits `Token.impl`. `Token.token_spec` proves every field of
 `IERC20.Spec` of that implementation: transfers conserve the two balances and
 never change supply; `transferFrom` spends allowance when the caller is not
 the source; `approve` writes the allowance; nobody can drop your balance except
@@ -29,7 +29,7 @@ balance except by the amount `a` itself authorised
 | `Theorems.lean` | Exported Tx, IERC20, and security theorems |
 | `Tests.lean` | Smoke `#guard`s |
 | `Proofs/Tx.lean` | `Tx.run` lemmas and deltas |
-| `Proofs/Implements.lean` | `IERC20.Spec Token.impl` (`Token.erc20`) |
+| `Proofs/Implements.lean` | `IERC20.Spec Token.impl` (`Token.token_spec`) |
 | `Proofs/Security.lean` | Auth/conservation/invariant instances |
 | `Proofs/Compile.lean` | Runtime `compileRuntime` witness |
 | `compiled/` | Yul, labelled Asm, bytecode, ABI, heimdall decompile |

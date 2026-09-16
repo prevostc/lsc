@@ -48,7 +48,7 @@ a spender you approved.
 Live holdings in Vault/Cpamm specs are `tok.impl.balanceOf me w.view`, not a
 hand-decoded `oracle.view`. Token itself implements the interface:
 `lsc_contract Token … implements IERC20 Token.tokenAsset` emits
-`Token.impl`, and `theorem erc20 : IERC20.Spec Token.impl`.
+`Token.impl`, and `theorem token_spec : IERC20.Spec Token.impl`.
 
 Between our calls, Vault's `vaultRely` / Cpamm's `cpammRely` say: this
 contract's token `balanceOf` does not fall, and each token's `totalSupply`

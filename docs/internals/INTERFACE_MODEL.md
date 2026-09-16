@@ -58,7 +58,7 @@ Files: `Lsc/Lang/Interface.lean`, `Lsc/Lang/InterfaceDeriving.lean`;
 
 ```
 lsc_contract Token … implements IERC20 Token.tokenAsset
-theorem erc20 : IERC20.Spec Token.impl
+theorem token_spec : IERC20.Spec Token.impl
 ```
 
 Vault/Cpamm theorems that mention the token take

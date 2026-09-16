@@ -86,11 +86,11 @@ structure Storage extends ERC20.Storage tokenAsset where
   deriving Fields
 
 def transfer (to : Address) (amount : Amount tokenAsset) : M Bool :=
-  ERC20.transfer base to amount
+  ERC20.transfer erc20 to amount
 ```
 
 `lsc_contract Token … implements IERC20 Token.tokenAsset` checks names and
-signatures against `IERC20` and emits `Token.impl`. `theorem erc20 :
+signatures against `IERC20` and emits `Token.impl`. `theorem token_spec :
 IERC20.Spec Token.impl` is in `Examples/Token/Theorems.lean`.
 
 Vault (`Examples/Vault/Contract.lean`) stores `asset : Ref (IERC20 vaultAsset)`,

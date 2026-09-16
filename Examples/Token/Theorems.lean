@@ -61,10 +61,10 @@ theorem approve_sets (spender : Address) (amount : Amount tokenAsset)
   Proof.approve_sets msg w spender amount h
 
 /-- Token is a conforming ERC20: every promise in `IERC20.Spec` holds of
-`Token.impl`. Named `erc20` because `lsc_contract` already generates the ABI
-spec as `Token.spec`. -/
-theorem erc20 : IERC20.Spec Token.impl :=
-  Proof.erc20
+`Token.impl`. Named `token_spec` because `lsc_contract` already generates
+the ABI spec as `Token.spec`. -/
+theorem token_spec : IERC20.Spec Token.impl :=
+  Proof.token_spec
 
 end Token
 

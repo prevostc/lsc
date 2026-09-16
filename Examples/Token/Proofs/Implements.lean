@@ -229,7 +229,7 @@ end
 
 namespace Proof
 
-theorem erc20 : IERC20.Spec Token.impl where
+theorem token_spec : IERC20.Spec Token.impl where
   transfer_moves := by
     intro to amount ctx w w' h
     have hok := Tx.run_toOption_ok (by simpa [impl_transfer] using h)

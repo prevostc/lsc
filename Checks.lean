@@ -39,8 +39,8 @@ pinned theorem is added or renamed; the commit message records what moved.
 /-- info: 'Token.token_solvent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms Token.token_solvent
 
-/-- info: 'Token.erc20' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs in #print axioms Token.erc20
+/-- info: 'Token.token_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms Token.token_spec
 
 /-- info: 'Vault.vault_solvent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms Vault.vault_solvent

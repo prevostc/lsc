@@ -29,7 +29,7 @@ ship `*_bytecode_*` theorems (DECISIONS 2026-09-12).
 | 4 Glue | `bytecode_call_correct`, `bytecode_trace_all` | `EndToEndTheorems.lean` | proved | S1 | Token-shaped call-free |
 | 4 Glue | `bytecode_call_correct_ext`, `yul_progress`, `evmCallRunExtAll_of_progress` | `EndToEndExtTheorems.lean`, `ProgressCoreTheorems.lean` | proved | S2 | Vault, Cpamm |
 | 4 Transport | `transport_claim_ext`, `transport_exists_claim_ext` | `TransportTheorems.lean` | proved | S2 | lifts example trace theorems |
-| Security (examples) | `token_no_unauthorized_extraction`, `token_solvent`, `erc20` | `Examples/Token/Theorems.lean` | proved | S1 | Token |
+| Security (examples) | `token_no_unauthorized_extraction`, `token_solvent`, `token_spec` | `Examples/Token/Theorems.lean` | proved | S1 | Token |
 | Security (examples) | `vault_no_unauthorized_extraction`, `vault_solvent` | `Examples/Vault/Theorems.lean` | proved | S2 | Vault |
 | Security (examples) | `cpamm_no_unauthorized_extraction`, `cpamm_solvent`, `swap0for1_k` | `Examples/Cpamm/Theorems.lean` | proved | S2 | Cpamm |
 | Deploy | `constructor_correct`, `bytecode_deploy_correct` | `ConstructorTheorems.lean`, `DeployTheorems.lean` | Yul ctor proved; EVM args gap | S1 | Token constructor (call-free) |
