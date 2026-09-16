@@ -64,9 +64,9 @@ abbrev AuthPred.ofSelf (A : Address → Call C → S → Prop) : AuthPred C :=
 
 /-- Environment steps allowed by `rely` do not decrease `claim`. Automatic
 when `claim` depends only on storage (`ClaimMonoEnv.of_self`). -/
-def ClaimMonoEnv (claim : Claim S X E) (rely : X → X → Prop) : Prop :=
+def ClaimMonoEnv (claim : Claim S X E) (rely : World S X E → X → Prop) : Prop :=
   ∀ (w : World S X E) (x' : X) (a : Address),
-    rely w.ext x' → claim a w ≤ claim a { w with ext := x' }
+    rely w x' → claim a w ≤ claim a { w with ext := x' }
 
 /-- Incoming `creditValue` does not change `claim` (book-based native). -/
 def ClaimMonoCredit [HasCreditValue X] (claim : Claim S X E) : Prop :=
@@ -78,10 +78,11 @@ when `Auth a` holds in the pre-state. Relative to `Inv`: a pro-rata `claim` is o
 monotone under the protocol invariant. -/
 def NoUnauthorizedDecrease [HasCreditValue X] (C : Spec S X E ε) [HasPayable C]
     [HasSelfBalance X]
+    (self : Address)
     (Inv : World S X E → Prop)
     (claim : Claim S X E) (Auth : AuthPred C) : Prop :=
   ∀ (c : Call C) (w : World S X E) (a : Address),
-    Inv w → claim a (step (.call c) w) < claim a w → Auth a c w
+    Inv w → claim a (step self (.call c) w) < claim a w → Auth a c w
 
 /-- Per-entrypoint form of `NoUnauthorizedDecrease` (unpacked args, no `Call` in the hyp).
 Runs on the pre-credit world; non-payable `of_fns` rewrites `step` to `worldAfter`. -/
@@ -112,11 +113,12 @@ def NoUnauthorizedDecreaseCreditFn [HasCreditValue X] (C : Spec S X E ε)
 Environment steps are skipped (`Auth` is only judged at calls).
 -/
 def NoAuthAlong [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
-    (Auth : AuthPred C) (a : Address) :
+    (self : Address) (Auth : AuthPred C) (a : Address) :
     List (Step C) → World S X E → Prop
   | [], _ => True
-  | .call c :: tr, w => ¬ Auth a c w ∧ NoAuthAlong Auth a tr (step (.call c) w)
-  | .env x' :: tr, w => NoAuthAlong Auth a tr { w with ext := x' }
+  | .call c :: tr, w =>
+    ¬ Auth a c w ∧ NoAuthAlong self Auth a tr (step self (.call c) w)
+  | .env x' :: tr, w => NoAuthAlong self Auth a tr { w with ext := x' }
 
 /-! Trace theorems `no_unauthorized_extraction` / `_at` live in `WealthTheorems`. -/
 
@@ -161,14 +163,15 @@ abbrev Inflow (C : Spec S X E ε) := Call C → World S X E → Nat
 Stated from worlds satisfying `Inv` (a pro-rata `claim` is only conservative under `Inv`). -/
 def Conservation [HasCreditValue X] (C : Spec S X E ε) [HasPayable C]
     [HasSelfBalance X]
+    (self : Address)
     (Inv : World S X E → Prop)
     (claim : Claim S X E)
     (inflow : Inflow C) : Prop :=
   ∀ (c : Call C) (w : World S X E),
     Inv w →
     ∃ T : Finset Address,
-      (∀ a, a ∉ T → claim a (step (.call c) w) = claim a w) ∧
-      T.sum (fun a => claim a (step (.call c) w)) ≤
+      (∀ a, a ∉ T → claim a (step self (.call c) w) = claim a w) ∧
+      T.sum (fun a => claim a (step self (.call c) w)) ≤
         T.sum (fun a => claim a w) + inflow c w
 
 /-- Per-entrypoint form of `Conservation` (unpacked args). -/

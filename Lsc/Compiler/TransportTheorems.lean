@@ -49,8 +49,8 @@ theorem transport_trace (T : TransportSetup S X E ε)
     (hE : EvmTraceRunAll T.is calls σ σ') :
     let tr := decodeTrace T calls
     Wf self tr w ∧
-      storageRel T.c T.Γ evmKeccak (run tr w).self σ' ∧
-      WorldWF T.c T.Γ { run tr w with log := [] } :=
+      storageRel T.c T.Γ evmKeccak (run self tr w).self σ' ∧
+      WorldWF T.c T.Γ { run self tr w with log := [] } :=
   Proof.transport_trace T hcf hnp hpc self calls w σ σ' hs hlog hwf hWF hE
 
 /-- A function that never CALLs out has post-storage and external ghosts
@@ -94,16 +94,19 @@ theorem transport_exists (T : TransportSetup S X E ε)
           (worldAfter (T.spec.exec fn args) ctx w').self ∧
         (worldAfter (T.spec.exec fn args) ctx w).ext =
           (worldAfter (T.spec.exec fn args) ctx w').ext)
-    (tr : List (Step T.spec)) (w : World S X E) (σ : U256 → U256)
+    (self : Address) (tr : List (Step T.spec)) (w : World S X E)
+    (σ : U256 → U256)
     (hs : storageRel T.c T.Γ evmKeccak w.self σ)
     (hwf : WorldWF T.c T.Γ w)
-    (hb : EncodeBounded T tr) :
-    ∃ σ', EvmTraceRun T.is (encodeCalls T tr) σ σ' ∧
+    (hb : EncodeBounded T self tr) :
+    ∃ σ', EvmTraceRun T.is (encodeCalls T self tr) σ σ' ∧
       storageRel T.c T.Γ evmKeccak
-        (run (decodeTrace T (encodeCalls T tr)) { w with log := [] }).self σ' ∧
+        (run self (decodeTrace T (encodeCalls T self tr))
+          { w with log := [] }).self σ' ∧
       WorldWF T.c T.Γ
-        { run (decodeTrace T (encodeCalls T tr)) { w with log := [] } with log := [] } :=
-  Proof.transport_exists T hcf hnp hpc tr w σ hs hwf hb
+        { run self (decodeTrace T (encodeCalls T self tr))
+            { w with log := [] } with log := [] } :=
+  Proof.transport_exists T hcf hnp hpc tr w σ self hs hwf hb
 
 /-- One compiled call-free call from matching storage ends with EVM storage
 that matches the high-level model of that call, or is unchanged if the
@@ -121,7 +124,7 @@ theorem transport_step (T : TransportSetup S X E ε)
       match decodeCall T ctx cd with
       | none => σ' = σ
       | some c =>
-          let w' := { step (.call c) w with log := [] }
+          let w' := { step ctx.self (.call c) w with log := [] }
           storageRel T.c T.Γ evmKeccak w'.self σ' ∧ WorldWF T.c T.Γ w' :=
   Proof.transport_step T hcf hnp ctx cd w σ hctxWF hcd hs hlog hwf
 
@@ -145,7 +148,8 @@ theorem transport_step_ext (T : TransportSetup S ExtState E ε)
       match decodeCall T ctx cd with
       | none => σ' = σ ∧ ξ' = evmForeign yst0
       | some c =>
-          let w' : World S ExtState E := { step (.call c) w with log := [] }
+          let w' : World S ExtState E :=
+            { step ctx.self (.call c) w with log := [] }
           storageRel T.c T.Γ evmKeccak w'.self σ' ∧ WorldWF T.c T.Γ w' ∧
             ∃ stObs : EvmState,
               stObs.storage = σ' ∧ evmForeign stObs = ξ' ∧
@@ -201,11 +205,12 @@ theorem transport_claim_ext (T : TransportSetup S ExtState E ε)
     (Inv : World S ExtState E → Prop) (claim : Claim S ExtState E)
     (Auth : AuthPred T.spec)
     (self : Address) (a : Address)
-    (hN : NoUnauthorizedDecrease T.spec Inv claim Auth)
+    (hN : NoUnauthorizedDecrease T.spec self Inv claim Auth)
     (hP : PreservesInvAt T.spec Inv self)
     (hInvR : InvReframe Inv Xpkg.oracle)
     (hInvL : ∀ w (log : List E), Inv w → Inv { w with log := log })
-    (hAirr : ∀ tr w w', NoAuthAlong Auth a tr w ↔ NoAuthAlong Auth a tr w')
+    (hAirr : ∀ tr w w',
+      NoAuthAlong self Auth a tr w ↔ NoAuthAlong self Auth a tr w')
     (hC : ∀ w w' x, w.self = w'.self → claim x w = claim x w')
     (calls : List EvmCall)
     (w : World S ExtState E) (σ : U256 → U256) (ξ : Foreign)
@@ -214,7 +219,7 @@ theorem transport_claim_ext (T : TransportSetup S ExtState E ε)
     (hlog : w.log = []) (hwf : WorldWF T.c T.Γ w)
     (hWF : CallsWF T self calls)
     (hOr : w.oracle = Oracle.ofExt Xpkg.oracle)
-    (hA : NoAuthAlong Auth a (decodeTrace T calls) w)
+    (hA : NoAuthAlong self Auth a (decodeTrace T calls) w)
     (hw : Inv w)
     (hE : EvmTraceRunExtAll T.is calls σ ξ σ' ξ') :
     ∃ w' : World S ExtState E,
@@ -245,10 +250,10 @@ theorem transport_exists_ext (T : TransportSetup S ExtState E ε)
     (σ : U256 → U256) (ξ : Foreign)
     (hs : storageRel T.c T.Γ evmKeccak w.self σ)
     (hwf : WorldWF T.c T.Γ w)
-    (hb : EncodeBounded T tr) (hW : Wf self tr w) (hw : Inv w)
+    (hb : EncodeBounded T self tr) (hW : Wf self tr w) (hw : Inv w)
     (hOr : w.oracle = Oracle.ofExt Xpkg.oracle) :
     ∃ σ' ξ' w',
-      EvmTraceRunExt T.is (encodeCalls T tr) σ ξ σ' ξ' ∧
+      EvmTraceRunExt T.is (encodeCalls T self tr) σ ξ σ' ξ' ∧
       storageRel T.c T.Γ evmKeccak w'.self σ' ∧
       WorldWF T.c T.Γ w' ∧
       ExtAgree self w'.ext
@@ -270,21 +275,22 @@ theorem transport_exists_claim_ext (T : TransportSetup S ExtState E ε)
     (Inv : World S ExtState E → Prop) (claim : Claim S ExtState E)
     (Auth : AuthPred T.spec)
     (self a : Address)
-    (hN : NoUnauthorizedDecrease T.spec Inv claim Auth)
+    (hN : NoUnauthorizedDecrease T.spec self Inv claim Auth)
     (hP : PreservesInvAt T.spec Inv self)
     (hInvR : InvReframe Inv Xpkg.oracle)
     (hInvL : ∀ w (log : List E), Inv w → Inv { w with log := log })
-    (hAirr : ∀ tr w w', NoAuthAlong Auth a tr w ↔ NoAuthAlong Auth a tr w')
+    (hAirr : ∀ tr w w',
+      NoAuthAlong self Auth a tr w ↔ NoAuthAlong self Auth a tr w')
     (hC : ∀ w w' x, w.self = w'.self → claim x w = claim x w')
     (tr : List (Step T.spec)) (w : World S ExtState E)
     (σ : U256 → U256) (ξ : Foreign)
     (hs : storageRel T.c T.Γ evmKeccak w.self σ)
     (hwf : WorldWF T.c T.Γ w)
-    (hb : EncodeBounded T tr) (hW : Wf self tr w) (hw : Inv w)
-    (hA : NoAuthAlong Auth a (callsOf tr) w)
+    (hb : EncodeBounded T self tr) (hW : Wf self tr w) (hw : Inv w)
+    (hA : NoAuthAlong self Auth a (callsOf tr) w)
     (hOr : w.oracle = Oracle.ofExt Xpkg.oracle) :
     ∃ σ' ξ' w',
-      EvmTraceRunExt T.is (encodeCalls T tr) σ ξ σ' ξ' ∧
+      EvmTraceRunExt T.is (encodeCalls T self tr) σ ξ σ' ξ' ∧
       storageRel T.c T.Γ evmKeccak w'.self σ' ∧
       WorldWF T.c T.Γ w' ∧
       ExtAgree self w'.ext

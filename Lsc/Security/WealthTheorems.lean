@@ -32,14 +32,14 @@ contract. -/
 theorem no_unauthorized_extraction [HasCreditValue X] [HasPayable C]
     [HasSelfBalance X]
     {Inv : World S X E → Prop} {claim : Claim S X E}
-    {Auth : AuthPred C} {rely : X → X → Prop}
-    (hN : NoUnauthorizedDecrease C Inv claim Auth)
-    (hP : PreservesInv C Inv) (hE : PreservesInvEnv C Inv rely)
+    {Auth : AuthPred C} {rely : World S X E → X → Prop} {self : Address}
+    (hN : NoUnauthorizedDecrease C self Inv claim Auth)
+    (hP : PreservesInv C self Inv) (hE : PreservesInvEnv C Inv rely)
     (hM : ClaimMonoEnv claim rely)
     (tr : List (Step C)) (w : World S X E) (a : Address)
-    (hw : Inv w) (hR : RelyAlong rely tr w)
-    (hA : NoAuthAlong Auth a tr w) :
-    claim a w ≤ claim a (run tr w) :=
+    (hw : Inv w) (hR : RelyAlong self rely tr w)
+    (hA : NoAuthAlong self Auth a tr w) :
+    claim a w ≤ claim a (run self tr w) :=
   Proof.no_unauthorized_extraction hN hP hE hM tr w a hw hR hA
 
 /-- Same victim-side guarantee as `no_unauthorized_extraction`, but the
@@ -53,14 +53,14 @@ can change along the trace. -/
 theorem no_unauthorized_extraction_at [HasCreditValue X] [HasPayable C]
     [HasSelfBalance X]
     {Inv : World S X E → Prop} {claim : Claim S X E}
-    {Auth : AuthPred C} {rely : X → X → Prop} {self : Address}
-    (hN : NoUnauthorizedDecrease C Inv claim Auth)
+    {Auth : AuthPred C} {rely : World S X E → X → Prop} {self : Address}
+    (hN : NoUnauthorizedDecrease C self Inv claim Auth)
     (hP : PreservesInvAt C Inv self) (hE : PreservesInvEnv C Inv rely)
     (hM : ClaimMonoEnv claim rely)
     (tr : List (Step C)) (w : World S X E) (a : Address)
-    (hw : Inv w) (hW : Wf self tr w) (hR : RelyAlong rely tr w)
-    (hA : NoAuthAlong Auth a tr w) :
-    claim a w ≤ claim a (run tr w) :=
+    (hw : Inv w) (hW : Wf self tr w) (hR : RelyAlong self rely tr w)
+    (hA : NoAuthAlong self Auth a tr w) :
+    claim a w ≤ claim a (run self tr w) :=
   Proof.no_unauthorized_extraction_at hN hP hE hM tr w a hw hW hR hA
 
 /-- If the protocol invariant already implies the contract does not owe more
@@ -71,12 +71,13 @@ that matters there. The invariant must hold at the start and survive
 every entrypoint and every environment step the token model allows. -/
 theorem solvent_run [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
     {Inv : World S X E → Prop} {claim : Claim S X E}
-    {holdings : Holdings S X E} {rely : X → X → Prop}
-    (hP : PreservesInv C Inv) (hE : PreservesInvEnv C Inv rely)
+    {holdings : Holdings S X E} {rely : World S X E → X → Prop}
+    {self : Address}
+    (hP : PreservesInv C self Inv) (hE : PreservesInvEnv C Inv rely)
     (hS : ∀ self w, Inv w → Solvent claim holdings self w)
-    {self : Address} {w : World S X E} (hw : Inv w) (tr : List (Step C))
-    (hW : Wf self tr w) (hR : RelyAlong rely tr w) :
-    Solvent claim holdings self (run tr w) :=
+    {w : World S X E} (hw : Inv w) (tr : List (Step C))
+    (hW : Wf self tr w) (hR : RelyAlong self rely tr w) :
+    Solvent claim holdings self (run self tr w) :=
   Proof.solvent_run hP hE hS hw tr hW hR
 
 /-- Same solvency preservation as `solvent_run`, restricted to traces of
@@ -85,12 +86,12 @@ this form because "what the contract holds" is this contract's token
 balance, which is only meaningful on calls to this address. -/
 theorem solvent_run_at [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
     {Inv : World S X E → Prop} {claim : Claim S X E}
-    {holdings : Holdings S X E} {rely : X → X → Prop} {self : Address}
+    {holdings : Holdings S X E} {rely : World S X E → X → Prop} {self : Address}
     (hP : PreservesInvAt C Inv self) (hE : PreservesInvEnv C Inv rely)
     (hS : ∀ w, Inv w → Solvent claim holdings self w)
     {w : World S X E} (hw : Inv w) (tr : List (Step C))
-    (hW : Wf self tr w) (hR : RelyAlong rely tr w) :
-    Solvent claim holdings self (run tr w) :=
+    (hW : Wf self tr w) (hR : RelyAlong self rely tr w) :
+    Solvent claim holdings self (run self tr w) :=
   Proof.solvent_run_at hP hE hS hw tr hW hR
 
 /-- Updating a member of a finite support replaces its contribution in the sum. -/
@@ -136,12 +137,14 @@ theorem Claim.ofSelf_congr (c : Address → S → Nat)
   Proof.Claim.ofSelf_congr c h
 
 /-- Storage-only claims ignore `ext`, so any `rely` is claim-monotone. -/
-theorem ClaimMonoEnv.of_self (c : Address → S → Nat) (rely : X → X → Prop) :
+theorem ClaimMonoEnv.of_self (c : Address → S → Nat)
+    (rely : World S X E → X → Prop) :
     ClaimMonoEnv (Claim.ofSelf (S := S) (X := X) (E := E) c) rely :=
   Proof.ClaimMonoEnv.of_self c rely
 
 /-- Native-book claims ignore `ext`, so any `rely` is claim-monotone. -/
-theorem ClaimMonoEnv.of_native (c : Address → S → Nat) (rely : X → X → Prop) :
+theorem ClaimMonoEnv.of_native (c : Address → S → Nat)
+    (rely : World S X E → X → Prop) :
     ClaimMonoEnv (Claim.ofNative (S := S) (X := X) (E := E) c) rely :=
   Proof.ClaimMonoEnv.of_native c rely
 
@@ -210,10 +213,10 @@ Non-payable contracts need no credit obligation. -/
 theorem NoUnauthorizedDecrease.of_fns [HasCreditValue X] [HasPayable C]
     [HasSelfBalance X]
     {Inv : World S X E → Prop}
-    {claim : Claim S X E} {Auth : AuthPred C}
+    {claim : Claim S X E} {Auth : AuthPred C} {self : Address}
     (h : ∀ fn, NoUnauthorizedDecreaseFn C Inv claim Auth fn)
     (hnp : ∀ fn, C.payable fn = false := by intro fn; cases fn <;> rfl) :
-    NoUnauthorizedDecrease C Inv claim Auth :=
+    NoUnauthorizedDecrease C self Inv claim Auth :=
   Proof.NoUnauthorizedDecrease.of_fns h hnp
 
 /-- `NoUnauthorizedDecrease` for contracts that may have payable entrypoints.
@@ -222,9 +225,10 @@ then `Tx.run`), matching `stepCall`. Non-payable + nonzero value is still a
 revert step and cannot decrease `claim`. -/
 theorem NoUnauthorizedDecrease.of_fns_credit [HasCreditValue X]
     {Inv : World S X E → Prop} {claim : Claim S X E} {Auth : AuthPred C}
+    {self : Address}
     [HasPayable C] [HasSelfBalance X]
     (h : ∀ fn, NoUnauthorizedDecreaseCreditFn C Inv claim Auth fn) :
-    NoUnauthorizedDecrease C Inv claim Auth :=
+    NoUnauthorizedDecrease C self Inv claim Auth :=
   Proof.NoUnauthorizedDecrease.of_fns_credit h
 
 /-- Non-payable `NoUnauthorizedDecreaseFn` yields the credit form: `valueOk`
@@ -285,10 +289,10 @@ contracts need no credit obligation. -/
 theorem Conservation.of_fns [HasCreditValue X] [HasPayable C]
     [HasSelfBalance X]
     {Inv : World S X E → Prop} {claim : Claim S X E}
-    {inflow : Inflow C}
+    {inflow : Inflow C} {self : Address}
     (h : ∀ fn, ConservesFn C Inv claim inflow fn)
     (hnp : ∀ fn, C.payable fn = false := by intro fn; cases fn <;> rfl) :
-    Conservation C Inv claim inflow :=
+    Conservation C self Inv claim inflow :=
   Proof.Conservation.of_fns h hnp
 
 /-- Reduce `ConservesFn` to the success path: a revert is conservation with empty touch-set. -/

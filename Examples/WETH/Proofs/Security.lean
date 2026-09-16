@@ -362,7 +362,8 @@ theorem totalSupply_auth : NoUnauthorizedDecreaseFn spec InvTrace claim Auth .to
     obtain ⟨rfl, rfl⟩ := hrun
     simp [claim] at hdec
 
-theorem weth_no_unauth : NoUnauthorizedDecrease spec InvTrace claim Auth :=
+theorem weth_no_unauth {self : Address} :
+    NoUnauthorizedDecrease spec self InvTrace claim Auth :=
   NoUnauthorizedDecrease.of_fns_credit (C := spec) fun fn =>
     match fn with
     | .deposit => deposit_auth
@@ -462,7 +463,8 @@ theorem weth_preserves_inv (self : Address) : PreservesInvAt spec InvTrace self 
     | .totalSupply =>
       PreservesInvCreditFnAt_of_fn (by rfl) (totalSupply_preserves_inv self)
 
-theorem weth_inv_rely : PreservesInvEnv spec InvTrace rely := by
+theorem weth_inv_rely {self : Address} :
+    PreservesInvEnv spec InvTrace (HasRely.rely (C := spec) self) := by
   intro w x' hw _hr
   exact hw
 
@@ -611,12 +613,13 @@ theorem backed_credit (fn : spec.Fn)
     obtain ⟨rfl, rfl⟩ := hrun
     exact hw.2.1
 
-theorem backed_step {c : Call spec} {w : World}
-    (hw : Inv w) : Backed (step (.call c) w) := by
-  rw [step_eq_run]
+theorem backed_step (self : Address) {c : Call spec} {w : World}
+    (hw : Inv w) : Backed (step self (.call c) w) := by
+  rw [step_eq_run self]
   split_ifs with hvo hwrap
   · exact hw.2.1
-  · cases hrun : spec.exec c.fn c.args c.toCtx (World.creditValue w c.value) with
+  · cases hrun : spec.exec c.fn c.args (c.toCtx self)
+        (World.creditValue w c.value) with
     | error _ => exact hw.2.1
     | ok p =>
       have hb : World.nativeBalance w + c.value < wordBound := by
@@ -629,27 +632,28 @@ theorem backed_step {c : Call spec} {w : World}
           have hv0 : c.value = 0 :=
             spec.value_eq_zero_of_valueOk hpF hvo
           simpa [hv0] using nativeBalance_lt_wordBound w
-      exact backed_credit c.fn c.args c.toCtx w p.1 p.2 hb hw hvo hrun
+      exact backed_credit c.fn c.args (c.toCtx self) w p.1 p.2 hb hw hvo hrun
   · exact hw.2.1
 
 theorem weth_inv_run (self : Address) {w : World}
     {tr : List (Step spec)}
-    (hw : Inv w) (hW : Wf self tr w) (hR : RelyAlong rely tr w) :
-    Inv (run tr w) := by
+    (hw : Inv w) (hW : Wf self tr w)
+    (hR : RelyAlong self (HasRely.rely (C := spec) self) tr w) :
+    Inv (run self tr w) := by
   induction tr generalizing w with
   | nil => simpa using hw
   | cons s rest ih =>
     match s with
     | .call c =>
-      have ⟨ht, hs, htl⟩ := hW
-      have hTr : InvTrace (step (.call c) w) :=
-        weth_preserves_inv self c w ht hs (Inv_to_trace hw)
-      have hB : Backed (step (.call c) w) := backed_step hw
+      have ⟨hs, htl⟩ := hW
+      have hTr : InvTrace (step self (.call c) w) :=
+        weth_preserves_inv self c w hs (Inv_to_trace hw)
+      have hB : Backed (step self (.call c) w) := backed_step self hw
       exact ih ⟨hTr.1, hB, hTr.2⟩ htl hR
     | .env x' =>
       have ⟨hr, htl⟩ := hR
       have hTr : InvTrace { w with ext := x' } :=
-        weth_inv_rely w x' (Inv_to_trace hw) hr
+        weth_inv_rely (self := self) w x' (Inv_to_trace hw) hr
       exact ih ⟨hTr.1, backed_env hr hw.2.1, hTr.2⟩ hW htl
 
 theorem deployed_inv {w : World}
@@ -660,7 +664,8 @@ theorem deployed_inv {w : World}
   · simp [hts, Amount.raw_zero]
 
 theorem weth_inv_of_reachable {self : Address} {w : World}
-    (h : Reachable (C := spec) rely self w) : Inv w := by
+    (h : Reachable (C := spec) (HasRely.rely (C := spec) self) self w) :
+    Inv w := by
   obtain ⟨w₀, tr, hDep, hW, hR, rfl⟩ := h
   exact weth_inv_run self (deployed_inv hDep) hW hR
 
@@ -702,44 +707,44 @@ private theorem balances_withdrawPost (σ : Storage) (src : Address)
     Function.update_apply, raw_ite] at hn ⊢
   exact nat_ite_burn (fun i => (σ.balances i).raw) src a n.raw hn
 
-private theorem spent_covers_ok (c : Call spec)
+private theorem spent_covers_ok (self : Address) (c : Call spec)
     (w w' : World) (a : Address) {r : spec.Ret c.fn}
-    (h : spec.exec c.fn c.args c.toCtx w = .ok (r, w')) :
+    (h : spec.exec c.fn c.args (c.toCtx self) w = .ok (r, w')) :
     w.self.balances a ≤ w'.self.balances a + spentCall a c := by
   revert r h
-  rcases c with ⟨sender, value, ts, bn, target, fn, args⟩
+  rcases c with ⟨sender, value, ts, bn, fn, args⟩
   cases fn <;> intro r h
   case transfer =>
     rcases args with ⟨dst, amount⟩
     have hrun : Tx.run (transfer dst amount)
-        ⟨sender, value, ts, bn, target⟩ w = .ok (r, w') := by
+        { sender, value, timestamp := ts, blockNumber := bn, self } w = .ok (r, w') := by
       simpa [Tx.run, spec_exec_transfer, Call.toCtx] using h
-    have hr := transfer_returns_true ⟨sender, value, ts, bn, target⟩ w dst amount
+    have hr := transfer_returns_true { sender, value, timestamp := ts, blockNumber := bn, self } w dst amount
       hrun
     subst hr
     have ⟨hsub, hw'⟩ :=
-      transfer_ok_inv ⟨sender, value, ts, bn, target⟩ w dst amount hrun
+      transfer_ok_inv { sender, value, timestamp := ts, blockNumber := bn, self } w dst amount hrun
     simp [spentCall, hw', Call.toCtx]
     exact balances_transferPost w.self sender dst amount a hsub
   case withdraw =>
-    have hrun : Tx.run (withdraw args) ⟨sender, value, ts, bn, target⟩ w =
+    have hrun : Tx.run (withdraw args) { sender, value, timestamp := ts, blockNumber := bn, self } w =
         .ok (r, w') := by
       simpa [Tx.run, spec_exec_withdraw, Call.toCtx] using h
     have ⟨hsub, _, hx⟩ :=
-      withdraw_ok_inv ⟨sender, value, ts, bn, target⟩ w args hrun
+      withdraw_ok_inv { sender, value, timestamp := ts, blockNumber := bn, self } w args hrun
     obtain ⟨_, _, hw'⟩ := hx
     simp [spentCall, hw', Call.toCtx]
     exact balances_withdrawPost w.self sender args a hsub
   case transferFrom =>
     rcases args with ⟨src, dst, amount⟩
     have hrun : Tx.run (transferFrom src dst amount)
-        ⟨sender, value, ts, bn, target⟩ w = .ok (r, w') := by
+        { sender, value, timestamp := ts, blockNumber := bn, self } w = .ok (r, w') := by
       simpa [Tx.run, spec_exec_transferFrom, Call.toCtx] using h
-    have hr := transferFrom_returns_true ⟨sender, value, ts, bn, target⟩ w
+    have hr := transferFrom_returns_true { sender, value, timestamp := ts, blockNumber := bn, self } w
       src dst amount hrun
     subst hr
     have ⟨_, hsub, hw'⟩ :=
-      transferFrom_ok_inv ⟨sender, value, ts, bn, target⟩ w src dst amount hrun
+      transferFrom_ok_inv { sender, value, timestamp := ts, blockNumber := bn, self } w src dst amount hrun
     simp [spentCall, hw', Call.toCtx]
     have hbals :
         (transferFromPost w.self src sender dst amount).balances =
@@ -747,11 +752,11 @@ private theorem spent_covers_ok (c : Call spec)
     rw [hbals]
     exact balances_transferPost w.self src dst amount a hsub
   case deposit =>
-    have hrun : Tx.run depositTx ⟨sender, value, ts, bn, target⟩ w =
+    have hrun : Tx.run depositTx { sender, value, timestamp := ts, blockNumber := bn, self } w =
         .ok (r, w') := by
       simpa [Tx.run, spec_exec_deposit, depositTx, Call.toCtx] using h
     have ⟨_, _, hw'⟩ :=
-      deposit_ok_inv ⟨sender, value, ts, bn, target⟩ w hrun
+      deposit_ok_inv { sender, value, timestamp := ts, blockNumber := bn, self } w hrun
     simp [spentCall, hw', Call.toCtx]
     by_cases hd : sender = a
     · subst hd
@@ -760,44 +765,45 @@ private theorem spent_covers_ok (c : Call spec)
   case approve =>
     rcases args with ⟨spender, amount⟩
     have hrun : Tx.run (approve spender amount)
-        ⟨sender, value, ts, bn, target⟩ w = .ok (r, w') := by
+        { sender, value, timestamp := ts, blockNumber := bn, self } w = .ok (r, w') := by
       simpa [Tx.run, spec_exec_approve, Call.toCtx] using h
-    rw [approve_ok ⟨sender, value, ts, bn, target⟩ w spender amount] at hrun
+    rw [approve_ok { sender, value, timestamp := ts, blockNumber := bn, self } w spender amount] at hrun
     obtain ⟨rfl, rfl⟩ := hrun
     simp [spentCall, approvePost]
   case balanceOf =>
-    have hrun : Tx.run (balanceOf args) ⟨sender, value, ts, bn, target⟩ w =
+    have hrun : Tx.run (balanceOf args) { sender, value, timestamp := ts, blockNumber := bn, self } w =
         .ok (r, w') := by
       simpa [Tx.run, spec_exec_balanceOf, Call.toCtx] using h
-    rw [balanceOf_returns_stored_balance ⟨sender, value, ts, bn, target⟩ w args]
+    rw [balanceOf_returns_stored_balance { sender, value, timestamp := ts, blockNumber := bn, self } w args]
       at hrun
     obtain ⟨rfl, rfl⟩ := hrun
     simp [spentCall]
   case allowance =>
     rcases args with ⟨owner, spender⟩
     have hrun : Tx.run (allowance owner spender)
-        ⟨sender, value, ts, bn, target⟩ w = .ok (r, w') := by
+        { sender, value, timestamp := ts, blockNumber := bn, self } w = .ok (r, w') := by
       simpa [Tx.run, spec_exec_allowance, Call.toCtx] using h
-    rw [allowance_returns_stored ⟨sender, value, ts, bn, target⟩ w owner spender]
+    rw [allowance_returns_stored { sender, value, timestamp := ts, blockNumber := bn, self } w owner spender]
       at hrun
     obtain ⟨rfl, rfl⟩ := hrun
     simp [spentCall]
   case totalSupply =>
-    have hrun : Tx.run totalSupply ⟨sender, value, ts, bn, target⟩ w =
+    have hrun : Tx.run totalSupply { sender, value, timestamp := ts, blockNumber := bn, self } w =
         .ok (r, w') := by
       simpa [Tx.run, spec_exec_totalSupply, Call.toCtx] using h
-    rw [totalSupply_returns_stored ⟨sender, value, ts, bn, target⟩ w] at hrun
+    rw [totalSupply_returns_stored { sender, value, timestamp := ts, blockNumber := bn, self } w] at hrun
     obtain ⟨rfl, rfl⟩ := hrun
     simp [spentCall]
 
-private theorem spent_covers_accepted (c : Call spec)
+private theorem spent_covers_accepted (self : Address) (c : Call spec)
     (w : World) (a : Address)
-    (hacc : accepted c w = true) :
-    w.self.balances a ≤ (step (.call c) w).self.balances a + spentCall a c := by
+    (hacc : accepted self c w = true) :
+    w.self.balances a ≤ (step self (.call c) w).self.balances a +
+      spentCall a c := by
   obtain ⟨_, _, ⟨⟨r, w'⟩, hrun, hstep⟩⟩ := accepted_ok hacc
   rw [hstep]
   simpa [World.creditValue_self] using
-    spent_covers_ok c (World.creditValue w c.value) w' a hrun
+    spent_covers_ok self c (World.creditValue w c.value) w' a hrun
 
 theorem weth_backed (w : State) : w.self.totalSupply ≤ w.nativeBalance := by
   have hInv := weth_inv_of_reachable (self := w.addr) w.reachable
@@ -813,8 +819,8 @@ private theorem foldAccepted_raw_add {s : State} (t : Txs s) (a : Address)
   | @call s c hne rest ih =>
     simp [Txs.foldAccepted, Txs.spent]
     split_ifs
-    · have hx := ih (x + HasSpent.spentCall (C := spec) a (s.callOf c))
-      have hsc := ih (HasSpent.spentCall (C := spec) a (s.callOf c))
+    · have hx := ih (x + HasSpent.spentCall (C := spec) a (c))
+      have hsc := ih (HasSpent.spentCall (C := spec) a (c))
       rw [hx, hsc]
       exact Nat.add_assoc _ _ _
     · exact ih x
@@ -829,24 +835,24 @@ theorem weth_no_unauthorized_extraction (w : State) (t : Txs w) (a : Address) :
     simp [Txs.spent, Txs.foldAccepted, Amount.le_iff, Amount.raw_add]
   | @call s c hne rest ih =>
     simp [Txs.spent, Txs.foldAccepted]
-    by_cases hacc : accepted (s.callOf c) s.w = true
-    · have hcov := spent_covers_accepted (s.callOf c) s.w a hacc
-      have hstepEq : (s.afterCall c hne).w = step (.call (s.callOf c)) s.w :=
+    by_cases hacc : accepted s.addr c s.w = true
+    · have hcov := spent_covers_accepted s.addr c s.w a hacc
+      have hstepEq : (s.afterCall c hne).w = step s.addr (.call c) s.w :=
         State.afterCall_w s c hne
       have hthis : s.self.balances a ≤
-          (s.afterCall c hne).self.balances a + spentCall a (s.callOf c) := by
+          (s.afterCall c hne).self.balances a + spentCall a c := by
         simpa [State.self, hstepEq] using hcov
       simp [Amount.le_iff, Amount.raw_add] at hthis ih
       have hfold := foldAccepted_raw_add rest a
-        (HasSpent.spentCall (C := spec) a (s.callOf c))
+        (HasSpent.spentCall (C := spec) a c)
       simp [Amount.le_iff, Amount.raw_add, Txs.spent, Txs.foldAccepted, hacc,
         HasSpent.spentCall] at hthis ih hfold ⊢
       rw [hfold]
       refine Nat.le_trans hthis ?_
-      have hih := Nat.add_le_add_right ih (spentCall a (s.callOf c)).raw
+      have hih := Nat.add_le_add_right ih (spentCall a c).raw
       convert hih using 1
       ac_rfl
-    · have hfalse : accepted (s.callOf c) s.w = false :=
+    · have hfalse : accepted s.addr c s.w = false :=
         Bool.eq_false_iff.mpr hacc
       have hstep := step_of_not_accepted hfalse
       have hs : (s.afterCall c hne).self = s.self := by

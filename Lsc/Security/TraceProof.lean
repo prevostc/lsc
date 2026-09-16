@@ -10,11 +10,11 @@ namespace Lsc.Security.Proof
 variable {S X E ε α : Type} {C : Spec S X E ε}
 
 theorem Call.toCtx_ofCtx (ctx : Ctx) (fn : C.Fn) (args : C.Args fn) :
-    (Call.ofCtx (C := C) ctx fn args).toCtx = ctx :=
+    (Call.ofCtx (C := C) ctx fn args).toCtx ctx.self = ctx :=
   rfl
 
-theorem Call.ofCtx_toCtx (c : Call C) :
-    Call.ofCtx c.toCtx c.fn c.args = c :=
+theorem Call.ofCtx_toCtx (c : Call C) (self : Address) :
+    Call.ofCtx (c.toCtx self) c.fn c.args = c :=
   rfl
 
 theorem worldAfter_ok {x : Tx S X E ε α} {ctx w a w'}
@@ -39,54 +39,54 @@ theorem worldAfter_eq_self {x : Tx S X E ε α} {ctx : Ctx} {w : World S X E}
   worldAfter_preserves (P := fun w' => w' = w) rfl hok
 
 theorem run_nil [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
-    (w : World S X E) :
-    run ([] : List (Step C)) w = w :=
+    (self : Address) (w : World S X E) :
+    run self ([] : List (Step C)) w = w :=
   rfl
 
 theorem run_cons [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
-    (s : Step C) (tr : List (Step C))
+    (self : Address) (s : Step C) (tr : List (Step C))
     (w : World S X E) :
-    run (s :: tr) w = run tr (step s w) :=
+    run self (s :: tr) w = run self tr (step self s w) :=
   rfl
 
 theorem run_append [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
-    (tr₁ tr₂ : List (Step C))
+    (self : Address) (tr₁ tr₂ : List (Step C))
     (w : World S X E) :
-    run (tr₁ ++ tr₂) w = run tr₂ (run tr₁ w) := by
+    run self (tr₁ ++ tr₂) w = run self tr₂ (run self tr₁ w) := by
   induction tr₁ generalizing w with
   | nil => rfl
   | cons _ _ ih => rw [List.cons_append, run_cons, ih, run_cons]
 
 theorem step_of_revert [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
-    {c : Call C} {w : World S X E} {e : Err ε}
+    {self : Address} {c : Call C} {w : World S X E} {e : Err ε}
     (hvo : C.valueOk c.fn c.value = true)
-    (h : C.exec c.fn c.args c.toCtx (World.creditValue w c.value) = .error e) :
-    step (.call c) w = w := by
+    (h : C.exec c.fn c.args (c.toCtx self) (World.creditValue w c.value) = .error e) :
+    step self (.call c) w = w := by
   simp only [step, stepCall]
   simp [hvo, h]
 
 theorem step_reject_value [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
-    {c : Call C} {w : World S X E}
+    {self : Address} {c : Call C} {w : World S X E}
     (hp : C.payable c.fn = false) (hv : c.value ≠ 0) :
-    step (.call c) w = w := by
+    step self (.call c) w = w := by
   simp only [step, stepCall]
   simp [Spec.valueOk_false (C := C) hp hv]
 
 theorem step_wrap [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
-    {c : Call C} {w : World S X E}
+    {self : Address} {c : Call C} {w : World S X E}
     (hp : C.payable c.fn = true) (hw : creditWraps w c.value = true) :
-    step (.call c) w = w := by
+    step self (.call c) w = w := by
   have hvo : C.valueOk c.fn c.value = true := Spec.valueOk_of_payable (C := C) hp
   simp only [step, stepCall]
   simp [hvo, hp, hw]
 
 theorem step_eq_run [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
-    (c : Call C) (w : World S X E) :
-    step (.call c) w =
+    (self : Address) (c : Call C) (w : World S X E) :
+    step self (.call c) w =
       if C.valueOk c.fn c.value then
         if C.payable c.fn && creditWraps w c.value then w
         else
-          match C.exec c.fn c.args c.toCtx (World.creditValue w c.value) with
+          match C.exec c.fn c.args (c.toCtx self) (World.creditValue w c.value) with
           | .ok (_, w') => w'
           | .error _ => w
       else w :=
@@ -94,23 +94,23 @@ theorem step_eq_run [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
 
 theorem step_eq_worldAfter_of_credit_id [HasCreditValue X] [HasPayable C]
     [HasSelfBalance X]
-    (c : Call C) (w : World S X E)
+    (self : Address) (c : Call C) (w : World S X E)
     (hvo : C.valueOk c.fn c.value = true)
     (h : World.creditValue w c.value = w)
     (hnw : (C.payable c.fn && creditWraps w c.value) = false) :
-    step (.call c) w = worldAfter (C.exec c.fn c.args) c.toCtx w := by
+    step self (.call c) w = worldAfter (C.exec c.fn c.args) (c.toCtx self) w := by
   simp only [step, stepCall]
   simp [hvo, hnw, h]
-  cases hrun : C.exec c.fn c.args c.toCtx w with
+  cases hrun : C.exec c.fn c.args (c.toCtx self) w with
   | ok p => simp [worldAfter, Tx.run, hrun]
   | error e => simp [worldAfter, Tx.run, hrun]
 
 theorem step_eq_worldAfter_of_not_payable [HasCreditValue X] [HasPayable C]
     [HasSelfBalance X]
-    (c : Call C) (w : World S X E)
+    (self : Address) (c : Call C) (w : World S X E)
     (hp : C.payable c.fn = false) (hv : c.value = 0) :
-    step (.call c) w = worldAfter (C.exec c.fn c.args) c.toCtx w :=
-  step_eq_worldAfter_of_credit_id c w
+    step self (.call c) w = worldAfter (C.exec c.fn c.args) (c.toCtx self) w :=
+  step_eq_worldAfter_of_credit_id self c w
     (by simp [Spec.valueOk, hp, hv]) (by rw [hv, World.creditValue_zero])
     (by simp [hp])
 
@@ -128,14 +128,14 @@ theorem External.append {self : Address} {tr₁ tr₂ : List (Step C)}
   | cons s rest ih =>
     match s with
     | .call c =>
-      have ⟨ht, hs, htl⟩ := h₁
-      exact ⟨ht, hs, ih htl⟩
+      have ⟨hs, htl⟩ := h₁
+      exact ⟨hs, ih htl⟩
     | .env _ =>
       exact ih h₁
 
 theorem Wf.append [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
     {self : Address} {tr₁ tr₂ : List (Step C)} {w : World S X E}
-    (h₁ : Wf self tr₁ w) (h₂ : Wf self tr₂ (run tr₁ w)) :
+    (h₁ : Wf self tr₁ w) (h₂ : Wf self tr₂ (run self tr₁ w)) :
     Wf self (tr₁ ++ tr₂) w :=
   External.append (C := C) h₁ h₂
 
@@ -189,13 +189,14 @@ theorem Wf.irrel_extState {S E ε : Type} {C : Spec S ExtState E ε}
   h
 
 theorem step_of_not_accepted [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
-    {c : Call C} {w : World S X E} (h : accepted c w = false) :
-    step (.call c) w = w := by
+    {self : Address} {c : Call C} {w : World S X E}
+    (h : accepted self c w = false) :
+    step self (.call c) w = w := by
   unfold accepted at h
   cases hvo : C.valueOk c.fn c.value
   · simp [step, stepCall, hvo]
   · cases hwrap : (C.payable c.fn && creditWraps w c.value)
-    · cases hrun : C.exec c.fn c.args c.toCtx (World.creditValue w c.value) with
+    · cases hrun : C.exec c.fn c.args (c.toCtx self) (World.creditValue w c.value) with
       | ok p =>
         simp [hvo, hwrap, hrun] at h
       | error e =>
@@ -203,17 +204,18 @@ theorem step_of_not_accepted [HasCreditValue X] [HasPayable C] [HasSelfBalance X
     · simp [step, stepCall, hvo, hwrap]
 
 theorem accepted_ok [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
-    {c : Call C} {w : World S X E} (h : accepted c w = true) :
+    {self : Address} {c : Call C} {w : World S X E}
+    (h : accepted self c w = true) :
     C.valueOk c.fn c.value = true ∧
       (C.payable c.fn && creditWraps w c.value) = false ∧
-      ∃ p, C.exec c.fn c.args c.toCtx (World.creditValue w c.value) = .ok p ∧
-        step (.call c) w = p.2 := by
+      ∃ p, C.exec c.fn c.args (c.toCtx self) (World.creditValue w c.value) = .ok p ∧
+        step self (.call c) w = p.2 := by
   unfold accepted at h
   if hvo : C.valueOk c.fn c.value = true then
     if hwrap : (C.payable c.fn && creditWraps w c.value) = true then
       simp [hvo, hwrap] at h
     else
-      cases hrun : C.exec c.fn c.args c.toCtx (World.creditValue w c.value) with
+      cases hrun : C.exec c.fn c.args (c.toCtx self) (World.creditValue w c.value) with
       | error e =>
         simp [hvo, hwrap, hrun] at h
       | ok p =>

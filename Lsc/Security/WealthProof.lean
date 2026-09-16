@@ -15,24 +15,24 @@ variable {S X E ε : Type} {C : Spec S X E ε}
 theorem no_unauthorized_extraction [HasCreditValue X] [HasPayable C]
     [HasSelfBalance X]
     {Inv : World S X E → Prop} {claim : Claim S X E}
-    {Auth : AuthPred C} {rely : X → X → Prop}
-    (hN : NoUnauthorizedDecrease C Inv claim Auth)
-    (hP : PreservesInv C Inv) (hE : PreservesInvEnv C Inv rely)
+    {Auth : AuthPred C} {rely : World S X E → X → Prop} {self : Address}
+    (hN : NoUnauthorizedDecrease C self Inv claim Auth)
+    (hP : PreservesInv C self Inv) (hE : PreservesInvEnv C Inv rely)
     (hM : ClaimMonoEnv claim rely)
     (tr : List (Step C)) (w : World S X E) (a : Address)
-    (hw : Inv w) (hR : RelyAlong rely tr w)
-    (hA : NoAuthAlong Auth a tr w) :
-    claim a w ≤ claim a (run tr w) := by
+    (hw : Inv w) (hR : RelyAlong self rely tr w)
+    (hA : NoAuthAlong self Auth a tr w) :
+    claim a w ≤ claim a (run self tr w) := by
   induction tr generalizing w with
   | nil => simp [run]
   | cons s tr ih =>
     match s with
     | .call c =>
       obtain ⟨hna, htl⟩ := hA
-      have hw' : Inv (step (.call c) w) := hP c w hw
-      have hle : claim a w ≤ claim a (step (.call c) w) :=
+      have hw' : Inv (step self (.call c) w) := hP c w hw
+      have hle : claim a w ≤ claim a (step self (.call c) w) :=
         Nat.le_of_not_lt fun hlt => hna (hN c w a hw hlt)
-      exact Nat.le_trans hle (ih (step (.call c) w) hw' hR htl)
+      exact Nat.le_trans hle (ih (step self (.call c) w) hw' hR htl)
     | .env x' =>
       obtain ⟨hr, htl⟩ := hR
       have hw' : Inv { w with ext := x' } := hE w x' hw hr
@@ -42,25 +42,25 @@ theorem no_unauthorized_extraction [HasCreditValue X] [HasPayable C]
 theorem no_unauthorized_extraction_at [HasCreditValue X] [HasPayable C]
     [HasSelfBalance X]
     {Inv : World S X E → Prop} {claim : Claim S X E}
-    {Auth : AuthPred C} {rely : X → X → Prop} {self : Address}
-    (hN : NoUnauthorizedDecrease C Inv claim Auth)
+    {Auth : AuthPred C} {rely : World S X E → X → Prop} {self : Address}
+    (hN : NoUnauthorizedDecrease C self Inv claim Auth)
     (hP : PreservesInvAt C Inv self) (hE : PreservesInvEnv C Inv rely)
     (hM : ClaimMonoEnv claim rely)
     (tr : List (Step C)) (w : World S X E) (a : Address)
-    (hw : Inv w) (hW : Wf self tr w) (hR : RelyAlong rely tr w)
-    (hA : NoAuthAlong Auth a tr w) :
-    claim a w ≤ claim a (run tr w) := by
+    (hw : Inv w) (hW : Wf self tr w) (hR : RelyAlong self rely tr w)
+    (hA : NoAuthAlong self Auth a tr w) :
+    claim a w ≤ claim a (run self tr w) := by
   induction tr generalizing w with
   | nil => simp [run]
   | cons s tr ih =>
     match s with
     | .call c =>
       obtain ⟨hna, htl⟩ := hA
-      have ⟨ht, hs, hWtl⟩ := hW
-      have hw' : Inv (step (.call c) w) := hP c w ht hs hw
-      have hle : claim a w ≤ claim a (step (.call c) w) :=
+      have ⟨hs, hWtl⟩ := hW
+      have hw' : Inv (step self (.call c) w) := hP c w hs hw
+      have hle : claim a w ≤ claim a (step self (.call c) w) :=
         Nat.le_of_not_lt fun hlt => hna (hN c w a hw hlt)
-      exact Nat.le_trans hle (ih (step (.call c) w) hw' hWtl hR htl)
+      exact Nat.le_trans hle (ih (step self (.call c) w) hw' hWtl hR htl)
     | .env x' =>
       obtain ⟨hr, htl⟩ := hR
       have hw' : Inv { w with ext := x' } := hE w x' hw hr
@@ -69,22 +69,23 @@ theorem no_unauthorized_extraction_at [HasCreditValue X] [HasPayable C]
 
 theorem solvent_run [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
     {Inv : World S X E → Prop} {claim : Claim S X E}
-    {holdings : Holdings S X E} {rely : X → X → Prop}
-    (hP : PreservesInv C Inv) (hE : PreservesInvEnv C Inv rely)
+    {holdings : Holdings S X E} {rely : World S X E → X → Prop}
+    {self : Address}
+    (hP : PreservesInv C self Inv) (hE : PreservesInvEnv C Inv rely)
     (hS : ∀ self w, Inv w → Solvent claim holdings self w)
-    {self : Address} {w : World S X E} (hw : Inv w) (tr : List (Step C))
-    (hW : Wf self tr w) (hR : RelyAlong rely tr w) :
-    Solvent claim holdings self (run tr w) :=
+    {w : World S X E} (hw : Inv w) (tr : List (Step C))
+    (hW : Wf self tr w) (hR : RelyAlong self rely tr w) :
+    Solvent claim holdings self (run self tr w) :=
   hS self _ (inv_run hP hE hw tr hW hR)
 
 theorem solvent_run_at [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
     {Inv : World S X E → Prop} {claim : Claim S X E}
-    {holdings : Holdings S X E} {rely : X → X → Prop} {self : Address}
+    {holdings : Holdings S X E} {rely : World S X E → X → Prop} {self : Address}
     (hP : PreservesInvAt C Inv self) (hE : PreservesInvEnv C Inv rely)
     (hS : ∀ w, Inv w → Solvent claim holdings self w)
     {w : World S X E} (hw : Inv w) (tr : List (Step C))
-    (hW : Wf self tr w) (hR : RelyAlong rely tr w) :
-    Solvent claim holdings self (run tr w) :=
+    (hW : Wf self tr w) (hR : RelyAlong self rely tr w) :
+    Solvent claim holdings self (run self tr w) :=
   hS _ (inv_run_at hP hE hw tr hW hR)
 
 theorem sum_update_mem {α : Type} [DecidableEq α] (H : Finset α) (f : α → Nat) {i : α}
@@ -128,11 +129,13 @@ theorem Claim.ofSelf_congr (c : Address → S → Nat)
       Claim.ofSelf (S := S) (X := X) (E := E) c a w' := by
   simp [Claim.eval_ofSelf, h]
 
-theorem ClaimMonoEnv.of_self (c : Address → S → Nat) (rely : X → X → Prop) :
+theorem ClaimMonoEnv.of_self (c : Address → S → Nat)
+    (rely : World S X E → X → Prop) :
     ClaimMonoEnv (Claim.ofSelf (S := S) (X := X) (E := E) c) rely := by
   intro _ _ _ _; exact Nat.le_refl _
 
-theorem ClaimMonoEnv.of_native (c : Address → S → Nat) (rely : X → X → Prop) :
+theorem ClaimMonoEnv.of_native (c : Address → S → Nat)
+    (rely : World S X E → X → Prop) :
     ClaimMonoEnv (Claim.ofNative (S := S) (X := X) (E := E) c) rely := by
   intro _ _ _ _; exact Nat.le_refl _
 
@@ -218,35 +221,36 @@ theorem NativeSendAuth.of_debits [HasSelfBalance X] {claim : Claim S X E}
 theorem NoUnauthorizedDecrease.of_fns [HasCreditValue X] [HasPayable C]
     [HasSelfBalance X]
     {Inv : World S X E → Prop}
-    {claim : Claim S X E} {Auth : AuthPred C}
+    {claim : Claim S X E} {Auth : AuthPred C} {self : Address}
     (h : ∀ fn, NoUnauthorizedDecreaseFn C Inv claim Auth fn)
     (hnp : ∀ fn, C.payable fn = false := by intro fn; cases fn <;> rfl) :
-    NoUnauthorizedDecrease C Inv claim Auth := by
+    NoUnauthorizedDecrease C self Inv claim Auth := by
   intro c w a hInv hlt
   have hp : C.payable c.fn = false := hnp c.fn
   by_cases hv : c.value = 0
-  · rw [step_eq_worldAfter_of_not_payable c w hp hv] at hlt
-    simpa [Call.ofCtx_toCtx] using h c.fn c.args c.toCtx w a hInv hlt
-  · rw [step_reject_value hp hv] at hlt
+  · rw [step_eq_worldAfter_of_not_payable self c w hp hv] at hlt
+    simpa [Call.ofCtx_toCtx] using h c.fn c.args (c.toCtx self) w a hInv hlt
+  · rw [step_reject_value (self := self) hp hv] at hlt
     exact (Nat.lt_irrefl _ hlt).elim
 
 theorem NoUnauthorizedDecrease.of_fns_credit [HasCreditValue X]
     {Inv : World S X E → Prop} {claim : Claim S X E} {Auth : AuthPred C}
+    {self : Address}
     [HasPayable C] [HasSelfBalance X]
     (h : ∀ fn, NoUnauthorizedDecreaseCreditFn C Inv claim Auth fn) :
-    NoUnauthorizedDecrease C Inv claim Auth := by
+    NoUnauthorizedDecrease C self Inv claim Auth := by
   intro c w a hInv hlt
-  rw [step_eq_run] at hlt
+  rw [step_eq_run self] at hlt
   split_ifs at hlt with hvo hwrap
   · exact (Nat.lt_irrefl _ hlt).elim
-  · cases hrun : C.exec c.fn c.args c.toCtx (World.creditValue w c.value) with
+  · cases hrun : C.exec c.fn c.args (c.toCtx self) (World.creditValue w c.value) with
     | error _ =>
       rw [hrun] at hlt
       exact (Nat.lt_irrefl _ hlt).elim
     | ok p =>
       rw [hrun] at hlt
       simpa [Call.ofCtx_toCtx] using
-        h c.fn c.args c.toCtx w a p.1 p.2 hvo hInv hrun hlt
+        h c.fn c.args (c.toCtx self) w a p.1 p.2 hvo hInv hrun hlt
   · exact (Nat.lt_irrefl _ hlt).elim
 
 theorem NoUnauthorizedDecreaseFn_of_native_send {Inv : World S X E → Prop}
@@ -330,16 +334,16 @@ theorem NoUnauthorizedDecreaseCreditFn_of_fn [HasCreditValue X]
 theorem Conservation.of_fns [HasCreditValue X] [HasPayable C]
     [HasSelfBalance X]
     {Inv : World S X E → Prop} {claim : Claim S X E}
-    {inflow : Inflow C}
+    {inflow : Inflow C} {self : Address}
     (h : ∀ fn, ConservesFn C Inv claim inflow fn)
     (hnp : ∀ fn, C.payable fn = false := by intro fn; cases fn <;> rfl) :
-    Conservation C Inv claim inflow := by
+    Conservation C self Inv claim inflow := by
   intro c w hInv
   have hp : C.payable c.fn = false := hnp c.fn
   by_cases hv : c.value = 0
-  · rw [step_eq_worldAfter_of_not_payable c w hp hv]
-    exact h c.fn c.args c.toCtx w hInv
-  · rw [step_reject_value hp hv]
+  · rw [step_eq_worldAfter_of_not_payable self c w hp hv]
+    exact h c.fn c.args (c.toCtx self) w hInv
+  · rw [step_reject_value (self := self) hp hv]
     refine ⟨∅, fun _ _ => rfl, by simp⟩
 
 theorem ConservesFn_of_ok {Inv : World S X E → Prop} {claim : Claim S X E}

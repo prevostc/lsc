@@ -61,6 +61,9 @@ call still uses `Ctx` (CallsWF already has `sender ≠ self`). -/
 structure Msg extends Ctx where
   notSelf : sender ≠ self
 
+/-- So `Tx.run f msg w` elaborates when `msg : Msg`. -/
+instance : Coe Msg Ctx := ⟨Msg.toCtx⟩
+
 /-- Deterministic, memory-blind callee oracle over opaque external state `X`.
 `call` is CALL: `none` is revert. `view` is STATICCALL: total, no `ext` update.
 `send` is a value-carrying CALL with empty calldata (`none` is revert).

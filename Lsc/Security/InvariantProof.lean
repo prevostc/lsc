@@ -10,17 +10,18 @@ variable {S X E ε : Type}
 
 theorem inv_run [HasCreditValue X] {C : Spec S X E ε} [HasPayable C]
     [HasSelfBalance X]
-    {Inv : World S X E → Prop} {rely : X → X → Prop}
-    (hC : PreservesInv C Inv) (hE : PreservesInvEnv C Inv rely)
-    {w : World S X E} (hw : Inv w) {self : Address} (tr : List (Step C))
-    (hW : Wf self tr w) (hR : RelyAlong rely tr w) :
-    Inv (run tr w) := by
+    {Inv : World S X E → Prop} {rely : World S X E → X → Prop}
+    {self : Address}
+    (hC : PreservesInv C self Inv) (hE : PreservesInvEnv C Inv rely)
+    {w : World S X E} (hw : Inv w) (tr : List (Step C))
+    (hW : Wf self tr w) (hR : RelyAlong self rely tr w) :
+    Inv (run self tr w) := by
   induction tr generalizing w with
   | nil => simpa using hw
   | cons s tr ih =>
     match s with
     | .call c =>
-      have ⟨_, _, htl⟩ := hW
+      have ⟨_, htl⟩ := hW
       exact ih (hC c w hw) htl hR
     | .env x' =>
       have ⟨hr, htl⟩ := hR
@@ -28,35 +29,35 @@ theorem inv_run [HasCreditValue X] {C : Spec S X E ε} [HasPayable C]
 
 theorem inv_run_at [HasCreditValue X] {C : Spec S X E ε} [HasPayable C]
     [HasSelfBalance X]
-    {Inv : World S X E → Prop} {rely : X → X → Prop}
+    {Inv : World S X E → Prop} {rely : World S X E → X → Prop}
     {self : Address}
     (hC : PreservesInvAt C Inv self) (hE : PreservesInvEnv C Inv rely)
     {w : World S X E} (hw : Inv w) (tr : List (Step C))
-    (hW : Wf self tr w) (hR : RelyAlong rely tr w) :
-    Inv (run tr w) := by
+    (hW : Wf self tr w) (hR : RelyAlong self rely tr w) :
+    Inv (run self tr w) := by
   induction tr generalizing w with
   | nil => simpa using hw
   | cons s tr ih =>
     match s with
     | .call c =>
-      have ⟨ht, hs, htl⟩ := hW
-      exact ih (hC c w ht hs hw) htl hR
+      have ⟨hs, htl⟩ := hW
+      exact ih (hC c w hs hw) htl hR
     | .env x' =>
       have ⟨hr, htl⟩ := hR
       exact ih (hE w x' hw hr) hW htl
 
 theorem PreservesInv.of_fns [HasCreditValue X] {C : Spec S X E ε} [HasPayable C]
     [HasSelfBalance X]
-    {Inv : World S X E → Prop}
+    {Inv : World S X E → Prop} {self : Address}
     (h : ∀ fn, PreservesInvFn C Inv fn)
     (hnp : ∀ fn, C.payable fn = false := by intro fn; cases fn <;> rfl) :
-    PreservesInv C Inv := by
+    PreservesInv C self Inv := by
   intro c w hc
   have hp : C.payable c.fn = false := hnp c.fn
   by_cases hv : c.value = 0
-  · rw [step_eq_worldAfter_of_not_payable c w hp hv]
-    exact h c.fn c.args c.toCtx w hc
-  · simpa [step_reject_value hp hv] using hc
+  · rw [step_eq_worldAfter_of_not_payable self c w hp hv]
+    exact h c.fn c.args (c.toCtx self) w hc
+  · simpa [step_reject_value (self := self) hp hv] using hc
 
 theorem PreservesInvFn_of_ok {C : Spec S X E ε} {Inv : World S X E → Prop} {fn : C.Fn}
     (hok : ∀ (args : C.Args fn) (ctx : Ctx) (w : World S X E) (a : C.Ret fn)
@@ -73,12 +74,12 @@ theorem PreservesInvAt.of_fns [HasCreditValue X] {C : Spec S X E ε} [HasPayable
     (h : ∀ fn, PreservesInvFnAt C Inv self fn)
     (hnp : ∀ fn, C.payable fn = false := by intro fn; cases fn <;> rfl) :
     PreservesInvAt C Inv self := by
-  intro c w ht hs hc
+  intro c w hs hc
   have hp : C.payable c.fn = false := hnp c.fn
   by_cases hv : c.value = 0
-  · rw [step_eq_worldAfter_of_not_payable c w hp hv]
-    exact h c.fn c.args c.toCtx w ht hs hc
-  · simpa [step_reject_value hp hv] using hc
+  · rw [step_eq_worldAfter_of_not_payable self c w hp hv]
+    exact h c.fn c.args (c.toCtx self) w rfl hs hc
+  · simpa [step_reject_value (self := self) hp hv] using hc
 
 theorem PreservesInvFnAt_of_ok {C : Spec S X E ε} {Inv : World S X E → Prop}
     {self : Address} {fn : C.Fn}
@@ -93,16 +94,16 @@ theorem PreservesInvFnAt_of_ok {C : Spec S X E ε} {Inv : World S X E → Prop}
 
 theorem PreservesInv.of_fns_credit [HasCreditValue X] {C : Spec S X E ε}
     [HasPayable C] [HasSelfBalance X]
-    {Inv : World S X E → Prop}
+    {Inv : World S X E → Prop} {self : Address}
     (h : ∀ fn, PreservesInvCreditFn C Inv fn) :
-    PreservesInv C Inv := by
+    PreservesInv C self Inv := by
   intro c w hc
-  rw [step_eq_run]
+  rw [step_eq_run self]
   split_ifs with hvo hwrap
   · exact hc
-  · cases hrun : C.exec c.fn c.args c.toCtx (World.creditValue w c.value) with
+  · cases hrun : C.exec c.fn c.args (c.toCtx self) (World.creditValue w c.value) with
     | error _ => exact hc
-    | ok p => exact h c.fn c.args c.toCtx w p.1 p.2 hvo hc hrun
+    | ok p => exact h c.fn c.args (c.toCtx self) w p.1 p.2 hvo hc hrun
   · exact hc
 
 theorem PreservesInvAt.of_fns_credit [HasCreditValue X] {C : Spec S X E ε}
@@ -110,16 +111,14 @@ theorem PreservesInvAt.of_fns_credit [HasCreditValue X] {C : Spec S X E ε}
     {Inv : World S X E → Prop} {self : Address}
     (h : ∀ fn, PreservesInvCreditFnAt C Inv self fn) :
     PreservesInvAt C Inv self := by
-  intro c w ht hs hc
-  rw [step_eq_run]
+  intro c w hs hc
+  rw [step_eq_run self]
   split_ifs with hvo hwrap
   · exact hc
-  · cases hrun : C.exec c.fn c.args c.toCtx (World.creditValue w c.value) with
+  · cases hrun : C.exec c.fn c.args (c.toCtx self) (World.creditValue w c.value) with
     | error _ => exact hc
     | ok p =>
-      have hself : c.toCtx.self = self := by simp [Call.toCtx, ht]
-      have hsne : c.toCtx.sender ≠ self := by simp [Call.toCtx, hs]
-      exact h c.fn c.args c.toCtx w p.1 p.2 hself hsne hvo hc hrun
+      exact h c.fn c.args (c.toCtx self) w p.1 p.2 rfl hs hvo hc hrun
   · exact hc
 
 /-- Non-payable `PreservesInvFn` yields the credit form: `valueOk` forces
@@ -151,9 +150,11 @@ theorem PreservesInvCreditFnAt_of_fn [HasCreditValue X] {C : Spec S X E ε}
 
 theorem RelyAlong.append [HasCreditValue X] {C : Spec S X E ε} [HasPayable C]
     [HasSelfBalance X]
-    {rely : X → X → Prop} {tr₁ tr₂ : List (Step C)} {w : World S X E}
-    (h₁ : RelyAlong rely tr₁ w) (h₂ : RelyAlong rely tr₂ (run tr₁ w)) :
-    RelyAlong rely (tr₁ ++ tr₂) w := by
+    {self : Address} {rely : World S X E → X → Prop}
+    {tr₁ tr₂ : List (Step C)} {w : World S X E}
+    (h₁ : RelyAlong self rely tr₁ w)
+    (h₂ : RelyAlong self rely tr₂ (run self tr₁ w)) :
+    RelyAlong self rely (tr₁ ++ tr₂) w := by
   induction tr₁ generalizing w with
   | nil => simpa [run] using h₂
   | cons s rest ih =>
@@ -167,23 +168,23 @@ theorem RelyAlong.append [HasCreditValue X] {C : Spec S X E ε} [HasPayable C]
 theorem PreservesInv.toAt [HasCreditValue X] {C : Spec S X E ε} [HasPayable C]
     [HasSelfBalance X]
     {Inv : World S X E → Prop} {self : Address}
-    (h : PreservesInv C Inv) : PreservesInvAt C Inv self :=
-  fun c w _ _ hw => h c w hw
+    (h : PreservesInv C self Inv) : PreservesInvAt C Inv self :=
+  fun c w _ hw => h c w hw
 
 theorem reachable_run [HasCreditValue X] {C : Spec S X E ε} [HasPayable C]
     [HasSelfBalance X] [HasDeploy C]
-    {rely : X → X → Prop} {self : Address} {w : World S X E}
+    {rely : World S X E → X → Prop} {self : Address} {w : World S X E}
     {tr : List (Step C)}
     (h : Reachable (C := C) rely self w) (hW : Wf self tr w)
-    (hR : RelyAlong rely tr w) :
-    Reachable (C := C) rely self (run tr w) := by
+    (hR : RelyAlong self rely tr w) :
+    Reachable (C := C) rely self (run self tr w) := by
   obtain ⟨w₀, tr₀, hDep, hW₀, hR₀, rfl⟩ := h
   refine ⟨w₀, tr₀ ++ tr, hDep, Wf.append hW₀ hW, RelyAlong.append hR₀ hR, ?_⟩
   simp [run_append]
 
 theorem inv_of_reachable [HasCreditValue X] {C : Spec S X E ε} [HasPayable C]
     [HasSelfBalance X] [HasDeploy C]
-    {Inv : World S X E → Prop} {rely : X → X → Prop} {self : Address}
+    {Inv : World S X E → Prop} {rely : World S X E → X → Prop} {self : Address}
     {w : World S X E}
     (hD : ∀ w, Deployed C w → Inv w)
     (hP : PreservesInvAt C Inv self)

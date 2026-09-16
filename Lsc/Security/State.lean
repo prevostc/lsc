@@ -1,4 +1,5 @@
 import Lsc.Lang.Amount
+import Lsc.Lang.AmountAlgebra
 import Lsc.Security.InvariantTheorems
 
 /-!
@@ -22,11 +23,16 @@ structure State (C : Spec S X E ε)
   addr : Address
   reachable :
     Reachable (S := S) (X := X) (E := E) (ε := ε) (C := C)
-      (HasRely.rely (C := C)) addr w
+      (HasRely.rely (C := C) addr) addr w
 
 variable {C : Spec S X E ε}
 variable [HasCreditValue X] [HasPayable C] [HasSelfBalance X] [HasDeploy C]
 variable [HasRely C]
+
+/-- Underlying world. Tried as a coercion; if instance search sticks, use `.w`. -/
+@[coe] def State.toWorld (s : State C) : World S X E := s.w
+
+instance : CoeOut (State C) (World S X E) := ⟨State.toWorld⟩
 
 /-- Storage of the executing contract. -/
 def State.self (s : State C) : S := s.w.self
@@ -41,29 +47,25 @@ def State.nativeBalance {S E ε : Type} {C : Spec S ExtState E ε}
     (s : State C) : Amount (HasNative.asset (C := C)) :=
   ⟨World.nativeBalance s.w⟩
 
-/-- Retarget a call at this contract. Public `Txs` does not mention `target`. -/
-def State.callOf (s : State C) (c : Call C) : Call C :=
-  { c with target := s.addr }
-
 /-- World after one call targeting this contract. -/
 def State.afterCall (s : State C) (c : Call C) (hne : c.sender ≠ s.addr) :
     State C :=
-  let tr := [Step.call (s.callOf c)]
-  { w := run tr s.w
+  let tr := [Step.call c]
+  { w := run s.addr tr s.w
     addr := s.addr
     reachable :=
       reachable_run (tr := tr) s.reachable
         (by
           change External s.addr tr
-          exact And.intro rfl (And.intro hne True.intro))
+          exact And.intro hne True.intro)
         (by
           exact True.intro) }
 
 /-- World after an environment step permitted by `HasRely`. -/
 def State.afterEnv (s : State C) (x' : X)
-    (hr : HasRely.rely (C := C) s.w.ext x') : State C :=
+    (hr : HasRely.rely (C := C) s.addr s.w x') : State C :=
   let tr := [Step.env x']
-  { w := run tr s.w
+  { w := run s.addr tr s.w
     addr := s.addr
     reachable :=
       reachable_run (tr := tr) s.reachable
@@ -80,7 +82,7 @@ inductive Txs : State C → Type where
   | nil {s} : Txs s
   | call {s} (c : Call C) (hne : c.sender ≠ s.addr)
       (rest : Txs (s.afterCall c hne)) : Txs s
-  | env {s} (x' : X) (hr : HasRely.rely (C := C) s.w.ext x')
+  | env {s} (x' : X) (hr : HasRely.rely (C := C) s.addr s.w x')
       (rest : Txs (s.afterEnv x' hr)) : Txs s
 
 /-- The world after this transaction sequence. -/
@@ -91,18 +93,18 @@ def Txs.end : {s : State C} → Txs s → State C
 
 @[simp] theorem State.afterCall_w (s : State C) (c : Call C)
     (hne : c.sender ≠ s.addr) :
-    (s.afterCall c hne).w = step (.call (s.callOf c)) s.w := rfl
+    (s.afterCall c hne).w = step s.addr (.call c) s.w := rfl
 
 @[simp] theorem State.afterCall_addr (s : State C) (c : Call C)
     (hne : c.sender ≠ s.addr) :
     (s.afterCall c hne).addr = s.addr := rfl
 
 @[simp] theorem State.afterEnv_self (s : State C) (x' : X)
-    (hr : HasRely.rely (C := C) s.w.ext x') :
+    (hr : HasRely.rely (C := C) s.addr s.w x') :
     (s.afterEnv x' hr).self = s.self := rfl
 
 @[simp] theorem State.afterEnv_addr (s : State C) (x' : X)
-    (hr : HasRely.rely (C := C) s.w.ext x') :
+    (hr : HasRely.rely (C := C) s.addr s.w x') :
     (s.afterEnv x' hr).addr = s.addr := rfl
 
 @[simp] theorem Txs.end_nil (s : State C) : Txs.end (.nil : Txs s) = s := rfl
@@ -112,7 +114,7 @@ def Txs.end : {s : State C} → Txs s → State C
     Txs.end (.call c hne rest) = rest.end := rfl
 
 @[simp] theorem Txs.end_env {s : State C} (x' : X)
-    (hr : HasRely.rely (C := C) s.w.ext x') (rest : Txs (s.afterEnv x' hr)) :
+    (hr : HasRely.rely (C := C) s.addr s.w x') (rest : Txs (s.afterEnv x' hr)) :
     Txs.end (.env x' hr rest) = rest.end := rfl
 
 /-- Fold `f` over accepted calls, left to right, at the pre-call world. -/
@@ -120,8 +122,7 @@ def Txs.foldAccepted {α : Type} (f : α → Call C → World S X E → α) (ini
     ∀ {s : State C}, Txs s → α
   | _, .nil => init
   | s, .call c _hne rest =>
-    let c' := s.callOf c
-    foldAccepted f (if accepted c' s.w then f init c' s.w else init) rest
+    foldAccepted f (if accepted s.addr c s.w then f init c s.w else init) rest
   | _, .env _ _ rest =>
     foldAccepted f init rest
 

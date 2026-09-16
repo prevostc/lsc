@@ -29,7 +29,7 @@ theorem transport_step (T : TransportSetup S X E ε)
       match decodeCall T ctx cd with
       | none => σ' = σ
       | some c =>
-          let w' := { step (.call c) w with log := [] }
+          let w' := { step ctx.self (.call c) w with log := [] }
           storageRel T.c T.Γ evmKeccak w'.self σ' ∧ WorldWF T.c T.Γ w' := by
   intro yst0
   have hctx : ctxRel ctx yst0 := ctxRel_mkEvmState _ _ _ _ hctxWF hcd
@@ -65,7 +65,7 @@ theorem transport_step (T : TransportSetup S X E ε)
       simpa [valueOk_spec_fnDef, heq] using hvoF
     have hp : T.spec.payable fn = false := hnp fn
     have hv0 : ctx.value = 0 := T.spec.value_eq_zero_of_valueOk hp hvo
-    rw [step_eq_worldAfter_of_not_payable
+    rw [step_eq_worldAfter_of_not_payable ctx.self
       (Call.ofCtx ctx fn (T.codec.decode fn (decodeArgs f cd))) w hp
       (by simp [Call.ofCtx, hv0])]
     simp only [Call.toCtx_ofCtx]
@@ -101,7 +101,8 @@ theorem transport_step_ext (T : TransportSetup S ExtState E ε)
       match decodeCall T ctx cd with
       | none => σ' = σ ∧ ξ' = evmForeign yst0
       | some c =>
-          let w' : World S ExtState E := { step (.call c) w with log := [] }
+          let w' : World S ExtState E :=
+            { step ctx.self (.call c) w with log := [] }
           storageRel T.c T.Γ evmKeccak w'.self σ' ∧ WorldWF T.c T.Γ w' ∧
             ∃ stObs : EvmState,
               stObs.storage = σ' ∧ evmForeign stObs = ξ' ∧
@@ -140,7 +141,7 @@ theorem transport_step_ext (T : TransportSetup S ExtState E ε)
       simpa [valueOk_spec_fnDef, heq] using hvoF
     have hp : T.spec.payable fn = false := hnp fn
     have hv0 : ctx.value = 0 := T.spec.value_eq_zero_of_valueOk hp hvo
-    rw [step_eq_worldAfter_of_not_payable
+    rw [step_eq_worldAfter_of_not_payable ctx.self
       (Call.ofCtx ctx fn (T.codec.decode fn (decodeArgs f cd))) w hp
       (by simp [Call.ofCtx, hv0])]
     simp only [Call.toCtx_ofCtx]

@@ -33,8 +33,8 @@ def Auth : AuthPred spec :=
 def inflow (c : Call spec) (w : World) : Nat :=
   match c.fn, c.args with
   | .deposit, _ =>
-    match Tx.run (@deposit Payable.entrypoint) c.toCtx w with
-    | .ok _ => c.toCtx.value
+    match Tx.run (@deposit Payable.entrypoint) (c.toCtx 0) w with
+    | .ok _ => c.value
     | .error _ => 0
   | _, _ => 0
 
@@ -52,7 +52,7 @@ def rely (x x' : ExtState) : Prop :=
   x.env.selfBalance.toNat ≤ x'.env.selfBalance.toNat
 
 instance : HasRely spec where
-  rely := rely
+  rely _ w x' := rely w.ext x'
 
 instance : HasNative spec where
   asset := native
