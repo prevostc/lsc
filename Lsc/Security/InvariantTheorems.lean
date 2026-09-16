@@ -54,6 +54,14 @@ theorem PreservesInvFn_of_ok {C : Spec S X E ε} {Inv : World S X E → Prop} {f
     PreservesInvFn C Inv fn :=
   Proof.PreservesInvFn_of_ok hok
 
+/-- `PreservesInv` for contracts that may have payable entrypoints.
+Each unpacked obligation is judged on the post-transfer world. -/
+theorem PreservesInv.of_fns_credit [HasCreditValue X] {C : Spec S X E ε}
+    {Inv : World S X E → Prop}
+    (h : ∀ fn, PreservesInvCreditFn C Inv fn) :
+    PreservesInv C Inv :=
+  Proof.PreservesInv.of_fns_credit h
+
 /-- `PreservesInvAt` follows from the per-entrypoint form at `self`.
 Non-payable contracts need no credit obligation. -/
 theorem PreservesInvAt.of_fns [HasCreditValue X] {C : Spec S X E ε} {Inv : World S X E → Prop}
@@ -62,6 +70,13 @@ theorem PreservesInvAt.of_fns [HasCreditValue X] {C : Spec S X E ε} {Inv : Worl
     (hnp : ∀ fn, C.payable fn = false := by intro fn; cases fn <;> rfl) :
     PreservesInvAt C Inv self :=
   Proof.PreservesInvAt.of_fns h hnp
+
+/-- `PreservesInvAt` for contracts that may have payable entrypoints. -/
+theorem PreservesInvAt.of_fns_credit [HasCreditValue X] {C : Spec S X E ε}
+    {Inv : World S X E → Prop} {self : Address}
+    (h : ∀ fn, PreservesInvCreditFnAt C Inv self fn) :
+    PreservesInvAt C Inv self :=
+  Proof.PreservesInvAt.of_fns_credit h
 
 /-- Reduce `PreservesInvFnAt` to the success path: a revert leaves the world unchanged. -/
 theorem PreservesInvFnAt_of_ok {C : Spec S X E ε} {Inv : World S X E → Prop}

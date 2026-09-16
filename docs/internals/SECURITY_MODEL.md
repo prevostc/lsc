@@ -10,8 +10,11 @@ Protocol authors declare, per contract:
 - `Inv : World S X E → Prop` — the protocol invariant (e.g. `Σ balances = totalSupply`;
   Vault: finite share-support; Cpamm: reserves plus protocol buckets covered by live
   `balanceOf`).
-- `claim : Address → World → ℕ` — what the protocol owes each account, in asset units (ERC20: balance;
-  vault: redeemable assets; Cpamm: share count for extraction).
+- `claim : Address → World → ℕ` — what the protocol owes each account: **token** units
+  (ERC20: balance; vault: redeemable assets; Cpamm: share count) **plus native** value
+  that account can obtain from `self` (WETH: wrapped balance on `self`'s books; 0 for
+  token-only contracts). `Claim` is a structure `{tokens, native}` with `native`
+  defaulting to 0; `claim a w` is `tokens a w + native a w`.
 - `Auth : Address → Call → World → Prop` — who may reduce whose claim (the account itself, an
   allowance holder, …).
 - `holdings` — assets the contract actually controls, read from `I.Impl`
@@ -67,8 +70,12 @@ Design decisions fixed for `Lsc/Security` (Trace / Invariant / Wealth):
   of `Inv` (`PreservesInv` / `PreservesInvAt` and `PreservesInvEnv`).
 - Obligations are stated **unpacked** per entrypoint (`PreservesInvFn`, `NoUnauthorizedDecreaseFn`,
   `ConservesFn` over `worldAfter (C.f args) ctx w`), never over dependent `Call`s; `of_fns`
-  assemblers lift them. AI proves the unpacked forms with `simp [worldAfter, f, …]`, `split_ifs`,
-  the `*_ok` lemmas and `omega`.
+  assemblers lift them. Payable contracts use `of_fns_credit` / `PreservesInv.of_fns_credit`
+  (obligation on the post-transfer world). `Native.send` of `v` to `to` is an authorised
+  outflow iff it reduces `to`'s claim by `v` and `to` is the caller
+  (`NoUnauthorizedDecreaseFn_of_native_send`); `DebitsOnSend` additionally requires
+  `self`'s native balance to fall by `v`. AI proves the unpacked forms with
+  `simp [worldAfter, f, …]`, `split_ifs`, the `*_ok` lemmas and `omega`.
 - Conservation is local: `∃ T : Finset Address` framing untouched claims and bounding
   `Σ_T claim` by the inflow. `inflow` is a spec function that is `0` on revert.
 - `Mapping` stays `K → V` for now. Finite support is a ghost in `Inv`
@@ -106,7 +113,14 @@ hypothesis that the CALL oracle always returns a result is now a fact of this
 model rather than an assumption.
 
 Ordering of *our* entrypoints (including sandwich of those calls) is the
-trace quantifier (`run` in `Trace.lean`, `WealthTheorems`). Out of scope (stated in
+trace quantifier (`run` in `Trace.lean`, `WealthTheorems`). **Wealth** is
+tokens plus native redeemable from this contract (`Claim.tokens + Claim.native`);
+it still does not track other contracts' state, gas, or block-producer ordering
+across other contracts. `ExtState.env.balanceOf` maps every address, but
+`Oracle.send` and `env` steps may rewrite it (8C-2 does not restore balances),
+so the native *claim* is the contract's books (WETH: wrapped `balances a`), not
+`balanceOf a`. A `Native.send` to `a` is authorised iff `a` is the caller and
+`a`'s book claim falls by the sent amount. Out of scope (stated in
 `TRUSTED_COMPUTING_BASE.md`): private-key compromise, block-producer
 ordering across other contracts, gas griefing of *our* execution, and
 token behaviours excluded by

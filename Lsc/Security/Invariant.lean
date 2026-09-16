@@ -43,4 +43,24 @@ def PreservesInvAt [HasCreditValue X] (C : Spec S X E ε) (Inv : World S X E →
   ∀ (c : Call C) (w : World S X E),
     c.target = self → c.sender ≠ self → Inv w → Inv (step (.call c) w)
 
+/-- Unpacked preservation on the success path of `stepCall` (credits then
+`Tx.run`). Payable contracts use this with `PreservesInv.of_fns_credit`.
+A revert of the body is a no-op on the pre-credit world (`stepCall`). -/
+def PreservesInvCreditFn [HasCreditValue X] (C : Spec S X E ε)
+    (Inv : World S X E → Prop) (fn : C.Fn) : Prop :=
+  ∀ (args : C.Args fn) (ctx : Ctx) (w : World S X E) (ret : C.Ret fn)
+    (w' : World S X E),
+    Inv w →
+    Tx.run (C.exec fn args) ctx (World.creditValue w ctx.value) = .ok (ret, w') →
+    Inv w'
+
+/-- Like `PreservesInvCreditFn`, restricted to well-formed calls at `self`. -/
+def PreservesInvCreditFnAt [HasCreditValue X] (C : Spec S X E ε)
+    (Inv : World S X E → Prop) (self : Address) (fn : C.Fn) : Prop :=
+  ∀ (args : C.Args fn) (ctx : Ctx) (w : World S X E) (ret : C.Ret fn)
+    (w' : World S X E),
+    ctx.self = self → ctx.sender ≠ self → Inv w →
+    Tx.run (C.exec fn args) ctx (World.creditValue w ctx.value) = .ok (ret, w') →
+    Inv w'
+
 end Lsc.Security

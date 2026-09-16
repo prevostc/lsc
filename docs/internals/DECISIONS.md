@@ -2,6 +2,14 @@
 
 Short dated records.
 
+## 2026-09-16 — D1'': claims include native holdings (19b)
+
+`Claim` is `{tokens, native}` with `native` default 0; `claim a w` is the
+sum (CoeFun). Native is `self`'s books, not `ext.env.balanceOf` (oracle
+does not restore balances, 8C-2). `Native.send` of `v` to `to` is
+authorised iff `to` is the caller and `to`'s claim falls by `v`
+(`NoUnauthorizedDecreaseFn_of_native_send`). Token-only `of_fns` unchanged.
+
 ## 2026-09-16 — D1': value credited only on accepted payable calls (18b)
 
 Trace `stepCall` credits `c.value` iff `HasPayable.payable fn`; a body

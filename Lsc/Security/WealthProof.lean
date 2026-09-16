@@ -1,3 +1,5 @@
+import Lsc.Lang.Chain
+import Lsc.Lang.TxTheorems
 import Lsc.Security.Wealth
 import Lsc.Security.InvariantTheorems
 
@@ -95,15 +97,117 @@ theorem sum_update_not_mem {α : Type} [DecidableEq α] (H : Finset α) (f : α 
   Finset.sum_congr rfl fun y hy =>
     Function.update_of_ne (by intro h; subst h; exact hi hy) n f
 
+theorem Claim.eval_apply (c : Claim S X E) (a : Address) (w : World S X E) :
+    Claim.eval c a w = c.tokens a w + c.native a w :=
+  rfl
+
+theorem Claim.eval_ofFun (f : Address → World S X E → Nat)
+    (a : Address) (w : World S X E) :
+    Claim.ofFun (S := S) (X := X) (E := E) f a w = f a w :=
+  Nat.add_zero _
+
+theorem Claim.eval_ofSelf (c : Address → S → Nat) (a : Address)
+    (w : World S X E) :
+    Claim.ofSelf (S := S) (X := X) (E := E) c a w = c a w.self :=
+  Claim.eval_ofFun _ a w
+
+theorem Claim.eval_ofNative (c : Address → S → Nat) (a : Address)
+    (w : World S X E) :
+    Claim.ofNative (S := S) (X := X) (E := E) c a w = c a w.self :=
+  Nat.zero_add _
+
 theorem Claim.ofSelf_congr (c : Address → S → Nat)
     {w w' : World S X E} {a : Address} (h : w.self = w'.self) :
     Claim.ofSelf (S := S) (X := X) (E := E) c a w =
       Claim.ofSelf (S := S) (X := X) (E := E) c a w' := by
-  simp [Claim.ofSelf, h]
+  simp [Claim.eval_ofSelf, h]
 
 theorem ClaimMonoEnv.of_self (c : Address → S → Nat) (rely : X → X → Prop) :
     ClaimMonoEnv (Claim.ofSelf (S := S) (X := X) (E := E) c) rely := by
   intro _ _ _ _; exact Nat.le_refl _
+
+theorem ClaimMonoEnv.of_native (c : Address → S → Nat) (rely : X → X → Prop) :
+    ClaimMonoEnv (Claim.ofNative (S := S) (X := X) (E := E) c) rely := by
+  intro _ _ _ _; exact Nat.le_refl _
+
+theorem Claim.booksOnly_ofSelf (c : Address → S → Nat) :
+    Claim.booksOnly (Claim.ofSelf (S := S) (X := X) (E := E) c) := by
+  intro a w w' h; simp [Claim.eval_ofSelf, h]
+
+theorem Claim.booksOnly_ofNative (c : Address → S → Nat) :
+    Claim.booksOnly (Claim.ofNative (S := S) (X := X) (E := E) c) := by
+  intro a w w' h; simp [Claim.eval_ofNative, h]
+
+theorem ClaimMonoCredit.of_books [HasCreditValue X] {claim : Claim S X E}
+    (h : Claim.booksOnly claim) : ClaimMonoCredit claim := by
+  intro w v a
+  exact h a (World.creditValue w v) w (World.creditValue_self w v)
+
+theorem selfNative_eq_nativeBalance (w : World S ExtState E) :
+    selfNative w = World.nativeBalance w :=
+  rfl
+
+theorem native_outflow_victim {claim : Claim S X E} {dst : Address} {v : Nat}
+    {w w' : World S X E} {a : Address}
+    (h : NativeOutflow claim dst v w w') (hlt : claim a w' < claim a w) :
+    a = dst := by
+  by_contra hne
+  exact Nat.lt_irrefl _ (h.frame a hne ▸ hlt)
+
+theorem sendRaw_books {claim : Claim S X E} (hB : Claim.booksOnly claim)
+    (dst amount : Nat) {ctx : Ctx} {w w' : World S X E} {ok : Bool}
+    (h : Tx.run (Tx.sendRaw (ε := ε) dst amount) ctx w = .ok (ok, w')) :
+    w'.self = w.self ∧ ∀ a, claim a w' = claim a w := by
+  simp [Tx.run, Tx.sendRaw] at h
+  cases hs : w.oracle.send dst amount w.ext with
+  | none =>
+    simp [hs] at h
+    obtain ⟨rfl, rfl⟩ := h
+    exact ⟨rfl, fun _ => rfl⟩
+  | some x' =>
+    simp [hs] at h
+    obtain ⟨rfl, rfl⟩ := h
+    refine ⟨rfl, fun a => hB a _ w rfl⟩
+
+theorem native_send_books {claim : Claim S X E} {a : Asset} (hB : Claim.booksOnly claim)
+    (dst : Address) (amount : Amount a) (err : ε) {ctx : Ctx} {w w' : World S X E}
+    (h : Tx.run (Native.send dst amount err) ctx w = .ok ((), w')) :
+    w'.self = w.self ∧ ∀ a, claim a w' = claim a w := by
+  unfold Native.send at h
+  simp [Tx.run, Tx.sendRaw] at h
+  cases hs : w.oracle.send dst amount.raw w.ext with
+  | none =>
+    simp [hs, Tx.require] at h
+  | some x' =>
+    simp [hs, Tx.require] at h
+    have hrun : Tx.run (Tx.sendRaw (ε := ε) dst amount.raw) ctx w =
+        .ok (true, { w with ext := x' }) := by
+      simp [Tx.run, Tx.sendRaw, hs]
+    have ⟨_, hcl⟩ := sendRaw_books (claim := claim) hB dst amount.raw hrun
+    cases h
+    exact ⟨rfl, hcl⟩
+
+theorem sendRaw_debit [HasSelfBalance X] {dst v : Nat} {ctx : Ctx}
+    {w w' : World S X E}
+    (hO : DebitsOnSend w.oracle)
+    (h : Tx.run (Tx.sendRaw (ε := ε) dst v) ctx w = .ok (true, w')) :
+    selfNative w' + v = selfNative w := by
+  simp [Tx.run, Tx.sendRaw] at h
+  cases hs : w.oracle.send dst v w.ext with
+  | none => simp [hs] at h
+  | some x' =>
+    simp [hs] at h
+    obtain ⟨rfl, rfl⟩ := h
+    exact hO dst v w.ext x' hs
+
+theorem NativeSendAuth.of_debits [HasSelfBalance X] {claim : Claim S X E}
+    {dst : Address} {v : Nat} {w w' : World S X E}
+    (hO : DebitsOnSend w.oracle)
+    (hsend : w.oracle.send dst v w.ext = some w'.ext)
+    (hout : NativeOutflow claim dst v w w') :
+    NativeSendAuth claim dst v w w' := by
+  refine ⟨hout, ?_⟩
+  simpa [selfNative] using hO dst v w.ext w'.ext hsend
 
 theorem NoUnauthorizedDecrease.of_fns [HasCreditValue X] {Inv : World S X E → Prop}
     {claim : Claim S X E} {Auth : AuthPred C}
@@ -117,6 +221,46 @@ theorem NoUnauthorizedDecrease.of_fns [HasCreditValue X] {Inv : World S X E → 
     simpa [Call.ofCtx_toCtx] using h c.fn c.args c.toCtx w a hInv hlt
   · rw [step_reject_value hp hv] at hlt
     exact (Nat.lt_irrefl _ hlt).elim
+
+theorem NoUnauthorizedDecrease.of_fns_credit [HasCreditValue X]
+    {Inv : World S X E → Prop} {claim : Claim S X E} {Auth : AuthPred C}
+    (h : ∀ fn, NoUnauthorizedDecreaseCreditFn C Inv claim Auth fn) :
+    NoUnauthorizedDecrease C Inv claim Auth := by
+  intro c w a hInv hlt
+  rw [step_eq_run] at hlt
+  split_ifs at hlt with hvo
+  · cases hrun : C.exec c.fn c.args c.toCtx (World.creditValue w c.value) with
+    | error _ =>
+      rw [hrun] at hlt
+      exact (Nat.lt_irrefl _ hlt).elim
+    | ok p =>
+      rw [hrun] at hlt
+      simpa [Call.ofCtx_toCtx] using
+        h c.fn c.args c.toCtx w a p.1 p.2 hInv hrun hlt
+  · exact (Nat.lt_irrefl _ hlt).elim
+
+theorem NoUnauthorizedDecreaseFn_of_native_send {Inv : World S X E → Prop}
+    {claim : Claim S X E} {Auth : AuthPred C} {fn : C.Fn}
+    (hAuth : ∀ (args : C.Args fn) (ctx : Ctx) (w : World S X E),
+      Auth ctx.sender (Call.ofCtx ctx fn args) w)
+    (hok : ∀ (args : C.Args fn) (ctx : Ctx) (w : World S X E)
+        (ret : C.Ret fn) (w' : World S X E),
+      Inv w → Tx.run (C.exec fn args) ctx w = .ok (ret, w') →
+      (∀ a, claim a w ≤ claim a w') ∨
+        ∃ v, NativeOutflow claim ctx.sender v w w') :
+    NoUnauthorizedDecreaseFn C Inv claim Auth fn := by
+  intro args ctx w a hInv hdec
+  cases hrun : Tx.run (C.exec fn args) ctx w with
+  | error _ => simp [worldAfter_error hrun] at hdec
+  | ok p =>
+    have hdec' : claim a p.2 < claim a w := by
+      simpa [worldAfter_ok hrun] using hdec
+    cases hok args ctx w p.1 p.2 hInv hrun with
+    | inl hge => exact (Nat.not_lt.mpr (hge a) hdec').elim
+    | inr hv =>
+      obtain ⟨v, hout⟩ := hv
+      have ha : a = ctx.sender := native_outflow_victim hout hdec'
+      simpa [ha] using hAuth args ctx w
 
 theorem NoUnauthorizedDecreaseFn_of_ok {Inv : World S X E → Prop} {claim : Claim S X E}
     {Auth : AuthPred C} {fn : C.Fn}

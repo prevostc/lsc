@@ -83,4 +83,33 @@ theorem PreservesInvFnAt_of_ok {C : Spec S X E ε} {Inv : World S X E → Prop}
   exact worldAfter_preserves hInv
     (fun a w' h => hok args ctx w a w' hself hsne hInv h)
 
+theorem PreservesInv.of_fns_credit [HasCreditValue X] {C : Spec S X E ε}
+    {Inv : World S X E → Prop}
+    (h : ∀ fn, PreservesInvCreditFn C Inv fn) :
+    PreservesInv C Inv := by
+  intro c w hc
+  rw [step_eq_run]
+  by_cases hvo : C.valueOk c.fn c.value
+  · simp only [hvo]
+    cases hrun : C.exec c.fn c.args c.toCtx (World.creditValue w c.value) with
+    | error _ => exact hc
+    | ok p => exact h c.fn c.args c.toCtx w p.1 p.2 hc hrun
+  · simp only [hvo]; exact hc
+
+theorem PreservesInvAt.of_fns_credit [HasCreditValue X] {C : Spec S X E ε}
+    {Inv : World S X E → Prop} {self : Address}
+    (h : ∀ fn, PreservesInvCreditFnAt C Inv self fn) :
+    PreservesInvAt C Inv self := by
+  intro c w ht hs hc
+  rw [step_eq_run]
+  by_cases hvo : C.valueOk c.fn c.value
+  · simp only [hvo]
+    cases hrun : C.exec c.fn c.args c.toCtx (World.creditValue w c.value) with
+    | error _ => exact hc
+    | ok p =>
+      have hself : c.toCtx.self = self := by simp [Call.toCtx, ht]
+      have hsne : c.toCtx.sender ≠ self := by simp [Call.toCtx, hs]
+      exact h c.fn c.args c.toCtx w p.1 p.2 hself hsne hc hrun
+  · simp only [hvo]; exact hc
+
 end Lsc.Security.Proof

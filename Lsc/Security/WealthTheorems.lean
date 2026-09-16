@@ -6,11 +6,11 @@ Victim-side wealth, once and for all contracts: nobody can reduce your
 protocol claim without your authorisation, and if the invariant already
 implies solvency then solvency survives any well-formed attack trace.
 
-Each contract declares what a claim is, who may reduce it, and what
-the contract holds. Token, Vault, and AMM discharge the local
-obligations and inherit these conclusions. Reverted calls are no-ops;
-between our calls the environment may change only as the token model
-allows.
+Each contract declares what a claim is (token units plus optional native
+redeemable from `self`), who may reduce it, and what the contract holds.
+Token, Vault, and AMM discharge the local obligations and inherit these
+conclusions. Reverted calls are no-ops; between our calls the environment
+may change only as the token model allows.
 -/
 
 namespace Lsc.Security
@@ -99,6 +99,29 @@ theorem sum_update_not_mem {α : Type} [DecidableEq α] (H : Finset α) (f : α 
     H.sum (Function.update f i n) = H.sum f :=
   Proof.sum_update_not_mem H f hi n
 
+/-- `Claim.eval` is tokens plus native. -/
+@[simp] theorem Claim.eval_apply (c : Claim S X E) (a : Address) (w : World S X E) :
+    Claim.eval c a w = c.tokens a w + c.native a w :=
+  Proof.Claim.eval_apply c a w
+
+/-- A token-only claim (`ofFun`) evaluates to the given function. -/
+@[simp] theorem Claim.eval_ofFun (f : Address → World S X E → Nat)
+    (a : Address) (w : World S X E) :
+    Claim.ofFun (S := S) (X := X) (E := E) f a w = f a w :=
+  Proof.Claim.eval_ofFun f a w
+
+/-- `Claim.ofSelf` ignores `ext` and `log`. -/
+@[simp] theorem Claim.eval_ofSelf (c : Address → S → Nat) (a : Address)
+    (w : World S X E) :
+    Claim.ofSelf (S := S) (X := X) (E := E) c a w = c a w.self :=
+  Proof.Claim.eval_ofSelf c a w
+
+/-- A native-only claim (`ofNative`) evaluates to the storage book. -/
+@[simp] theorem Claim.eval_ofNative (c : Address → S → Nat) (a : Address)
+    (w : World S X E) :
+    Claim.ofNative (S := S) (X := X) (E := E) c a w = c a w.self :=
+  Proof.Claim.eval_ofNative c a w
+
 /-- `Claim.ofSelf` ignores `ext` and `log`. -/
 theorem Claim.ofSelf_congr (c : Address → S → Nat)
     {w w' : World S X E} {a : Address} (h : w.self = w'.self) :
@@ -111,6 +134,71 @@ theorem ClaimMonoEnv.of_self (c : Address → S → Nat) (rely : X → X → Pro
     ClaimMonoEnv (Claim.ofSelf (S := S) (X := X) (E := E) c) rely :=
   Proof.ClaimMonoEnv.of_self c rely
 
+/-- Native-book claims ignore `ext`, so any `rely` is claim-monotone. -/
+theorem ClaimMonoEnv.of_native (c : Address → S → Nat) (rely : X → X → Prop) :
+    ClaimMonoEnv (Claim.ofNative (S := S) (X := X) (E := E) c) rely :=
+  Proof.ClaimMonoEnv.of_native c rely
+
+/-- Book-based claims (`tokens` from `self`) ignore `ext`. -/
+theorem Claim.booksOnly_ofSelf (c : Address → S → Nat) :
+    Claim.booksOnly (Claim.ofSelf (S := S) (X := X) (E := E) c) :=
+  Proof.Claim.booksOnly_ofSelf c
+
+/-- Native-book claims ignore `ext`. -/
+theorem Claim.booksOnly_ofNative (c : Address → S → Nat) :
+    Claim.booksOnly (Claim.ofNative (S := S) (X := X) (E := E) c) :=
+  Proof.Claim.booksOnly_ofNative c
+
+/-- Incoming value does not change a book-based claim. -/
+theorem ClaimMonoCredit.of_books [HasCreditValue X] {claim : Claim S X E}
+    (h : Claim.booksOnly claim) : ClaimMonoCredit claim :=
+  Proof.ClaimMonoCredit.of_books h
+
+/-- On `ExtState`, `selfNative` is `World.nativeBalance`. -/
+@[simp] theorem selfNative_eq_nativeBalance (w : World S ExtState E) :
+    selfNative w = World.nativeBalance w :=
+  Proof.selfNative_eq_nativeBalance w
+
+/-- If `claim a` falls across a `NativeOutflow` of `v` to `dst`, the victim is `dst`. -/
+theorem native_outflow_victim {claim : Claim S X E} {dst : Address} {v : Nat}
+    {w w' : World S X E} {a : Address}
+    (h : NativeOutflow claim dst v w w') (hlt : claim a w' < claim a w) :
+    a = dst :=
+  Proof.native_outflow_victim h hlt
+
+/-- Successful `sendRaw` updates only `ext`. Book-based claims are unchanged. -/
+theorem sendRaw_books {claim : Claim S X E} (hB : Claim.booksOnly claim)
+    (dst amount : Nat) {ctx : Ctx} {w w' : World S X E} {ok : Bool}
+    (h : Tx.run (Tx.sendRaw (ε := ε) dst amount) ctx w =
+      .ok (ok, w')) :
+    w'.self = w.self ∧ ∀ a, claim a w' = claim a w :=
+  Proof.sendRaw_books hB dst amount h
+
+/-- Successful `Native.send` updates only `ext`. Book-based claims are unchanged. -/
+theorem native_send_books {claim : Claim S X E} {a : Asset} (hB : Claim.booksOnly claim)
+    (dst : Address) (amount : Amount a) (err : ε) {ctx : Ctx} {w w' : World S X E}
+    (h : Tx.run (Native.send dst amount err) ctx w = .ok ((), w')) :
+    w'.self = w.self ∧ ∀ a, claim a w' = claim a w :=
+  Proof.native_send_books hB dst amount err h
+
+/-- If `oracle.send` succeeds and `DebitsOnSend` holds, `self`'s native balance
+falls by `v`. -/
+theorem sendRaw_debit [HasSelfBalance X] {dst v : Nat} {ctx : Ctx}
+    {w w' : World S X E}
+    (hO : DebitsOnSend w.oracle)
+    (h : Tx.run (Tx.sendRaw (ε := ε) dst v) ctx w = .ok (true, w')) :
+    selfNative w' + v = selfNative w :=
+  Proof.sendRaw_debit hO h
+
+/-- `DebitsOnSend` plus a matching book-claim drop is `NativeSendAuth`. -/
+theorem NativeSendAuth.of_debits [HasSelfBalance X] {claim : Claim S X E}
+    {dst : Address} {v : Nat} {w w' : World S X E}
+    (hO : DebitsOnSend w.oracle)
+    (hsend : w.oracle.send dst v w.ext = some w'.ext)
+    (hout : NativeOutflow claim dst v w w') :
+    NativeSendAuth claim dst v w w' :=
+  Proof.NativeSendAuth.of_debits hO hsend hout
+
 /-- `NoUnauthorizedDecrease` follows from the per-entrypoint form.
 Non-payable contracts need no credit obligation. -/
 theorem NoUnauthorizedDecrease.of_fns [HasCreditValue X] {Inv : World S X E → Prop}
@@ -119,6 +207,33 @@ theorem NoUnauthorizedDecrease.of_fns [HasCreditValue X] {Inv : World S X E → 
     (hnp : ∀ fn, C.payable fn = false := by intro fn; cases fn <;> rfl) :
     NoUnauthorizedDecrease C Inv claim Auth :=
   Proof.NoUnauthorizedDecrease.of_fns h hnp
+
+/-- `NoUnauthorizedDecrease` for contracts that may have payable entrypoints.
+Each unpacked obligation is judged on the post-transfer world (`creditValue`
+then `Tx.run`), matching `stepCall`. Non-payable + nonzero value is still a
+revert step and cannot decrease `claim`. -/
+theorem NoUnauthorizedDecrease.of_fns_credit [HasCreditValue X]
+    {Inv : World S X E → Prop} {claim : Claim S X E} {Auth : AuthPred C}
+    (h : ∀ fn, NoUnauthorizedDecreaseCreditFn C Inv claim Auth fn) :
+    NoUnauthorizedDecrease C Inv claim Auth :=
+  Proof.NoUnauthorizedDecrease.of_fns_credit h
+
+/-- If every success path is claim-nondecreasing or a `NativeOutflow` to the
+caller, and `Auth` holds of the caller, then `fn` does not unauthorisedly
+decrease any claim. This is the generic lemma for `Native.send` after a
+matching book burn (WETH `withdraw`: burn `v` of `sender`'s wrapped balance,
+then send `sender` exactly `v`). -/
+theorem NoUnauthorizedDecreaseFn_of_native_send {Inv : World S X E → Prop}
+    {claim : Claim S X E} {Auth : AuthPred C} {fn : C.Fn}
+    (hAuth : ∀ (args : C.Args fn) (ctx : Ctx) (w : World S X E),
+      Auth ctx.sender (Call.ofCtx ctx fn args) w)
+    (hok : ∀ (args : C.Args fn) (ctx : Ctx) (w : World S X E)
+        (ret : C.Ret fn) (w' : World S X E),
+      Inv w → Tx.run (C.exec fn args) ctx w = .ok (ret, w') →
+      (∀ a, claim a w ≤ claim a w') ∨
+        ∃ v, NativeOutflow claim ctx.sender v w w') :
+    NoUnauthorizedDecreaseFn C Inv claim Auth fn :=
+  Proof.NoUnauthorizedDecreaseFn_of_native_send hAuth hok
 
 /-- Reduce `NoUnauthorizedDecreaseFn` to the success path: a revert cannot decrease `claim`. -/
 theorem NoUnauthorizedDecreaseFn_of_ok {Inv : World S X E → Prop} {claim : Claim S X E}
