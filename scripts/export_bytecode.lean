@@ -225,11 +225,13 @@ def tokErr : Token.Error → Nat
 
 def tokAddrs : List Nat := [0, 1, 2, 3]
 
+/-- Flattened `ERC20.Storage` then `owner`: balances 0, allowances 1,
+totalSupply 2, owner 3. -/
 def tokSlots (σ : Token.Storage) : List (BitVec 256 × BitVec 256) :=
-  [(u256 0, u256 σ.owner), (u256 1, u256 σ.totalSupply.raw)] ++
-    tokAddrs.map (fun a => (mapSlot1 keccakOf 2 a, u256 (σ.balances a).raw)) ++
+  tokAddrs.map (fun a => (mapSlot1 keccakOf 0 a, u256 (σ.balances a).raw)) ++
     tokAddrs.flatMap (fun a =>
-      tokAddrs.map (fun b => (mapSlot2 keccakOf 3 a b, u256 (σ.allowances a b).raw)))
+      tokAddrs.map (fun b => (mapSlot2 keccakOf 1 a b, u256 (σ.allowances a b).raw))) ++
+    [(u256 2, u256 σ.totalSupply.raw), (u256 3, u256 σ.owner)]
 
 def bals₁ : Nat → Nat
   | 1 => 1000

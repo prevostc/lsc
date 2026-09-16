@@ -1,8 +1,9 @@
 # Token
 
-Closed ERC-20: `transfer`, `approve`, `transferFrom`, `mint`, `burn`, and the
-views `totalSupply`, `balanceOf`, `allowance`. No external calls. Storage: owner,
-total supply, balances, and nested allowances.
+Closed ERC-20: `transfer`, `approve`, `transferFrom`, owner-gated `mint`,
+`burn`, and the views. Storage `extends ERC20.Storage` plus `owner`. The
+six IERC20 entrypoints are one-line re-exports of the ERC20 base;
+constructor and owner-`mint` call `ERC20.mint`.
 
 `lsc_contract Token … implements IERC20 Token.tokenAsset` checks names and signatures
 against `IERC20` and emits `Token.impl`. `Token.erc20` proves every field of

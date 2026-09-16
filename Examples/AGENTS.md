@@ -7,11 +7,13 @@ Exactly:
   `abbrev native := Chain.native chain`);
   `Storage`, `Event`, `Error`; the
   user-facing functions, each with a one-line docstring; the single
-  `lsc_contract` line. `[Payable]` / `[Reentrant]` / `[Reentrant.Unsafe]`
-  instance binders may sit on a user-facing function. `write f (read f op x)`
+  `lsc_contract` line. `Contract.lean` may `extends` a Stdlib storage and
+  re-export base entrypoints (`def transfer := ERC20.transfer erc20`).
+  `[Payable]` / `[Reentrant]` / `[Reentrant.Unsafe]`
+  instance binders may sit on a user-facing function. `instance` is
+  allowed only for Stdlib `Events` / `Errors`. `write f (read f op x)`
   elaborates directly (`write` elaborates the argument at `M`; fallible ops
   accept `M` on either side). Nested `←` (`(← (←`) is forbidden. FORBIDDEN: `theorem`, `lemma`, `example`,
-  `instance`,
   `@[simp]`, `#guard`, `#eval`, `#check`, `#guard_msgs`, any
   `.core`/`core_denote`/`Core.*`/`Spec.exec` mention, `Amount.ofWord`/`.raw`/
   word-level plumbing, helper duplicates (`*Raw`, `*U`, `*Unit`, `*Impl`

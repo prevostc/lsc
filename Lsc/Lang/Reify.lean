@@ -196,13 +196,16 @@ def contractInfo (ns : Name) : MetaM ContractInfo := do
   let env ← getEnv
   unless isStructure env storage do
     throwError "{storage} must be a structure"
-  let indVal ← getConstInfoInduct storage
-  let nparams := indVal.numParams
   let fieldNames := getStructureFieldsFlattened env storage
       (includeSubobjectFields := false)
   let fields ← fieldNames.mapIdxM fun i fieldName => do
-    let projTy ← inferType (mkConst (storage ++ fieldName))
-    forallBoundedTelescope projTy (some (nparams + 1)) fun _ rest => do
+    let some orig := findField? env storage fieldName
+      | throwError "{storage} has no field `{fieldName}`"
+    let some projFn := getProjFnForField? env orig fieldName
+      | throwError "no projection for `{orig}.{fieldName}`"
+    let origNparams := (← getConstInfoInduct orig).numParams
+    let projTy ← inferType (mkConst projFn)
+    forallBoundedTelescope projTy (some (origNparams + 1)) fun _ rest => do
       let (kind, valTy) ← fieldKindAndVal rest
       pure { name := fieldName, idx := i, kind, valTy : FieldInfo }
   let evInfo ← getConstInfoInduct event
@@ -698,15 +701,125 @@ partial def atomOf (env : Env t) (e : Expr) (fuel : Nat := 64) : MetaM Atom := d
   throwError "reify: `{e}` is not an atom; bind it first with `let x ← …` \
     (pure Nat arithmetic is not part of the language, use `+?` or `+↻`)"
 
+/-- `Field.mk` args: last two are `get` and `set`. -/
+def fieldMkGetSet? (f : Expr) : Option (Expr × Expr) :=
+  let f := f.consumeMData
+  if f.isAppOf ``Lsc.Field.mk then
+    let args := f.getAppArgs
+    if args.size ≥ 2 then some (args[args.size - 2]!, args[args.size - 1]!)
+    else none
+  else none
+
+/-- Unfold a `Field` value to `Field.mk` (lenses, `Field.comp`, `ofParent`).
+Uses default transparency so a contract's `def erc20 := .ofParent …`
+unfolds; reducible-only `whnf` gets stuck on that def. -/
+partial def whnfFieldMk (f : Expr) (fuel : Nat := 8) : MetaM Expr := do
+  if fuel = 0 then return f
+  let f ← whnf f.consumeMData
+  if (fieldMkGetSet? f).isSome then return f
+  match ← unfoldDefinition? f with
+  | some f' => whnfFieldMk f' (fuel - 1)
+  | none =>
+    match f.cleanupAnnotations with
+    | .proj n i s =>
+      match ← reduceProj? f with
+      | some f' => whnfFieldMk f' (fuel - 1)
+      | none =>
+        match ← unfoldDefinition? s with
+        | some s' => whnfFieldMk (.proj n i s') (fuel - 1)
+        | none => return f
+    | _ =>
+      if f.isApp then
+        match ← unfoldDefinition? f.getAppFn with
+        | some fn' => whnfFieldMk (mkAppN fn' f.getAppArgs) (fuel - 1)
+        | none =>
+          let args := f.getAppArgs
+          if args.size ≥ 1 then
+            match ← unfoldDefinition? args[args.size - 1]! with
+            | some a' =>
+              whnfFieldMk (mkAppN f.getAppFn (args.set! (args.size - 1) a'))
+                (fuel - 1)
+            | none => return f
+          else return f
+      else return f
+
+/-- `Field.get f s` as a constant app or as `(f).1 s`, ignoring extra key
+applications (`(Field.get f σ) k`). -/
+partial def fieldGetArgs? (e : Expr) : Option (Expr × Expr) :=
+  let e := e.cleanupAnnotations
+  if e.isAppOf ``Lsc.Field.get then
+    let args := e.getAppArgs
+    if args.size ≥ 4 then some (args[2]!, args[3]!)
+    else if args.size ≥ 2 then some (args[args.size - 2]!, args[args.size - 1]!)
+    else none
+  else
+    match e with
+    | .app (.proj _ 0 f) s => some (f, s)
+    | .app rest _ => fieldGetArgs? rest
+    | _ => none
+
+/-- Extra key applications after `Field.get f s`. -/
+partial def fieldGetKeyArgs (e : Expr) : Array Expr :=
+  let e := e.cleanupAnnotations
+  if e.isAppOf ``Lsc.Field.get then
+    e.getAppArgs.extract 4 e.getAppArgs.size
+  else
+    match e with
+    | .app rest k =>
+      match rest.cleanupAnnotations with
+      | .app (.proj _ 0 _) _ => #[k]
+      | .app .. => fieldGetKeyArgs rest |>.push k
+      | _ => #[]
+    | _ => #[]
+
+/-- `Field.set f s v` as a constant app or as `(f).2 s v`. -/
+def fieldSetArgs? (e : Expr) : Option (Expr × Expr × Expr) :=
+  let e := e.cleanupAnnotations
+  if e.isAppOf ``Lsc.Field.set then
+    let args := e.getAppArgs
+    if args.size ≥ 3 then
+      some (args[args.size - 3]!, args[args.size - 2]!, args[args.size - 1]!)
+    else none
+  else
+    match e with
+    | .app (.app fn s) v =>
+      match fn.cleanupAnnotations with
+      | .proj _ 1 f => some (f, s, v)
+      | _ => none
+    | _ => none
+
 /-- Unfold `Field.get f` / `Field.set f` and constructor matches until a storage
 projection (or structure update) is visible. Lenses from `deriving Fields`
 are `@[reducible]`; reducible `whnf` turns `Field.set Storage.Fields.f`
-into `{ σ with f := · }`. -/
+into `{ σ with f := · }`. Nested `Field.comp` (inherited `extends` fields)
+is unfolded the same way. -/
 partial def reduceFieldApp (e : Expr) (fuel : Nat := 16) : MetaM Expr := do
   if fuel = 0 then return e
-  let e ← withReducible (whnf e.consumeMData)
+  let e0 := e.cleanupAnnotations
+  let e ←
+    if (fieldGetArgs? e0).isSome || (fieldSetArgs? e0).isSome then
+      whnf e0
+    else
+      withReducible (whnf e0)
+  if let some (f, s) := fieldGetArgs? e then
+    let f ← whnfFieldMk f
+    if let some (get, _) := fieldMkGetSet? f then
+      let extras := fieldGetKeyArgs e
+      return (← reduceFieldApp (mkAppN (get.app s) extras) (fuel - 1))
+    return e
+  if let some (f, s, v) := fieldSetArgs? e then
+    let f ← whnfFieldMk f
+    if let some (_, set) := fieldMkGetSet? f then
+      return (← reduceFieldApp (mkApp2 set s v) (fuel - 1))
+    return e
   match e.consumeMData with
   | .proj n i s =>
+    if let some (f, s') := fieldGetArgs? s then
+      let f ← whnfFieldMk f
+      if let some (get, _) := fieldMkGetSet? f then
+        let extras := fieldGetKeyArgs s
+        return (← reduceFieldApp (.proj n i (mkAppN (get.app s') extras))
+          (fuel - 1))
     match ← reduceProj? e with
     | some e' => reduceFieldApp e' (fuel - 1)
     | none =>
@@ -714,27 +827,26 @@ partial def reduceFieldApp (e : Expr) (fuel : Nat := 16) : MetaM Expr := do
       | some s' => reduceFieldApp (.proj n i s') (fuel - 1)
       | none => return e
   | _ =>
-    if e.isAppOf ``Lsc.Field.get || e.isAppOf ``Lsc.Field.set then
-      match ← unfoldDefinition? e with
-      | some e' => reduceFieldApp e' (fuel - 1)
-      | none =>
-        let args := e.getAppArgs
-        let mut changed := false
-        let mut args' := args
-        for i in [:args.size] do
-          let a' ← withReducible (whnf args[i]!)
-          if a' != args[i]! then
-            args' := args'.set! i a'
-            changed := true
-        if changed then
-          reduceFieldApp (mkAppN e.getAppFn args') (fuel - 1)
-        else return e
-    else
-      match ← unfoldDefinition? e with
-      | some e' =>
-        if e' == e then return e
-        reduceFieldApp e' (fuel - 1)
-      | none => return e
+    if e.isApp then
+      if let some n := e.getAppFn.constName? then
+        match (← getEnv).find? n with
+        | some (.ctorInfo _) =>
+          let args := e.getAppArgs
+          let mut args' := args
+          let mut changed := false
+          for i in [:args.size] do
+            let a' ← reduceFieldApp args[i]! (fuel - 1)
+            if a' != args[i]! then
+              args' := args'.set! i a'
+              changed := true
+          if changed then
+            return (← reduceFieldApp (mkAppN e.getAppFn args') (fuel - 1))
+        | _ => pure ()
+    match ← unfoldDefinition? e with
+    | some e' =>
+      if e' == e then return e
+      reduceFieldApp e' (fuel - 1)
+    | none => return e
 
 /-- The storage field a projection lambda `fun σ => σ.f` (or the projection function itself) denotes. -/
 def fieldOfProj (ci : ContractInfo) (proj : Expr) : MetaM FieldInfo := do
@@ -761,21 +873,56 @@ def fieldOfProj (ci : ContractInfo) (proj : Expr) : MetaM FieldInfo := do
         else pure body
       | _ => pure body
     let body ← reduceFieldApp body
-    match body.getAppFn with
-    | Expr.const n _ => pure (some n)
-    | Expr.proj _ i s =>
+    let body := body.cleanupAnnotations
+    match body.getAppFn.cleanupAnnotations with
+    | Expr.const n _ =>
+      -- Direct `C.Storage.f`, or inherited `Parent.f (C.Storage.toParent σ)`.
+      let fname := Name.mkSimple n.getString!
+      if ci.fields.any (·.name == fname) then
+        pure (some (ci.storage ++ fname))
+      else pure (some n)
+    | Expr.proj n i s =>
         let sTy ← whnfD (← inferType s)
-        if sTy.isConstOf ci.storage then
-          pure (ci.fields[i]?.map (fun f => ci.storage ++ f.name))
-        else
-          -- `Field.get f σ` may still be a projection of the Field structure.
-          let s ← reduceFieldApp s
-          match s.getAppFn with
-          | .const n _ =>
-            if n == ci.storage then
-              pure (ci.fields[i]?.map (fun f => ci.storage ++ f.name))
+        let env ← getEnv
+        if sTy.isConstOf ci.storage || sTy.isAppOf ci.storage then
+          -- `i` is the *direct* field index (`toStorage`, `owner`), not the
+          -- flattened leaf index (`balances`, …).
+          let direct := getStructureFields env ci.storage
+          match direct[i]? with
+          | some fname =>
+            if (isSubobjectField? env ci.storage fname).isSome then
+              pure none
+            else if ci.fields.any (·.name == fname) then
+              pure (some (ci.storage ++ fname))
             else pure none
-          | _ => pure none
+          | none => pure none
+        else do
+          -- Inherited: `.proj Parent i (toParent σ)`.
+          -- `Lsc.Field` / `Amount` are not storage parents.
+          if n == ``Lsc.Field || n == ``Lsc.Amount then
+            pure none
+          else
+            if isStructure env n then
+              let pfields := getStructureFieldsFlattened env n
+                  (includeSubobjectFields := false)
+              match pfields[i]? with
+              | some fname =>
+                if ci.fields.any (·.name == fname) then
+                  pure (some (ci.storage ++ fname))
+                else pure none
+              | none => pure none
+            else
+              let s ← reduceFieldApp s
+              match s.getAppFn.cleanupAnnotations with
+              | .const n' _ =>
+                if n' == ci.storage || n'.getString! == n.getString! then
+                  let fname := Name.mkSimple n.getString!
+                  if ci.fields.any (·.name == fname) then
+                    pure (some (ci.storage ++ fname))
+                  else
+                    pure (ci.fields[i]?.map (fun f => ci.storage ++ f.name))
+                else pure none
+              | _ => pure none
     | _ => pure none
   match name? with
   | some n =>
@@ -784,29 +931,74 @@ def fieldOfProj (ci : ContractInfo) (proj : Expr) : MetaM FieldInfo := do
     | none => throwError "reify: `{proj}` is not a projection of {ci.storage}"
   | none => throwError "reify: `{proj}` is not a storage projection"
 
+/-- Flattened field values of a constructor application, parent-subobject first. -/
+partial def flattenedCtorArgs (env : Environment) (structName : Name) (e : Expr) :
+    MetaM (Array Expr) := do
+  let ctor := getStructureCtor env structName
+  unless e.getAppFn.isConstOf ctor.name do return #[]
+  let args := e.getAppArgs
+  let direct := getStructureFields env structName
+  unless args.size == ctor.numParams + direct.size do return #[]
+  let mut out : Array Expr := #[]
+  for i in [:direct.size] do
+    let arg := args[ctor.numParams + i]!
+    let fname := direct[i]!
+    match isSubobjectField? env structName fname with
+    | some parent =>
+      let nested ← flattenedCtorArgs env parent arg
+      if nested.size == 0 then
+        -- Unchanged parent subobject (`σ.toParent`), not a constructor.
+        let n := (getStructureFieldsFlattened env parent
+          (includeSubobjectFields := false)).size
+        out := out ++ Array.replicate n arg
+      else
+        out := out ++ nested
+    | none =>
+      out := out.push arg
+  return out
+
 /-- The storage field an update lambda `fun σ m => { σ with f := m }` denotes. -/
 def fieldOfUpd (ci : ContractInfo) (upd : Expr) : MetaM FieldInfo := do
   let upd ← reduceFieldApp upd
   lambdaTelescope upd fun xs body => do
-    let body ← reduceFieldApp body.consumeMData
     unless xs.size == 2 do throwError "reify: `{upd}` is not a storage update"
     let m := xs[1]!
-    -- `Field.set f σ (ofWord m)` reduces to a structure update.
-    let body ← reduceFieldApp body
-    let args := body.getAppArgs
-    let ctor := getStructureCtor (← getEnv) ci.storage
-    unless body.getAppFn.isConstOf ctor.name && args.size == ctor.numParams + ci.fields.size do
+    let body ← reduceFieldApp body.consumeMData
+    let body ←
+      if let some (f, s, v) := fieldSetArgs? body then
+        let f ← whnfFieldMk f
+        if let some (_, set) := fieldMkGetSet? f then
+          reduceFieldApp (mkApp2 set s v)
+        else pure body
+      else
+        pure body
+    let env ← getEnv
+    let args ← flattenedCtorArgs env ci.storage body
+    unless args.size == ci.fields.size do
       throwError "reify: `{upd}` is not a storage update"
     let some mid := m.fvarId? |
       throwError "reify: `{upd}` is not a storage update"
-    let idxs := (List.range ci.fields.size).filter fun i =>
-      (args[ctor.numParams + i]!).containsFVar mid
+    let idxs := (List.range args.size).filter fun i =>
+      (args[i]!).containsFVar mid
     match idxs with
     | [i] => pure ci.fields[i]!
     | _ => throwError "reify: `{upd}` does not update exactly one field"
 
 def ctorIndex (ctors : Array Name) (e : Expr) : MetaM (Nat × Array Expr) := do
-  let e := e.consumeMData
+  let mut e := e.consumeMData
+  -- `Events.transfer` / `Errors.insufficientBalance` are class methods.
+  for _ in [:8] do
+    if let some e' ← unfoldProjInst? e then
+      e := e'.consumeMData
+    else if let some f' ← unfoldProjInst? e.getAppFn then
+      e := mkAppN f' e.getAppArgs
+    else
+      match ← unfoldDefinition? e with
+      | some e' => e := e'.consumeMData
+      | none =>
+        let e' ← whnf e
+        if e' == e then break
+        else e := e'
   match e.getAppFn with
   | .const n _ =>
     match ctors.idxOf? n with
@@ -871,7 +1063,7 @@ def retExprOf (env : Env t) : (s : RetTy) → Expr → MetaM (RetExpr s)
 
 /-- `Amount a` / `Fixed d` / `Word` map to `Nat`. `Address`/`Flag` stay named. -/
 partial def retTyOf (ρ : Expr) : MetaM RetTy := do
-  let ρ ← whnfR ρ
+  let ρ ← whnf ρ
   match ρ.getAppFn.constName?, ρ.getAppNumArgs with
   | some ``Unit, 0 | some ``PUnit, 0 => pure .unit
   | some ``Nat, 0 => pure .word
@@ -1602,7 +1794,7 @@ partial def reify (ci : ContractInfo) (t : RetTy) (env : Env t) (e : Expr)
             else if isIteExpr x then
               -- `bind (if c then a else b) k` → `seqIf` (`k` once). Pair-valued
               -- `if` still duplicates `k` through `Core.ite` (`Tx.bind_ite`).
-              let tBr ← retTyOf args[1]!
+              let tBr ← retTyOf args[2]!
               match tBr with
               | .pair _ _ =>
                 let c ← condOf env (x.getArg! 1)
@@ -1617,7 +1809,7 @@ partial def reify (ci : ContractInfo) (t : RetTy) (env : Env t) (e : Expr)
                 let th ← reify ci tBr envBr (x.getArg! 3) inline?
                 let el ← reify ci tBr envBr (x.getArg! 4) inline?
                 lambdaBoundedTelescope k 1 fun ys body => do
-                  let isU ← isUnitTy args[1]!
+                  let isU ← isUnitTy args[2]!
                   let kEnv :=
                     if isU then env else { env with vars := ys[0]!.fvarId! :: env.vars }
                   let kc ← reify ci t kEnv body inline?
@@ -1723,9 +1915,12 @@ partial def reify (ci : ContractInfo) (t : RetTy) (env : Env t) (e : Expr)
 
 /-! ## Commands -/
 
-/-- `@[internal]` helpers and generated `I.Ref.f` methods reachable from `fn`. -/
+/-- `@[internal]` helpers, generated `I.Ref.f` methods, and ERC20 base
+functions reachable from `fn` (the six entrypoints are not `@[internal]`
+so a contract can list them; they still have to unfold in the certificate). -/
 def isCertUnfold (env : Environment) (n : Name) : Bool :=
-  Lsc.isInternal env n || isRefMethod n
+  Lsc.isInternal env n || isRefMethod n ||
+    n.getPrefix.toString == "Lsc.Stdlib.ERC20"
 
 /-- `@[internal]` names and `I.Ref` methods reachable from `fn`. -/
 def inlinesUsedBy (fn : Name) : MetaM (Array Name) := do

@@ -15,8 +15,9 @@ pragma solidity >=0.8.0;
 ///                       https://heimdall.rs
 
 contract DecompiledContract {
-    uint256 public unresolved_18160ddd;
+    mapping(bytes32 => bytes32) storage_map_c;
     mapping(bytes32 => bytes32) storage_map_a;
+    uint256 public unresolved_18160ddd;
     
     event Event_7fcf532c();
     event Event_8c5be1e5();
@@ -50,11 +51,13 @@ contract DecompiledContract {
         require(!msg.data.length < 0x24);
         transient[0] = 0x01;
         address var_a = msg.sender;
+        require(!(storage_map_a[var_a] < arg0), CustomError_f4d678b8());
         require(!(storage_map_a[var_a] < arg0), CustomError_90b8ec18());
         var_a = msg.sender;
         storage_map_a[var_a] = storage_map_a[var_a] - arg0;
         require(!(unresolved_18160ddd < arg0), CustomError_90b8ec18());
         unresolved_18160ddd = unresolved_18160ddd - arg0;
+        emit Event_ddf252ad(msg.sender, 0, arg0);
         (bool success, bytes memory ret0) = address(msg.sender).transfer(arg0);
         require(success == 0x01, CustomError_90b8ec18());
         emit Event_7fcf532c(msg.sender, arg0);
@@ -125,12 +128,13 @@ contract DecompiledContract {
     /// @custom:signature   Unresolved_d0e30db0() public payable
     function Unresolved_d0e30db0() public payable {
         require(!address(this).balance < msg.value);
-        address var_a = msg.sender;
-        if (!(storage_map_a[var_a] + msg.value) < storage_map_a[var_a]) {
-            var_a = msg.sender;
-            storage_map_a[var_a] = storage_map_a[var_a] + msg.value;
-            if (!(unresolved_18160ddd + msg.value) < unresolved_18160ddd) {
-                unresolved_18160ddd = unresolved_18160ddd + msg.value;
+        if (!(unresolved_18160ddd + msg.value) < unresolved_18160ddd) {
+            unresolved_18160ddd = unresolved_18160ddd + msg.value;
+            address var_c = msg.sender;
+            if (!(storage_map_c[var_c] + msg.value) < storage_map_c[var_c]) {
+                var_c = msg.sender;
+                storage_map_c[var_c] = storage_map_c[var_c] + msg.value;
+                emit Event_ddf252ad(0, msg.sender, msg.value);
                 emit Event_e1fffcc4(msg.sender, msg.value);
             }
         }

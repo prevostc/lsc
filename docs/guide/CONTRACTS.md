@@ -75,18 +75,18 @@ parent subobject lens is what `ERC20.Fields.ofParent` composes.
 
 ## Token, vault, pool
 
-Token (`Examples/Token/Contract.lean`) is a closed ERC-20: no external calls.
-Amounts are `Amount tokenAsset`. Transfers use checked arithmetic and `require`:
+Token (`Examples/Token/Contract.lean`) is a closed ERC-20: no external
+calls. Storage `extends ERC20.Storage tokenAsset` plus `owner`. The six
+IERC20 entrypoints are one-line re-exports of the base; constructor and
+owner-gated `mint` call `ERC20.mint`.
 
 ```lean
-def transfer (to : Address) (amount : Amount tokenAsset) : M Bool := do
-  let src ← Tx.sender
-  let b ← read balances[src]
-  Tx.require (amount ≤ b) .InsufficientBalance
-  write balances[src] (b -? amount)
-  write balances[to] (read balances[to] +? amount)
-  Tx.emit (.Transfer src to amount)
-  return true
+structure Storage extends ERC20.Storage tokenAsset where
+  owner : Address
+  deriving Fields
+
+def transfer (to : Address) (amount : Amount tokenAsset) : M Bool :=
+  ERC20.transfer base to amount
 ```
 
 `lsc_contract Token … implements IERC20 Token.tokenAsset` checks names and
@@ -99,10 +99,11 @@ Share conversion is `Shares.toShares` / `Shares.toAssets` with
 `offset := ⟨6⟩` (virtual offset `10^6`).
 Cpamm (`Examples/Cpamm/Contract.lean`) binds two `Ref (IERC20 …)` tokens.
 See [External calls](EXTERNAL_CALLS.md).
-WETH (`Examples/WETH/Contract.lean`) wraps the chain native asset as an
-ERC-20 (`IERC20.Exact`). The native asset comes from the `Chain` profile,
-so the same contract is a wrapped-native token on any profile (`def chain
-:= .ethereum` here).
+WETH (`Examples/WETH/Contract.lean`) is `extends ERC20.Storage native`
+with nothing else: `deposit` / `withdraw` wrap `ERC20.mint` / `ERC20.burn`
+around native value; the six IERC20 names are re-exported. `weth_exact`
+is `IERC20.Exact WETH.impl` (deposit/withdraw are extra `step`s, so this
+is not `ERC20.exact` of the six methods alone).
 
 A function named `constructor` is deployment only; it is not a trace
 entrypoint. Token's constructor mints the initial supply to the owner.

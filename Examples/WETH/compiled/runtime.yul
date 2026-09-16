@@ -32,26 +32,30 @@
         {
             let deposit_0 := caller()
             let deposit_1 := callvalue()
-            mstore(0, deposit_0)
-            mstore(32, 0)
-            let deposit_2 := sload(keccak256(0, 64))
+            let deposit_2 := sload(2)
             let deposit_3 := add(deposit_2, deposit_1)
             if lt(deposit_3, deposit_2) {
                 mstore(128, shl(224, 1313373041))
                 mstore(132, 17)
                 revert(128, 36)
             }
+            sstore(2, deposit_3)
             mstore(0, deposit_0)
             mstore(32, 0)
-            sstore(keccak256(0, 64), deposit_3)
-            let deposit_4 := sload(2)
+            let deposit_4 := sload(keccak256(0, 64))
             let deposit_5 := add(deposit_4, deposit_1)
             if lt(deposit_5, deposit_4) {
                 mstore(128, shl(224, 1313373041))
                 mstore(132, 17)
                 revert(128, 36)
             }
-            sstore(2, deposit_5)
+            mstore(0, deposit_0)
+            mstore(32, 0)
+            sstore(keccak256(0, 64), deposit_5)
+            mstore(128, 0)
+            mstore(160, deposit_0)
+            mstore(192, deposit_1)
+            log1(128, 96, 100389287136786176327247604509743168900146139575972864366142685224231313322991)
             mstore(128, deposit_0)
             mstore(160, deposit_1)
             log1(128, 64, 102222681472383059465863322013072701928378550215632170212813623808969952268444)
@@ -74,6 +78,10 @@
             mstore(0, withdraw_1)
             mstore(32, 0)
             let withdraw_2 := sload(keccak256(0, 64))
+            if iszero(iszero(lt(withdraw_2, withdraw_0))) {
+                mstore(128, shl(224, 4107696312))
+                revert(128, 4)
+            }
             if lt(withdraw_2, withdraw_0) {
                 mstore(128, shl(224, 1313373041))
                 mstore(132, 17)
@@ -91,6 +99,10 @@
             }
             let withdraw_5 := sub(withdraw_4, withdraw_0)
             sstore(2, withdraw_5)
+            mstore(128, withdraw_1)
+            mstore(160, 0)
+            mstore(192, withdraw_0)
+            log1(128, 96, 100389287136786176327247604509743168900146139575972864366142685224231313322991)
             let withdraw_6 := 0
             {
                 let withdraw__ok_6 := call(1000000, withdraw_1, withdraw_0, 0, 0, 0, 0)

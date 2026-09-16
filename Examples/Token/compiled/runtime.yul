@@ -34,7 +34,7 @@
             let transfer_1 := calldataload(36)
             let transfer_2 := caller()
             mstore(0, transfer_2)
-            mstore(32, 2)
+            mstore(32, 0)
             let transfer_3 := sload(keccak256(0, 64))
             if iszero(iszero(lt(transfer_3, transfer_1))) {
                 mstore(128, shl(224, 4107696312))
@@ -47,10 +47,10 @@
             }
             let transfer_4 := sub(transfer_3, transfer_1)
             mstore(0, transfer_2)
-            mstore(32, 2)
+            mstore(32, 0)
             sstore(keccak256(0, 64), transfer_4)
             mstore(0, transfer_0)
-            mstore(32, 2)
+            mstore(32, 0)
             let transfer_5 := sload(keccak256(0, 64))
             let transfer_6 := add(transfer_5, transfer_1)
             if lt(transfer_6, transfer_5) {
@@ -59,7 +59,7 @@
                 revert(128, 36)
             }
             mstore(0, transfer_0)
-            mstore(32, 2)
+            mstore(32, 0)
             sstore(keccak256(0, 64), transfer_6)
             mstore(128, transfer_2)
             mstore(160, transfer_0)
@@ -84,7 +84,7 @@
             let transferFrom_2 := calldataload(68)
             let transferFrom_3 := caller()
             mstore(0, transferFrom_0)
-            mstore(32, 3)
+            mstore(32, 1)
             mstore(32, keccak256(0, 64))
             mstore(0, transferFrom_3)
             let transferFrom_4 := sload(keccak256(0, 64))
@@ -93,7 +93,7 @@
                 revert(128, 4)
             }
             mstore(0, transferFrom_0)
-            mstore(32, 2)
+            mstore(32, 0)
             let transferFrom_5 := sload(keccak256(0, 64))
             if iszero(iszero(lt(transferFrom_5, transferFrom_2))) {
                 mstore(128, shl(224, 4107696312))
@@ -106,7 +106,7 @@
             }
             let transferFrom_6 := sub(transferFrom_4, transferFrom_2)
             mstore(0, transferFrom_0)
-            mstore(32, 3)
+            mstore(32, 1)
             mstore(32, keccak256(0, 64))
             mstore(0, transferFrom_3)
             sstore(keccak256(0, 64), transferFrom_6)
@@ -117,10 +117,10 @@
             }
             let transferFrom_7 := sub(transferFrom_5, transferFrom_2)
             mstore(0, transferFrom_0)
-            mstore(32, 2)
+            mstore(32, 0)
             sstore(keccak256(0, 64), transferFrom_7)
             mstore(0, transferFrom_1)
-            mstore(32, 2)
+            mstore(32, 0)
             let transferFrom_8 := sload(keccak256(0, 64))
             let transferFrom_9 := add(transferFrom_8, transferFrom_2)
             if lt(transferFrom_9, transferFrom_8) {
@@ -129,7 +129,7 @@
                 revert(128, 36)
             }
             mstore(0, transferFrom_1)
-            mstore(32, 2)
+            mstore(32, 0)
             sstore(keccak256(0, 64), transferFrom_9)
             mstore(128, transferFrom_0)
             mstore(160, transferFrom_1)
@@ -153,7 +153,7 @@
             let approve_1 := calldataload(36)
             let approve_2 := caller()
             mstore(0, approve_2)
-            mstore(32, 3)
+            mstore(32, 1)
             mstore(32, keccak256(0, 64))
             mstore(0, approve_0)
             sstore(keccak256(0, 64), approve_1)
@@ -175,7 +175,7 @@
             revert(0, 0)
         }
         {
-            let totalSupply_0 := sload(1)
+            let totalSupply_0 := sload(2)
             mstore(128, totalSupply_0)
             return(128, 32)
         }
@@ -192,7 +192,7 @@
         {
             let balanceOf_0 := calldataload(4)
             mstore(0, balanceOf_0)
-            mstore(32, 2)
+            mstore(32, 0)
             let balanceOf_1 := sload(keccak256(0, 64))
             mstore(128, balanceOf_1)
             return(128, 32)
@@ -211,7 +211,7 @@
             let allowance_0 := calldataload(4)
             let allowance_1 := calldataload(36)
             mstore(0, allowance_0)
-            mstore(32, 3)
+            mstore(32, 1)
             mstore(32, keccak256(0, 64))
             mstore(0, allowance_1)
             let allowance_2 := sload(keccak256(0, 64))
@@ -232,21 +232,21 @@
             let mint_0 := calldataload(4)
             let mint_1 := calldataload(36)
             let mint_2 := caller()
-            let mint_3 := sload(0)
+            let mint_3 := sload(3)
             if iszero(eq(mint_2, mint_3)) {
                 mstore(128, shl(224, 818771057))
                 revert(128, 4)
             }
-            let mint_4 := sload(1)
+            let mint_4 := sload(2)
             let mint_5 := add(mint_4, mint_1)
             if lt(mint_5, mint_4) {
                 mstore(128, shl(224, 1313373041))
                 mstore(132, 17)
                 revert(128, 36)
             }
-            sstore(1, mint_5)
+            sstore(2, mint_5)
             mstore(0, mint_0)
-            mstore(32, 2)
+            mstore(32, 0)
             let mint_6 := sload(keccak256(0, 64))
             let mint_7 := add(mint_6, mint_1)
             if lt(mint_7, mint_6) {
@@ -255,7 +255,7 @@
                 revert(128, 36)
             }
             mstore(0, mint_0)
-            mstore(32, 2)
+            mstore(32, 0)
             sstore(keccak256(0, 64), mint_7)
             mstore(128, 0)
             mstore(160, mint_0)
@@ -277,32 +277,29 @@
             let burn_0 := calldataload(4)
             let burn_1 := caller()
             mstore(0, burn_1)
-            mstore(32, 2)
+            mstore(32, 0)
             let burn_2 := sload(keccak256(0, 64))
-            switch iszero(lt(burn_2, burn_0))
-            case 0 {
+            if iszero(iszero(lt(burn_2, burn_0))) {
                 mstore(128, shl(224, 4107696312))
                 revert(128, 4)
             }
-            default {
-                if lt(burn_2, burn_0) {
-                    mstore(128, shl(224, 1313373041))
-                    mstore(132, 17)
-                    revert(128, 36)
-                }
-                let burn_3 := sub(burn_2, burn_0)
-                mstore(0, burn_1)
-                mstore(32, 2)
-                sstore(keccak256(0, 64), burn_3)
-                let burn_4 := sload(1)
-                if lt(burn_4, burn_0) {
-                    mstore(128, shl(224, 1313373041))
-                    mstore(132, 17)
-                    revert(128, 36)
-                }
-                let burn_5 := sub(burn_4, burn_0)
-                sstore(1, burn_5)
+            if lt(burn_2, burn_0) {
+                mstore(128, shl(224, 1313373041))
+                mstore(132, 17)
+                revert(128, 36)
             }
+            let burn_3 := sub(burn_2, burn_0)
+            mstore(0, burn_1)
+            mstore(32, 0)
+            sstore(keccak256(0, 64), burn_3)
+            let burn_4 := sload(2)
+            if lt(burn_4, burn_0) {
+                mstore(128, shl(224, 1313373041))
+                mstore(132, 17)
+                revert(128, 36)
+            }
+            let burn_5 := sub(burn_4, burn_0)
+            sstore(2, burn_5)
             mstore(128, burn_1)
             mstore(160, 0)
             mstore(192, burn_0)

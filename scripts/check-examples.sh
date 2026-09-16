@@ -18,7 +18,6 @@ CONTRACT_PATTERNS=(
   '(^|[[:space:]])theorem([[:space:]]|$)'
   '(^|[[:space:]])lemma([[:space:]]|$)'
   '(^|[[:space:]])example([[:space:]]|$)'
-  '(^|[[:space:]])instance([[:space:]]|$)'
   '@\[simp\]'
   '#guard_msgs'
   '#guard'

@@ -699,15 +699,21 @@ theorem token_deployed_inv (w : World)
 /-- Deployment from empty balances establishes `Inv`. -/
 theorem «constructor_inv» (owner : Address) (supply : Amount tokenAsset) (ctx : Ctx)
     (w : World)
-    (hempty : ∀ a, w.self.balances a = 0) :
+    (hempty : ∀ a, w.self.balances a = 0)
+    (htot : w.self.totalSupply = 0)
+    (hfit : supply.raw < wordBound) :
     Inv (worldAfter (Token.constructor owner supply) ctx w) := by
-  have hrun := ctor_ok ctx w owner supply
+  have hsupply : (w.self.totalSupply + supply).raw < wordBound := by
+    simpa [htot, Amount.raw_add, Amount.raw_zero] using hfit
+  have hadd : (w.self.balances owner + supply).raw < wordBound := by
+    simpa [hempty, Amount.raw_add, Amount.raw_zero] using hfit
+  have hrun := ctor_ok ctx w owner supply hsupply hadd
   simp [worldAfter, hrun, Inv, InvStorage]
   refine ⟨{owner}, ?_, ?_⟩
   · intro a ha
     have hne : a ≠ owner := by simpa [Finset.mem_singleton] using ha
-    simp [ctorPost, Function.update_of_ne hne, hempty]
-  ·     simp [ctorPost, Finset.sum_singleton, Function.update_self]
+    simp [ctorPost, credit, Function.update_of_ne hne, hempty]
+  · simp [ctorPost, credit, Finset.sum_singleton, Function.update_self, hempty, htot]
 
 namespace Proof
 

@@ -97,7 +97,7 @@ L6:    // JUMPDEST
     DUP1
     PUSH 0x00
     MSTORE
-    PUSH 0x02
+    PUSH 0x00
     PUSH 0x20
     MSTORE
     PUSH 0x40
@@ -141,7 +141,7 @@ L8:    // JUMPDEST
     DUP3
     PUSH 0x00
     MSTORE
-    PUSH 0x02
+    PUSH 0x00
     PUSH 0x20
     MSTORE
     DUP1
@@ -152,7 +152,7 @@ L8:    // JUMPDEST
     DUP5
     PUSH 0x00
     MSTORE
-    PUSH 0x02
+    PUSH 0x00
     PUSH 0x20
     MSTORE
     PUSH 0x40
@@ -182,7 +182,7 @@ L9:    // JUMPDEST
     DUP7
     PUSH 0x00
     MSTORE
-    PUSH 0x02
+    PUSH 0x00
     PUSH 0x20
     MSTORE
     DUP1
@@ -245,7 +245,7 @@ L12:    // JUMPDEST
     DUP4
     PUSH 0x00
     MSTORE
-    PUSH 0x03
+    PUSH 0x01
     PUSH 0x20
     MSTORE
     PUSH 0x40
@@ -277,7 +277,7 @@ L13:    // JUMPDEST
     DUP5
     PUSH 0x00
     MSTORE
-    PUSH 0x02
+    PUSH 0x00
     PUSH 0x20
     MSTORE
     PUSH 0x40
@@ -321,7 +321,7 @@ L15:    // JUMPDEST
     DUP7
     PUSH 0x00
     MSTORE
-    PUSH 0x03
+    PUSH 0x01
     PUSH 0x20
     MSTORE
     PUSH 0x40
@@ -360,7 +360,7 @@ L16:    // JUMPDEST
     DUP8
     PUSH 0x00
     MSTORE
-    PUSH 0x02
+    PUSH 0x00
     PUSH 0x20
     MSTORE
     DUP1
@@ -371,7 +371,7 @@ L16:    // JUMPDEST
     DUP7
     PUSH 0x00
     MSTORE
-    PUSH 0x02
+    PUSH 0x00
     PUSH 0x20
     MSTORE
     PUSH 0x40
@@ -401,7 +401,7 @@ L17:    // JUMPDEST
     DUP9
     PUSH 0x00
     MSTORE
-    PUSH 0x02
+    PUSH 0x00
     PUSH 0x20
     MSTORE
     DUP1
@@ -465,7 +465,7 @@ L20:    // JUMPDEST
     DUP1
     PUSH 0x00
     MSTORE
-    PUSH 0x03
+    PUSH 0x01
     PUSH 0x20
     MSTORE
     PUSH 0x40
@@ -522,7 +522,7 @@ L22:    // JUMPDEST
     PUSH 0x00
     REVERT
 L23:    // JUMPDEST
-    PUSH 0x01
+    PUSH 0x02
     SLOAD
     DUP1
     PUSH 0x80
@@ -555,7 +555,7 @@ L26:    // JUMPDEST
     DUP1
     PUSH 0x00
     MSTORE
-    PUSH 0x02
+    PUSH 0x00
     PUSH 0x20
     MSTORE
     PUSH 0x40
@@ -596,7 +596,7 @@ L29:    // JUMPDEST
     DUP2
     PUSH 0x00
     MSTORE
-    PUSH 0x03
+    PUSH 0x01
     PUSH 0x20
     MSTORE
     PUSH 0x40
@@ -644,7 +644,7 @@ L32:    // JUMPDEST
     PUSH 0x24
     CALLDATALOAD
     CALLER
-    PUSH 0x00
+    PUSH 0x03
     SLOAD
     DUP1
     DUP3
@@ -659,7 +659,7 @@ L32:    // JUMPDEST
     PUSH 0x80
     REVERT
 L33:    // JUMPDEST
-    PUSH 0x01
+    PUSH 0x02
     SLOAD
     DUP4
     DUP2
@@ -682,12 +682,12 @@ L33:    // JUMPDEST
     REVERT
 L34:    // JUMPDEST
     DUP1
-    PUSH 0x01
+    PUSH 0x02
     SSTORE
     DUP6
     PUSH 0x00
     MSTORE
-    PUSH 0x02
+    PUSH 0x00
     PUSH 0x20
     MSTORE
     PUSH 0x40
@@ -717,7 +717,7 @@ L35:    // JUMPDEST
     DUP8
     PUSH 0x00
     MSTORE
-    PUSH 0x02
+    PUSH 0x00
     PUSH 0x20
     MSTORE
     DUP1
@@ -772,7 +772,7 @@ L38:    // JUMPDEST
     DUP1
     PUSH 0x00
     MSTORE
-    PUSH 0x02
+    PUSH 0x00
     PUSH 0x20
     MSTORE
     PUSH 0x40
@@ -783,12 +783,50 @@ L38:    // JUMPDEST
     DUP2
     LT
     ISZERO
-    DUP1
-    PUSH 0x00
-    EQ
-    JUMPI L40
-    POP
+    JUMPI L39
+    PUSH 0xf4d678b8    // selector: InsufficientBalance()
+    PUSH 0xe0
+    SHL
+    PUSH 0x80
+    MSTORE
+    PUSH 0x04
+    PUSH 0x80
+    REVERT
+L39:    // JUMPDEST
     DUP3
+    DUP2
+    LT
+    ISZERO
+    JUMPI L40
+    PUSH 0x4e487b71
+    PUSH 0xe0
+    SHL
+    PUSH 0x80
+    MSTORE
+    PUSH 0x11
+    PUSH 0x84
+    MSTORE
+    PUSH 0x24
+    PUSH 0x80
+    REVERT
+L40:    // JUMPDEST
+    DUP3
+    DUP2
+    SUB
+    DUP3
+    PUSH 0x00
+    MSTORE
+    PUSH 0x00
+    PUSH 0x20
+    MSTORE
+    DUP1
+    PUSH 0x40
+    PUSH 0x00
+    KECCAK256
+    SSTORE
+    PUSH 0x02
+    SLOAD
+    DUP5
     DUP2
     LT
     ISZERO
@@ -805,67 +843,19 @@ L38:    // JUMPDEST
     PUSH 0x80
     REVERT
 L41:    // JUMPDEST
-    DUP3
+    DUP5
     DUP2
     SUB
-    DUP3
-    PUSH 0x00
-    MSTORE
+    DUP1
     PUSH 0x02
-    PUSH 0x20
-    MSTORE
-    DUP1
-    PUSH 0x40
-    PUSH 0x00
-    KECCAK256
     SSTORE
-    PUSH 0x01
-    SLOAD
     DUP5
-    DUP2
-    LT
-    ISZERO
-    JUMPI L42
-    PUSH 0x4e487b71
-    PUSH 0xe0
-    SHL
-    PUSH 0x80
-    MSTORE
-    PUSH 0x11
-    PUSH 0x84
-    MSTORE
-    PUSH 0x24
-    PUSH 0x80
-    REVERT
-L42:    // JUMPDEST
-    DUP5
-    DUP2
-    SUB
-    DUP1
-    PUSH 0x01
-    SSTORE
-    POP
-    POP
-    POP
-    JUMP L39
-L40:    // JUMPDEST
-    POP
-    PUSH 0xf4d678b8    // selector: InsufficientBalance()
-    PUSH 0xe0
-    SHL
-    PUSH 0x80
-    MSTORE
-    PUSH 0x04
-    PUSH 0x80
-    REVERT
-L39:    // JUMPDEST
-    DUP2
     PUSH 0x80
     MSTORE
     PUSH 0x00
     PUSH 0xa0
     MSTORE
-    DUP3
+    DUP6
     PUSH 0xc0
     MSTORE
     PUSH 0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef    // topic: Transfer(address,address,uint256)
@@ -873,6 +863,9 @@ L39:    // JUMPDEST
     PUSH 0x80
     LOG1
     STOP
+    POP
+    POP
+    POP
     POP
     POP
     POP

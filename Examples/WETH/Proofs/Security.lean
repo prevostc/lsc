@@ -485,7 +485,8 @@ theorem backed_deposit {ctx : Ctx} {w : World}
             self := depositPost (World.creditValue w ctx.value).self ctx.sender
               ⟨ctx.value⟩
             log := (World.creditValue w ctx.value).log ++
-              [.Deposit ctx.sender ⟨ctx.value⟩] } =
+              [.Transfer 0 ctx.sender ⟨ctx.value⟩,
+                .Deposit ctx.sender ⟨ctx.value⟩] } =
       World.nativeBalance w + ctx.value := by
     change World.nativeBalance (World.creditValue w ctx.value) = _
     exact nativeBalance_creditValue w ctx.value hb
@@ -508,7 +509,8 @@ theorem backed_withdraw (amount : Amount native) {ctx : Ctx}
           { w with
             self := withdrawPost w.self ctx.sender amount
             ext := x'
-            log := w.log ++ [.Withdrawal ctx.sender amount] } +
+            log := w.log ++
+              [.Transfer ctx.sender 0 amount, .Withdrawal ctx.sender amount] } +
         amount.raw =
       World.nativeBalance w := by
     change HasSelfBalance.get x' + amount.raw = HasSelfBalance.get w.ext
@@ -524,7 +526,8 @@ theorem backed_withdraw (amount : Amount native) {ctx : Ctx}
             { w with
               self := withdrawPost w.self ctx.sender amount
               ext := x'
-              log := w.log ++ [.Withdrawal ctx.sender amount] } +
+              log := w.log ++
+              [.Transfer ctx.sender 0 amount, .Withdrawal ctx.sender amount] } +
           amount.raw := by
     rw [hts, hnat]
     exact hw.2.1

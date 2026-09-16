@@ -29,7 +29,7 @@ structure Fields (S : Type) (a : Asset) where
   totalSupply : Field S (Amount a)
 
 /-- Compose a parent `ERC20.Storage` lens into the three field lenses. -/
-def Fields.ofParent {S : Type} {a : Asset} (p : Field S (Storage a)) :
+@[reducible] def Fields.ofParent {S : Type} {a : Asset} (p : Field S (Storage a)) :
     Fields S a where
   balances := Field.comp p Storage.Fields.balances
   allowances := Field.comp p Storage.Fields.allowances
@@ -155,11 +155,9 @@ def totalSupply (F : Fields S a) : Tx S X E ε (Amount a) :=
 @[internal] def burn [Events E a] [Errors ε] (F : Fields S a)
     (src : Address) (amount : Amount a) : Tx S X E ε Unit := do
   let b ← read F.balances[src]
-  if amount ≤ b then
-    write F.balances[src] (b -? amount)
-    write F.totalSupply (read F.totalSupply -? amount)
-  else
-    Tx.revert Errors.insufficientBalance
+  Tx.require (amount ≤ b) Errors.insufficientBalance
+  write F.balances[src] (b -? amount)
+  write F.totalSupply (read F.totalSupply -? amount)
   Tx.emit (Events.transfer src 0 amount)
 
 /-- `IERC20.Impl` whose methods are the base functions at `F`. -/

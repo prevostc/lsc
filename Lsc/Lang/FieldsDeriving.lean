@@ -26,10 +26,23 @@ def identOfFVar (x : Expr) : MetaM Ident := do
   let n := (← x.fvarId!.getUserName).eraseMacroScopes
   return mkIdent n
 
-def emitLens (structName : Name) (fieldName : Name)
+/-- Projection function of `fieldName` on the structure that actually
+declares it (`findField?`), not `structName ++ fieldName` (inherited
+fields have no such constant). -/
+def origProj (structName fieldName : Name) : CommandElabM (Name × Nat) := do
+  let env ← getEnv
+  let some orig := findField? env structName fieldName
+    | throwError "deriving Fields: `{structName}` has no field `{fieldName}`"
+  let some projFn := getProjFnForField? env orig fieldName
+    | throwError "deriving Fields: no projection for `{orig}.{fieldName}`"
+  let origNparams := (← getConstInfoInduct orig).numParams
+  return (projFn, origNparams)
+
+/-- Direct field of `structName` (including a parent subobject). -/
+def emitDirectLens (structName : Name) (fieldName : Name)
     (paramBinders : Array (TSyntax ``Parser.Term.bracketedBinder))
     (structApp : Term) (nparams : Nat) : CommandElabM Unit := do
-  let projName := structName ++ fieldName
+  let (projName, _) ← origProj structName fieldName
   let tyStx ← liftTermElabM do
     let projTy ← inferType (mkConst projName)
     forallBoundedTelescope projTy (some (nparams + 1)) fun _ rest => delab rest
@@ -67,18 +80,11 @@ def deriveOne (structName : Name) : CommandElabM Unit := do
         idents := idents.push id
       let app ← `($(mkCIdent structName) $idents*)
       pure (binders, app)
-  let flat := getStructureFieldsFlattened env structName
-      (includeSubobjectFields := false)
-  let mut seen : NameSet := {}
-  for fieldName in flat do
-    emitLens structName fieldName paramBinders structApp nparams
-    seen := seen.insert fieldName
-  for fieldName in getStructureFields env structName do
-    if seen.contains fieldName then continue
-    unless (isSubobjectField? env structName fieldName).isSome do continue
-    emitLens structName fieldName paramBinders structApp nparams
-  for f1 in flat do
-    for f2 in flat do
+  let direct := getStructureFields env structName
+  for fieldName in direct do
+    emitDirectLens structName fieldName paramBinders structApp nparams
+  for f1 in direct do
+    for f2 in direct do
       if f1 == f2 then continue
       let l1 := rootIdent (structName ++ `Fields ++ f1)
       let l2 := rootIdent (structName ++ `Fields ++ f2)

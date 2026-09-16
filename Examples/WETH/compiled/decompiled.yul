@@ -74,23 +74,30 @@ object "DecompiledContract" {
                         tstore(0, 0x01)
                         mstore(0, caller())
                         mstore(0x20, 0)
-                        if iszero(lt(sload(sha3(0, 0x40)), calldataload(0x04))) {
-                            mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
-                            mstore(0x84, 0x11)
-                            mstore(0, caller())
-                            mstore(0x20, 0)
-                            sstore(sha3(0, 0x40), sub(sload(sha3(0, 0x40)), calldataload(0x04)))
-                            if iszero(lt(sload(0x02), calldataload(0x04))) {
+                        if iszero(lt(sload(sha3(0, 0x40)), calldataload(0x04))) { revert(0x80, 0x04); } else {
+                            mstore(0x80, 0xf4d678b800000000000000000000000000000000000000000000000000000000)
+                            if iszero(lt(sload(sha3(0, 0x40)), calldataload(0x04))) {
                                 mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
                                 mstore(0x84, 0x11)
-                                sstore(0x02, sub(sload(0x02), calldataload(0x04)))
-                                call(0x0f4240, caller(), calldataload(0x04), 0, 0, 0, 0)
-                                if eq(call(0x0f4240, caller(), calldataload(0x04), 0, 0, 0, 0), 0x01) { revert(0, 0); } else {
-                                    mstore(0x80, 0x90b8ec1800000000000000000000000000000000000000000000000000000000)
+                                mstore(0, caller())
+                                mstore(0x20, 0)
+                                sstore(sha3(0, 0x40), sub(sload(sha3(0, 0x40)), calldataload(0x04)))
+                                if iszero(lt(sload(0x02), calldataload(0x04))) {
+                                    mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
+                                    mstore(0x84, 0x11)
+                                    sstore(0x02, sub(sload(0x02), calldataload(0x04)))
                                     mstore(0x80, caller())
-                                    mstore(0xa0, calldataload(0x04))
-                                    log1(0x80, 0x40, 0x7fcf532c15f0a6db0bd6d0e038bea71d30d808c7d98cb3bf7268a95bf5081b65)
-                                    tstore(0, 0)
+                                    mstore(0xa0, 0)
+                                    mstore(0xc0, calldataload(0x04))
+                                    log1(0x80, 0x60, 0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef)
+                                    call(0x0f4240, caller(), calldataload(0x04), 0, 0, 0, 0)
+                                    if eq(call(0x0f4240, caller(), calldataload(0x04), 0, 0, 0, 0), 0x01) { revert(0, 0); } else {
+                                        mstore(0x80, 0x90b8ec1800000000000000000000000000000000000000000000000000000000)
+                                        mstore(0x80, caller())
+                                        mstore(0xa0, calldataload(0x04))
+                                        log1(0x80, 0x40, 0x7fcf532c15f0a6db0bd6d0e038bea71d30d808c7d98cb3bf7268a95bf5081b65)
+                                        tstore(0, 0)
+                                    }
                                 }
                             }
                         }
@@ -216,18 +223,22 @@ object "DecompiledContract" {
             case 0xd0e30db0 {
                 if iszero(lt(calldatasize(), 0x04)) { revert(0, 0); } else {
                     if iszero(lt(selfbalance(), callvalue())) { revert(0, 0); } else {
-                        mstore(0, caller())
-                        mstore(0x20, 0)
-                        if iszero(lt(add(sload(sha3(0, 0x40)), callvalue()), sload(sha3(0, 0x40)))) {
+                        if iszero(lt(add(sload(0x02), callvalue()), sload(0x02))) {
                             mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
                             mstore(0x84, 0x11)
+                            sstore(0x02, add(sload(0x02), callvalue()))
                             mstore(0, caller())
                             mstore(0x20, 0)
-                            sstore(sha3(0, 0x40), add(sload(sha3(0, 0x40)), callvalue()))
-                            if iszero(lt(add(sload(0x02), callvalue()), sload(0x02))) {
+                            if iszero(lt(add(sload(sha3(0, 0x40)), callvalue()), sload(sha3(0, 0x40)))) {
                                 mstore(0x80, 0x4e487b7100000000000000000000000000000000000000000000000000000000)
                                 mstore(0x84, 0x11)
-                                sstore(0x02, add(sload(0x02), callvalue()))
+                                mstore(0, caller())
+                                mstore(0x20, 0)
+                                sstore(sha3(0, 0x40), add(sload(sha3(0, 0x40)), callvalue()))
+                                mstore(0x80, 0)
+                                mstore(0xa0, caller())
+                                mstore(0xc0, callvalue())
+                                log1(0x80, 0x60, 0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef)
                                 mstore(0x80, caller())
                                 mstore(0xa0, callvalue())
                                 log1(0x80, 0x40, 0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c)

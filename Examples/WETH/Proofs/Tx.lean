@@ -1,4 +1,5 @@
 import Mathlib.Tactic.SplitIfs
+import Stdlib.ERC20.BaseTheorems
 import Examples.WETH.Contract
 
 /-!
@@ -7,11 +8,30 @@ WETH Tx-level lemmas: exact `Tx.run` post-states and conservation.
 
 set_option linter.unusedSimpArgs false
 
-open Lsc WETH
+open Lsc Lsc.Stdlib WETH
 
 namespace WETH
 
 variable (ctx : Ctx) (w : World)
+
+instance : ERC20.Fields.Lawful erc20 := inferInstance
+
+@[simp] theorem balances_get (σ : Storage) (who : Address) :
+    erc20.balances.get σ who = σ.balances who := rfl
+@[simp] theorem allowances_get (σ : Storage) (owner spender : Address) :
+    erc20.allowances.get σ owner spender = σ.allowances owner spender := rfl
+@[simp] theorem totalSupply_get (σ : Storage) :
+    erc20.totalSupply.get σ = σ.totalSupply := rfl
+@[simp] theorem balances_set (σ : Storage) (m : Address → Amount native) :
+    erc20.balances.set σ m = { σ with balances := m } := rfl
+@[simp] theorem events_transfer :
+    ERC20.Events.transfer (E := Event) (a := native) = Event.Transfer := rfl
+@[simp] theorem events_approval :
+    ERC20.Events.approval (E := Event) (a := native) = Event.Approval := rfl
+@[simp] theorem errors_balance :
+    ERC20.Errors.insufficientBalance (ε := Error) = .InsufficientBalance := rfl
+@[simp] theorem errors_allowance :
+    ERC20.Errors.insufficientAllowance (ε := Error) = .InsufficientAllowance := rfl
 
 def depositTx : M Unit := @deposit Payable.entrypoint
 
@@ -53,16 +73,19 @@ theorem credit_other {α} [Add α] (bals : Mapping Address α) {a b : Address}
 
 theorem balanceOf_returns_stored_balance (who : Address) :
     Tx.run (balanceOf who) ctx w = .ok (w.self.balances who, w) := by
-  simp [balanceOf]
+  simpa [balanceOf] using
+    ERC20.Proof.balanceOf_returns (ε := Error) erc20 ctx w who
 
 theorem totalSupply_returns_stored :
     Tx.run totalSupply ctx w = .ok (w.self.totalSupply, w) := by
-  simp [totalSupply]
+  simpa [totalSupply] using
+    ERC20.Proof.totalSupply_returns (ε := Error) erc20 ctx w
 
 theorem allowance_returns_stored (owner spender : Address) :
     Tx.run (allowance owner spender) ctx w =
       .ok (w.self.allowances owner spender, w) := by
-  simp [allowance]
+  simpa [allowance] using
+    ERC20.Proof.allowance_returns (ε := Error) erc20 ctx w owner spender
 
 /-- `(x - y) + (z + y) = x + z` when `y ≤ x`. -/
 private theorem nat_sub_add_add (x y z : Nat) (h : y ≤ x) :
@@ -87,12 +110,15 @@ theorem deposit_ok
     Tx.run depositTx ctx w =
       .ok ((), { w with
         self := depositPost w.self ctx.sender ⟨ctx.value⟩
-        log := w.log ++ [.Deposit ctx.sender ⟨ctx.value⟩] }) := by
+        log := w.log ++
+          [.Transfer 0 ctx.sender ⟨ctx.value⟩,
+            .Deposit ctx.sender ⟨ctx.value⟩] }) := by
   have hb : (w.self.balances ctx.sender).raw + ctx.value < wordBound := by
     simpa [Amount.raw_add, Amount.ofWord] using hbal
   have hs : w.self.totalSupply.raw + ctx.value < wordBound := by
     simpa [Amount.raw_add, Amount.ofWord] using hsup
-  simp [depositTx, deposit, Tx.value, hb, hs, depositPost, credit]
+  simp [depositTx, deposit, Tx.value, hb, hs, depositPost, credit,
+    ERC20.mint, Field.Lawful.get_set, Field.Independent.get_set_other]
   apply And.intro
   · apply And.intro
     · rw [Amount.update_raw w.self.balances ctx.sender
@@ -108,20 +134,22 @@ theorem deposit_ok_inv {w' : World}
       (w.self.totalSupply + Amount.ofWord ctx.value).raw < wordBound ∧
       w' = { w with
         self := depositPost w.self ctx.sender ⟨ctx.value⟩
-        log := w.log ++ [.Deposit ctx.sender ⟨ctx.value⟩] } := by
-  by_cases hbal : (w.self.balances ctx.sender + Amount.ofWord ctx.value).raw < wordBound
-  · by_cases hsup : (w.self.totalSupply + Amount.ofWord ctx.value).raw < wordBound
+        log := w.log ++
+          [.Transfer 0 ctx.sender ⟨ctx.value⟩,
+            .Deposit ctx.sender ⟨ctx.value⟩] } := by
+  by_cases hsup : (w.self.totalSupply + Amount.ofWord ctx.value).raw < wordBound
+  · by_cases hbal : (w.self.balances ctx.sender + Amount.ofWord ctx.value).raw < wordBound
     · rw [deposit_ok ctx w hbal hsup] at h
       cases h
       exact ⟨hbal, hsup, rfl⟩
-    · have hs : ¬ w.self.totalSupply.raw + ctx.value < wordBound := by
+    · have hs : w.self.totalSupply.raw + ctx.value < wordBound := by
         simpa [Amount.raw_add, Amount.ofWord] using hsup
-      have hb : (w.self.balances ctx.sender).raw + ctx.value < wordBound := by
+      have hb : ¬ (w.self.balances ctx.sender).raw + ctx.value < wordBound := by
         simpa [Amount.raw_add, Amount.ofWord] using hbal
-      simp [depositTx, deposit, Tx.value, hb, hs] at h
-  · have hb : ¬ (w.self.balances ctx.sender).raw + ctx.value < wordBound := by
-      simpa [Amount.raw_add, Amount.ofWord] using hbal
-    simp [depositTx, deposit, Tx.value, hb] at h
+      simp [depositTx, deposit, Tx.value, hb, hs, ERC20.mint] at h
+  · have hs : ¬ w.self.totalSupply.raw + ctx.value < wordBound := by
+      simpa [Amount.raw_add, Amount.ofWord] using hsup
+    simp [depositTx, deposit, Tx.value, hs, ERC20.mint] at h
 
 theorem deposit_others {w' : World}
     (h : Tx.run depositTx ctx w = .ok ((), w'))
@@ -158,10 +186,11 @@ theorem withdraw_ok (amount : Amount native) {x' : ExtState}
       .ok ((), { w with
         self := withdrawPost w.self ctx.sender amount
         ext := x'
-        log := w.log ++ [.Withdrawal ctx.sender amount] }) := by
+        log := w.log ++
+          [.Transfer ctx.sender 0 amount, .Withdrawal ctx.sender amount] }) := by
   have hb : amount.raw ≤ (w.self.balances ctx.sender).raw := hbal
   have hs : amount.raw ≤ w.self.totalSupply.raw := hsup
-  simp [withdraw, run_native_send, hb, hs, hsend, withdrawPost, debit,
+  simp [withdraw, ERC20.burn, run_native_send, hb, hs, hsend, withdrawPost, debit,
     Amount.update_raw, Amount.ofWord_raw, Amount.raw_sub]
 
 theorem withdraw_ok_inv (amount : Amount native)
@@ -173,23 +202,24 @@ theorem withdraw_ok_inv (amount : Amount native)
         w' = { w with
           self := withdrawPost w.self ctx.sender amount
           ext := x'
-          log := w.log ++ [.Withdrawal ctx.sender amount] } := by
+          log := w.log ++
+            [.Transfer ctx.sender 0 amount, .Withdrawal ctx.sender amount] } := by
   by_cases hbal : amount ≤ w.self.balances ctx.sender
   · by_cases hsup : amount ≤ w.self.totalSupply
     · cases hsend : w.oracle.send ctx.sender amount.raw w.ext with
       | none =>
         have hb : amount.raw ≤ (w.self.balances ctx.sender).raw := hbal
         have hs : amount.raw ≤ w.self.totalSupply.raw := hsup
-        simp [withdraw, run_native_send, hb, hs, hsend] at h
+        simp [withdraw, ERC20.burn, run_native_send, hb, hs, hsend] at h
       | some x' =>
         rw [withdraw_ok ctx w amount hbal hsup hsend] at h
         cases h
         exact ⟨hbal, hsup, ⟨x', rfl, rfl⟩⟩
     · have hb : amount.raw ≤ (w.self.balances ctx.sender).raw := hbal
       have hs : ¬ amount.raw ≤ w.self.totalSupply.raw := hsup
-      simp [withdraw, hb, hs] at h
+      simp [withdraw, ERC20.burn, hb, hs] at h
   · have hb : ¬ amount.raw ≤ (w.self.balances ctx.sender).raw := hbal
-    simp [withdraw, hb] at h
+    simp [withdraw, ERC20.burn, hb] at h
 
 theorem withdraw_others (amount : Amount native)
     {w' : World}
@@ -214,7 +244,8 @@ theorem transfer_ok (to : Address) (amount : Amount native)
         log := w.log ++ [.Transfer ctx.sender to amount] }) := by
   simp only [debit, Amount.le_iff, Amount.raw_add, Amount.raw_sub,
     Amount.update_raw_apply] at hsub hadd
-  simp [transfer, hsub, hadd]
+  simp [transfer, ERC20.transfer, hsub, hadd,
+    Field.Lawful.get_set, Field.Lawful.set_set, Field.Independent.get_set_other]
   simp [transferPost, debit, credit, Amount.update2_raw,
     Amount.ofWord_update_lookup, Amount.ofWord_raw]
 
@@ -227,10 +258,10 @@ theorem transfer_returns_true (to : Address) (amount : Amount native)
       cases h; rfl
     · have hle : amount.raw ≤ (w.self.balances ctx.sender).raw := hsub
       simp only [debit_credit_raw] at hadd
-      simp [transfer, hle, hadd] at h
+      simp [transfer, ERC20.transfer, hle, hadd] at h
   · have hle : ¬ amount.raw ≤ (w.self.balances ctx.sender).raw :=
       hsub
-    simp [transfer, hle] at h
+    simp [transfer, ERC20.transfer, hle] at h
 
 theorem transfer_ok_inv (to : Address) (amount : Amount native)
     {w' : World}
@@ -246,10 +277,10 @@ theorem transfer_ok_inv (to : Address) (amount : Amount native)
       exact ⟨hsub, rfl⟩
     · have hle : amount.raw ≤ (w.self.balances ctx.sender).raw := hsub
       simp only [debit_credit_raw] at hadd
-      simp [transfer, hle, hadd] at h
+      simp [transfer, ERC20.transfer, hle, hadd] at h
   · have hle : ¬ amount.raw ≤ (w.self.balances ctx.sender).raw :=
       hsub
-    simp [transfer, hle] at h
+    simp [transfer, ERC20.transfer, hle] at h
 
 theorem transfer_credits (to : Address) (amount : Amount native)
     {w' : World}
@@ -311,7 +342,7 @@ theorem approve_ok (spender : Address) (amount : Amount native) :
       .ok (true, { w with
         self := approvePost w.self ctx.sender spender amount
         log := w.log ++ [.Approval ctx.sender spender amount] }) := by
-  simp [approve, approvePost, Amount.update_nested_raw, Amount.ofWord_raw]
+  simp [approve, ERC20.approve, approvePost, Amount.update_nested_raw, Amount.ofWord_raw]
 
 theorem approve_sets (spender : Address) (amount : Amount native)
     {w' : World}
@@ -350,7 +381,7 @@ theorem transferFrom_ok (src to : Address) (amount : Amount native)
   have hallow' : amount.raw ≤ (w.self.allowances src ctx.sender).raw := hallow
   have hsub' : amount.raw ≤ (w.self.balances src).raw := hsub
   simp only [debit, Amount.raw_add, Amount.raw_sub, Amount.update_raw_apply] at hadd
-  simp [transferFrom, hallow', hsub', hadd]
+  simp [transferFrom, ERC20.transferFrom, hallow', hsub', hadd]
   simp [transferFromPost, debit, credit, Amount.update_nested_raw,
     Amount.update2_raw, Amount.ofWord_update_lookup, Amount.ofWord_raw]
 
@@ -371,14 +402,14 @@ theorem transferFrom_ok_inv (src to : Address) (amount : Amount native)
       · have hle : amount.raw ≤ (w.self.balances src).raw := hsub
         have ha : amount.raw ≤ (w.self.allowances src ctx.sender).raw := hallow
         simp only [debit_credit_raw] at hadd
-        simp [transferFrom, ha, hle, hadd] at h
+        simp [transferFrom, ERC20.transferFrom, ha, hle, hadd] at h
     · have hle : ¬ amount.raw ≤ (w.self.balances src).raw :=
         hsub
       have ha : amount.raw ≤ (w.self.allowances src ctx.sender).raw := hallow
-      simp [transferFrom, ha, hle] at h
+      simp [transferFrom, ERC20.transferFrom, ha, hle] at h
   · have ha : ¬ amount.raw ≤ (w.self.allowances src ctx.sender).raw :=
       hallow
-    simp [transferFrom, ha] at h
+    simp [transferFrom, ERC20.transferFrom, ha] at h
 
 theorem transferFrom_returns_true (src to : Address) (amount : Amount native)
     {r : Bool} {w' : World}
@@ -391,14 +422,14 @@ theorem transferFrom_returns_true (src to : Address) (amount : Amount native)
       · have hle : amount.raw ≤ (w.self.balances src).raw := hsub
         have ha : amount.raw ≤ (w.self.allowances src ctx.sender).raw := hallow
         simp only [debit_credit_raw] at hadd
-        simp [transferFrom, ha, hle, hadd] at h
+        simp [transferFrom, ERC20.transferFrom, ha, hle, hadd] at h
     · have hle : ¬ amount.raw ≤ (w.self.balances src).raw :=
         hsub
       have ha : amount.raw ≤ (w.self.allowances src ctx.sender).raw := hallow
-      simp [transferFrom, ha, hle] at h
+      simp [transferFrom, ERC20.transferFrom, ha, hle] at h
   · have ha : ¬ amount.raw ≤ (w.self.allowances src ctx.sender).raw :=
       hallow
-    simp [transferFrom, ha] at h
+    simp [transferFrom, ERC20.transferFrom, ha] at h
 
 theorem transferFrom_conserves (src to : Address) (amount : Amount native)
     {w' : World}

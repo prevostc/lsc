@@ -1,4 +1,5 @@
 import Mathlib.Tactic.SplitIfs
+import Stdlib.ERC20.BaseTheorems
 import Examples.Token.Contract
 
 /-!
@@ -6,11 +7,28 @@ Token Tx-level lemmas: exact `Tx.run` post-states, revert cases, and
 conservation of a successful `transfer`.
 -/
 
-open Lsc Token
+open Lsc Lsc.Stdlib Token
 
 namespace Token
 
 variable (ctx : Ctx) (w : World)
+
+instance : ERC20.Fields.Lawful base := inferInstance
+
+@[simp] theorem balances_get (σ : Storage) (who : Address) :
+    base.balances.get σ who = σ.balances who := rfl
+@[simp] theorem allowances_get (σ : Storage) (owner spender : Address) :
+    base.allowances.get σ owner spender = σ.allowances owner spender := rfl
+@[simp] theorem totalSupply_get (σ : Storage) :
+    base.totalSupply.get σ = σ.totalSupply := rfl
+@[simp] theorem events_transfer :
+    ERC20.Events.transfer (E := Event) (a := tokenAsset) = Event.Transfer := rfl
+@[simp] theorem events_approval :
+    ERC20.Events.approval (E := Event) (a := tokenAsset) = Event.Approval := rfl
+@[simp] theorem errors_balance :
+    ERC20.Errors.insufficientBalance (ε := Error) = .InsufficientBalance := rfl
+@[simp] theorem errors_allowance :
+    ERC20.Errors.insufficientAllowance (ε := Error) = .InsufficientAllowance := rfl
 
 /-- `bals` after removing `amount` from `a`. -/
 def debit {α} [Sub α] (bals : Mapping Address α) (a : Address) (amount : α) :
@@ -55,26 +73,39 @@ private theorem nat_sub_add_add (x y z : Nat) (h : y ≤ x) :
 
 theorem balanceOf_returns_stored_balance (who : Address) :
     Tx.run (balanceOf who) ctx w = .ok (w.self.balances who, w) := by
-  simp [balanceOf]
+  simpa [balanceOf] using
+    ERC20.Proof.balanceOf_returns (ε := Error) base ctx w who
 
 theorem totalSupply_returns_stored :
     Tx.run totalSupply ctx w = .ok (w.self.totalSupply, w) := by
-  simp [totalSupply]
+  simpa [totalSupply] using
+    ERC20.Proof.totalSupply_returns (ε := Error) base ctx w
 
 theorem allowance_returns_stored (owner spender : Address) :
     Tx.run (allowance owner spender) ctx w = .ok (w.self.allowances owner spender, w) := by
-  simp [allowance]
+  simpa [allowance] using
+    ERC20.Proof.allowance_returns (ε := Error) base ctx w owner spender
 
 /-! ### constructor -/
 
 /-- Storage after a successful `constructor`. -/
 def ctorPost (σ : Storage) (owner : Address) (supply : Amount tokenAsset) : Storage :=
-  Storage.mk owner supply (Function.update σ.balances owner supply) σ.allowances
+  { σ with
+    owner := owner
+    totalSupply := σ.totalSupply + supply
+    balances := credit σ.balances owner supply }
 
-theorem ctor_ok (owner : Address) (supply : Amount tokenAsset) :
+theorem ctor_ok (owner : Address) (supply : Amount tokenAsset)
+    (hsupply : (w.self.totalSupply + supply).raw < wordBound)
+    (hadd : (w.self.balances owner + supply).raw < wordBound) :
     Tx.run (Token.constructor owner supply) ctx w =
-      .ok ((), { w with self := ctorPost w.self owner supply, log := w.log ++ [.Transfer 0 owner supply] }) := by
-  simp [Token.constructor, ctorPost, Amount.update_raw, Amount.ofWord_raw]
+      .ok ((), { w with
+        self := ctorPost w.self owner supply,
+        log := w.log ++ [.Transfer 0 owner supply] }) := by
+  simp [Amount.raw_add] at hsupply hadd
+  simp [Token.constructor, ERC20.mint, ctorPost, credit, hsupply, hadd,
+    Field.Lawful.get_set, Field.Independent.get_set_other, Amount.update_raw,
+    Amount.ofWord_raw]
 
 /-! ### transfer -/
 
@@ -89,7 +120,8 @@ theorem transfer_ok (to : Address) (amount : Amount tokenAsset)
     Tx.run (transfer to amount) ctx w =
       .ok (true, { w with self := transferPost w.self ctx.sender to amount, log := w.log ++ [.Transfer ctx.sender to amount] }) := by
   simp only [debit, Amount.le_iff, Amount.raw_add, Amount.raw_sub, Amount.update_raw_apply] at hsub hadd
-  simp [transfer, hsub, hadd]
+  simp [transfer, ERC20.transfer, hsub, hadd,
+    Field.Lawful.get_set, Field.Lawful.set_set, Field.Independent.get_set_other]
   simp [transferPost, debit, credit, Amount.update2_raw,
     Amount.ofWord_update_lookup, Amount.ofWord_raw]
 
@@ -145,9 +177,9 @@ theorem transfer_preserves_allowances (to : Address) (amount : Amount tokenAsset
       cases h; rfl
     · have hle : amount.raw ≤ (w.self.balances ctx.sender).raw := hsub
       simp only [debit_credit_raw] at hadd
-      simp [transfer, hle, hadd] at h
+      simp [transfer, ERC20.transfer, hle, hadd] at h
   · have hle : ¬ amount.raw ≤ (w.self.balances ctx.sender).raw := hsub
-    simp [transfer, hle] at h
+    simp [transfer, ERC20.transfer, hle] at h
 
 /-- Frame: `transfer` never touches `totalSupply`, whatever happens. -/
 theorem transfer_preserves_totalSupply (to : Address) (amount : Amount tokenAsset)
@@ -160,14 +192,14 @@ theorem transfer_preserves_totalSupply (to : Address) (amount : Amount tokenAsse
       cases h; rfl
     · have hle : amount.raw ≤ (w.self.balances ctx.sender).raw := hsub
       simp only [debit_credit_raw] at hadd
-      simp [transfer, hle, hadd] at h
+      simp [transfer, ERC20.transfer, hle, hadd] at h
   · have hle : ¬ amount.raw ≤ (w.self.balances ctx.sender).raw := hsub
-    simp [transfer, hle] at h
+    simp [transfer, ERC20.transfer, hle] at h
 
 theorem transfer_reverts_on_insufficient_balance (to : Address) (amount : Amount tokenAsset)
     (h : w.self.balances ctx.sender < amount) :
     Tx.run (transfer to amount) ctx w = .error (.user .InsufficientBalance) := by
-  simp [transfer, Amount.not_le_of_gt h]
+  simp [transfer, ERC20.transfer, Amount.not_le_of_gt h]
 
 theorem transfer_reverts_on_overflow (to : Address) (amount : Amount tokenAsset)
     (hsub : amount ≤ w.self.balances ctx.sender)
@@ -175,7 +207,7 @@ theorem transfer_reverts_on_overflow (to : Address) (amount : Amount tokenAsset)
     Tx.run (transfer to amount) ctx w = .error (.arith .overflow) := by
   have hle : amount.raw ≤ (w.self.balances ctx.sender).raw := hsub
   simp only [debit_credit_raw] at hadd
-  simp [transfer, hle, Nat.not_lt.mpr hadd]
+  simp [transfer, ERC20.transfer, hle, Nat.not_lt.mpr hadd]
 
 /-! ### mint -/
 
@@ -188,7 +220,7 @@ theorem mint_ok (to : Address) (amount : Amount tokenAsset) (howner : ctx.sender
     Tx.run (mint to amount) ctx w =
       .ok ((), { w with self := mintPost w.self to amount, log := w.log ++ [.Transfer 0 to amount] }) := by
   simp [Amount.raw_add] at hsupply hadd
-  simp [mint, mintPost, credit, howner, hsupply, hadd, Amount.update_raw]
+  simp [mint, ERC20.mint, mintPost, credit, howner, hsupply, hadd, Amount.update_raw]
 
 theorem mint_increases_total_supply (to : Address) (amount : Amount tokenAsset) (howner : ctx.sender = w.self.owner)
     (hsupply : (w.self.totalSupply + amount).raw < wordBound)
@@ -215,13 +247,13 @@ theorem mint_preserves_other_balances (to : Address) (amount : Amount tokenAsset
 
 theorem mint_reverts_for_non_owner (to : Address) (amount : Amount tokenAsset) (h : ctx.sender ≠ w.self.owner) :
     Tx.run (mint to amount) ctx w = .error (.user .NotOwner) := by
-  simp [mint, h]
+  simp [mint, ERC20.mint, h]
 
 theorem mint_reverts_on_overflow (to : Address) (amount : Amount tokenAsset) (howner : ctx.sender = w.self.owner)
     (h : wordBound ≤ (w.self.totalSupply + amount).raw) :
     Tx.run (mint to amount) ctx w = .error (.arith .overflow) := by
   simp [Amount.raw_add] at h
-  simp [mint, howner, Nat.not_lt.mpr h]
+  simp [mint, ERC20.mint, howner, Nat.not_lt.mpr h]
 
 theorem mint_reverts_on_balance_overflow (to : Address) (amount : Amount tokenAsset)
     (howner : ctx.sender = w.self.owner)
@@ -229,7 +261,7 @@ theorem mint_reverts_on_balance_overflow (to : Address) (amount : Amount tokenAs
     (h : wordBound ≤ (w.self.balances to + amount).raw) :
     Tx.run (mint to amount) ctx w = .error (.arith .overflow) := by
   simp [Amount.raw_add] at hsupply h
-  simp [mint, howner, hsupply, Nat.not_lt.mpr h]
+  simp [mint, ERC20.mint, howner, hsupply, Nat.not_lt.mpr h]
 
 /-! ### approve -/
 
@@ -240,7 +272,7 @@ def approvePost (σ : Storage) (owner spender : Address) (amount : Amount tokenA
 theorem approve_ok (spender : Address) (amount : Amount tokenAsset) :
     Tx.run (approve spender amount) ctx w =
       .ok (true, { w with self := approvePost w.self ctx.sender spender amount, log := w.log ++ [.Approval ctx.sender spender amount] }) := by
-  simp [approve, approvePost, Amount.update_nested_raw, Amount.ofWord_raw]
+  simp [approve, ERC20.approve, approvePost, Amount.update_nested_raw, Amount.ofWord_raw]
 
 theorem approve_sets_allowance (spender : Address) (amount : Amount tokenAsset) :
     ∃ w', Tx.run (approve spender amount) ctx w = .ok (true, w') ∧
@@ -280,19 +312,19 @@ theorem transferFrom_ok (src to : Address) (amount : Amount tokenAsset)
   have hallow' : amount.raw ≤ (w.self.allowances src ctx.sender).raw := hallow
   have hsub' : amount.raw ≤ (w.self.balances src).raw := hsub
   simp only [debit_credit_raw] at hadd
-  simp [transferFrom, hallow', hsub', hadd]
+  simp [transferFrom, ERC20.transferFrom, hallow', hsub', hadd]
   simp [transferFromPost, debit, credit, Amount.update_nested_raw,
     Amount.update2_raw, Amount.ofWord_update_lookup, Amount.ofWord_raw]
 
 theorem transferFrom_reverts_on_insufficient_allowance (src to : Address) (amount : Amount tokenAsset)
     (h : w.self.allowances src ctx.sender < amount) :
     Tx.run (transferFrom src to amount) ctx w = .error (.user .InsufficientAllowance) := by
-  simp [transferFrom, Amount.not_le_of_gt h]
+  simp [transferFrom, ERC20.transferFrom, Amount.not_le_of_gt h]
 
 theorem transferFrom_reverts_on_insufficient_balance (src to : Address) (amount : Amount tokenAsset)
     (hallow : amount ≤ w.self.allowances src ctx.sender) (h : w.self.balances src < amount) :
     Tx.run (transferFrom src to amount) ctx w = .error (.user .InsufficientBalance) := by
-  simp [transferFrom, hallow, Amount.not_le_of_gt h]
+  simp [transferFrom, ERC20.transferFrom, hallow, Amount.not_le_of_gt h]
 
 theorem transferFrom_decrements_allowance (src to : Address) (amount : Amount tokenAsset)
     (hallow : amount ≤ w.self.allowances src ctx.sender)
@@ -387,14 +419,14 @@ theorem transferFrom_reverts_on_overflow (src to : Address) (amount : Amount tok
   have hallow' : amount.raw ≤ (w.self.allowances src ctx.sender).raw := hallow
   have hsub' : amount.raw ≤ (w.self.balances src).raw := hsub
   simp only [debit_credit_raw] at hadd
-  simp [transferFrom, hallow', hsub', Nat.not_lt.mpr hadd]
+  simp [transferFrom, ERC20.transferFrom, hallow', hsub', Nat.not_lt.mpr hadd]
 
 /-! ### burn -/
 
 theorem burn_reverts_on_insufficient_balance (amount : Amount tokenAsset) (h : w.self.balances ctx.sender < amount) :
     Tx.run (burn amount) ctx w = .error (.user .InsufficientBalance) := by
   have hfail : ¬ amount.raw ≤ (w.self.balances ctx.sender).raw := Amount.not_le_of_gt h
-  simp [burn, hfail]
+  simp [burn, ERC20.burn, hfail]
 
 def burnPost (σ : Storage) (src : Address) (amount : Amount tokenAsset) : Storage :=
   { σ with totalSupply := σ.totalSupply - amount, balances := debit σ.balances src amount }
@@ -405,7 +437,7 @@ theorem burn_ok (amount : Amount tokenAsset)
       .ok ((), { w with self := burnPost w.self ctx.sender amount, log := w.log ++ [.Transfer ctx.sender 0 amount] }) := by
   have hle : amount.raw ≤ (w.self.balances ctx.sender).raw := hsub
   have hsup : amount.raw ≤ w.self.totalSupply.raw := hsupply
-  simp [burn, burnPost, debit, hle, hsup, Amount.update_raw]
+  simp [burn, ERC20.burn, burnPost, debit, hle, hsup, Amount.update_raw]
 
 theorem burn_decreases_supply (amount : Amount tokenAsset)
     (hsub : amount ≤ w.self.balances ctx.sender) (hsupply : amount ≤ w.self.totalSupply) :
@@ -425,7 +457,7 @@ theorem burn_reverts_on_insufficient_supply (amount : Amount tokenAsset)
     Tx.run (burn amount) ctx w = .error (.arith .underflow) := by
   have hle : amount.raw ≤ (w.self.balances ctx.sender).raw := hsub
   have hns : ¬ amount.raw ≤ w.self.totalSupply.raw := Amount.not_le_of_gt hsupply
-  simp [burn, hle, hns]
+  simp [burn, ERC20.burn, hle, hns]
 
 namespace Proof
 

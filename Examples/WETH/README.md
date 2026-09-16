@@ -1,10 +1,10 @@
 # WETH
 
-Wraps the chain's native asset as an ERC-20. The native asset comes from
-the `Chain` profile, so the same contract is a wrapped-native token on
-any profile. This copy uses Ethereum ETH (18 decimals). `deposit` is
-payable and credits `msg.value`. `withdraw` burns wrapped tokens and
-`Native.send`s ETH to the caller.
+Wraps the chain's native asset as an ERC-20. Storage is
+`extends ERC20.Storage native`. `deposit` is payable: `ERC20.mint` then
+`Deposit` (the mint also emits `Transfer` from `0`). `withdraw` burns,
+`Native.send`s ETH, then emits `Withdrawal`. The six IERC20 entrypoints
+are one-line re-exports of the ERC20 base.
 
 ## What is proved
 

@@ -203,29 +203,21 @@ namespace Field
 
 variable {S α β : Type}
 
-/-- `inner` after `outer`. Used by `ERC20.Fields.ofParent`. -/
-def comp (outer : Field S α) (inner : Field α β) : Field S β where
+/-- `inner` after `outer`. Used by `ERC20.Fields.ofParent`.
+Reducible so Reify sees the parent projection of an inherited field. -/
+@[reducible] def comp (outer : Field S α) (inner : Field α β) : Field S β where
   get s := inner.get (outer.get s)
   set s v := outer.set s (inner.set (outer.get s) v)
 
 instance [Lawful outer] [Lawful inner] : Lawful (comp outer inner) where
-  get_set := by
-    intro s v
-    simp [comp, Lawful.get_set]
-  set_get := by
-    intro s
-    simp [comp, Lawful.set_get]
-  set_set := by
-    intro s v w
-    simp only [comp]
-    rw [Lawful.get_set, Lawful.set_set, Lawful.set_set]
+  get_set := by intro s v; simp [Lawful.get_set]
+  set_get := by intro s; simp [Lawful.set_get]
+  set_set := by intro s v w; simp [Lawful.get_set, Lawful.set_set]
 
 instance {γ : Type} {outer : Field S α} {inner₁ : Field α β}
     {inner₂ : Field α γ} [Lawful outer] [Independent inner₁ inner₂] :
     Independent (comp outer inner₁) (comp outer inner₂) where
-  get_set_other := by
-    intro s v
-    simp [comp, Lawful.get_set, Independent.get_set_other]
+  get_set_other := by intro s v; simp [Lawful.get_set, Independent.get_set_other]
 
 end Field
 
