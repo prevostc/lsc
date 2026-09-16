@@ -56,3 +56,11 @@ docstring checker treats `Theorems.lean` as a Theorems file (glob
 Theorem hygiene per root `AGENTS.md` (success as hypothesis, delta form, no
 unnecessary hypotheses, no edge-case exclusions unless genuinely false).
 `scripts/check-examples.sh` enforces the Contract/Theorems layout.
+
+Proof performance (`Proofs/Tx.lean`, budget: whole file ≤ 10 s, never
+`maxHeartbeats`): peel the monadic body with `rw [fn, run_req_*,
+run_*_binds, …]` and `simp only` with a small set; never `simp [fn, …]` on
+the whole body. Success-shape lemmas (`∃ …, Tx.run … = .ok …`) must not
+mention external `Tx.run (call …)` terms in their `∃` — the kernel
+re-checks the CALL every time they are destructured (Vault: 40 s per
+`rcases`). State the post-condition on the tail after the call instead.
