@@ -34,6 +34,31 @@ variable [HasRely C]
 
 instance : CoeOut (State C) (World S X E) := ⟨State.toWorld⟩
 
+/-- A message to the contract in state `w`: a sender other than the contract
+itself, and the value sent. -/
+structure Msg (w : State C) where
+  sender : Address
+  value : Nat := 0
+  notSelf : sender ≠ w.addr
+
+/-- Unpack a message into the `Tx` context at this state's callee. -/
+@[coe] def Msg.toCtx {w : State C} (m : Msg w) : Ctx where
+  sender := m.sender
+  value := m.value
+  self := w.addr
+
+/-- So `Tx.run f msg w` elaborates when `msg : Msg w`. -/
+instance {w : State C} : CoeOut (Msg w) Ctx := ⟨Msg.toCtx⟩
+
+@[simp] theorem Msg.toCtx_sender {w : State C} (m : Msg w) :
+    m.toCtx.sender = m.sender := rfl
+
+@[simp] theorem Msg.toCtx_value {w : State C} (m : Msg w) :
+    m.toCtx.value = m.value := rfl
+
+@[simp] theorem Msg.toCtx_self {w : State C} (m : Msg w) :
+    m.toCtx.self = w.addr := rfl
+
 /-- Storage of the executing contract. -/
 def State.self (s : State C) : S := s.w.self
 

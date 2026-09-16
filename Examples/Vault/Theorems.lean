@@ -7,7 +7,9 @@ import Stdlib.Shares
 /-!
 Vault theorems: Tx-level share and holdings deltas, spec-level anti-extraction
 and solvency. The honest-counterparty assumption (`IERC20.Spec` of the bound
-asset) lives in `State` / `HasDeploy` / `HasRely`.
+asset) lives in `State` / `HasDeploy` / `HasRely`. Per-call theorems that
+mention the token are over `State` with `msg : Msg w`; share-only deltas stay
+over `World` with `msg : Ctx`.
 -/
 
 open Lsc Lsc.Stdlib Lsc.Security Vault
@@ -35,31 +37,6 @@ theorem withdraw_shares (sharesIn : Amount vShare)
       w'.self.totalShares = w.self.totalShares - sharesIn :=
   Proof.withdraw_shares h
 
-end Vault
-
-namespace Vault
-
-variable (msg : Msg) (w : World)
-
-/-- A successful `deposit` raises the vault's live token balance by `assets`.
-The caller is not the vault (`msg : Msg`). Assumed of the token: the bound
-asset is a conforming ERC-20. -/
-theorem deposit_holdings (assets : Amount vaultAsset)
-    {hT : IERC20.Spec (w.self.asset.impl : AssetImpl)}
-    {minted : Amount vShare} {w' : World}
-    (h : Tx.run (deposit assets) msg w = .ok (minted, w')) :
-    holdingsAt msg.self w' = holdingsAt msg.self w + assets :=
-  Proof.deposit_holdings (ctx := msg.toCtx) (w := w) hT msg.notSelf h
-
-/-- A successful `withdraw` lowers the vault's live token balance by the
-assets paid. The caller is not the vault (`msg : Msg`). -/
-theorem withdraw_holdings (sharesIn : Amount vShare)
-    {hT : IERC20.Spec (w.self.asset.impl : AssetImpl)}
-    {paid : Amount vaultAsset} {w' : World}
-    (h : Tx.run (withdraw sharesIn) msg w = .ok (paid, w')) :
-    holdingsAt msg.self w' + paid = holdingsAt msg.self w :=
-  Proof.withdraw_holdings (ctx := msg.toCtx) (w := w) hT msg.notSelf h
-
 /-- After a successful `deposit` of `x` assets against live holdings `A` and
 share supply `S`, redeeming the minted shares recovers all but at most
 `(A + 10^offset) / 10^offset` wei: an inflation donation of size `A` costs
@@ -74,11 +51,27 @@ theorem deposit_inflation_bounded (assets : Amount vaultAsset)
     let r := Shares.toAssetsRaw offset minted.raw (A.raw + assets.raw)
       (S.raw + minted.raw)
     V.raw * (assets.raw - r) ≤ A.raw + V.raw :=
-  Proof.deposit_inflation_bounded (ctx := msg.toCtx) (w := w) h
+  Proof.deposit_inflation_bounded (ctx := msg) (w := w) h
 
 end Vault
 
 namespace Vault
+
+/-- A successful `deposit` raises the vault's holdings of its asset by exactly
+`assets`. -/
+theorem deposit_holdings (w : State) (msg : Msg w) (assets : Amount vaultAsset)
+    {minted : Amount vShare} {w' : World}
+    (h : Tx.run (deposit assets) msg w = .ok (minted, w')) :
+    holdingsAt w.addr w' = w.holdings + assets :=
+  Proof.deposit_holdings w msg assets h
+
+/-- A successful `withdraw` lowers the vault's holdings by exactly what it
+paid out. -/
+theorem withdraw_holdings (w : State) (msg : Msg w) (sharesIn : Amount vShare)
+    {paid : Amount vaultAsset} {w' : World}
+    (h : Tx.run (withdraw sharesIn) msg w = .ok (paid, w')) :
+    holdingsAt w.addr w' + paid = w.holdings :=
+  Proof.withdraw_holdings w msg sharesIn h
 
 /-- The vault can always pay out every share: what all shareholders are owed
 never exceeds the assets it holds. -/

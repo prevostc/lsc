@@ -121,9 +121,10 @@ Not derived from powdr:
 - **`sender ≠ self`.** Physically only this contract's code can emit a
   message from `self`. Nested calls into `self` are the oracle's
   `nested_lock_reverts`. Public `Txs.call` carries the inequality;
-  per-call theorems that need it take `msg : Msg` (`Msg.notSelf`) instead
-  of a `hne` hypothesis. Transport of a single call still uses `Ctx`
-  (`CallsWF` already has `sender ≠ self`).
+  per-call theorems that mention an external contract take `msg : Msg w`
+  on a reachable `State` (`Msg.notSelf`) instead of a `hne` hypothesis;
+  `IERC20.Spec` is not a theorem hypothesis. Transport of a single call
+  still uses `Ctx` (`CallsWF` already has `sender ≠ self`).
 
 ## Not covered
 

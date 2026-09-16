@@ -48,6 +48,12 @@ pinned theorem is added or renamed; the commit message records what moved.
 /-- info: 'Vault.vault_no_unauthorized_extraction' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms Vault.vault_no_unauthorized_extraction
 
+/-- info: 'Vault.deposit_holdings' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms Vault.deposit_holdings
+
+/-- info: 'Vault.withdraw_holdings' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms Vault.withdraw_holdings
+
 /-- info: 'Cpamm.swap0for1_k' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms Cpamm.swap0for1_k
 

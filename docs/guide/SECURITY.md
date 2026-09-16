@@ -60,8 +60,11 @@ quantifier (`run` in `Trace.lean`, `no_unauthorized_extraction`). Between our
 calls, the environment may update `ext` only in ways `HasRely` allows
 (default: this contract's native balance does not fall; Vault/Cpamm:
 `vaultRely` / `cpammRely` — our token `balanceOf` does not fall;
-`totalSupply` stays put). `sender ≠ self` is carried by `Txs` / `Msg`,
-not a public hypothesis. The native wrap is a dispatcher revert.
+`totalSupply` stays put). `sender ≠ self` is carried by `Txs` / `Msg w`,
+not a public hypothesis. Per-call theorems that mention an external
+token are over a reachable `State` (`msg : Msg w`); the honest ERC-20
+assumption lives in `HasDeploy` / `State`, not on the theorem. The
+native wrap is a dispatcher revert.
 
 Incoming `callvalue` is credited onto `self`'s native balance in the
 trace `step` only for an accepted payable call (EVM CALL is post-transfer

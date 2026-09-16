@@ -1325,8 +1325,8 @@ theorem deposit_shares {assets : Amount vaultAsset} {minted : Amount vShare}
   subst hn
   simp [hσ, depositPost, Amount.raw_add, Amount.raw_ofWord]
 
-theorem deposit_holdings {assets : Amount vaultAsset} {minted : Amount vShare}
-    {w' : World}
+theorem deposit_holdings_of_spec {assets : Amount vaultAsset}
+    {minted : Amount vShare} {w' : World}
     (hT : IERC20.Spec (w.self.asset.impl : AssetImpl))
     (hne : ctx.sender ≠ ctx.self)
     (h : Tx.run (deposit assets) ctx w = .ok (minted, w')) :
@@ -1360,8 +1360,8 @@ theorem withdraw_shares {sharesIn : Amount vShare} {paid : Amount vaultAsset}
   subst hn
   simp [hσ, withdrawPost, Amount.raw_sub, Amount.raw_ofWord]
 
-theorem withdraw_holdings {sharesIn : Amount vShare} {paid : Amount vaultAsset}
-    {w' : World}
+theorem withdraw_holdings_of_spec {sharesIn : Amount vShare}
+    {paid : Amount vaultAsset} {w' : World}
     (hT : IERC20.Spec (w.self.asset.impl : AssetImpl))
     (hne : ctx.sender ≠ ctx.self)
     (h : Tx.run (withdraw sharesIn) ctx w = .ok (paid, w')) :

@@ -746,6 +746,18 @@ private theorem deployed_invT (self : Address) {w : World}
     InvT self w.self.asset w.oracle w :=
   ⟨deployed_inv self h, rfl, rfl, h.2.2.2⟩
 
+theorem vault_invT_of_state (s : State) :
+    InvT s.addr s.w.self.asset s.w.oracle s.w := by
+  obtain ⟨w0, tr, hDep, hW, hR, hw⟩ := s.reachable
+  have hInvT :=
+    inv_run_at (vault_preserves_inv s.addr w0.self.asset w0.oracle)
+      (inv_rely s.addr w0.self.asset w0.oracle)
+      (deployed_invT s.addr hDep) tr hW hR
+  rw [hw]
+  obtain ⟨hInv, ha, _ho, hT⟩ := hInvT
+  refine ⟨hInv, rfl, rfl, ?_⟩
+  simpa [ha, IERC20.Ref.impl] using hT
+
 private theorem owed_le_of_inv (self : Address) (w : World)
     (h : Inv self w) : owedAt self w ≤ holdingsAt self w := by
   obtain ⟨_, hbd⟩ := h
@@ -756,17 +768,29 @@ private theorem owed_le_of_inv (self : Address) (w : World)
   simpa [owedAt, holdingsAt, holdings, Amount.le_iff, Shares.toAssetsRaw]
     using hle
 
-theorem vault_inv_of_state (s : State) : Inv s.addr s.w := by
-  obtain ⟨w0, tr, hDep, hW, hR, hw⟩ := s.reachable
-  have hInvT :=
-    inv_run_at (vault_preserves_inv s.addr w0.self.asset w0.oracle)
-      (inv_rely s.addr w0.self.asset w0.oracle)
-      (deployed_invT s.addr hDep) tr hW hR
-  rw [hw]
-  exact hInvT.1
+theorem vault_inv_of_state (s : State) : Inv s.addr s.w :=
+  (vault_invT_of_state s).1
 
 theorem vault_solvent (s : State) : s.owed ≤ s.holdings :=
   owed_le_of_inv s.addr s.w (vault_inv_of_state s)
+
+/-- A successful `deposit` raises the vault's holdings of its asset by exactly
+`assets`. -/
+theorem deposit_holdings (w : State) (msg : Msg w) (assets : Amount vaultAsset)
+    {minted : Amount vShare} {w' : World}
+    (h : Tx.run (deposit assets) msg w = .ok (minted, w')) :
+    holdingsAt w.addr w' = w.holdings + assets :=
+  deposit_holdings_of_spec (ctx := msg.toCtx) (w := w.w)
+    (vault_invT_of_state w).2.2.2 msg.notSelf h
+
+/-- A successful `withdraw` lowers the vault's holdings by exactly what it
+paid out. -/
+theorem withdraw_holdings (w : State) (msg : Msg w) (sharesIn : Amount vShare)
+    {paid : Amount vaultAsset} {w' : World}
+    (h : Tx.run (withdraw sharesIn) msg w = .ok (paid, w')) :
+    holdingsAt w.addr w' + paid = w.holdings :=
+  withdraw_holdings_of_spec (ctx := msg.toCtx) (w := w.w)
+    (vault_invT_of_state w).2.2.2 msg.notSelf h
 
 private theorem shares_withdrawPost (σ : Storage) (src : Address)
     (n : Amount vShare) (a : Address) (hn : n ≤ σ.shares src) :
@@ -940,5 +964,10 @@ theorem vault_no_unauthorized_extraction (s : State) (t : Txs s)
     simpa [Txs.spent, Txs.foldAccepted, hs] using ih
 
 end Proof
+
+/-- The bound asset of a reachable vault is a conforming ERC-20. -/
+theorem State.asset_spec (s : State) :
+    IERC20.Spec (s.self.asset.impl : AssetImpl) :=
+  (Proof.vault_invT_of_state s).2.2.2
 
 end Vault

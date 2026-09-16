@@ -9,13 +9,16 @@ size `A` costs on the order of `10^6` wei per wei a later depositor cannot
 redeem (`deposit_inflation_bounded`: `10^offset · (x − r) ≤ A + 10^offset`).
 
 **Proved:** a successful deposit credits shares and raises live holdings
-(caller is not the vault: `msg : Msg`). A successful withdraw burns shares
-and lowers holdings. In any reachable `State`, after any `Txs`, a
+(caller is not the vault: `msg : Msg w` on a reachable `State`). A
+successful withdraw burns shares and lowers holdings. Share-only deltas
+(`deposit_shares` / `withdraw_shares`) are over an arbitrary `World`.
+In any reachable `State`, after any `Txs`, a
 shareholder's shares drop by at most what they themselves redeemed
 (`vault_no_unauthorized_extraction`). The vault stays solvent:
 `owed ≤ holdings` (`vault_solvent`). Inflation of the share rate is
 bounded as above. Honest-counterparty (`IERC20.Spec` of the bound asset)
-lives in `HasDeploy` / `State`. Between calls the vault's token balance
+lives in `HasDeploy` / `State` — holdings theorems do not take it as a
+hypothesis. Between calls the vault's token balance
 does not fall and the token's `totalSupply` view stays the same
 (`HasRely`). No reentrancy is modelled.
 

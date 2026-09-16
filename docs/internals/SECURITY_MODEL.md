@@ -72,7 +72,12 @@ Design decisions fixed for `Lsc/Security` (Trace / Invariant / Wealth):
   override `HasRely` with the honest-counterparty assumption (the token
   `balanceOf self` does not fall). Internal `Wf` / `External` is
   world-independent (`target = self` and `sender ≠ self`); the native wrap
-  is no longer a trace assumption.
+  is no longer a trace assumption. Per-call theorems whose conclusion
+  depends on an external contract (Vault holdings) quantify a reachable
+  `State` and `msg : Msg w`; `IERC20.Spec` is recovered from `HasDeploy`
+  / reachability (`State.asset_spec`) and is not a theorem hypothesis.
+  Theorems that mention only this contract's storage stay over `World`
+  with `msg : Ctx`.
 - `Reachable C rely self w` is deployment (`Deployed`) followed by a well-formed `rely`
   trace. `inv_of_reachable` turns that into `Inv` when deployment establishes `Inv` and
   calls/`env` preserve it. Public Token/WETH theorems take `State` (a `Reachable`

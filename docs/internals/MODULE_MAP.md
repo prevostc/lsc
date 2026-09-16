@@ -47,7 +47,8 @@ Lake libraries (`lakefile.lean`): `LscSemantics` (`Lsc.Lang`, `Lsc.Security`,
 - `Trace.lean` — `Call`, `Step` (`call` / `env`), `accepted`, `External` /
   `Wf` (`target = self` and `sender ≠ self`), `HasRely` / `defaultRely`,
   `run`.
-- `State.lean` — public `State C` / `Txs w`, `foldAccepted`, `HasSpent` /
+- `State.lean` — public `State C` / `Txs w`, `Msg w` (a call to a
+  deployed state: `sender ≠ self`), `foldAccepted`, `HasSpent` /
   `Txs.spent`.
 - `Invariant.lean` — `Inv : World S X E → Prop`, `RelyAlong`,
   `PreservesInv` / `PreservesInvEnv` / `PreservesInvAt`, `Reachable`.
