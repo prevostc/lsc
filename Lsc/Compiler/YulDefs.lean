@@ -139,7 +139,7 @@ def reentrancyLockSlot : Nat := 0
 the lock. `[Reentrant]` functions never acquire or release it. Pure-read
 views with an outgoing `staticcall` do not: they have no inconsistent
 window and must stay honest `view`s (STATICCALL-callable). -/
-def locks (f : FnDef) : Bool :=
+def locks (f : FnDef) (tbl : List InternalDef := []) : Bool :=
   !f.reentrant && Core.hasExtCall f.core && !Core.isPureRead f.core
 
 /-- Aligned ABI words at `abiPtr` fit in `[0, memoryGuardK)`. Equivalent to `n ≤ 4`. -/
@@ -192,8 +192,17 @@ def lockClearStmt : YStmt :=
 
 /-- Empty when `locks f` is false, so non-locking `entryCase` is
 definitionally the historical `[block guard, block body]`. -/
-def lockSetPrefix (f : FnDef) : YBlock :=
-  if locks f then [lockSetStmt] else []
+def lockSetPrefix (f : FnDef) (tbl : List InternalDef := []) : YBlock :=
+  if locks f tbl then [lockSetStmt] else []
+
+/-- Slice 1: `hasExtCall` / `isPureRead` ignore `tbl`. -/
+@[simp] theorem locks_irrel (f : FnDef) (tbl : List InternalDef) :
+    locks f tbl = locks f [] := by
+  simp [locks]
+
+@[simp] theorem lockSetPrefix_irrel (f : FnDef) (tbl : List InternalDef) :
+    lockSetPrefix f tbl = lockSetPrefix f [] := by
+  simp [lockSetPrefix]
 
 /-- `if callvalue() { revert(0,0) }`. Solidity non-payable: a nonzero
 value reverts with empty data, same shape as the unknown-selector path. -/
@@ -296,22 +305,47 @@ def retWF : {t : RetTy} → RetExpr t → Bool
   | _, .flag a => atomWF a
   | _, .pair x y => retWF x && retWF y
 
-def coreWF (c : ContractDef) : {t : RetTy} → Core t → Bool
-  | _, .ret r => retWF r && fitsGuardWords (retAtoms r).length
-  | _, .opTail op => opWF c op
-  | _, .opTailAddr op => opWF c op
-  | _, .opTailFlag op => opWF c op
-  | _, .stmtTail s => stmtWF c s
-  | _, .revertTail err args => errorOK c err args.length && args.all atomWF
-  | _, .letOp op k => opWF c op && coreWF c k
-  | _, .seq s k => stmtWF c s && coreWF c k
-  | _, .letPure _ args k => args.all atomWF && coreWF c k
-  | _, .ite cond a b => condWF cond && coreWF c a && coreWF c b
-  | _, .seqIf (t := t) cond th el k =>
-      condWF cond && coreWF c th && coreWF c el && coreWF c k &&
+def coreWF (c : ContractDef) : {t : RetTy} → Core t →
+    (bound : Nat := c.internals.length) → Bool
+  | _, .ret r, _ => retWF r && fitsGuardWords (retAtoms r).length
+  | _, .opTail op, _ => opWF c op
+  | _, .opTailAddr op, _ => opWF c op
+  | _, .opTailFlag op, _ => opWF c op
+  | _, .stmtTail s, _ => stmtWF c s
+  | _, .revertTail err args, _ => errorOK c err args.length && args.all atomWF
+  | _, .letOp op k, bound => opWF c op && coreWF c k bound
+  | _, .seq s k, bound => stmtWF c s && coreWF c k bound
+  | _, .letPure _ args k, bound => args.all atomWF && coreWF c k bound
+  | _, .ite cond a b, bound =>
+      condWF cond && coreWF c a bound && coreWF c b bound
+  | _, .seqIf (t := t) cond th el k, bound =>
+      condWF cond && coreWF c th bound && coreWF c el bound &&
+        coreWF c k bound &&
         match t with
         | .pair _ _ => false
         | _ => true
+  | t, .letCall i args k, bound =>
+      decide (i < bound) &&
+        match c.internals[i]? with
+        | none => false
+        | some d =>
+            decide (args.length = d.arity) && args.all atomWF &&
+              decide (d.ret = t) && decide (d.ret.wordCount ≤ 16) &&
+              coreWF c k bound
+  | t, .callTail i args, bound =>
+      decide (i < bound) &&
+        match c.internals[i]? with
+        | none => false
+        | some d =>
+            decide (args.length = d.arity) && args.all atomWF &&
+              decide (d.ret = t) && decide (d.ret.wordCount ≤ 16)
+
+/-- Each internal `i` may only call strictly smaller indices. -/
+def internalsWF (c : ContractDef) : Bool :=
+  (List.range c.internals.length).all fun i =>
+    match c.internals[i]? with
+    | none => false
+    | some d => decide (d.ret.wordCount ≤ 16) && coreWF c d.body i
 
 /-- Extra `let`s under `f` (`opTail` desugars to one). `maxDepth f = params + extra`. -/
 def coreExtraDepth : {t : RetTy} → Core t → Nat
@@ -330,6 +364,8 @@ def coreExtraDepth : {t : RetTy} → Core t → Nat
       match t with
       | .word | .addr | .flag => max br (coreExtraDepth k + 1)
       | .unit | .pair _ _ => max br (coreExtraDepth k)
+  | _, .letCall (t := t) _ _ k => t.wordCount + coreExtraDepth k
+  | _, .callTail .. => 0
 
 def maxDepth (f : FnDef) : Nat := f.params.length + coreExtraDepth f.core
 
@@ -812,6 +848,8 @@ def emitCore (tag : String) (c : ContractDef) (e : Emit) (depth : Nat)
         emitCore tag c (emitSeqIfWord tag e depth cond eA eB)
           (depth + 1) haltUnit k clearLock
     | .pair _ _ => some e
+  | .callTail .. => some (e.push revert00)
+  | .letCall .. => some (e.push revert00)
 
 /-- Compile `core` as statements that assign `dest` and fall through. -/
 def emitCoreToVar (tag : String) (c : ContractDef) (e : Emit) (depth : Nat)
@@ -856,6 +894,8 @@ def emitCoreToVar (tag : String) (c : ContractDef) (e : Emit) (depth : Nat)
         emitCoreToVar tag c (emitSeqIfWord tag e depth cond eA eB)
           (depth + 1) dest k
     | .pair _ _ => some e
+  | .callTail .. => some (e.push revert00)
+  | .letCall .. => some (e.push revert00)
 end
 
 end IdentV
@@ -871,7 +911,7 @@ def toYulFn (c : ContractDef) (f : FnDef) : Option YBlock :=
     let offset := if f.kind = .constructor then 0 else 4
     let haltUnit := f.kind ≠ .constructor
     let e := emitParams f.name {} offset f.params.length
-    (emitCore f.name c e f.params.length haltUnit f.core (locks f)).map Emit.stmts
+    (emitCore f.name c e f.params.length haltUnit f.core (locks f c.internals)).map Emit.stmts
 
 /-- Compile a constructor: args from the init-code suffix (`emitCtorParams`), unit
 `ret` falls through (no `stop()`), so `deployObject` can append `constructorCode`. -/
@@ -893,7 +933,7 @@ def entryCase (c : ContractDef) (f : FnDef) : Option (YulSemantics.Literal × YB
   let guard := (emitGuardLt {} min).stmts
   some (YulSemantics.Literal.number f.selector,
     YulSemantics.Stmt.block guard ::
-      (valueGuardPrefix f ++ (lockSetPrefix f ++ [YulSemantics.Stmt.block body])))
+      (valueGuardPrefix f ++ (lockSetPrefix f c.internals ++ [YulSemantics.Stmt.block body])))
 
 /-- Discarded `memoryguard(k)` marker (`if memoryguard(k) {}`). powdr collects
 any `.call "memoryguard" [lit k]`; the dialect has no `pop`, and a truthiness

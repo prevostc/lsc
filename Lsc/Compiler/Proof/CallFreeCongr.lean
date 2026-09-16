@@ -340,6 +340,9 @@ theorem callFree_run_self_ext {Γ : ContractSchema S X E ε} {t}
           have ⟨hv, hs1, he1⟩ := exceptSelfExt_ok_ok h1 h2 hbr
           subst hv
           exact ihk hk (v :: env) w1 w1' hs1 he1
+  | letCall _ _ _ | callTail _ _ =>
+    intro h
+    exact False.elim (by simpa [CallFree, M1Frag] using h)
 
 /-- A call-free Core run's post-`self`/`ext` depend only on the pre-`self`/`ext`
 (not log or faults). -/

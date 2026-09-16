@@ -123,6 +123,7 @@ theorem m1FragB_eq {t} (core : Core t) : m1FragB core = true ↔ M1Frag core := 
     | pair _ _ => simp [m1FragB, M1Frag]
     | unit | word | addr | flag =>
       simp [m1FragB, M1Frag, M1Cond, ihth, ihel, ihk, and_assoc]
+  | letCall _ _ _ | callTail _ _ => simp [m1FragB, M1Frag]
 
 theorem callFreeB_eq {t} (core : Core t) : callFreeB core = true ↔ CallFree core :=
   m1FragB_eq core
@@ -200,6 +201,8 @@ theorem M1Frag_noExtCall {t} (core : Core t) (h : M1Frag core) :
       have ⟨hc', hv'⟩ := ihel hel
       have ⟨hc'', hv''⟩ := ihk hk
       simp [Core.effects, Effects.append, hc, hv, hc', hv', hc'', hv'']
+  | letCall _ _ _ | callTail _ _ =>
+    cases (by simpa [M1Frag] using h : False)
 
 theorem CallFree_not_hasExtCall {t} {core : Core t} (h : CallFree core) :
     Core.hasExtCall core = false := by

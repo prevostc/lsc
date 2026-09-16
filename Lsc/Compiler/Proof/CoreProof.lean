@@ -556,6 +556,8 @@ def coreSize : {t : RetTy} → Core t → Nat
   | _, .letPure _ _ k => coreSize k + 1
   | _, .ite _ a b => coreSize a + coreSize b + 1
   | _, .seqIf _ th el k => coreSize th + coreSize el + coreSize k + 1
+  | _, .letCall _ _ k => coreSize k + 1
+  | _, .callTail _ _ => 1
 
 theorem emitReturnUnit_false (e : Emit) : emitReturnUnit e false = e := rfl
 
@@ -1979,6 +1981,9 @@ theorem core_sim_packed {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E 
         simp only [emitCoreToVar] at hem; cases hem
         simp only [Core.denote, Tx.run_revert]
         exact revertTail_sim tag funs hinv hwf
+  | letCall _ _ _ | callTail _ _ =>
+    intro hM1
+    exact False.elim (by simpa [M1Frag] using hM1)
 
 theorem core_sim_fall {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx} (hΓ : Γ.st.Lawful c.fields) (hκ : KeccakSep c κ)
@@ -2182,7 +2187,6 @@ theorem seqIf_wordLike_sim {S X E ε} {c : ContractDef}
       exact execStmts_append_halt
         (exec_seqIfWord_halt (tag := tag) hcond1 hsel
           (hoist_emitCoreToVar tag hB) hexecB)
-
 
 theorem core_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
     {κ ctx haltUnit} (hhalt : haltUnit = true)
@@ -2607,6 +2611,9 @@ theorem core_sim {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε}
         simp only [except_error_prod]
         refine ⟨restore V V', st', bytes, ?_, hh, herr⟩
         exact exec_switch_halt hcond hsel (hoist_emitCore tag hB) hexec
+  | letCall _ _ _ | callTail _ _ =>
+    intro hM1
+    exact False.elim (by simpa [M1Frag] using hM1)
   | @seqIf tBr _ cond th el k ihth ihel ihk =>
     intro hM1 w env V st funs hwf hn hinv clearLock e' hem
     cases tBr with

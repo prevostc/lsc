@@ -860,6 +860,11 @@ theorem noYulCall_emitCoreToVar tag (c : ContractDef) {t} (core : Core t) :
             (noYulCall_emitSeqIfWord tag e d cond eA eB he
               (ihth {} d (identPhi tag d) noYulCall_nilEmit _ ha)
               (ihel {} d (identPhi tag d) noYulCall_nilEmit _ hb)) e' h
+  | letCall _ _ _ | callTail _ _ =>
+    intro e d dest he e' h
+    simp [emitCoreToVar] at h
+    cases h
+    exact noYulCall_emit_push e _ he noYulCall_revert00
 
 theorem noYulCall_emitCore tag (c : ContractDef) (halt : Bool)
     {clearLock : Bool} {t} (core : Core t) :
@@ -973,6 +978,11 @@ theorem noYulCall_emitCore tag (c : ContractDef) (halt : Bool)
           exact ihk (halt := halt) (clearLock := clearLock)
             (emitSeqIfWord tag e d cond eA eB) (d + 1)
             (noYulCall_emitSeqIfWord tag e d cond eA eB he hA hB) e' h
+  | letCall _ _ _ | callTail _ _ =>
+    intro e d he e' h
+    simp [emitCore] at h
+    cases h
+    exact noYulCall_emit_push e _ he noYulCall_revert00
 
 theorem toYulFn_noYulCall {c f yul} (h : toYulFn c f = some yul) :
     noYulCallStmts yul = true := by

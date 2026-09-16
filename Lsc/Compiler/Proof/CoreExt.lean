@@ -126,6 +126,7 @@ theorem s2FragB_eq {t} (core : Core t) : s2FragB core = true ↔ S2Frag core := 
     | pair _ _ => simp [s2FragB, S2Frag]
     | unit | word | addr | flag =>
       simp [s2FragB, S2Frag, M1Cond, m1FragB_eq, ihk, and_assoc]
+  | letCall _ _ _ | callTail _ _ => simp [s2FragB, S2Frag]
 
 instance (op : Lsc.Op) : Decidable (S2Op op) :=
   decidable_of_iff (s2OpB op = true) (s2OpB_eq op)
@@ -232,6 +233,8 @@ theorem s2frag_of_callFree {t} {core : Core t} (h : CallFree core) : S2Frag core
       have ⟨hc, hth, hel, hk⟩ := m1frag_seqIf.mp h
       simpa [S2Frag] using
         And.intro hc (And.intro hth (And.intro hel (ihk hk)))
+  | letCall _ _ _ | callTail _ _ =>
+    intro h; simp [CallFree, M1Frag] at h
 
 /-! ## `NoExternalOps` of CallFree emit -/
 
@@ -422,6 +425,9 @@ theorem noExt_coreToVar {c t} {core : Core t} (hM1 : CallFree core) :
         (noExt_emitSeqIfWord (tag := tag) e d cond eA eB he
           (ihth hth {} d (identPhi tag d) hA noExt_nil)
           (ihel hel {} d (identPhi tag d) hB noExt_nil))
+  | letCall _ _ _ | callTail _ _ =>
+    intro hM1
+    exact False.elim (by simpa [CallFree, M1Frag] using hM1)
 
 theorem noExt_core_callFree {c halt clearLock t} {core : Core t} (hM1 : CallFree core) :
     ∀ (e : Emit) (d : Nat) {e' : Emit},
@@ -511,6 +517,9 @@ theorem noExt_core_callFree {c halt clearLock t} {core : Core t} (hM1 : CallFree
         (noExt_emitSeqIfWord (tag := tag) e d cond eA eB he
           (noExt_coreToVar (tag := tag) hth {} d (identPhi tag d) hA noExt_nil)
           (noExt_coreToVar (tag := tag) hel {} d (identPhi tag d) hB noExt_nil))
+  | letCall _ _ _ | callTail _ _ =>
+    intro hM1
+    exact False.elim (by simpa [CallFree, M1Frag] using hM1)
 
 theorem hoist_yulD_of_evm {calls : ExternalCalls} {ss : YBlock}
     (h : hoist evm ss = []) : hoist (yulD calls) ss = [] := by
@@ -737,13 +746,13 @@ theorem m1stmt_preserves_ghost {S X E ε} {Γ : ContractSchema S X E ε}
 theorem callFree_preserves_ghost {S X E ε} {Γ : ContractSchema S X E ε} {t}
     {core : Core t} (hM1 : CallFree core) (env : List Nat) (ctx : Ctx) (w : World S X E)
     {v : t.denote} {w' : World S X E}
-    (hok : Core.denote Γ core env ctx w = .ok (v, w')) :
+    (hok : (Core.denote Γ core env) ctx w = .ok (v, w')) :
     w'.ext = w.ext ∧ w'.oracle = w.oracle := by
   revert hM1 env w v w' hok
   induction core with
   | ret r =>
     intro h env w v w' hok
-    have hred : Core.denote Γ (.ret r) env ctx w = .ok (r.eval env, w) := rfl
+    have hred : (Core.denote Γ (.ret r) env) ctx w = .ok (r.eval env, w) := rfl
     rw [hred] at hok; cases hok; simp
   | opTail op | opTailAddr op | opTailFlag op =>
     intro h env w v w' hok
@@ -799,6 +808,9 @@ theorem callFree_preserves_ghost {S X E ε} {Γ : ContractSchema S X E ε} {t}
     by_cases hc : c.denote env
     · simp [hc] at hok; exact iha ha env w hok
     · simp [hc] at hok; exact ihb hb env w hok
+  | letCall _ _ _ | callTail _ _ =>
+    intro h
+    exact False.elim (by simpa [CallFree, M1Frag] using h)
   | @seqIf tBr _ c th el k ihth ihel ihk =>
     intro h env w v w' hok
     cases tBr with

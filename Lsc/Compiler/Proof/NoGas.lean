@@ -714,6 +714,11 @@ theorem noGas_emitCoreToVar tag (c : ContractDef) {t} (core : Core t) :
             (noGas_emitSeqIfWord tag e d cond eA eB he
               (ihth {} d (identPhi tag d) noGas_nilEmit _ ha)
               (ihel {} d (identPhi tag d) noGas_nilEmit _ hb)) e' h
+  | letCall _ _ _ | callTail _ _ =>
+    intro e d dest he e' h
+    simp [emitCoreToVar] at h
+    cases h
+    exact noGas_emit_push e _ he noGas_revert00
 
 theorem noGas_emitCore tag (c : ContractDef) (halt : Bool)
     {clearLock : Bool} {t} (core : Core t) :
@@ -823,6 +828,11 @@ theorem noGas_emitCore tag (c : ContractDef) (halt : Bool)
           exact ihk (halt := halt) (clearLock := clearLock)
             (emitSeqIfWord tag e d cond eA eB) (d + 1)
             (noGas_emitSeqIfWord tag e d cond eA eB he hA hB) e' h
+  | letCall _ _ _ | callTail _ _ =>
+    intro e d he e' h
+    simp [emitCore] at h
+    cases h
+    exact noGas_emit_push e _ he noGas_revert00
 
 theorem noGas_lockSetStmt : noGasStmt lockSetStmt = true := by
   simp [lockSetStmt, noGasStmt, bop, noGasExpr, noGasOp, noGasExprs, lit]

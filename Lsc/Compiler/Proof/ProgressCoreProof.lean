@@ -885,6 +885,9 @@ theorem core_progress {S E ε}
                 (exec_seqIfWord_halt (tag := tag)
                   (funs := List.replicate n []) hcond hsel
                   (hoist_emitCoreToVar tag hB) hexecB))
+  | letCall _ _ _ | callTail _ _ =>
+    intro hS2
+    exact False.elim (by simpa [S2Frag] using hS2)
 
 /-! ## Function and dispatcher progress -/
 

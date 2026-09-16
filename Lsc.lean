@@ -9,6 +9,7 @@ import Lsc.Lang.TxTheorems
 import Lsc.Lang.InterfaceTheorems
 import Lsc.Lang.Core
 import Lsc.Lang.CoreTheorems
+import Lsc.Lang.CoreTests
 import Lsc.Lang.Spec
 import Lsc.Lang.Reify
 import Lsc.Lang.Contract

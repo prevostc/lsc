@@ -91,7 +91,8 @@ structure ErrorDef where
 
 /-- Everything the compiler needs about one contract. External CALLs are
 self-contained on `Op.call` / `Op.view` (target atom, selector, arity,
-return kind); there is no binding table. -/
+return kind). Internal helpers live in `internals`, topo-sorted callees
+first; entrypoints refer to them by `Core.letCall` / `Core.callTail`. -/
 structure ContractDef where
   name : String
   fields : List FieldDef
@@ -100,10 +101,13 @@ structure ContractDef where
   ctor : Option FnDef
   events : List EventDef
   errors : List ErrorDef
+  /-- Internal helpers, callees first. Empty until slice 2 of internal calls. -/
+  internals : List InternalDef := []
 
 instance : EmptyCollection ContractDef where
   emptyCollection :=
-    { name := "", fields := [], functions := [], ctor := none, events := [], errors := [] }
+    { name := "", fields := [], functions := [], ctor := none, events := [],
+      errors := [], internals := [] }
 
 instance : Inhabited ContractDef where
   default := {}

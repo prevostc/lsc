@@ -378,6 +378,15 @@ def RetExpr.eval (env : List Nat) : {t : RetTy} → RetExpr t → t.denote
     RetExpr.eval env (.flag a) = a.eval env :=
   rfl
 
+/-- Lift a renaming under `n` binders (flattened internal-call returns). -/
+def liftRenameN (n : Nat) (ρ : Nat → Atom) : Nat → Atom :=
+  fun i =>
+    if i < n then .var i
+    else
+      match ρ (i - n) with
+      | .var j => .var (j + n)
+      | .lit m => .lit m
+
 /-- The Core language. Indexed by the function's return type. -/
 inductive Core : RetTy → Type
   | ret {t : RetTy} (r : RetExpr t) : Core t
@@ -393,6 +402,68 @@ inductive Core : RetTy → Type
   /-- Run `th` or `el`, then `k` once. Unit branches keep `k`'s environment;
   word/addr/flag branches bind the result as `var 0` in `k`. -/
   | seqIf {t u : RetTy} (c : Cond) (th el : Core t) (k : Core u) : Core u
+  /-- Internal call in ANF bind position. `f` indexes `ContractDef.internals`
+  (callees first). Flattened results are bound last-word-as-`var 0`. -/
+  | letCall {t u : RetTy} (f : Nat) (args : List Atom) (k : Core u) : Core u
+  /-- Internal call in tail position. Same index space as `letCall`. -/
+  | callTail {t : RetTy} (f : Nat) (args : List Atom) : Core t
+
+/-- One compiled internal helper. `ident` is the Yul name `i_{n}`.
+Bodies live in their own de Bruijn env: `var 0` is `args[0]`. -/
+structure InternalDef where
+  ident : String
+  arity : Nat
+  ret : RetTy
+  body : Core ret
+
+/-- Flattened ABI word count. Nested pairs are left-to-right. Cap 16 is
+enforced by `coreWF` (yul-compiler `.funDef` rejects more). -/
+def RetTy.wordCount : RetTy → Nat
+  | .unit => 0
+  | .word | .addr | .flag => 1
+  | .pair a b => a.wordCount + b.wordCount
+
+/-- Flattened words, last word first, so `var 0` is the last ABI word
+(`let (a, b) ←` binds `b` as `var 0`). -/
+def RetTy.flatten : {t : RetTy} → t.denote → List Nat
+  | .unit, _ => []
+  | .word, n => [n]
+  | .addr, n => [n]
+  | .flag, n => [n]
+  | .pair _ _, p => RetTy.flatten p.2 ++ RetTy.flatten p.1
+
+theorem RetTy.flatten_length : {t : RetTy} → (v : t.denote) →
+    (RetTy.flatten v).length = t.wordCount
+  | .unit, _ => rfl
+  | .word, _ => rfl
+  | .addr, _ => rfl
+  | .flag, _ => rfl
+  | .pair _ _, p => by
+    simp [RetTy.flatten, RetTy.wordCount, flatten_length p.1, flatten_length p.2,
+      Nat.add_comm]
+
+/-- Atoms of a `RetExpr`, ABI left-to-right. -/
+def RetExpr.atoms : {t : RetTy} → RetExpr t → List Atom
+  | _, .unit => []
+  | _, .word a => [a]
+  | _, .addr a => [a]
+  | _, .flag a => [a]
+  | _, .pair x y => x.atoms ++ y.atoms
+
+/-- Map callee de Bruijn `var i` to the `i`-th call-site argument. -/
+def substArgs (args : List Atom) : Nat → Atom
+  | i => args.getD i (.lit 0)
+
+theorem substArgs_eval (args : List Atom) (env : List Nat) (i : Nat) :
+    (substArgs args i).eval env = (args.map (·.eval env)).getD i 0 := by
+  simp [substArgs, List.getD_eq_getElem?_getD, List.getElem?_map]
+  cases args[i]? <;> simp [Atom.eval]
+
+/-- `List.take i` is strictly shorter when `i` is a valid index. -/
+theorem take_length_lt {α} {l : List α} {i : Nat} (h : i < l.length) :
+    (l.take i).length < l.length := by
+  rw [List.length_take, Nat.min_eq_left (Nat.le_of_lt h)]
+  exact h
 
 /-! ## Schemas: how field / event / error indices map to the user's Lean types -/
 
@@ -469,25 +540,98 @@ def Stmt.denote (Γ : ContractSchema S X E ε) (env : List Nat) : Stmt → Tx S 
   | .view t sel args ret =>
     Op.denote Γ env (.view t sel args ret) >>= fun _ => Pure.pure ()
 
-def Core.denote (Γ : ContractSchema S X E ε) : {t : RetTy} → Core t → List Nat → Tx S X E ε t.denote
+/-- Ill-indexed or ill-typed internal call. Rejected by `coreWF`. -/
+def Core.denoteDummy (Γ : ContractSchema S X E ε) {t : RetTy} :
+    Tx S X E ε t.denote :=
+  Tx.revert (Γ.err.build 0 [])
+
+/-- Denotation. Structural so `simp [Core.denote]` keeps constructor
+equations. A `letCall`/`callTail` is `denoteDummy` (ill-indexed); table
+CBV lives in `denoteTbl`. Do not put `tbl` on this function: a default
+arg makes `Core.denote Γ c env` an `optParam` and breaks `core_denote`. -/
+def Core.denote (Γ : ContractSchema S X E ε) :
+    {t : RetTy} → Core t → List Nat → Tx S X E ε t.denote
   | _, .ret r, env => pure (r.eval env)
   | _, .opTail op, env => Op.denote Γ env op
   | _, .opTailAddr op, env => (Op.denote Γ env op : Tx S X E ε Nat)
   | _, .opTailFlag op, env => (Op.denote Γ env op : Tx S X E ε Nat)
   | _, .stmtTail s, env => Stmt.denote Γ env s
-  | _, .revertTail err args, env => Tx.revert (Γ.err.build err (args.map (·.eval env)))
-  | _, .letOp op k, env => Op.denote Γ env op >>= fun v => Core.denote Γ k (v :: env)
-  | _, .seq s k, env => Stmt.denote Γ env s >>= fun _ => Core.denote Γ k env
-  | _, .letPure p args k, env => Core.denote Γ k (Prim.eval p (args.map (·.eval env)) :: env)
-  | _, .ite c a b, env => if c.denote env then Core.denote Γ a env else Core.denote Γ b env
-  | _, .seqIf (t := t) c th el k, env =>
+  | _, .revertTail err args, env =>
+      Tx.revert (Γ.err.build err (args.map (·.eval env)))
+  | _, .letOp op k, env =>
+      Op.denote Γ env op >>= fun v => Core.denote Γ k (v :: env)
+  | _, .seq s k, env =>
+      Stmt.denote Γ env s >>= fun _ => Core.denote Γ k env
+  | _, .letPure p args k, env =>
+      Core.denote Γ k (Prim.eval p (args.map (·.eval env)) :: env)
+  | _, .ite c a b, env =>
+      if c.denote env then Core.denote Γ a env else Core.denote Γ b env
+  | _, .seqIf (t := tBr) c th el k, env =>
       (if c.denote env then Core.denote Γ th env else Core.denote Γ el env) >>=
-        match t with
+        match tBr with
         | .unit => fun _ => Core.denote Γ k env
         | .word => fun v => Core.denote Γ k (v :: env)
         | .addr => fun v => Core.denote Γ k ((v : Nat) :: env)
         | .flag => fun v => Core.denote Γ k (v :: env)
         | .pair _ _ => fun _ => Core.denote Γ k env
+  | _, .callTail _ _, _ => Core.denoteDummy Γ
+  | _, .letCall (t := tArg) _ _ k, env =>
+      Core.denoteDummy (t := tArg) Γ >>= fun v =>
+        Core.denote Γ k (RetTy.flatten v ++ env)
+
+/-- Table CBV (design §1). Fuel is `tbl.length`; a call at `i` continues
+with `tbl.take i`. Ill-indexed or ill-typed → `denoteDummy`. -/
+def Core.denoteTbl (Γ : ContractSchema S X E ε) :
+    (fuel : Nat) → {t : RetTy} → Core t → List Nat → List InternalDef →
+    Tx S X E ε t.denote
+  | _, _, .ret r, env, _ => pure (r.eval env)
+  | _, _, .opTail op, env, _ => Op.denote Γ env op
+  | _, _, .opTailAddr op, env, _ => (Op.denote Γ env op : Tx S X E ε Nat)
+  | _, _, .opTailFlag op, env, _ => (Op.denote Γ env op : Tx S X E ε Nat)
+  | _, _, .stmtTail s, env, _ => Stmt.denote Γ env s
+  | _, _, .revertTail err args, env, _ =>
+      Tx.revert (Γ.err.build err (args.map (·.eval env)))
+  | fuel, _, .letOp op k, env, tbl =>
+      Op.denote Γ env op >>= fun v => Core.denoteTbl Γ fuel k (v :: env) tbl
+  | fuel, _, .seq s k, env, tbl =>
+      Stmt.denote Γ env s >>= fun _ => Core.denoteTbl Γ fuel k env tbl
+  | fuel, _, .letPure p args k, env, tbl =>
+      Core.denoteTbl Γ fuel k (Prim.eval p (args.map (·.eval env)) :: env) tbl
+  | fuel, _, .ite c a b, env, tbl =>
+      if c.denote env then Core.denoteTbl Γ fuel a env tbl
+      else Core.denoteTbl Γ fuel b env tbl
+  | fuel, _, .seqIf (t := tBr) c th el k, env, tbl =>
+      (if c.denote env then Core.denoteTbl Γ fuel th env tbl
+        else Core.denoteTbl Γ fuel el env tbl) >>=
+        match tBr with
+        | .unit => fun _ => Core.denoteTbl Γ fuel k env tbl
+        | .word => fun v => Core.denoteTbl Γ fuel k (v :: env) tbl
+        | .addr => fun v => Core.denoteTbl Γ fuel k ((v : Nat) :: env) tbl
+        | .flag => fun v => Core.denoteTbl Γ fuel k (v :: env) tbl
+        | .pair _ _ => fun _ => Core.denoteTbl Γ fuel k env tbl
+  | 0, _, .callTail _ _, _, _ => Core.denoteDummy Γ
+  | n + 1, t, .callTail i args, env, tbl =>
+      if hi : i < tbl.length then
+        let d := tbl[i]
+        if hret : d.ret = t then
+          Core.denoteTbl Γ n (hret ▸ d.body) (args.map (·.eval env)) (tbl.take i)
+        else
+          Core.denoteDummy Γ
+      else
+        Core.denoteDummy Γ
+  | 0, _, .letCall (t := tArg) _ _ k, env, tbl =>
+      Core.denoteDummy (t := tArg) Γ >>= fun v =>
+        Core.denoteTbl Γ 0 k (RetTy.flatten v ++ env) tbl
+  | n + 1, _, .letCall (t := tArg) i args k, env, tbl =>
+      (if hi : i < tbl.length then
+        let d := tbl[i]
+        if hret : d.ret = tArg then
+          Core.denoteTbl Γ n (hret ▸ d.body) (args.map (·.eval env)) (tbl.take i)
+        else
+          Core.denoteDummy (t := tArg) Γ
+      else
+        Core.denoteDummy (t := tArg) Γ) >>= fun v =>
+        Core.denoteTbl Γ (n + 1) k (RetTy.flatten v ++ env) tbl
 
 /-- Continuation of `seqIf` (`k` after the chosen branch). -/
 def Core.seqIfCont (Γ : ContractSchema S X E ε) :
@@ -581,6 +725,10 @@ def Core.rename (ρ : Nat → Atom) : {t : RetTy} → Core t → Core t
   | _, .ite c a b => .ite (c.rename ρ) (a.rename ρ) (b.rename ρ)
   | _, .seqIf (t := t) c th el k =>
       .seqIf (c.rename ρ) (th.rename ρ) (el.rename ρ) (k.rename (seqIfRename (t := t) ρ))
+  | _, .letCall (t := t) i args k =>
+      .letCall (t := t) i (args.map (·.rename ρ)) (k.rename (liftRenameN t.wordCount ρ))
+  | _, .callTail i args =>
+      .callTail i (args.map (·.rename ρ))
 
 /-- Sequence a unit core before `k`, duplicating `k` through `ite`. -/
 def Core.seqUnit {u : RetTy} : Core .unit → Core u → Core u
@@ -594,6 +742,9 @@ def Core.seqUnit {u : RetTy} : Core .unit → Core u → Core u
       .seqIf c th el (seqUnit k' (match t with
         | .word | .addr | .flag => k.rename (fun i => .var (i + 1))
         | .unit | .pair _ _ => k))
+  | .letCall (t := t) i args k', k =>
+      .letCall (t := t) i args (seqUnit k' (k.rename (fun j => .var (j + t.wordCount))))
+  | .callTail i args, k => .letCall (t := .unit) i args k
   | .revertTail e args, _ => .revertTail e args
 
 /-- Bind a word core's result into `k` (`var 0`), duplicating `k` through `ite`. -/
@@ -607,6 +758,8 @@ def Core.bindWord {u : RetTy} : Core .word → Core u → Core u
   | .letPure p args k', k => .letPure p args (bindWord k' k)
   | .ite c a b, k => .ite c (bindWord a k) (bindWord b k)
   | .seqIf c th el k', k => .seqIf c th el (bindWord k' k)
+  | .letCall (t := t) i args k', k => .letCall (t := t) i args (bindWord k' k)
+  | .callTail i args, k => .letCall (t := .word) i args k
   | .revertTail e args, _ => .revertTail e args
 
 /-- Bind an address core's result into `k`. -/
@@ -620,6 +773,8 @@ def Core.bindAddr {u : RetTy} : Core .addr → Core u → Core u
   | .letPure p args k', k => .letPure p args (bindAddr k' k)
   | .ite c a b, k => .ite c (bindAddr a k) (bindAddr b k)
   | .seqIf c th el k', k => .seqIf c th el (bindAddr k' k)
+  | .letCall (t := t) i args k', k => .letCall (t := t) i args (bindAddr k' k)
+  | .callTail i args, k => .letCall (t := .addr) i args k
   | .revertTail e args, _ => .revertTail e args
 
 /-- Bind a flag core's result into `k`. -/
@@ -633,7 +788,30 @@ def Core.bindFlag {u : RetTy} : Core .flag → Core u → Core u
   | .letPure p args k', k => .letPure p args (bindFlag k' k)
   | .ite c a b, k => .ite c (bindFlag a k) (bindFlag b k)
   | .seqIf c th el k', k => .seqIf c th el (bindFlag k' k)
+  | .letCall (t := t) i args k', k => .letCall (t := t) i args (bindFlag k' k)
+  | .callTail i args, k => .letCall (t := .flag) i args k
   | .revertTail e args, _ => .revertTail e args
+
+/-- Bind `as` left-to-right (`letPure .id`); last atom is `var 0` in `k`. -/
+def Core.bindAtoms {u : RetTy} : List Atom → Core u → Core u
+  | [], k => k
+  | a :: as, k => .letPure .id [a] (bindAtoms as k)
+
+/-- Sequence any core before `k`, binding flattened results last-word-first. -/
+def Core.bindRet {t u : RetTy} : Core t → Core u → Core u
+  | .ret r, k => bindAtoms (RetExpr.atoms r) k
+  | .opTail op, k => .letOp op k
+  | .opTailAddr op, k => .letOp op k
+  | .opTailFlag op, k => .letOp op k
+  | .stmtTail s, k => .seq s k
+  | .revertTail e args, _ => .revertTail e args
+  | .letOp op k', k => .letOp op (bindRet k' k)
+  | .seq s k', k => .seq s (bindRet k' k)
+  | .letPure p args k', k => .letPure p args (bindRet k' k)
+  | .ite c a b, k => .ite c (bindRet a k) (bindRet b k)
+  | .seqIf c th el k', k => .seqIf c th el (bindRet k' k)
+  | .letCall (t := t) i args k', k => .letCall (t := t) i args (bindRet k' k)
+  | .callTail (t := t) i args, k => .letCall (t := t) i args k
 
 /-! ## Quoting `Core` values into `Expr` (indexed families are not covered by `deriving ToExpr`) -/
 
@@ -663,6 +841,12 @@ def Core.toExpr : {t : RetTy} → Core t → Expr
   | u, .seqIf (t := t) c th el k =>
     mkAppN (mkConst ``Core.seqIf)
       #[Lean.toExpr t, Lean.toExpr u, Lean.toExpr c, th.toExpr, el.toExpr, k.toExpr]
+  | u, .letCall (t := t) i args k =>
+    mkAppN (mkConst ``Core.letCall)
+      #[Lean.toExpr t, Lean.toExpr u, Lean.toExpr i, Lean.toExpr args, k.toExpr]
+  | t, .callTail i args =>
+    mkAppN (mkConst ``Core.callTail)
+      #[Lean.toExpr t, Lean.toExpr i, Lean.toExpr args]
 
 /-! ## Pretty-printing of `Core` for `#eval`/logging -/
 
@@ -695,6 +879,9 @@ instance : Repr (Core t) where
         "seqIf " ++ repr c ++ " then" ++ Std.Format.nest 2 (Std.Format.line ++ go th) ++
           Std.Format.line ++ "else" ++ Std.Format.nest 2 (Std.Format.line ++ go el) ++
           Std.Format.line ++ "then" ++ Std.Format.nest 2 (Std.Format.line ++ go k)
+      | _, .letCall i args k =>
+        "letCall " ++ repr i ++ " " ++ repr args ++ ";" ++ Std.Format.line ++ go k
+      | _, .callTail i args => "callTail " ++ repr i ++ " " ++ repr args
     go c
 
 /-! ## Effects and framing -/
@@ -735,6 +922,8 @@ def Stmt.effects : Stmt → Effects
   | .view _ sel _ _ => { views := [sel] }
   | .require .. | .revert .. => {}
 
+/-- Structural effects. Callee union is `effectsTbl`. A `letCall` contributes
+only `k` (no `tbl` here: a default arg would break `mkAppM`/`isPureRead`). -/
 def Core.effects : {t : RetTy} → Core t → Effects
   | _, .ret _ => {}
   | _, .opTail op => Op.effects op
@@ -748,6 +937,39 @@ def Core.effects : {t : RetTy} → Core t → Effects
   | _, .ite _ a b => (Core.effects a).append (Core.effects b)
   | _, .seqIf _ th el k =>
     ((Core.effects th).append (Core.effects el)).append (Core.effects k)
+  | _, .letCall _ _ k => Core.effects k
+  | _, .callTail _ _ => {}
+
+/-- Effects through callees. Fuel is `tbl.length`. -/
+def Core.effectsTbl :
+    (fuel : Nat) → {t : RetTy} → Core t → List InternalDef → Effects
+  | _, _, .ret _, _ => {}
+  | _, _, .opTail op, _ => Op.effects op
+  | _, _, .opTailAddr op, _ => Op.effects op
+  | _, _, .opTailFlag op, _ => Op.effects op
+  | _, _, .stmtTail s, _ => Stmt.effects s
+  | _, _, .revertTail .., _ => {}
+  | fuel, _, .letOp op k, tbl => (Op.effects op).append (Core.effectsTbl fuel k tbl)
+  | fuel, _, .seq s k, tbl => (Stmt.effects s).append (Core.effectsTbl fuel k tbl)
+  | fuel, _, .letPure _ _ k, tbl => Core.effectsTbl fuel k tbl
+  | fuel, _, .ite _ a b, tbl =>
+      (Core.effectsTbl fuel a tbl).append (Core.effectsTbl fuel b tbl)
+  | fuel, _, .seqIf _ th el k, tbl =>
+      ((Core.effectsTbl fuel th tbl).append (Core.effectsTbl fuel el tbl)).append
+        (Core.effectsTbl fuel k tbl)
+  | 0, _, .letCall _ _ k, tbl => Core.effectsTbl 0 k tbl
+  | n + 1, _, .letCall i _ k, tbl =>
+      if hi : i < tbl.length then
+        (Core.effectsTbl n tbl[i].body (tbl.take i)).append
+          (Core.effectsTbl (n + 1) k tbl)
+      else
+        Core.effectsTbl (n + 1) k tbl
+  | 0, _, .callTail _ _, _ => {}
+  | n + 1, _, .callTail i _, tbl =>
+      if hi : i < tbl.length then
+        Core.effectsTbl n tbl[i].body (tbl.take i)
+      else
+        {}
 
 /-- No stores, emits, or state-changing CALLs — allowed as an `implements` View. -/
 def Core.isPureRead {t : RetTy} (c : Core t) : Bool :=
@@ -755,7 +977,8 @@ def Core.isPureRead {t : RetTy} (c : Core t) : Bool :=
   e.writes.isEmpty && e.emits.isEmpty && e.calls.isEmpty
 
 /-- The body contains `Op.call` / `Stmt.call` / `Op.view` / `Stmt.view`.
-Not `¬ CallFree`: that also excludes emits. Used by the reentrancy lock. -/
+Not `¬ CallFree`: that also excludes emits. Used by the reentrancy lock.
+Follows internal callees, so a thin wrapper still locks. -/
 def Core.hasExtCall {t : RetTy} (c : Core t) : Bool :=
   let e := Core.effects c
   !e.calls.isEmpty || !e.views.isEmpty
@@ -777,37 +1000,56 @@ def Stmt.isStore : Stmt → Bool
 
 /-- `seen` is whether some prefix already contained an external call.
 Structural in the Core (same shape as `Core.effects`) so `lsc_contract`
-can reduce it. -/
-def Core.storeAfterCallSeen {t : RetTy} (seen : Bool) : Core t → Bool
+can reduce it. Follows internal callees. -/
+def Core.storeAfterCallSeen {t : RetTy} (seen : Bool) (c : Core t)
+    (tbl : List InternalDef := []) : Bool :=
+  match c with
   | .ret _ => false
   | .opTail _ | .opTailAddr _ | .opTailFlag _ => false
   | .stmtTail s => seen && Stmt.isStore s
   | .revertTail .. => false
-  | .letOp op k => Core.storeAfterCallSeen (seen || Op.isExtCall op) k
+  | .letOp op k => Core.storeAfterCallSeen (seen || Op.isExtCall op) k tbl
   | .seq s k =>
     (seen && Stmt.isStore s) ||
-      Core.storeAfterCallSeen (seen || Stmt.isExtCall s) k
-  | .letPure _ _ k => Core.storeAfterCallSeen seen k
+      Core.storeAfterCallSeen (seen || Stmt.isExtCall s) k tbl
+  | .letPure _ _ k => Core.storeAfterCallSeen seen k tbl
   | .ite _ a b =>
-    Core.storeAfterCallSeen seen a || Core.storeAfterCallSeen seen b
+    Core.storeAfterCallSeen seen a tbl || Core.storeAfterCallSeen seen b tbl
   | .seqIf _ th el k =>
-    Core.storeAfterCallSeen seen th || Core.storeAfterCallSeen seen el ||
-      Core.storeAfterCallSeen seen k
+    Core.storeAfterCallSeen seen th tbl || Core.storeAfterCallSeen seen el tbl ||
+      Core.storeAfterCallSeen seen k tbl
+  | .letCall i _ k =>
+      if hi : i < tbl.length then
+        let d := tbl[i]
+        let tbl' := tbl.take i
+        Core.storeAfterCallSeen seen d.body tbl' ||
+          Core.storeAfterCallSeen (seen || Core.hasExtCall d.body) k tbl
+      else
+        Core.storeAfterCallSeen seen k tbl
+  | .callTail i _ =>
+      if hi : i < tbl.length then
+        Core.storeAfterCallSeen seen tbl[i].body (tbl.take i)
+      else
+        false
+termination_by (tbl.length, sizeOf c)
+decreasing_by all_goals decreasing_tactic
 
 /-- Number of `seqIf` nodes, for reifier tests. -/
 def Core.countSeqIf : {t : RetTy} → Core t → Nat
   | _, .seqIf _ th el k =>
     1 + Core.countSeqIf th + Core.countSeqIf el + Core.countSeqIf k
   | _, .ite _ a b => Core.countSeqIf a + Core.countSeqIf b
-  | _, .letOp _ k | _, .seq _ k | _, .letPure _ _ k => Core.countSeqIf k
+  | _, .letOp _ k | _, .seq _ k | _, .letPure _ _ k | _, .letCall _ _ k =>
+      Core.countSeqIf k
   | _, _ => 0
 
 /-- Syntactic checks-effects-interactions: some path has an `Op`/`Stmt`
 store after an external CALL/STATICCALL in program order. Used to reject
 `[Reentrant]` functions that write after a call, unless they also carry
 `[Reentrant.Unsafe]`. Tail calls are not followed by a store. -/
-def Core.storeAfterCall {t : RetTy} (c : Core t) : Bool :=
-  Core.storeAfterCallSeen false c
+def Core.storeAfterCall {t : RetTy} (c : Core t) (tbl : List InternalDef := []) :
+    Bool :=
+  Core.storeAfterCallSeen false c tbl
 
 theorem Op.effects_writes (op : Op) : (Op.effects op).writes = [] := by
   cases op <;> rfl

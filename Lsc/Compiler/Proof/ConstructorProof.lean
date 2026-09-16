@@ -216,6 +216,9 @@ theorem core_sim_ctor {S X E ε} {c : ContractDef} {Γ : ContractSchema S X E ε
   | seqIf _ _ _ _ =>
     intro hM1 hNo ht
     exact (show False from hNo).elim
+  | letCall _ _ _ | callTail _ _ =>
+    intro hM1
+    exact False.elim (by simpa [M1Frag] using hM1)
   | revertTail err args =>
     intro hM1 hNo ht w env V st funs hwf hn hinv e' hem
     have hnil : args.length = 0 := by simpa [M1Frag] using hM1

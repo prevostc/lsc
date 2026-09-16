@@ -15,6 +15,7 @@ def NoIte : {t : RetTy} → Core t → Prop
   | _, .letOp _ k => NoIte k
   | _, .seq _ k => NoIte k
   | _, .letPure _ _ k => NoIte k
+  | _, .letCall _ _ k => NoIte k
   | _, _ => True
 
 end Lsc.Compiler

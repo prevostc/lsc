@@ -580,6 +580,9 @@ theorem emitCore_acc tag {c : ContractDef} {halt : Bool} {clearLock : Bool} {t :
           | none => simp
           | some _ => simp [List.append_assoc]
     | pair _ _ => simp [emitCore]
+  | letCall _ _ _ | callTail _ _ =>
+    intro e d
+    simp [emitCore, Emit.push]
 
 theorem emitCore_prefix {c halt clearLock t} {core : Core t}
     {e e' : Emit} {d : Nat} (hem : emitCore tag c e d halt core clearLock = some e') :
@@ -695,6 +698,8 @@ theorem emitCoreToVar_acc tag {c : ContractDef} {t : RetTy} (core : Core t)
           | none => simp
           | some _ => simp [List.append_assoc]
     | pair _ _ => simp [emitCoreToVar]
+  | letCall _ _ _ | callTail _ _ =>
+    simp [emitCoreToVar, Emit.push]
 
 theorem emitCoreToVar_prefix {c t} {core : Core t}
     {e e' : Emit} {d : Nat} {dest : YIdent}
@@ -738,6 +743,8 @@ theorem emitCoreToVar_eq_emitCore_unit_gen tag {c : ContractDef} {t : RetTy}
   | ite cond a b iha ihb =>
     simp only [emitCoreToVar, emitCore]
     rw [iha {} d dest ht, ihb {} d dest ht]
+  | letCall _ _ _ | callTail _ _ =>
+    simp [emitCoreToVar, emitCore]
   | @seqIf tBr _ cond th el k ihth ihel ihk =>
     cases tBr with
     | unit =>
@@ -790,6 +797,7 @@ theorem emitCore_some tag {c t} (core : Core t) (e : Emit) (d : Nat)
     obtain ⟨eA, hA⟩ := iha ({} : Emit) d halt clearLock
     obtain ⟨eB, hB⟩ := ihb ({} : Emit) d halt clearLock
     simp [emitCore, hA, hB]
+  | letCall _ _ _ | callTail _ _ => simp [emitCore]
   | @seqIf tBr _ cond th el k ihth ihel ihk =>
     cases tBr with
     | unit =>
@@ -827,6 +835,7 @@ theorem emitCoreToVar_some tag {c t} (core : Core t) (e : Emit) (d : Nat)
     obtain ⟨eA, hA⟩ := iha ({} : Emit) d dest
     obtain ⟨eB, hB⟩ := ihb ({} : Emit) d dest
     simp [emitCoreToVar, hA, hB]
+  | letCall _ _ _ | callTail _ _ => simp [emitCoreToVar]
   | @seqIf tBr _ cond th el k ihth ihel ihk =>
     cases tBr with
     | unit =>
@@ -1087,6 +1096,10 @@ theorem noFun_core tag {c halt clearLock t} :
       b ({} : Emit) d
     simp [hA, hB] at hem; cases hem
     exact noFun_push he rfl
+  | letCall _ _ _ | callTail _ _ =>
+    intro e d e' hem he
+    simp [emitCore] at hem; cases hem
+    exact noFun_push he rfl
   | @seqIf tBr _ cond th el k _ _ ihk =>
     intro e d e' hem he
     cases tBr with
@@ -1154,6 +1167,10 @@ theorem noFun_coreToVar tag {c t} :
     obtain ⟨eB, hB⟩ := emitCoreToVar_some tag (c := c) b ({} : Emit) d dest
     simp [hA, hB] at hem; cases hem
     exact noFun_push he notFunDef_switch
+  | letCall _ _ _ | callTail _ _ =>
+    intro e d dest e' hem he
+    simp [emitCoreToVar] at hem; cases hem
+    exact noFun_push he rfl
   | @seqIf tBr _ cond th el k _ _ ihk =>
     intro e d dest e' hem he
     cases tBr with

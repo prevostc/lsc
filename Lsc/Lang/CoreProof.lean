@@ -1,5 +1,7 @@
 import Lsc.Lang.Core
 
+set_option linter.unusedSimpArgs false
+
 /-!
 Proofs of the `Core.effects` frame theorems. Statements and documentation live
 in `Lsc.Lang.CoreTheorems`.
@@ -147,7 +149,8 @@ theorem effects_frame_on {α} {Γ : ContractSchema S X E ε} {t : RetTy} (c : Co
     exact congrArg P (Op.effects_frame op env h)
   | stmtTail s =>
     simp [Core.denote] at h
-    exact Stmt.effects_frame_on P s env f hStore hStoreMap hStoreMap2 hf h
+    have hf' : f ∉ (Stmt.effects s).writes := by simpa [Core.effects] using hf
+    exact Stmt.effects_frame_on P s env f hStore hStoreMap hStoreMap2 hf' h
   | revertTail err args =>
     simp [Core.denote] at h
   | letOp op k ih =>
@@ -175,7 +178,8 @@ theorem effects_frame_on {α} {Γ : ContractSchema S X E ε} {t : RetTy} (c : Co
       rw [ih env hfsk.2 h, hs]
   | letPure p args k ih =>
     simp [Core.denote] at h
-    exact ih (Prim.eval p (args.map (·.eval env)) :: env) hf h
+    have hf' : f ∉ (Core.effects k).writes := by simpa [Core.effects] using hf
+    exact ih (Prim.eval p (args.map (·.eval env)) :: env) hf' h
   | ite c a b iha ihb =>
     simp [Core.denote, Tx.run_ite] at h
     have hfab : f ∉ (Core.effects a).writes ∧ f ∉ (Core.effects b).writes := by
@@ -207,6 +211,10 @@ theorem effects_frame_on {α} {Γ : ContractSchema S X E ε} {t : RetTy} (c : Co
         | flag => exact ihk (vBr :: env) hfth.2.2 h
         | pair _ _ => exact ihk env hfth.2.2 h
       rw [hk, hbr]
+  | callTail i args =>
+    simp [Core.denote, Core.denoteDummy, Tx.run_revert] at h
+  | letCall i args k _ih =>
+    simp [Core.denote, Tx.run_bind, Core.denoteDummy, Tx.run_revert] at h
 
 /-- A successful run does not change scalar field `f` unless `f` is in `writes`. -/
 theorem effects_frame {Γ : ContractSchema S X E ε} {t} (c : Core t) (env : List Nat)
@@ -393,6 +401,12 @@ theorem liftRename_eval (ρ : Nat → Atom) {env env' : List Nat} {v : Nat}
       simp [hρ, Atom.eval] at this ⊢
       simp [this]
 
+theorem denoteDummy_bind {Γ : ContractSchema S X E ε} {t u : RetTy}
+    (k : t.denote → Tx S X E ε u.denote) :
+    Core.denoteDummy (t := t) Γ >>= k = Core.denoteDummy (t := u) Γ := by
+  funext ctx w
+  simp [Core.denoteDummy, Tx.bind_apply, Tx.run_revert, Tx.revert]
+
 theorem retExpr_eval_rename (ρ : Nat → Atom) {env env' : List Nat}
     (h : ∀ i, (ρ i).eval env' = env.getD i 0) {t} (r : RetExpr t) :
     (r.rename ρ).eval env' = r.eval env := by
@@ -474,12 +488,14 @@ theorem denote_rename {Γ : ContractSchema S X E ε} {t : RetTy}
     have hif :
         (if Cond.denote env' (c.rename ρ) then Core.denote Γ th env
           else Core.denote Γ el env) =
-        (if c.denote env then Core.denote Γ th env else Core.denote Γ el env) := by
+        (if c.denote env then Core.denote Γ th env
+          else Core.denote Γ el env) := by
       simp [hc]
     rw [hif]
     refine congrArg
       (fun f =>
-        (if c.denote env then Core.denote Γ th env else Core.denote Γ el env) >>= f)
+        (if c.denote env then Core.denote Γ th env
+          else Core.denote Γ el env) >>= f)
       ?_
     funext v
     cases tBr with
@@ -498,6 +514,24 @@ theorem denote_rename {Γ : ContractSchema S X E ε} {t : RetTy}
     | flag =>
       simp [seqIfRename]
       exact ihk (ρ := liftRename ρ) (liftRename_eval (v := v) ρ h)
+  | callTail i args =>
+    simp [Core.rename, Core.denote]
+  | letCall i args k _ih =>
+    simp [Core.rename, Core.denote, denoteDummy_bind]
+
+/-- Slice-1 `denote` treats an internal call as `denoteDummy`. -/
+theorem denote_callTail {Γ : ContractSchema S X E ε} {t : RetTy}
+    (i : Nat) (args : List Atom) (env : List Nat) :
+    Core.denote Γ (.callTail (t := t) i args) env = Core.denoteDummy Γ :=
+  rfl
+
+/-- `letCall` is dummy-call bound into `k`. -/
+theorem denote_letCall {Γ : ContractSchema S X E ε} {t u : RetTy}
+    (i : Nat) (args : List Atom) (k : Core u) (env : List Nat) :
+    Core.denote Γ (.letCall (t := t) i args k) env =
+      Core.denoteDummy (t := t) Γ >>= fun v =>
+        Core.denote Γ k (RetTy.flatten v ++ env) :=
+  rfl
 
 /-- `seqUnit` is bind of a unit core into `k`. -/
 theorem denote_seqUnit {u : RetTy} (Γ : ContractSchema S X E ε)
@@ -587,6 +621,13 @@ theorem denote_seqUnit {u : RetTy} (Γ : ContractSchema S X E ε)
         fun _ => rfl
       rw [denote_seqUnit (Γ := Γ) k' (k.rename fun i => .var (i + 1)) (v :: env),
         denote_rename (ρ := fun i => .var (i + 1)) (h := hρ)]
+  | letCall i args k' =>
+    funext ctx w
+    simp [Core.seqUnit, Core.denote, Tx.bind_apply, Tx.bind_assoc,
+      Core.denoteDummy, Tx.run_revert]
+  | callTail i args =>
+    funext ctx w
+    simp [Core.seqUnit, Core.denote, Tx.bind_apply, Core.denoteDummy, Tx.run_revert]
 termination_by a
 decreasing_by all_goals decreasing_tactic
 

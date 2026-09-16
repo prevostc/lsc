@@ -40,7 +40,7 @@ theorem core_sim_ext_callFree {S E ε}
   cases hTx : Tx.run (Core.denote Γ core env) ctx w with
   | ok p =>
     rcases p with ⟨v, w0⟩
-    have hok : Core.denote Γ core env ctx w = .ok (v, w0) := by
+    have hok : (Core.denote Γ core env) ctx w = .ok (v, w0) := by
       simpa [Tx.run] using hTx
     have hg := callFree_preserves_ghost (Γ := Γ) hM1 env ctx w hok
     rw [hTx] at hS1
@@ -208,7 +208,7 @@ theorem sim_ext_seqIf_unit {S E ε : Type} {u : RetTy}
           (hoist_emitCore tag hA) hexecA
       rw [hrestA] at hsw
       have hrest := s1_match_prefix_ok hfuns hno hexec hsw
-      have hokd : Core.denote Γ th env ctx w = .ok ((), w1) := by
+      have hokd : (Core.denote Γ th env) ctx w = .ok ((), w1) := by
         simpa [Tx.run] using hrun
       have hg := callFree_preserves_ghost (Γ := Γ) hth env ctx w hokd
       have hAgr1 : ExtAgree ctx.self w1.ext stA := by
@@ -249,7 +249,7 @@ theorem sim_ext_seqIf_unit {S E ε : Type} {u : RetTy}
           (hoist_emitCore tag hB) hexecB
       rw [hrestB] at hsw
       have hrest := s1_match_prefix_ok hfuns hno hexec hsw
-      have hokd : Core.denote Γ el env ctx w = .ok ((), w1) := by
+      have hokd : (Core.denote Γ el env) ctx w = .ok ((), w1) := by
         simpa [Tx.run] using hrun
       have hg := callFree_preserves_ghost (Γ := Γ) hel env ctx w hokd
       have hAgr1 : ExtAgree ctx.self w1.ext stB := by
@@ -363,7 +363,7 @@ theorem sim_ext_seqIf_wordLike {S E ε : Type} {t u : RetTy}
         exec_seqIfWord_ok (tag := tag) hcond1 hsel
           (hoist_emitCoreToVar tag hA) hexecA hrestA
       have hrest := s1_match_prefix_ok hfuns hno hexec hpre
-      have hokd : Core.denote Γ th env ctx w = .ok (v, w1) := by
+      have hokd : (Core.denote Γ th env) ctx w = .ok (v, w1) := by
         simpa [Tx.run] using hrun
       have hg := callFree_preserves_ghost (Γ := Γ) hth env ctx w hokd
       have hAgr1 : ExtAgree ctx.self w1.ext stA := by
@@ -408,7 +408,7 @@ theorem sim_ext_seqIf_wordLike {S E ε : Type} {t u : RetTy}
         exec_seqIfWord_ok (tag := tag) hcond1 hsel
           (hoist_emitCoreToVar tag hB) hexecB hrestB
       have hrest := s1_match_prefix_ok hfuns hno hexec hpre
-      have hokd : Core.denote Γ el env ctx w = .ok (v, w1) := by
+      have hokd : (Core.denote Γ el env) ctx w = .ok (v, w1) := by
         simpa [Tx.run] using hrun
       have hg := callFree_preserves_ghost (Γ := Γ) hel env ctx w hokd
       have hAgr1 : ExtAgree ctx.self w1.ext stB := by
@@ -869,6 +869,9 @@ theorem core_sim_ext {S E ε}
         have htWL : retTyWordLike (coreRetTy th) := trivial
         exact sim_ext_seqIf_wordLike (tag := tag) hΓ hκ hlen htWL hC hth hel
           (ihk hk) funs hfuns hwf hn hinv hAgr hOr hNR hem hexec
+  | letCall _ _ _ | callTail _ _ =>
+    intro hS2
+    exact False.elim (by simpa [S2Frag] using hS2)
 
 /-- S2 backward `toYulFn` for `S2Frag` cores. Every Yul run is predicted by
 `Core.denote` with `w.oracle = Oracle.ofExt o`. Reentrancy is not modelled

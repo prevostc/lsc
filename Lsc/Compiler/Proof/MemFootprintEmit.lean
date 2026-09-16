@@ -808,6 +808,11 @@ theorem staticSafe_emitCoreToVar (c : ContractDef) {t} (core : Core t)
             (staticSafe_emitSeqIfWord (tag := tag) e d cond eA eB he
               (ihth hthWF {} d (identPhi tag d) (staticSafe_nilEmit _) _ ha)
               (ihel helWF {} d (identPhi tag d) (staticSafe_nilEmit _) _ hb)) e' h
+  | letCall _ _ _ | callTail _ _ =>
+    intro e d dest he e' h
+    simp [emitCoreToVar] at h
+    cases h
+    exact staticSafe_emit_push _ e _ he (staticSafe_revert00 _)
 
 theorem staticSafe_emitCore (c : ContractDef) (halt : Bool)
     {clearLock : Bool} {t} (core : Core t)
@@ -953,6 +958,11 @@ theorem staticSafe_emitCore (c : ContractDef) (halt : Bool)
           exact ihk (halt := halt) (clearLock := clearLock) hkWF
             (emitSeqIfWord tag e d cond eA eB) (d + 1)
             (staticSafe_emitSeqIfWord (tag := tag) e d cond eA eB he hA hB) e' h
+  | letCall _ _ _ | callTail _ _ =>
+    intro e d he e' h
+    simp [emitCore] at h
+    cases h
+    exact staticSafe_emit_push _ e _ he (staticSafe_revert00 _)
 
 theorem staticSafe_toYulFn {c f yul} (h : toYulFn c f = some yul) :
     staticSafeStmts memoryGuardK yul = true := by

@@ -2766,7 +2766,8 @@ def assembleContract (ns : Name) (fns : Array Name) : TermElabM Unit := do
   let fnList ← mkListLit (Lean.mkConst ``FnDef) fnDefs.toList
   let contractTy := Lean.mkConst ``ContractDef
   let contractVal := mkAppN (Lean.mkConst ``ContractDef.mk) #[
-    toExpr ns.getString!, toExpr fields, fnList, ctorE, toExpr events, toExpr errors]
+    toExpr ns.getString!, toExpr fields, fnList, ctorE, toExpr events, toExpr errors,
+    mkApp (mkConst ``List.nil [levelZero]) (mkConst ``InternalDef)]
   addAndCompile <| .defnDecl (mkDefinitionValEx (ns ++ `contract) [] contractTy contractVal
     .abbrev .safe [ns ++ `contract])
   enableRealizationsForConst (ns ++ `contract)
