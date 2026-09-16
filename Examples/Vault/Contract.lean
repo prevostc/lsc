@@ -32,6 +32,9 @@ structure Storage where
   paused : Flag
   totalShares : Amount vShare
   shares : Mapping Address (Amount vShare)
+  deriving Fields
+
+open Storage.Fields
 
 inductive Event
   | Deposit (who : Address) (assets : Amount vaultAsset)

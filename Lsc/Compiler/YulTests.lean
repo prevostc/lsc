@@ -20,6 +20,7 @@ namespace YulTestsToy
 
 structure Storage where
   dummy : Nat
+  deriving Fields
 
 inductive Event
   | Dummy

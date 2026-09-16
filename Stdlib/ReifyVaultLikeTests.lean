@@ -27,6 +27,7 @@ structure Storage where
   paused : Flag
   totalShares : Amount tShare
   shares : Mapping Address (Amount tShare)
+  deriving Fields
 
 inductive Event
   | Deposit (who : Address) (assets : Amount tAsset) (sharesOut : Amount tShare)
@@ -114,6 +115,7 @@ namespace KindProbe
 
 structure Storage where
   dummy : Nat
+  deriving Fields
 
 inductive Event
   | Dummy

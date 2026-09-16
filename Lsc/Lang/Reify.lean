@@ -697,20 +697,42 @@ partial def atomOf (env : Env t) (e : Expr) (fuel : Nat := 64) : MetaM Atom := d
     (pure Nat arithmetic is not part of the language, use `+?` or `+↻`)"
 
 /-- Unfold `Field.get f` / `Field.set f` and constructor matches until a storage
-projection (or structure update) is visible. -/
+projection (or structure update) is visible. Lenses from `deriving Fields`
+are `@[reducible]`; reducible `whnf` turns `Field.set Storage.Fields.f`
+into `{ σ with f := · }`. -/
 partial def reduceFieldApp (e : Expr) (fuel : Nat := 16) : MetaM Expr := do
   if fuel = 0 then return e
-  let e ← whnf e.consumeMData
-  if e.isAppOf ``Lsc.Field.get || e.isAppOf ``Lsc.Field.set then
-    match ← unfoldDefinition? e with
+  let e ← withReducible (whnf e.consumeMData)
+  match e.consumeMData with
+  | .proj n i s =>
+    match ← reduceProj? e with
     | some e' => reduceFieldApp e' (fuel - 1)
-    | none => return e
-  else
-    match ← unfoldDefinition? e with
-    | some e' =>
-      if e' == e then return e
-      reduceFieldApp e' (fuel - 1)
-    | none => return e
+    | none =>
+      match ← unfoldDefinition? s with
+      | some s' => reduceFieldApp (.proj n i s') (fuel - 1)
+      | none => return e
+  | _ =>
+    if e.isAppOf ``Lsc.Field.get || e.isAppOf ``Lsc.Field.set then
+      match ← unfoldDefinition? e with
+      | some e' => reduceFieldApp e' (fuel - 1)
+      | none =>
+        let args := e.getAppArgs
+        let mut changed := false
+        let mut args' := args
+        for i in [:args.size] do
+          let a' ← withReducible (whnf args[i]!)
+          if a' != args[i]! then
+            args' := args'.set! i a'
+            changed := true
+        if changed then
+          reduceFieldApp (mkAppN e.getAppFn args') (fuel - 1)
+        else return e
+    else
+      match ← unfoldDefinition? e with
+      | some e' =>
+        if e' == e then return e
+        reduceFieldApp e' (fuel - 1)
+      | none => return e
 
 /-- The storage field a projection lambda `fun σ => σ.f` (or the projection function itself) denotes. -/
 def fieldOfProj (ci : ContractInfo) (proj : Expr) : MetaM FieldInfo := do
@@ -762,6 +784,7 @@ def fieldOfProj (ci : ContractInfo) (proj : Expr) : MetaM FieldInfo := do
 
 /-- The storage field an update lambda `fun σ m => { σ with f := m }` denotes. -/
 def fieldOfUpd (ci : ContractInfo) (upd : Expr) : MetaM FieldInfo := do
+  let upd ← reduceFieldApp upd
   lambdaTelescope upd fun xs body => do
     let body ← reduceFieldApp body.consumeMData
     unless xs.size == 2 do throwError "reify: `{upd}` is not a storage update"

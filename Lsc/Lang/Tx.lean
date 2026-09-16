@@ -172,12 +172,17 @@ inductive Err (ε : Type)
   | callFailed
   deriving DecidableEq, Repr
 
-/-- A storage field: getter plus in-place setter. `read`/`write` accept
-these as well as bare field names. After inlining, a `match` on a
-constructor reduces to today's `Storage` projection. -/
+/-- A storage field: getter plus in-place setter. `deriving Fields` on
+`structure Storage` generates one lens per field in `Storage.Fields`
+(and `open`s that namespace), so `reserve1` in contract code is the
+lens. `read` / `write` take these values; `read balances[who]` is
+indexing sugar on a mapping lens. -/
 structure Field (S : Type) (α : Type) where
   get : S → α
   set : S → α → S
+
+/-- Marker class: `deriving Fields` on a storage structure. -/
+class Fields (S : Type) : Prop
 
 @[simp] theorem Field.get_mk {S α} (get : S → α) (set : S → α → S) :
     Field.get ⟨get, set⟩ = get := rfl
@@ -554,8 +559,8 @@ syntax; their elaborators live in `Lsc.Lang.Interface` so they can wrap
 each operand at `Tx`, so `write f (read f +? x)` sees a `Tx` expected type
 on `read` before instance synthesis.
 
-* `read f`, `read f[k]`, `read f[k₁, k₂]` — storage reads
-* `read d.f`, `write d.f v` — `Field S α` (direction-indexed fields)
+* `read f`, `read f[k]`, `read f[k₁, k₂]` — storage reads (`f` is a `Field` lens)
+* `read d.f`, `write d.f v` — `Field S α` (direction-indexed lenses)
 * `write f v`, `write f[k] v`, `write f[k₁, k₂] v` — storage writes (`v` may be `Tx`)
 * `a +? b`, `a -? b`, `a *? b`, `a /? b` — checked arithmetic (operands may be `Tx`)
 * `a mulDiv↓ b / c`, `a mulDiv↑ b / c` — fused checked mulDiv (one op, not `*?` then `/?`)
@@ -566,12 +571,9 @@ namespace Syntax
 open Lean
 
 scoped syntax:max (name := lscRead) "read " ident ("[" term,+ "]")? : term
-scoped syntax:max (name := lscReadField) "read " ident noWs "." ident : term
 scoped syntax:max (name := lscWrite) "write " ident ("[" term,+ "]")? ppSpace term:max : term
-scoped syntax:max (name := lscWriteField) "write " ident noWs "." ident ppSpace term:max : term
 
 def sigma : Ident := mkIdent `σ
-def projOf (f : Ident) : Ident := mkIdent (`σ ++ f.getId)
 
 scoped syntax:65 (name := lscHAdd) term:65 " +? " term:66 : term
 scoped syntax:65 (name := lscHSub) term:65 " -? " term:66 : term

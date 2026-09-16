@@ -23,6 +23,7 @@ namespace Toy
 structure Storage where
   token : Ref (IERC20 toyAsset)
   owner : Address
+  deriving Fields
 
 inductive Event
   | Dummy
@@ -55,6 +56,7 @@ namespace BadToy
 structure Storage where
   token : Ref (IERC20 toyAsset)
   owner : Address
+  deriving Fields
 
 inductive Event
   | Dummy

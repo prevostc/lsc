@@ -15,6 +15,7 @@ namespace ReentrantToy
 
 structure Storage where
   dummy : Nat
+  deriving Fields
 
 inductive Event
   | Dummy
@@ -43,6 +44,7 @@ namespace ReentrantBad
 
 structure Storage where
   dummy : Nat
+  deriving Fields
 
 inductive Event
   | Dummy

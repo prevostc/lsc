@@ -30,6 +30,8 @@ Units in `Stdlib/Scales.lean`: `Wad`/`Ray`/`Bps` (`Fixed 18/27/4`) and constants
 ```lean
 structure Storage where
   count : Nat
+  deriving Fields
+open Storage.Fields
 
 def increment : M Unit := do
   write count (read count +? 1)
@@ -47,6 +49,26 @@ lsc_contract Counter increment incrementBy decrement get
 each listed function (kernel-checked `f.core_denote`) and assembles
 `C.contract` plus the language-level spec used by security proofs. A reifier
 bug is a build error, not a silent miscompile.
+
+## Fields are values
+
+`deriving Fields` on `structure Storage` generates one `Field Storage α`
+lens per field in `Storage.Fields`. Follow it with `open Storage.Fields`
+so `reserve1` in contract code *is* the lens (`deriving` cannot persist
+that `open` itself). `read` / `write` take lens values; `read
+balances[who]` indexes a mapping lens. A bare ident resolves to
+`Storage.Fields.f`, so a binder may reuse the field name
+(`write owner owner`). Direction-indexed helpers return lenses:
+
+```lean
+@[reducible] def SwapDirection.reserveOut :
+    (d : SwapDirection) → Field Storage (Amount d.assetOut)
+  | .zeroForOne => reserve1
+  | .oneForZero => reserve0
+```
+
+Reify still sees `Field.get` / `Field.set` (unfolded to the projection
+and `{ σ with f := v }`).
 
 ## Token, vault, pool
 

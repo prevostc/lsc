@@ -1,5 +1,6 @@
 import Lsc.Lang.Amount
 import Lsc.Lang.Word
+import Lsc.Lang.FieldsDeriving
 import KeccakEngine.Sponge
 import Lean.Elab.Term
 
@@ -274,9 +275,13 @@ end Tx
 
 /-! ### `read` / `write` elaborators
 
-`Amount` / `*.Ref` fields are stored as words in Core. The sugar elaborates to
-the same `ofWord` / `.raw` (and `{ addr := · }` / `.addr`) wrappers the schema
-uses, so `lsc_reify` certificates close. -/
+`Amount` / `*.Ref` fields are stored as words in Core. The sugar elaborates a
+`Field S α` lens (`deriving Fields`) to `Tx.load` / `Tx.store` of
+`Field.get` / `Field.set`, with the same `ofWord` / `.raw` (and
+`{ addr := · }` / `.addr`) wrappers the schema uses, so `lsc_reify`
+certificates close. Bare idents resolve to `S.Fields.f` so a binder may
+reuse the field name (`write owner owner`). `read f[k]` is indexing
+sugar. -/
 namespace Syntax
 open Lean Elab Term Meta PrettyPrinter
 
@@ -468,23 +473,16 @@ def elabMulDivUp : TermElab := fun stx expectedType? =>
       #[a, b, c] expectedType?
   | _ => throwUnsupportedSyntax
 
-def elabFieldProj (f : Ident) (expectedType? : Option Expr) : TermElabM Expr := do
-  let some S ← txStorage? expectedType? |
-    throwError "read/write: could not infer storage type (use in a `Tx` context)"
-  let α ← mkFreshExprMVar none
-  let expected ← mkArrow S α
-  elabTerm (← `(fun $(sigma) => $(projOf f))) expected
-
-/-- Value type of storage field `f` (scalar / map1 / map2).
+/-- Value type at the end of a lens type `α` (scalar / map1 / map2).
 Reducible-only: `Address` is a `def` newtype and must not unfold to `Nat`. -/
-def fieldValTy (f : Ident) (expectedType? : Option Expr) : TermElabM Expr := do
-  forallTelescopeReducing (← inferType (← elabFieldProj f expectedType?)) fun _ body =>
+def lensValTy (α : Expr) : TermElabM Expr :=
+  forallTelescopeReducing α fun _ body =>
     withReducible (whnf body)
 
-/-- Number of mapping keys `f` expects (0 = scalar). -/
-def fieldKeyCount (f : Ident) (expectedType? : Option Expr) : TermElabM Nat := do
-  forallTelescopeReducing (← inferType (← elabFieldProj f expectedType?)) fun xs _ =>
-    return xs.size - 1
+/-- Number of mapping keys a lens of type `Field S α` expects (0 = scalar). -/
+def lensKeyCount (α : Expr) : TermElabM Nat :=
+  forallTelescopeReducing α fun xs _ =>
+    return xs.size
 
 def wrapLoad (α : Expr) (load : Term) (expectedType? : Option Expr) : TermElabM Expr := do
   let α ← whnfD α
@@ -496,8 +494,8 @@ def wrapLoad (α : Expr) (load : Term) (expectedType? : Option Expr) : TermElabM
     elabTerm load expectedType?
 
 /-- Lean lexes `d.f` as one hierarchical `ident`, so `read d.f` / `write d.f`
-hit `lscRead` / `lscWrite`. Split that form; `lscReadField` stays for an
-explicit `d` / `.` / `f` parse if it ever wins. -/
+hit `lscRead` / `lscWrite`. Split into field notation so the head elaborates
+as a `Field` value. -/
 def splitFieldIdent? (id : Ident) : Option (Ident × Ident) :=
   match id.getId with
   | .str pre field =>
@@ -506,83 +504,77 @@ def splitFieldIdent? (id : Ident) : Option (Ident × Ident) :=
     else none
   | _ => none
 
-/-- Elaborate `d.f` as `Field S α` using the surrounding `Tx` storage. -/
-def elabFieldRef (d f : Ident) (expectedType? : Option Expr) : TermElabM Expr := do
+/-- Head of `read`/`write` as a `Field S α` term. Bare idents resolve to
+`S.Fields.f` (binders may reuse the field name). `d.f` is field notation. -/
+def fieldLensTerm (f : Ident) (expectedType? : Option Expr) : TermElabM Term := do
+  if let some (d, fld) := splitFieldIdent? f then
+    `($d.$fld)
+  else
+    let some S ← txStorage? expectedType? |
+      throwError "read/write: could not infer storage type (use in a `Tx` context)"
+    let S ← withReducible (whnf (← instantiateMVars S))
+    match S.getAppFn.constName? with
+    | some sName =>
+      let n := sName ++ `Fields ++ f.getId
+      unless (← getEnv).contains n do
+        throwError "read/write: `{f.getId}` is not a field of `{sName}` \
+          (add `deriving Fields` on the storage structure)"
+      `($(mkIdent (`_root_ ++ n)))
+    | none =>
+      throwError "read/write: could not infer storage type (use in a `Tx` context)"
+
+/-- `α` of `Field S α` for a lens term. -/
+def elabLensTy (lens : Term) (expectedType? : Option Expr) : TermElabM Expr := do
   let some S ← txStorage? expectedType? |
     throwError "read/write: could not infer storage type (use in a `Tx` context)"
   let α ← mkFreshExprMVar none
   let fieldTy := mkAppN (mkConst ``Lsc.Field) #[S, α]
-  discard <| elabTerm (← `($d.$f)) (some fieldTy)
+  discard <| elabTerm lens (some fieldTy)
   withReducible (instantiateMVars (← whnf α))
-
-def elabReadFieldOf (d f : Ident) (expectedType? : Option Expr) : TermElabM Expr := do
-  let α ← elabFieldRef d f expectedType?
-  let load ←
-    if isRef α then
-      `(Lsc.Tx.load (fun $(sigma) =>
-          ((Lsc.Field.get ($d.$f) $(sigma)).addr : Nat)))
-    else
-      `(Lsc.Tx.load (Lsc.Field.get ($d.$f)))
-  wrapLoad α load expectedType?
 
 @[term_elab lscRead]
 def elabRead : TermElab := fun stx expectedType? => do
   tryPostponeIfNoneOrMVar expectedType?
   match stx with
   | `(read $f:ident) => do
-    if let some (d, fld) := splitFieldIdent? f then
-      return ← elabReadFieldOf d fld expectedType?
-    let n ← fieldKeyCount f expectedType?
-    unless n == 0 do throwError "read: `{f.getId}` needs keys"
-    let α ← fieldValTy f expectedType?
+    let lens ← fieldLensTerm f expectedType?
+    let α ← elabLensTy lens expectedType?
+    unless (← lensKeyCount α) == 0 do throwError "read: `{f.getId}` needs keys"
+    let valTy ← lensValTy α
     let load ←
-      if isRef (← whnfD α) then
+      if isRef valTy then
         `(Lsc.Tx.load (fun $(sigma) =>
-            (($(← fieldProj f α)).addr : Nat)))
+            ((Lsc.Field.get $lens $(sigma)).addr : Nat)))
       else
-        `(Lsc.Tx.load (fun $(sigma) => $(← fieldProj f α)))
-    wrapLoad α load expectedType?
+        `(Lsc.Tx.load (Lsc.Field.get $lens))
+    wrapLoad valTy load expectedType?
   | `(read $f:ident [ $ks:term,* ]) => do
+    let lens ← fieldLensTerm f expectedType?
+    let α ← elabLensTy lens expectedType?
     let keys := ks.getElems
-    let n ← fieldKeyCount f expectedType?
+    let n ← lensKeyCount α
     unless n == keys.size do
       throwError "read: `{f.getId}` expects {n} key(s)"
-    let α ← fieldValTy f expectedType?
+    let valTy ← lensValTy α
     match keys.toList with
     | [k] =>
-      let kk := mkIdent `k
       let load ←
-        if isRef (← whnfD α) then
-          `(Lsc.Tx.loadMap (fun $(sigma) $kk =>
-            (($(← fieldProjKey f kk α)).addr : Nat)) $k)
+        if isRef valTy then
+          `(Lsc.Tx.loadMap (fun $(sigma) k =>
+              ((Lsc.Field.get $lens $(sigma) k).addr : Nat)) $k)
         else
-          `(Lsc.Tx.loadMap (fun $(sigma) $kk =>
-            $(← fieldProjKey f kk α)) $k)
-      wrapLoad α load expectedType?
+          `(Lsc.Tx.loadMap (Lsc.Field.get $lens) $k)
+      wrapLoad valTy load expectedType?
     | [k₁, k₂] =>
-      let a := mkIdent `k₁
-      let b := mkIdent `k₂
       let load ←
-        if isRef (← whnfD α) then
-          `(Lsc.Tx.loadMap2 (fun $(sigma) $a $b =>
-            (($(← fieldProjKey2 f a b α)).addr : Nat)) $k₁ $k₂)
+        if isRef valTy then
+          `(Lsc.Tx.loadMap2 (fun $(sigma) k₁ k₂ =>
+              ((Lsc.Field.get $lens $(sigma) k₁ k₂).addr : Nat)) $k₁ $k₂)
         else
-          `(Lsc.Tx.loadMap2 (fun $(sigma) $a $b =>
-            $(← fieldProjKey2 f a b α)) $k₁ $k₂)
-      wrapLoad α load expectedType?
+          `(Lsc.Tx.loadMap2 (Lsc.Field.get $lens) $k₁ $k₂)
+      wrapLoad valTy load expectedType?
     | _ => throwError "read: mappings have one or two keys"
   | _ => throwUnsupportedSyntax
-
-where
-  fieldProj (f : Ident) (_α : Expr) : TermElabM Term := do
-    let p := projOf f
-    `($p)
-  fieldProjKey (f k : Ident) (_α : Expr) : TermElabM Term := do
-    let p := projOf f
-    `($p $k)
-  fieldProjKey2 (f k₁ k₂ : Ident) (_α : Expr) : TermElabM Term := do
-    let p := projOf f
-    `($p $k₁ $k₂)
 
 /-- Elaborate `v` at `Tx S X E ε α` (the primary `write` signature). Pure values
 coerce via `CoeTail`; if the result is `pure v` we emit the store without a
@@ -617,167 +609,128 @@ def writeArg (α : Expr) (v : Term) (expectedType? : Option Expr)
     saved.restore
     elabTerm (← mkPure (← `(($v : $αStx)))) expectedType?
 
-def elabWriteFieldOf (d f : Ident) (v : Term) (expectedType? : Option Expr) :
-    TermElabM Expr := do
-  let α ← elabFieldRef d f expectedType?
-  let α ← withReducible (whnf α)
-  let σ := sigma
-  if isAmount α then
-    writeArg α v expectedType?
-      (fun v =>
-        `(Lsc.Tx.store (fun $σ m =>
-            Lsc.Field.set ($d.$f) $σ (Lsc.Amount.ofWord m))
-          (Lsc.Amount.raw $v)))
-      `(fun x =>
-        Lsc.Tx.store (fun $σ y =>
-            Lsc.Field.set ($d.$f) $σ (Lsc.Amount.ofWord y))
-          (Lsc.Amount.raw x))
-  else if isRef α then
-    writeArg α v expectedType?
-      (fun v =>
-        `(Lsc.Tx.store (fun $σ m => Lsc.Field.set ($d.$f) $σ { addr := m })
-            ($v).addr))
-      `(fun x =>
-        Lsc.Tx.store (fun $σ y => Lsc.Field.set ($d.$f) $σ { addr := y })
-          x.addr)
-  else
-    writeArg α v expectedType?
-      (fun v => `(Lsc.Tx.store (Lsc.Field.set ($d.$f)) $v))
-      `(fun x => Lsc.Tx.store (Lsc.Field.set ($d.$f)) x)
-
-@[term_elab lscReadField]
-def elabReadField : TermElab := fun stx expectedType? => do
-  tryPostponeIfNoneOrMVar expectedType?
-  match stx with
-  | `(read $d:ident.$f:ident) => elabReadFieldOf d f expectedType?
-  | _ => throwUnsupportedSyntax
-
 @[term_elab lscWrite]
 def elabWrite : TermElab := fun stx expectedType? => do
   tryPostponeIfNoneOrMVar expectedType?
   match stx with
   | `(write $f:ident $v) => do
-    if let some (d, fld) := splitFieldIdent? f then
-      return ← elabWriteFieldOf d fld v expectedType?
-    let n ← fieldKeyCount f expectedType?
-    unless n == 0 do throwError "write: `{f.getId}` needs keys"
-    let α ← fieldValTy f expectedType?
-    storeScalar f α v expectedType?
+    let lens ← fieldLensTerm f expectedType?
+    let α ← elabLensTy lens expectedType?
+    unless (← lensKeyCount α) == 0 do throwError "write: `{f.getId}` needs keys"
+    let valTy ← lensValTy α
+    storeScalar lens valTy v expectedType?
   | `(write $f:ident [ $ks:term,* ] $v) => do
+    let lens ← fieldLensTerm f expectedType?
+    let α ← elabLensTy lens expectedType?
     let keys := ks.getElems
-    let n ← fieldKeyCount f expectedType?
+    let n ← lensKeyCount α
     unless n == keys.size do
       throwError "write: `{f.getId}` expects {n} key(s)"
-    let α ← fieldValTy f expectedType?
+    let valTy ← lensValTy α
     match keys.toList with
-    | [k] => storeMap1 f α k v expectedType?
-    | [k₁, k₂] => storeMap2 f α k₁ k₂ v expectedType?
+    | [k] => storeMap1 lens valTy k v expectedType?
+    | [k₁, k₂] => storeMap2 lens valTy k₁ k₂ v expectedType?
     | _ => throwError "write: mappings have one or two keys"
   | _ => throwUnsupportedSyntax
 
 where
-  storeScalar (f : Ident) (α : Expr) (v : Term) (expectedType? : Option Expr) :
+  storeScalar (lens : Term) (α : Expr) (v : Term) (expectedType? : Option Expr) :
       TermElabM Expr := do
     let α ← withReducible (whnf α)
     let σ := sigma
     if isAmount α then
       writeArg α v expectedType?
         (fun v =>
-          `(Lsc.Tx.store (fun $σ m => { $σ with $f:ident := Lsc.Amount.ofWord m })
+          `(Lsc.Tx.store (fun $σ m => Lsc.Field.set $lens $σ (Lsc.Amount.ofWord m))
               (Lsc.Amount.raw $v)))
         `(fun x =>
-          Lsc.Tx.store (fun $σ y => { $σ with $f:ident := Lsc.Amount.ofWord y })
+          Lsc.Tx.store (fun $σ y => Lsc.Field.set $lens $σ (Lsc.Amount.ofWord y))
             (Lsc.Amount.raw x))
     else if isRef α then
       writeArg α v expectedType?
         (fun v =>
-          `(Lsc.Tx.store (fun $σ m => { $σ with $f:ident := { addr := m } })
+          `(Lsc.Tx.store (fun $σ m => Lsc.Field.set $lens $σ { addr := m })
               ($v).addr))
         `(fun x =>
-          Lsc.Tx.store (fun $σ y => { $σ with $f:ident := { addr := y } })
+          Lsc.Tx.store (fun $σ y => Lsc.Field.set $lens $σ { addr := y })
             x.addr)
     else
       writeArg α v expectedType?
-        (fun v => `(Lsc.Tx.store (fun $σ m => { $σ with $f:ident := m }) $v))
-        `(fun x => Lsc.Tx.store (fun $σ y => { $σ with $f:ident := y }) x)
-  storeMap1 (f : Ident) (α : Expr) (k v : Term) (expectedType? : Option Expr) :
+        (fun v => `(Lsc.Tx.store (fun $σ m => Lsc.Field.set $lens $σ m) $v))
+        `(fun x => Lsc.Tx.store (fun $σ y => Lsc.Field.set $lens $σ y) x)
+  storeMap1 (lens : Term) (α : Expr) (k v : Term) (expectedType? : Option Expr) :
       TermElabM Expr := do
     let α ← withReducible (whnf α)
     let σ := sigma
-    let p := projOf f
     let kk := mkIdent `k
     let mm := mkIdent `m
     if isAmount α then
       writeArg α v expectedType?
         (fun v =>
-          `(Lsc.Tx.storeMap (fun $σ $kk => Lsc.Amount.raw ($p $kk))
-              (fun $σ $mm => { $σ with $f:ident := fun $kk => Lsc.Amount.ofWord ($mm $kk) })
+          `(Lsc.Tx.storeMap (fun $σ $kk => Lsc.Amount.raw (Lsc.Field.get $lens $σ $kk))
+              (fun $σ $mm => Lsc.Field.set $lens $σ (fun $kk => Lsc.Amount.ofWord ($mm $kk)))
               $k (Lsc.Amount.raw $v)))
         `(fun x =>
-          Lsc.Tx.storeMap (fun $σ $kk => Lsc.Amount.raw ($p $kk))
-            (fun $σ $mm => { $σ with $f:ident := fun $kk => Lsc.Amount.ofWord ($mm $kk) })
+          Lsc.Tx.storeMap (fun $σ $kk => Lsc.Amount.raw (Lsc.Field.get $lens $σ $kk))
+            (fun $σ $mm => Lsc.Field.set $lens $σ (fun $kk => Lsc.Amount.ofWord ($mm $kk)))
             $k (Lsc.Amount.raw x))
     else if isRef α then
       writeArg α v expectedType?
         (fun v =>
-          `(Lsc.Tx.storeMap (fun $σ $kk => ($p $kk).addr)
-              (fun $σ $mm => { $σ with $f:ident := fun $kk => { addr := $mm $kk } })
+          `(Lsc.Tx.storeMap (fun $σ $kk => (Lsc.Field.get $lens $σ $kk).addr)
+              (fun $σ $mm => Lsc.Field.set $lens $σ (fun $kk => { addr := $mm $kk }))
               $k ($v).addr))
         `(fun x =>
-          Lsc.Tx.storeMap (fun $σ $kk => ($p $kk).addr)
-            (fun $σ $mm => { $σ with $f:ident := fun $kk => { addr := $mm $kk } })
+          Lsc.Tx.storeMap (fun $σ $kk => (Lsc.Field.get $lens $σ $kk).addr)
+            (fun $σ $mm => Lsc.Field.set $lens $σ (fun $kk => { addr := $mm $kk }))
             $k x.addr)
     else
       writeArg α v expectedType?
         (fun v =>
-          `(Lsc.Tx.storeMap (fun $σ => $p) (fun $σ $mm => { $σ with $f:ident := $mm })
-              $k $v))
+          `(Lsc.Tx.storeMap (Lsc.Field.get $lens) (Lsc.Field.set $lens) $k $v))
         `(fun x =>
-          Lsc.Tx.storeMap (fun $σ => $p) (fun $σ $mm => { $σ with $f:ident := $mm })
-            $k x)
-  storeMap2 (f : Ident) (α : Expr) (k₁ k₂ v : Term) (expectedType? : Option Expr) :
+          Lsc.Tx.storeMap (Lsc.Field.get $lens) (Lsc.Field.set $lens) $k x)
+  storeMap2 (lens : Term) (α : Expr) (k₁ k₂ v : Term) (expectedType? : Option Expr) :
       TermElabM Expr := do
     let α ← withReducible (whnf α)
     let σ := sigma
-    let p := projOf f
     let a := mkIdent `k₁
     let b := mkIdent `k₂
     let mm := mkIdent `m
     if isAmount α then
       writeArg α v expectedType?
         (fun v =>
-          `(Lsc.Tx.storeMap2 (fun $σ $a $b => Lsc.Amount.raw ($p $a $b))
-              (fun $σ $mm => { $σ with $f:ident := fun $a $b => Lsc.Amount.ofWord ($mm $a $b) })
+          `(Lsc.Tx.storeMap2
+              (fun $σ $a $b => Lsc.Amount.raw (Lsc.Field.get $lens $σ $a $b))
+              (fun $σ $mm =>
+                Lsc.Field.set $lens $σ (fun $a $b => Lsc.Amount.ofWord ($mm $a $b)))
               $k₁ $k₂ (Lsc.Amount.raw $v)))
         `(fun x =>
-          Lsc.Tx.storeMap2 (fun $σ $a $b => Lsc.Amount.raw ($p $a $b))
-            (fun $σ $mm => { $σ with $f:ident := fun $a $b => Lsc.Amount.ofWord ($mm $a $b) })
+          Lsc.Tx.storeMap2
+            (fun $σ $a $b => Lsc.Amount.raw (Lsc.Field.get $lens $σ $a $b))
+            (fun $σ $mm =>
+              Lsc.Field.set $lens $σ (fun $a $b => Lsc.Amount.ofWord ($mm $a $b)))
             $k₁ $k₂ (Lsc.Amount.raw x))
     else if isRef α then
       writeArg α v expectedType?
         (fun v =>
-          `(Lsc.Tx.storeMap2 (fun $σ $a $b => ($p $a $b).addr)
-              (fun $σ $mm => { $σ with $f:ident := fun $a $b => { addr := $mm $a $b } })
+          `(Lsc.Tx.storeMap2
+              (fun $σ $a $b => (Lsc.Field.get $lens $σ $a $b).addr)
+              (fun $σ $mm =>
+                Lsc.Field.set $lens $σ (fun $a $b => { addr := $mm $a $b }))
               $k₁ $k₂ ($v).addr))
         `(fun x =>
-          Lsc.Tx.storeMap2 (fun $σ $a $b => ($p $a $b).addr)
-            (fun $σ $mm => { $σ with $f:ident := fun $a $b => { addr := $mm $a $b } })
+          Lsc.Tx.storeMap2
+            (fun $σ $a $b => (Lsc.Field.get $lens $σ $a $b).addr)
+            (fun $σ $mm =>
+              Lsc.Field.set $lens $σ (fun $a $b => { addr := $mm $a $b }))
             $k₁ $k₂ x.addr)
     else
       writeArg α v expectedType?
         (fun v =>
-          `(Lsc.Tx.storeMap2 (fun $σ => $p) (fun $σ $mm => { $σ with $f:ident := $mm })
-              $k₁ $k₂ $v))
+          `(Lsc.Tx.storeMap2 (Lsc.Field.get $lens) (Lsc.Field.set $lens) $k₁ $k₂ $v))
         `(fun x =>
-          Lsc.Tx.storeMap2 (fun $σ => $p) (fun $σ $mm => { $σ with $f:ident := $mm })
-            $k₁ $k₂ x)
-
-@[term_elab lscWriteField]
-def elabWriteField : TermElab := fun stx expectedType? => do
-  tryPostponeIfNoneOrMVar expectedType?
-  match stx with
-  | `(write $d:ident.$f:ident $v) => elabWriteFieldOf d f v expectedType?
-  | _ => throwUnsupportedSyntax
+          Lsc.Tx.storeMap2 (Lsc.Field.get $lens) (Lsc.Field.set $lens) $k₁ $k₂ x)
 
 end Syntax
 

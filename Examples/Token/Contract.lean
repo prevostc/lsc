@@ -23,6 +23,9 @@ structure Storage where
   totalSupply : Amount tokenAsset
   balances : Mapping Address (Amount tokenAsset)
   allowances : Mapping Address (Mapping Address (Amount tokenAsset))
+  deriving Fields
+
+open Storage.Fields
 
 inductive Event
   | Transfer (src to : Address) (amount : Amount tokenAsset)

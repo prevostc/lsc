@@ -13,6 +13,9 @@ namespace Counter
 
 structure Storage where
   count : Nat
+  deriving Fields
+
+open Storage.Fields
 
 inductive Event
   | Incremented (by_ : Nat)

@@ -21,6 +21,9 @@ structure Storage where
   balances    : Mapping Address (Amount native)
   allowances  : Mapping Address (Mapping Address (Amount native))
   totalSupply : Amount native
+  deriving Fields
+
+open Storage.Fields
 
 inductive Event
   | Deposit (who : Address) (amount : Amount native)

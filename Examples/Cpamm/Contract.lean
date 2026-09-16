@@ -36,6 +36,9 @@ structure Storage where
   protocolShareBps : Bps
   protocolFees0 : Amount asset0
   protocolFees1 : Amount asset1
+  deriving Fields
+
+open Storage.Fields
 
 inductive Event
   | AddLiquidity (who : Address) (a0 : Amount asset0) (a1 : Amount asset1)
@@ -85,28 +88,28 @@ inductive SwapDirection
 /-- Storage fields on the input/output side of a swap. -/
 @[reducible] def SwapDirection.reserveIn :
     (d : SwapDirection) → Field Storage (Amount d.assetIn)
-  | .zeroForOne => ⟨Storage.reserve0, fun σ v => { σ with reserve0 := v }⟩
-  | .oneForZero => ⟨Storage.reserve1, fun σ v => { σ with reserve1 := v }⟩
+  | .zeroForOne => reserve0
+  | .oneForZero => reserve1
 
 @[reducible] def SwapDirection.reserveOut :
     (d : SwapDirection) → Field Storage (Amount d.assetOut)
-  | .zeroForOne => ⟨Storage.reserve1, fun σ v => { σ with reserve1 := v }⟩
-  | .oneForZero => ⟨Storage.reserve0, fun σ v => { σ with reserve0 := v }⟩
+  | .zeroForOne => reserve1
+  | .oneForZero => reserve0
 
 @[reducible] def SwapDirection.tokenIn :
     (d : SwapDirection) → Field Storage (Ref (IERC20 d.assetIn))
-  | .zeroForOne => ⟨Storage.token0, fun σ v => { σ with token0 := v }⟩
-  | .oneForZero => ⟨Storage.token1, fun σ v => { σ with token1 := v }⟩
+  | .zeroForOne => token0
+  | .oneForZero => token1
 
 @[reducible] def SwapDirection.tokenOut :
     (d : SwapDirection) → Field Storage (Ref (IERC20 d.assetOut))
-  | .zeroForOne => ⟨Storage.token1, fun σ v => { σ with token1 := v }⟩
-  | .oneForZero => ⟨Storage.token0, fun σ v => { σ with token0 := v }⟩
+  | .zeroForOne => token1
+  | .oneForZero => token0
 
 @[reducible] def SwapDirection.protocolFees :
     (d : SwapDirection) → Field Storage (Amount d.assetIn)
-  | .zeroForOne => ⟨Storage.protocolFees0, fun σ v => { σ with protocolFees0 := v }⟩
-  | .oneForZero => ⟨Storage.protocolFees1, fun σ v => { σ with protocolFees1 := v }⟩
+  | .zeroForOne => protocolFees0
+  | .oneForZero => protocolFees1
 
 /-- Constant-product quote: 0.3% fee, output and protocol take; oversized take reverts. -/
 @[lsc_inline] def swapOut {a b : Asset} (rIn : Amount a) (rOut : Amount b)

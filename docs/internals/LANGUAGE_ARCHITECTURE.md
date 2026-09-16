@@ -30,7 +30,10 @@ Core  --toYul (ours)-->  Yul AST (powdr yul-semantics)  --powdr compile_correct-
   `structure` (an abbrev would unify every amount back to `Word`). Same-asset `+? -?`;
   `*? /?` only against a `Word` scalar; `*?↓` / `*?↑` only against a `Fixed d` (a non-fixed
   `Amount b` is a type error). Mixed-unit arithmetic is a type error.
-- Storage is a Lean `structure`; mappings are `K → V` with default zero (≤ 2 keys).
+- Storage is a Lean `structure`; `deriving Fields` generates a `Field S α`
+  lens per field (`S.Fields.f`). Contract files `open Storage.Fields` so
+  the field name *is* the lens. `read` / `write` take lens values;
+  `read f[k]` is indexing sugar. Mappings are `K → V` with default zero (≤ 2 keys).
 - Reentrancy during a call is not modelled at Tx (`self` is unchanged). The
   runtime emits `if tload(0) { revert(0,0) }` on every entry; `locks f`
   acquire/release the slot unless `[Reentrant]`. Held-lock revert is proved

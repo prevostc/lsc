@@ -22,6 +22,7 @@ def asset1 : Asset := ⟨`asset1, none⟩
 structure Storage where
   dummy : Nat
   token : IERC20.Ref testToken
+  deriving Fields
 
 inductive Event
   | Dummy

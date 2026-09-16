@@ -16,11 +16,14 @@ Lake libraries (`lakefile.lean`): `LscSemantics` (`Lsc.Lang`, `Lsc.Security`,
 ## `Lsc/Lang` — the language
 
 - `Tx.lean` — `Tx S X E ε`, `World S X E`, `Ctx`, `Oracle`, `Err` (including
-  `callFailed`), primitives, `Lsc.Syntax` `read` / `write`. Language specification.
+  `callFailed`), primitives, `Field`, `deriving Fields` marker, `Lsc.Syntax`
+  `read` / `write`. Language specification.
   `TxTheorems.lean` / `TxProof.lean` — `run_*` peeling lemmas and monad laws.
 - `Interface.lean` — `Fn` / `View`, `Interface`, `Tx.call` / `Tx.view` /
-  `Tx.tryCall`, `decodeOrDefault`, `I.Ref` macro. `InterfaceDeriving.lean`
-  generates `I.Ref` / `I.Impl` / `Impl.ofRef`. `InterfaceTheorems.lean` /
+  `Tx.tryCall`, `decodeOrDefault`, `I.Ref` macro, `read`/`write` elaborators
+  (lens values; bare idents → `S.Fields.f`). `InterfaceDeriving.lean`
+  generates `I.Ref` / `I.Impl` / `Impl.ofRef`. `FieldsDeriving.lean`
+  generates per-field `Field S α` lenses. `InterfaceTheorems.lean` /
   `InterfaceProof.lean` — `run_call` / `run_view` and certificate lemmas.
 - `Word.lean` — `Word`, `Flag`, checked `+? -? *? /?`, `mulDivDown` / `Up` /
   `pow10`. `WordTheorems.lean` / `WordProof.lean` for `Tx.run` lemmas.
