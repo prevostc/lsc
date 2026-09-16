@@ -17,7 +17,7 @@ DeFi-oriented cut of SWC / OWASP Smart Contract Top 10 / Solodit. Status is
 | Rounding / precision loss | Proved | `mulDiv↓`/`↑`; `swap0for1_k`; `removeLiquidity_paid`; `vault_solvent` (floor dust) | 512-bit `mulDiv` (Cpamm docstring) |
 | First-depositor / share inflation / donation | Proved | Vault: `Shares` virtual offset `10^6`; `deposit_inflation_bounded` / `Shares.inflation_bound_raw` (`V · (x − r) ≤ A + V`); Cpamm: Uniswap-v2 `MINIMUM_LIQUIDITY` lock, `addLiquidity_min_liquidity` (first mint → `1000 ≤ totalShares`) | Weaker `r ≥ x − x/V − 1` is false when the mint is 0; attacker-cost form is what is proved |
 | Access control / missing auth | Proved | `token_no_unauthorized_extraction` + `Auth`; Vault/Cpamm own `withdraw`/`removeLiquidity`; `NotOwner` on mint/pause | `Auth` is per-contract; missing `require` still compiles until proofs fail |
-| Unchecked CALL return | Impossible | `if iszero(ok) { revert(0,0) }`; `SafeERC20` `require (ok = true)`; `boolOpt` empty→true | Raw `r.transfer` without `safe*` still compiles |
+| Unchecked CALL return | Impossible | `if iszero(ok) { revert(0,0) }`; `SafeERC20` `require (ok = true)`; `Native.send` reverts with `err`; `boolOpt` empty→true | Raw `r.transfer` / `Native.try.send` without a check still compiles |
 | Fee-on-transfer / rebase / weird ERC20 | Assumed | `IERC20.Spec.transfer_moves` exact `amount`; SECURITY.md fee-on-transfer, down-rebase excluded; `vaultRely` allows up-rebase | Stdlib: credit `Δ balanceOf` |
 | Approve front-running | Open | `approve_sets` overwrite; no `increaseAllowance` | Stdlib `increaseAllowance` |
 | Price-oracle manipulation | Open | No oracle `Interface`; Cpamm price = reserves | Stdlib Chainlink/TWAP `Spec` |
@@ -30,7 +30,7 @@ DeFi-oriented cut of SWC / OWASP Smart Contract Top 10 / Solodit. Status is
 | Unbounded loops / gas DoS | Impossible | `Core` loop-free; Yul never `for`; gas griefing of *our* exec out of scope | — |
 | DoS via revert-in-callback / unexpected ETH | Assumed | Failed CALL reverts us (SECURITY.md); ABI `nonpayable`; no `receive` | Liveness vs token-revert griefing |
 | Timestamp / block dependence | Open | `Tx.timestamp` / `blockNumber` are `Core.Op` and compile | Lint/ban in `Auth` |
-| ETH / `payable` / stuck funds | Assumed | Interface “payable methods are not modelled”; outgoing `call(..., 0, ...)` | Model payable; sweep force-ETH |
+| ETH / `payable` / stuck funds | Proved | `[Payable]` + typed `Tx.value`; dispatcher `callvalue` revert; `Native.send`; WNative `wnative_backed` / deltas | Trace `step` credits `ctx.value` before `Tx.run`; native-balance extraction is **not** in the `Wealth` framework |
 | Decimals mismatch / unit confusion | Proved | `Amount a` blocks mixed `+?`; `x.as b` requires `a.decimals? = b.decimals?` at elaboration (rejects `USDC(6)→DAI(18)` and `none` vs `some`); `asUnchecked` only for documented cross-scale retags (Cpamm first mint) | `decodeOrDefault` on views still fail-open |
 | Unsafe casts / silent truncation | Open | `Amount.ofWord`; `decodeOrDefault` on views | Fail closed on bad view ABI |
 | ERC-777 / token-hook reentrancy | Assumed | SECURITY.md ERC-777 hooks out of scope; `NoReentry` | 8C + token `Spec` |

@@ -74,6 +74,8 @@ Share conversion is `Shares.toShares` / `Shares.toAssets` with
 `offset := ⟨6⟩` (virtual offset `10^6`).
 Cpamm (`Examples/Cpamm/Contract.lean`) binds two `Ref (IERC20 …)` tokens.
 See [External calls](EXTERNAL_CALLS.md).
+WNative (`Examples/WNative/Contract.lean`) wraps the chain native asset
+(`def chain := .ethereum`) as an ERC-20 (`IERC20.Exact`).
 
 A function named `constructor` is deployment only; it is not a trace
 entrypoint. Token's constructor mints the initial supply to the owner.
@@ -118,10 +120,17 @@ Write them as instance binders on the function. There are no user
 instances: a helper that asks for `[Payable]` is callable only from a
 function that already has the binder. Binder order does not matter.
 
+Pick a chain profile once (`def chain : Chain := .ethereum` and
+`abbrev native := Chain.native chain`). `Tx.value` is `[Payable]` and returns
+`Amount` of the inferred asset. `Native.send to amount err` is a
+value-carrying CALL with empty calldata (reverts with `err` on failure);
+`Native.try.send` returns `Bool`. `none` native asset: `Chain.native` does
+not elaborate.
+
 ```lean
 def deposit [Payable] : M Unit := do
-  -- `[Payable]` admits value; `Tx.value` arrives with the native-asset
-  -- chain profile (slice 18).
+  let v ← Tx.value
+  -- `v : Amount native` when that is the expected type
 def flashLoan [Reentrant] (to : Address) (amount : Amount usdc) : M Unit := do
   -- …
 def both [Payable] [Reentrant] … : M Unit := do

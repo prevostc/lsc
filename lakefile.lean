@@ -55,7 +55,9 @@ lean_lib Examples where
     Glob.submodules `Examples.Vault,
     Glob.submodules `Examples.Vault.Proofs,
     Glob.submodules `Examples.Cpamm,
-    Glob.submodules `Examples.Cpamm.Proofs
+    Glob.submodules `Examples.Cpamm.Proofs,
+    Glob.submodules `Examples.WNative,
+    Glob.submodules `Examples.WNative.Proofs
   ]
 
 /-- Pinned axiom footprint of the certificates and end-to-end theorems (built by `lake build`). -/

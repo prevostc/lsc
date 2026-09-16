@@ -37,8 +37,9 @@ read asset; tok.balanceOf me`, `safeTransferFrom`).
 
 `lsc_schema` and `lsc_contract` assemble the schema and the contract object.
 `lsc_contract … implements IERC20 …` emits `C.impl`; Token proves
-`theorem erc20 : IERC20.Spec Token.impl`. Start from
-`Examples/Counter/Contract.lean`, then Token, Vault, and Cpamm.
+`theorem erc20 : IERC20.Spec Token.impl`, WNative proves
+`theorem wnative_exact : IERC20.Exact WNative.impl`. Start from
+`Examples/Counter/Contract.lean`, then Token, Vault, Cpamm, and WNative.
 
 Compile with `Lsc.Compiler.compileContract` (`Lsc/Compiler/Pipeline.lean`): it
 returns `Artifacts` (`runtimeHex`, `deployHex`, `abi`, `yul`, `asm`,

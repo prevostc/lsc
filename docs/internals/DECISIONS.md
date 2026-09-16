@@ -374,7 +374,7 @@ wrapper is `WNative`, not a built-in ETH type.
 
 `IERC20.Exact T` extends `IERC20.Spec T` (class; `.toSpec` for Vault/Cpamm).
 A contract file picks `def chain : Chain := .ethereum` and
-`def native := Chain.native chain`. `lsc_contract` is unchanged.
+`abbrev native := Chain.native chain`. `lsc_contract` is unchanged.
 
 ## 2026-09-15 — `seqIf`: shared continuation for effectful `if`
 

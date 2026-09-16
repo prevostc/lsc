@@ -62,6 +62,14 @@ Theorems that mention the token take `hT : IERC20.Spec (w.self.asset.impl : Asse
 USDT-style missing return values are treated as success (`boolOpt`).
 Fee-on-transfer and reentrancy are outside `IERC20.Spec` as stated.
 
+`IERC20.Exact T` is `IERC20.Spec T` as a class (`extends`); Vault/Cpamm
+keep taking `hT : IERC20.Spec _` and discharge it with `exact.toSpec`.
+WNative proves `wnative_exact : IERC20.Exact WNative.impl`.
+
+`Native.send` is a value-carrying CALL with empty calldata (not an
+`I.Ref` method). The Yul is `call(extCallGas, to, value, 0, 0, 0, 0)`.
+`Oracle.send` is the Lean hook; `Oracle.ofExt` fills `CallRequest.value`.
+
 Call-free contracts (Counter, Token) use a closed model: no `CALL`.
 
 ---
