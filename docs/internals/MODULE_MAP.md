@@ -44,10 +44,13 @@ Lake libraries (`lakefile.lean`): `LscSemantics` (`Lsc.Lang`, `Lsc.Security`,
 
 ## `Lsc/Security` — the security model
 
-- `Trace.lean` — `Call`, `Step` (`call` / `env`), `Wf` (`target = self` and
-  `sender ≠ self`), `run`, revert-frame lemmas.
+- `Trace.lean` — `Call`, `Step` (`call` / `env`), `accepted`, `External` /
+  `Wf` (`target = self` and `sender ≠ self`), `HasRely` / `defaultRely`,
+  `run`.
+- `State.lean` — public `State C` / `Txs w`, `foldAccepted`, `HasSpent` /
+  `Txs.spent`.
 - `Invariant.lean` — `Inv : World S X E → Prop`, `RelyAlong`,
-  `PreservesInv` / `PreservesInvEnv` / `PreservesInvAt`.
+  `PreservesInv` / `PreservesInvEnv` / `PreservesInvAt`, `Reachable`.
 - `InvariantTheorems.lean` / `InvariantProof.lean` — `inv_run`, `inv_run_at`.
 - `Wealth.lean` — `claim`, `Auth`, `holdings`, `Solvent`.
 - `WealthTheorems.lean` / `WealthProof.lean` — `no_unauthorized_extraction`,
@@ -129,14 +132,16 @@ Each protocol is a directory (`Examples/AGENTS.md`):
 
 - **Counter** — `Examples/Counter/`. Tx deltas (`increment_adds`, …); no wealth theorem.
 - **Token** — `Examples/Token/`. S1. `token_no_unauthorized_extraction`,
-  `token_solvent`, `erc20` (`IERC20.Spec Token.impl`).
+  `token_solvent`, `erc20` (`IERC20.Spec Token.impl`). Public theorems
+  take `State` / `Txs`.
 - **Vault** — `Examples/Vault/`. S2, one `IERC20.Ref`. `vault_no_unauthorized_extraction`,
-  `vault_solvent`.
+  `vault_solvent` (still `Inv` / `RelyAlong` until 19f).
 - **Cpamm** — `Examples/Cpamm/`. S2, two `IERC20.Ref`. `swap0for1_k`,
-  `cpamm_no_unauthorized_extraction`, `cpamm_solvent`.
+  `cpamm_no_unauthorized_extraction`, `cpamm_solvent` (still `Inv` /
+  `RelyAlong` until 19f).
 - **WETH** — `Examples/WETH/`. Wrapped native (`Chain` profile). `weth_exact`,
-  `weth_backed` (`Reachable`, not an `Inv` hypothesis), `deposit_delta`,
-  `withdraw_delta`.
+  `weth_backed` / `weth_no_unauthorized_extraction` (`State` / `Txs`),
+  `deposit_delta`, `withdraw_delta`.
 
 `Checks.lean` imports `Examples.<Name>.Theorems` only. Bytecode transport is
 the compiler family in `TransportTheorems.lean`, not per-example theorems.

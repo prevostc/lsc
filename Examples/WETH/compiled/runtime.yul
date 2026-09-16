@@ -26,6 +26,9 @@
                 revert(0, 0)
             }
         }
+        if lt(selfbalance(), callvalue()) {
+            revert(0, 0)
+        }
         {
             let deposit_0 := caller()
             let deposit_1 := callvalue()

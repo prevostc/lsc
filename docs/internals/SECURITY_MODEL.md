@@ -58,15 +58,32 @@ Design decisions fixed for `Lsc/Security` (Trace / Invariant / Wealth):
   `run : Args → Tx`). The `[Payable]` table is `HasPayable` (default: none), not a `Spec`
   field. A trace mixes `call` and `env` steps; `step` of a payable call credits `c.value` then
   `Tx.run` (revert rolls the credit back); nonzero value to a non-payable function is a revert
-  step (world unchanged), matching compiler `valueOk` / `dispatchedFn`. `env` is constrained by
-  `RelyAlong`; `run` is a left fold. Well-formed traces (`Wf self tr w`) target `self`, are
-  not self-calls, and never overflow a 256-bit native balance — true on every chain since
-  total native supply < `2^256`. Incoming `creditValue` still wraps (EVM `BitVec`); `Wf` is
-  what rules wrapping out of attack traces.
+  step (world unchanged), matching compiler `valueOk` / `dispatchedFn`. A payable call whose
+  credited balance wraps is also a revert step, matching dispatcher
+  `if lt(selfbalance(), callvalue()) { revert(0,0) }`. `env` is constrained by
+  `RelyAlong`; `run` is a left fold. Public theorems quantify `State C` /
+  `Txs w`. `State` is a world after deployment and any sequence of
+  transactions. `Txs` constructors carry the two model facts: a call has
+  `sender ≠ self` (only `self`'s code can emit a message from `self`; nested
+  calls are `nested_lock_reverts`), and an env step carries the spec's
+  `HasRely` proof. Default rely (`defaultRely`): `self`'s native balance does
+  not fall — only this contract's code can move its ETH; donations are
+  allowed. Contracts with `Ref` counterparties (Vault/Cpamm, slice 19f)
+  override `HasRely` with the honest-counterparty assumption (the token
+  `balanceOf self` does not fall). Internal `Wf` / `External` is
+  world-independent (`target = self` and `sender ≠ self`); the native wrap
+  is no longer a trace assumption.
 - `Reachable C rely self w` is deployment (`Deployed`) followed by a well-formed `rely`
   trace. `inv_of_reachable` turns that into `Inv` when deployment establishes `Inv` and
-  calls/`env` preserve it. WETH public theorems take `Reachable` rather than an `Inv`
-  hypothesis; `Inv` stays a proof device. Token/Vault/Cpamm still take `Inv` in this slice.
+  calls/`env` preserve it. Public Token/WETH theorems take `State` (a `Reachable`
+  world) rather than an `Inv` hypothesis; `Inv` stays a proof device.
+  Vault/Cpamm still take `Inv` / `RelyAlong` until 19f.
+- `spent` (per example, via `HasSpent` / `spentCall`) sums, over **accepted**
+  calls of a `Txs` sequence, the amount moved out on `a`'s authority
+  (`transfer`/`withdraw` with sender `a`, `transferFrom src _ amount` with
+  `src = a`). Failed attempts are not counted (a reverting
+  `transferFrom(a, …, 2^200)` must not vacate the bound). Environment steps
+  contribute 0. Extraction is `w.self.balances a ≤ t.end.self.balances a + t.spent a`.
 - `Inv : World S X E → Prop`. One extra obligation per contract: `Inv` is preserved by `Rely`.
   `of_fns` for contracts with no payable function uses `creditValue w 0 = w` and needs no
   `hcredit`.
@@ -107,10 +124,10 @@ constrained by `RelyAlong` (`vaultRely` / `cpammRely`). Compiler-level
 ## Adversary model
 
 Any set of addresses `A`, any sequence of calls with arbitrary arguments from `A`, interleaved
-arbitrarily with honest calls; between our calls, `env` steps constrained by `RelyAlong`;
-well-formed traces target `self`, are not self-calls, and never overflow a 256-bit native
-balance (`Wf`). External contracts behave per
-their declared `IERC20.Spec` / `RelyAlong`. Other contracts are modelled as unable to see this
+arbitrarily with honest calls; between our calls, `env` steps constrained by `HasRely`
+(default: native balance of `self` does not fall; Vault/Cpamm 19f: honest-counterparty
+`vaultRely` / `cpammRely`). Public `Txs` already carries `sender ≠ self`. External contracts
+behave per their declared `IERC20.Spec` / rely. Other contracts are modelled as unable to see this
 contract's private memory or `msize`, which is true of the EVM (`ExtOracle`).
 They are also modelled as deterministic functions of the call and the on-chain
 state they can see: the same request against the same observable world always

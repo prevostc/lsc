@@ -105,15 +105,25 @@ Not derived from powdr:
   `EvmState.init` with empty logs (`R` tracks `.self` only across a trace).
 - **Universality.** `EvmCallRun` / `EvmTraceRunAll` (S1) and `EvmCallRunExtAll` /
   `EvmTraceRunExtAll` (S2) quantify over **every halted matching EVM run of an
-  arbitrary calldata list**. Unknown selectors are no-ops. `Wf` and
+  arbitrary calldata list**. Unknown selectors are no-ops. Internal `Wf` and
   `NoAuthAlong` are hypotheses on the decoded calls. powdr `compile_correct` is
   forward (`Yul Run → ∃ EVM Steps`). Progress (`toCalls_total` + `yul_progress`)
   supplies a Yul run and `steps_halted_unique` identifies every halted matching
   EVM run with it.
-- **Native-balance bound.** Well-formed traces target `self`, are not self-calls, and
-  never overflow a 256-bit native balance — true on every chain since total native
-  supply < `2^256`. `creditValue` still wraps (EVM `BitVec`); `Wf` is what rules
-  wrapping out of attack traces.
+- **Payable wrap guard (compiled).** Every `[Payable]` entry emits
+  `if lt(selfbalance(), callvalue()) { revert(0,0) }`. After the EVM credits
+  `callvalue`, a 256-bit wrap is exactly `selfbalance() < callvalue()`.
+  `stepCall` mirrors that revert. The wrap is not a trace assumption.
+- **Only `self`'s code moves `self`'s ETH.** An environment step may not
+  decrease this contract's native balance (`defaultRely` / `HasRely`).
+  Donations are allowed. Contracts with `Ref` counterparties add further
+  rely (honest token `balanceOf self`) in 19f.
+- **`sender ≠ self`.** Physically only this contract's code can emit a
+  message from `self`. Nested calls into `self` are the oracle's
+  `nested_lock_reverts`. Public `Txs.call` carries the inequality; 19f
+  per-call theorems can take `msg : Msg` (`Msg.notSelf`) instead of a
+  `hne` hypothesis. Transport of a single call still uses `Ctx`
+  (`CallsWF` already has `sender ≠ self`).
 
 ## Not covered
 

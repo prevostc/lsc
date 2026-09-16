@@ -14,14 +14,16 @@ decrements allowance — the spec hypothesises `sender ≠ src`, so that policy
 is compatible.
 
 **Proved:** a successful transfer or `transferFrom` conserves the two balances.
-A successful `approve` sets the allowance. Nobody's balance falls unless they
-authorised the call. Recorded balances still sum to total supply after any
-well-formed trace.
+A successful `approve` sets the allowance. In any reachable state, recorded
+balances still sum to total supply. No sequence of calls by other parties
+lowers `a`'s balance except by the amount `a` itself authorised
+(`token_no_unauthorized_extraction`: `a`'s own `transfer`/`burn`, or a
+`transferFrom` of `a`'s tokens). Only accepted calls count.
 
 | File | Role |
 |------|------|
 | `Contract.lean` | Token surface + schema + `lsc_contract` (`implements IERC20`) |
-| `Spec.lean` | `claim`, `Auth`, `Inv` |
+| `Spec.lean` | `claim`, `Auth`, `Inv`, `spentCall` |
 | `Theorems.lean` | Exported Tx, IERC20, and security theorems |
 | `Tests.lean` | Smoke `#guard`s |
 | `Proofs/Tx.lean` | `Tx.run` lemmas and deltas |

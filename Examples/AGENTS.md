@@ -18,12 +18,18 @@ Exactly:
   suffixes), named arithmetic where an operator exists (`+? -? *? /?`,
   `mulDiv↓`/`mulDiv↑`).
 - `Spec.lean` — invariant, rely, authorisation/value predicates, named world
-  readers (e.g. `holdings w`). No theorems, no proofs.
+  readers (e.g. `holdings w`), and `spentCall` (amount an accepted call moved
+  out on `a`'s authority). No theorems, no proofs. `Inv` / `Auth` / `claim`
+  are proof machinery consumed by `Proofs/Security.lean`, not public
+  hypotheses.
 - `Theorems.lean` — every exposed theorem about the *contract*: Tx-level
-  deltas, security, `implements` conformance. Plain-language docstring on
-  each; body is a one-line reference into `Proofs/`. NO compiler/bytecode
-  theorems: the compiler's theorems quantify over all contracts, per-contract
-  instances add nothing.
+  deltas, security, `implements` conformance. Trace theorems quantify
+  `State C` and `Txs w` with conclusions in storage fields; no `Inv` /
+  `Wf` / `RelyAlong` / `NoAuthAlong` hypotheses (Vault/Cpamm still use
+  those internally until 19f). Per-call binders are `msg`. Plain-language
+  docstring on each; body is a one-line reference into `Proofs/`. NO
+  compiler/bytecode theorems: the compiler's theorems quantify over all
+  contracts, per-contract instances add nothing.
 - `Proofs/` — `Tx.lean`, `Security.lean`, `Implements.lean` (when the contract
   implements an interface), `Compile.lean` (only the
   `#guard (compileRuntime C.contract).isSome` witness and, if a contract needs

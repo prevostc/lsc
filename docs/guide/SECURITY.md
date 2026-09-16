@@ -38,35 +38,35 @@ If those local facts hold, then:
   contract.
 - If the invariant implies solvency, solvency still holds after any
   well-formed trace. Vault and Cpamm use the `_at` variants, which do
-  require well-formedness (caller ≠ contract, native balance plus call
-  value fits in 256 bits), because their invariant talks about this
-  contract's token balance.
-- The invariant itself still holds along a well-formed trace.
-- WETH's public theorems replace an `Inv` hypothesis with `Reachable`:
-  deployment followed by any well-formed `rely` trace. Backing is proved
-  from that, not assumed.
+  require well-formedness (caller ≠ contract), because their invariant
+  talks about this contract's token balance. The 256-bit native wrap is
+  a compiled payable guard, not a trace hypothesis.
+- Token and WETH public theorems quantify `State` / `Txs`: a deployed
+  world after any sequence of calls by anyone, plus environment steps
+  the spec's rely permits. Extraction is
+  `w.self.balances a ≤ t.end.self.balances a + t.spent a` (`spent` sums
+  authorised outflows over accepted calls). `Inv` is a proof device.
+  Vault/Cpamm still take `Inv` / `RelyAlong` until 19f.
 
 A reverted call leaves the world unchanged. Constructors are not trace
 steps; `Deployed` is the post-constructor (or default) storage, and
-`Reachable` is that state after a well-formed `rely` trace.
+`State` is that world after any `Txs` sequence.
 
 ## What the adversary may do
 
 Any addresses may call any entrypoint with any arguments, in any order,
 interleaved with honest calls — sandwich of *our* calls is this
 quantifier (`run` in `Trace.lean`, `no_unauthorized_extraction`). Between our
-calls, the environment may update `ext` only in ways `vaultRely` /
-`cpammRely` allow (our token `balanceOf` does not fall; `totalSupply`
-stays put). Well-formedness — callers are not the contract itself, and
-the native balance plus call value never overflows 256 bits — is
-required for invariant and solvency preservation and for the `_at`
-extraction theorems (Vault, Cpamm), not for Token-style unrestricted
-extraction.
+calls, the environment may update `ext` only in ways `HasRely` allows
+(default: this contract's native balance does not fall; Vault/Cpamm:
+`vaultRely` / `cpammRely` — our token `balanceOf` does not fall;
+`totalSupply` stays put). `sender ≠ self` is carried by `Txs` / `Msg`,
+not a public hypothesis. The native wrap is a dispatcher revert.
 
 Incoming `callvalue` is credited onto `self`'s native balance in the
 trace `step` only for an accepted payable call (EVM CALL is post-transfer
-at the callee; a value-reject reverts the transfer). `Tx.run` itself is
-unchanged. Non-payable + nonzero value is a revert step.
+at the callee; a value-reject or wrap-reject reverts the transfer). `Tx.run`
+itself is unchanged. Non-payable + nonzero value is a revert step.
 
 Token, Vault, and Cpamm instantiate this at the spec. The compiler lifts
 a trace fact onto bytecode with `transport_claim_ext` /

@@ -15,20 +15,20 @@ pragma solidity >=0.8.0;
 ///                       https://heimdall.rs
 
 contract DecompiledContract {
-    uint256 public totalSupply;
+    uint256 public unresolved_18160ddd;
     mapping(bytes32 => bytes32) storage_map_a;
     
-    event Withdrawal(address, uint256);
-    event Approval(address, address, uint256);
-    event Deposit(address, uint256);
-    error InsufficientBalance();
-    event Transfer(address, address, uint256);
+    event Event_7fcf532c();
+    event Event_8c5be1e5();
+    event Event_e1fffcc4();
+    error CustomError_00000000();
+    event Event_ddf252ad();
     
     /// @custom:selector    0xa9059cbb
-    /// @custom:signature   workMyDirefulOwner(uint256 arg0, uint256 arg1) public returns (uint256)
+    /// @custom:signature   Unresolved_a9059cbb(uint256 arg0, uint256 arg1) public returns (uint256)
     /// @param              arg0 ["uint256", "bytes32", "int256"]
     /// @param              arg1 ["uint256", "bytes32", "int256"]
-    function workMyDirefulOwner(uint256 arg0, uint256 arg1) public returns (uint256) {
+    function Unresolved_a9059cbb(uint256 arg0, uint256 arg1) public returns (uint256) {
         require(!msg.data.length < 0x44);
         address var_a = msg.sender;
         require(!(storage_map_a[var_a] < arg1), CustomError_f4d678b8());
@@ -39,25 +39,25 @@ contract DecompiledContract {
         require(!(storage_map_a[var_a] + arg1) < storage_map_a[var_a]);
         var_a = arg0;
         storage_map_a[var_a] = storage_map_a[var_a] + arg1;
-        emit Transfer(msg.sender, arg0, arg1);
+        emit Event_ddf252ad(msg.sender, arg0, arg1);
         return 0x01;
     }
     
     /// @custom:selector    0x2e1a7d4d
-    /// @custom:signature   withdraw(uint256 arg0) public
+    /// @custom:signature   Unresolved_2e1a7d4d(uint256 arg0) public
     /// @param              arg0 ["uint256", "bytes32", "int256"]
-    function withdraw(uint256 arg0) public {
+    function Unresolved_2e1a7d4d(uint256 arg0) public {
         require(!msg.data.length < 0x24);
         transient[0] = 0x01;
         address var_a = msg.sender;
         require(!(storage_map_a[var_a] < arg0), CustomError_90b8ec18());
         var_a = msg.sender;
         storage_map_a[var_a] = storage_map_a[var_a] - arg0;
-        require(!(totalSupply < arg0), CustomError_90b8ec18());
-        totalSupply = totalSupply - arg0;
+        require(!(unresolved_18160ddd < arg0), CustomError_90b8ec18());
+        unresolved_18160ddd = unresolved_18160ddd - arg0;
         (bool success, bytes memory ret0) = address(msg.sender).transfer(arg0);
         require(success == 0x01, CustomError_90b8ec18());
-        emit Withdrawal(msg.sender, arg0);
+        emit Event_7fcf532c(msg.sender, arg0);
         transient[0] = 0;
     }
     
@@ -95,7 +95,7 @@ contract DecompiledContract {
         require(!(storage_map_a[var_a] + arg2) < storage_map_a[var_a]);
         var_a = arg1;
         storage_map_a[var_a] = storage_map_a[var_a] + arg2;
-        emit Transfer(arg0, arg1, arg2);
+        emit Event_ddf252ad(arg0, arg1, arg2);
         return 0x01;
     }
     
@@ -108,7 +108,7 @@ contract DecompiledContract {
         address var_a = msg.sender;
         var_a = arg0;
         storage_map_a[var_a] = arg1;
-        emit Approval(msg.sender, arg0, arg1);
+        emit Event_8c5be1e5(msg.sender, arg0, arg1);
         return 0x01;
     }
     
@@ -122,15 +122,16 @@ contract DecompiledContract {
     }
     
     /// @custom:selector    0xd0e30db0
-    /// @custom:signature   deposit() public payable
-    function deposit() public payable {
+    /// @custom:signature   Unresolved_d0e30db0() public payable
+    function Unresolved_d0e30db0() public payable {
+        require(!address(this).balance < msg.value);
         address var_a = msg.sender;
         if (!(storage_map_a[var_a] + msg.value) < storage_map_a[var_a]) {
             var_a = msg.sender;
             storage_map_a[var_a] = storage_map_a[var_a] + msg.value;
-            if (!(totalSupply + msg.value) < totalSupply) {
-                totalSupply = totalSupply + msg.value;
-                emit Deposit(msg.sender, msg.value);
+            if (!(unresolved_18160ddd + msg.value) < unresolved_18160ddd) {
+                unresolved_18160ddd = unresolved_18160ddd + msg.value;
+                emit Event_e1fffcc4(msg.sender, msg.value);
             }
         }
     }

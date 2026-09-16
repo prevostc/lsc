@@ -109,9 +109,16 @@ Liveness ("under which conditions does the call succeed") is a separate theorem
 (`foo_succeeds_of …`), written only when a user needs it; never fused into a
 safety theorem.
 
-Prefer statements over all `ctx`/`w`; avoid hypotheses that merely restate an
-invariant already carried by the trace framework (`Inv`) unless the theorem is
-stated outside that framework.
+Prefer statements over all `msg`/`w`. Trace theorems quantify over `State C`
+(a world the contract can actually be in after deployment) and `Txs w`
+(any calls by anyone, plus environment steps the spec's rely permits).
+They must not mention `Inv`, `Wf`, `RelyAlong`, `NoAuthAlong`, `self : Address`,
+`tr : List (Step spec)`, or `oracle` as hypotheses. Conclusions are spelled
+in storage fields (`w.self.balances a`, `w.nativeBalance`, …), not framework
+combinators (`Inv`, `Solvent`, `claim a w ≤ …`). `Inv` / `Auth` / `Reachable`
+stay internal proof machinery. Per-call theorems keep the success hypothesis
+and bind the context as `msg`. Use the generated `Token.World` alias, not
+`World Storage ExtState Event`.
 
 State theorems on the state delta (fields of `w'` versus `w`); return values
 appear only as corollaries or for view functions.

@@ -14,14 +14,14 @@ payable and credits `msg.value`. `withdraw` burns wrapped tokens and
 - `weth_exact` — `IERC20.Exact WETH.impl`; Vault/Cpamm use `.toSpec`.
 - `weth_backed` — in any state the contract can actually reach, wrapped
   `totalSupply` never exceeds the native balance it holds. Deployment
-  starts at supply 0; deposit credits and mints the same amount (`Wf`
-  forbids a wrapping credit); withdraw burns and sends; the environment
-  cannot lower `self`'s native balance.
+  starts at supply 0; deposit credits and mints the same amount (a
+  wrapping credit is a dispatcher revert); withdraw burns and sends;
+  only this contract's code can move its ETH, so the environment cannot
+  lower `self`'s native balance.
 - `weth_no_unauthorized_extraction` — no sequence of calls by other
-  parties lowers an account's wrapped balance; the only authorised
-  reductions are that account's own `transfer`/`withdraw`, or a
-  `transferFrom` within an allowance it granted. Environment steps may
-  not drop this contract's native balance.
+  parties lowers an account's wrapped balance except by the amount that
+  account authorised: its own `transfer`/`withdraw`, or a `transferFrom`
+  of its tokens. Only accepted calls count.
 
 ## What is assumed
 
@@ -29,15 +29,17 @@ payable and credits `msg.value`. `withdraw` burns wrapped tokens and
   reverts the withdraw with `TransferFailed`. Honest send (`DebitsOnSend`)
   debits `self`'s native balance by the sent amount.
 - Incoming call value is credited onto `self` in the trace `step` before
-  the body; `Tx.run` itself does not.
-- Well-formed traces target this contract, are not self-calls, and never
-  overflow a 256-bit native balance — true on every chain since total
-  native supply is less than `2^256`.
+  the body; `Tx.run` itself does not. Payable entries revert if the
+  credited balance would wrap (`selfbalance() < callvalue()`).
+- Model facts, not trace hypotheses: only this contract's code can move
+  its ETH (environment steps do not drop `self`'s native balance);
+  `sender ≠ self` (only `self`'s code can emit a message from `self`;
+  nested calls are the oracle's `nested_lock_reverts`).
 
 ## Files
 
 - `Contract.lean` — storage, events, functions, `lsc_contract`.
-- `Spec.lean` — `claim`, `Auth`, `inflow`, `holdings`, `rely`.
+- `Spec.lean` — `claim`, `Auth`, `inflow`, `holdings`, `rely`, `spentCall`.
 - `Theorems.lean` — exported statements.
 - `Proofs/` — Tx, Implements, Security (`Inv`), Compile.
 - `Tests.lean` — smoke `#guard`s and `Exact.toSpec`.
