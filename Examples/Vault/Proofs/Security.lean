@@ -470,12 +470,12 @@ theorem deposit_preserves_inv :
     PreservesInvFnAt spec (InvT self asset oracle) self .deposit :=
   PreservesInvFnAt_of_ok fun assets ctx w _n w' hself hsne hInvT hrun => by
     obtain ⟨⟨hst, hbd⟩, ha, ho, hT⟩ := hInvT
-    have hok := deposit_ok_of_run hrun
+    obtain ⟨ta, hok⟩ := deposit_ok_of_run hrun
     obtain ⟨_, hσ, hor, _⟩ := deposit_post assets hok hrun
     obtain ⟨w1, htf, hself1, hor1, _, hext, _⟩ := deposit_call assets hok hrun
     have hT' : IERC20.Spec (w.self.asset.impl : AssetImpl) := by
       simpa [IERC20.Ref.impl, ha] using hT
-    have hTA : holdings self w = hok.ta.raw := by
+    have hTA : holdings self w = ta.raw := by
       subst hself
       exact viewBal?_some_holdings ctx.self hok.viewOk
     have hhold := holdings_add_of_transferFrom self hself hsne hT' htf
@@ -487,10 +487,10 @@ theorem deposit_preserves_inv :
     refine ⟨⟨?_, ?_⟩, ?_, ?_, ?_⟩
     · simpa [hσ] using
         invStorage_of_depositPost w.self ctx.sender
-          (mintedShares w.self.totalShares hok.ta assets) hst
+          (mintedShares w.self.totalShares ta assets) hst
     · rw [hσ]
       simp only [depositPost, Amount.raw_add, Amount.raw_ofWord, mintedShares]
-      have hbd' : w.self.totalShares.raw ≤ hok.ta.raw * Word.scale offset.decimals :=
+      have hbd' : w.self.totalShares.raw ≤ ta.raw * Word.scale offset.decimals :=
         hTA ▸ hbd
       simpa [hH', hTA] using Shares.toSharesRaw_preserves_inv offset hbd'
     · simpa [hσ, depositPost] using ha
@@ -501,12 +501,12 @@ theorem withdraw_preserves_inv :
     PreservesInvFnAt spec (InvT self asset oracle) self .withdraw :=
   PreservesInvFnAt_of_ok fun sharesIn ctx w _n w' hself hsne hInvT hrun => by
     obtain ⟨⟨hst, hbd⟩, ha, ho, hT⟩ := hInvT
-    have hok := withdraw_ok_of_run hrun
+    obtain ⟨ta, hok⟩ := withdraw_ok_of_run hrun
     obtain ⟨_, hσ, hor, _⟩ := withdraw_post sharesIn hok hrun
     obtain ⟨w1, htr, hself1, hor1, hext, _, _⟩ := withdraw_call sharesIn hok hrun
     have hT' : IERC20.Spec (w.self.asset.impl : AssetImpl) := by
       simpa [IERC20.Ref.impl, ha] using hT
-    have hTA : holdings self w = hok.ta.raw := by
+    have hTA : holdings self w = ta.raw := by
       subst hself
       exact viewBal?_some_holdings ctx.self hok.viewOk
     have hhold := holdings_sub_of_transfer self hself hsne hT'
@@ -516,7 +516,7 @@ theorem withdraw_preserves_inv :
     have hhold' : holdings self w' = holdings self w1 :=
       holdings_congr self (by simp [hσ, withdrawPost, hself1])
         (hor.trans hor1.symm) hext
-    set amt := Amount.ofWord (redeemedAssets w.self.totalShares hok.ta sharesIn)
+    set amt := Amount.ofWord (redeemedAssets w.self.totalShares ta sharesIn)
     have hH' : holdings self w' + amt.raw = holdings self w := by
       rw [hhold', hhold]
     refine ⟨⟨?_, ?_⟩, ?_, ?_, ?_⟩
@@ -524,11 +524,11 @@ theorem withdraw_preserves_inv :
         invStorage_of_withdrawPost w.self ctx.sender sharesIn hst hok.bal
     · rw [hσ]
       simp only [withdrawPost, Amount.raw_sub]
-      have hbd' : w.self.totalShares.raw ≤ hok.ta.raw * Word.scale offset.decimals :=
+      have hbd' : w.self.totalShares.raw ≤ ta.raw * Word.scale offset.decimals :=
         hTA ▸ hbd
       have hsub : holdings self w' =
-          hok.ta.raw - redeemedAssets w.self.totalShares hok.ta sharesIn := by
-        have : amt.raw = redeemedAssets w.self.totalShares hok.ta sharesIn :=
+          ta.raw - redeemedAssets w.self.totalShares ta sharesIn := by
+        have : amt.raw = redeemedAssets w.self.totalShares ta sharesIn :=
           Amount.raw_ofWord _
         rw [hTA] at hH'
         rw [this] at hH'
@@ -613,7 +613,7 @@ private theorem claim_le_deposit_run (assets : Amount vaultAsset)
     (hrun : Tx.run (deposit assets) ctx w = .ok (n, w')) :
     claim self a w ≤ claim self a w' := by
   subst hself
-  have hok := deposit_ok_of_run hrun
+  obtain ⟨ta, hok⟩ := deposit_ok_of_run hrun
   obtain ⟨_, hσ, hor, _⟩ := deposit_post assets hok hrun
   obtain ⟨w1, htf, hself1, hor1, _, hext, _⟩ := deposit_call assets hok hrun
   have hhold := holdings_add_of_transferFrom ctx.self rfl hsne hT htf
@@ -622,9 +622,9 @@ private theorem claim_le_deposit_run (assets : Amount vaultAsset)
       (hor.trans hor1.symm) hext
   have hH' : holdings ctx.self w' = holdings ctx.self w + assets.raw := by
     rw [hhold', hhold]
-  have hTA : holdings ctx.self w = hok.ta.raw :=
+  have hTA : holdings ctx.self w = ta.raw :=
     viewBal?_some_holdings ctx.self hok.viewOk
-  have hrate := rate_le_of_depositPost w.self ctx.sender a hok.ta assets
+  have hrate := rate_le_of_depositPost w.self ctx.sender a ta assets
   rw [claim_eq_rate, claim_eq_rate, hσ, hH', hTA]
   exact hrate
 
@@ -637,12 +637,12 @@ private theorem claim_le_withdraw_run (sharesIn : Amount vShare)
     (hrun : Tx.run (withdraw sharesIn) ctx w = .ok (n, w')) :
     claim self a w ≤ claim self a w' := by
   subst hself
-  have hok := withdraw_ok_of_run hrun
+  obtain ⟨ta, hok⟩ := withdraw_ok_of_run hrun
   obtain ⟨hn, hσ, hor, _⟩ := withdraw_post sharesIn hok hrun
   obtain ⟨w1, htr, hself1, hor1, hext, _, _⟩ := withdraw_call sharesIn hok hrun
   subst hn
   set σ' := withdrawPost w.self ctx.sender sharesIn
-  set amt := Amount.ofWord (redeemedAssets w.self.totalShares hok.ta sharesIn)
+  set amt := Amount.ofWord (redeemedAssets w.self.totalShares ta sharesIn)
   have hhold := holdings_sub_of_transfer ctx.self rfl hsne hT
     (wCall := withdrawTailWorld w ctx.sender sharesIn)
     (by simp [withdrawTailWorld, σ', withdrawPost]) rfl rfl
@@ -652,13 +652,13 @@ private theorem claim_le_withdraw_run (sharesIn : Amount vShare)
       (hor.trans hor1.symm) hext
   have hH' : holdings ctx.self w' + amt.raw = holdings ctx.self w := by
     rw [hhold', hhold]
-  have hTA : holdings ctx.self w = hok.ta.raw :=
+  have hTA : holdings ctx.self w = ta.raw :=
     viewBal?_some_holdings ctx.self hok.viewOk
-  have hrate := rate_le_of_withdrawPost w.self ctx.sender a hok.ta sharesIn
+  have hrate := rate_le_of_withdrawPost w.self ctx.sender a ta sharesIn
     hneA hok.supply
   have hsub : holdings ctx.self w' =
-      hok.ta.raw - redeemedAssets w.self.totalShares hok.ta sharesIn := by
-    have : amt.raw = redeemedAssets w.self.totalShares hok.ta sharesIn :=
+      ta.raw - redeemedAssets w.self.totalShares ta sharesIn := by
+    have : amt.raw = redeemedAssets w.self.totalShares ta sharesIn :=
       Amount.raw_ofWord _
     rw [hTA] at hH'
     rw [this] at hH'
@@ -816,7 +816,7 @@ private theorem spent_covers_ok (self : Address) (c : Call spec)
         { sender, value, timestamp := ts, blockNumber := bn, self } w =
           .ok (r, w') := by
       simpa [Tx.run, spec_exec_withdraw, Call.toCtx] using h
-    have hok := withdraw_ok_of_run hrun
+    obtain ⟨_, hok⟩ := withdraw_ok_of_run hrun
     have ⟨hn, hσ, _, _⟩ := withdraw_post args hok hrun
     subst hn
     simp [spentCall, hσ, Call.toCtx]
@@ -826,7 +826,7 @@ private theorem spent_covers_ok (self : Address) (c : Call spec)
         { sender, value, timestamp := ts, blockNumber := bn, self } w =
           .ok (r, w') := by
       simpa [Tx.run, spec_exec_deposit, Call.toCtx] using h
-    have hok := deposit_ok_of_run hrun
+    obtain ⟨_, hok⟩ := deposit_ok_of_run hrun
     have ⟨hn, hσ, _, _⟩ := deposit_post args hok hrun
     subst hn
     simp [spentCall, hσ, depositPost]
