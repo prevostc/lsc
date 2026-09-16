@@ -9,18 +9,18 @@ Recursive definitions are rejected at attribute application. Certificates are
 kernel-checked `Core.denote (reify f) = f` (`rfl`, or `Tx` monad laws when a
 helper sits mid-`do`).
 
-`@[internal]` and `@[internal inline]` have the same codegen today (substitution
-at call sites). A later slice compiles plain `@[internal]` as a real Yul
-function call and keeps `inline` substituted. Do not use Lean's builtin
-`@[inline]`.
+Plain `@[internal]` (`InternalKind.call`) is a real Core `letCall` /
+`callTail` (one `InternalDef` per specialised key); `@[internal inline]`
+stays substituted at call sites. Slice 3 emits a Yul `function`. Do not
+use Lean's builtin `@[inline]`.
 -/
 
 open Lean
 
 namespace Lsc
 
-/-- Parameter of `@[internal]`: today both kinds are inlined; `inline` will
-stay substituted after plain `internal` becomes a real call. -/
+/-- Parameter of `@[internal]`: `call` is a Core internal call; `inline`
+stays substituted at call sites. -/
 inductive InternalKind where
   /-- Default: will become a real Yul function call. -/
   | call
@@ -64,5 +64,13 @@ initialize internalAttr : ParametricAttribute InternalKind ←
 /-- True when `n` carries `@[internal]` (with or without `inline`). -/
 def isInternal (env : Environment) (n : Name) : Bool :=
   (internalAttr.getParam? env n).isSome
+
+/-- True when `n` is `@[internal]` without `inline` (a real Core call). -/
+def isInternalCall (env : Environment) (n : Name) : Bool :=
+  internalAttr.getParam? env n == some InternalKind.call
+
+/-- True when `n` is `@[internal inline]` (still substituted). -/
+def isInternalInline (env : Environment) (n : Name) : Bool :=
+  internalAttr.getParam? env n == some InternalKind.inline
 
 end Lsc

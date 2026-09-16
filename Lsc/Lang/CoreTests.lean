@@ -57,4 +57,19 @@ def callEmit : Core .unit := .callTail (t := .unit) 0 []
 -- Structural effects (no table walk) ignores the callee.
 #guard (Core.effects wrapStore).writes == []
 
+def runExpand (c : Core .word) (env : List Nat)
+    (tbl : List InternalDef) : Option Nat :=
+  match Tx.run (Core.denote dummyΓ (Core.expand tbl c) env) { sender := 0 }
+      { self := (), ext := () } with
+  | .ok (v, _) => some v
+  | .error _ => none
+
+-- expand ∘ denote agrees with denoteTbl on the two-entry table.
+#guard runExpand (.callTail 1 [.lit 42]) [] twoEntry == some 42
+#guard runExpand (.callTail 1 [.lit 42]) [] twoEntry ==
+  runTbl twoEntry.length (.callTail 1 [.lit 42]) [] twoEntry
+
+-- No internal calls: expand leaves a call-free body call-free.
+#guard Core.hasInternalCall (Core.expand twoEntry idWord) == false
+
 end Lsc.Lang.CoreTests

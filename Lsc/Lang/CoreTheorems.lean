@@ -392,6 +392,19 @@ theorem map_denote_letPure_ofWord_pair {a b : Asset}
         Core.denote Γ k (Prim.eval p (args.map (·.eval env)) :: env) :=
   by apply Proof.map_denote_letPure_ofWord_pair
 
+/-- Table CBV agrees with `Core.denote` after capture-free expansion. -/
+theorem denoteTbl_eq_denote_expand {Γ : ContractSchema S X E ε} {t : RetTy}
+    (tbl : List InternalDef) (c : Core t) (env : List Nat) :
+    Core.denoteTbl Γ tbl.length c env tbl =
+      Core.denote Γ (Core.expand tbl c) env :=
+  Proof.denoteTbl_eq_denote_expand tbl c env
+
+/-- Expansion is the identity on cores with no `letCall`/`callTail`. -/
+theorem expand_eq_self {t : RetTy} (tbl : List InternalDef) (c : Core t)
+    (h : Core.hasInternalCall c = false) :
+    Core.expand tbl c = c :=
+  Proof.expand_eq_self tbl c h
+
 end Lsc
 
 namespace Lsc.Tx

@@ -450,6 +450,15 @@ def RetExpr.atoms : {t : RetTy} → RetExpr t → List Atom
   | _, .flag a => [a]
   | _, .pair x y => x.atoms ++ y.atoms
 
+theorem RetExpr.atoms_length : {t : RetTy} → (r : RetExpr t) →
+    (RetExpr.atoms r).length = t.wordCount
+  | _, .unit => rfl
+  | _, .word _ => rfl
+  | _, .addr _ => rfl
+  | _, .flag _ => rfl
+  | _, .pair x y => by
+    simp [RetExpr.atoms, RetTy.wordCount, atoms_length x, atoms_length y]
+
 /-- Map callee de Bruijn `var i` to the `i`-th call-site argument. -/
 def substArgs (args : List Atom) : Nat → Atom
   | i => args.getD i (.lit 0)
@@ -579,59 +588,84 @@ def Core.denote (Γ : ContractSchema S X E ε) :
       Core.denoteDummy (t := tArg) Γ >>= fun v =>
         Core.denote Γ k (RetTy.flatten v ++ env)
 
+mutual
+/-- Continuation of `seqIf` under table denotation. -/
+def Core.seqIfContTbl (Γ : ContractSchema S X E ε) (fuel : Nat)
+    {t u : RetTy} (v : t.denote) (k : Core u) (env : List Nat)
+    (tbl : List InternalDef) : Tx S X E ε u.denote :=
+  match t, v with
+  | .unit, _ => Core.denoteTbl Γ fuel k env tbl
+  | .word, v => Core.denoteTbl Γ fuel k (v :: env) tbl
+  | .addr, v => Core.denoteTbl Γ fuel k (Address.toWord v :: env) tbl
+  | .flag, v => Core.denoteTbl Γ fuel k (v :: env) tbl
+  | .pair _ _, _ => Core.denoteTbl Γ fuel k env tbl
+  termination_by (fuel, sizeOf k, (1 : Nat))
+
 /-- Table CBV (design §1). Fuel is `tbl.length`; a call at `i` continues
 with `tbl.take i`. Ill-indexed or ill-typed → `denoteDummy`. -/
-def Core.denoteTbl (Γ : ContractSchema S X E ε) :
-    (fuel : Nat) → {t : RetTy} → Core t → List Nat → List InternalDef →
-    Tx S X E ε t.denote
-  | _, _, .ret r, env, _ => pure (r.eval env)
-  | _, _, .opTail op, env, _ => Op.denote Γ env op
-  | _, _, .opTailAddr op, env, _ => (Op.denote Γ env op : Tx S X E ε Nat)
-  | _, _, .opTailFlag op, env, _ => (Op.denote Γ env op : Tx S X E ε Nat)
-  | _, _, .stmtTail s, env, _ => Stmt.denote Γ env s
-  | _, _, .revertTail err args, env, _ =>
+def Core.denoteTbl (Γ : ContractSchema S X E ε)
+    (fuel : Nat) {t : RetTy} (c : Core t) (env : List Nat)
+    (tbl : List InternalDef) : Tx S X E ε t.denote :=
+  match c with
+  | .ret r => pure (r.eval env)
+  | .opTail op => Op.denote Γ env op
+  | .opTailAddr op => (Op.denote Γ env op : Tx S X E ε Nat)
+  | .opTailFlag op => (Op.denote Γ env op : Tx S X E ε Nat)
+  | .stmtTail s => Stmt.denote Γ env s
+  | .revertTail err args =>
       Tx.revert (Γ.err.build err (args.map (·.eval env)))
-  | fuel, _, .letOp op k, env, tbl =>
+  | .letOp op k =>
       Op.denote Γ env op >>= fun v => Core.denoteTbl Γ fuel k (v :: env) tbl
-  | fuel, _, .seq s k, env, tbl =>
+  | .seq s k =>
       Stmt.denote Γ env s >>= fun _ => Core.denoteTbl Γ fuel k env tbl
-  | fuel, _, .letPure p args k, env, tbl =>
+  | .letPure p args k =>
       Core.denoteTbl Γ fuel k (Prim.eval p (args.map (·.eval env)) :: env) tbl
-  | fuel, _, .ite c a b, env, tbl =>
+  | .ite c a b =>
       if c.denote env then Core.denoteTbl Γ fuel a env tbl
       else Core.denoteTbl Γ fuel b env tbl
-  | fuel, _, .seqIf (t := tBr) c th el k, env, tbl =>
+  | .seqIf (t := tBr) c th el k =>
       (if c.denote env then Core.denoteTbl Γ fuel th env tbl
         else Core.denoteTbl Γ fuel el env tbl) >>=
-        match tBr with
-        | .unit => fun _ => Core.denoteTbl Γ fuel k env tbl
-        | .word => fun v => Core.denoteTbl Γ fuel k (v :: env) tbl
-        | .addr => fun v => Core.denoteTbl Γ fuel k ((v : Nat) :: env) tbl
-        | .flag => fun v => Core.denoteTbl Γ fuel k (v :: env) tbl
-        | .pair _ _ => fun _ => Core.denoteTbl Γ fuel k env tbl
-  | 0, _, .callTail _ _, _, _ => Core.denoteDummy Γ
-  | n + 1, t, .callTail i args, env, tbl =>
-      if hi : i < tbl.length then
-        let d := tbl[i]
-        if hret : d.ret = t then
-          Core.denoteTbl Γ n (hret ▸ d.body) (args.map (·.eval env)) (tbl.take i)
-        else
-          Core.denoteDummy Γ
-      else
-        Core.denoteDummy Γ
-  | 0, _, .letCall (t := tArg) _ _ k, env, tbl =>
-      Core.denoteDummy (t := tArg) Γ >>= fun v =>
-        Core.denoteTbl Γ 0 k (RetTy.flatten v ++ env) tbl
-  | n + 1, _, .letCall (t := tArg) i args k, env, tbl =>
-      (if hi : i < tbl.length then
-        let d := tbl[i]
-        if hret : d.ret = tArg then
-          Core.denoteTbl Γ n (hret ▸ d.body) (args.map (·.eval env)) (tbl.take i)
-        else
-          Core.denoteDummy (t := tArg) Γ
-      else
-        Core.denoteDummy (t := tArg) Γ) >>= fun v =>
-        Core.denoteTbl Γ (n + 1) k (RetTy.flatten v ++ env) tbl
+        fun v => Core.seqIfContTbl Γ fuel v k env tbl
+  | .callTail i args =>
+      match fuel with
+      | 0 => Core.denoteDummy Γ
+      | n + 1 =>
+          if hi : i < tbl.length then
+            let d := tbl[i]
+            if hret : d.ret = t then
+              Core.denoteTbl Γ n (hret ▸ d.body) (args.map (·.eval env))
+                (tbl.take i)
+            else
+              Core.denoteDummy Γ
+          else
+            Core.denoteDummy Γ
+  | .letCall (t := tArg) i args k =>
+      match fuel with
+      | 0 =>
+          Core.denoteDummy (t := tArg) Γ >>= fun v =>
+            Core.denoteTbl Γ 0 k (RetTy.flatten v ++ env) tbl
+      | n + 1 =>
+          (if hi : i < tbl.length then
+            let d := tbl[i]
+            if hret : d.ret = tArg then
+              Core.denoteTbl Γ n (hret ▸ d.body) (args.map (·.eval env))
+                (tbl.take i)
+            else
+              Core.denoteDummy (t := tArg) Γ
+          else
+            Core.denoteDummy (t := tArg) Γ) >>= fun v =>
+            Core.denoteTbl Γ (n + 1) k (RetTy.flatten v ++ env) tbl
+  termination_by (fuel, sizeOf c, (0 : Nat))
+end
+
+/-- Flattened result atoms, last word first (`var 0` is the last ABI word). -/
+def substFlatten {t : RetTy} (r : RetExpr t) (d : Nat) : Nat → Atom :=
+  fun i =>
+    if i < t.wordCount then
+      (RetExpr.atoms r).getD (t.wordCount - 1 - i) (.lit 0)
+    else
+      .var (i - t.wordCount + d)
 
 /-- Continuation of `seqIf` (`k` after the chosen branch). -/
 def Core.seqIfCont (Γ : ContractSchema S X E ε) :
@@ -813,6 +847,100 @@ def Core.bindRet {t u : RetTy} : Core t → Core u → Core u
   | .letCall (t := t) i args k', k => .letCall (t := t) i args (bindRet k' k)
   | .callTail (t := t) i args, k => .letCall (t := t) i args k
 
+/-- Sequence `body` before `k`, substituting flattened results (no extra
+`let`s). `d` is the number of binders entered in `body` so `k`'s original
+environment is skipped. At `d = 0` this is the syntactic form of
+`denote body >>= fun v => denote k (flatten v ++ env)`. -/
+def Core.splice {t u : RetTy} (d : Nat) : Core t → Core u → Core u
+  | .ret r, k => k.rename (substFlatten r d)
+  | .opTail op, k =>
+      .letOp op (k.rename (substFlatten (RetExpr.word (.var 0)) (d + 1)))
+  | .opTailAddr op, k =>
+      .letOp op (k.rename (substFlatten (RetExpr.addr (.var 0)) (d + 1)))
+  | .opTailFlag op, k =>
+      .letOp op (k.rename (substFlatten (RetExpr.flag (.var 0)) (d + 1)))
+  | .stmtTail s, k => .seq s (k.rename (substFlatten RetExpr.unit d))
+  | .revertTail e args, _ => .revertTail e args
+  | .letOp op k', k => .letOp op (splice (d + 1) k' k)
+  | .seq s k', k => .seq s (splice d k' k)
+  | .letPure p args k', k => .letPure p args (splice (d + 1) k' k)
+  | .ite c a b, k => .ite c (splice d a k) (splice d b k)
+  | .seqIf (t := tBr) c th el k', k =>
+      let d' :=
+        match tBr with
+        | .word | .addr | .flag => d + 1
+        | .unit | .pair _ _ => d
+      .seqIf c th el (splice d' k' k)
+  | .letCall (t := tArg) i args k', k =>
+      .letCall (t := tArg) i args (splice (d + tArg.wordCount) k' k)
+  | .callTail (t := tArg) i args, k =>
+      .letCall (t := tArg) i args (k.rename (fun i => .var (i + d)))
+
+/-- Inline internal calls by capture-free substitution of argument atoms
+into the callee body (`rename` of parameter slots), then `splice` into
+the continuation. Fuel is `tbl.length`; a call at `i` continues with
+`tbl.take i`. Ill-indexed or ill-typed calls are left as-is (rejected by
+`coreWF`; `emitCore` still `revert00`s them). -/
+def Core.expandGo (fuel : Nat) {t : RetTy} (c : Core t)
+    (tbl : List InternalDef) : Core t :=
+  match c with
+  | .ret r => .ret r
+  | .opTail op => .opTail op
+  | .opTailAddr op => .opTailAddr op
+  | .opTailFlag op => .opTailFlag op
+  | .stmtTail s => .stmtTail s
+  | .revertTail err args => .revertTail err args
+  | .letOp op k => .letOp op (expandGo fuel k tbl)
+  | .seq s k => .seq s (expandGo fuel k tbl)
+  | .letPure p args k => .letPure p args (expandGo fuel k tbl)
+  | .ite cnd a b => .ite cnd (expandGo fuel a tbl) (expandGo fuel b tbl)
+  | .seqIf cnd th el k =>
+      .seqIf cnd (expandGo fuel th tbl) (expandGo fuel el tbl)
+        (expandGo fuel k tbl)
+  | .letCall (t := tArg) i args k =>
+      let k' := expandGo fuel k tbl
+      match fuel with
+      | 0 => .letCall (t := tArg) i args k'
+      | n + 1 =>
+          if hi : i < tbl.length then
+            let d := tbl[i]
+            if hret : d.ret = tArg then
+              splice 0
+                (expandGo n ((hret ▸ d.body).rename (substArgs args))
+                  (tbl.take i))
+                k'
+            else
+              .letCall (t := tArg) i args k'
+          else
+            .letCall (t := tArg) i args k'
+  | .callTail i args =>
+      match fuel with
+      | 0 => .callTail i args
+      | n + 1 =>
+          if hi : i < tbl.length then
+            let d := tbl[i]
+            if hret : d.ret = t then
+              expandGo n ((hret ▸ d.body).rename (substArgs args))
+                (tbl.take i)
+            else
+              .callTail i args
+          else
+            .callTail i args
+
+/-- Inline every `letCall`/`callTail` in `c` against `tbl` (callees first). -/
+def Core.expand (tbl : List InternalDef) : {t : RetTy} → Core t → Core t :=
+  fun c => Core.expandGo tbl.length c tbl
+
+/-- True iff `c` contains a `letCall`/`callTail`. -/
+def Core.hasInternalCall : {t : RetTy} → Core t → Bool
+  | _, .ret _ | _, .opTail _ | _, .opTailAddr _ | _, .opTailFlag _ => false
+  | _, .stmtTail _ | _, .revertTail .. => false
+  | _, .letOp _ k | _, .seq _ k | _, .letPure _ _ k => hasInternalCall k
+  | _, .ite _ a b => hasInternalCall a || hasInternalCall b
+  | _, .seqIf _ th el k =>
+      hasInternalCall th || hasInternalCall el || hasInternalCall k
+  | _, .letCall .. | _, .callTail .. => true
+
 /-! ## Quoting `Core` values into `Expr` (indexed families are not covered by `deriving ToExpr`) -/
 
 open Lean in
@@ -847,6 +975,16 @@ def Core.toExpr : {t : RetTy} → Core t → Expr
   | t, .callTail i args =>
     mkAppN (mkConst ``Core.callTail)
       #[Lean.toExpr t, Lean.toExpr i, Lean.toExpr args]
+
+open Lean in
+def InternalDef.toExpr (d : InternalDef) : Expr :=
+  mkAppN (mkConst ``InternalDef.mk)
+    #[Lean.toExpr d.ident, Lean.toExpr d.arity, Lean.toExpr d.ret, d.body.toExpr]
+
+open Lean in
+instance : ToExpr InternalDef where
+  toExpr := InternalDef.toExpr
+  toTypeExpr := mkConst ``InternalDef
 
 /-! ## Pretty-printing of `Core` for `#eval`/logging -/
 

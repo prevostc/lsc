@@ -804,4 +804,522 @@ theorem map_denote_letPure_ofWord_pair {a b : Asset}
   map_denote_letPure
     (Prod.map (Amount.ofWord (a := a)) (Amount.ofWord (a := b))) Γ p args k env
 
+theorem RetExpr.flatten_eval {t : RetTy} (r : RetExpr t) (env : List Nat) :
+    RetTy.flatten (r.eval env) = ((RetExpr.atoms r).map (·.eval env)).reverse := by
+  induction r with
+  | unit => rfl
+  | word a | addr a | flag a =>
+    simp [RetTy.flatten, RetExpr.eval, RetExpr.atoms]
+  | pair x y ihx ihy =>
+    simp [RetTy.flatten, RetExpr.eval, RetExpr.atoms, List.map_append,
+      List.reverse_append, ihx, ihy]
+
+theorem getD_append_right {α} (l₁ l₂ : List α) (i : Nat) (x : α)
+    (h : l₁.length ≤ i) :
+    (l₁ ++ l₂).getD i x = l₂.getD (i - l₁.length) x := by
+  simp [List.getD_eq_getElem?_getD, List.getElem?_append_right h]
+
+theorem getD_append_left {α} (l₁ l₂ : List α) (i : Nat) (x : α)
+    (h : i < l₁.length) :
+    (l₁ ++ l₂).getD i x = l₁.getD i x := by
+  simp [List.getD_eq_getElem?_getD, List.getElem?_append, h]
+
+theorem getD_reverse {α} (l : List α) (i : Nat) (x : α)
+    (h : i < l.length) :
+    l.reverse.getD i x = l.getD (l.length - 1 - i) x := by
+  have h' : l.length - 1 - i < l.length := by omega
+  simp [List.getD_eq_getElem?_getD, List.getElem?_reverse h,
+    List.getElem?_eq_getElem h, List.getElem?_eq_getElem h']
+
+theorem getD_map_atom_eval (as : List Atom) (env : List Nat) (i : Nat) :
+    (as.map (·.eval env)).getD i 0 = (as.getD i (.lit 0)).eval env := by
+  simp [List.getD_eq_getElem?_getD, List.getElem?_map]
+  cases as[i]? <;> simp [Atom.eval]
+
+theorem substFlatten_eval {t : RetTy} (r : RetExpr t) (d : Nat)
+    (vs orig : List Nat) (hd : vs.length = d) (i : Nat) :
+    (substFlatten r d i).eval (vs ++ orig) =
+      (RetTy.flatten (r.eval (vs ++ orig)) ++ orig).getD i 0 := by
+  have hn : (RetExpr.atoms r).length = t.wordCount := RetExpr.atoms_length r
+  have hf : (RetTy.flatten (r.eval (vs ++ orig))).length = t.wordCount :=
+    RetTy.flatten_length _
+  simp only [substFlatten]
+  by_cases hlt : i < t.wordCount
+  · rw [if_pos hlt]
+    rw [← getD_map_atom_eval, RetExpr.flatten_eval]
+    have hiL : i < ((RetExpr.atoms r).map (·.eval (vs ++ orig))).reverse.length := by
+      simp [List.length_map, hn]; omega
+    rw [getD_append_left _ orig i 0 (by simpa using hiL)]
+    rw [getD_reverse _ i 0 (by simpa using hiL)]
+    simp [List.length_map, hn]
+  · rw [if_neg hlt]
+    have hge : t.wordCount ≤ i := Nat.le_of_not_gt hlt
+    simp only [Atom.eval]
+    have : i - t.wordCount + d = vs.length + (i - t.wordCount) := by omega
+    rw [this, getD_append_right vs orig _ 0 (by omega)]
+    rw [getD_append_right (RetTy.flatten (r.eval (vs ++ orig))) orig i 0
+      (by omega)]
+    simp [hf]
+
+theorem denote_splice {Γ : ContractSchema S X E ε} {t u : RetTy}
+    (d : Nat) (body : Core t) (k : Core u) (vs orig : List Nat)
+    (hd : vs.length = d) :
+    Core.denote Γ (Core.splice d body k) (vs ++ orig) =
+      Core.denote Γ body (vs ++ orig) >>= fun v =>
+        Core.denote Γ k (RetTy.flatten v ++ orig) := by
+  induction body generalizing d vs with
+  | ret r =>
+    simp [Core.splice, Core.denote, Tx.pure_bind]
+    exact denote_rename k (ρ := substFlatten r d)
+      (substFlatten_eval r d vs orig hd)
+  | opTail op =>
+    simp [Core.splice, Core.denote]
+    refine congrArg (fun f => Op.denote Γ (vs ++ orig) op >>= f) ?_
+    funext v
+    have hd' : (v :: vs).length = d + 1 := by simp [hd]
+    have henv : v :: (vs ++ orig) = (v :: vs) ++ orig := rfl
+    rw [henv, denote_rename (Γ := Γ) k
+      (ρ := substFlatten (RetExpr.word (.var 0)) (d + 1))
+      (substFlatten_eval (RetExpr.word (.var 0)) (d + 1) (v :: vs) orig hd')]
+    simp [RetTy.flatten, RetExpr.eval, Atom.eval]
+  | opTailAddr op =>
+    simp [Core.splice, Core.denote]
+    refine congrArg (fun f => Op.denote Γ (vs ++ orig) op >>= f) ?_
+    funext v
+    have hd' : (v :: vs).length = d + 1 := by simp [hd]
+    have henv : v :: (vs ++ orig) = (v :: vs) ++ orig := rfl
+    rw [henv, denote_rename (Γ := Γ) k
+      (ρ := substFlatten (RetExpr.addr (.var 0)) (d + 1))
+      (substFlatten_eval (RetExpr.addr (.var 0)) (d + 1) (v :: vs) orig hd')]
+    simp [RetTy.flatten, RetExpr.eval, Atom.eval]
+  | opTailFlag op =>
+    simp [Core.splice, Core.denote]
+    refine congrArg (fun f => Op.denote Γ (vs ++ orig) op >>= f) ?_
+    funext v
+    have hd' : (v :: vs).length = d + 1 := by simp [hd]
+    have henv : v :: (vs ++ orig) = (v :: vs) ++ orig := rfl
+    rw [henv, denote_rename (Γ := Γ) k
+      (ρ := substFlatten (RetExpr.flag (.var 0)) (d + 1))
+      (substFlatten_eval (RetExpr.flag (.var 0)) (d + 1) (v :: vs) orig hd')]
+    simp [RetTy.flatten, RetExpr.eval, Atom.eval]
+  | stmtTail s =>
+    simp [Core.splice, Core.denote]
+    rw [denote_rename (Γ := Γ) k (ρ := substFlatten RetExpr.unit d)
+      (substFlatten_eval RetExpr.unit d vs orig hd)]
+    try simp [RetTy.flatten]
+  | revertTail e args =>
+    simp [Core.splice, Core.denote]
+    funext ctx w
+    simp [Tx.bind_apply, Tx.run_revert, Tx.revert]
+  | letOp op k' ih =>
+    simp [Core.splice, Core.denote, Tx.bind_assoc]
+    refine congrArg (fun f => Op.denote Γ (vs ++ orig) op >>= f) ?_
+    funext v
+    exact ih (d + 1) (v :: vs) (by simp [hd])
+  | seq s k' ih =>
+    simp [Core.splice, Core.denote, Tx.bind_assoc]
+    exact congrArg (fun t => Stmt.denote Γ (vs ++ orig) s >>= fun _ => t)
+      (ih d vs hd)
+  | letPure p args k' ih =>
+    simp [Core.splice, Core.denote]
+    exact ih (d + 1) (Prim.eval p (args.map (·.eval (vs ++ orig))) :: vs)
+      (by simp [hd])
+  | ite c a b iha ihb =>
+    simp [Core.splice, Core.denote]
+    by_cases hc : Cond.denote (vs ++ orig) c
+    · simp [hc]; exact iha d vs hd
+    · simp [hc]; exact ihb d vs hd
+  | @seqIf tBr _ c th el k' _ _ ihk =>
+    simp [Core.splice, Core.denote, Tx.bind_assoc]
+    refine congrArg
+      (fun f =>
+        (if Cond.denote (vs ++ orig) c then Core.denote Γ th (vs ++ orig)
+          else Core.denote Γ el (vs ++ orig)) >>= f) ?_
+    funext v
+    cases tBr with
+    | unit =>
+      simpa [RetTy.flatten] using ihk d vs hd
+    | pair _ _ =>
+      simpa [RetTy.flatten] using ihk d vs hd
+    | word =>
+      exact ihk (d + 1) (v :: vs) (by simp [hd])
+    | addr =>
+      exact ihk (d + 1) (Address.toWord v :: vs) (by simp [hd])
+    | flag =>
+      exact ihk (d + 1) (v :: vs) (by simp [hd])
+  | letCall i args k' _ =>
+    simp [Core.splice, Core.denote]
+    exact denoteDummy_bind _
+  | callTail i args =>
+    simp [Core.splice, Core.denote]
+    exact denoteDummy_bind _
+
+theorem denote_splice0 {Γ : ContractSchema S X E ε} {t u : RetTy}
+    (body : Core t) (k : Core u) (env : List Nat) :
+    Core.denote Γ (Core.splice 0 body k) env =
+      Core.denote Γ body env >>= fun v =>
+        Core.denote Γ k (RetTy.flatten v ++ env) := by
+  simpa using denote_splice (Γ := Γ) 0 body k [] env rfl
+
+theorem liftRenameN_eval (n : Nat) (ρ : Nat → Atom)
+    {env env' : List Nat} (vs : List Nat) (hvs : vs.length = n)
+    (h : ∀ i, (ρ i).eval env' = env.getD i 0) :
+    ∀ i, (liftRenameN n ρ i).eval (vs ++ env') = (vs ++ env).getD i 0 := by
+  intro i
+  simp only [liftRenameN]
+  by_cases hi : i < n
+  · rw [if_pos hi]
+    simp only [Atom.eval]
+    have : i < vs.length := by omega
+    rw [getD_append_left vs env' i 0 (by omega), getD_append_left vs env i 0 (by omega)]
+  · have hge : n ≤ i := Nat.le_of_not_gt hi
+    rw [if_neg hi]
+    have hρ := h (i - n)
+    cases hρi : ρ (i - n) with
+    | var j =>
+      simp only [hρi, Atom.eval] at hρ ⊢
+      have : j + n = vs.length + j := by omega
+      rw [this, getD_append_right vs env' _ 0 (by omega)]
+      rw [getD_append_right vs env i 0 (by omega)]
+      simpa [hvs]
+    | lit m =>
+      simp only [hρi, Atom.eval] at hρ ⊢
+      rw [getD_append_right vs env i 0 (by omega)]
+      simpa [hvs]
+
+theorem denoteTbl_ret {Γ : ContractSchema S X E ε} (fuel : Nat)
+    {t} (r : RetExpr t) (env : List Nat) (tbl : List InternalDef) :
+    Core.denoteTbl Γ fuel (.ret r) env tbl = pure (r.eval env) := by
+  cases fuel <;> simp [Core.denoteTbl]
+
+theorem denoteTbl_opTail {Γ : ContractSchema S X E ε} (fuel : Nat)
+    (op : Op) (env : List Nat) (tbl : List InternalDef) :
+    Core.denoteTbl Γ fuel (.opTail op) env tbl = Op.denote Γ env op := by
+  cases fuel <;> simp [Core.denoteTbl]
+
+theorem denoteTbl_opTailAddr {Γ : ContractSchema S X E ε} (fuel : Nat)
+    (op : Op) (env : List Nat) (tbl : List InternalDef) :
+    Core.denoteTbl Γ fuel (.opTailAddr op) env tbl = Op.denote Γ env op := by
+  cases fuel <;> (simp [Core.denoteTbl]; rfl)
+
+theorem denoteTbl_opTailFlag {Γ : ContractSchema S X E ε} (fuel : Nat)
+    (op : Op) (env : List Nat) (tbl : List InternalDef) :
+    Core.denoteTbl Γ fuel (.opTailFlag op) env tbl = Op.denote Γ env op := by
+  cases fuel <;> simp [Core.denoteTbl]
+
+theorem denoteTbl_stmtTail {Γ : ContractSchema S X E ε} (fuel : Nat)
+    (s : Stmt) (env : List Nat) (tbl : List InternalDef) :
+    Core.denoteTbl Γ fuel (.stmtTail s) env tbl = Stmt.denote Γ env s := by
+  cases fuel <;> simp [Core.denoteTbl]
+
+theorem denoteTbl_revertTail {Γ : ContractSchema S X E ε} (fuel : Nat)
+    {t} (err : Nat) (args : List Atom) (env : List Nat) (tbl : List InternalDef) :
+    Core.denoteTbl Γ fuel (.revertTail (t := t) err args) env tbl =
+      Tx.revert (Γ.err.build err (args.map (·.eval env))) := by
+  cases fuel <;> simp [Core.denoteTbl]
+
+theorem denoteTbl_letOp {Γ : ContractSchema S X E ε} (fuel : Nat)
+    {t} (op : Op) (k : Core t) (env : List Nat) (tbl : List InternalDef) :
+    Core.denoteTbl Γ fuel (.letOp op k) env tbl =
+      Op.denote Γ env op >>= fun v => Core.denoteTbl Γ fuel k (v :: env) tbl := by
+  cases fuel <;> simp [Core.denoteTbl]
+
+theorem denoteTbl_seq {Γ : ContractSchema S X E ε} (fuel : Nat)
+    {t} (s : Stmt) (k : Core t) (env : List Nat) (tbl : List InternalDef) :
+    Core.denoteTbl Γ fuel (.seq s k) env tbl =
+      Stmt.denote Γ env s >>= fun _ => Core.denoteTbl Γ fuel k env tbl := by
+  cases fuel <;> simp [Core.denoteTbl]
+
+theorem denoteTbl_letPure {Γ : ContractSchema S X E ε} (fuel : Nat)
+    {t} (p : Prim) (args : List Atom) (k : Core t) (env : List Nat)
+    (tbl : List InternalDef) :
+    Core.denoteTbl Γ fuel (.letPure p args k) env tbl =
+      Core.denoteTbl Γ fuel k (Prim.eval p (args.map (·.eval env)) :: env) tbl := by
+  cases fuel <;> simp [Core.denoteTbl]
+
+theorem denoteTbl_ite {Γ : ContractSchema S X E ε} (fuel : Nat)
+    {t} (c : Cond) (a b : Core t) (env : List Nat) (tbl : List InternalDef) :
+    Core.denoteTbl Γ fuel (.ite c a b) env tbl =
+      if c.denote env then Core.denoteTbl Γ fuel a env tbl
+      else Core.denoteTbl Γ fuel b env tbl := by
+  cases fuel <;> simp [Core.denoteTbl]
+
+theorem denoteTbl_seqIf {Γ : ContractSchema S X E ε} (fuel : Nat)
+    {t u} (c : Cond) (th el : Core t) (k : Core u) (env : List Nat)
+    (tbl : List InternalDef) :
+    Core.denoteTbl Γ fuel (.seqIf c th el k) env tbl =
+      (if c.denote env then Core.denoteTbl Γ fuel th env tbl
+        else Core.denoteTbl Γ fuel el env tbl) >>=
+        fun v => Core.seqIfContTbl Γ fuel v k env tbl := by
+  simp [Core.denoteTbl]
+
+theorem denoteTbl_rename {Γ : ContractSchema S X E ε} {t : RetTy}
+    (fuel : Nat) (k : Core t) (ρ : Nat → Atom) {env env' : List Nat}
+    (h : ∀ i, (ρ i).eval env' = env.getD i 0) (tbl : List InternalDef) :
+    Core.denoteTbl Γ fuel (k.rename ρ) env' tbl =
+      Core.denoteTbl Γ fuel k env tbl := by
+  induction k generalizing env env' ρ with
+  | ret r =>
+    simp [Core.rename, denoteTbl_ret, retExpr_eval_rename ρ h]
+  | opTail op =>
+    simp [Core.rename, denoteTbl_opTail, op_denote_rename ρ h]
+  | opTailAddr op =>
+    simp [Core.rename, denoteTbl_opTailAddr, op_denote_rename ρ h]; rfl
+  | opTailFlag op =>
+    simp [Core.rename, denoteTbl_opTailFlag, op_denote_rename ρ h]
+  | stmtTail s =>
+    simp [Core.rename, denoteTbl_stmtTail, stmt_denote_rename ρ h]
+  | revertTail err args =>
+    simp [Core.rename, denoteTbl_revertTail, list_atom_eval_rename ρ h]
+  | letOp op k ih =>
+    simp [Core.rename, denoteTbl_letOp, op_denote_rename ρ h]
+    refine congrArg (fun f => Op.denote Γ env op >>= f) ?_
+    funext v
+    exact ih (ρ := liftRename ρ) (liftRename_eval (v := v) ρ h)
+  | seq s k ih =>
+    simp [Core.rename, denoteTbl_seq, stmt_denote_rename ρ h]
+    exact congrArg (fun t => Stmt.denote Γ env s >>= fun _ => t) (ih (ρ := ρ) h)
+  | letPure p args k ih =>
+    simp [Core.rename, denoteTbl_letPure, list_atom_eval_rename ρ h]
+    exact ih (ρ := liftRename ρ) (liftRename_eval ρ h)
+  | ite c a b iha ihb =>
+    have hc := cond_denote_rename ρ h c
+    simp only [Core.rename, denoteTbl_ite]
+    by_cases hcond : c.denote env
+    · have hc' : Cond.denote env' (c.rename ρ) := hc.mpr hcond
+      simp [hc', hcond]
+      exact iha (ρ := ρ) h
+    · have hc' : ¬ Cond.denote env' (c.rename ρ) := fun h' => hcond (hc.mp h')
+      simp [hc', hcond]
+      exact ihb (ρ := ρ) h
+  | @seqIf tBr _ c th el k ihth ihel ihk =>
+    have hc := cond_denote_rename ρ h c
+    simp only [Core.rename, denoteTbl_seqIf]
+    rw [ihth (ρ := ρ) h, ihel (ρ := ρ) h]
+    have hif :
+        (if Cond.denote env' (c.rename ρ) then Core.denoteTbl Γ fuel th env tbl
+          else Core.denoteTbl Γ fuel el env tbl) =
+        (if c.denote env then Core.denoteTbl Γ fuel th env tbl
+          else Core.denoteTbl Γ fuel el env tbl) := by
+      simp [hc]
+    rw [hif]
+    refine congrArg
+      (fun f =>
+        (if c.denote env then Core.denoteTbl Γ fuel th env tbl
+          else Core.denoteTbl Γ fuel el env tbl) >>= f)
+      ?_
+    funext v
+    cases tBr with
+    | unit =>
+      simp [seqIfRename, Core.seqIfContTbl]
+      exact ihk (ρ := ρ) h
+    | pair _ _ =>
+      simp [seqIfRename, Core.seqIfContTbl]
+      exact ihk (ρ := ρ) h
+    | word =>
+      simp [seqIfRename, Core.seqIfContTbl]
+      exact ihk (ρ := liftRename ρ) (liftRename_eval (v := v) ρ h)
+    | addr =>
+      simp [seqIfRename, Core.seqIfContTbl]
+      exact ihk (ρ := liftRename ρ) (liftRename_eval (v := Address.toWord v) ρ h)
+    | flag =>
+      simp [seqIfRename, Core.seqIfContTbl]
+      exact ihk (ρ := liftRename ρ) (liftRename_eval (v := v) ρ h)
+  | callTail i args =>
+    cases fuel with
+    | zero => simp [Core.rename, Core.denoteTbl]
+    | succ n =>
+      simp [Core.rename, Core.denoteTbl, list_atom_eval_rename ρ h]
+  | letCall i args k ih =>
+    cases fuel with
+    | zero => simp [Core.rename, Core.denoteTbl, denoteDummy_bind]
+    | succ n =>
+      simp [Core.rename, Core.denoteTbl, list_atom_eval_rename ρ h]
+      refine congrArg
+        (fun f =>
+          (if hi : i < tbl.length then
+            let d := tbl[i]
+            if hret : d.ret = _ then
+              Core.denoteTbl Γ n (hret ▸ d.body) (args.map (·.eval env)) (tbl.take i)
+            else Core.denoteDummy Γ
+          else Core.denoteDummy Γ) >>= f) ?_
+      funext v
+      exact ih (ρ := liftRenameN _ ρ)
+        (liftRenameN_eval _ ρ (RetTy.flatten v)
+          (RetTy.flatten_length v) h)
+
+theorem denoteTbl_eq_denote_expandGo {Γ : ContractSchema S X E ε} {t : RetTy}
+    (fuel : Nat) (c : Core t) (env : List Nat) (tbl : List InternalDef) :
+    Core.denoteTbl Γ fuel c env tbl =
+      Core.denote Γ (Core.expandGo fuel c tbl) env := by
+  induction fuel generalizing t c env tbl with
+  | zero =>
+    induction c generalizing env with
+    | ret r => simp [Core.expandGo, denoteTbl_ret, Core.denote]
+    | opTail op => simp [Core.expandGo, denoteTbl_opTail, Core.denote]
+    | opTailAddr op => simp [Core.expandGo, denoteTbl_opTailAddr, Core.denote]; rfl
+    | opTailFlag op => simp [Core.expandGo, denoteTbl_opTailFlag, Core.denote]
+    | stmtTail s => simp [Core.expandGo, denoteTbl_stmtTail, Core.denote]
+    | revertTail err args =>
+      simp [Core.expandGo, denoteTbl_revertTail, Core.denote]
+    | letOp op k ih =>
+      simp [Core.expandGo, denoteTbl_letOp, Core.denote]
+      refine congrArg (fun f => Op.denote Γ env op >>= f) ?_
+      funext v; exact ih (v :: env)
+    | seq s k ih =>
+      simp [Core.expandGo, denoteTbl_seq, Core.denote]
+      exact congrArg (fun t => Stmt.denote Γ env s >>= fun _ => t) (ih env)
+    | letPure p args k ih =>
+      simp [Core.expandGo, denoteTbl_letPure, Core.denote]
+      exact ih _
+    | ite c a b iha ihb =>
+      simp [Core.expandGo, denoteTbl_ite, Core.denote]
+      by_cases hc : Cond.denote env c
+      · simp [hc]; exact iha env
+      · simp [hc]; exact ihb env
+    | @seqIf tBr _ c th el k ihth ihel ihk =>
+      simp [Core.expandGo, denoteTbl_seqIf, Core.denote]
+      rw [ihth env, ihel env]
+      refine congrArg
+        (fun f =>
+          (if Cond.denote env c then Core.denote Γ (Core.expandGo 0 th tbl) env
+            else Core.denote Γ (Core.expandGo 0 el tbl) env) >>= f) ?_
+      funext v
+      cases tBr with
+      | unit | pair _ _ =>
+        simp [Core.seqIfContTbl]; exact ihk env
+      | word | addr | flag =>
+        simp [Core.seqIfContTbl]; exact ihk _
+    | letCall i args k ih =>
+      simp [Core.expandGo, Core.denoteTbl, Core.denote, denoteDummy_bind]
+    | callTail i args =>
+      simp [Core.expandGo, Core.denoteTbl, Core.denote]
+  | succ n ihf =>
+    induction c generalizing env with
+    | ret r => simp [Core.expandGo, denoteTbl_ret, Core.denote]
+    | opTail op => simp [Core.expandGo, denoteTbl_opTail, Core.denote]
+    | opTailAddr op => simp [Core.expandGo, denoteTbl_opTailAddr, Core.denote]; rfl
+    | opTailFlag op => simp [Core.expandGo, denoteTbl_opTailFlag, Core.denote]
+    | stmtTail s => simp [Core.expandGo, denoteTbl_stmtTail, Core.denote]
+    | revertTail err args =>
+      simp [Core.expandGo, denoteTbl_revertTail, Core.denote]
+    | letOp op k ih =>
+      simp [Core.expandGo, denoteTbl_letOp, Core.denote]
+      refine congrArg (fun f => Op.denote Γ env op >>= f) ?_
+      funext v; exact ih (v :: env)
+    | seq s k ih =>
+      simp [Core.expandGo, denoteTbl_seq, Core.denote]
+      exact congrArg (fun t => Stmt.denote Γ env s >>= fun _ => t) (ih env)
+    | letPure p args k ih =>
+      simp [Core.expandGo, denoteTbl_letPure, Core.denote]
+      exact ih _
+    | ite c a b iha ihb =>
+      simp [Core.expandGo, denoteTbl_ite, Core.denote]
+      by_cases hc : Cond.denote env c
+      · simp [hc]; exact iha env
+      · simp [hc]; exact ihb env
+    | @seqIf tBr _ c th el k ihth ihel ihk =>
+      simp [Core.expandGo, denoteTbl_seqIf, Core.denote]
+      rw [ihth env, ihel env]
+      refine congrArg
+        (fun f =>
+          (if Cond.denote env c then
+            Core.denote Γ (Core.expandGo (n + 1) th tbl) env
+          else Core.denote Γ (Core.expandGo (n + 1) el tbl) env) >>= f) ?_
+      funext v
+      cases tBr with
+      | unit | pair _ _ =>
+        simp [Core.seqIfContTbl]; exact ihk env
+      | word | addr | flag =>
+        simp [Core.seqIfContTbl]; exact ihk _
+    | @callTail tRet i args =>
+      simp [Core.expandGo, Core.denoteTbl]
+      by_cases hi : i < tbl.length
+      · simp [hi]
+        by_cases hret : tbl[i].ret = tRet
+        · rw [dif_pos hret, dif_pos hret]
+          have hρ : ∀ j, (substArgs args j).eval env =
+              (args.map (·.eval env)).getD j 0 := substArgs_eval args env
+          trans Core.denoteTbl Γ n
+              ((hret ▸ tbl[i].body).rename (substArgs args)) env (tbl.take i)
+          · exact (denoteTbl_rename (Γ := Γ) n (hret ▸ tbl[i].body)
+              (substArgs args) hρ (tbl.take i)).symm
+          · exact ihf _ env (tbl.take i)
+        · rw [dif_neg hret, dif_neg hret]
+          simp [Core.denote]
+      · simp [hi, Core.denote]
+    | @letCall tArg _u i args k ih =>
+      simp [Core.expandGo, Core.denoteTbl]
+      by_cases hi : i < tbl.length
+      · simp [hi]
+        by_cases hret : tbl[i].ret = tArg
+        · rw [dif_pos hret, dif_pos hret]
+          have hρ : ∀ j, (substArgs args j).eval env =
+              (args.map (·.eval env)).getD j 0 := substArgs_eval args env
+          rw [denote_splice0]
+          have hbody :
+              Core.denoteTbl Γ n (hret ▸ tbl[i].body)
+                (args.map (·.eval env)) (tbl.take i) =
+              Core.denote Γ
+                (Core.expandGo n
+                  ((hret ▸ tbl[i].body).rename (substArgs args))
+                  (tbl.take i)) env := by
+            trans Core.denoteTbl Γ n
+                ((hret ▸ tbl[i].body).rename (substArgs args))
+                env (tbl.take i)
+            · exact (denoteTbl_rename (Γ := Γ) n (hret ▸ tbl[i].body)
+                (substArgs args) hρ (tbl.take i)).symm
+            · exact ihf _ env (tbl.take i)
+          rw [hbody]
+          refine congrArg
+            (fun f =>
+              Core.denote Γ
+                (Core.expandGo n
+                  ((hret ▸ tbl[i].body).rename (substArgs args))
+                  (tbl.take i)) env >>= f) ?_
+          funext v
+          exact ih _
+        · rw [dif_neg hret, dif_neg hret]
+          simp [Core.denote, denoteDummy_bind]
+      · simp [hi, Core.denote, denoteDummy_bind]
+
+theorem denoteTbl_eq_denote_expand {Γ : ContractSchema S X E ε} {t : RetTy}
+    (tbl : List InternalDef) (c : Core t) (env : List Nat) :
+    Core.denoteTbl Γ tbl.length c env tbl =
+      Core.denote Γ (Core.expand tbl c) env :=
+  denoteTbl_eq_denote_expandGo tbl.length c env tbl
+
+theorem expandGo_eq_self {t : RetTy} (fuel : Nat) (c : Core t)
+    (tbl : List InternalDef) (h : Core.hasInternalCall c = false) :
+    Core.expandGo fuel c tbl = c := by
+  induction c generalizing fuel with
+  | ret r => simp [Core.expandGo]
+  | opTail op | opTailAddr op | opTailFlag op => simp [Core.expandGo]
+  | stmtTail s => simp [Core.expandGo]
+  | revertTail err args => simp [Core.expandGo]
+  | letOp op k ih =>
+    simp [Core.hasInternalCall] at h
+    simp [Core.expandGo, ih fuel h]
+  | seq s k ih =>
+    simp [Core.hasInternalCall] at h
+    simp [Core.expandGo, ih fuel h]
+  | letPure p args k ih =>
+    simp [Core.hasInternalCall] at h
+    simp [Core.expandGo, ih fuel h]
+  | ite c a b iha ihb =>
+    simp [Core.hasInternalCall, Bool.or_eq_false_iff] at h
+    simp [Core.expandGo, iha fuel h.1, ihb fuel h.2]
+  | seqIf c th el k ihth ihel ihk =>
+    simp [Core.hasInternalCall, Bool.or_eq_false_iff] at h
+    simp [Core.expandGo, ihth fuel h.1.1, ihel fuel h.1.2, ihk fuel h.2]
+  | letCall i args k =>
+    simp [Core.hasInternalCall] at h
+  | callTail i args =>
+    simp [Core.hasInternalCall] at h
+
+theorem expand_eq_self {t : RetTy} (tbl : List InternalDef) (c : Core t)
+    (h : Core.hasInternalCall c = false) :
+    Core.expand tbl c = c :=
+  expandGo_eq_self tbl.length c tbl h
+
 end Lsc.Proof
