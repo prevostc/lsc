@@ -2,11 +2,12 @@ import Examples.Vault.Spec
 import Examples.Vault.Proofs.Tx
 import Examples.Vault.Proofs.Security
 import Stdlib.ERC20
+import Stdlib.Shares
 
 /-!
 Vault theorems: Tx-level share and holdings deltas, spec-level anti-extraction
-and solvency. Assumed of the token: it is a conforming ERC-20 per
-`IERC20.Spec`; no reentrancy is modelled.
+and solvency. The honest-counterparty assumption (`IERC20.Spec` of the bound
+asset) lives in `State` / `HasDeploy` / `HasRely`.
 -/
 
 open Lsc Lsc.Stdlib Lsc.Security Vault
@@ -25,19 +26,6 @@ theorem deposit_shares (assets : Amount vaultAsset)
       w'.self.totalShares = w.self.totalShares + minted :=
   Proof.deposit_shares h
 
-/-- A successful `deposit` raises the vault's live token balance by `assets`,
-when the caller is not the vault. Assumed of the token: it is a conforming
-ERC-20 per `IERC20.Spec`; no reentrancy is modelled. Self-deposit is excluded
-because a conforming self-`transferFrom` is a no-op on the vault's balance, so
-the holdings delta is genuinely false there. -/
-theorem deposit_holdings (assets : Amount vaultAsset)
-    {minted : Amount vShare} {w' : World}
-    (hT : IERC20.Spec (w.self.asset.impl : AssetImpl))
-    (hne : msg.sender ≠ msg.self)
-    (h : Tx.run (deposit assets) msg w = .ok (minted, w')) :
-    holdings msg.self w' = holdings msg.self w + assets.raw :=
-  Proof.deposit_holdings hT hne h
-
 /-- A successful `withdraw` burns `sharesIn` from the caller and lowers
 `totalShares` by the burned shares. -/
 theorem withdraw_shares (sharesIn : Amount vShare)
@@ -47,66 +35,60 @@ theorem withdraw_shares (sharesIn : Amount vShare)
       w'.self.totalShares = w.self.totalShares - sharesIn :=
   Proof.withdraw_shares h
 
+end Vault
+
+namespace Vault
+
+variable (msg : Msg) (w : World)
+
+/-- A successful `deposit` raises the vault's live token balance by `assets`.
+The caller is not the vault (`msg : Msg`). Assumed of the token: the bound
+asset is a conforming ERC-20. -/
+theorem deposit_holdings (assets : Amount vaultAsset)
+    {hT : IERC20.Spec (w.self.asset.impl : AssetImpl)}
+    {minted : Amount vShare} {w' : World}
+    (h : Tx.run (deposit assets) msg w = .ok (minted, w')) :
+    holdingsAt msg.self w' = holdingsAt msg.self w + assets :=
+  Proof.deposit_holdings (ctx := msg.toCtx) (w := w) hT msg.notSelf h
+
 /-- A successful `withdraw` lowers the vault's live token balance by the
-assets paid, when the caller is not the vault. Assumed of the token: it is a
-conforming ERC-20 per `IERC20.Spec`; no reentrancy is modelled. Self-withdraw
-is excluded because a conforming self-`transfer` is a no-op on the vault's
-balance, so the holdings delta is genuinely false there. -/
+assets paid. The caller is not the vault (`msg : Msg`). -/
 theorem withdraw_holdings (sharesIn : Amount vShare)
+    {hT : IERC20.Spec (w.self.asset.impl : AssetImpl)}
     {paid : Amount vaultAsset} {w' : World}
-    (hT : IERC20.Spec (w.self.asset.impl : AssetImpl))
-    (hne : msg.sender ≠ msg.self)
     (h : Tx.run (withdraw sharesIn) msg w = .ok (paid, w')) :
-    holdings msg.self w' + paid.raw = holdings msg.self w :=
-  Proof.withdraw_holdings hT hne h
-
-/-- After any well-formed sequence of Vault calls, the sum of depositors'
-redeemable assets still does not exceed the vault's token balance: the
-vault never owes more than it holds. The starting world must already be
-solvent in that sense, and between calls the asset token must not take
-the vault's balance (donations are allowed). Floor rounding can leak dust
-per step; solvency, not per-step conservation, is the statement. Assumed of
-the token: it is a conforming ERC-20 per `IERC20.Spec`; no reentrancy is
-modelled. -/
-theorem vault_solvent (self : Address) (tr : List (Step spec))
-    (w : World)
-    (hW : Wf self tr w)
-    (hR : RelyAlong (vaultRely self w.self.asset w.oracle) tr w)
-    (hT : IERC20.Spec (w.self.asset.impl : AssetImpl))
-    (h : Inv self w) :
-    Solvent (claim self) holdings self (run tr w) :=
-  Proof.vault_solvent self tr w hW hR hT h
-
-/-- No sequence of calls by other users can reduce Alice's redeemable share
-of the vault's live assets without a transaction she signed: the only
-authorised reduction is her own `withdraw`. Other depositors, the owner
-pausing or unpausing, and views cannot debit her; she may lose redeemable
-value only through her own withdrawals. Between calls the asset token must
-not take the vault's balance. Assumed of the token: it is a conforming
-ERC-20 per `IERC20.Spec`; no reentrancy is modelled. This is not liveness —
-pause can block withdrawal without reducing the recorded claim. -/
-theorem vault_no_unauthorized_extraction (self : Address)
-    (tr : List (Step spec)) (w : World) (a : Address)
-    (hw : Inv self w) (hW : Wf self tr w)
-    (hR : RelyAlong (vaultRely self w.self.asset w.oracle) tr w)
-    (hT : IERC20.Spec (w.self.asset.impl : AssetImpl))
-    (hA : NoAuthAlong Auth a tr w) :
-    claim self a w ≤ claim self a (run tr w) :=
-  Proof.vault_no_unauthorized_extraction self tr w a hw hW hR hT hA
+    holdingsAt msg.self w' + paid = holdingsAt msg.self w :=
+  Proof.withdraw_holdings (ctx := msg.toCtx) (w := w) hT msg.notSelf h
 
 /-- After a successful `deposit` of `x` assets against live holdings `A` and
 share supply `S`, redeeming the minted shares recovers all but at most
 `(A + 10^offset) / 10^offset` wei: an inflation donation of size `A` costs
-on the order of `10^offset` wei per wei the depositor cannot redeem. -/
+on the order of `10^offset` wei per wei the depositor cannot redeem.
+The bound is a Nat product of the virtual offset and the unredeemable dust. -/
 theorem deposit_inflation_bounded (assets : Amount vaultAsset)
     {minted : Amount vShare} {w' : World}
     (h : Tx.run (deposit assets) msg w = .ok (minted, w')) :
-    let V := Word.scale offset.decimals
-    let A := holdings msg.self w
-    let S := w.self.totalShares.raw
-    let x := assets.raw
-    let r := Shares.toAssetsRaw offset minted.raw (A + x) (S + minted.raw)
-    V * (x - r) ≤ A + V :=
-  Proof.deposit_inflation_bounded h
+    let V := Shares.virtualShares (s := vShare) offset
+    let A := holdingsAt msg.self w
+    let S := w.self.totalShares
+    let r := Shares.toAssetsRaw offset minted.raw (A.raw + assets.raw)
+      (S.raw + minted.raw)
+    V.raw * (assets.raw - r) ≤ A.raw + V.raw :=
+  Proof.deposit_inflation_bounded (ctx := msg.toCtx) (w := w) h
+
+end Vault
+
+namespace Vault
+
+/-- The vault can always pay out every share: what all shareholders are owed
+never exceeds the assets it holds. -/
+theorem vault_solvent (w : State) : w.owed ≤ w.holdings :=
+  Proof.vault_solvent w
+
+/-- Between any two moments, a shareholder's shares drop by at most what they
+themselves redeemed. -/
+theorem vault_no_unauthorized_extraction (w : State) (t : Txs w) (a : Address) :
+    w.self.shares a ≤ t.end.self.shares a + t.spent a :=
+  Proof.vault_no_unauthorized_extraction w t a
 
 end Vault

@@ -2,6 +2,7 @@ import Mathlib.Tactic.SplitIfs
 import Mathlib.Algebra.BigOperators.Group.Finset.Basic
 import Lsc.Security.Wealth
 import Lsc.Security.WealthTheorems
+import Lsc.Security.InvariantTheorems
 import Examples.Vault.Spec
 import Examples.Vault.Proofs.Tx
 import Stdlib.SharesTheorems
@@ -29,8 +30,10 @@ def InvT (self : Address) (asset : IERC20.Ref vaultAsset)
 theorem inv_rely (self : Address) (asset : IERC20.Ref vaultAsset)
     (oracle : Oracle ExtState) :
     PreservesInvEnv spec (InvT self asset oracle)
-      (vaultRely self asset oracle) := by
-  intro w x' ⟨⟨hst, hbd⟩, ha, ho, hT⟩ ⟨hbal, _hsup⟩
+      (HasRely.rely (C := spec) self) := by
+  intro w x' ⟨⟨hst, hbd⟩, ha, ho, hT⟩ hr
+  have ⟨hbal, _hsup⟩ : vaultRely self asset oracle w.ext x' := by
+    simpa [HasRely.rely, vaultRely, ha, ho] using hr
   refine ⟨⟨hst, ?_⟩, ha, ho, by simpa [IERC20.Ref.impl] using hT⟩
   have hH : holdings self w = (viewBal asset self oracle w.ext).raw := by
     simp [holdings_view, ha, ho]
@@ -393,8 +396,8 @@ private theorem holdings_add_of_transferFrom
       simpa [impl_transferFrom] using this)
   have hdst := hmoves.2.1 hsne
   have hframe := transferFrom_frame (by simpa [tfCall] using hcall)
-  simpa [holdings, IERC20.Ref.impl, Amount.raw_add, hframe.1, hframe.2.1,
-    World.view] using
+  simpa [holdings, holdingsAt, IERC20.Ref.impl, Amount.raw_add, hframe.1,
+    hframe.2.1, World.view] using
     congrArg Amount.raw hdst
 
 private theorem holdings_sub_of_transfer
@@ -435,7 +438,7 @@ private theorem holdings_sub_of_transfer
   have hframe := transfer_frame (w := wCall) (by simpa [trCall, ha] using hcall)
   have hs : w1.self = wCall.self := hframe.1
   rw [← heq0]
-  simp [holdings, hs] at hsumr htor ⊢
+  simp [holdings, holdingsAt, hs] at hsumr htor ⊢
   rw [htor] at hsumr
   rw [Nat.add_assoc, Nat.add_comm amt.raw] at hsumr
   exact Nat.add_left_cancel hsumr
@@ -458,6 +461,8 @@ private theorem claim_le_of_rely (self : Address)
   exact Nat.div_le_div_right (Nat.mul_le_mul_left _ (Nat.add_le_add_right hbal 1))
 
 /-! ### Invariant preservation -/
+
+section InvPreserve
 
 variable (self : Address) (asset : IERC20.Ref vaultAsset) (oracle : Oracle ExtState)
 
@@ -664,22 +669,22 @@ private theorem claim_le_withdraw_run (sharesIn : Amount vShare)
 private theorem claim_le_call (c : Call spec)
     (w : World) (a : Address)
     (hInvT : InvT self asset oracle w)
-    (ht : c.target = self) (hs : c.sender ≠ self)
+    (hs : c.sender ≠ self)
     (hna : ¬ Auth a c w) :
-    claim self a w ≤ claim self a (step (.call c) w) := by
+    claim self a w ≤ claim self a (step self (.call c) w) := by
   obtain ⟨hInv, ha, ho, hT⟩ := hInvT
   have hT' : IERC20.Spec (w.self.asset.impl : AssetImpl) := by
     simpa [IERC20.Ref.impl, ha] using hT
-  rcases c with ⟨sender, value, ts, bn, target, fn, args⟩
+  rcases c with ⟨sender, value, ts, bn, fn, args⟩
   let ctx : Ctx :=
     { sender := sender, value := value, timestamp := ts,
-      blockNumber := bn, self := target }
-  have hself : ctx.self = self := ht
+      blockNumber := bn, self := self }
+  have hself : ctx.self = self := rfl
   have hsne : ctx.sender ≠ self := hs
   have hp : spec.payable fn = false := rfl
   by_cases hv : value = 0
-  · rw [step_eq_worldAfter_of_not_payable (c :=
-      ⟨sender, value, ts, bn, target, fn, args⟩) (w := w) hp hv]
+  · rw [step_eq_worldAfter_of_not_payable self
+      ⟨sender, value, ts, bn, fn, args⟩ w hp hv]
     apply worldAfter_preserves (x := spec.exec fn args) (ctx := ctx)
       (P := fun w' => claim self a w ≤ claim self a w') (Nat.le_refl _)
     intro ret w' hrun
@@ -723,58 +728,216 @@ private theorem claim_le_call (c : Call spec)
         (sharesIn := args) hrun
       subst hw; exact Nat.le_refl _
   · simp [step_reject_value (c :=
-      ⟨sender, value, ts, bn, target, fn, args⟩) (w := w) hp hv]
+      ⟨sender, value, ts, bn, fn, args⟩) (w := w) hp hv]
+
+end InvPreserve
 
 namespace Proof
 
-theorem vault_solvent (self : Address) (tr : List (Step spec))
-    (w : World)
-    (hW : Wf self tr w)
-    (hR : RelyAlong (vaultRely self w.self.asset w.oracle) tr w)
-    (hT : IERC20.Spec (w.self.asset.impl : AssetImpl))
-    (h : Inv self w) :
-    Solvent (claim self) holdings self (run tr w) :=
-  solvent_run_at
-    (vault_preserves_inv self w.self.asset w.oracle)
-    (inv_rely self w.self.asset w.oracle)
-    (fun w' hw' => inv_solvent self w' hw'.1)
-    ⟨h, rfl, rfl, hT⟩ tr hW hR
+private theorem deployed_inv (self : Address) {w : World}
+    (h : Deployed spec w) : Inv self w := by
+  obtain ⟨_hpause, hts, hsh, _hT⟩ := h
+  refine ⟨⟨∅, fun a _ => hsh a, ?_⟩, ?_⟩
+  · simp [hts]
+  · simp [hts]
 
-theorem vault_no_unauthorized_extraction (self : Address)
-    (tr : List (Step spec)) (w : World) (a : Address)
-    (hw : Inv self w) (hW : Wf self tr w)
-    (hR : RelyAlong (vaultRely self w.self.asset w.oracle) tr w)
-    (hT : IERC20.Spec (w.self.asset.impl : AssetImpl))
-    (hA : NoAuthAlong Auth a tr w) :
-    claim self a w ≤ claim self a (run tr w) := by
-  let asset := w.self.asset
-  let oracle := w.oracle
-  have go : ∀ (tr : List (Step spec)) (w' : World),
-      InvT self asset oracle w' →
-      Wf self tr w' →
-      RelyAlong (vaultRely self asset oracle) tr w' →
-      NoAuthAlong Auth a tr w' →
-      claim self a w' ≤ claim self a (run tr w') := by
-    intro tr w'
-    induction tr generalizing w' with
-    | nil =>
-      intro _ _ _ _
-      simp [run]
-    | cons s rest ih =>
-      intro hw' hW hR hA
-      match s with
-      | .env x' =>
-        obtain ⟨hr, htl⟩ := hR
-        have hle := claim_le_of_rely self asset oracle w' x' a hw'.2.1 hw'.2.2.1 hr
-        have hw'' := inv_rely self asset oracle w' x' hw' hr
-        exact Nat.le_trans hle (ih { w' with ext := x' } hw'' hW htl hA)
-      | .call c =>
-        obtain ⟨hna, htl⟩ := hA
-        obtain ⟨ht, hs, hWtl⟩ := hW
-        have hw'' := vault_preserves_inv self asset oracle c w' ht hs hw'
-        have hle := claim_le_call self asset oracle c w' a hw' ht hs hna
-        exact Nat.le_trans hle (ih (step (.call c) w') hw'' hWtl hR htl)
-  exact go tr w ⟨hw, rfl, rfl, hT⟩ hW hR hA
+private theorem deployed_invT (self : Address) {w : World}
+    (h : Deployed spec w) :
+    InvT self w.self.asset w.oracle w :=
+  ⟨deployed_inv self h, rfl, rfl, h.2.2.2⟩
+
+private theorem owed_le_of_inv (self : Address) (w : World)
+    (h : Inv self w) : owedAt self w ≤ holdingsAt self w := by
+  obtain ⟨_, hbd⟩ := h
+  have hV : 0 < Word.scale offset.decimals :=
+    Nat.pow_pos (by decide : 0 < 10)
+  have hle := offset_claims_le (holdings self w) w.self.totalShares.raw
+    (Word.scale offset.decimals) hV hbd
+  simpa [owedAt, holdingsAt, holdings, Amount.le_iff, Shares.toAssetsRaw]
+    using hle
+
+theorem vault_inv_of_state (s : State) : Inv s.addr s.w := by
+  obtain ⟨w0, tr, hDep, hW, hR, hw⟩ := s.reachable
+  have hInvT :=
+    inv_run_at (vault_preserves_inv s.addr w0.self.asset w0.oracle)
+      (inv_rely s.addr w0.self.asset w0.oracle)
+      (deployed_invT s.addr hDep) tr hW hR
+  rw [hw]
+  exact hInvT.1
+
+theorem vault_solvent (s : State) : s.owed ≤ s.holdings :=
+  owed_le_of_inv s.addr s.w (vault_inv_of_state s)
+
+private theorem shares_withdrawPost (σ : Storage) (src : Address)
+    (n : Amount vShare) (a : Address) (hn : n ≤ σ.shares src) :
+    σ.shares a ≤ (withdrawPost σ src n).shares a +
+      (if src = a then n else 0) := by
+  have hn' : n.raw ≤ (σ.shares src).raw := (Amount.le_iff _ _).mp hn
+  simp only [Amount.le_iff, Amount.raw_add, withdrawPost, Amount.raw_sub]
+  by_cases h : a = src
+  · subst h
+    simp [Function.update]
+    exact Nat.le_of_eq (Nat.sub_add_cancel hn').symm
+  · simp [Function.update, h]
+
+private theorem spent_covers_ok (self : Address) (c : Call spec)
+    (w w' : World) (a : Address) {r : spec.Ret c.fn}
+    (h : spec.exec c.fn c.args (c.toCtx self) w = .ok (r, w')) :
+    w.self.shares a ≤ w'.self.shares a + spentCall a c := by
+  revert r h
+  rcases c with ⟨sender, value, ts, bn, fn, args⟩
+  cases fn <;> intro r h
+  case withdraw =>
+    have hrun : Tx.run (withdraw args)
+        { sender, value, timestamp := ts, blockNumber := bn, self } w =
+          .ok (r, w') := by
+      simpa [Tx.run, spec_exec_withdraw, Call.toCtx] using h
+    have hok := withdraw_ok_of_run hrun
+    have ⟨hn, hσ, _, _⟩ := withdraw_post args hok hrun
+    subst hn
+    simp [spentCall, hσ, Call.toCtx]
+    exact shares_withdrawPost w.self sender args a hok.bal
+  case deposit =>
+    have hrun : Tx.run (deposit args)
+        { sender, value, timestamp := ts, blockNumber := bn, self } w =
+          .ok (r, w') := by
+      simpa [Tx.run, spec_exec_deposit, Call.toCtx] using h
+    have hok := deposit_ok_of_run hrun
+    have ⟨hn, hσ, _, _⟩ := deposit_post args hok hrun
+    subst hn
+    simp [spentCall, hσ, depositPost]
+    by_cases hwho : a = sender
+    · subst hwho
+      simp [Function.update, Amount.le_iff, Amount.raw_add]
+    · simp [Function.update, hwho, Amount.le_iff]
+  case pause =>
+    have hrun : Tx.run pause
+        { sender, value, timestamp := ts, blockNumber := bn, self } w =
+          .ok (r, w') := by
+      simpa [Tx.run, spec_exec_pause, Call.toCtx] using h
+    by_cases howner : sender = w.self.owner
+    · have hok := pause_ok
+        (ctx := { sender, value, timestamp := ts, blockNumber := bn, self })
+        (w := w) howner
+      rw [hok] at hrun
+      obtain ⟨rfl, rfl⟩ := hrun
+      simp [spentCall]
+    · have herr := pause_only_owner
+        (ctx := { sender, value, timestamp := ts, blockNumber := bn, self })
+        (w := w) howner
+      rw [herr] at hrun
+      cases hrun
+  case unpause =>
+    have hrun : Tx.run unpause
+        { sender, value, timestamp := ts, blockNumber := bn, self } w =
+          .ok (r, w') := by
+      simpa [Tx.run, spec_exec_unpause, Call.toCtx] using h
+    by_cases howner : sender = w.self.owner
+    · have hok := unpause_ok
+        (ctx := { sender, value, timestamp := ts, blockNumber := bn, self })
+        (w := w) howner
+      rw [hok] at hrun
+      obtain ⟨rfl, rfl⟩ := hrun
+      simp [spentCall]
+    · have herr := unpause_only_owner
+        (ctx := { sender, value, timestamp := ts, blockNumber := bn, self })
+        (w := w) howner
+      rw [herr] at hrun
+      cases hrun
+  case isPaused =>
+    have hrun : Tx.run isPaused
+        { sender, value, timestamp := ts, blockNumber := bn, self } w =
+          .ok (r, w') := by
+      simpa [Tx.run, spec_exec_isPaused, Call.toCtx] using h
+    have hok := isPaused_returns_stored
+      (ctx := { sender, value, timestamp := ts, blockNumber := bn, self })
+      (w := w)
+    rw [hok] at hrun
+    obtain ⟨rfl, rfl⟩ := hrun
+    simp [spentCall]
+  case previewDeposit =>
+    have hrun : Tx.run (previewDeposit args)
+        { sender, value, timestamp := ts, blockNumber := bn, self } w =
+          .ok (r, w') := by
+      simpa [Tx.run, spec_exec_previewDeposit, Call.toCtx] using h
+    have hw := previewDeposit_success_world (assets := args) hrun
+    subst hw
+    simp [spentCall]
+  case previewRedeem =>
+    have hrun : Tx.run (previewRedeem args)
+        { sender, value, timestamp := ts, blockNumber := bn, self } w =
+          .ok (r, w') := by
+      simpa [Tx.run, spec_exec_previewRedeem, Call.toCtx] using h
+    have hw := previewRedeem_success_world (sharesIn := args) hrun
+    subst hw
+    simp [spentCall]
+
+private theorem spent_covers_accepted (self : Address) (c : Call spec)
+    (w : World) (a : Address)
+    (hacc : accepted self c w = true) :
+    w.self.shares a ≤ (step self (.call c) w).self.shares a +
+      spentCall a c := by
+  obtain ⟨hvo, _, ⟨⟨r, w'⟩, hrun, hstep⟩⟩ := accepted_ok hacc
+  have hv : c.value = 0 :=
+    spec.value_eq_zero_of_valueOk (by cases c.fn <;> rfl) hvo
+  rw [hv, World.creditValue_zero] at hrun
+  rw [hstep]
+  exact spent_covers_ok self c w w' a hrun
+
+private theorem foldAccepted_raw_add {s : State} (t : Txs s) (a : Address)
+    (x : Amount vShare) :
+    (t.foldAccepted (fun acc c _ => acc + HasSpent.spentCall (C := spec) a c)
+      x).raw =
+      x.raw + (Txs.spent t a).raw := by
+  induction t generalizing x with
+  | nil => simp [Txs.foldAccepted, Txs.spent, Amount.raw_add]
+  | @call s c hne rest ih =>
+    simp [Txs.foldAccepted, Txs.spent]
+    split_ifs
+    · have hx := ih (x + HasSpent.spentCall (C := spec) a (c))
+      have hsc := ih (HasSpent.spentCall (C := spec) a (c))
+      rw [hx, hsc]
+      simp [Amount.raw_add]
+      ac_rfl
+    · exact ih x
+  | @env s x' hr rest ih =>
+    simpa [Txs.spent, Txs.foldAccepted] using ih x
+
+theorem vault_no_unauthorized_extraction (s : State) (t : Txs s)
+    (a : Address) :
+    s.self.shares a ≤ t.end.self.shares a + t.spent a := by
+  induction t with
+  | nil =>
+    simp [Txs.end, Txs.spent, Amount.le_iff, Amount.raw_add]
+  | @call s c hne rest ih =>
+    by_cases hacc : accepted s.addr c s.w = true
+    · have hcov := spent_covers_accepted s.addr c s.w a hacc
+      have hstepEq : (s.afterCall c hne).w = step s.addr (.call c) s.w :=
+        State.afterCall_w s c hne
+      have hthis : s.self.shares a ≤
+          (s.afterCall c hne).self.shares a + spentCall a c := by
+        simpa [State.self, hstepEq] using hcov
+      simp [Amount.le_iff, Amount.raw_add] at hthis ih
+      have hfold := foldAccepted_raw_add rest a
+        (HasSpent.spentCall (C := spec) a c)
+      simp [Amount.le_iff, Amount.raw_add, Txs.spent, Txs.foldAccepted, hacc,
+        HasSpent.spentCall] at hthis ih hfold ⊢
+      rw [hfold]
+      refine Nat.le_trans hthis ?_
+      have hih := Nat.add_le_add_right ih (spentCall a c).raw
+      convert hih using 1
+      ac_rfl
+    · have hfalse : accepted s.addr c s.w = false :=
+        Bool.eq_false_iff.mpr hacc
+      have hstep := step_of_not_accepted hfalse
+      have hs : (s.afterCall c hne).self = s.self := by
+        simp only [State.self, State.afterCall_w]
+        exact congrArg World.self hstep
+      simp [hs, Txs.spent, Txs.foldAccepted, hfalse] at ih ⊢
+      exact ih
+  | @env s x' hr rest ih =>
+    have hs : (s.afterEnv x' hr).self = s.self := State.afterEnv_self s x' hr
+    simpa [Txs.spent, Txs.foldAccepted, hs] using ih
 
 end Proof
 

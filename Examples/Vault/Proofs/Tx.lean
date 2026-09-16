@@ -7,8 +7,6 @@ import Lsc.Lang.AmountTheorems
 import Lsc.Lang.InterfaceTheorems
 
 set_option linter.unusedSimpArgs false
-set_option maxHeartbeats 800000
-
 /-!
 Vault `Tx.run` lemmas. External CALLs are opaque; success lemmas recover
 storage, logs, and the oracle, and use `IERC20.Spec` for holdings.
@@ -120,13 +118,19 @@ theorem impl_balanceOf (r : IERC20.Ref vaultAsset) (who : Address)
 
 theorem holdings_view (self : Address) :
     holdings self w = (viewBal w.self.asset self w.oracle w.ext).raw := by
-  simp [holdings, impl_balanceOf]
+  simp [holdings, holdingsAt, impl_balanceOf]
+
+theorem holdingsAt_congr (self : Address) {w w' : World}
+    (ha : w'.self.asset.addr = w.self.asset.addr)
+    (ho : w'.oracle = w.oracle) (hx : w'.ext = w.ext) :
+    holdingsAt self w' = holdingsAt self w := by
+  simp [holdingsAt, IERC20.Ref.impl, IERC20.Impl.ofRef, ha, ho, hx, World.view]
 
 theorem holdings_congr (self : Address) {w w' : World}
     (ha : w'.self.asset.addr = w.self.asset.addr)
     (ho : w'.oracle = w.oracle) (hx : w'.ext = w.ext) :
-    holdings self w' = holdings self w := by
-  simp [holdings, IERC20.Ref.impl, IERC20.Impl.ofRef, ha, ho, hx, World.view]
+    holdings self w' = holdings self w :=
+  congrArg Amount.raw (holdingsAt_congr self ha ho hx)
 
 theorem transferFrom_frame {r : IERC20.Ref vaultAsset}
     {src dst : Address} {amt : Amount vaultAsset} {b : Bool}
@@ -1326,7 +1330,7 @@ theorem deposit_holdings {assets : Amount vaultAsset} {minted : Amount vShare}
     (hT : IERC20.Spec (w.self.asset.impl : AssetImpl))
     (hne : ctx.sender ≠ ctx.self)
     (h : Tx.run (deposit assets) ctx w = .ok (minted, w')) :
-    holdings ctx.self w' = holdings ctx.self w + assets.raw := by
+    holdingsAt ctx.self w' = holdingsAt ctx.self w + assets := by
   have hok := deposit_ok_of_run h
   have ⟨w1, htf, hself1, hor1, _, hext, hor⟩ := deposit_call assets hok h
   have ⟨_, hσ, _, _⟩ := deposit_post assets hok h
@@ -1336,13 +1340,15 @@ theorem deposit_holdings {assets : Amount vaultAsset} {minted : Amount vShare}
       have := congrArg (Option.map (Prod.map id World.view)) hopt
       simpa [impl_transferFrom] using this)
   have hdst := hmoves.2.1 hne
-  have hbal : holdings ctx.self w1 = holdings ctx.self w + assets.raw := by
-    simpa [holdings, IERC20.Ref.impl, Amount.raw_add, hself1, hor1, World.view] using
-      congrArg Amount.raw hdst
+  have hbal : holdingsAt ctx.self w1 = holdingsAt ctx.self w + assets := by
+    simpa [holdingsAt, IERC20.Ref.impl, hself1, hor1, World.view] using hdst
   have heqH : holdings ctx.self w' = holdings ctx.self w1 :=
     holdings_congr ctx.self (by simp [hσ, depositPost, hself1])
       (hor.trans hor1.symm) hext
-  simpa [heqH] using hbal
+  apply Amount.ext
+  have hraw := congrArg Amount.raw hbal
+  rw [Amount.raw_add] at hraw
+  simpa [holdings] using heqH.trans hraw
 
 theorem withdraw_shares {sharesIn : Amount vShare} {paid : Amount vaultAsset}
     {w' : World}
@@ -1359,7 +1365,7 @@ theorem withdraw_holdings {sharesIn : Amount vShare} {paid : Amount vaultAsset}
     (hT : IERC20.Spec (w.self.asset.impl : AssetImpl))
     (hne : ctx.sender ≠ ctx.self)
     (h : Tx.run (withdraw sharesIn) ctx w = .ok (paid, w')) :
-    holdings ctx.self w' + paid.raw = holdings ctx.self w := by
+    holdingsAt ctx.self w' + paid = holdingsAt ctx.self w := by
   have hok := withdraw_ok_of_run h
   have ⟨hn, hσ, hor, _⟩ := withdraw_post sharesIn hok h
   obtain ⟨w1, htr, hself1, hor1, hext, _, _⟩ := withdraw_call sharesIn hok h
@@ -1401,9 +1407,12 @@ theorem withdraw_holdings {sharesIn : Amount vShare} {paid : Amount vaultAsset}
       (by simp [wCall, withdrawTailWorld, withdrawPost]) rfl rfl
   have hs : w1.self = wCall.self := by
     simp [hself1, wCall, withdrawTailWorld, σ', withdrawPost]
+  apply Amount.ext
+  change holdings ctx.self w' + amt.raw = holdings ctx.self w
   rw [heq1, ← heq0]
   clear heq1 heq0
-  simp [holdings, hs, wCall, withdrawTailWorld, withdrawPost] at hsumr htor ⊢
+  simp [holdings, holdingsAt, hs, wCall, withdrawTailWorld, withdrawPost]
+    at hsumr htor ⊢
   rw [htor] at hsumr
   rw [Nat.add_assoc, Nat.add_comm amt.raw] at hsumr
   exact Nat.add_left_cancel hsumr
@@ -1411,20 +1420,21 @@ theorem withdraw_holdings {sharesIn : Amount vShare} {paid : Amount vaultAsset}
 theorem deposit_inflation_bounded {assets : Amount vaultAsset}
     {minted : Amount vShare} {w' : World}
     (h : Tx.run (deposit assets) ctx w = .ok (minted, w')) :
-    let V := Word.scale offset.decimals
-    let A := holdings ctx.self w
-    let S := w.self.totalShares.raw
-    let x := assets.raw
-    let r := Shares.toAssetsRaw offset minted.raw (A + x) (S + minted.raw)
-    V * (x - r) ≤ A + V := by
+    let V := Shares.virtualShares (s := vShare) offset
+    let A := holdingsAt ctx.self w
+    let S := w.self.totalShares
+    let r := Shares.toAssetsRaw offset minted.raw (A.raw + assets.raw)
+      (S.raw + minted.raw)
+    V.raw * (assets.raw - r) ≤ A.raw + V.raw := by
   have hok := deposit_ok_of_run h
   have ⟨hn, _, _, _⟩ := deposit_post assets hok h
-  have hTA : holdings ctx.self w = hok.ta.raw :=
+  have hTA : (holdingsAt ctx.self w).raw = hok.ta.raw :=
     viewBal?_some_holdings ctx.self hok.viewOk
   subst hn
-  simpa [hTA, mintedShares, Amount.raw_ofWord] using
-    Shares.inflation_bound_raw offset assets.raw hok.ta.raw
-      w.self.totalShares.raw
+  simp [hTA, mintedShares, Amount.raw_ofWord, Shares.virtualShares,
+    Shares.virtualShares_raw]
+  exact Shares.inflation_bound_raw offset assets.raw hok.ta.raw
+    w.self.totalShares.raw
 
 end Proof
 

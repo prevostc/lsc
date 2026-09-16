@@ -8,14 +8,16 @@ storage writes. Donations raise everyone's claim pro-rata; a donation of
 size `A` costs on the order of `10^6` wei per wei a later depositor cannot
 redeem (`deposit_inflation_bounded`: `10^offset · (x − r) ≤ A + 10^offset`).
 
-**Proved:** a successful deposit credits shares and raises live holdings (when
-the caller is not the vault). A successful withdraw burns shares and lowers
-holdings. An address's redeemable assets never fall unless that address
-called `withdraw`. The vault stays solvent vs its live token balance.
-Inflation of the share rate is bounded as above.
-Assumed of the token: it is a conforming ERC-20 per `IERC20.Spec`; no
-reentrancy is modelled. Between calls the vault's token balance does not
-fall and the token's `totalSupply` view stays the same.
+**Proved:** a successful deposit credits shares and raises live holdings
+(caller is not the vault: `msg : Msg`). A successful withdraw burns shares
+and lowers holdings. In any reachable `State`, after any `Txs`, a
+shareholder's shares drop by at most what they themselves redeemed
+(`vault_no_unauthorized_extraction`). The vault stays solvent:
+`owed ≤ holdings` (`vault_solvent`). Inflation of the share rate is
+bounded as above. Honest-counterparty (`IERC20.Spec` of the bound asset)
+lives in `HasDeploy` / `State`. Between calls the vault's token balance
+does not fall and the token's `totalSupply` view stays the same
+(`HasRely`). No reentrancy is modelled.
 
 | File | Role |
 |------|------|
