@@ -64,8 +64,10 @@ private theorem collect_cover {r fees H H' : Nat}
 theorem inv_rely (self : Address) (t0 : IERC20.Ref asset0) (t1 : IERC20.Ref asset1)
     (oracle : Oracle ExtState) :
     PreservesInvEnv spec (InvT self t0 t1 oracle)
-      (cpammRely self t0 t1 oracle) := by
-  intro w x' ⟨⟨h0, h1, hinv, hps⟩, ht0, ht1, ho, hT0, hT1, hInd⟩ ⟨hR0, hR1, _, _⟩
+      (HasRely.rely (C := spec) self) := by
+  intro w x' ⟨⟨h0, h1, hinv, hps⟩, ht0, ht1, ho, hT0, hT1, hInd⟩ hr
+  have ⟨hR0, hR1, _, _⟩ : cpammRely self t0 t1 oracle w.ext x' := by
+    simpa [HasRely.rely, cpammRely, ht0, ht1, ho] using hr
   refine ⟨⟨?_, ?_, hinv, hps⟩, ht0, ht1, ho, ?_, ?_, hInd⟩
   · rw [holdings0_view, ht0, ho] at h0 ⊢
     exact Nat.le_trans h0 hR0
@@ -299,7 +301,7 @@ private theorem holdings0_add_of_transferFrom
       simpa [impl_transferFrom] using this)
   have hdst := hmoves.2.1 hsne
   have hframe := transferFrom_frame hcall
-  simp [holdings0, IERC20.Ref.impl, World.view] at hdst ⊢
+  simp [holdings0, holdingsAt0, IERC20.Ref.impl, World.view] at hdst ⊢
   simp [hframe.1, hframe.2.1] at hdst ⊢
   simpa [Amount.raw_add] using congrArg Amount.raw hdst
 
@@ -319,7 +321,7 @@ private theorem holdings1_add_of_transferFrom
       simpa [impl_transferFrom] using this)
   have hdst := hmoves.2.1 hsne
   have hframe := transferFrom_frame hcall
-  simp [holdings1, IERC20.Ref.impl, World.view] at hdst ⊢
+  simp [holdings1, holdingsAt1, IERC20.Ref.impl, World.view] at hdst ⊢
   simp [hframe.1, hframe.2.1] at hdst ⊢
   simpa [Amount.raw_add] using congrArg Amount.raw hdst
 
@@ -354,7 +356,8 @@ private theorem holdings0_sub_of_transfer
   have htor := congrArg Amount.raw hto
   simp [Amount.raw_add] at htor
   have hframe := transfer_frame (w := wCall) hcall
-  simp [holdings0, IERC20.Ref.impl, hframe.1, hframe.2.1, World.view] at hsumr htor ⊢
+  simp [holdings0, holdingsAt0, IERC20.Ref.impl, hframe.1, hframe.2.1,
+    World.view] at hsumr htor ⊢
   rw [htor] at hsumr
   rw [Nat.add_assoc, Nat.add_comm amt.raw] at hsumr
   exact Nat.add_left_cancel hsumr
@@ -390,7 +393,8 @@ private theorem holdings1_sub_of_transfer
   have htor := congrArg Amount.raw hto
   simp [Amount.raw_add] at htor
   have hframe := transfer_frame (w := wCall) hcall
-  simp [holdings1, IERC20.Ref.impl, hframe.1, hframe.2.1, World.view] at hsumr htor ⊢
+  simp [holdings1, holdingsAt1, IERC20.Ref.impl, hframe.1, hframe.2.1,
+    World.view] at hsumr htor ⊢
   rw [htor] at hsumr
   rw [Nat.add_assoc, Nat.add_comm amt.raw] at hsumr
   exact Nat.add_left_cancel hsumr
@@ -885,7 +889,7 @@ theorem protocolFees_auth :
   exact (Nat.lt_irrefl _ hdec).elim
 
 theorem cpamm_no_unauth :
-    NoUnauthorizedDecrease spec (InvT self t0 t1 oracle) claim Auth :=
+    NoUnauthorizedDecrease spec self (InvT self t0 t1 oracle) claim Auth :=
   NoUnauthorizedDecrease.of_fns (C := spec) fun fn =>
     match fn with
     | .addLiquidity => addLiquidity_auth self t0 t1 oracle
@@ -901,37 +905,224 @@ theorem cpamm_no_unauth :
 
 namespace Proof
 
-theorem cpamm_no_unauthorized_extraction (self : Address)
-    (tr : List (Step spec)) (w : World) (a : Address)
-    (hw : Inv self w) (hW : Wf self tr w)
-    (hR : RelyAlong (cpammRely self w.self.token0 w.self.token1 w.oracle) tr w)
-    (hT0 : IERC20.Spec (w.self.token0.impl : Token0Impl))
-    (hT1 : IERC20.Spec (w.self.token1.impl : Token1Impl))
-    (hInd : TokensIndependent w.self.token0 w.self.token1 w.oracle)
-    (hA : NoAuthAlong Auth a tr w) :
-    claim a w ≤ claim a (run tr w) :=
-  no_unauthorized_extraction_at
-    (cpamm_no_unauth self w.self.token0 w.self.token1 w.oracle)
-    (cpamm_preserves_inv self w.self.token0 w.self.token1 w.oracle)
-    (inv_rely self w.self.token0 w.self.token1 w.oracle)
-    (ClaimMonoEnv.of_self (fun a (s : Storage) => (s.shares a).raw)
-      (cpammRely self w.self.token0 w.self.token1 w.oracle))
-    tr w a ⟨hw, rfl, rfl, rfl, hT0, hT1, hInd⟩ hW hR hA
+private theorem deployed_inv (self : Address) {w : World}
+    (h : Deployed spec w) : Inv self w := by
+  obtain ⟨_hne, hts, hsh, hr0, hr1, hf0, hf1, hps, _hT0, _hT1, _hInd⟩ := h
+  refine ⟨?_, ?_, ⟨∅, fun a _ => hsh a, ?_⟩, hps⟩
+  · simp [hr0, hf0]
+  · simp [hr1, hf1]
+  · simp [hts]
 
-theorem cpamm_solvent (self : Address) (tr : List (Step spec))
-    (w : World)
-    (hW : Wf self tr w)
-    (hR : RelyAlong (cpammRely self w.self.token0 w.self.token1 w.oracle) tr w)
-    (hT0 : IERC20.Spec (w.self.token0.impl : Token0Impl))
-    (hT1 : IERC20.Spec (w.self.token1.impl : Token1Impl))
-    (hInd : TokensIndependent w.self.token0 w.self.token1 w.oracle)
-    (h : Inv self w) :
-    CoversLpsAndProtocol self (run tr w) :=
-  inv_covers self (run tr w)
-    (inv_run_at
-      (cpamm_preserves_inv self w.self.token0 w.self.token1 w.oracle)
-      (inv_rely self w.self.token0 w.self.token1 w.oracle)
-      ⟨h, rfl, rfl, rfl, hT0, hT1, hInd⟩ tr hW hR).1
+private theorem deployed_invT (self : Address) {w : World}
+    (h : Deployed spec w) :
+    InvT self w.self.token0 w.self.token1 w.oracle w :=
+  ⟨deployed_inv self h, rfl, rfl, rfl, h.2.2.2.2.2.2.2.2.1,
+    h.2.2.2.2.2.2.2.2.2.1, h.2.2.2.2.2.2.2.2.2.2⟩
+
+theorem cpamm_inv_of_state (s : State) : Inv s.addr s.w := by
+  obtain ⟨w0, tr, hDep, hW, hR, hw⟩ := s.reachable
+  have hInvT :=
+    inv_run_at (cpamm_preserves_inv s.addr w0.self.token0 w0.self.token1
+        w0.oracle)
+      (inv_rely s.addr w0.self.token0 w0.self.token1 w0.oracle)
+      (deployed_invT s.addr hDep) tr hW hR
+  rw [hw]
+  exact hInvT.1
+
+theorem cpamm_solvent (s : State) :
+    s.self.reserve0 + s.self.protocolFees0 ≤ s.holdings0 ∧
+    s.self.reserve1 + s.self.protocolFees1 ≤ s.holdings1 := by
+  obtain ⟨h0, h1, _, _⟩ := cpamm_inv_of_state s
+  constructor
+  · exact (Amount.le_iff _ _).mpr (by
+      simp only [State.self, State.holdings0, Amount.raw_add]
+      simpa [holdings0, holdingsAt0] using h0)
+  · exact (Amount.le_iff _ _).mpr (by
+      simp only [State.self, State.holdings1, Amount.raw_add]
+      simpa [holdings1, holdingsAt1] using h1)
+
+private theorem sharesAfterDead_ge (σ : Storage) (a : Address) :
+    (σ.shares a).raw ≤ (sharesAfterDead σ a).raw := by
+  by_cases hts : σ.totalShares.raw = 0
+  · by_cases ha : a = (0 : Address)
+    · subst ha
+      simp [sharesAfterDead, hts, Function.update, Amount.raw_add]
+    · simp [sharesAfterDead, hts, Function.update, ha]
+  · simp [sharesAfterDead, hts]
+
+private theorem shares_removePost (σ : Storage) (src : Address)
+    (n : Amount lpShare) (a : Address) (hn : n ≤ σ.shares src) :
+    σ.shares a ≤ (removeLiquidityPost σ src n.raw).shares a +
+      (if src = a then n else 0) := by
+  have hn' : n.raw ≤ (σ.shares src).raw := (Amount.le_iff _ _).mp hn
+  simp only [Amount.le_iff, Amount.raw_add, removeLiquidityPost,
+    Amount.raw_sub, Amount.raw_ofWord]
+  by_cases h : a = src
+  · subst h
+    simp [Function.update]
+    exact Nat.le_of_eq (Nat.sub_add_cancel hn').symm
+  · simp [Function.update, h]
+
+private theorem spent_covers_ok (self : Address) (c : Call spec)
+    (w w' : World) (a : Address) {r : spec.Ret c.fn}
+    (h : spec.exec c.fn c.args (c.toCtx self) w = .ok (r, w')) :
+    w.self.shares a ≤ w'.self.shares a + spentCall a c := by
+  revert r h
+  rcases c with ⟨sender, value, ts, bn, fn, args⟩
+  cases fn <;> intro r h
+  case removeLiquidity =>
+    have hrun : Tx.run (removeLiquidity args)
+        { sender, value, timestamp := ts, blockNumber := bn, self } w =
+          .ok (r, w') := by
+      simpa [Tx.run, spec_exec_removeLiquidity, Call.toCtx] using h
+    have hok := removeLiquidity_ok_of_run hrun
+    have ⟨_, hσ, _, _⟩ := removeLiquidity_post args hok hrun
+    simp [spentCall, hσ, Call.toCtx]
+    exact shares_removePost w.self sender args a hok.bal
+  case addLiquidity =>
+    have hrun : Tx.run (addLiquidity args.1 args.2)
+        { sender, value, timestamp := ts, blockNumber := bn, self } w =
+          .ok (r, w') := by
+      simpa [Tx.run, spec_exec_addLiquidity, Call.toCtx] using h
+    have hok := addLiquidity_ok_of_run hrun
+    have ⟨hn, hσ, _, _⟩ := addLiquidity_post args.1 args.2 hok hrun
+    subst hn
+    simp [spentCall, hσ, addLiquidityPost]
+    by_cases hwho : a = sender
+    · subst hwho
+      simp [Function.update, Amount.le_iff, Amount.raw_add, Amount.raw_ofWord]
+      exact Nat.le_trans (sharesAfterDead_ge w.self a) (Nat.le_add_right _ _)
+    · simp [Function.update, hwho, Amount.le_iff]
+      exact sharesAfterDead_ge w.self a
+  case swap0for1 =>
+    have hrun : Tx.run (swap0for1 args.1 args.2)
+        { sender, value, timestamp := ts, blockNumber := bn, self } w =
+          .ok (r, w') := by
+      simpa [Tx.run, spec_exec_swap0for1, Call.toCtx] using h
+    have hok := swap0for1_ok_of_run hrun
+    have ⟨_, hσ, _, _⟩ := swap0for1_post args.1 args.2 hok hrun
+    simp [spentCall, hσ, swap0Post]
+  case swap1for0 =>
+    have hrun : Tx.run (swap1for0 args.1 args.2)
+        { sender, value, timestamp := ts, blockNumber := bn, self } w =
+          .ok (r, w') := by
+      simpa [Tx.run, spec_exec_swap1for0, Call.toCtx] using h
+    have hok := swap1for0_ok_of_run hrun
+    have ⟨_, hσ, _, _⟩ := swap1for0_post args.1 args.2 hok hrun
+    simp [spentCall, hσ, swap1Post]
+  case setProtocolShare =>
+    have hrun : Tx.run (setProtocolShare args)
+        { sender, value, timestamp := ts, blockNumber := bn, self } w =
+          .ok (r, w') := by
+      simpa [Tx.run, spec_exec_setProtocolShare, Call.toCtx] using h
+    obtain ⟨_, _, rfl⟩ := setProtocolShare_ok_of_run hrun
+    simp [spentCall]
+  case setFeeTo =>
+    have hrun : Tx.run (setFeeTo args)
+        { sender, value, timestamp := ts, blockNumber := bn, self } w =
+          .ok (r, w') := by
+      simpa [Tx.run, spec_exec_setFeeTo, Call.toCtx] using h
+    obtain ⟨_, rfl⟩ := setFeeTo_ok_of_run hrun
+    simp [spentCall]
+  case collectProtocolFees =>
+    have hrun : Tx.run collectProtocolFees
+        { sender, value, timestamp := ts, blockNumber := bn, self } w =
+          .ok (r, w') := by
+      simpa [Tx.run, spec_exec_collectProtocolFees, Call.toCtx] using h
+    have hok := collectProtocolFees_ok_of_run hrun
+    have ⟨_, hσ, _, _⟩ := collectProtocolFees_post hok hrun
+    simp [spentCall, hσ, collectPost]
+  case getReserves =>
+    have hrun : Tx.run getReserves
+        { sender, value, timestamp := ts, blockNumber := bn, self } w =
+          .ok (r, w') := by
+      simpa [Tx.run, spec_exec_getReserves, Call.toCtx] using h
+    rw [getReserves_ok] at hrun
+    obtain ⟨rfl, rfl⟩ := hrun
+    simp [spentCall]
+  case sharesOf =>
+    have hrun : Tx.run (sharesOf args)
+        { sender, value, timestamp := ts, blockNumber := bn, self } w =
+          .ok (r, w') := by
+      simpa [Tx.run, spec_exec_sharesOf, Call.toCtx] using h
+    rw [sharesOf_ok] at hrun
+    obtain ⟨rfl, rfl⟩ := hrun
+    simp [spentCall]
+  case protocolFees =>
+    have hrun : Tx.run protocolFees
+        { sender, value, timestamp := ts, blockNumber := bn, self } w =
+          .ok (r, w') := by
+      simpa [Tx.run, spec_exec_protocolFees, Call.toCtx] using h
+    rw [protocolFees_ok] at hrun
+    obtain ⟨rfl, rfl⟩ := hrun
+    simp [spentCall]
+
+private theorem spent_covers_accepted (self : Address) (c : Call spec)
+    (w : World) (a : Address)
+    (hacc : accepted self c w = true) :
+    w.self.shares a ≤ (step self (.call c) w).self.shares a +
+      spentCall a c := by
+  obtain ⟨hvo, _, ⟨⟨r, w'⟩, hrun, hstep⟩⟩ := accepted_ok hacc
+  have hv : c.value = 0 :=
+    spec.value_eq_zero_of_valueOk (by cases c.fn <;> rfl) hvo
+  rw [hv, World.creditValue_zero] at hrun
+  rw [hstep]
+  exact spent_covers_ok self c w w' a hrun
+
+private theorem foldAccepted_raw_add {s : State} (t : Txs s) (a : Address)
+    (x : Amount lpShare) :
+    (t.foldAccepted (fun acc c _ => acc + HasSpent.spentCall (C := spec) a c)
+      x).raw =
+      x.raw + (Txs.spent t a).raw := by
+  induction t generalizing x with
+  | nil => simp [Txs.foldAccepted, Txs.spent, Amount.raw_add]
+  | @call s c hne rest ih =>
+    simp [Txs.foldAccepted, Txs.spent]
+    split_ifs
+    · have hx := ih (x + HasSpent.spentCall (C := spec) a (c))
+      have hsc := ih (HasSpent.spentCall (C := spec) a (c))
+      rw [hx, hsc]
+      simp [Amount.raw_add]
+      ac_rfl
+    · exact ih x
+  | @env s x' hr rest ih =>
+    simpa [Txs.spent, Txs.foldAccepted] using ih x
+
+theorem cpamm_no_unauthorized_extraction (s : State) (t : Txs s)
+    (a : Address) :
+    s.self.shares a ≤ t.end.self.shares a + t.spent a := by
+  induction t with
+  | nil =>
+    simp [Txs.end, Txs.spent, Amount.le_iff, Amount.raw_add]
+  | @call s c hne rest ih =>
+    by_cases hacc : accepted s.addr c s.w = true
+    · have hcov := spent_covers_accepted s.addr c s.w a hacc
+      have hstepEq : (s.afterCall c hne).w = step s.addr (.call c) s.w :=
+        State.afterCall_w s c hne
+      have hthis : s.self.shares a ≤
+          (s.afterCall c hne).self.shares a + spentCall a c := by
+        simpa [State.self, hstepEq] using hcov
+      simp [Amount.le_iff, Amount.raw_add] at hthis ih
+      have hfold := foldAccepted_raw_add rest a
+        (HasSpent.spentCall (C := spec) a c)
+      simp [Amount.le_iff, Amount.raw_add, Txs.spent, Txs.foldAccepted, hacc,
+        HasSpent.spentCall] at hthis ih hfold ⊢
+      rw [hfold]
+      refine Nat.le_trans hthis ?_
+      have hih := Nat.add_le_add_right ih (spentCall a c).raw
+      convert hih using 1
+      ac_rfl
+    · have hfalse : accepted s.addr c s.w = false :=
+        Bool.eq_false_iff.mpr hacc
+      have hstep := step_of_not_accepted hfalse
+      have hs : (s.afterCall c hne).self = s.self := by
+        simp only [State.self, State.afterCall_w]
+        exact congrArg World.self hstep
+      simp [hs, Txs.spent, Txs.foldAccepted, hfalse] at ih ⊢
+      exact ih
+  | @env s x' hr rest ih =>
+    have hs : (s.afterEnv x' hr).self = s.self := State.afterEnv_self s x' hr
+    simpa [Txs.spent, Txs.foldAccepted, hs] using ih
 
 end Proof
 

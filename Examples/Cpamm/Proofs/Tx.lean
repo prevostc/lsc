@@ -208,6 +208,25 @@ def swap1Post (σ : Storage) (dx proto out : Nat) : Storage :=
 def collectPost (σ : Storage) : Storage :=
   { σ with protocolFees0 := 0, protocolFees1 := 0 }
 
+theorem protocolFee_raw {a : Asset} (σ : Storage) (dx : Amount a) :
+    (protocolFee σ dx).raw = protoOf σ dx.raw := by
+  unfold protocolFee protoOf protoTake
+  rfl
+
+theorem mintedSharesAmt_raw (σ : Storage) (a0 : Amount asset0)
+    (a1 : Amount asset1) :
+    (mintedSharesAmt σ a0 a1).raw = mintedShares σ a0.raw a1.raw := by
+  unfold mintedSharesAmt mintedShares
+  rfl
+
+theorem lockedLiquidity_raw (σ : Storage) :
+    (lockedLiquidity σ).raw = deadShares σ := by
+  by_cases h : σ.totalShares.raw = 0
+  · have hA : σ.totalShares = 0 := Amount.ext (by simpa using h)
+    simp [lockedLiquidity, deadShares, hA, h, MINIMUM_LIQUIDITY_raw]
+  · have hA : σ.totalShares ≠ 0 := fun hz => h (by simp [hz])
+    simp [lockedLiquidity, deadShares, hA, h]
+
 theorem protoOf_eq_take (σ : Storage) (dx : Nat) :
     protoOf σ dx = protoTake σ.feeTo σ.protocolShareBps.raw (swapFee dx) :=
   rfl
@@ -255,23 +274,27 @@ theorem dxFeeLess_le (dx : Nat) : dxFeeLess dx ≤ dx := by
 
 theorem holdings0_view (self : Address) :
     holdings0 self w = (viewBal0 w.self.token0 self w.oracle w.ext).raw := by
-  simp [holdings0, viewBal0, IERC20.Ref.impl, IERC20.Impl.ofRef, World.view]
+  simp [holdings0, holdingsAt0, viewBal0, IERC20.Ref.impl, IERC20.Impl.ofRef,
+    World.view]
 
 theorem holdings1_view (self : Address) :
     holdings1 self w = (viewBal1 w.self.token1 self w.oracle w.ext).raw := by
-  simp [holdings1, viewBal1, IERC20.Ref.impl, IERC20.Impl.ofRef, World.view]
+  simp [holdings1, holdingsAt1, viewBal1, IERC20.Ref.impl, IERC20.Impl.ofRef,
+    World.view]
 
 theorem holdings0_congr (self : Address) {w w' : World}
     (ha : w'.self.token0.addr = w.self.token0.addr)
     (ho : w'.oracle = w.oracle) (hx : w'.ext = w.ext) :
     holdings0 self w' = holdings0 self w := by
-  simp [holdings0, IERC20.Ref.impl, IERC20.Impl.ofRef, ha, ho, hx, World.view]
+  simp [holdings0, holdingsAt0, IERC20.Ref.impl, IERC20.Impl.ofRef, ha, ho, hx,
+    World.view]
 
 theorem holdings1_congr (self : Address) {w w' : World}
     (ha : w'.self.token1.addr = w.self.token1.addr)
     (ho : w'.oracle = w.oracle) (hx : w'.ext = w.ext) :
     holdings1 self w' = holdings1 self w := by
-  simp [holdings1, IERC20.Ref.impl, IERC20.Impl.ofRef, ha, ho, hx, World.view]
+  simp [holdings1, holdingsAt1, IERC20.Ref.impl, IERC20.Impl.ofRef, ha, ho, hx,
+    World.view]
 
 theorem transferFrom_frame {a : Asset} {r : IERC20.Ref a}
     {src dst : Address} {amt : Amount a} {b : Bool}
@@ -3057,22 +3080,24 @@ theorem swap1for0_k {dx : Amount asset1} {minOut : Amount asset0}
 theorem swap0_protocol_fee {dx : Amount asset0} {minOut : Amount asset1}
     {out : Amount asset1} {w' : World}
     (h : Tx.run (swap0for1 dx minOut) ctx w = .ok (out, w')) :
-    w'.self.protocolFees0 =
-      w.self.protocolFees0 + Amount.ofWord (protoOf w.self dx.raw) ∧
+    w'.self.protocolFees0 = w.self.protocolFees0 + protocolFee w.self dx ∧
       w'.self.protocolFees1 = w.self.protocolFees1 := by
   have hok := swap0for1_ok_of_run h
   have ⟨_, hσ, _, _⟩ := swap0for1_post dx minOut hok h
-  simp [hσ, swap0Post]
+  refine ⟨?_, by simp [hσ, swap0Post]⟩
+  apply Amount.ext
+  simp [hσ, swap0Post, protocolFee_raw, Amount.raw_add, Amount.raw_ofWord]
 
 theorem swap1_protocol_fee {dx : Amount asset1} {minOut : Amount asset0}
     {out : Amount asset0} {w' : World}
     (h : Tx.run (swap1for0 dx minOut) ctx w = .ok (out, w')) :
-    w'.self.protocolFees1 =
-      w.self.protocolFees1 + Amount.ofWord (protoOf w.self dx.raw) ∧
+    w'.self.protocolFees1 = w.self.protocolFees1 + protocolFee w.self dx ∧
       w'.self.protocolFees0 = w.self.protocolFees0 := by
   have hok := swap1for0_ok_of_run h
   have ⟨_, hσ, _, _⟩ := swap1for0_post dx minOut hok h
-  simp [hσ, swap1Post]
+  refine ⟨?_, by simp [hσ, swap1Post]⟩
+  apply Amount.ext
+  simp [hσ, swap1Post, protocolFee_raw, Amount.raw_add, Amount.raw_ofWord]
 
 theorem collect_only_feeTo {p : Amount asset0 × Amount asset1}
     {w' : World}
@@ -3129,11 +3154,12 @@ theorem removeLiquidity_pro_rata {s : Amount lpShare}
 theorem removeLiquidity_paid {s : Amount lpShare}
     {p : Amount asset0 × Amount asset1} {w' : World}
     (h : Tx.run (removeLiquidity s) ctx w = .ok (p, w')) :
-    p.1.raw = w.self.reserve0.raw * s.raw / w.self.totalShares.raw ∧
-      p.2.raw = w.self.reserve1.raw * s.raw / w.self.totalShares.raw := by
+    p.1 = proRata0 w.self s ∧ p.2 = proRata1 w.self s := by
   have hok := removeLiquidity_ok_of_run h
   have ⟨hp, _, _, _⟩ := removeLiquidity_post s hok h
-  simp [hp, redeemed, Amount.raw_ofWord]
+  have hts : w.self.totalShares ≠ 0 := by
+    intro hz; exact absurd hok.supply (by simp [hz])
+  simp [hp, redeemed, proRata0, proRata1, hts, Amount.raw_ofWord]
 
 theorem addLiquidity_pro_rata {a0 : Amount asset0} {a1 : Amount asset1}
     {n : Amount lpShare} {w' : World}
@@ -3141,19 +3167,20 @@ theorem addLiquidity_pro_rata {a0 : Amount asset0} {a1 : Amount asset1}
     w'.self.shares ctx.sender =
       sharesAfterDead w.self ctx.sender + n ∧
       w'.self.totalShares =
-        w.self.totalShares + n + Amount.ofWord (deadShares w.self) := by
+        w.self.totalShares + n + lockedLiquidity w.self := by
   have hok := addLiquidity_ok_of_run h
   have ⟨hn, hσ, _, _⟩ := addLiquidity_post a0 a1 hok h
   subst hn
   simp [hσ, addLiquidityPost, Function.update, Amount.raw_add, Amount.raw_ofWord,
-    Nat.add_comm, Nat.add_assoc, Nat.add_left_comm]
+    lockedLiquidity_raw, Nat.add_comm, Nat.add_assoc, Nat.add_left_comm]
 
 theorem addLiquidity_minted {a0 : Amount asset0} {a1 : Amount asset1}
     {n : Amount lpShare} {w' : World}
     (h : Tx.run (addLiquidity a0 a1) ctx w = .ok (n, w')) :
-    n = Amount.ofWord (mintedShares w.self a0.raw a1.raw) := by
+    n = mintedSharesAmt w.self a0 a1 := by
   have hok := addLiquidity_ok_of_run h
-  exact (addLiquidity_post a0 a1 hok h).1
+  have hn := (addLiquidity_post a0 a1 hok h).1
+  simpa [mintedSharesAmt, mintedShares] using hn
 
 /-- A successful first mint leaves at least `MINIMUM_LIQUIDITY` shares
 outstanding (locked at address 0). `Wf` only excludes `sender = self`, so

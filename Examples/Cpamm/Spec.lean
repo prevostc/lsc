@@ -1,5 +1,6 @@
 import Mathlib.Algebra.BigOperators.Group.Finset.Basic
 import Lsc.Security.Wealth
+import Lsc.Security.State
 import Examples.Cpamm.Contract
 import Stdlib.ERC20
 import Stdlib.Scales
@@ -11,7 +12,9 @@ each reserve plus that token's protocol bucket covered by the pool's live
 token balance. `k` is a swap fact, not `Inv`. Between our transactions,
 `cpammRely` lets `ext` change except that neither pool balance falls and
 each token's `totalSupply` view stays the same — that is `ClaimMonoEnv`
-for the share-count claim.
+for the share-count claim. Honest-counterparty (`IERC20.Spec` of both
+bound tokens, and that their views do not interfere) lives in
+`HasDeploy` / `HasRely` / `State`.
 -/
 
 open Lsc Lsc.Stdlib Lsc.Security Cpamm Stdlib
@@ -48,18 +51,26 @@ def Auth : AuthPred spec :=
 def inflow (c : Call spec) (w : World) : Nat :=
   match c.fn, c.args with
   | .addLiquidity, (a0, a1) =>
-    match Tx.run (addLiquidity a0 a1) c.toCtx w with
+    match Tx.run (addLiquidity a0 a1) (c.toCtx 0) w with
     | .ok (n, _) => n.raw
     | .error _ => 0
   | _, _ => 0
 
-/-- Live token0 balance of the pool, from the bound token's view. -/
-def holdings0 (self : Address) (w : World) : Nat :=
-  (w.self.token0.impl.balanceOf self w.view).raw
+/-- Live token0 balance of the pool at `self`, from the bound token's view. -/
+def holdingsAt0 (self : Address) (w : World) : Amount asset0 :=
+  w.self.token0.impl.balanceOf self w.view
 
-/-- Live token1 balance of the pool, from the bound token's view. -/
+/-- Live token1 balance of the pool at `self`, from the bound token's view. -/
+def holdingsAt1 (self : Address) (w : World) : Amount asset1 :=
+  w.self.token1.impl.balanceOf self w.view
+
+/-- Nat projection of `holdingsAt0`, used by internal `Inv`. -/
+def holdings0 (self : Address) (w : World) : Nat :=
+  (holdingsAt0 self w).raw
+
+/-- Nat projection of `holdingsAt1`, used by internal `Inv`. -/
 def holdings1 (self : Address) (w : World) : Nat :=
-  (w.self.token1.impl.balanceOf self w.view).raw
+  (holdingsAt1 self w).raw
 
 def InvStorage (σ : Storage) : Prop :=
   ∃ H : Finset Address,
@@ -144,6 +155,35 @@ def swapFee (dx : Nat) : Nat :=
 def protoTake (feeTo protocolShareBps fee : Nat) : Nat :=
   if (feeTo : Nat) = 0 then 0 else fee * protocolShareBps / BPS.raw
 
+/-- Protocol take of a swap input, as an `Amount` of the input asset. -/
+def protocolFee {a : Asset} (σ : Storage) (dx : Amount a) : Amount a :=
+  ⟨protoTake σ.feeTo σ.protocolShareBps.raw (swapFee dx.raw)⟩
+
+/-- Shares `addLiquidity` mints. First mint is `a0 − 1000`; later mint is
+the floor-min of the two reserve ratios. -/
+def mintedSharesAmt (σ : Storage) (a0 : Amount asset0) (a1 : Amount asset1) :
+    Amount lpShare :=
+  ⟨if σ.totalShares.raw = 0 then a0.raw - 1000
+    else if σ.totalShares.raw * a0.raw / σ.reserve0.raw ≤
+        σ.totalShares.raw * a1.raw / σ.reserve1.raw then
+      σ.totalShares.raw * a0.raw / σ.reserve0.raw
+    else
+      σ.totalShares.raw * a1.raw / σ.reserve1.raw⟩
+
+/-- Locked LP shares burned to address 0 on the first mint. -/
+def lockedLiquidity (σ : Storage) : Amount lpShare :=
+  if σ.totalShares = 0 then MINIMUM_LIQUIDITY else 0
+
+/-- Floor-pro-rata token0 payout of `s` shares. -/
+def proRata0 (σ : Storage) (s : Amount lpShare) : Amount asset0 :=
+  if σ.totalShares = 0 then 0
+  else ⟨σ.reserve0.raw * s.raw / σ.totalShares.raw⟩
+
+/-- Floor-pro-rata token1 payout of `s` shares. -/
+def proRata1 (σ : Storage) (s : Amount lpShare) : Amount asset1 :=
+  if σ.totalShares = 0 then 0
+  else ⟨σ.reserve1.raw * s.raw / σ.totalShares.raw⟩
+
 def amountOutF (rIn rOut dx : Nat) : Nat :=
   let dxF := dxFeeLess dx
   rOut * dxF / (rIn + dxF)
@@ -151,5 +191,49 @@ def amountOutF (rIn rOut dx : Nat) : Nat :=
 /-- Shared quote used by both swap directions: `(out, proto)`. -/
 def swapQuote (rIn rOut dx feeTo pShareBps : Nat) : Nat × Nat :=
   (amountOutF rIn rOut dx, protoTake feeTo pShareBps (swapFee dx))
+
+/-- A deployed CPAMM whose two bound tokens are distinct conforming ERC-20s
+that do not interfere, with empty shares and zero reserves/fees. Distinctness
+is also required by the constructor (`SameToken`). -/
+instance : HasDeploy spec where
+  pred w :=
+    w.self.token0.addr ≠ w.self.token1.addr ∧
+    w.self.totalShares = 0 ∧
+    (∀ a, w.self.shares a = 0) ∧
+    w.self.reserve0 = 0 ∧
+    w.self.reserve1 = 0 ∧
+    w.self.protocolFees0 = 0 ∧
+    w.self.protocolFees1 = 0 ∧
+    w.self.protocolShareBps ≤ BPS ∧
+    IERC20.Spec (w.self.token0.impl : Token0Impl) ∧
+    IERC20.Spec (w.self.token1.impl : Token1Impl) ∧
+    TokensIndependent w.self.token0 w.self.token1 w.oracle
+
+/-- Honest-counterparty: neither pool token balance falls between our calls,
+and each token's `totalSupply` view stays the same. `IERC20.Spec` and
+`TokensIndependent` are on `HasDeploy` / `State`. -/
+instance : HasRely spec where
+  rely self w x' := cpammRely self w.self.token0 w.self.token1 w.oracle w.ext x'
+
+/-- Amount this accepted call burned on `a`'s authority. -/
+def spentCall (a : Address) (c : Call spec) : Amount lpShare :=
+  match c.fn, c.args with
+  | .removeLiquidity, n => if c.sender = a then n else 0
+  | _, _ => 0
+
+instance : HasSpent spec where
+  asset := lpShare
+  spentCall := spentCall
+
+/-- A state of a deployed CPAMM whose two assets behave as distinct ERC-20s. -/
+abbrev State := Lsc.Security.State spec
+
+/-- Live token0 balance of this pool. -/
+def State.holdings0 (s : State) : Amount asset0 :=
+  holdingsAt0 s.addr s.w
+
+/-- Live token1 balance of this pool. -/
+def State.holdings1 (s : State) : Amount asset1 :=
+  holdingsAt1 s.addr s.w
 
 end Cpamm

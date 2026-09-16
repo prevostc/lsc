@@ -16,16 +16,16 @@ mint). `mint` updates both `shares[to]` and `totalShares`; first mint
 calls `mint 0 MINIMUM_LIQUIDITY` then `mint who minted`. Owner admin does
 not touch the buckets.
 
-**Proved (spec):** share-count anti-extraction
-(`cpamm_no_unauthorized_extraction`) and solvency of LP claims plus protocol
-buckets against live holdings (`cpamm_solvent`). Address 0's locked shares
-count as a claim; only a `removeLiquidity` it signs could burn them.
-Assumed of the tokens: they
-are distinct conforming ERC-20s per `IERC20.Spec`; a CALL on one does not
-change the other's `balanceOf` / `totalSupply` views; no reentrancy is
-modelled; no fee-on-transfer. Between calls neither pool balance may fall
-(`cpammRely`). Bytecode trust is the compiler's transport theorems, not
-repeated here.
+**Proved (spec):** in any reachable `State`, after any `Txs`, an LP's
+shares drop by at most what they themselves redeemed
+(`cpamm_no_unauthorized_extraction`); each reserve plus that token's
+protocol bucket is covered by live holdings (`cpamm_solvent`). Address 0's
+locked shares count as a claim; only a `removeLiquidity` it signs could
+burn them. Honest-counterparty (`IERC20.Spec` of both tokens, and
+`TokensIndependent`) lives in `HasDeploy` / `State`. Between calls neither
+pool balance may fall (`HasRely` / `cpammRely`). No reentrancy or
+fee-on-transfer is modelled. Bytecode trust is the compiler's transport
+theorems, not repeated here.
 
 **Not proved:** strict `k` increase, 512-bit `mulDiv` (a word-overflow
 intermediate reverts), impermanent loss, the owner redirecting future fees
