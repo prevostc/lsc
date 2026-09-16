@@ -1872,6 +1872,7 @@ def certifyDenote (fn : Name) (ci : ContractInfo) (lhs lhsRaw rhs coreE : Expr) 
   let info ← getConstInfoDefn fn
   let send? := info.value.getUsedConstants.any fun n =>
     n == ``Lsc.Tx.sendRaw || n == ``Lsc.Native.send
+      || n == ``Lsc.Native.try.send
   -- `sendRaw` / `Native.send` are `boolBit <$> sendRaw` in Core; reducible
   -- `isDefEq` against the Bool surface times out (same class as inlines).
   if inlines.isEmpty && scales.isEmpty && !send? then
@@ -1926,11 +1927,11 @@ def certifyDenote (fn : Name) (ci : ContractInfo) (lhs lhsRaw rhs coreE : Expr) 
     mkIdent ``Lsc.Tx.viewAsNat_bool_bind_require,
     mkIdent ``Lsc.Tx.callAsNat_bool_bind_require_bind,
     mkIdent ``Lsc.Tx.viewAsNat_bool_bind_require_bind,
+    -- Whole-bind Bool bridges. Inner `require_bool_eq_true_iff_bit` is *not*
+    -- here: bottom-up `simp` would poison `callAsNat_bool_bind_require`
+    -- (SafeERC20). Native.send adds those lemmas in the `send?` branch.
     mkIdent ``Lsc.Tx.sendRaw_bool_bind_require,
     mkIdent ``Lsc.Tx.sendRaw_bool_bind_require_bind,
-    mkIdent ``Lsc.Tx.require_bool_eq_true_iff_bit,
-    mkIdent ``Lsc.Tx.sendRaw_require_eq_true_iff_bit,
-    mkIdent ``Lsc.Tx.sendRaw_require_eq_true_iff_bit_bind,
     mkIdent ``Lsc.Tx.callAsNat_bool_bind_unit,
     mkIdent ``Lsc.Tx.viewAsNat_bool_bind_unit,
     mkIdent ``Lsc.Tx.viewAsNat_word_bind_const,
@@ -2094,9 +2095,28 @@ def certifyDenote (fn : Name) (ci : ContractInfo) (lhs lhsRaw rhs coreE : Expr) 
     let scaleLemmas ← existingIdents
       #[``Lsc.Word.scale, ``Lsc.Word.scale_six, `Lsc.Stdlib.Shares.virtual_eq_scale]
     idsAmount := idsAmount ++ scaleLemmas
+  -- Native.send only: the 18b extra pass (Core unfold + Bool/bit require).
+  -- Must stay off SafeERC20 — inner `require_bool_eq_true_iff_bit` poisons
+  -- `callAsNat_bool_bind_require` and a 512-step Core unfold rec-depths Vault.
+  if send? then
+    idsAmount := idsAmount.push (mkIdent ``Lsc.Tx.require_bool_eq_true_iff_bit)
+    idsAmount := idsAmount.push (mkIdent ``Lsc.Tx.sendRaw_require_eq_true_iff_bit)
+    idsAmount := idsAmount.push (mkIdent ``Lsc.Tx.sendRaw_require_eq_true_iff_bit_bind)
   -- `lhsRaw` inlines `f.core`. `simp` of `Core.denote` equation lemmas gives
   -- the `Tx` `>>=` spine without unfolding into ReaderT.
   let eqRaw ← mkEq lhsRaw rhs
+  let sendUnfold ←
+    if send? then
+      `(tactic| try simp (config := { maxSteps := 512 }) only
+          [Lsc.Core.denote, Lsc.Op.denote, Lsc.Stmt.denote,
+            Lsc.Tx.require_bool_eq_true_iff_bit,
+            Lsc.Tx.sendRaw_require_eq_true_iff_bit,
+            Lsc.Tx.sendRaw_require_eq_true_iff_bit_bind,
+            Lsc.Tx.sendRaw_bool_bind_require_bind,
+            Lsc.Tx.sendRaw_bool_bind_require,
+            Lsc.Address.toWord, Lsc.Amount.raw])
+    else
+      `(tactic| skip)
   let tacAmt ← `(by
     -- Push `ofWord <$>` / `natToBool <$>` through Core constructors *before*
     -- unfolding `Core.denote` (unfolding yields a `do`/`bind` spine that
@@ -2124,14 +2144,7 @@ def certifyDenote (fn : Name) (ci : ContractInfo) (lhs lhsRaw rhs coreE : Expr) 
           Lsc.map_denote_opTailFlag, Lsc.map_denote_opTailAddr,
           Lsc.map_denote_stmtTail, Lsc.map_denote_revertTail,
           Lsc.Tx.map_pure, Lsc.Tx.natToBool_one])
-    try simp (config := { maxSteps := 512 }) only
-      [Lsc.Core.denote, Lsc.Op.denote, Lsc.Stmt.denote,
-        Lsc.Tx.require_bool_eq_true_iff_bit,
-        Lsc.Tx.sendRaw_require_eq_true_iff_bit,
-        Lsc.Tx.sendRaw_require_eq_true_iff_bit_bind,
-        Lsc.Tx.sendRaw_bool_bind_require_bind,
-        Lsc.Tx.sendRaw_bool_bind_require,
-        Lsc.Address.toWord, Lsc.Amount.raw]
+    $sendUnfold:tactic
     simp (config := { maxSteps := 20000 }) only [$[$idsAmount:ident],*]
     try (conv =>
       lhs
@@ -2162,9 +2175,6 @@ def certifyDenote (fn : Name) (ci : ContractInfo) (lhs lhsRaw rhs coreE : Expr) 
       Lsc.Tx.callAsNat_bool_bind_require_bind,
       Lsc.Tx.viewAsNat_bool_bind_require_bind,
       Lsc.Tx.sendRaw_bool_bind_require, Lsc.Tx.sendRaw_bool_bind_require_bind,
-      Lsc.Tx.require_bool_eq_true_iff_bit,
-      Lsc.Tx.sendRaw_require_eq_true_iff_bit,
-      Lsc.Tx.sendRaw_require_eq_true_iff_bit_bind,
       Lsc.Tx.map_bind, Lsc.Tx.bind_map, Lsc.Tx.map_bind_ofWord,
       Lsc.Tx.map_bind_ofWord_pair, Lsc.Tx.map_discard_ofWord_pair,
       Lsc.Tx.map_pure_ofWord_pair,

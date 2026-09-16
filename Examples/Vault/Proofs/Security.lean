@@ -676,48 +676,54 @@ private theorem claim_le_call (c : Call spec)
       blockNumber := bn, self := target }
   have hself : ctx.self = self := ht
   have hsne : ctx.sender ≠ self := hs
-  apply worldAfter_preserves (x := spec.exec fn args) (ctx := ctx)
-    (P := fun w' => claim self a w ≤ claim self a w') (Nat.le_refl _)
-  intro ret w' hrun
-  match fn with
-  | .deposit =>
-    exact claim_le_deposit_run (self := self) args hself hsne hT' hrun
-  | .withdraw =>
-    have hneA : ctx.sender ≠ a := by
-      intro heq
-      exact hna (by simpa [Auth, AuthPred.ofSelf] using heq)
-    exact claim_le_withdraw_run (self := self) args hself hsne hneA hT' hrun
-  | .pause =>
-    by_cases howner : ctx.sender = w.self.owner
-    · have hok := pause_ok (ctx := ctx) (w := w) howner
+  have hp : spec.payable fn = false := rfl
+  by_cases hv : value = 0
+  · rw [step_eq_worldAfter_of_not_payable (c :=
+      ⟨sender, value, ts, bn, target, fn, args⟩) (w := w) hp hv]
+    apply worldAfter_preserves (x := spec.exec fn args) (ctx := ctx)
+      (P := fun w' => claim self a w ≤ claim self a w') (Nat.le_refl _)
+    intro ret w' hrun
+    match fn with
+    | .deposit =>
+      exact claim_le_deposit_run (self := self) args hself hsne hT' hrun
+    | .withdraw =>
+      have hneA : ctx.sender ≠ a := by
+        intro heq
+        exact hna (by simpa [Auth, AuthPred.ofSelf] using heq)
+      exact claim_le_withdraw_run (self := self) args hself hsne hneA hT' hrun
+    | .pause =>
+      by_cases howner : ctx.sender = w.self.owner
+      · have hok := pause_ok (ctx := ctx) (w := w) howner
+        rw [hok] at hrun
+        obtain ⟨rfl, rfl⟩ := hrun
+        exact Nat.le_refl _
+      · have herr := pause_only_owner (ctx := ctx) (w := w) howner
+        rw [herr] at hrun
+        cases hrun
+    | .unpause =>
+      by_cases howner : ctx.sender = w.self.owner
+      · have hok := unpause_ok (ctx := ctx) (w := w) howner
+        rw [hok] at hrun
+        obtain ⟨rfl, rfl⟩ := hrun
+        exact Nat.le_refl _
+      · have herr := unpause_only_owner (ctx := ctx) (w := w) howner
+        rw [herr] at hrun
+        cases hrun
+    | .isPaused =>
+      have hok := isPaused_returns_stored (ctx := ctx) (w := w)
       rw [hok] at hrun
       obtain ⟨rfl, rfl⟩ := hrun
       exact Nat.le_refl _
-    · have herr := pause_only_owner (ctx := ctx) (w := w) howner
-      rw [herr] at hrun
-      cases hrun
-  | .unpause =>
-    by_cases howner : ctx.sender = w.self.owner
-    · have hok := unpause_ok (ctx := ctx) (w := w) howner
-      rw [hok] at hrun
-      obtain ⟨rfl, rfl⟩ := hrun
-      exact Nat.le_refl _
-    · have herr := unpause_only_owner (ctx := ctx) (w := w) howner
-      rw [herr] at hrun
-      cases hrun
-  | .isPaused =>
-    have hok := isPaused_returns_stored (ctx := ctx) (w := w)
-    rw [hok] at hrun
-    obtain ⟨rfl, rfl⟩ := hrun
-    exact Nat.le_refl _
-  | .previewDeposit =>
-    have hw := previewDeposit_success_world (ctx := ctx) (w := w)
-      (assets := args) hrun
-    subst hw; exact Nat.le_refl _
-  | .previewRedeem =>
-    have hw := previewRedeem_success_world (ctx := ctx) (w := w)
-      (sharesIn := args) hrun
-    subst hw; exact Nat.le_refl _
+    | .previewDeposit =>
+      have hw := previewDeposit_success_world (ctx := ctx) (w := w)
+        (assets := args) hrun
+      subst hw; exact Nat.le_refl _
+    | .previewRedeem =>
+      have hw := previewRedeem_success_world (ctx := ctx) (w := w)
+        (sharesIn := args) hrun
+      subst hw; exact Nat.le_refl _
+  · simp [step_reject_value (c :=
+      ⟨sender, value, ts, bn, target, fn, args⟩) (w := w) hp hv]
 
 namespace Proof
 
