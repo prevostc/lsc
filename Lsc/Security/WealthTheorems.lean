@@ -29,7 +29,8 @@ the claim (`ClaimMonoEnv`; automatic when `claim` depends only on storage).
 Unlike `no_unauthorized_extraction_at`, this form does not require the caller
 to differ from the contract, and does not restrict to calls that target this
 contract. -/
-theorem no_unauthorized_extraction [HasCreditValue X] {Inv : World S X E → Prop} {claim : Claim S X E}
+theorem no_unauthorized_extraction [HasCreditValue X] [HasPayable C]
+    {Inv : World S X E → Prop} {claim : Claim S X E}
     {Auth : AuthPred C} {rely : X → X → Prop}
     (hN : NoUnauthorizedDecrease C Inv claim Auth)
     (hP : PreservesInv C Inv) (hE : PreservesInvEnv C Inv rely)
@@ -48,7 +49,8 @@ meaningless for a call to some other address; well-formedness (caller ≠
 contract) is required here, not on `no_unauthorized_extraction`.
 Authorisation is still judged in the pre-state of each call, so allowances
 can change along the trace. -/
-theorem no_unauthorized_extraction_at [HasCreditValue X] {Inv : World S X E → Prop} {claim : Claim S X E}
+theorem no_unauthorized_extraction_at [HasCreditValue X] [HasPayable C]
+    {Inv : World S X E → Prop} {claim : Claim S X E}
     {Auth : AuthPred C} {rely : X → X → Prop} {self : Address}
     (hN : NoUnauthorizedDecrease C Inv claim Auth)
     (hP : PreservesInvAt C Inv self) (hE : PreservesInvEnv C Inv rely)
@@ -65,7 +67,8 @@ Per-step conservation of claims is not required: Vault's floor-rounded
 pro-rata shares can leak dust each step, and solvency is the statement
 that matters there. The invariant must hold at the start and survive
 every entrypoint and every environment step the token model allows. -/
-theorem solvent_run [HasCreditValue X] {Inv : World S X E → Prop} {claim : Claim S X E}
+theorem solvent_run [HasCreditValue X] [HasPayable C]
+    {Inv : World S X E → Prop} {claim : Claim S X E}
     {holdings : Holdings S X E} {rely : X → X → Prop}
     (hP : PreservesInv C Inv) (hE : PreservesInvEnv C Inv rely)
     (hS : ∀ self w, Inv w → Solvent claim holdings self w)
@@ -78,7 +81,8 @@ theorem solvent_run [HasCreditValue X] {Inv : World S X E → Prop} {claim : Cla
 calls that target this contract with a distinct sender. Vault and AMM use
 this form because "what the contract holds" is this contract's token
 balance, which is only meaningful on calls to this address. -/
-theorem solvent_run_at [HasCreditValue X] {Inv : World S X E → Prop} {claim : Claim S X E}
+theorem solvent_run_at [HasCreditValue X] [HasPayable C]
+    {Inv : World S X E → Prop} {claim : Claim S X E}
     {holdings : Holdings S X E} {rely : X → X → Prop} {self : Address}
     (hP : PreservesInvAt C Inv self) (hE : PreservesInvEnv C Inv rely)
     (hS : ∀ w, Inv w → Solvent claim holdings self w)
@@ -201,7 +205,8 @@ theorem NativeSendAuth.of_debits [HasSelfBalance X] {claim : Claim S X E}
 
 /-- `NoUnauthorizedDecrease` follows from the per-entrypoint form.
 Non-payable contracts need no credit obligation. -/
-theorem NoUnauthorizedDecrease.of_fns [HasCreditValue X] {Inv : World S X E → Prop}
+theorem NoUnauthorizedDecrease.of_fns [HasCreditValue X] [HasPayable C]
+    {Inv : World S X E → Prop}
     {claim : Claim S X E} {Auth : AuthPred C}
     (h : ∀ fn, NoUnauthorizedDecreaseFn C Inv claim Auth fn)
     (hnp : ∀ fn, C.payable fn = false := by intro fn; cases fn <;> rfl) :
@@ -214,9 +219,19 @@ then `Tx.run`), matching `stepCall`. Non-payable + nonzero value is still a
 revert step and cannot decrease `claim`. -/
 theorem NoUnauthorizedDecrease.of_fns_credit [HasCreditValue X]
     {Inv : World S X E → Prop} {claim : Claim S X E} {Auth : AuthPred C}
+    [HasPayable C]
     (h : ∀ fn, NoUnauthorizedDecreaseCreditFn C Inv claim Auth fn) :
     NoUnauthorizedDecrease C Inv claim Auth :=
   Proof.NoUnauthorizedDecrease.of_fns_credit h
+
+/-- Non-payable `NoUnauthorizedDecreaseFn` yields the credit form: `valueOk`
+forces `value = 0`, so `creditValue` is the identity. -/
+theorem NoUnauthorizedDecreaseCreditFn_of_fn [HasCreditValue X]
+    {Inv : World S X E → Prop} {claim : Claim S X E} {Auth : AuthPred C}
+    {fn : C.Fn} [HasPayable C] (hp : C.payable fn = false)
+    (h : NoUnauthorizedDecreaseFn C Inv claim Auth fn) :
+    NoUnauthorizedDecreaseCreditFn C Inv claim Auth fn :=
+  Proof.NoUnauthorizedDecreaseCreditFn_of_fn hp h
 
 /-- If every success path is claim-nondecreasing or a `NativeOutflow` to the
 caller, and `Auth` holds of the caller, then `fn` does not unauthorisedly
@@ -235,6 +250,22 @@ theorem NoUnauthorizedDecreaseFn_of_native_send {Inv : World S X E → Prop}
     NoUnauthorizedDecreaseFn C Inv claim Auth fn :=
   Proof.NoUnauthorizedDecreaseFn_of_native_send hAuth hok
 
+/-- Same as `NoUnauthorizedDecreaseFn_of_native_send`, but `Auth` is judged
+on the success path, so tight permission (`amount ≤ balances`) is allowed. -/
+theorem NoUnauthorizedDecreaseFn_of_native_send_ok {Inv : World S X E → Prop}
+    {claim : Claim S X E} {Auth : AuthPred C} {fn : C.Fn}
+    (hAuth : ∀ (args : C.Args fn) (ctx : Ctx) (w : World S X E)
+        (ret : C.Ret fn) (w' : World S X E),
+      Tx.run (C.exec fn args) ctx w = .ok (ret, w') →
+      Auth ctx.sender (Call.ofCtx ctx fn args) w)
+    (hok : ∀ (args : C.Args fn) (ctx : Ctx) (w : World S X E)
+        (ret : C.Ret fn) (w' : World S X E),
+      Inv w → Tx.run (C.exec fn args) ctx w = .ok (ret, w') →
+      (∀ a, claim a w ≤ claim a w') ∨
+        ∃ v, NativeOutflow claim ctx.sender v w w') :
+    NoUnauthorizedDecreaseFn C Inv claim Auth fn :=
+  Proof.NoUnauthorizedDecreaseFn_of_native_send_ok hAuth hok
+
 /-- Reduce `NoUnauthorizedDecreaseFn` to the success path: a revert cannot decrease `claim`. -/
 theorem NoUnauthorizedDecreaseFn_of_ok {Inv : World S X E → Prop} {claim : Claim S X E}
     {Auth : AuthPred C} {fn : C.Fn}
@@ -248,7 +279,8 @@ theorem NoUnauthorizedDecreaseFn_of_ok {Inv : World S X E → Prop} {claim : Cla
 
 /-- `Conservation` follows from the per-entrypoint form. Non-payable
 contracts need no credit obligation. -/
-theorem Conservation.of_fns [HasCreditValue X] {Inv : World S X E → Prop} {claim : Claim S X E}
+theorem Conservation.of_fns [HasCreditValue X] [HasPayable C]
+    {Inv : World S X E → Prop} {claim : Claim S X E}
     {inflow : Inflow C}
     (h : ∀ fn, ConservesFn C Inv claim inflow fn)
     (hnp : ∀ fn, C.payable fn = false := by intro fn; cases fn <;> rfl) :

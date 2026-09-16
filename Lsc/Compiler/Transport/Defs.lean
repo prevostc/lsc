@@ -206,7 +206,7 @@ theorem wf_decodeTrace (T : TransportSetup S X E ε) (self : Address)
 
 /-- S1 only: post-`.self` ignores `log` (Token `exec` does not read `log`).
 Call-free contracts have no payable function, so `creditValue w 0 = w`. -/
-theorem post_congr_run [HasCreditValue X] {C : Spec S X E ε}
+theorem post_congr_run [HasCreditValue X] {C : Spec S X E ε} [HasPayable C]
     (hpc : ∀ (fn : C.Fn) (args : C.Args fn) (ctx : Ctx) (w w' : World S X E),
       w.self = w'.self → w.ext = w'.ext →
         (worldAfter (C.exec fn args) ctx w).self =
@@ -236,7 +236,9 @@ theorem post_congr_run [HasCreditValue X] {C : Spec S X E ε}
           step_reject_value (c := c) (w := w') hp hv]
         exact ih w w' hs he
 
-theorem step_ofCtx [HasCreditValue X] (T : TransportSetup S X E ε) (ctx : Ctx)
+theorem step_ofCtx [HasCreditValue X] (T : TransportSetup S X E ε)
+    [HasPayable T.spec]
+    (ctx : Ctx)
     (fn : T.spec.Fn)
     (args : T.spec.Args fn) (w : World S X E)
     (hvo : T.spec.valueOk fn ctx.value = true) :

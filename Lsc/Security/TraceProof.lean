@@ -38,31 +38,35 @@ theorem worldAfter_eq_self {x : Tx S X E ε α} {ctx : Ctx} {w : World S X E}
     worldAfter x ctx w = w :=
   worldAfter_preserves (P := fun w' => w' = w) rfl hok
 
-theorem run_nil [HasCreditValue X] (w : World S X E) : run ([] : List (Step C)) w = w :=
+theorem run_nil [HasCreditValue X] [HasPayable C] (w : World S X E) :
+    run ([] : List (Step C)) w = w :=
   rfl
 
-theorem run_cons [HasCreditValue X] (s : Step C) (tr : List (Step C)) (w : World S X E) :
+theorem run_cons [HasCreditValue X] [HasPayable C] (s : Step C) (tr : List (Step C))
+    (w : World S X E) :
     run (s :: tr) w = run tr (step s w) :=
   rfl
 
-theorem run_append [HasCreditValue X] (tr₁ tr₂ : List (Step C)) (w : World S X E) :
+theorem run_append [HasCreditValue X] [HasPayable C] (tr₁ tr₂ : List (Step C))
+    (w : World S X E) :
     run (tr₁ ++ tr₂) w = run tr₂ (run tr₁ w) := by
   induction tr₁ generalizing w with
   | nil => rfl
   | cons _ _ ih => rw [List.cons_append, run_cons, ih, run_cons]
 
-theorem step_of_revert [HasCreditValue X] {c : Call C} {w : World S X E} {e : Err ε}
+theorem step_of_revert [HasCreditValue X] [HasPayable C] {c : Call C} {w : World S X E}
+    {e : Err ε}
     (hvo : C.valueOk c.fn c.value = true)
     (h : C.exec c.fn c.args c.toCtx (World.creditValue w c.value) = .error e) :
     step (.call c) w = w := by
   simp [step, stepCall, hvo, h]
 
-theorem step_reject_value [HasCreditValue X] {c : Call C} {w : World S X E}
+theorem step_reject_value [HasCreditValue X] [HasPayable C] {c : Call C} {w : World S X E}
     (hp : C.payable c.fn = false) (hv : c.value ≠ 0) :
     step (.call c) w = w := by
   simp [step, stepCall, Spec.valueOk_false (C := C) hp hv]
 
-theorem step_eq_run [HasCreditValue X] (c : Call C) (w : World S X E) :
+theorem step_eq_run [HasCreditValue X] [HasPayable C] (c : Call C) (w : World S X E) :
     step (.call c) w =
       if C.valueOk c.fn c.value then
         match C.exec c.fn c.args c.toCtx (World.creditValue w c.value) with
@@ -71,7 +75,7 @@ theorem step_eq_run [HasCreditValue X] (c : Call C) (w : World S X E) :
       else w :=
   rfl
 
-theorem step_eq_worldAfter_of_credit_id [HasCreditValue X]
+theorem step_eq_worldAfter_of_credit_id [HasCreditValue X] [HasPayable C]
     (c : Call C) (w : World S X E)
     (hvo : C.valueOk c.fn c.value = true)
     (h : World.creditValue w c.value = w) :
@@ -81,7 +85,7 @@ theorem step_eq_worldAfter_of_credit_id [HasCreditValue X]
   | ok p => simp [worldAfter, Tx.run, hrun]
   | error e => simp [worldAfter, Tx.run, hrun]
 
-theorem step_eq_worldAfter_of_not_payable [HasCreditValue X]
+theorem step_eq_worldAfter_of_not_payable [HasCreditValue X] [HasPayable C]
     (c : Call C) (w : World S X E)
     (hp : C.payable c.fn = false) (hv : c.value = 0) :
     step (.call c) w = worldAfter (C.exec c.fn c.args) c.toCtx w :=

@@ -12,7 +12,8 @@ namespace Lsc.Security.Proof
 
 variable {S X E ε : Type} {C : Spec S X E ε}
 
-theorem no_unauthorized_extraction [HasCreditValue X] {Inv : World S X E → Prop} {claim : Claim S X E}
+theorem no_unauthorized_extraction [HasCreditValue X] [HasPayable C]
+    {Inv : World S X E → Prop} {claim : Claim S X E}
     {Auth : AuthPred C} {rely : X → X → Prop}
     (hN : NoUnauthorizedDecrease C Inv claim Auth)
     (hP : PreservesInv C Inv) (hE : PreservesInvEnv C Inv rely)
@@ -37,7 +38,8 @@ theorem no_unauthorized_extraction [HasCreditValue X] {Inv : World S X E → Pro
       have hle : claim a w ≤ claim a { w with ext := x' } := hM w x' a hr
       exact Nat.le_trans hle (ih { w with ext := x' } hw' htl hA)
 
-theorem no_unauthorized_extraction_at [HasCreditValue X] {Inv : World S X E → Prop} {claim : Claim S X E}
+theorem no_unauthorized_extraction_at [HasCreditValue X] [HasPayable C]
+    {Inv : World S X E → Prop} {claim : Claim S X E}
     {Auth : AuthPred C} {rely : X → X → Prop} {self : Address}
     (hN : NoUnauthorizedDecrease C Inv claim Auth)
     (hP : PreservesInvAt C Inv self) (hE : PreservesInvEnv C Inv rely)
@@ -63,7 +65,8 @@ theorem no_unauthorized_extraction_at [HasCreditValue X] {Inv : World S X E → 
       have hle : claim a w ≤ claim a { w with ext := x' } := hM w x' a hr
       exact Nat.le_trans hle (ih { w with ext := x' } hw' hW htl hA)
 
-theorem solvent_run [HasCreditValue X] {Inv : World S X E → Prop} {claim : Claim S X E}
+theorem solvent_run [HasCreditValue X] [HasPayable C]
+    {Inv : World S X E → Prop} {claim : Claim S X E}
     {holdings : Holdings S X E} {rely : X → X → Prop}
     (hP : PreservesInv C Inv) (hE : PreservesInvEnv C Inv rely)
     (hS : ∀ self w, Inv w → Solvent claim holdings self w)
@@ -72,7 +75,8 @@ theorem solvent_run [HasCreditValue X] {Inv : World S X E → Prop} {claim : Cla
     Solvent claim holdings self (run tr w) :=
   hS self _ (inv_run hP hE hw tr hW hR)
 
-theorem solvent_run_at [HasCreditValue X] {Inv : World S X E → Prop} {claim : Claim S X E}
+theorem solvent_run_at [HasCreditValue X] [HasPayable C]
+    {Inv : World S X E → Prop} {claim : Claim S X E}
     {holdings : Holdings S X E} {rely : X → X → Prop} {self : Address}
     (hP : PreservesInvAt C Inv self) (hE : PreservesInvEnv C Inv rely)
     (hS : ∀ w, Inv w → Solvent claim holdings self w)
@@ -209,7 +213,8 @@ theorem NativeSendAuth.of_debits [HasSelfBalance X] {claim : Claim S X E}
   refine ⟨hout, ?_⟩
   simpa [selfNative] using hO dst v w.ext w'.ext hsend
 
-theorem NoUnauthorizedDecrease.of_fns [HasCreditValue X] {Inv : World S X E → Prop}
+theorem NoUnauthorizedDecrease.of_fns [HasCreditValue X] [HasPayable C]
+    {Inv : World S X E → Prop}
     {claim : Claim S X E} {Auth : AuthPred C}
     (h : ∀ fn, NoUnauthorizedDecreaseFn C Inv claim Auth fn)
     (hnp : ∀ fn, C.payable fn = false := by intro fn; cases fn <;> rfl) :
@@ -224,6 +229,7 @@ theorem NoUnauthorizedDecrease.of_fns [HasCreditValue X] {Inv : World S X E → 
 
 theorem NoUnauthorizedDecrease.of_fns_credit [HasCreditValue X]
     {Inv : World S X E → Prop} {claim : Claim S X E} {Auth : AuthPred C}
+    [HasPayable C]
     (h : ∀ fn, NoUnauthorizedDecreaseCreditFn C Inv claim Auth fn) :
     NoUnauthorizedDecrease C Inv claim Auth := by
   intro c w a hInv hlt
@@ -236,7 +242,7 @@ theorem NoUnauthorizedDecrease.of_fns_credit [HasCreditValue X]
     | ok p =>
       rw [hrun] at hlt
       simpa [Call.ofCtx_toCtx] using
-        h c.fn c.args c.toCtx w a p.1 p.2 hInv hrun hlt
+        h c.fn c.args c.toCtx w a p.1 p.2 hvo hInv hrun hlt
   · exact (Nat.lt_irrefl _ hlt).elim
 
 theorem NoUnauthorizedDecreaseFn_of_native_send {Inv : World S X E → Prop}
@@ -262,6 +268,33 @@ theorem NoUnauthorizedDecreaseFn_of_native_send {Inv : World S X E → Prop}
       have ha : a = ctx.sender := native_outflow_victim hout hdec'
       simpa [ha] using hAuth args ctx w
 
+/-- Same as `NoUnauthorizedDecreaseFn_of_native_send`, but `Auth` is
+judged on the success path (tight permission such as `amount ≤ balances`). -/
+theorem NoUnauthorizedDecreaseFn_of_native_send_ok {Inv : World S X E → Prop}
+    {claim : Claim S X E} {Auth : AuthPred C} {fn : C.Fn}
+    (hAuth : ∀ (args : C.Args fn) (ctx : Ctx) (w : World S X E)
+        (ret : C.Ret fn) (w' : World S X E),
+      Tx.run (C.exec fn args) ctx w = .ok (ret, w') →
+      Auth ctx.sender (Call.ofCtx ctx fn args) w)
+    (hok : ∀ (args : C.Args fn) (ctx : Ctx) (w : World S X E)
+        (ret : C.Ret fn) (w' : World S X E),
+      Inv w → Tx.run (C.exec fn args) ctx w = .ok (ret, w') →
+      (∀ a, claim a w ≤ claim a w') ∨
+        ∃ v, NativeOutflow claim ctx.sender v w w') :
+    NoUnauthorizedDecreaseFn C Inv claim Auth fn := by
+  intro args ctx w a hInv hdec
+  cases hrun : Tx.run (C.exec fn args) ctx w with
+  | error _ => simp [worldAfter_error hrun] at hdec
+  | ok p =>
+    have hdec' : claim a p.2 < claim a w := by
+      simpa [worldAfter_ok hrun] using hdec
+    cases hok args ctx w p.1 p.2 hInv hrun with
+    | inl hge => exact (Nat.not_lt.mpr (hge a) hdec').elim
+    | inr hv =>
+      obtain ⟨v, hout⟩ := hv
+      have ha : a = ctx.sender := native_outflow_victim hout hdec'
+      simpa [ha] using hAuth args ctx w p.1 p.2 hrun
+
 theorem NoUnauthorizedDecreaseFn_of_ok {Inv : World S X E → Prop} {claim : Claim S X E}
     {Auth : AuthPred C} {fn : C.Fn}
     (hok : ∀ (args : C.Args fn) (ctx : Ctx) (w : World S X E) (a : Address)
@@ -276,7 +309,22 @@ theorem NoUnauthorizedDecreaseFn_of_ok {Inv : World S X E → Prop} {claim : Cla
   | ok p =>
     exact hok args ctx w a p.1 p.2 hInv h (by simpa [worldAfter_ok h] using hdec)
 
-theorem Conservation.of_fns [HasCreditValue X] {Inv : World S X E → Prop} {claim : Claim S X E}
+/-- Non-payable `NoUnauthorizedDecreaseFn` yields the credit form: `valueOk`
+forces `value = 0`, so `creditValue` is the identity. -/
+theorem NoUnauthorizedDecreaseCreditFn_of_fn [HasCreditValue X]
+    {Inv : World S X E → Prop} {claim : Claim S X E} {Auth : AuthPred C}
+    {fn : C.Fn} [HasPayable C] (hp : C.payable fn = false)
+    (h : NoUnauthorizedDecreaseFn C Inv claim Auth fn) :
+    NoUnauthorizedDecreaseCreditFn C Inv claim Auth fn := by
+  intro args ctx w a ret w' hvo hInv hrun hdec
+  have hv : ctx.value = 0 := C.value_eq_zero_of_valueOk hp hvo
+  rw [hv, World.creditValue_zero] at hrun
+  have hlt : claim a (worldAfter (C.exec fn args) ctx w) < claim a w := by
+    simpa [worldAfter_ok hrun] using hdec
+  exact h args ctx w a hInv hlt
+
+theorem Conservation.of_fns [HasCreditValue X] [HasPayable C]
+    {Inv : World S X E → Prop} {claim : Claim S X E}
     {inflow : Inflow C}
     (h : ∀ fn, ConservesFn C Inv claim inflow fn)
     (hnp : ∀ fn, C.payable fn = false := by intro fn; cases fn <;> rfl) :

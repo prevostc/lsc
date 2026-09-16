@@ -62,6 +62,9 @@ pinned theorem is added or renamed; the commit message records what moved.
 /-- info: 'WETH.weth_backed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms WETH.weth_backed
 
+/-- info: 'WETH.weth_no_unauthorized_extraction' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms WETH.weth_no_unauthorized_extraction
+
 /-- info: 'WETH.deposit_delta' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms WETH.deposit_delta
 

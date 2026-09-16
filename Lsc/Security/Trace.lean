@@ -58,7 +58,8 @@ is payable (`C.payable`); a revert of that body rolls the credit back.
 A nonzero-value call to a non-payable function is a revert step (world
 unchanged), matching compiler `valueOk` / `dispatchedFn`. Non-payable
 success has `v = 0`, so `creditValue w 0 = w`. -/
-def stepCall [HasCreditValue X] (c : Call C) (w : World S X E) : World S X E :=
+def stepCall [HasCreditValue X] [HasPayable C] (c : Call C) (w : World S X E) :
+    World S X E :=
   if C.valueOk c.fn c.value then
     match C.exec c.fn c.args c.toCtx (World.creditValue w c.value) with
     | .ok (_, w') => w'
@@ -72,12 +73,13 @@ Incoming `c.value` is credited onto `self`'s native balance *before*
 `Tx.run` only for an accepted payable call (EVM CALL is post-transfer
 at the callee, and a value-reject reverts the transfer). `Tx.run` is
 unchanged. -/
-def step [HasCreditValue X] : Step C → World S X E → World S X E
+def step [HasCreditValue X] [HasPayable C] : Step C → World S X E → World S X E
   | .call c, w => stepCall c w
   | .env x', w => { w with ext := x' }
 
 /-- Left fold: first step first. -/
-def run [HasCreditValue X] (tr : List (Step C)) (w : World S X E) : World S X E :=
+def run [HasCreditValue X] [HasPayable C] (tr : List (Step C)) (w : World S X E) :
+    World S X E :=
   tr.foldl (fun acc s => step s acc) w
 
 /-- Every call is aimed at `self` and is not a self-call. `env` steps are unrestricted. -/

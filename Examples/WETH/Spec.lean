@@ -2,16 +2,20 @@ import Lsc.Security.Wealth
 import Examples.WETH.Contract
 
 /-!
-WETH spec: `claim` is the wrapped balance; `Auth` is the holder's own
+WETH spec: `claim` is the wrapped balance (redeemable native on `self`'s
+books; not a second `ofNative` summand). `Auth` is the holder's own
 `transfer` / `withdraw` or an allowance-backed `transferFrom`. `Inv` is
-finite-support conservation of balances against `totalSupply`.
+finite-support conservation plus `totalSupply ≤` self's native balance
+and honest `Native.send`. Between our transactions, `rely` lets `ext`
+change except that this contract's native balance does not fall.
 -/
 
 open Lsc Lsc.Security WETH
 
 namespace WETH
 
-/-- `claim a w` is `a`'s wrapped balance. -/
+/-- `claim a w` is `a`'s wrapped balance. Wrapped tokens are the redeemable
+native; do not also use `Claim.ofNative`. -/
 def claim : Claim Storage ExtState Event :=
   Claim.ofSelf fun a s => (s.balances a).raw
 
@@ -44,11 +48,20 @@ def InvStorage (s : Storage) : Prop :=
     (∀ a, a ∉ H → s.balances a = 0) ∧
     H.sum (fun a => (s.balances a).raw) = s.totalSupply.raw
 
+/-- Balances have finite support summing to `totalSupply`, wrapped supply
+is covered by `self`'s native balance, and `oracle.send` debits that
+balance by the sent amount. -/
 def Inv (w : World Storage ExtState Event) : Prop :=
-  InvStorage w.self ∧ w.self.totalSupply.raw ≤ World.nativeBalance w
+  InvStorage w.self ∧
+    w.self.totalSupply.raw ≤ World.nativeBalance w ∧
+    DebitsOnSend w.oracle
 
-/-- Environment steps may change `ext` (including native balances).
-Storage-only `claim` is automatically monotone. -/
-def rely (_x _x' : ExtState) : Prop := True
+/-- Between our transactions the outside world may change `ext`
+arbitrarily, except that this contract's native balance does not fall
+(donations are allowed). That is what keeps `Inv`'s
+`totalSupply ≤ nativeBalance` across environment steps; `withdraw` is the
+only native outflow, and it burns matching wrapped tokens. -/
+def rely (x x' : ExtState) : Prop :=
+  x.env.selfBalance.toNat ≤ x'.env.selfBalance.toNat
 
 end WETH
