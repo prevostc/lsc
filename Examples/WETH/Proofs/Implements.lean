@@ -14,7 +14,7 @@ namespace WETH
 
 section
 
-variable (ctx : Ctx) (w : World Storage ExtState Event)
+variable (ctx : Ctx) (w : World)
 
 @[simp] theorem impl_transfer (to : Address) (amount : Amount native) :
     WETH.impl.transfer to amount ctx w =
@@ -31,7 +31,7 @@ variable (ctx : Ctx) (w : World Storage ExtState Event)
       (Tx.run (approve spender amount) ctx w).toOption :=
   rfl
 
-@[simp] theorem impl_balanceOf (who : Address) (w : World Storage ExtState Event) :
+@[simp] theorem impl_balanceOf (who : Address) (w : World) :
     WETH.impl.balanceOf who w = w.self.balances who := by
   change (match Tx.run (balanceOf who) { sender := (0 : Address) } w with
     | .ok (v, _) => v
@@ -39,14 +39,14 @@ variable (ctx : Ctx) (w : World Storage ExtState Event)
   rw [balanceOf_returns_stored_balance { sender := 0 } w who]
 
 @[simp] theorem impl_allowance (owner spender : Address)
-    (w : World Storage ExtState Event) :
+    (w : World) :
     WETH.impl.allowance owner spender w = w.self.allowances owner spender := by
   change (match Tx.run (allowance owner spender) { sender := (0 : Address) } w with
     | .ok (v, _) => v
     | .error _ => default) = _
   rw [allowance_returns_stored { sender := 0 } w owner spender]
 
-@[simp] theorem impl_totalSupply (w : World Storage ExtState Event) :
+@[simp] theorem impl_totalSupply (w : World) :
     WETH.impl.totalSupply w = w.self.totalSupply := by
   change (match Tx.run totalSupply { sender := (0 : Address) } w with
     | .ok (v, _) => v
@@ -74,7 +74,7 @@ private lemma sub_add_ge (b a n : Amount native) (hn : n.raw ≤ b.raw) (ha : n.
   simpa [Amount.raw_sub, Amount.raw_add] using this
 
 theorem transfer_balance_protected (to : Address) (amount : Amount native)
-    {r : Bool} {w' : World Storage ExtState Event} (x : Address)
+    {r : Bool} {w' : World} (x : Address)
     (h : Tx.run (transfer to amount) ctx w = .ok (r, w'))
     (hne : ctx.sender ≠ x) :
     w'.self.balances x + w.self.allowances x ctx.sender ≥ w.self.balances x := by
@@ -97,7 +97,7 @@ theorem transfer_balance_protected (to : Address) (amount : Amount native)
     exact ge_self_add _ _
 
 theorem transferFrom_balance_protected (src to : Address) (amount : Amount native)
-    {r : Bool} {w' : World Storage ExtState Event} (x : Address)
+    {r : Bool} {w' : World} (x : Address)
     (h : Tx.run (transferFrom src to amount) ctx w = .ok (r, w'))
     (hne : ctx.sender ≠ x) :
     w'.self.balances x + w.self.allowances x ctx.sender ≥ w.self.balances x := by
@@ -139,14 +139,14 @@ theorem transferFrom_balance_protected (src to : Address) (amount : Amount nativ
     exact ge_self_add _ _
 
 theorem approve_balance_protected (spender : Address) (amount : Amount native)
-    {r : Bool} {w' : World Storage ExtState Event} (x : Address)
+    {r : Bool} {w' : World} (x : Address)
     (h : Tx.run (approve spender amount) ctx w = .ok (r, w')) :
     w'.self.balances x + w.self.allowances x ctx.sender ≥ w.self.balances x := by
   rw [approve_ok] at h
   cases h
   exact ge_self_add _ _
 
-theorem deposit_balance_protected {w' : World Storage ExtState Event} (x : Address)
+theorem deposit_balance_protected {w' : World} (x : Address)
     (h : Tx.run depositTx ctx w = .ok ((), w')) :
     w'.self.balances x + w.self.allowances x ctx.sender ≥ w.self.balances x := by
   by_cases hx : x = ctx.sender
@@ -158,7 +158,7 @@ theorem deposit_balance_protected {w' : World Storage ExtState Event} (x : Addre
     simp [hb]
 
 theorem withdraw_balance_protected (amount : Amount native)
-    {w' : World Storage ExtState Event} (x : Address)
+    {w' : World} (x : Address)
     (h : Tx.run (withdraw amount) ctx w = .ok ((), w'))
     (hne : ctx.sender ≠ x) :
     w'.self.balances x + w.self.allowances x ctx.sender ≥ w.self.balances x := by

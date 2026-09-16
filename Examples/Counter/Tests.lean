@@ -8,7 +8,7 @@ open Lsc Counter
 
 def smokeCtx : Ctx := { sender := 1 }
 
-def smokeW (n : Nat) : World Storage ExtState Event :=
+def smokeW (n : Nat) : World :=
   { self := { count := n }, ext := default }
 
 #guard

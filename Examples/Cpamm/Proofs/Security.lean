@@ -24,7 +24,7 @@ namespace Cpamm
 
 /-- Invariant plus callee promises, pinned to the starting tokens/oracle. -/
 def InvT (self : Address) (t0 : IERC20.Ref asset0) (t1 : IERC20.Ref asset1)
-    (oracle : Oracle ExtState) (w : World Storage ExtState Event) : Prop :=
+    (oracle : Oracle ExtState) (w : World) : Prop :=
   Inv self w ∧ w.self.token0 = t0 ∧ w.self.token1 = t1 ∧ w.oracle = oracle ∧
     IERC20.Spec (t0.impl : Token0Impl) ∧
     IERC20.Spec (t1.impl : Token1Impl) ∧
@@ -250,7 +250,7 @@ private theorem invStorage_of_removeLiquidityPost (σ : Storage) (who : Address)
       exact h0 a ha
     · simp [removeLiquidityPost, hn0, hsum]
 
-theorem inv_covers (self : Address) (w : World Storage ExtState Event)
+theorem inv_covers (self : Address) (w : World)
     (h : Inv self w) : CoversLpsAndProtocol self w := by
   obtain ⟨hta0, hta1, ⟨H, hz, hs⟩, _hps⟩ := h
   refine ⟨H, hz, ?_, ?_⟩
@@ -284,7 +284,7 @@ theorem inv_covers (self : Address) (w : World Storage ExtState Event)
 /-! ### Holdings along CALLs -/
 
 private theorem holdings0_add_of_transferFrom
-    (self : Address) {ctx : Ctx} {w w1 : World Storage ExtState Event}
+    (self : Address) {ctx : Ctx} {w w1 : World}
     {amt : Amount asset0}
     (hself : ctx.self = self) (hsne : ctx.sender ≠ self)
     (hT : IERC20.Spec (w.self.token0.impl : Token0Impl))
@@ -304,7 +304,7 @@ private theorem holdings0_add_of_transferFrom
   simpa [Amount.raw_add] using congrArg Amount.raw hdst
 
 private theorem holdings1_add_of_transferFrom
-    (self : Address) {ctx : Ctx} {w w1 : World Storage ExtState Event}
+    (self : Address) {ctx : Ctx} {w w1 : World}
     {amt : Amount asset1}
     (hself : ctx.self = self) (hsne : ctx.sender ≠ self)
     (hT : IERC20.Spec (w.self.token1.impl : Token1Impl))
@@ -324,7 +324,7 @@ private theorem holdings1_add_of_transferFrom
   simpa [Amount.raw_add] using congrArg Amount.raw hdst
 
 private theorem holdings0_sub_of_transfer
-    (self : Address) {ctx : Ctx} {wCall w1 : World Storage ExtState Event}
+    (self : Address) {ctx : Ctx} {wCall w1 : World}
     {amt : Amount asset0}
     (hself : ctx.self = self) (hsne : ctx.sender ≠ self)
     (hT : IERC20.Spec (wCall.self.token0.impl : Token0Impl))
@@ -360,7 +360,7 @@ private theorem holdings0_sub_of_transfer
   exact Nat.add_left_cancel hsumr
 
 private theorem holdings1_sub_of_transfer
-    (self : Address) {ctx : Ctx} {wCall w1 : World Storage ExtState Event}
+    (self : Address) {ctx : Ctx} {wCall w1 : World}
     {amt : Amount asset1}
     (hself : ctx.self = self) (hsne : ctx.sender ≠ self)
     (hT : IERC20.Spec (wCall.self.token1.impl : Token1Impl))
@@ -396,7 +396,7 @@ private theorem holdings1_sub_of_transfer
   exact Nat.add_left_cancel hsumr
 
 private theorem holdings1_frame_token0
-    (self : Address) {w w1 : World Storage ExtState Event}
+    (self : Address) {w w1 : World}
     (hInd : TokensIndependent w.self.token0 w.self.token1 w.oracle)
     (hcall : ∃ sel args rets,
       w.oracle.call w.self.token0.addr sel args w.ext = some (rets, w1.ext))
@@ -410,7 +410,7 @@ private theorem holdings1_frame_token0
     (hview balSel1 [AbiType.encode self])
 
 private theorem holdings0_frame_token1
-    (self : Address) {w w1 : World Storage ExtState Event}
+    (self : Address) {w w1 : World}
     (hInd : TokensIndependent w.self.token0 w.self.token1 w.oracle)
     (hcall : ∃ sel args rets,
       w.oracle.call w.self.token1.addr sel args w.ext = some (rets, w1.ext))
@@ -902,7 +902,7 @@ theorem cpamm_no_unauth :
 namespace Proof
 
 theorem cpamm_no_unauthorized_extraction (self : Address)
-    (tr : List (Step spec)) (w : World Storage ExtState Event) (a : Address)
+    (tr : List (Step spec)) (w : World) (a : Address)
     (hw : Inv self w) (hW : Wf self tr w)
     (hR : RelyAlong (cpammRely self w.self.token0 w.self.token1 w.oracle) tr w)
     (hT0 : IERC20.Spec (w.self.token0.impl : Token0Impl))
@@ -919,7 +919,7 @@ theorem cpamm_no_unauthorized_extraction (self : Address)
     tr w a ⟨hw, rfl, rfl, rfl, hT0, hT1, hInd⟩ hW hR hA
 
 theorem cpamm_solvent (self : Address) (tr : List (Step spec))
-    (w : World Storage ExtState Event)
+    (w : World)
     (hW : Wf self tr w)
     (hR : RelyAlong (cpammRely self w.self.token0 w.self.token1 w.oracle) tr w)
     (hT0 : IERC20.Spec (w.self.token0.impl : Token0Impl))

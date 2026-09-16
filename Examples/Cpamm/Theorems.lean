@@ -14,7 +14,7 @@ namespace Cpamm
 
 section Tx
 
-variable (ctx : Ctx) (w : World Storage ExtState Event)
+variable (msg : Ctx) (w : World)
 
 /-- A successful `swap0for1` does not decrease the product of the two reserves.
 `swapOut` reverts if the protocol take would exceed the 0.3% fee, so the
@@ -22,8 +22,8 @@ input reserve grows by at least the fee-less notional used to compute the
 output. Word overflow in the `mulDiv` intermediates reverts; that is not
 a 512-bit `mulDiv`. -/
 theorem swap0for1_k (dx : Amount asset0) (minOut : Amount asset1)
-    {out : Amount asset1} {w' : World Storage ExtState Event}
-    (h : Tx.run (swap0for1 dx minOut) ctx w = .ok (out, w')) :
+    {out : Amount asset1} {w' : World}
+    (h : Tx.run (swap0for1 dx minOut) msg w = .ok (out, w')) :
     w'.self.reserve0.raw * w'.self.reserve1.raw ≥
       w.self.reserve0.raw * w.self.reserve1.raw :=
   Proof.swap0for1_k h
@@ -31,8 +31,8 @@ theorem swap0for1_k (dx : Amount asset0) (minOut : Amount asset1)
 /-- A successful `swap1for0` does not decrease the product of the two reserves.
 Same fee-bound as `swap0for1_k`. -/
 theorem swap1for0_k (dx : Amount asset1) (minOut : Amount asset0)
-    {out : Amount asset0} {w' : World Storage ExtState Event}
-    (h : Tx.run (swap1for0 dx minOut) ctx w = .ok (out, w')) :
+    {out : Amount asset0} {w' : World}
+    (h : Tx.run (swap1for0 dx minOut) msg w = .ok (out, w')) :
     w'.self.reserve0.raw * w'.self.reserve1.raw ≥
       w.self.reserve0.raw * w.self.reserve1.raw :=
   Proof.swap1for0_k h
@@ -41,8 +41,8 @@ theorem swap1for0_k (dx : Amount asset1) (minOut : Amount asset0)
 `proto` (zero when `feeTo = 0`, otherwise `⌊fee · protocolShareBps / BPS⌋` of
 the 0.3% swap fee) and the token1 bucket is unchanged. -/
 theorem swap0_protocol_fee (dx : Amount asset0) (minOut : Amount asset1)
-    {out : Amount asset1} {w' : World Storage ExtState Event}
-    (h : Tx.run (swap0for1 dx minOut) ctx w = .ok (out, w')) :
+    {out : Amount asset1} {w' : World}
+    (h : Tx.run (swap0for1 dx minOut) msg w = .ok (out, w')) :
     w'.self.protocolFees0 =
       w.self.protocolFees0 + Amount.ofWord (protoOf w.self dx.raw) ∧
       w'.self.protocolFees1 = w.self.protocolFees1 :=
@@ -51,8 +51,8 @@ theorem swap0_protocol_fee (dx : Amount asset0) (minOut : Amount asset1)
 /-- On a successful `swap1for0`, the token1 protocol bucket grows by exactly
 `proto` and the token0 bucket is unchanged. -/
 theorem swap1_protocol_fee (dx : Amount asset1) (minOut : Amount asset0)
-    {out : Amount asset0} {w' : World Storage ExtState Event}
-    (h : Tx.run (swap1for0 dx minOut) ctx w = .ok (out, w')) :
+    {out : Amount asset0} {w' : World}
+    (h : Tx.run (swap1for0 dx minOut) msg w = .ok (out, w')) :
     w'.self.protocolFees1 =
       w.self.protocolFees1 + Amount.ofWord (protoOf w.self dx.raw) ∧
       w'.self.protocolFees0 = w.self.protocolFees0 :=
@@ -61,38 +61,38 @@ theorem swap1_protocol_fee (dx : Amount asset1) (minOut : Amount asset0)
 /-- Success of `collectProtocolFees` zeros both protocol buckets and leaves
 the curve reserves unchanged. -/
 theorem collect_only_feeTo {p : Amount asset0 × Amount asset1}
-    {w' : World Storage ExtState Event}
-    (h : Tx.run collectProtocolFees ctx w = .ok (p, w')) :
+    {w' : World}
+    (h : Tx.run collectProtocolFees msg w = .ok (p, w')) :
     w'.self.protocolFees0 = 0 ∧ w'.self.protocolFees1 = 0 ∧
       w'.self.reserve0 = w.self.reserve0 ∧ w'.self.reserve1 = w.self.reserve1 :=
   Proof.collect_only_feeTo h
 
 /-- `addLiquidity` does not touch either protocol-fee bucket. -/
 theorem addLiquidity_buckets (a0 : Amount asset0) (a1 : Amount asset1)
-    {n : Amount lpShare} {w' : World Storage ExtState Event}
-    (h : Tx.run (addLiquidity a0 a1) ctx w = .ok (n, w')) :
+    {n : Amount lpShare} {w' : World}
+    (h : Tx.run (addLiquidity a0 a1) msg w = .ok (n, w')) :
     w'.self.protocolFees0 = w.self.protocolFees0 ∧
       w'.self.protocolFees1 = w.self.protocolFees1 :=
   Proof.addLiquidity_buckets h
 
 /-- `removeLiquidity` does not touch either protocol-fee bucket. -/
 theorem removeLiquidity_buckets (s : Amount lpShare)
-    {p : Amount asset0 × Amount asset1} {w' : World Storage ExtState Event}
-    (h : Tx.run (removeLiquidity s) ctx w = .ok (p, w')) :
+    {p : Amount asset0 × Amount asset1} {w' : World}
+    (h : Tx.run (removeLiquidity s) msg w = .ok (p, w')) :
     w'.self.protocolFees0 = w.self.protocolFees0 ∧
       w'.self.protocolFees1 = w.self.protocolFees1 :=
   Proof.removeLiquidity_buckets h
 
 /-- `setProtocolShare` does not touch either protocol-fee bucket. -/
-theorem setProtocolShare_buckets (bps : Bps) {w' : World Storage ExtState Event}
-    (h : Tx.run (setProtocolShare bps) ctx w = .ok ((), w')) :
+theorem setProtocolShare_buckets (bps : Bps) {w' : World}
+    (h : Tx.run (setProtocolShare bps) msg w = .ok ((), w')) :
     w'.self.protocolFees0 = w.self.protocolFees0 ∧
       w'.self.protocolFees1 = w.self.protocolFees1 :=
   Proof.setProtocolShare_buckets h
 
 /-- `setFeeTo` does not touch either protocol-fee bucket. -/
-theorem setFeeTo_buckets (recipient : Address) {w' : World Storage ExtState Event}
-    (h : Tx.run (setFeeTo recipient) ctx w = .ok ((), w')) :
+theorem setFeeTo_buckets (recipient : Address) {w' : World}
+    (h : Tx.run (setFeeTo recipient) msg w = .ok ((), w')) :
     w'.self.protocolFees0 = w.self.protocolFees0 ∧
       w'.self.protocolFees1 = w.self.protocolFees1 :=
   Proof.setFeeTo_buckets h
@@ -101,8 +101,8 @@ theorem setFeeTo_buckets (recipient : Address) {w' : World Storage ExtState Even
 payout. Success already implies a positive share supply and a positive
 payout. -/
 theorem removeLiquidity_pro_rata (s : Amount lpShare)
-    {p : Amount asset0 × Amount asset1} {w' : World Storage ExtState Event}
-    (h : Tx.run (removeLiquidity s) ctx w = .ok (p, w')) :
+    {p : Amount asset0 × Amount asset1} {w' : World}
+    (h : Tx.run (removeLiquidity s) msg w = .ok (p, w')) :
     w'.self.reserve0 = w.self.reserve0 - p.1 ∧
       w'.self.reserve1 = w.self.reserve1 - p.2 :=
   Proof.removeLiquidity_pro_rata h
@@ -110,8 +110,8 @@ theorem removeLiquidity_pro_rata (s : Amount lpShare)
 /-- The tokens paid by a successful `removeLiquidity s` are
 `⌊reserve_i · s / totalShares⌋`. -/
 theorem removeLiquidity_paid (s : Amount lpShare)
-    {p : Amount asset0 × Amount asset1} {w' : World Storage ExtState Event}
-    (h : Tx.run (removeLiquidity s) ctx w = .ok (p, w')) :
+    {p : Amount asset0 × Amount asset1} {w' : World}
+    (h : Tx.run (removeLiquidity s) msg w = .ok (p, w')) :
     p.1.raw = w.self.reserve0.raw * s.raw / w.self.totalShares.raw ∧
       p.2.raw = w.self.reserve1.raw * s.raw / w.self.totalShares.raw :=
   Proof.removeLiquidity_paid h
@@ -120,10 +120,10 @@ theorem removeLiquidity_paid (s : Amount lpShare)
 (plus the first-mint lock if the caller is address 0) and raises
 `totalShares` by the minted shares plus any `MINIMUM_LIQUIDITY` lock. -/
 theorem addLiquidity_pro_rata (a0 : Amount asset0) (a1 : Amount asset1)
-    {n : Amount lpShare} {w' : World Storage ExtState Event}
-    (h : Tx.run (addLiquidity a0 a1) ctx w = .ok (n, w')) :
-    w'.self.shares ctx.sender =
-      sharesAfterDead w.self ctx.sender + n ∧
+    {n : Amount lpShare} {w' : World}
+    (h : Tx.run (addLiquidity a0 a1) msg w = .ok (n, w')) :
+    w'.self.shares msg.sender =
+      sharesAfterDead w.self msg.sender + n ∧
       w'.self.totalShares =
         w.self.totalShares + n + Amount.ofWord (deadShares w.self) :=
   Proof.addLiquidity_pro_rata h
@@ -131,19 +131,19 @@ theorem addLiquidity_pro_rata (a0 : Amount asset0) (a1 : Amount asset1)
 /-- Shares minted by a successful `addLiquidity` are the floor-min of the
 two reserve ratios, or `a0 − 1000` on the first mint. -/
 theorem addLiquidity_minted (a0 : Amount asset0) (a1 : Amount asset1)
-    {n : Amount lpShare} {w' : World Storage ExtState Event}
-    (h : Tx.run (addLiquidity a0 a1) ctx w = .ok (n, w')) :
+    {n : Amount lpShare} {w' : World}
+    (h : Tx.run (addLiquidity a0 a1) msg w = .ok (n, w')) :
     n = Amount.ofWord (mintedShares w.self a0.raw a1.raw) :=
   Proof.addLiquidity_minted h
 
 /-- A successful first mint leaves at least `MINIMUM_LIQUIDITY` shares
 outstanding. On that mint those 1000 shares are locked at address 0.
-`Wf` only excludes `sender = self`, so `ctx.sender = 0` can later burn
+`Wf` only excludes `sender = self`, so `msg.sender = 0` can later burn
 `shares[0]`; this is not a trace invariant. Later mints only increase
 `totalShares`. -/
 theorem addLiquidity_min_liquidity (a0 : Amount asset0) (a1 : Amount asset1)
-    {n : Amount lpShare} {w' : World Storage ExtState Event}
-    (h : Tx.run (addLiquidity a0 a1) ctx w = .ok (n, w')) :
+    {n : Amount lpShare} {w' : World}
+    (h : Tx.run (addLiquidity a0 a1) msg w = .ok (n, w')) :
     w.self.totalShares.raw = 0 → 1000 ≤ w'.self.totalShares.raw :=
   Proof.addLiquidity_min_liquidity h
 
@@ -157,7 +157,7 @@ ERC-20s per `IERC20.Spec`; a CALL on one does not change the other's
 `balanceOf` / `totalSupply` views; no reentrancy is modelled; no
 fee-on-transfer. Callers must not be the pool itself. -/
 theorem cpamm_solvent (self : Address) (tr : List (Step spec))
-    (w : World Storage ExtState Event)
+    (w : World)
     (hW : Wf self tr w)
     (hR : RelyAlong (cpammRely self w.self.token0 w.self.token1 w.oracle) tr w)
     (hT0 : IERC20.Spec (w.self.token0.impl : Token0Impl))
@@ -176,7 +176,7 @@ conforming ERC-20s per `IERC20.Spec`; a CALL on one does not change the
 other's views; no reentrancy is modelled; no fee-on-transfer. Between
 calls neither pool balance may fall. Callers must not be the pool itself. -/
 theorem cpamm_no_unauthorized_extraction (self : Address)
-    (tr : List (Step spec)) (w : World Storage ExtState Event) (a : Address)
+    (tr : List (Step spec)) (w : World) (a : Address)
     (hw : Inv self w) (hW : Wf self tr w)
     (hR : RelyAlong (cpammRely self w.self.token0 w.self.token1 w.oracle) tr w)
     (hT0 : IERC20.Spec (w.self.token0.impl : Token0Impl))

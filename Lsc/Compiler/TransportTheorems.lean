@@ -46,13 +46,12 @@ theorem transport_trace (T : TransportSetup S X E ε)
     (hs : storageRel T.c T.Γ evmKeccak w.self σ)
     (hlog : w.log = []) (hwf : WorldWF T.c T.Γ w)
     (hWF : CallsWF T self calls)
-    (hlt : ∀ (w : World S X E), HasSelfBalance.get w.ext < wordBound)
     (hE : EvmTraceRunAll T.is calls σ σ') :
     let tr := decodeTrace T calls
     Wf self tr w ∧
       storageRel T.c T.Γ evmKeccak (run tr w).self σ' ∧
       WorldWF T.c T.Γ { run tr w with log := [] } :=
-  Proof.transport_trace T hcf hnp hpc self calls w σ σ' hs hlog hwf hWF hlt hE
+  Proof.transport_trace T hcf hnp hpc self calls w σ σ' hs hlog hwf hWF hE
 
 /-- A function that never CALLs out has post-storage and external ghosts
 that depend only on the pre-storage and pre-ghosts, not on logs or on

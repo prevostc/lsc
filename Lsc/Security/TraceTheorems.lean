@@ -121,8 +121,7 @@ theorem step_eq_worldAfter_of_not_payable [HasCreditValue X] [HasPayable C]
   Proof.step_eq_worldAfter_of_not_payable c w hp hv
 
 /-- The empty trace is well-formed at any `self` and world. -/
-theorem Wf.nil [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
-    (self : Address) (w : World S X E) : Wf (C := C) self [] w :=
+theorem Wf.nil (self : Address) (w : World S X E) : Wf (C := C) self [] w :=
   Proof.Wf.nil self w
 
 /-- The empty trace is from any sender set. -/
@@ -148,12 +147,32 @@ theorem nativeBalance_creditValue {S E : Type} (w : World S ExtState E) (v : Nat
     World.nativeBalance (World.creditValue w v) = World.nativeBalance w + v :=
   Proof.nativeBalance_creditValue w v h
 
-/-- On `ExtState`, a zero-value well-formed trace is well-formed at every world. -/
-theorem Wf.irrel_extState {S E ε : Type} {C : Spec S ExtState E ε} [HasPayable C]
+/-- `Wf` ignores the world index. -/
+theorem Wf.irrel_extState {S E ε : Type} {C : Spec S ExtState E ε}
     (self : Address) (tr : List (Step C))
     (w w' : World S ExtState E)
-    (hz : ∀ (c : Call C), Step.call c ∈ tr → c.value = 0)
     (h : Wf self tr w) : Wf self tr w' :=
-  Proof.Wf.irrel_extState self tr w w' hz h
+  Proof.Wf.irrel_extState self tr w w' h
+
+/-- A rejected call (value, wrap, or body revert) is a no-op on the world. -/
+theorem step_of_not_accepted [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
+    {c : Call C} {w : World S X E} (h : accepted c w = false) :
+    step (.call c) w = w :=
+  Proof.step_of_not_accepted h
+
+/-- An accepted call ran the body successfully after the value/wrap guards. -/
+theorem accepted_ok [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
+    {c : Call C} {w : World S X E} (h : accepted c w = true) :
+    C.valueOk c.fn c.value = true ∧
+      (C.payable c.fn && creditWraps w c.value) = false ∧
+      ∃ p, C.exec c.fn c.args c.toCtx (World.creditValue w c.value) = .ok p ∧
+        step (.call c) w = p.2 :=
+  Proof.accepted_ok h
+
+/-- Wrap-reject is exactly 256-bit overflow of `self`'s native balance. -/
+theorem creditWraps_false_lt {S E : Type} (w : World S ExtState E) (v : Nat)
+    (h : creditWraps w v = false) :
+    World.nativeBalance w + v < wordBound :=
+  Proof.creditWraps_false_lt w v h
 
 end Lsc.Security

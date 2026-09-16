@@ -119,6 +119,13 @@ theorem PreservesInvFnAt_of_ok {C : Spec S X E ε} {Inv : World S X E → Prop}
     PreservesInvFnAt C Inv self fn :=
   Proof.PreservesInvFnAt_of_ok hok
 
+/-- Unrestricted preservation implies preservation on well-formed calls at `self`. -/
+theorem PreservesInv.toAt [HasCreditValue X] {C : Spec S X E ε} [HasPayable C]
+    [HasSelfBalance X]
+    {Inv : World S X E → Prop} {self : Address}
+    (h : PreservesInv C Inv) : PreservesInvAt C Inv self :=
+  Proof.PreservesInv.toAt h
+
 /-- A reachable world satisfies `Inv` when deployment establishes `Inv` and
 every well-formed call and `rely`-conformant environment step preserves it. -/
 theorem inv_of_reachable [HasCreditValue X] {C : Spec S X E ε} [HasPayable C]

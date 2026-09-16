@@ -21,7 +21,7 @@ namespace Vault
 abbrev AssetImpl := IERC20.Impl vaultAsset (WorldView ExtState)
 
 /-- Underlying-token balance of the vault, from the bound token's view. -/
-def holdings (self : Address) (w : World Storage ExtState Event) : Nat :=
+def holdings (self : Address) (w : World) : Nat :=
   (w.self.asset.impl.balanceOf self w.view).raw
 
 /-- Redeemable assets of `a`:
@@ -39,7 +39,7 @@ def Auth : AuthPred spec :=
     | _, _ => False
 
 /-- Deposit is the only inflow of claim-units; it is `0` on revert. -/
-def inflow (c : Call spec) (w : World Storage ExtState Event) : Nat :=
+def inflow (c : Call spec) (w : World) : Nat :=
   match c.fn, c.args with
   | .deposit, assets =>
     match Tx.run (deposit assets) c.toCtx w with
@@ -55,7 +55,7 @@ def InvStorage (σ : Storage) : Prop :=
 /-- Share balances have finite support summing to `totalShares`, and
 `totalShares ≤ holdings · 10^offset` so offset claims stay covered by
 holdings. -/
-def Inv (self : Address) (w : World Storage ExtState Event) : Prop :=
+def Inv (self : Address) (w : World) : Prop :=
   InvStorage w.self ∧
     w.self.totalShares.raw ≤ holdings self w * Word.scale offset.decimals
 

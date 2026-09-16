@@ -56,7 +56,7 @@ theorem no_unauthorized_extraction_at [HasCreditValue X] [HasPayable C]
     match s with
     | .call c =>
       obtain ⟨hna, htl⟩ := hA
-      have ⟨ht, hs, _, hWtl⟩ := hW
+      have ⟨ht, hs, hWtl⟩ := hW
       have hw' : Inv (step (.call c) w) := hP c w ht hs hw
       have hle : claim a w ≤ claim a (step (.call c) w) :=
         Nat.le_of_not_lt fun hlt => hna (hN c w a hw hlt)

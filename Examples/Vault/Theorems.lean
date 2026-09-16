@@ -13,15 +13,15 @@ open Lsc Lsc.Stdlib Lsc.Security Vault
 
 namespace Vault
 
-variable (ctx : Ctx) (w : World Storage ExtState Event)
+variable (msg : Ctx) (w : World)
 
 /-- A successful `deposit` credits the caller with the minted shares and
 raises `totalShares` by that amount. Success already implies the pause,
 positivity, rounding, and overflow checks. -/
 theorem deposit_shares (assets : Amount vaultAsset)
-    {minted : Amount vShare} {w' : World Storage ExtState Event}
-    (h : Tx.run (deposit assets) ctx w = .ok (minted, w')) :
-    w'.self.shares ctx.sender = w.self.shares ctx.sender + minted ∧
+    {minted : Amount vShare} {w' : World}
+    (h : Tx.run (deposit assets) msg w = .ok (minted, w')) :
+    w'.self.shares msg.sender = w.self.shares msg.sender + minted ∧
       w'.self.totalShares = w.self.totalShares + minted :=
   Proof.deposit_shares h
 
@@ -31,19 +31,19 @@ ERC-20 per `IERC20.Spec`; no reentrancy is modelled. Self-deposit is excluded
 because a conforming self-`transferFrom` is a no-op on the vault's balance, so
 the holdings delta is genuinely false there. -/
 theorem deposit_holdings (assets : Amount vaultAsset)
-    {minted : Amount vShare} {w' : World Storage ExtState Event}
+    {minted : Amount vShare} {w' : World}
     (hT : IERC20.Spec (w.self.asset.impl : AssetImpl))
-    (hne : ctx.sender ≠ ctx.self)
-    (h : Tx.run (deposit assets) ctx w = .ok (minted, w')) :
-    holdings ctx.self w' = holdings ctx.self w + assets.raw :=
+    (hne : msg.sender ≠ msg.self)
+    (h : Tx.run (deposit assets) msg w = .ok (minted, w')) :
+    holdings msg.self w' = holdings msg.self w + assets.raw :=
   Proof.deposit_holdings hT hne h
 
 /-- A successful `withdraw` burns `sharesIn` from the caller and lowers
 `totalShares` by the burned shares. -/
 theorem withdraw_shares (sharesIn : Amount vShare)
-    {paid : Amount vaultAsset} {w' : World Storage ExtState Event}
-    (h : Tx.run (withdraw sharesIn) ctx w = .ok (paid, w')) :
-    w'.self.shares ctx.sender = w.self.shares ctx.sender - sharesIn ∧
+    {paid : Amount vaultAsset} {w' : World}
+    (h : Tx.run (withdraw sharesIn) msg w = .ok (paid, w')) :
+    w'.self.shares msg.sender = w.self.shares msg.sender - sharesIn ∧
       w'.self.totalShares = w.self.totalShares - sharesIn :=
   Proof.withdraw_shares h
 
@@ -53,11 +53,11 @@ conforming ERC-20 per `IERC20.Spec`; no reentrancy is modelled. Self-withdraw
 is excluded because a conforming self-`transfer` is a no-op on the vault's
 balance, so the holdings delta is genuinely false there. -/
 theorem withdraw_holdings (sharesIn : Amount vShare)
-    {paid : Amount vaultAsset} {w' : World Storage ExtState Event}
+    {paid : Amount vaultAsset} {w' : World}
     (hT : IERC20.Spec (w.self.asset.impl : AssetImpl))
-    (hne : ctx.sender ≠ ctx.self)
-    (h : Tx.run (withdraw sharesIn) ctx w = .ok (paid, w')) :
-    holdings ctx.self w' + paid.raw = holdings ctx.self w :=
+    (hne : msg.sender ≠ msg.self)
+    (h : Tx.run (withdraw sharesIn) msg w = .ok (paid, w')) :
+    holdings msg.self w' + paid.raw = holdings msg.self w :=
   Proof.withdraw_holdings hT hne h
 
 /-- After any well-formed sequence of Vault calls, the sum of depositors'
@@ -69,7 +69,7 @@ per step; solvency, not per-step conservation, is the statement. Assumed of
 the token: it is a conforming ERC-20 per `IERC20.Spec`; no reentrancy is
 modelled. -/
 theorem vault_solvent (self : Address) (tr : List (Step spec))
-    (w : World Storage ExtState Event)
+    (w : World)
     (hW : Wf self tr w)
     (hR : RelyAlong (vaultRely self w.self.asset w.oracle) tr w)
     (hT : IERC20.Spec (w.self.asset.impl : AssetImpl))
@@ -86,7 +86,7 @@ not take the vault's balance. Assumed of the token: it is a conforming
 ERC-20 per `IERC20.Spec`; no reentrancy is modelled. This is not liveness —
 pause can block withdrawal without reducing the recorded claim. -/
 theorem vault_no_unauthorized_extraction (self : Address)
-    (tr : List (Step spec)) (w : World Storage ExtState Event) (a : Address)
+    (tr : List (Step spec)) (w : World) (a : Address)
     (hw : Inv self w) (hW : Wf self tr w)
     (hR : RelyAlong (vaultRely self w.self.asset w.oracle) tr w)
     (hT : IERC20.Spec (w.self.asset.impl : AssetImpl))
@@ -99,10 +99,10 @@ share supply `S`, redeeming the minted shares recovers all but at most
 `(A + 10^offset) / 10^offset` wei: an inflation donation of size `A` costs
 on the order of `10^offset` wei per wei the depositor cannot redeem. -/
 theorem deposit_inflation_bounded (assets : Amount vaultAsset)
-    {minted : Amount vShare} {w' : World Storage ExtState Event}
-    (h : Tx.run (deposit assets) ctx w = .ok (minted, w')) :
+    {minted : Amount vShare} {w' : World}
+    (h : Tx.run (deposit assets) msg w = .ok (minted, w')) :
     let V := Word.scale offset.decimals
-    let A := holdings ctx.self w
+    let A := holdings msg.self w
     let S := w.self.totalShares.raw
     let x := assets.raw
     let r := Shares.toAssetsRaw offset minted.raw (A + x) (S + minted.raw)

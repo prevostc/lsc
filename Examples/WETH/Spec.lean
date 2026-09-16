@@ -1,4 +1,5 @@
 import Lsc.Security.Wealth
+import Lsc.Security.State
 import Examples.WETH.Contract
 
 /-!
@@ -29,7 +30,7 @@ def Auth : AuthPred spec :=
     | _, _ => False
 
 /-- Deposit is the only inflow; it is `0` on revert. -/
-def inflow (c : Call spec) (w : World Storage ExtState Event) : Nat :=
+def inflow (c : Call spec) (w : World) : Nat :=
   match c.fn, c.args with
   | .deposit, _ =>
     match Tx.run (@deposit Payable.entrypoint) c.toCtx w with
@@ -39,15 +40,44 @@ def inflow (c : Call spec) (w : World Storage ExtState Event) : Nat :=
 
 /-- Holdings for solvency are recorded `totalSupply` (wrapped tokens).
 Native ETH of `self` is `World.nativeBalance`, used by `weth_backed`. -/
-def holdings (_self : Address) (w : World Storage ExtState Event) : Nat :=
+def holdings (_self : Address) (w : World) : Nat :=
   w.self.totalSupply.raw
 
 /-- Between our transactions the outside world may change `ext`
 arbitrarily, except that this contract's native balance does not fall
 (donations are allowed). That is what keeps wrapping backed across
 environment steps; `withdraw` is the only native outflow, and it burns
-matching wrapped tokens. -/
+matching wrapped tokens. Definitionally `defaultRely`. -/
 def rely (x x' : ExtState) : Prop :=
   x.env.selfBalance.toNat ≤ x'.env.selfBalance.toNat
+
+instance : HasRely spec where
+  rely := rely
+
+instance : HasNative spec where
+  asset := native
+
+/-- Empty storage, honest `Native.send`. Native balance and `ext` are
+arbitrary. -/
+instance : HasDeploy spec where
+  pred w :=
+    (∀ a, w.self.balances a = 0) ∧
+    w.self.totalSupply = 0 ∧
+    DebitsOnSend w.oracle
+
+/-- Amount this accepted call moved out on `a`'s authority. -/
+def spentCall (a : Address) (c : Call spec) : Amount native :=
+  match c.fn, c.args with
+  | .transfer, (_, amount) => if c.sender = a then amount else 0
+  | .withdraw, amount => if c.sender = a then amount else 0
+  | .transferFrom, (src, _, amount) => if src = a then amount else 0
+  | _, _ => 0
+
+instance : HasSpent spec where
+  asset := native
+  spentCall := spentCall
+
+/-- Deployed WETH states. -/
+abbrev State := Lsc.Security.State spec
 
 end WETH

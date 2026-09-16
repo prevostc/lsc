@@ -13,7 +13,7 @@ namespace WETH
 def smokeWho : Address := 1
 def smokeTo : Address := 2
 
-def smokeEmpty : World Storage ExtState Event where
+def smokeEmpty : World where
   self := { balances := fun _ => 0, allowances := fun _ _ => 0, totalSupply := 0 }
   ext := default
 
@@ -22,7 +22,7 @@ def smokeCtx : Ctx := { sender := smokeWho, value := 40 }
 def acceptSend : Oracle ExtState where
   send _ _ x := some x
 
-def smokeSend : World Storage ExtState Event :=
+def smokeSend : World :=
   { smokeEmpty with oracle := acceptSend }
 
 end WETH

@@ -4,9 +4,11 @@ import Lsc.Lang.Spec
 /-!
 Trace semantics of one contract: `Call`, `Step`, `step`, and `run` over a language-level
 `Lsc.Spec`. A reverted call is a no-op on the world (EVM atomicity). `env` steps replace
-the ghost record; they are constrained by `RelyAlong` in `Invariant.lean`. `Wf` is
-state-indexed: well-formed traces target `self`, are not self-calls, and never overflow
-a 256-bit native balance.
+the ghost record; they are constrained by `RelyAlong` in `Invariant.lean`. `External`
+says every call targets this contract and is not a self-call (physically only this
+contract's code can emit a message from `self`; nested calls are the oracle's
+`nested_lock_reverts`). The 256-bit native wrap is a dispatcher/`stepCall` revert,
+not a trace assumption. Public theorems quantify `State` / `Txs` (`State.lean`).
 -/
 
 namespace Lsc.Security
@@ -97,20 +99,43 @@ def run [HasCreditValue X] [HasPayable C] [HasSelfBalance X] :
   | [], w => w
   | s :: tr, w => run tr (step s w)
 
-/-- Well-formed traces target `self`, are not self-calls, and never overflow a
-256-bit native balance — true on every chain since total native supply <
-`2^256`. Incoming `creditValue` still wraps (EVM `BitVec`); this predicate
-is what rules wrapping out of attack traces. `env` steps thread the world.
-On `ExtState`, `HasSelfBalance.get w.ext` is `World.nativeBalance w`. -/
-def Wf [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
-    (self : Address) : List (Step C) → World S X E → Prop
-  | [], _ => True
-  | .call c :: tr, w =>
-      c.target = self ∧ c.sender ≠ self ∧
-      HasSelfBalance.get w.ext + c.value < wordBound ∧
-      Wf self tr (step (.call c) w)
-  | .env x' :: tr, w =>
-      Wf self tr { w with ext := x' }
+/-- Default rely: this contract's native balance does not fall across an
+environment step. Only this contract's code can move its ETH; donations
+are allowed. Contracts with `Ref` counterparties (Vault/Cpamm) override
+via `HasRely`. -/
+def defaultRely [HasSelfBalance X] (x x' : X) : Prop :=
+  HasSelfBalance.get x ≤ HasSelfBalance.get x'
+
+/-- Environment-step permission. Default is `defaultRely`. -/
+class HasRely (C : Spec S X E ε) [HasSelfBalance X] where
+  rely : X → X → Prop := defaultRely
+
+instance (priority := low) {C : Spec S X E ε} [HasSelfBalance X] : HasRely C where
+  rely := defaultRely
+
+/-- True iff `stepCall` takes the successful-exec arm. Failed attempts
+(value reject, wrap, or body revert) are not counted by `Txs.spent`. -/
+def accepted [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
+    (c : Call C) (w : World S X E) : Bool :=
+  if C.valueOk c.fn c.value then
+    if C.payable c.fn && creditWraps w c.value then false
+    else
+      match C.exec c.fn c.args c.toCtx (World.creditValue w c.value) with
+      | .ok _ => true
+      | .error _ => false
+  else false
+
+/-- Calls in this contract's trace target `self` and are not self-calls.
+The native wrap is a dispatcher/`stepCall` revert, not a trace assumption. -/
+def External (self : Address) : List (Step C) → Prop
+  | [] => True
+  | .call c :: tr => c.target = self ∧ c.sender ≠ self ∧ External self tr
+  | .env _ :: tr => External self tr
+
+/-- Mechanical name: `Wf` no longer carries a native-balance bound or a
+world index. Public theorems use `State` / `Txs`. -/
+def Wf (self : Address) (tr : List (Step C)) (_w : World S X E) : Prop :=
+  External (C := C) self tr
 
 /-- Every call in `tr` is sent from `A`. Environment steps are ignored. -/
 def Trace.from (A : Finset Address) : List (Step C) → Prop

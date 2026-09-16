@@ -20,7 +20,7 @@ theorem inv_run [HasCreditValue X] {C : Spec S X E ε} [HasPayable C]
   | cons s tr ih =>
     match s with
     | .call c =>
-      have ⟨_, _, _, htl⟩ := hW
+      have ⟨_, _, htl⟩ := hW
       exact ih (hC c w hw) htl hR
     | .env x' =>
       have ⟨hr, htl⟩ := hR
@@ -39,7 +39,7 @@ theorem inv_run_at [HasCreditValue X] {C : Spec S X E ε} [HasPayable C]
   | cons s tr ih =>
     match s with
     | .call c =>
-      have ⟨ht, hs, _, htl⟩ := hW
+      have ⟨ht, hs, htl⟩ := hW
       exact ih (hC c w ht hs hw) htl hR
     | .env x' =>
       have ⟨hr, htl⟩ := hR
@@ -163,6 +163,12 @@ theorem RelyAlong.append [HasCreditValue X] {C : Spec S X E ε} [HasPayable C]
     | .env x' =>
       have ⟨hr, htl⟩ := h₁
       exact ⟨hr, ih htl h₂⟩
+
+theorem PreservesInv.toAt [HasCreditValue X] {C : Spec S X E ε} [HasPayable C]
+    [HasSelfBalance X]
+    {Inv : World S X E → Prop} {self : Address}
+    (h : PreservesInv C Inv) : PreservesInvAt C Inv self :=
+  fun c w _ _ hw => h c w hw
 
 theorem reachable_run [HasCreditValue X] {C : Spec S X E ε} [HasPayable C]
     [HasSelfBalance X] [HasDeploy C]

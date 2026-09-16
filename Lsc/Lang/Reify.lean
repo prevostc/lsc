@@ -2738,6 +2738,9 @@ def mkSpecCommands (ns : Name) (fns : Array Name) : TermElabM (Array (TSyntax `c
   let specName := mkIdent (ns ++ `spec)
   let specCmd ←
     `(command| @[reducible] def $specName : Lsc.Spec $S $X $E $ε := ⟨$fnName, $entryName⟩)
+  let worldName := mkIdent (ns ++ `World)
+  let worldCmd ←
+    `(command| abbrev $worldName := Lsc.World $S $X $E)
   let payInfo ← entries.mapM fun fn => do
     let ctor := ctorIdent fn
     let info ← getConstInfoDefn fn
@@ -2749,7 +2752,7 @@ def mkSpecCommands (ns : Name) (fns : Array Name) : TermElabM (Array (TSyntax `c
     pure (pay, alt)
   let anyPay := payInfo.any (·.1)
   let payAlts : TSyntaxArray ``Lean.Parser.Term.matchAlt := payInfo.map (·.2)
-  let mut cmds : Array (TSyntax `command) := #[fnCmd, entryCmd, specCmd]
+  let mut cmds : Array (TSyntax `command) := #[fnCmd, entryCmd, specCmd, worldCmd]
   if anyPay then
     let instCmd ←
       `(command| instance : Lsc.HasPayable $specName where

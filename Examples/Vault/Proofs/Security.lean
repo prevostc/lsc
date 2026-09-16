@@ -20,7 +20,7 @@ and `IERC20.Spec`. Well-formed traces use `PreservesInvFnAt`
 
 /-- Invariant plus the callee promise, pinned to the starting asset/oracle. -/
 def InvT (self : Address) (asset : IERC20.Ref vaultAsset)
-    (oracle : Oracle ExtState) (w : World Storage ExtState Event) : Prop :=
+    (oracle : Oracle ExtState) (w : World) : Prop :=
   Inv self w ∧ w.self.asset = asset ∧ w.oracle = oracle ∧
     IERC20.Spec (asset.impl : AssetImpl)
 
@@ -204,7 +204,7 @@ private def rate (σ : Storage) (TA : Nat) (a : Address) : Nat :=
   Shares.toAssetsRaw offset (σ.shares a).raw TA σ.totalShares.raw
 
 private theorem claim_eq_rate (self a : Address)
-    (w : World Storage ExtState Event) :
+    (w : World) :
     claim self a w = rate w.self (holdings self w) a :=
   rfl
 
@@ -342,7 +342,7 @@ private theorem sum_mul_const {α : Type} [DecidableEq α]
   | insert x S hx ih =>
     rw [Finset.sum_insert hx, Finset.sum_insert hx, ih, Nat.add_mul]
 
-theorem inv_solvent (self : Address) (w : World Storage ExtState Event)
+theorem inv_solvent (self : Address) (w : World)
     (h : Inv self w) :
     Solvent (claim self) holdings self w := by
   obtain ⟨⟨H, h0, hs⟩, hbd⟩ := h
@@ -378,7 +378,7 @@ theorem inv_solvent (self : Address) (w : World Storage ExtState Event)
     exact Nat.le_trans hsum hcov
 
 private theorem holdings_add_of_transferFrom
-    (self : Address) {ctx : Ctx} {w w1 : World Storage ExtState Event}
+    (self : Address) {ctx : Ctx} {w w1 : World}
     {assets : Amount vaultAsset}
     (hself : ctx.self = self) (hsne : ctx.sender ≠ self)
     (hT : IERC20.Spec (w.self.asset.impl : AssetImpl))
@@ -398,7 +398,7 @@ private theorem holdings_add_of_transferFrom
     congrArg Amount.raw hdst
 
 private theorem holdings_sub_of_transfer
-    (self : Address) {ctx : Ctx} {w wCall w1 : World Storage ExtState Event}
+    (self : Address) {ctx : Ctx} {w wCall w1 : World}
     {amt : Amount vaultAsset}
     (hself : ctx.self = self) (hsne : ctx.sender ≠ self)
     (hT : IERC20.Spec (w.self.asset.impl : AssetImpl))
@@ -442,7 +442,7 @@ private theorem holdings_sub_of_transfer
 
 private theorem claim_le_of_rely (self : Address)
     (asset : IERC20.Ref vaultAsset) (oracle : Oracle ExtState)
-    (w : World Storage ExtState Event) (x' : ExtState) (a : Address)
+    (w : World) (x' : ExtState) (a : Address)
     (ha : w.self.asset = asset) (ho : w.oracle = oracle)
     (hr : vaultRely self asset oracle w.ext x') :
     claim self a w ≤ claim self a { w with ext := x' } := by
@@ -565,12 +565,12 @@ theorem isPaused_preserves_inv :
   exact hInvT
 
 private theorem previewDeposit_worldAfter (assets : Amount vaultAsset)
-    (ctx : Ctx) (w : World Storage ExtState Event) :
+    (ctx : Ctx) (w : World) :
     worldAfter (previewDeposit assets) ctx w = w :=
   worldAfter_eq_self (fun _ _ h => previewDeposit_success_world h)
 
 private theorem previewRedeem_worldAfter (sharesIn : Amount vShare)
-    (ctx : Ctx) (w : World Storage ExtState Event) :
+    (ctx : Ctx) (w : World) :
     worldAfter (previewRedeem sharesIn) ctx w = w :=
   worldAfter_eq_self (fun _ _ h => previewRedeem_success_world h)
 
@@ -601,7 +601,7 @@ theorem vault_preserves_inv :
 /-! ### Claim monotonicity of well-formed calls (caller ≠ vault) -/
 
 private theorem claim_le_deposit_run (assets : Amount vaultAsset)
-    {ctx : Ctx} {w w' : World Storage ExtState Event} {n : Amount vShare}
+    {ctx : Ctx} {w w' : World} {n : Amount vShare}
     {a : Address}
     (hself : ctx.self = self) (hsne : ctx.sender ≠ self)
     (hT : IERC20.Spec (w.self.asset.impl : AssetImpl))
@@ -624,7 +624,7 @@ private theorem claim_le_deposit_run (assets : Amount vaultAsset)
   exact hrate
 
 private theorem claim_le_withdraw_run (sharesIn : Amount vShare)
-    {ctx : Ctx} {w w' : World Storage ExtState Event} {n : Amount vaultAsset}
+    {ctx : Ctx} {w w' : World} {n : Amount vaultAsset}
     {a : Address}
     (hself : ctx.self = self) (hsne : ctx.sender ≠ self)
     (hneA : ctx.sender ≠ a)
@@ -662,7 +662,7 @@ private theorem claim_le_withdraw_run (sharesIn : Amount vShare)
   exact hrate
 
 private theorem claim_le_call (c : Call spec)
-    (w : World Storage ExtState Event) (a : Address)
+    (w : World) (a : Address)
     (hInvT : InvT self asset oracle w)
     (ht : c.target = self) (hs : c.sender ≠ self)
     (hna : ¬ Auth a c w) :
@@ -728,7 +728,7 @@ private theorem claim_le_call (c : Call spec)
 namespace Proof
 
 theorem vault_solvent (self : Address) (tr : List (Step spec))
-    (w : World Storage ExtState Event)
+    (w : World)
     (hW : Wf self tr w)
     (hR : RelyAlong (vaultRely self w.self.asset w.oracle) tr w)
     (hT : IERC20.Spec (w.self.asset.impl : AssetImpl))
@@ -741,7 +741,7 @@ theorem vault_solvent (self : Address) (tr : List (Step spec))
     ⟨h, rfl, rfl, hT⟩ tr hW hR
 
 theorem vault_no_unauthorized_extraction (self : Address)
-    (tr : List (Step spec)) (w : World Storage ExtState Event) (a : Address)
+    (tr : List (Step spec)) (w : World) (a : Address)
     (hw : Inv self w) (hW : Wf self tr w)
     (hR : RelyAlong (vaultRely self w.self.asset w.oracle) tr w)
     (hT : IERC20.Spec (w.self.asset.impl : AssetImpl))
@@ -749,7 +749,7 @@ theorem vault_no_unauthorized_extraction (self : Address)
     claim self a w ≤ claim self a (run tr w) := by
   let asset := w.self.asset
   let oracle := w.oracle
-  have go : ∀ (tr : List (Step spec)) (w' : World Storage ExtState Event),
+  have go : ∀ (tr : List (Step spec)) (w' : World),
       InvT self asset oracle w' →
       Wf self tr w' →
       RelyAlong (vaultRely self asset oracle) tr w' →
@@ -770,7 +770,7 @@ theorem vault_no_unauthorized_extraction (self : Address)
         exact Nat.le_trans hle (ih { w' with ext := x' } hw'' hW htl hA)
       | .call c =>
         obtain ⟨hna, htl⟩ := hA
-        obtain ⟨ht, hs, _, hWtl⟩ := hW
+        obtain ⟨ht, hs, hWtl⟩ := hW
         have hw'' := vault_preserves_inv self asset oracle c w' ht hs hw'
         have hle := claim_le_call self asset oracle c w' a hw' ht hs hna
         exact Nat.le_trans hle (ih (step (.call c) w') hw'' hWtl hR htl)

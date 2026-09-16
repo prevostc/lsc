@@ -17,7 +17,7 @@ def smokeOracle : Oracle ExtState where
 
 def smokeCtx : Ctx := { sender := 2, self := 1 }
 
-def smokeEmpty : World Storage ExtState Event where
+def smokeEmpty : World where
   self := {
     token0 := ⟨10⟩, token1 := ⟨11⟩
     reserve0 := 0, reserve1 := 0
@@ -27,7 +27,7 @@ def smokeEmpty : World Storage ExtState Event where
   ext := default
   oracle := smokeOracle
 
-def smokePool : World Storage ExtState Event where
+def smokePool : World where
   self := {
     token0 := ⟨10⟩, token1 := ⟨11⟩
     reserve0 := 1000, reserve1 := 2000
@@ -38,7 +38,7 @@ def smokePool : World Storage ExtState Event where
   ext := default
   oracle := smokeOracle
 
-def smokePoolProto : World Storage ExtState Event where
+def smokePoolProto : World where
   self := {
     token0 := ⟨10⟩, token1 := ⟨11⟩
     reserve0 := 1000, reserve1 := 2000

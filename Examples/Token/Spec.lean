@@ -1,4 +1,5 @@
 import Lsc.Security.Wealth
+import Lsc.Security.State
 import Examples.Token.Contract
 
 /-!
@@ -27,7 +28,7 @@ def Auth : AuthPred spec :=
 
 /-- Mint is the only inflow; it is `0` on revert. Storage-only so
 `inflow` is unchanged by `World.creditValue`. -/
-def inflow (c : Call spec) (w : World Storage ExtState Event) : Nat :=
+def inflow (c : Call spec) (w : World) : Nat :=
   match c.fn, c.args with
   | .mint, (dst, amt) =>
     if c.toCtx.sender = w.self.owner ∧
@@ -37,7 +38,7 @@ def inflow (c : Call spec) (w : World Storage ExtState Event) : Nat :=
   | _, _ => 0
 
 /-- Token holdings are the recorded `totalSupply`. The address is ignored. -/
-def holdings (_self : Address) (w : World Storage ExtState Event) : Nat :=
+def holdings (_self : Address) (w : World) : Nat :=
   w.self.totalSupply.raw
 
 /-- Finite support of balances. Used by `inv_of_*`; `Inv` wraps it on a world. -/
@@ -46,6 +47,28 @@ def InvStorage (s : Storage) : Prop :=
     (∀ a, a ∉ H → s.balances a = 0) ∧
     H.sum (fun a => (s.balances a).raw) = s.totalSupply.raw
 
-def Inv (w : World Storage ExtState Event) : Prop := InvStorage w.self
+def Inv (w : World) : Prop := InvStorage w.self
+
+/-- Empty storage is a valid deployment (no constructor in the runtime spec). -/
+instance : HasDeploy spec where
+  pred w := w.self = default
+
+instance : HasRely spec where
+  rely := defaultRely (X := ExtState)
+
+/-- Amount this accepted call moved out on `a`'s authority. -/
+def spentCall (a : Address) (c : Call spec) : Amount tokenAsset :=
+  match c.fn, c.args with
+  | .transfer, (_, amount) => if c.sender = a then amount else 0
+  | .burn, amount => if c.sender = a then amount else 0
+  | .transferFrom, (src, _, amount) => if src = a then amount else 0
+  | _, _ => 0
+
+instance : HasSpent spec where
+  asset := tokenAsset
+  spentCall := spentCall
+
+/-- Deployed Token states. -/
+abbrev State := Lsc.Security.State spec
 
 end Token

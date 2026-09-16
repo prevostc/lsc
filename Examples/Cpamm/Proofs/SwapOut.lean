@@ -19,7 +19,7 @@ attribute [local simp] Amount.eq_iff Amount.ne_iff Amount.lt_iff Amount.le_iff
 
 namespace Cpamm
 
-variable {ctx : Ctx} {w : World Storage ExtState Event}
+variable {ctx : Ctx} {w : World}
 
 private theorem word_10000_ne : (10000 : Word) ≠ 0 := by decide
 
@@ -315,7 +315,7 @@ theorem run_swapOut_bind {a b : Asset} {ρ : Type}
 theorem run_swapOut_ok {a b : Asset} (rIn : Amount a) (rOut : Amount b)
     (amountIn : Amount a) (share : Bps)
     {p : Amount b × Amount a}
-    {w' : World Storage ExtState Event} :
+    {w' : World} :
     Tx.run (swapOut rIn rOut amountIn share) ctx w = .ok (p, w') ↔
       SwapOutOk rIn.raw rOut.raw amountIn.raw share ∧
         p.1 = ⟨swapOutOut rIn.raw rOut.raw amountIn.raw⟩ ∧

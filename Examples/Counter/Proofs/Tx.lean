@@ -11,11 +11,11 @@ open Lsc Counter
 
 namespace Counter
 
-variable (ctx : Ctx) (w : World Storage ExtState Event)
+variable (ctx : Ctx) (w : World)
 
 namespace Proof
 
-theorem increment_adds {w' : World Storage ExtState Event}
+theorem increment_adds {w' : World}
     (h : Tx.run increment ctx w = .ok ((), w')) :
     w'.self.count = w.self.count + 1 := by
   simp [increment, Tx.HAddChecked.hAdd, Tx.run_addChecked] at h
@@ -23,7 +23,7 @@ theorem increment_adds {w' : World Storage ExtState Event}
   cases h
   rfl
 
-theorem incrementBy_adds (n : Nat) {w' : World Storage ExtState Event}
+theorem incrementBy_adds (n : Nat) {w' : World}
     (h : Tx.run (incrementBy n) ctx w = .ok ((), w')) :
     w'.self.count = w.self.count + n := by
   simp [incrementBy, Tx.HAddChecked.hAdd, Tx.run_addChecked, Tx.run_require] at h
@@ -33,7 +33,7 @@ theorem incrementBy_adds (n : Nat) {w' : World Storage ExtState Event}
   cases h
   rfl
 
-theorem decrement_saturates {w' : World Storage ExtState Event}
+theorem decrement_saturates {w' : World}
     (h : Tx.run decrement ctx w = .ok ((), w')) :
     w'.self.count = if w.self.count = 0 then 0 else w.self.count - 1 := by
   simp [decrement, Tx.HSubChecked.hSub, Tx.run_subChecked] at h
@@ -46,7 +46,7 @@ theorem decrement_saturates {w' : World Storage ExtState Event}
     cases h
     rfl
 
-theorem get_returns {n : Nat} {w' : World Storage ExtState Event}
+theorem get_returns {n : Nat} {w' : World}
     (h : Tx.run Counter.get ctx w = .ok (n, w')) :
     n = w.self.count ∧ w' = w := by
   have hget : Tx.run Counter.get ctx w = .ok (w.self.count, w) := by

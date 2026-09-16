@@ -55,13 +55,12 @@ theorem transport_trace (T : TransportSetup S X E ε)
     (hs : storageRel T.c T.Γ evmKeccak w.self σ)
     (hlog : w.log = []) (hwf : WorldWF T.c T.Γ w)
     (hWF : CallsWF T self calls)
-    (hlt : ∀ (w : World S X E), HasSelfBalance.get w.ext < wordBound)
     (hE : EvmTraceRunAll T.is calls σ σ') :
     let tr := decodeTrace T calls
     Wf self tr w ∧
       storageRel T.c T.Γ evmKeccak (run tr w).self σ' ∧
       WorldWF T.c T.Γ { run tr w with log := [] } := by
-  refine ⟨wf_decodeTrace (T := T) self calls w hWF hlt hnp, ?_⟩
+  refine ⟨wf_decodeTrace (T := T) self calls w hWF, ?_⟩
   induction calls generalizing w σ σ' with
   | nil =>
     cases hE
@@ -235,8 +234,7 @@ theorem transport_trace_ext (T : TransportSetup S ExtState E ε)
         ExtAgree self w'.ext
           (mkEvmStateExt ([] : List UInt8) σ' ξ' evmKeccak (dummyCtx self)) ∧
         Inv w' := by
-  refine ⟨wf_decodeTrace (T := T) self calls w hWF
-      (fun w => nativeBalance_lt_wordBound w) hnp, ?_⟩
+  refine ⟨wf_decodeTrace (T := T) self calls w hWF, ?_⟩
   -- Each call reframes onto `Oracle.ofExt`; `hOr` is the user's starting world.
   clear hOr
   induction calls generalizing w σ ξ σ' ξ' with
@@ -435,18 +433,14 @@ theorem transport_exists_ext (T : TransportSetup S ExtState E ε)
   | cons s rest ih =>
     match s with
     | .env x' =>
-      have hz : ∀ (c : Call T.spec), Step.call c ∈ rest → c.value = 0 :=
-        fun _ hc => encodeBounded_value_zero T
-          (by simpa [EncodeBounded] using hb) hc
-      have hW' : Wf self rest w :=
-        Wf.irrel_extState self rest { w with ext := x' } w hz hW
+      have hW' : Wf self rest w := hW
       simpa [encodeCalls] using
         ih (w := w) (σ := σ) (ξ := ξ)
           hs hwf
           (by simpa [EncodeBounded] using hb) hW' hw
     | .call c =>
       rcases hb with ⟨hctxWF, hWargs, hvo, htlB⟩
-      rcases hW with ⟨htgt, hne, _, hWtl⟩
+      rcases hW with ⟨htgt, hne, hWtl⟩
       have hdecC := encodeCall_decode T c hWargs hvo
       have hcd : (encodeCall T c).calldata.length < wordBound := by
         simp only [encodeCall]
@@ -468,10 +462,7 @@ theorem transport_exists_ext (T : TransportSetup S ExtState E ε)
         hInvL _ [] (hP c wF (by simpa [wF] using htgt)
           (by simpa [wF] using hne)
           (hInvR wL (encodeCall T c).calldata σ ξ c.toCtx (hInvL w [] hw)))
-      have hz : ∀ (c' : Call T.spec), Step.call c' ∈ rest → c'.value = 0 :=
-        fun _ hc => encodeBounded_value_zero T htlB hc
-      have hW1 : Wf self rest w1 :=
-        Wf.irrel_extState self rest (step (.call c) w) w1 hz hWtl
+      have hW1 : Wf self rest w1 := hWtl
       obtain ⟨σ', ξ', w', htl, hs', hwf', hAgr', hInv'⟩ :=
         ih (w := w1) (σ := σ₁) (ξ := ξ₁) hs1 hwf1 htlB hW1 hw1
       exact ⟨σ', ξ', w',
@@ -525,18 +516,14 @@ theorem transport_exists_claim_ext (T : TransportSetup S ExtState E ε)
   | cons s rest ih =>
     match s with
     | .env x' =>
-      have hz : ∀ (c : Call T.spec), Step.call c ∈ rest → c.value = 0 :=
-        fun _ hc => encodeBounded_value_zero T
-          (by simpa [EncodeBounded] using hb) hc
-      have hW' : Wf self rest w :=
-        Wf.irrel_extState self rest { w with ext := x' } w hz hW
+      have hW' : Wf self rest w := hW
       simpa [encodeCalls, callsOf] using
         ih (w := w) (σ := σ) (ξ := ξ)
           hs hwf
           (by simpa [EncodeBounded] using hb) hW' hw hA
     | .call c =>
       rcases hb with ⟨hctxWF, hWargs, hvo, htlB⟩
-      rcases hW with ⟨htgt, hne, _, hWtl⟩
+      rcases hW with ⟨htgt, hne, hWtl⟩
       rcases hA with ⟨hna, hAtl⟩
       have hdecC := encodeCall_decode T c hWargs hvo
       have hcd : (encodeCall T c).calldata.length < wordBound := by
@@ -572,10 +559,7 @@ theorem transport_exists_claim_ext (T : TransportSetup S ExtState E ε)
       have hw1 : Inv w1 :=
         hInvL _ [] (hP c wF (by simpa [wF] using htgt)
           (by simpa [wF] using hne) hwFInv)
-      have hz : ∀ (c' : Call T.spec), Step.call c' ∈ rest → c'.value = 0 :=
-        fun _ hc => encodeBounded_value_zero T htlB hc
-      have hW1 : Wf self rest w1 :=
-        Wf.irrel_extState self rest (step (.call c) w) w1 hz hWtl
+      have hW1 : Wf self rest w1 := hWtl
       obtain ⟨σ', ξ', w', htl, hs', hwf', hAgr', hInv', hle⟩ :=
         ih (w := w1) (σ := σ₁) (ξ := ξ₁) hs1 hwf1 htlB hW1 hw1
           ((hAirr (callsOf rest) (step (.call c) w) w1).mp hAtl)

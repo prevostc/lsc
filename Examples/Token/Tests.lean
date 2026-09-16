@@ -13,7 +13,7 @@ def smokeOwner : Address := 1
 def smokeTo : Address := 2
 def smokeSpender : Address := 3
 
-def smokeEmpty : World Storage ExtState Event where
+def smokeEmpty : World where
   self := {
     owner := 0
     totalSupply := 0

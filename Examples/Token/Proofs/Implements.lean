@@ -15,7 +15,7 @@ namespace Token
 
 section
 
-variable (ctx : Ctx) (w : World Storage ExtState Event)
+variable (ctx : Ctx) (w : World)
 
 @[simp] theorem impl_transfer (to : Address) (amount : Amount tokenAsset) :
     Token.impl.transfer to amount ctx w =
@@ -32,7 +32,7 @@ variable (ctx : Ctx) (w : World Storage ExtState Event)
       (Tx.run (approve spender amount) ctx w).toOption :=
   rfl
 
-@[simp] theorem impl_balanceOf (who : Address) (w : World Storage ExtState Event) :
+@[simp] theorem impl_balanceOf (who : Address) (w : World) :
     Token.impl.balanceOf who w = w.self.balances who := by
   change (match Tx.run (balanceOf who) { sender := (0 : Address) } w with
     | .ok (v, _) => v
@@ -40,14 +40,14 @@ variable (ctx : Ctx) (w : World Storage ExtState Event)
   rw [balanceOf_returns_stored_balance { sender := 0 } w who]
 
 @[simp] theorem impl_allowance (owner spender : Address)
-    (w : World Storage ExtState Event) :
+    (w : World) :
     Token.impl.allowance owner spender w = w.self.allowances owner spender := by
   change (match Tx.run (allowance owner spender) { sender := (0 : Address) } w with
     | .ok (v, _) => v
     | .error _ => default) = _
   rw [allowance_returns_stored { sender := 0 } w owner spender]
 
-@[simp] theorem impl_totalSupply (w : World Storage ExtState Event) :
+@[simp] theorem impl_totalSupply (w : World) :
     Token.impl.totalSupply w = w.self.totalSupply := by
   change (match Tx.run totalSupply { sender := (0 : Address) } w with
     | .ok (v, _) => v
@@ -76,7 +76,7 @@ private lemma sub_add_ge (b a n : Amount tokenAsset) (hn : n.raw ≤ b.raw) (ha 
 
 /-- Caller ≠ `x` ⇒ `transfer` does not drop `x`'s balance. -/
 theorem transfer_balance_protected (to : Address) (amount : Amount tokenAsset)
-    {r : Bool} {w' : World Storage ExtState Event} (x : Address)
+    {r : Bool} {w' : World} (x : Address)
     (h : Tx.run (transfer to amount) ctx w = .ok (r, w'))
     (hne : ctx.sender ≠ x) :
     w'.self.balances x + w.self.allowances x ctx.sender ≥ w.self.balances x := by
@@ -99,7 +99,7 @@ theorem transfer_balance_protected (to : Address) (amount : Amount tokenAsset)
 
 /-- Caller ≠ `x` ⇒ `transferFrom` does not drop `x` below `balance − allowance`. -/
 theorem transferFrom_balance_protected (src to : Address) (amount : Amount tokenAsset)
-    {r : Bool} {w' : World Storage ExtState Event} (x : Address)
+    {r : Bool} {w' : World} (x : Address)
     (h : Tx.run (transferFrom src to amount) ctx w = .ok (r, w'))
     (hne : ctx.sender ≠ x) :
     w'.self.balances x + w.self.allowances x ctx.sender ≥ w.self.balances x := by
@@ -142,7 +142,7 @@ theorem transferFrom_balance_protected (src to : Address) (amount : Amount token
 
 /-- `approve` never changes balances. -/
 theorem approve_balance_protected (spender : Address) (amount : Amount tokenAsset)
-    {r : Bool} {w' : World Storage ExtState Event} (x : Address)
+    {r : Bool} {w' : World} (x : Address)
     (h : Tx.run (approve spender amount) ctx w = .ok (r, w')) :
     w'.self.balances x + w.self.allowances x ctx.sender ≥ w.self.balances x := by
   have hr := Proof.approve_returns_true ctx w spender amount h
@@ -153,7 +153,7 @@ theorem approve_balance_protected (spender : Address) (amount : Amount tokenAsse
 
 /-- `mint` never decreases an existing balance. -/
 theorem mint_balance_protected (to : Address) (amount : Amount tokenAsset)
-    {r : Unit} {w' : World Storage ExtState Event} (x : Address)
+    {r : Unit} {w' : World} (x : Address)
     (h : Tx.run (mint to amount) ctx w = .ok (r, w')) :
     w'.self.balances x + w.self.allowances x ctx.sender ≥ w.self.balances x := by
   cases r
@@ -182,7 +182,7 @@ theorem mint_balance_protected (to : Address) (amount : Amount tokenAsset)
 
 /-- Caller ≠ `x` ⇒ `burn` does not touch `x`'s balance. -/
 theorem burn_balance_protected (amount : Amount tokenAsset)
-    {r : Unit} {w' : World Storage ExtState Event} (x : Address)
+    {r : Unit} {w' : World} (x : Address)
     (h : Tx.run (burn amount) ctx w = .ok (r, w'))
     (hne : ctx.sender ≠ x) :
     w'.self.balances x + w.self.allowances x ctx.sender ≥ w.self.balances x := by
@@ -202,7 +202,7 @@ theorem burn_balance_protected (amount : Amount tokenAsset)
 
 /-- Views leave the world unchanged. -/
 theorem balanceOf_balance_protected (who : Address)
-    {r : Amount tokenAsset} {w' : World Storage ExtState Event} (x : Address)
+    {r : Amount tokenAsset} {w' : World} (x : Address)
     (h : Tx.run (balanceOf who) ctx w = .ok (r, w')) :
     w'.self.balances x + w.self.allowances x ctx.sender ≥ w.self.balances x := by
   rw [balanceOf_returns_stored_balance ctx w who] at h
@@ -210,7 +210,7 @@ theorem balanceOf_balance_protected (who : Address)
   exact ge_self_add _ _
 
 theorem allowance_balance_protected (owner spender : Address)
-    {r : Amount tokenAsset} {w' : World Storage ExtState Event} (x : Address)
+    {r : Amount tokenAsset} {w' : World} (x : Address)
     (h : Tx.run (allowance owner spender) ctx w = .ok (r, w')) :
     w'.self.balances x + w.self.allowances x ctx.sender ≥ w.self.balances x := by
   rw [allowance_returns_stored ctx w owner spender] at h
@@ -218,7 +218,7 @@ theorem allowance_balance_protected (owner spender : Address)
   exact ge_self_add _ _
 
 theorem totalSupply_balance_protected
-    {r : Amount tokenAsset} {w' : World Storage ExtState Event} (x : Address)
+    {r : Amount tokenAsset} {w' : World} (x : Address)
     (h : Tx.run totalSupply ctx w = .ok (r, w')) :
     w'.self.balances x + w.self.allowances x ctx.sender ≥ w.self.balances x := by
   rw [totalSupply_returns_stored ctx w] at h

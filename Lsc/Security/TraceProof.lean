@@ -114,26 +114,30 @@ theorem step_eq_worldAfter_of_not_payable [HasCreditValue X] [HasPayable C]
     (by simp [Spec.valueOk, hp, hv]) (by rw [hv, World.creditValue_zero])
     (by simp [hp])
 
-theorem Wf.nil [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
-    (self : Address) (w : World S X E) : Wf (C := C) self [] w :=
+theorem Wf.nil (self : Address) (w : World S X E) : Wf (C := C) self [] w :=
   trivial
 
 theorem Trace.from_nil (A : Finset Address) : Trace.from (C := C) A [] :=
   trivial
 
-theorem Wf.append [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
-    {self : Address} {tr₁ tr₂ : List (Step C)} {w : World S X E}
-    (h₁ : Wf self tr₁ w) (h₂ : Wf self tr₂ (run tr₁ w)) :
-    Wf self (tr₁ ++ tr₂) w := by
-  induction tr₁ generalizing w with
-  | nil => simpa [run] using h₂
+theorem External.append {self : Address} {tr₁ tr₂ : List (Step C)}
+    (h₁ : External (C := C) self tr₁) (h₂ : External self tr₂) :
+    External self (tr₁ ++ tr₂) := by
+  induction tr₁ with
+  | nil => simpa using h₂
   | cons s rest ih =>
     match s with
     | .call c =>
-      have ⟨ht, hs, hb, htl⟩ := h₁
-      exact ⟨ht, hs, hb, ih htl h₂⟩
-    | .env x' =>
-      exact ih h₁ h₂
+      have ⟨ht, hs, htl⟩ := h₁
+      exact ⟨ht, hs, ih htl⟩
+    | .env _ =>
+      exact ih h₁
+
+theorem Wf.append [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
+    {self : Address} {tr₁ tr₂ : List (Step C)} {w : World S X E}
+    (h₁ : Wf self tr₁ w) (h₂ : Wf self tr₂ (run tr₁ w)) :
+    Wf self (tr₁ ++ tr₂) w :=
+  External.append (C := C) h₁ h₂
 
 /-- Crediting `v` wei does not wrap when the sum fits in a 256-bit word. -/
 theorem nativeBalance_creditValue {S E : Type} (w : World S ExtState E) (v : Nat)
@@ -149,27 +153,73 @@ theorem nativeBalance_lt_wordBound {S E : Type} (w : World S ExtState E) :
     HasSelfBalance.get w.ext < wordBound :=
   w.ext.env.selfBalance.isLt
 
-/-- On `ExtState`, zero-value well-formedness does not depend on the starting
-world: every native balance already fits in 256 bits. -/
-theorem Wf.irrel_extState {S E ε : Type} {C : Spec S ExtState E ε} [HasPayable C]
+/-- Wrap-reject is exactly 256-bit overflow of `self`'s native balance. -/
+theorem creditWraps_false_lt {S E : Type} (w : World S ExtState E) (v : Nat)
+    (h : creditWraps w v = false) :
+    World.nativeBalance w + v < wordBound := by
+  have hnl : ¬ (BitVec.ofNat 256 (World.nativeBalance w + v)).toNat < v := by
+    have : decide
+        ((BitVec.ofNat 256 (w.ext.env.selfBalance.toNat + v)).toNat < v) =
+          false := by
+      simpa [creditWraps, World.creditValue, HasCreditValue.credit,
+        ExtState.creditValue, HasSelfBalance.get, World.nativeBalance] using h
+    exact of_decide_eq_false this
+  have hvle : v ≤ (World.nativeBalance w + v) % 2 ^ 256 := by
+    simpa [BitVec.toNat_ofNat] using Nat.not_lt.mp hnl
+  have hvlt : v < 2 ^ 256 :=
+    Nat.lt_of_le_of_lt hvle (Nat.mod_lt _ (by decide))
+  have hbal : World.nativeBalance w < 2 ^ 256 := w.ext.env.selfBalance.isLt
+  by_contra hge
+  rw [Nat.not_lt, show wordBound = 2 ^ 256 from rfl] at hge
+  have hdiv : (World.nativeBalance w + v) / 2 ^ 256 = 1 :=
+    Nat.div_eq_of_lt_le (by simpa using hge) (by
+      have := Nat.add_lt_add hbal hvlt
+      simpa [Nat.two_mul] using this)
+  have hmod : (World.nativeBalance w + v) % 2 ^ 256 =
+      World.nativeBalance w + v - 2 ^ 256 := by
+    rw [Nat.mod_eq_sub_div_mul, hdiv, Nat.one_mul]
+  have hwrap : World.nativeBalance w + v - 2 ^ 256 < v := by omega
+  exact Nat.not_le_of_gt (hmod ▸ hwrap) hvle
+
+/-- `Wf` ignores the world index. -/
+theorem Wf.irrel_extState {S E ε : Type} {C : Spec S ExtState E ε}
     (self : Address) (tr : List (Step C))
     (w w' : World S ExtState E)
-    (hz : ∀ (c : Call C), Step.call c ∈ tr → c.value = 0)
-    (h : Wf self tr w) : Wf self tr w' := by
-  induction tr generalizing w w' with
-  | nil => trivial
-  | cons s rest ih =>
-    match s with
-    | .env x =>
-      exact ih (w := { w with ext := x }) (w' := { w' with ext := x })
-        (fun c hc => hz c (List.mem_cons_of_mem _ hc)) h
-    | .call c =>
-      rcases h with ⟨ht, hs, _, htl⟩
-      have hv : c.value = 0 := hz c (List.mem_cons_self)
-      refine ⟨ht, hs, ?bound,
-        ih (w := step (.call c) w) (w' := step (.call c) w')
-          (fun c' hc => hz c' (List.mem_cons_of_mem _ hc)) htl⟩
-      have hlt := nativeBalance_lt_wordBound (S := S) (E := E) w'
-      simpa [hv, Nat.add_zero] using hlt
+    (h : Wf self tr w) : Wf self tr w' :=
+  h
+
+theorem step_of_not_accepted [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
+    {c : Call C} {w : World S X E} (h : accepted c w = false) :
+    step (.call c) w = w := by
+  unfold accepted at h
+  cases hvo : C.valueOk c.fn c.value
+  · simp [step, stepCall, hvo]
+  · cases hwrap : (C.payable c.fn && creditWraps w c.value)
+    · cases hrun : C.exec c.fn c.args c.toCtx (World.creditValue w c.value) with
+      | ok p =>
+        simp [hvo, hwrap, hrun] at h
+      | error e =>
+        simp [step, stepCall, hvo, hwrap, hrun]
+    · simp [step, stepCall, hvo, hwrap]
+
+theorem accepted_ok [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
+    {c : Call C} {w : World S X E} (h : accepted c w = true) :
+    C.valueOk c.fn c.value = true ∧
+      (C.payable c.fn && creditWraps w c.value) = false ∧
+      ∃ p, C.exec c.fn c.args c.toCtx (World.creditValue w c.value) = .ok p ∧
+        step (.call c) w = p.2 := by
+  unfold accepted at h
+  if hvo : C.valueOk c.fn c.value = true then
+    if hwrap : (C.payable c.fn && creditWraps w c.value) = true then
+      simp [hvo, hwrap] at h
+    else
+      cases hrun : C.exec c.fn c.args c.toCtx (World.creditValue w c.value) with
+      | error e =>
+        simp [hvo, hwrap, hrun] at h
+      | ok p =>
+        refine ⟨hvo, Bool.eq_false_iff.mpr hwrap, p, rfl, ?_⟩
+        simp [step, stepCall, hvo, hwrap, hrun]
+  else
+    simp [hvo] at h
 
 end Lsc.Security.Proof

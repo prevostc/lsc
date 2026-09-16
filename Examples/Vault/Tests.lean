@@ -17,7 +17,7 @@ def smokeOracle : Oracle ExtState where
 
 def smokeCtx : Ctx := { sender := 2, self := 1 }
 
-def smokeEmpty : World Storage ExtState Event where
+def smokeEmpty : World where
   self := {
     asset := ⟨10⟩
     owner := 2
@@ -27,7 +27,7 @@ def smokeEmpty : World Storage ExtState Event where
   ext := default
   oracle := smokeOracle
 
-def smokeFilled : World Storage ExtState Event where
+def smokeFilled : World where
   self := {
     asset := ⟨10⟩
     owner := 2

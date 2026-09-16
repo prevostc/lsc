@@ -10,7 +10,7 @@ open Lsc Token
 
 namespace Token
 
-variable (ctx : Ctx) (w : World Storage ExtState Event)
+variable (ctx : Ctx) (w : World)
 
 /-- `bals` after removing `amount` from `a`. -/
 def debit {α} [Sub α] (bals : Mapping Address α) (a : Address) (amount : α) :
@@ -136,7 +136,7 @@ theorem transfer_self_transfer_is_noop (amount : Amount tokenAsset)
   · simp [transferPost, credit_other _ h, debit_other _ h]
 
 theorem transfer_preserves_allowances (to : Address) (amount : Amount tokenAsset)
-    (w' : World Storage ExtState Event)
+    (w' : World)
     (h : Tx.run (transfer to amount) ctx w = .ok (true, w')) :
     w'.self.allowances = w.self.allowances := by
   by_cases hsub : amount ≤ w.self.balances ctx.sender
@@ -151,7 +151,7 @@ theorem transfer_preserves_allowances (to : Address) (amount : Amount tokenAsset
 
 /-- Frame: `transfer` never touches `totalSupply`, whatever happens. -/
 theorem transfer_preserves_totalSupply (to : Address) (amount : Amount tokenAsset)
-    (w' : World Storage ExtState Event)
+    (w' : World)
     (h : Tx.run (transfer to amount) ctx w = .ok (true, w')) :
     w'.self.totalSupply = w.self.totalSupply := by
   by_cases hsub : amount ≤ w.self.balances ctx.sender
@@ -432,7 +432,7 @@ namespace Proof
 /-- Invert a successful `transfer`: funds and overflow already held, and the
 post-state is `transferPost`. -/
 theorem transfer_ok_inv (to : Address) (amount : Amount tokenAsset)
-    {w' : World Storage ExtState Event}
+    {w' : World}
     (h : Tx.run (transfer to amount) ctx w = .ok (true, w')) :
     amount ≤ w.self.balances ctx.sender ∧
     (debit w.self.balances ctx.sender amount to + amount).raw < wordBound ∧
@@ -450,7 +450,7 @@ theorem transfer_ok_inv (to : Address) (amount : Amount tokenAsset)
 
 /-- Invert a successful `transferFrom`. -/
 theorem transferFrom_ok_inv (src to : Address) (amount : Amount tokenAsset)
-    {w' : World Storage ExtState Event}
+    {w' : World}
     (h : Tx.run (transferFrom src to amount) ctx w = .ok (true, w')) :
     amount ≤ w.self.allowances src ctx.sender ∧
     amount ≤ w.self.balances src ∧
@@ -473,7 +473,7 @@ theorem transferFrom_ok_inv (src to : Address) (amount : Amount tokenAsset)
     cases h
 
 theorem transferFrom_preserves_totalSupply (src to : Address) (amount : Amount tokenAsset)
-    {w' : World Storage ExtState Event}
+    {w' : World}
     (h : Tx.run (transferFrom src to amount) ctx w = .ok (true, w')) :
     w'.self.totalSupply = w.self.totalSupply := by
   have ⟨_, _, _, hw'⟩ := transferFrom_ok_inv ctx w src to amount h
@@ -482,7 +482,7 @@ theorem transferFrom_preserves_totalSupply (src to : Address) (amount : Amount t
 /-- A successful `transfer` conserves the sum of the two balances, including
 when sender = recipient. Success implies the funds and overflow checks. -/
 theorem transfer_conserves (to : Address) (amount : Amount tokenAsset)
-    {w' : World Storage ExtState Event}
+    {w' : World}
     (h : Tx.run (transfer to amount) ctx w = .ok (true, w')) :
     w'.self.balances ctx.sender + w'.self.balances to =
       w.self.balances ctx.sender + w.self.balances to := by
@@ -501,7 +501,7 @@ theorem transfer_conserves (to : Address) (amount : Amount tokenAsset)
     exact nat_sub_add_add _ _ _ hle
 
 theorem transfer_credits (to : Address) (amount : Amount tokenAsset)
-    {w' : World Storage ExtState Event}
+    {w' : World}
     (h : Tx.run (transfer to amount) ctx w = .ok (true, w'))
     (hne : ctx.sender ≠ to) :
     w'.self.balances to = w.self.balances to + amount := by
@@ -509,7 +509,7 @@ theorem transfer_credits (to : Address) (amount : Amount tokenAsset)
   simp [hw', transferPost, debit_other _ hne.symm]
 
 theorem transfer_others (to : Address) (amount : Amount tokenAsset)
-    {w' : World Storage ExtState Event}
+    {w' : World}
     (h : Tx.run (transfer to amount) ctx w = .ok (true, w'))
     (x : Address) (hx1 : x ≠ ctx.sender) (hx2 : x ≠ to) :
     w'.self.balances x = w.self.balances x := by
@@ -517,14 +517,14 @@ theorem transfer_others (to : Address) (amount : Amount tokenAsset)
   simp [hw', transferPost, credit_other _ hx2, debit_other _ hx1]
 
 theorem transfer_preserves_totalSupply (to : Address) (amount : Amount tokenAsset)
-    {w' : World Storage ExtState Event}
+    {w' : World}
     (h : Tx.run (transfer to amount) ctx w = .ok (true, w')) :
     w'.self.totalSupply = w.self.totalSupply := by
   have ⟨_, _, hw'⟩ := transfer_ok_inv ctx w to amount h
   simp [hw', transferPost]
 
 theorem transferFrom_conserves (src to : Address) (amount : Amount tokenAsset)
-    {w' : World Storage ExtState Event}
+    {w' : World}
     (h : Tx.run (transferFrom src to amount) ctx w = .ok (true, w')) :
     w'.self.balances src + w'.self.balances to =
       w.self.balances src + w.self.balances to := by
@@ -543,7 +543,7 @@ theorem transferFrom_conserves (src to : Address) (amount : Amount tokenAsset)
     exact nat_sub_add_add _ _ _ hle
 
 theorem transferFrom_credits (src to : Address) (amount : Amount tokenAsset)
-    {w' : World Storage ExtState Event}
+    {w' : World}
     (h : Tx.run (transferFrom src to amount) ctx w = .ok (true, w'))
     (hne : src ≠ to) :
     w'.self.balances to = w.self.balances to + amount := by
@@ -551,7 +551,7 @@ theorem transferFrom_credits (src to : Address) (amount : Amount tokenAsset)
   simp [hw', transferFromPost, debit_other _ hne.symm]
 
 theorem transferFrom_others (src to : Address) (amount : Amount tokenAsset)
-    {w' : World Storage ExtState Event}
+    {w' : World}
     (h : Tx.run (transferFrom src to amount) ctx w = .ok (true, w'))
     (x : Address) (hx1 : x ≠ src) (hx2 : x ≠ to) :
     w'.self.balances x = w.self.balances x := by
@@ -559,7 +559,7 @@ theorem transferFrom_others (src to : Address) (amount : Amount tokenAsset)
   simp [hw', transferFromPost, credit_other _ hx2, debit_other _ hx1]
 
 theorem transferFrom_allowance (src to : Address) (amount : Amount tokenAsset)
-    {w' : World Storage ExtState Event}
+    {w' : World}
     (h : Tx.run (transferFrom src to amount) ctx w = .ok (true, w')) :
     w'.self.allowances src ctx.sender + amount =
       w.self.allowances src ctx.sender := by
@@ -569,7 +569,7 @@ theorem transferFrom_allowance (src to : Address) (amount : Amount tokenAsset)
   simp [hw', transferFromPost, Amount.raw_add, Amount.raw_sub, Nat.sub_add_cancel hle]
 
 theorem approve_sets (spender : Address) (amount : Amount tokenAsset)
-    {w' : World Storage ExtState Event}
+    {w' : World}
     (h : Tx.run (approve spender amount) ctx w = .ok (true, w')) :
     w'.self.allowances ctx.sender spender = amount := by
   rw [approve_ok ctx w spender amount] at h
@@ -577,7 +577,7 @@ theorem approve_sets (spender : Address) (amount : Amount tokenAsset)
   simp [approvePost]
 
 theorem transfer_returns_true (to : Address) (amount : Amount tokenAsset)
-    {r : Bool} {w' : World Storage ExtState Event}
+    {r : Bool} {w' : World}
     (h : Tx.run (transfer to amount) ctx w = .ok (r, w')) : r = true := by
   by_cases hsub : amount ≤ w.self.balances ctx.sender
   · by_cases hadd : (debit w.self.balances ctx.sender amount to + amount).raw < wordBound
@@ -590,7 +590,7 @@ theorem transfer_returns_true (to : Address) (amount : Amount tokenAsset)
     cases h
 
 theorem transferFrom_returns_true (src to : Address) (amount : Amount tokenAsset)
-    {r : Bool} {w' : World Storage ExtState Event}
+    {r : Bool} {w' : World}
     (h : Tx.run (transferFrom src to amount) ctx w = .ok (r, w')) : r = true := by
   by_cases hallow : amount ≤ w.self.allowances src ctx.sender
   · by_cases hsub : amount ≤ w.self.balances src
@@ -608,7 +608,7 @@ theorem transferFrom_returns_true (src to : Address) (amount : Amount tokenAsset
     cases h
 
 theorem approve_returns_true (spender : Address) (amount : Amount tokenAsset)
-    {r : Bool} {w' : World Storage ExtState Event}
+    {r : Bool} {w' : World}
     (h : Tx.run (approve spender amount) ctx w = .ok (r, w')) : r = true := by
   rw [approve_ok ctx w spender amount] at h
   cases h; rfl

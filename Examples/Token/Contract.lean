@@ -23,7 +23,7 @@ structure Storage where
   totalSupply : Amount tokenAsset
   balances : Mapping Address (Amount tokenAsset)
   allowances : Mapping Address (Mapping Address (Amount tokenAsset))
-  deriving Fields
+  deriving Fields, Inhabited
 
 open Storage.Fields
 

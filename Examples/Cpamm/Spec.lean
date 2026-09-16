@@ -45,7 +45,7 @@ def Auth : AuthPred spec :=
     | _, _ => False
 
 /-- `addLiquidity` is the only inflow of share-count; it is `0` on revert. -/
-def inflow (c : Call spec) (w : World Storage ExtState Event) : Nat :=
+def inflow (c : Call spec) (w : World) : Nat :=
   match c.fn, c.args with
   | .addLiquidity, (a0, a1) =>
     match Tx.run (addLiquidity a0 a1) c.toCtx w with
@@ -54,11 +54,11 @@ def inflow (c : Call spec) (w : World Storage ExtState Event) : Nat :=
   | _, _ => 0
 
 /-- Live token0 balance of the pool, from the bound token's view. -/
-def holdings0 (self : Address) (w : World Storage ExtState Event) : Nat :=
+def holdings0 (self : Address) (w : World) : Nat :=
   (w.self.token0.impl.balanceOf self w.view).raw
 
 /-- Live token1 balance of the pool, from the bound token's view. -/
-def holdings1 (self : Address) (w : World Storage ExtState Event) : Nat :=
+def holdings1 (self : Address) (w : World) : Nat :=
   (w.self.token1.impl.balanceOf self w.view).raw
 
 def InvStorage (σ : Storage) : Prop :=
@@ -69,14 +69,14 @@ def InvStorage (σ : Storage) : Prop :=
 /-- Each reserve plus that token's protocol bucket is covered by the pool's
 token balance, share balances have finite support, and the protocol share
 is at most 100%. -/
-def Inv (self : Address) (w : World Storage ExtState Event) : Prop :=
+def Inv (self : Address) (w : World) : Prop :=
   w.self.reserve0.raw + w.self.protocolFees0.raw ≤ holdings0 self w ∧
   w.self.reserve1.raw + w.self.protocolFees1.raw ≤ holdings1 self w ∧
   InvStorage w.self ∧
   w.self.protocolShareBps ≤ BPS
 
 /-- After a trace, LP pro-rata claims plus protocol buckets are covered. -/
-def CoversLpsAndProtocol (self : Address) (w : World Storage ExtState Event) : Prop :=
+def CoversLpsAndProtocol (self : Address) (w : World) : Prop :=
   ∃ H : Finset Address,
     (∀ a, a ∉ H → w.self.shares a = 0) ∧
     H.sum (fun a => claim0 a w) + w.self.protocolFees0.raw ≤ holdings0 self w ∧

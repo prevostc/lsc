@@ -26,7 +26,7 @@ attribute [local simp] Amount.eq_iff Amount.ne_iff Amount.lt_iff Amount.le_iff
 
 namespace Cpamm
 
-variable {ctx : Ctx} {w : World Storage ExtState Event}
+variable {ctx : Ctx} {w : World}
 
 abbrev tfCall {a : Asset} (r : IERC20.Ref a) (src dst : Address)
     (amt : Amount a) : Tx Storage ExtState Event Error Bool :=
@@ -158,12 +158,12 @@ private theorem addLiquidityPost_of_first (σ : Storage) (who : Address)
     Amount.ofWord_add_left, Nat.sub_add_cancel hle]
 
 /-- Overwriting `self` twice keeps the last storage. -/
-private theorem world_self_overwrite (w : World Storage ExtState Event)
+private theorem world_self_overwrite (w : World)
     (s s' : Storage) :
     { { w with self := s } with self := s' } = { w with self := s' } :=
   rfl
 
-private theorem world_eq_self (w w' : World Storage ExtState Event)
+private theorem world_eq_self (w w' : World)
     (hs : w.self = w'.self) (he : w.ext = w'.ext)
     (hl : w.log = w'.log) (ho : w.oracle = w'.oracle) : w = w' := by
   cases w; cases w'
@@ -261,13 +261,13 @@ theorem holdings1_view (self : Address) :
     holdings1 self w = (viewBal1 w.self.token1 self w.oracle w.ext).raw := by
   simp [holdings1, viewBal1, IERC20.Ref.impl, IERC20.Impl.ofRef, World.view]
 
-theorem holdings0_congr (self : Address) {w w' : World Storage ExtState Event}
+theorem holdings0_congr (self : Address) {w w' : World}
     (ha : w'.self.token0.addr = w.self.token0.addr)
     (ho : w'.oracle = w.oracle) (hx : w'.ext = w.ext) :
     holdings0 self w' = holdings0 self w := by
   simp [holdings0, IERC20.Ref.impl, IERC20.Impl.ofRef, ha, ho, hx, World.view]
 
-theorem holdings1_congr (self : Address) {w w' : World Storage ExtState Event}
+theorem holdings1_congr (self : Address) {w w' : World}
     (ha : w'.self.token1.addr = w.self.token1.addr)
     (ho : w'.oracle = w.oracle) (hx : w'.ext = w.ext) :
     holdings1 self w' = holdings1 self w := by
@@ -275,7 +275,7 @@ theorem holdings1_congr (self : Address) {w w' : World Storage ExtState Event}
 
 theorem transferFrom_frame {a : Asset} {r : IERC20.Ref a}
     {src dst : Address} {amt : Amount a} {b : Bool}
-    {w' : World Storage ExtState Event}
+    {w' : World}
     (h : Tx.run (tfCall r src dst amt) ctx w = .ok (b, w')) :
     w'.self = w.self ∧ w'.oracle = w.oracle ∧ w'.log = w.log := by
   refine ⟨Tx.call_self (α := Bool) r.addr
@@ -291,7 +291,7 @@ theorem transferFrom_frame {a : Asset} {r : IERC20.Ref a}
 
 theorem transfer_frame {a : Asset} {r : IERC20.Ref a}
     {dst : Address} {amt : Amount a} {b : Bool}
-    {w' : World Storage ExtState Event}
+    {w' : World}
     (h : Tx.run (trCall r dst amt) ctx w = .ok (b, w')) :
     w'.self = w.self ∧ w'.oracle = w.oracle ∧ w'.log = w.log := by
   refine ⟨Tx.call_self (α := Bool) r.addr
@@ -325,12 +325,12 @@ theorem impl_transfer {a : Asset} (r : IERC20.Ref a)
 
 theorem transfer_run_ctx_irrel {a : Asset} {r : IERC20.Ref a}
     {dst : Address} {amt : Amount a} {ctx' : Ctx}
-    {w₀ : World Storage ExtState Event} :
+    {w₀ : World} :
     Tx.run (trCall r dst amt) ctx w₀ =
       Tx.run (trCall r dst amt) ctx' w₀ := by
   simp [IERC20.Ref.transfer, Tx.run_call]
 
-theorem eq_self_ext {σ : Storage} {w1 : World Storage ExtState Event}
+theorem eq_self_ext {σ : Storage} {w1 : World}
     (hs : w1.self = σ) (ho : w1.oracle = w.oracle) (hl : w1.log = w.log) :
     w1 = { w with self := σ, ext := w1.ext } := by
   cases w; cases w1; simp_all
@@ -339,7 +339,7 @@ theorem eq_self_ext {σ : Storage} {w1 : World Storage ExtState Event}
 the original world with only `ext` changed. -/
 theorem transferFrom_call_ignore_self {a : Asset} {r : IERC20.Ref a}
     {src dst : Address} {amt : Amount a} {σ : Storage} {b : Bool}
-    {w1 : World Storage ExtState Event}
+    {w1 : World}
     (h : Tx.run (tfCall r src dst amt) ctx { w with self := σ } = .ok (b, w1)) :
     Tx.run (tfCall r src dst amt) ctx w = .ok (b, { w with ext := w1.ext }) ∧
       w1.self = σ ∧ w1.oracle = w.oracle ∧ w1.log = w.log := by
@@ -352,7 +352,7 @@ theorem transferFrom_call_ignore_self {a : Asset} {r : IERC20.Ref a}
 
 theorem transfer_call_ignore_self {a : Asset} {r : IERC20.Ref a}
     {dst : Address} {amt : Amount a} {σ : Storage} {b : Bool}
-    {w1 : World Storage ExtState Event}
+    {w1 : World}
     (h : Tx.run (trCall r dst amt) ctx { w with self := σ } = .ok (b, w1)) :
     Tx.run (trCall r dst amt) ctx w = .ok (b, { w with ext := w1.ext }) ∧
       w1.self = σ ∧ w1.oracle = w.oracle ∧ w1.log = w.log := by
@@ -365,7 +365,7 @@ theorem transfer_call_ignore_self {a : Asset} {r : IERC20.Ref a}
 
 theorem transferFrom_call_addr {a : Asset} {r : IERC20.Ref a}
     {src dst : Address} {amt : Amount a} {b : Bool}
-    {w' : World Storage ExtState Event}
+    {w' : World}
     (h : Tx.run (tfCall r src dst amt) ctx w = .ok (b, w')) :
     ∃ sel args rets, w.oracle.call r.addr sel args w.ext = some (rets, w'.ext) := by
   simp [IERC20.Ref.transferFrom, Tx.run_call] at h
@@ -379,7 +379,7 @@ theorem transferFrom_call_addr {a : Asset} {r : IERC20.Ref a}
 
 theorem transfer_call_addr {a : Asset} {r : IERC20.Ref a}
     {dst : Address} {amt : Amount a} {b : Bool}
-    {w' : World Storage ExtState Event}
+    {w' : World}
     (h : Tx.run (trCall r dst amt) ctx w = .ok (b, w')) :
     ∃ sel args rets, w.oracle.call r.addr sel args w.ext = some (rets, w'.ext) := by
   simp [IERC20.Ref.transfer, Tx.run_call] at h
@@ -668,7 +668,7 @@ private theorem run_emit_bind {α : Type} {ev : Event}
 /-- Bind after `safeTransferFrom` is a match on the Bool CALL, not a nested
 Unit match. Quantified over `w₀` so it rewrites on post-storage worlds. -/
 private theorem run_safeTF_bind {α : Type} {a : Asset}
-    {w₀ : World Storage ExtState Event}
+    {w₀ : World}
     (r : IERC20.Ref a) (src dst : Address) (amt : Amount a)
     (k : Unit → Tx Storage ExtState Event Error α) :
     Tx.run (safeTransferFrom (E := Event) r src dst amt Error.TransferFailed >>= k)
@@ -687,7 +687,7 @@ private theorem run_safeTF_bind {α : Type} {a : Asset}
 
 /-- Bind after `safeTransfer` is a match on the Bool CALL. -/
 private theorem run_safeTR_bind {α : Type} {a : Asset}
-    {w₀ : World Storage ExtState Event}
+    {w₀ : World}
     (r : IERC20.Ref a) (dst : Address) (amt : Amount a)
     (k : Unit → Tx Storage ExtState Event Error α) :
     Tx.run (safeTransfer (E := Event) r dst amt Error.TransferFailed >>= k) ctx w₀ =
@@ -705,7 +705,7 @@ private theorem run_safeTR_bind {α : Type} {a : Asset}
 
 /-- `swap0for1` loads `token1` after `safeTransferFrom`; the CALL preserves `self`. -/
 private theorem run_safeTF_then_read_token1 {α : Type}
-    {w₀ : World Storage ExtState Event}
+    {w₀ : World}
     (r : IERC20.Ref asset0) (src dst : Address) (amt : Amount asset0)
     (k : IERC20.Ref asset1 → Tx Storage ExtState Event Error α) :
     Tx.run (do
@@ -729,7 +729,7 @@ private theorem run_safeTF_then_read_token1 {α : Type}
 
 /-- `swap1for0` loads `token0` after `safeTransferFrom`; the CALL preserves `self`. -/
 private theorem run_safeTF_then_read_token0 {α : Type}
-    {w₀ : World Storage ExtState Event}
+    {w₀ : World}
     (r : IERC20.Ref asset1) (src dst : Address) (amt : Amount asset1)
     (k : IERC20.Ref asset0 → Tx Storage ExtState Event Error α) :
     Tx.run (do
@@ -751,7 +751,7 @@ private theorem run_safeTF_then_read_token0 {α : Type}
       simp only [↓reduceIte, Tx.run_bind, Tx.run_map, Tx.run_load]
       simp [hs]
 
-private theorem run_emit_pure {w₀ : World Storage ExtState Event}
+private theorem run_emit_pure {w₀ : World}
     (ev : Event) {α : Type} (a : α) :
     Tx.run (do
         Tx.emit (S := Storage) (X := ExtState) ev
@@ -759,8 +759,8 @@ private theorem run_emit_pure {w₀ : World Storage ExtState Event}
       .ok (a, { w₀ with log := w₀.log ++ [ev] }) := by
   simp [Tx.run_bind, Tx.run_emit, Tx.run_pure]
 
-private theorem ok_of_emit_pure {w₀ : World Storage ExtState Event}
-    {ev : Event} {α : Type} {a n : α} {w' : World Storage ExtState Event}
+private theorem ok_of_emit_pure {w₀ : World}
+    {ev : Event} {α : Type} {a n : α} {w' : World}
     (hrun : Tx.run (do
         Tx.emit (S := Storage) (X := ExtState) ev
         (pure a : Tx Storage ExtState Event Error α)) ctx w₀ = .ok (n, w')) :
@@ -773,10 +773,10 @@ private theorem ok_of_emit_pure {w₀ : World Storage ExtState Event}
 /-- Success of `safeTransferFrom >>= k` yields a true CALL that preserves
 `self` / oracle / log, then `k`. -/
 private theorem ok_of_safeTF_bind {α : Type} {a : Asset}
-    {w₀ : World Storage ExtState Event}
+    {w₀ : World}
     {r : IERC20.Ref a} {src dst : Address} {amt : Amount a}
     {k : Unit → Tx Storage ExtState Event Error α}
-    {n : α} {w' : World Storage ExtState Event}
+    {n : α} {w' : World}
     (hrun : Tx.run (safeTransferFrom (E := Event) r src dst amt
         Error.TransferFailed >>= k) ctx w₀ = .ok (n, w')) :
     ∃ w1, Tx.run (tfCall r src dst amt) ctx w₀ = .ok (true, w1) ∧
@@ -794,10 +794,10 @@ private theorem ok_of_safeTF_bind {α : Type} {a : Asset}
 /-- Success of `safeTransfer >>= k` yields a true CALL that preserves
 `self` / oracle / log, then `k`. -/
 private theorem ok_of_safeTR_bind {α : Type} {a : Asset}
-    {w₀ : World Storage ExtState Event}
+    {w₀ : World}
     {r : IERC20.Ref a} {dst : Address} {amt : Amount a}
     {k : Unit → Tx Storage ExtState Event Error α}
-    {n : α} {w' : World Storage ExtState Event}
+    {n : α} {w' : World}
     (hrun : Tx.run (safeTransfer (E := Event) r dst amt
         Error.TransferFailed >>= k) ctx w₀ = .ok (n, w')) :
     ∃ w1, Tx.run (trCall r dst amt) ctx w₀ = .ok (true, w1) ∧
@@ -842,8 +842,8 @@ private theorem thousand_lt_wordBound : (1000 : Nat) < wordBound := by
   decide
 
 /-- World after `mint 0 MINIMUM_LIQUIDITY` on a first mint. -/
-private def deadMintWorld (w : World Storage ExtState Event) :
-    World Storage ExtState Event :=
+private def deadMintWorld (w : World) :
+    World :=
   { w with self := { w.self with
       shares := fun k => Amount.ofWord
         (Function.update (fun i => (w.self.shares i).raw) (0 : Address)
@@ -865,7 +865,7 @@ private theorem deadMint_ts_raw :
   simp [deadMintWorld, Amount.raw_ofWord]
 
 /-- Shared tail after `minted` is bound. `+?` closes over `wOrig`. -/
-private abbrev addLiqRest (ctx₀ : Ctx) (wOrig : World Storage ExtState Event)
+private abbrev addLiqRest (ctx₀ : Ctx) (wOrig : World)
     (a0 : Amount asset0) (a1 : Amount asset1) (minted : Amount lpShare) :
     M (Amount lpShare) := do
   write reserve0 (wOrig.self.reserve0 +? a0)
@@ -976,7 +976,7 @@ private theorem addLiq_after_mint (a0 : Amount asset0) (a1 : Amount asset1)
 /-- Reserve writes, then `mint` to sender, then the transfer tail. `+?` uses
 the original `w` reserves; share/`totalShares` overflows use `w₀`. -/
 private theorem run_addLiq_stores (a0 : Amount asset0) (a1 : Amount asset1)
-    (minted : Amount lpShare) (w₀ : World Storage ExtState Event) :
+    (minted : Amount lpShare) (w₀ : World) :
     Tx.run (addLiqRest ctx w a0 a1 minted) ctx w₀ =
       if w.self.reserve0.raw + a0.raw < wordBound then
         if w.self.reserve1.raw + a1.raw < wordBound then
@@ -1041,7 +1041,7 @@ theorem setProtocolShare_only_owner (bps : Bps)
     Tx.run (setProtocolShare bps) ctx w = .error (.user .NotOwner) := by
   simp [setProtocolShare, h]
 
-theorem setProtocolShare_ok_of_run {bps : Bps} {w' : World Storage ExtState Event}
+theorem setProtocolShare_ok_of_run {bps : Bps} {w' : World}
     (hrun : Tx.run (setProtocolShare bps) ctx w = .ok ((), w')) :
     ctx.sender = w.self.owner ∧ bps ≤ BPS ∧
       w' = { w with
@@ -1066,7 +1066,7 @@ theorem setFeeTo_only_owner (recipient : Address)
     Tx.run (setFeeTo recipient) ctx w = .error (.user .NotOwner) := by
   simp [setFeeTo, h]
 
-theorem setFeeTo_ok_of_run {recipient : Address} {w' : World Storage ExtState Event}
+theorem setFeeTo_ok_of_run {recipient : Address} {w' : World}
     (hrun : Tx.run (setFeeTo recipient) ctx w = .ok ((), w')) :
     ctx.sender = w.self.owner ∧
       w' = { w with
@@ -1089,7 +1089,7 @@ theorem addLiquidity_reverts_on_nonpos1 (a0 : Amount asset0) (a1 : Amount asset1
     Tx.run (addLiquidity a0 a1) ctx w = .error (.user .Zero) := by
   rw [addLiquidity, run_req_true hpos0, run_req_false hpos1]
 
-structure AddLiqOk (ctx : Ctx) (w : World Storage ExtState Event)
+structure AddLiqOk (ctx : Ctx) (w : World)
     (a0 : Amount asset0) (a1 : Amount asset1) : Prop where
   pos0 : 0 < a0
   pos1 : 0 < a1
@@ -1331,7 +1331,7 @@ theorem addLiquidity_reverts_on_add_bal (a0 : Amount asset0) (a1 : Amount asset1
     split_ifs <;> first | rfl | (rw [run_addLiq_stores]; split_ifs <;> rfl)
 
 theorem addLiquidity_ok_of_run {a0 : Amount asset0} {a1 : Amount asset1}
-    {n : Amount lpShare} {w' : World Storage ExtState Event}
+    {n : Amount lpShare} {w' : World}
     (hrun : Tx.run (addLiquidity a0 a1) ctx w = .ok (n, w')) :
     AddLiqOk ctx w a0 a1 := by
   have hpos0 : 0 < a0 := by
@@ -1496,7 +1496,7 @@ theorem addLiquidity_to_tail (a0 : Amount asset0) (a1 : Amount asset1)
     · rfl
 
 theorem addLiquidity_post (a0 : Amount asset0) (a1 : Amount asset1)
-    {n : Amount lpShare} {w' : World Storage ExtState Event}
+    {n : Amount lpShare} {w' : World}
     (h : AddLiqOk ctx w a0 a1)
     (hrun : Tx.run (addLiquidity a0 a1) ctx w = .ok (n, w')) :
     n = Amount.ofWord (mintedShares w.self a0.raw a1.raw) ∧
@@ -1515,7 +1515,7 @@ theorem addLiquidity_post (a0 : Amount asset0) (a1 : Amount asset1)
     by simp [hl1, hl2, hl3]⟩
 
 theorem addLiquidity_call (a0 : Amount asset0) (a1 : Amount asset1)
-    {n : Amount lpShare} {w' : World Storage ExtState Event}
+    {n : Amount lpShare} {w' : World}
     (h : AddLiqOk ctx w a0 a1)
     (hrun : Tx.run (addLiquidity a0 a1) ctx w = .ok (n, w')) :
     ∃ w1 w2,
@@ -1776,7 +1776,7 @@ theorem removeLiquidity_reverts_on_sub_r1 (s : Amount lpShare)
       w.self.reserve1.raw := by simpa [redeemed] using hle1
   rw [if_neg hle1R]
 
-structure RemoveOk (ctx : Ctx) (w : World Storage ExtState Event)
+structure RemoveOk (ctx : Ctx) (w : World)
     (s : Amount lpShare) : Prop where
   pos : 0 < s
   bal : s ≤ w.self.shares ctx.sender
@@ -1790,7 +1790,7 @@ structure RemoveOk (ctx : Ctx) (w : World Storage ExtState Event)
   le1 : (redeemed w.self s.raw).2 ≤ w.self.reserve1.raw
 
 theorem removeLiquidity_ok_of_run {s : Amount lpShare}
-    {p : Amount asset0 × Amount asset1} {w' : World Storage ExtState Event}
+    {p : Amount asset0 × Amount asset1} {w' : World}
     (hrun : Tx.run (removeLiquidity s) ctx w = .ok (p, w')) :
     RemoveOk ctx w s := by
   have hpos : 0 < s := by
@@ -1895,7 +1895,7 @@ theorem removeLiquidity_to_tail (s : Amount lpShare) (h : RemoveOk ctx w s) :
   try rfl
 
 theorem removeLiquidity_post (s : Amount lpShare)
-    {p : Amount asset0 × Amount asset1} {w' : World Storage ExtState Event}
+    {p : Amount asset0 × Amount asset1} {w' : World}
     (h : RemoveOk ctx w s)
     (hrun : Tx.run (removeLiquidity s) ctx w = .ok (p, w')) :
     p = (Amount.ofWord (redeemed w.self s.raw).1,
@@ -1916,7 +1916,7 @@ theorem removeLiquidity_post (s : Amount lpShare)
     by simp [hl1, hl2, hl3]⟩
 
 theorem removeLiquidity_call (s : Amount lpShare)
-    {p : Amount asset0 × Amount asset1} {w' : World Storage ExtState Event}
+    {p : Amount asset0 × Amount asset1} {w' : World}
     (h : RemoveOk ctx w s)
     (hrun : Tx.run (removeLiquidity s) ctx w = .ok (p, w')) :
     ∃ w1 w2,
@@ -1959,7 +1959,7 @@ private abbrev swap0Out (σ : Storage) (dx : Nat) : Nat :=
 private abbrev swap1Out (σ : Storage) (dx : Nat) : Nat :=
   amountOut σ.reserve1.raw σ.reserve0.raw dx
 
-structure Swap0Ok (w : World Storage ExtState Event)
+structure Swap0Ok (w : World)
     (dx : Amount asset0) (minOut : Amount asset1) : Prop where
   pos : 0 < dx
   r0 : 0 < w.self.reserve0.raw
@@ -1976,7 +1976,7 @@ structure Swap0Ok (w : World Storage ExtState Event)
   sub1 : swap0Out w.self dx.raw ≤ w.self.reserve1.raw
   acc : w.self.protocolFees0.raw + protoOf w.self dx.raw < wordBound
 
-structure Swap1Ok (w : World Storage ExtState Event)
+structure Swap1Ok (w : World)
     (dx : Amount asset1) (minOut : Amount asset0) : Prop where
   pos : 0 < dx
   r0 : 0 < w.self.reserve0.raw
@@ -2340,7 +2340,7 @@ theorem swap0for1_reverts_on_acc (dx : Amount asset0) (minOut : Amount asset1)
   rw [if_neg hacc]
 
 theorem swap0for1_ok_of_run {dx : Amount asset0} {minOut : Amount asset1}
-    {out : Amount asset1} {w' : World Storage ExtState Event}
+    {out : Amount asset1} {w' : World}
     (hrun : Tx.run (swap0for1 dx minOut) ctx w = .ok (out, w')) :
     Swap0Ok w dx minOut := by
   have hpos : 0 < dx := by
@@ -2464,7 +2464,7 @@ theorem swap0for1_to_tail (dx : Amount asset0) (minOut : Amount asset1)
   rfl
 
 theorem swap0for1_post (dx : Amount asset0) (minOut : Amount asset1)
-    {out : Amount asset1} {w' : World Storage ExtState Event}
+    {out : Amount asset1} {w' : World}
     (h : Swap0Ok w dx minOut)
     (hrun : Tx.run (swap0for1 dx minOut) ctx w = .ok (out, w')) :
     out = Amount.ofWord (swap0Out w.self dx.raw) ∧
@@ -2485,7 +2485,7 @@ theorem swap0for1_post (dx : Amount asset0) (minOut : Amount asset1)
     by simp [hl1, hl2, hl3]⟩
 
 theorem swap0for1_call (dx : Amount asset0) (minOut : Amount asset1)
-    {out : Amount asset1} {w' : World Storage ExtState Event}
+    {out : Amount asset1} {w' : World}
     (h : Swap0Ok w dx minOut)
     (hrun : Tx.run (swap0for1 dx minOut) ctx w = .ok (out, w')) :
     ∃ w1 w2,
@@ -2732,7 +2732,7 @@ theorem swap1for0_reverts_on_acc (dx : Amount asset1) (minOut : Amount asset0)
   rw [if_neg hacc]
 
 theorem swap1for0_ok_of_run {dx : Amount asset1} {minOut : Amount asset0}
-    {out : Amount asset0} {w' : World Storage ExtState Event}
+    {out : Amount asset0} {w' : World}
     (hrun : Tx.run (swap1for0 dx minOut) ctx w = .ok (out, w')) :
     Swap1Ok w dx minOut := by
   have hpos : 0 < dx := by
@@ -2856,7 +2856,7 @@ theorem swap1for0_to_tail (dx : Amount asset1) (minOut : Amount asset0)
   rfl
 
 theorem swap1for0_post (dx : Amount asset1) (minOut : Amount asset0)
-    {out : Amount asset0} {w' : World Storage ExtState Event}
+    {out : Amount asset0} {w' : World}
     (h : Swap1Ok w dx minOut)
     (hrun : Tx.run (swap1for0 dx minOut) ctx w = .ok (out, w')) :
     out = Amount.ofWord (swap1Out w.self dx.raw) ∧
@@ -2877,7 +2877,7 @@ theorem swap1for0_post (dx : Amount asset1) (minOut : Amount asset0)
     by simp [hl1, hl2, hl3]⟩
 
 theorem swap1for0_call (dx : Amount asset1) (minOut : Amount asset0)
-    {out : Amount asset0} {w' : World Storage ExtState Event}
+    {out : Amount asset0} {w' : World}
     (h : Swap1Ok w dx minOut)
     (hrun : Tx.run (swap1for0 dx minOut) ctx w = .ok (out, w')) :
     ∃ w1 w2,
@@ -2928,12 +2928,12 @@ theorem collectProtocolFees_reverts_on_not_feeTo
   rw [collectProtocolFees, run_sender_bind, run_load_bind, run_req_true hft,
     run_req_false h]
 
-structure CollectOk (ctx : Ctx) (w : World Storage ExtState Event) : Prop where
+structure CollectOk (ctx : Ctx) (w : World) : Prop where
   feeTo : w.self.feeTo ≠ 0
   sender : ctx.sender = w.self.feeTo
 
 theorem collectProtocolFees_ok_of_run
-    {p : Amount asset0 × Amount asset1} {w' : World Storage ExtState Event}
+    {p : Amount asset0 × Amount asset1} {w' : World}
     (hrun : Tx.run collectProtocolFees ctx w = .ok (p, w')) :
     CollectOk ctx w := by
   have hft : w.self.feeTo ≠ 0 := by
@@ -2972,7 +2972,7 @@ theorem collectProtocolFees_to_tail (h : CollectOk ctx w) :
   rfl
 
 theorem collectProtocolFees_post
-    {p : Amount asset0 × Amount asset1} {w' : World Storage ExtState Event}
+    {p : Amount asset0 × Amount asset1} {w' : World}
     (h : CollectOk ctx w)
     (hrun : Tx.run collectProtocolFees ctx w = .ok (p, w')) :
     p = (w.self.protocolFees0, w.self.protocolFees1) ∧
@@ -2990,7 +2990,7 @@ theorem collectProtocolFees_post
     by simp [hl1, hl2, hl3]⟩
 
 theorem collectProtocolFees_call
-    {p : Amount asset0 × Amount asset1} {w' : World Storage ExtState Event}
+    {p : Amount asset0 × Amount asset1} {w' : World}
     (h : CollectOk ctx w)
     (hrun : Tx.run collectProtocolFees ctx w = .ok (p, w')) :
     ∃ w1 w2,
@@ -3020,7 +3020,7 @@ theorem collectProtocolFees_call
 namespace Proof
 
 theorem swap0for1_k {dx : Amount asset0} {minOut : Amount asset1}
-    {out : Amount asset1} {w' : World Storage ExtState Event}
+    {out : Amount asset1} {w' : World}
     (h : Tx.run (swap0for1 dx minOut) ctx w = .ok (out, w')) :
     w'.self.reserve0.raw * w'.self.reserve1.raw ≥
       w.self.reserve0.raw * w.self.reserve1.raw := by
@@ -3037,7 +3037,7 @@ theorem swap0for1_k {dx : Amount asset0} {minOut : Amount asset1}
   exact hk
 
 theorem swap1for0_k {dx : Amount asset1} {minOut : Amount asset0}
-    {out : Amount asset0} {w' : World Storage ExtState Event}
+    {out : Amount asset0} {w' : World}
     (h : Tx.run (swap1for0 dx minOut) ctx w = .ok (out, w')) :
     w'.self.reserve0.raw * w'.self.reserve1.raw ≥
       w.self.reserve0.raw * w.self.reserve1.raw := by
@@ -3055,7 +3055,7 @@ theorem swap1for0_k {dx : Amount asset1} {minOut : Amount asset0}
   exact (Nat.mul_comm _ _).le
 
 theorem swap0_protocol_fee {dx : Amount asset0} {minOut : Amount asset1}
-    {out : Amount asset1} {w' : World Storage ExtState Event}
+    {out : Amount asset1} {w' : World}
     (h : Tx.run (swap0for1 dx minOut) ctx w = .ok (out, w')) :
     w'.self.protocolFees0 =
       w.self.protocolFees0 + Amount.ofWord (protoOf w.self dx.raw) ∧
@@ -3065,7 +3065,7 @@ theorem swap0_protocol_fee {dx : Amount asset0} {minOut : Amount asset1}
   simp [hσ, swap0Post]
 
 theorem swap1_protocol_fee {dx : Amount asset1} {minOut : Amount asset0}
-    {out : Amount asset0} {w' : World Storage ExtState Event}
+    {out : Amount asset0} {w' : World}
     (h : Tx.run (swap1for0 dx minOut) ctx w = .ok (out, w')) :
     w'.self.protocolFees1 =
       w.self.protocolFees1 + Amount.ofWord (protoOf w.self dx.raw) ∧
@@ -3075,7 +3075,7 @@ theorem swap1_protocol_fee {dx : Amount asset1} {minOut : Amount asset0}
   simp [hσ, swap1Post]
 
 theorem collect_only_feeTo {p : Amount asset0 × Amount asset1}
-    {w' : World Storage ExtState Event}
+    {w' : World}
     (h : Tx.run collectProtocolFees ctx w = .ok (p, w')) :
     w'.self.protocolFees0 = 0 ∧ w'.self.protocolFees1 = 0 ∧
       w'.self.reserve0 = w.self.reserve0 ∧ w'.self.reserve1 = w.self.reserve1 := by
@@ -3085,7 +3085,7 @@ theorem collect_only_feeTo {p : Amount asset0 × Amount asset1}
     by simp [hσ, collectPost], by simp [hσ, collectPost]⟩
 
 theorem addLiquidity_buckets {a0 : Amount asset0} {a1 : Amount asset1}
-    {n : Amount lpShare} {w' : World Storage ExtState Event}
+    {n : Amount lpShare} {w' : World}
     (h : Tx.run (addLiquidity a0 a1) ctx w = .ok (n, w')) :
     w'.self.protocolFees0 = w.self.protocolFees0 ∧
       w'.self.protocolFees1 = w.self.protocolFees1 := by
@@ -3094,7 +3094,7 @@ theorem addLiquidity_buckets {a0 : Amount asset0} {a1 : Amount asset1}
   simp [hσ, addLiquidityPost]
 
 theorem removeLiquidity_buckets {s : Amount lpShare}
-    {p : Amount asset0 × Amount asset1} {w' : World Storage ExtState Event}
+    {p : Amount asset0 × Amount asset1} {w' : World}
     (h : Tx.run (removeLiquidity s) ctx w = .ok (p, w')) :
     w'.self.protocolFees0 = w.self.protocolFees0 ∧
       w'.self.protocolFees1 = w.self.protocolFees1 := by
@@ -3102,14 +3102,14 @@ theorem removeLiquidity_buckets {s : Amount lpShare}
   have ⟨_, hσ, _, _⟩ := removeLiquidity_post s hok h
   simp [hσ, removeLiquidityPost]
 
-theorem setProtocolShare_buckets {bps : Bps} {w' : World Storage ExtState Event}
+theorem setProtocolShare_buckets {bps : Bps} {w' : World}
     (h : Tx.run (setProtocolShare bps) ctx w = .ok ((), w')) :
     w'.self.protocolFees0 = w.self.protocolFees0 ∧
       w'.self.protocolFees1 = w.self.protocolFees1 := by
   obtain ⟨_, _, rfl⟩ := setProtocolShare_ok_of_run h
   simp
 
-theorem setFeeTo_buckets {recipient : Address} {w' : World Storage ExtState Event}
+theorem setFeeTo_buckets {recipient : Address} {w' : World}
     (h : Tx.run (setFeeTo recipient) ctx w = .ok ((), w')) :
     w'.self.protocolFees0 = w.self.protocolFees0 ∧
       w'.self.protocolFees1 = w.self.protocolFees1 := by
@@ -3117,7 +3117,7 @@ theorem setFeeTo_buckets {recipient : Address} {w' : World Storage ExtState Even
   simp
 
 theorem removeLiquidity_pro_rata {s : Amount lpShare}
-    {p : Amount asset0 × Amount asset1} {w' : World Storage ExtState Event}
+    {p : Amount asset0 × Amount asset1} {w' : World}
     (h : Tx.run (removeLiquidity s) ctx w = .ok (p, w')) :
     w'.self.reserve0 = w.self.reserve0 - p.1 ∧
       w'.self.reserve1 = w.self.reserve1 - p.2 := by
@@ -3127,7 +3127,7 @@ theorem removeLiquidity_pro_rata {s : Amount lpShare}
   simp [hσ, removeLiquidityPost, redeemed]
 
 theorem removeLiquidity_paid {s : Amount lpShare}
-    {p : Amount asset0 × Amount asset1} {w' : World Storage ExtState Event}
+    {p : Amount asset0 × Amount asset1} {w' : World}
     (h : Tx.run (removeLiquidity s) ctx w = .ok (p, w')) :
     p.1.raw = w.self.reserve0.raw * s.raw / w.self.totalShares.raw ∧
       p.2.raw = w.self.reserve1.raw * s.raw / w.self.totalShares.raw := by
@@ -3136,7 +3136,7 @@ theorem removeLiquidity_paid {s : Amount lpShare}
   simp [hp, redeemed, Amount.raw_ofWord]
 
 theorem addLiquidity_pro_rata {a0 : Amount asset0} {a1 : Amount asset1}
-    {n : Amount lpShare} {w' : World Storage ExtState Event}
+    {n : Amount lpShare} {w' : World}
     (h : Tx.run (addLiquidity a0 a1) ctx w = .ok (n, w')) :
     w'.self.shares ctx.sender =
       sharesAfterDead w.self ctx.sender + n ∧
@@ -3149,7 +3149,7 @@ theorem addLiquidity_pro_rata {a0 : Amount asset0} {a1 : Amount asset1}
     Nat.add_comm, Nat.add_assoc, Nat.add_left_comm]
 
 theorem addLiquidity_minted {a0 : Amount asset0} {a1 : Amount asset1}
-    {n : Amount lpShare} {w' : World Storage ExtState Event}
+    {n : Amount lpShare} {w' : World}
     (h : Tx.run (addLiquidity a0 a1) ctx w = .ok (n, w')) :
     n = Amount.ofWord (mintedShares w.self a0.raw a1.raw) := by
   have hok := addLiquidity_ok_of_run h
@@ -3160,7 +3160,7 @@ outstanding (locked at address 0). `Wf` only excludes `sender = self`, so
 `ctx.sender = 0` can burn `shares[0]` later; this is not a trace invariant.
 A later mint on a pool that never locked 1000 need not reach 1000. -/
 theorem addLiquidity_min_liquidity {a0 : Amount asset0} {a1 : Amount asset1}
-    {n : Amount lpShare} {w' : World Storage ExtState Event}
+    {n : Amount lpShare} {w' : World}
     (h : Tx.run (addLiquidity a0 a1) ctx w = .ok (n, w')) :
     w.self.totalShares.raw = 0 → 1000 ≤ w'.self.totalShares.raw := by
   have hok := addLiquidity_ok_of_run h

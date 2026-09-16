@@ -14,36 +14,36 @@ open Lsc Lsc.Stdlib WETH
 
 namespace WETH
 
-variable (ctx : Ctx) (w : World Storage ExtState Event)
+variable (msg : Ctx) (w : World)
 
-/-- A successful `deposit` credits `ctx.value` to the sender and to
+/-- A successful `deposit` credits `msg.value` to the sender and to
 `totalSupply`. `Tx.run` does not credit incoming ETH; the trace `step`
 does that before the body. -/
-theorem deposit_delta {w' : World Storage ExtState Event}
-    (h : Tx.run depositTx ctx w = .ok ((), w')) :
-    w'.self.balances ctx.sender =
-      w.self.balances ctx.sender + ⟨ctx.value⟩ ∧
-    w'.self.totalSupply = w.self.totalSupply + ⟨ctx.value⟩ ∧
+theorem deposit_delta {w' : World}
+    (h : Tx.run depositTx msg w = .ok ((), w')) :
+    w'.self.balances msg.sender =
+      w.self.balances msg.sender + ⟨msg.value⟩ ∧
+    w'.self.totalSupply = w.self.totalSupply + ⟨msg.value⟩ ∧
     World.nativeBalance w' = World.nativeBalance w :=
-  Proof.deposit_delta ctx w h
+  Proof.deposit_delta msg w h
 
 /-- A successful `withdraw` burns `amount` from the sender and from
 `totalSupply`. Native `ext` is the `oracle.send` post-state. -/
 theorem withdraw_delta (amount : Amount native)
-    {w' : World Storage ExtState Event}
-    (h : Tx.run (withdraw amount) ctx w = .ok ((), w')) :
-    w'.self.balances ctx.sender + amount = w.self.balances ctx.sender ∧
+    {w' : World}
+    (h : Tx.run (withdraw amount) msg w = .ok ((), w')) :
+    w'.self.balances msg.sender + amount = w.self.balances msg.sender ∧
     w'.self.totalSupply + amount = w.self.totalSupply :=
-  Proof.withdraw_delta ctx w amount h
+  Proof.withdraw_delta msg w amount h
 
 /-- A successful `transfer` leaves the sum of the sender's and recipient's
 balances unchanged. -/
 theorem transfer_conserves (dst : Address) (amount : Amount native)
-    {w' : World Storage ExtState Event}
-    (h : Tx.run (transfer dst amount) ctx w = .ok (true, w')) :
-    w'.self.balances ctx.sender + w'.self.balances dst =
-      w.self.balances ctx.sender + w.self.balances dst :=
-  Proof.transfer_conserves ctx w dst amount h
+    {w' : World}
+    (h : Tx.run (transfer dst amount) msg w = .ok (true, w')) :
+    w'.self.balances msg.sender + w'.self.balances dst =
+      w.self.balances msg.sender + w.self.balances dst :=
+  Proof.transfer_conserves msg w dst amount h
 
 /-- WETH is an exact ERC-20: every promise in `IERC20.Spec` holds of
 `WETH.impl`. Vault/Cpamm take this via `.toSpec` with no new proofs. -/
@@ -56,26 +56,18 @@ open Lsc Lsc.Security WETH
 
 namespace WETH
 
-/-- Every wrapped token is backed: in any state the contract can actually reach, the supply
-never exceeds the native balance it holds. -/
-theorem weth_backed {self : Address} {w : World Storage ExtState Event}
-    (h : Reachable (C := spec) rely self w) :
-    w.self.totalSupply.raw ≤ World.nativeBalance w :=
-  Proof.weth_backed h
+/-- Every wrapped token is backed: in any state the contract can actually
+reach, the supply never exceeds the native balance it holds. -/
+theorem weth_backed (w : State) :
+    w.self.totalSupply ≤ w.nativeBalance :=
+  Proof.weth_backed w
 
-/-- No sequence of calls by other parties lowers `a`'s balance; the only way `a`'s
-claim falls is `a`'s own `transfer` or `withdraw`, or a `transferFrom` within an
-allowance `a` granted. Deposit is payable and only credits the caller. Between
-calls the environment may not drop this contract's native balance (donations are
-allowed). Well-formed traces target this contract, have a distinct caller, and
-never overflow a 256-bit native balance. Reverted calls leave every balance
-unchanged. -/
-theorem weth_no_unauthorized_extraction (self : Address)
-    (tr : List (Step spec)) (w : World Storage ExtState Event) (a : Address)
-    (h : Reachable (C := spec) rely self w)
-    (hW : Wf self tr w) (hR : RelyAlong rely tr w)
-    (hA : NoAuthAlong Auth a tr w) :
-    claim a w ≤ claim a (run tr w) :=
-  Proof.weth_no_unauthorized_extraction self tr w a h hW hR hA
+/-- No sequence of calls by other parties lowers `a`'s wrapped balance
+except by the amount `a` itself authorised: `a`'s own `transfer`/`withdraw`,
+or a `transferFrom` of `a`'s tokens. Only accepted calls count. Between
+calls the environment may not drop this contract's native balance. -/
+theorem weth_no_unauthorized_extraction (w : State) (t : Txs w) (a : Address) :
+    w.self.balances a ≤ t.end.self.balances a + t.spent a :=
+  Proof.weth_no_unauthorized_extraction w t a
 
 end WETH

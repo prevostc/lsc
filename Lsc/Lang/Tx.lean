@@ -53,6 +53,14 @@ structure Ctx where
   self : Address := 0
   deriving Repr
 
+/-- An external message: `sender ≠ self`. Physically only this contract's
+code can emit a message from `self`; nested calls are the oracle's
+`nested_lock_reverts`. 19f: Vault per-call theorems take `msg : Msg` and
+read `msg.notSelf` instead of a `hne` hypothesis. Transport of a single
+call still uses `Ctx` (CallsWF already has `sender ≠ self`). -/
+structure Msg extends Ctx where
+  notSelf : sender ≠ self
+
 /-- Deterministic, memory-blind callee oracle over opaque external state `X`.
 `call` is CALL: `none` is revert. `view` is STATICCALL: total, no `ext` update.
 `send` is a value-carrying CALL with empty calldata (`none` is revert).

@@ -23,6 +23,7 @@ import Lsc.Security.Invariant
 import Lsc.Security.InvariantTheorems
 import Lsc.Security.Wealth
 import Lsc.Security.WealthTheorems
+import Lsc.Security.State
 
 /-!
 # LSC — a provable DeFi language compiling to EVM
