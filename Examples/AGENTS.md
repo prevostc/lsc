@@ -25,9 +25,11 @@ Exactly:
 - `Theorems.lean` — every exposed theorem about the *contract*: Tx-level
   deltas, security, `implements` conformance. Trace theorems quantify
   `State C` and `Txs w` with conclusions in storage fields; no `Inv` /
-  `Wf` / `RelyAlong` / `NoAuthAlong` hypotheses (Vault/Cpamm still use
-  those internally until 19f). Per-call binders are `msg`. Plain-language
-  docstring on each; body is a one-line reference into `Proofs/`. NO
+  `Wf` / `RelyAlong` / `NoAuthAlong` hypotheses. Honest-counterparty
+  (`IERC20.Spec`, `TokensIndependent`) lives in `HasDeploy` / `State`.
+  Per-call binders are `msg` (`Msg` when `sender ≠ self` is needed).
+  Plain-language docstring on each; body is a one-line reference into
+  `Proofs/`. NO
   compiler/bytecode theorems: the compiler's theorems quantify over all
   contracts, per-contract instances add nothing.
 - `Proofs/` — `Tx.lean`, `Security.lean`, `Implements.lean` (when the contract

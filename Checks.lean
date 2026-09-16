@@ -33,7 +33,7 @@ pinned theorem is added or renamed; the commit message records what moved.
 /-- info: 'Token.transfer_conserves' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms Token.transfer_conserves
 
-/-- info: 'Token.token_no_unauthorized_extraction' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Token.token_no_unauthorized_extraction' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms Token.token_no_unauthorized_extraction
 
 /-- info: 'Token.token_solvent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -45,7 +45,7 @@ pinned theorem is added or renamed; the commit message records what moved.
 /-- info: 'Vault.vault_solvent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms Vault.vault_solvent
 
-/-- info: 'Vault.vault_no_unauthorized_extraction' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Vault.vault_no_unauthorized_extraction' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms Vault.vault_no_unauthorized_extraction
 
 /-- info: 'Cpamm.swap0for1_k' depends on axioms: [propext, Quot.sound] -/
@@ -63,7 +63,7 @@ pinned theorem is added or renamed; the commit message records what moved.
 /-- info: 'WETH.weth_backed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms WETH.weth_backed
 
-/-- info: 'WETH.weth_no_unauthorized_extraction' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'WETH.weth_no_unauthorized_extraction' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms WETH.weth_no_unauthorized_extraction
 
 /-- info: 'Lsc.Security.inv_of_reachable' does not depend on any axioms -/

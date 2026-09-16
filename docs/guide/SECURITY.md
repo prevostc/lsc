@@ -41,12 +41,12 @@ If those local facts hold, then:
   require well-formedness (caller ≠ contract), because their invariant
   talks about this contract's token balance. The 256-bit native wrap is
   a compiled payable guard, not a trace hypothesis.
-- Token and WETH public theorems quantify `State` / `Txs`: a deployed
-  world after any sequence of calls by anyone, plus environment steps
-  the spec's rely permits. Extraction is
-  `w.self.balances a ≤ t.end.self.balances a + t.spent a` (`spent` sums
-  authorised outflows over accepted calls). `Inv` is a proof device.
-  Vault/Cpamm still take `Inv` / `RelyAlong` until 19f.
+- Token, WETH, Vault, and Cpamm public theorems quantify `State` / `Txs`:
+  a deployed world after any sequence of calls by anyone, plus environment
+  steps the spec's rely permits. Extraction is
+  `w.self.balances a ≤ t.end.self.balances a + t.spent a` (Token) or the
+  analogous share-count form (Vault/Cpamm). `spent` sums authorised
+  outflows over accepted calls. `Inv` is a proof device.
 
 A reverted call leaves the world unchanged. Constructors are not trace
 steps; `Deployed` is the post-constructor (or default) storage, and

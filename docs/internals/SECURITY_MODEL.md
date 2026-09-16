@@ -77,7 +77,7 @@ Design decisions fixed for `Lsc/Security` (Trace / Invariant / Wealth):
   trace. `inv_of_reachable` turns that into `Inv` when deployment establishes `Inv` and
   calls/`env` preserve it. Public Token/WETH theorems take `State` (a `Reachable`
   world) rather than an `Inv` hypothesis; `Inv` stays a proof device.
-  Vault/Cpamm still take `Inv` / `RelyAlong` until 19f.
+  Vault/Cpamm public theorems do the same.
 - `spent` (per example, via `HasSpent` / `spentCall`) sums, over **accepted**
   calls of a `Txs` sequence, the amount moved out on `a`'s authority
   (`transfer`/`withdraw` with sender `a`, `transferFrom src _ amount` with
@@ -125,7 +125,7 @@ constrained by `RelyAlong` (`vaultRely` / `cpammRely`). Compiler-level
 
 Any set of addresses `A`, any sequence of calls with arbitrary arguments from `A`, interleaved
 arbitrarily with honest calls; between our calls, `env` steps constrained by `HasRely`
-(default: native balance of `self` does not fall; Vault/Cpamm 19f: honest-counterparty
+(default: native balance of `self` does not fall; Vault/Cpamm: honest-counterparty
 `vaultRely` / `cpammRely`). Public `Txs` already carries `sender ≠ self`. External contracts
 behave per their declared `IERC20.Spec` / rely. Other contracts are modelled as unable to see this
 contract's private memory or `msize`, which is true of the EVM (`ExtOracle`).
@@ -174,5 +174,6 @@ and Cpamm are `Examples/` protocol instances, not stdlib modules.
 
 ## Protocol-specific
 
-`Inv`, `claim`, `Auth`, `holdings`; per-token `IERC20.Spec` and `RelyAlong`;
+`Inv`, `claim`, `Auth`, `holdings`; per-token `IERC20.Spec` lives in
+`HasDeploy` / `State`; environment steps follow `HasRely`;
 economic parameters; prices and oracles.

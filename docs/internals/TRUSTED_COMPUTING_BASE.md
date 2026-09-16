@@ -117,12 +117,12 @@ Not derived from powdr:
 - **Only `self`'s code moves `self`'s ETH.** An environment step may not
   decrease this contract's native balance (`defaultRely` / `HasRely`).
   Donations are allowed. Contracts with `Ref` counterparties add further
-  rely (honest token `balanceOf self`) in 19f.
+  rely (honest token `balanceOf self` via `HasRely`).
 - **`sender ≠ self`.** Physically only this contract's code can emit a
   message from `self`. Nested calls into `self` are the oracle's
-  `nested_lock_reverts`. Public `Txs.call` carries the inequality; 19f
-  per-call theorems can take `msg : Msg` (`Msg.notSelf`) instead of a
-  `hne` hypothesis. Transport of a single call still uses `Ctx`
+  `nested_lock_reverts`. Public `Txs.call` carries the inequality;
+  per-call theorems that need it take `msg : Msg` (`Msg.notSelf`) instead
+  of a `hne` hypothesis. Transport of a single call still uses `Ctx`
   (`CallsWF` already has `sender ≠ self`).
 
 ## Not covered

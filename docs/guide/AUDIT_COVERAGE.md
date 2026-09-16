@@ -26,7 +26,7 @@ DeFi-oriented cut of SWC / OWASP Smart Contract Top 10 / Solodit. Status is
 | Signature replay / malleability | Impossible | No `ecrecover`/`permit` in `Core.Op` | Add only with nonce `Spec` |
 | `delegatecall` / `selfdestruct` / proxy layout | Impossible | YulDefs: never emitted; `stepOp_delegatecall = none`; no `create` | — |
 | `tx.origin` auth | Impossible | Surface `Tx.sender` only; no `Tx.origin` | — |
-| Uninitialized state / constructor | Assumed | `Mapping` default 0; `constructor` not a trace step; `Deployed` / `State` (Token, WETH); TRUST.md EVM ctor-args gap; Vault/Cpamm ctor `CALL` out of scope | Model CREATE suffix; Vault/Cpamm `State` |
+| Uninitialized state / constructor | Assumed | `Mapping` default 0; `constructor` not a trace step; `Deployed` / `State` (Token, WETH, Vault, Cpamm); TRUST.md EVM ctor-args gap; Vault/Cpamm ctor `CALL` out of scope | Model CREATE suffix |
 | Unbounded loops / gas DoS | Impossible | `Core` loop-free; Yul never `for`; gas griefing of *our* exec out of scope | — |
 | DoS via revert-in-callback / unexpected ETH | Assumed | Failed CALL reverts us (SECURITY.md); ABI `nonpayable`; no `receive` | Liveness vs token-revert griefing |
 | Timestamp / block dependence | Open | `Tx.timestamp` / `blockNumber` are `Core.Op` and compile | Lint/ban in `Auth` |

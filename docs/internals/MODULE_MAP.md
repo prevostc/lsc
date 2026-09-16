@@ -135,10 +135,10 @@ Each protocol is a directory (`Examples/AGENTS.md`):
   `token_solvent`, `erc20` (`IERC20.Spec Token.impl`). Public theorems
   take `State` / `Txs`.
 - **Vault** — `Examples/Vault/`. S2, one `IERC20.Ref`. `vault_no_unauthorized_extraction`,
-  `vault_solvent` (still `Inv` / `RelyAlong` until 19f).
+  `vault_solvent` (`State` / `Txs`; `IERC20.Spec` lives in `HasDeploy` / `State`).
 - **Cpamm** — `Examples/Cpamm/`. S2, two `IERC20.Ref`. `swap0for1_k`,
-  `cpamm_no_unauthorized_extraction`, `cpamm_solvent` (still `Inv` /
-  `RelyAlong` until 19f).
+  `cpamm_no_unauthorized_extraction`, `cpamm_solvent` (`State` / `Txs`;
+  both `IERC20.Spec`s and `TokensIndependent` live in `HasDeploy` / `State`).
 - **WETH** — `Examples/WETH/`. Wrapped native (`Chain` profile). `weth_exact`,
   `weth_backed` / `weth_no_unauthorized_extraction` (`State` / `Txs`),
   `deposit_delta`, `withdraw_delta`.
