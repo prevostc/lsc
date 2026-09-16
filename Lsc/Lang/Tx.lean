@@ -41,6 +41,9 @@ end Address
 /-- Storage mappings are plain functions with default zero. -/
 abbrev Mapping (K V : Type) := K → V
 
+/-- `Address ↦ Amount a` is `Mapping Address (Amount a)`. Right-associative. -/
+infixr:25 " ↦ " => Mapping
+
 /-- `2^256`: the EVM word bound. -/
 def wordBound : Nat := 2 ^ 256
 
@@ -183,6 +186,48 @@ structure Field (S : Type) (α : Type) where
 
 /-- Marker class: `deriving Fields` on a storage structure. -/
 class Fields (S : Type) : Prop
+
+/-- Lens laws. `deriving Fields` instances are lawful; `Field.comp`
+preserves them. -/
+class Field.Lawful {S α : Type} (f : Field S α) : Prop where
+  get_set : ∀ (s : S) (v : α), f.get (f.set s v) = v
+  set_get : ∀ (s : S), f.set s (f.get s) = s
+  set_set : ∀ (s : S) (v w : α), f.set (f.set s v) w = f.set s w
+
+/-- Distinct fields of a structure: setting `g` does not change `f.get`.
+`deriving Fields` instances every ordered pair of distinct fields. -/
+class Field.Independent {S α β : Type} (f : Field S α) (g : Field S β) : Prop where
+  get_set_other : ∀ (s : S) (v : β), f.get (g.set s v) = f.get s
+
+namespace Field
+
+variable {S α β : Type}
+
+/-- `inner` after `outer`. Used by `ERC20.Fields.ofParent`. -/
+def comp (outer : Field S α) (inner : Field α β) : Field S β where
+  get s := inner.get (outer.get s)
+  set s v := outer.set s (inner.set (outer.get s) v)
+
+instance [Lawful outer] [Lawful inner] : Lawful (comp outer inner) where
+  get_set := by
+    intro s v
+    simp [comp, Lawful.get_set]
+  set_get := by
+    intro s
+    simp [comp, Lawful.set_get]
+  set_set := by
+    intro s v w
+    simp only [comp]
+    rw [Lawful.get_set, Lawful.set_set, Lawful.set_set]
+
+instance {γ : Type} {outer : Field S α} {inner₁ : Field α β}
+    {inner₂ : Field α γ} [Lawful outer] [Independent inner₁ inner₂] :
+    Independent (comp outer inner₁) (comp outer inner₂) where
+  get_set_other := by
+    intro s v
+    simp [comp, Lawful.get_set, Independent.get_set_other]
+
+end Field
 
 @[simp] theorem Field.get_mk {S α} (get : S → α) (set : S → α → S) :
     Field.get ⟨get, set⟩ = get := rfl

@@ -1,4 +1,6 @@
 import Stdlib.ERC20
+import Stdlib.ERC20.Base
+import Stdlib.ERC20.BaseTheorems
 import Stdlib.SafeERC20
 import Stdlib.Scales
 import Stdlib.Shares

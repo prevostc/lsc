@@ -5,6 +5,7 @@ syntax are `Examples/Counter/Contract.lean`, `Examples/Token/Contract.lean`,
 `Examples/Vault/Contract.lean`, and `Examples/Cpamm/Contract.lean`.
 
 - [Writing a contract](CONTRACTS.md) — `lsc_schema`, `lsc_contract`, `Amount`
+- [Stdlib](STDLIB.md) — IERC20, ERC20 base, SafeERC20, scales, shares
 - [Security model](SECURITY.md) — unauthorised extraction, solvency, the adversary
 - [External calls](EXTERNAL_CALLS.md) — `IERC20.Ref` / `I.Impl` / `I.Spec`
 - [What is trusted](TRUST.md) — foundations and hypotheses, in words

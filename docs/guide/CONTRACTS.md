@@ -68,7 +68,10 @@ balances[who]` indexes a mapping lens. A bare ident resolves to
 ```
 
 Reify still sees `Field.get` / `Field.set` (unfolded to the projection
-and `{ σ with f := v }`).
+and `{ σ with f := v }`). Each derived lens is `Field.Lawful`; distinct
+flattened fields are pairwise `Field.Independent`. Parameterized
+structures (`ERC20.Storage a`) and `extends` parents are supported: the
+parent subobject lens is what `ERC20.Fields.ofParent` composes.
 
 ## Token, vault, pool
 

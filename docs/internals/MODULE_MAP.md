@@ -17,14 +17,16 @@ Lake libraries (`lakefile.lean`): `LscSemantics` (`Lsc.Lang`, `Lsc.Security`,
 ## `Lsc/Lang` — the language
 
 - `Tx.lean` — `Tx S X E ε`, `World S X E`, `Ctx`, `Oracle`, `Err` (including
-  `callFailed`), primitives, `Field`, `deriving Fields` marker, `Lsc.Syntax`
+  `callFailed`), primitives, `Field`, `Field.Lawful` / `Field.Independent` /
+  `Field.comp`, `deriving Fields` marker, `Lsc.Syntax`
   `read` / `write`. Language specification.
   `TxTheorems.lean` / `TxProof.lean` — `run_*` peeling lemmas and monad laws.
 - `Interface.lean` — `Fn` / `View`, `Interface`, `Tx.call` / `Tx.view` /
   `Tx.tryCall`, `decodeOrDefault`, `I.Ref` macro, `read`/`write` elaborators
   (lens values; bare idents → `S.Fields.f`). `InterfaceDeriving.lean`
   generates `I.Ref` / `I.Impl` / `Impl.ofRef`. `FieldsDeriving.lean`
-  generates per-field `Field S α` lenses. `InterfaceTheorems.lean` /
+  generates per-field `Field S α` lenses (flattened `extends` fields, parent
+  subobject lenses, `Field.Lawful` / pairwise `Field.Independent`). `InterfaceTheorems.lean` /
   `InterfaceProof.lean` — `run_call` / `run_view` and certificate lemmas.
 - `Word.lean` — `Word`, `Flag`, checked `+? -? *? /?`, `mulDivDown` / `Up` /
   `pow10`. `WordTheorems.lean` / `WordProof.lean` for `Tx.run` lemmas.
@@ -64,7 +66,11 @@ Depends only on `Lsc/Lang`.
 Does not import `Examples`. `Lsc` does not import `Stdlib`.
 
 - `ERC20.lean` — `structure IERC20 (a : Asset)` (`deriving Interface`) and
-  `IERC20.Spec T`. Namespace `Lsc.Stdlib`.
+  `IERC20.Spec` / `IERC20.Exact`. Namespace `Lsc.Stdlib`.
+- `ERC20/Base.lean` — `ERC20.Storage`, `Fields` / `ofParent`, `Events` /
+  `Errors`, the six IERC20 methods, `@[internal]` `mint` / `burn`.
+  `ERC20/BaseTheorems.lean` — `ERC20.exact` and per-call deltas over
+  `[Fields.Lawful F]`.
 - `Scales.lean` — `WAD`, `RAY`, `USDC_SCALE`, `Q96`, `E8`; `Fixed` helpers.
 - `SafeERC20.lean` — `safeTransfer` / `safeTransferFrom` / `safeApprove`
   (`@[internal inline]`).

@@ -196,13 +196,15 @@ def contractInfo (ns : Name) : MetaM ContractInfo := do
   let env ← getEnv
   unless isStructure env storage do
     throwError "{storage} must be a structure"
-  let fieldNames := getStructureFields env storage
-  let ctor := getStructureCtor env storage
-  let fields ← forallTelescope ctor.type fun xs _ => do
-    let xs := xs.extract ctor.numParams xs.size
-    xs.mapIdxM fun i x => do
-      let (kind, valTy) ← fieldKindAndVal (← inferType x)
-      pure { name := fieldNames[i]!, idx := i, kind, valTy : FieldInfo }
+  let indVal ← getConstInfoInduct storage
+  let nparams := indVal.numParams
+  let fieldNames := getStructureFieldsFlattened env storage
+      (includeSubobjectFields := false)
+  let fields ← fieldNames.mapIdxM fun i fieldName => do
+    let projTy ← inferType (mkConst (storage ++ fieldName))
+    forallBoundedTelescope projTy (some (nparams + 1)) fun _ rest => do
+      let (kind, valTy) ← fieldKindAndVal rest
+      pure { name := fieldName, idx := i, kind, valTy : FieldInfo }
   let evInfo ← getConstInfoInduct event
   let errInfo ← getConstInfoInduct error
   pure {
