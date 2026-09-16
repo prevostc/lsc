@@ -15,7 +15,7 @@ python3 tests/difftest.py --check-tools
 
 echo "==> lake build (bytecode exporter deps)"
 scripts/lean lake build Lsc.Compiler.Bytecode Examples.Counter.Contract Examples.Token.Contract \
-  Examples.Vault.Contract Examples.Cpamm.Contract Examples.WNative.Contract \
+  Examples.Vault.Contract Examples.Cpamm.Contract Examples.WETH.Contract \
   Lsc.Tools.AbiJson Lsc.Tools.Disasm
 
 echo "==> export bytecode + Tx.run expectations"

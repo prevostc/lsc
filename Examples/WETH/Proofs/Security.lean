@@ -1,6 +1,6 @@
 import Lsc.Security.WealthTheorems
-import Examples.WNative.Spec
-import Examples.WNative.Proofs.Tx
+import Examples.WETH.Spec
+import Examples.WETH.Proofs.Tx
 
 /-!
 Wrapped-token claim is storage-only (`Claim.ofSelf`). Wealth therefore
@@ -13,16 +13,16 @@ treat it as a `Claim`: `env` steps can change `ext` balances, and
 is not a Wealth claim.
 -/
 
-open Lsc Lsc.Security WNative
+open Lsc Lsc.Security WETH
 
-namespace WNative
+namespace WETH
 
 namespace Proof
 
-theorem wnative_backed {w : World Storage ExtState Event} (h : Inv w) :
+theorem weth_backed {w : World Storage ExtState Event} (h : Inv w) :
     w.self.totalSupply.raw ≤ World.nativeBalance w :=
   h.2
 
 end Proof
 
-end WNative
+end WETH

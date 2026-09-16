@@ -30,7 +30,7 @@ DeFi-oriented cut of SWC / OWASP Smart Contract Top 10 / Solodit. Status is
 | Unbounded loops / gas DoS | Impossible | `Core` loop-free; Yul never `for`; gas griefing of *our* exec out of scope | — |
 | DoS via revert-in-callback / unexpected ETH | Assumed | Failed CALL reverts us (SECURITY.md); ABI `nonpayable`; no `receive` | Liveness vs token-revert griefing |
 | Timestamp / block dependence | Open | `Tx.timestamp` / `blockNumber` are `Core.Op` and compile | Lint/ban in `Auth` |
-| ETH / `payable` / stuck funds | Proved | `[Payable]` + typed `Tx.value`; dispatcher `callvalue` revert; `Native.send`; WNative `wnative_backed` / deltas | Trace `step` credits `ctx.value` before `Tx.run`; native-balance extraction is **not** in the `Wealth` framework |
+| ETH / `payable` / stuck funds | Proved | `[Payable]` + typed `Tx.value`; dispatcher `callvalue` revert; `Native.send`; WETH `weth_backed` / deltas | Trace `step` credits `ctx.value` before `Tx.run`; native-balance extraction is **not** in the `Wealth` framework |
 | Decimals mismatch / unit confusion | Proved | `Amount a` blocks mixed `+?`; `x.as b` requires `a.decimals? = b.decimals?` at elaboration (rejects `USDC(6)→DAI(18)` and `none` vs `some`); `asUnchecked` only for documented cross-scale retags (Cpamm first mint) | `decodeOrDefault` on views still fail-open |
 | Unsafe casts / silent truncation | Open | `Amount.ofWord`; `decodeOrDefault` on views | Fail closed on bad view ABI |
 | ERC-777 / token-hook reentrancy | Assumed | SECURITY.md ERC-777 hooks out of scope; `NoReentry` | 8C + token `Spec` |

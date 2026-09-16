@@ -1,15 +1,15 @@
 import Mathlib.Tactic.SplitIfs
-import Examples.WNative.Contract
+import Examples.WETH.Contract
 
 /-!
-WNative Tx-level lemmas: exact `Tx.run` post-states and conservation.
+WETH Tx-level lemmas: exact `Tx.run` post-states and conservation.
 -/
 
 set_option linter.unusedSimpArgs false
 
-open Lsc WNative
+open Lsc WETH
 
-namespace WNative
+namespace WETH
 
 variable (ctx : Ctx) (w : World Storage ExtState Event)
 
@@ -525,5 +525,5 @@ theorem transfer_conserves (to : Address) (amount : Amount native)
 
 end Proof
 
-end WNative
+end WETH
 

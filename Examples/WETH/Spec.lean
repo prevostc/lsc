@@ -1,15 +1,15 @@
 import Lsc.Security.Wealth
-import Examples.WNative.Contract
+import Examples.WETH.Contract
 
 /-!
-WNative spec: `claim` is the wrapped balance; `Auth` is the holder's own
+WETH spec: `claim` is the wrapped balance; `Auth` is the holder's own
 `transfer` / `withdraw` or an allowance-backed `transferFrom`. `Inv` is
 finite-support conservation of balances against `totalSupply`.
 -/
 
-open Lsc Lsc.Security WNative
+open Lsc Lsc.Security WETH
 
-namespace WNative
+namespace WETH
 
 /-- `claim a w` is `a`'s wrapped balance. -/
 def claim : Claim Storage ExtState Event :=
@@ -34,7 +34,7 @@ def inflow (c : Call spec) (w : World Storage ExtState Event) : Nat :=
   | _, _ => 0
 
 /-- Holdings for solvency are recorded `totalSupply` (wrapped tokens).
-Native ETH of `self` is `World.nativeBalance`, used by `wnative_backed`. -/
+Native ETH of `self` is `World.nativeBalance`, used by `weth_backed`. -/
 def holdings (_self : Address) (w : World Storage ExtState Event) : Nat :=
   w.self.totalSupply.raw
 
@@ -51,4 +51,4 @@ def Inv (w : World Storage ExtState Event) : Prop :=
 Storage-only `claim` is automatically monotone. -/
 def rely (_x _x' : ExtState) : Prop := True
 
-end WNative
+end WETH

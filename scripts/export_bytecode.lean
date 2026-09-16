@@ -11,7 +11,7 @@ prints JSON on stdout (BEGIN_LSC_EXPORT … END_LSC_EXPORT) for `scripts/difftes
 Does not import example Tests files (their `#eval`/`#guard` would re-run).
 Case lists, senders, and mapping slots follow the old interpreter fixtures.
 Vault and CPAMM are exported for artifacts only (no Tx.run cases); constructors CALL out.
-WNative has payable deposit / Native.send withdraw cases.
+WETH has payable deposit / Native.send withdraw cases.
 -/
 import Lsc.Compiler.Bytecode
 import Lsc.Compiler.Pipeline
@@ -23,7 +23,7 @@ import Examples.Counter.Contract
 import Examples.Token.Contract
 import Examples.Vault.Contract
 import Examples.Cpamm.Contract
-import Examples.WNative.Contract
+import Examples.WETH.Contract
 import Lsc.Lang.Capability
 import Lsc.Tools.AbiJson
 import Lsc.Tools.Disasm
@@ -347,9 +347,9 @@ def tokenCtorChecks : List Case :=
       ((Tx.run Token.totalSupply tokenCtxDeploy tokenW1).map
         fun (n, w) => (n.raw, w)) ]
 
-/-! ## WNative (payable deposit, Native.send withdraw) -/
+/-! ## WETH (payable deposit, Native.send withdraw) -/
 
-def wnErr : WNative.Error → Nat
+def wnErr : WETH.Error → Nat
   | .InsufficientBalance => 0
   | .InsufficientAllowance => 1
   | .TransferFailed => 2
@@ -359,21 +359,21 @@ abbrev wnFe : Nat := 0x1000
 
 def wnAddrs : List Nat := [0, 1, 2, wnFe]
 
-def wnSlots (σ : WNative.Storage) : List (BitVec 256 × BitVec 256) :=
+def wnSlots (σ : WETH.Storage) : List (BitVec 256 × BitVec 256) :=
   wnAddrs.map (fun a => (mapSlot1 keccakOf 0 a, u256 (σ.balances a).raw)) ++
     wnAddrs.flatMap (fun a =>
       wnAddrs.map (fun b => (mapSlot2 keccakOf 1 a b, u256 (σ.allowances a b).raw))) ++
     [(u256 2, u256 σ.totalSupply.raw)]
 
-def wnEmpty : WNative.Storage :=
+def wnEmpty : WETH.Storage :=
   { balances := fun _ => 0, allowances := fun _ _ => 0, totalSupply := 0 }
 
-def wnWrap1 : WNative.Storage :=
+def wnWrap1 : WETH.Storage :=
   { balances := fun a => Amount.ofWord (if a = (1 : Address) then 40 else 0)
     allowances := fun _ _ => 0
     totalSupply := 40 }
 
-def wnWrapFe : WNative.Storage :=
+def wnWrapFe : WETH.Storage :=
   { balances := fun a => Amount.ofWord (if a = (0x1000 : Address) then 40 else 0)
     allowances := fun _ _ => 0
     totalSupply := 40 }
@@ -381,18 +381,18 @@ def wnWrapFe : WNative.Storage :=
 def wnAccept : Oracle ExtState where
   send _ _ x := some x
 
-def wnW0 : World WNative.Storage ExtState WNative.Event := { self := wnEmpty, ext := {} }
-def wnW1 : World WNative.Storage ExtState WNative.Event := { self := wnWrap1, ext := {} }
-def wnW1s : World WNative.Storage ExtState WNative.Event :=
+def wnW0 : World WETH.Storage ExtState WETH.Event := { self := wnEmpty, ext := {} }
+def wnW1 : World WETH.Storage ExtState WETH.Event := { self := wnWrap1, ext := {} }
+def wnW1s : World WETH.Storage ExtState WETH.Event :=
   { self := wnWrap1, ext := {}, oracle := wnAccept }
-def wnWFe : World WNative.Storage ExtState WNative.Event := { self := wnWrapFe, ext := {} }
+def wnWFe : World WETH.Storage ExtState WETH.Event := { self := wnWrapFe, ext := {} }
 
 def wnCtx : Ctx := { sender := 1, self := 7 }
 def wnCtxVal : Ctx := { sender := 1, value := 40, self := 7 }
 def wnCtxFe : Ctx := { sender := wnFe, self := 7 }
 
-def wnUnit (name fname : String) (args : List Nat) (ctx : Ctx) (σ : WNative.Storage)
-    (tx : Except (Err WNative.Error) (Unit × World WNative.Storage ExtState WNative.Event))
+def wnUnit (name fname : String) (args : List Nat) (ctx : Ctx) (σ : WETH.Storage)
+    (tx : Except (Err WETH.Error) (Unit × World WETH.Storage ExtState WETH.Event))
     (value : Nat := 0) (selfBalance : Nat := 0)
     (setCode : List (Nat × String) := []) : Case :=
   let pre := wnSlots σ
@@ -400,33 +400,33 @@ def wnUnit (name fname : String) (args : List Nat) (ctx : Ctx) (σ : WNative.Sto
     match tx with
     | .ok (_, w') => wnSlots w'.self
     | .error _ => pre
-  { mkCase WNative.contract name fname args ctx.sender
-      (unitOutcome WNative.contract wnErr tx pre postOk) pre with
+  { mkCase WETH.contract name fname args ctx.sender
+      (unitOutcome WETH.contract wnErr tx pre postOk) pre with
     value, selfBalance, setCode }
 
-def wnBool (name fname : String) (args : List Nat) (ctx : Ctx) (σ : WNative.Storage)
-    (tx : Except (Err WNative.Error) (Bool × World WNative.Storage ExtState WNative.Event))
+def wnBool (name fname : String) (args : List Nat) (ctx : Ctx) (σ : WETH.Storage)
+    (tx : Except (Err WETH.Error) (Bool × World WETH.Storage ExtState WETH.Event))
     (value : Nat := 0) : Case :=
   let pre := wnSlots σ
   let postOk :=
     match tx with
     | .ok (_, w') => wnSlots w'.self
     | .error _ => pre
-  { mkCase WNative.contract name fname args ctx.sender
-      (boolOutcome WNative.contract wnErr tx pre postOk) pre with value }
+  { mkCase WETH.contract name fname args ctx.sender
+      (boolOutcome WETH.contract wnErr tx pre postOk) pre with value }
 
-def wnativeCases : List Case :=
+def wethCases : List Case :=
   [ wnUnit "deposit_ok" "deposit" [] wnCtxVal wnEmpty
-      (Tx.run (@WNative.deposit Payable.entrypoint) wnCtxVal wnW0) (value := 40)
+      (Tx.run (@WETH.deposit Payable.entrypoint) wnCtxVal wnW0) (value := 40)
   , wnUnit "withdraw_ok" "withdraw" [10] wnCtx wnWrap1
-      (Tx.run (WNative.withdraw 10) wnCtx wnW1s) (selfBalance := 1000)
+      (Tx.run (WETH.withdraw 10) wnCtx wnW1s) (selfBalance := 1000)
   , wnBool "transfer_ok" "transfer" [2, 15] wnCtx wnWrap1
-      (Tx.run (WNative.transfer 2 15) wnCtx wnW1)
+      (Tx.run (WETH.transfer 2 15) wnCtx wnW1)
   , { wnBool "transfer_value_revert" "transfer" [2, 15] wnCtx wnWrap1
-        (Tx.run (WNative.transfer 2 15) wnCtx wnW1) with
+        (Tx.run (WETH.transfer 2 15) wnCtx wnW1) with
       status := "revert", returnData := [], post := wnSlots wnWrap1, value := 1 }
   , wnUnit "withdraw_reject_value" "withdraw" [10] wnCtxFe wnWrapFe
-      (Tx.run (WNative.withdraw 10) wnCtxFe wnWFe) (selfBalance := 1000)
+      (Tx.run (WETH.withdraw 10) wnCtxFe wnWFe) (selfBalance := 1000)
       (setCode := [(wnFe, "0xfe")]) ]
 
 /-- Fixed `anvil_setCode` address. `Ctx.self = 7` would be the ECMUL precompile
@@ -437,7 +437,7 @@ def counterArt := compileContract Counter.contract
 def tokenArt := compileContract Token.contract
 def vaultArt := compileContract Vault.contract
 def cpammArt := compileContract Cpamm.contract
-def wnativeArt := compileContract WNative.contract
+def wethArt := compileContract WETH.contract
 
 def exportJson : String :=
   "{" ++ String.intercalate "," [
@@ -451,7 +451,7 @@ def exportJson : String :=
         (some (ctorCalldata [1, 10])),
       contractJson "Cpamm" Cpamm.contract cpammArt []
         (some (ctorCalldata [1, 10, 11])),
-      contractJson "WNative" WNative.contract wnativeArt wnativeCases
+      contractJson "WETH" WETH.contract wethArt wethCases
     ] ++ "]"
   ] ++ "}"
 
@@ -460,7 +460,7 @@ def main : IO Unit := do
   writeContract "Token" Token.contract tokenArt
   writeContract "Vault" Vault.contract vaultArt
   writeContract "Cpamm" Cpamm.contract cpammArt
-  writeContract "WNative" WNative.contract wnativeArt
+  writeContract "WETH" WETH.contract wethArt
   IO.println "BEGIN_LSC_EXPORT"
   IO.println exportJson
   IO.println "END_LSC_EXPORT"

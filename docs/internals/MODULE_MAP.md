@@ -11,7 +11,7 @@ Lake libraries (`lakefile.lean`): `LscSemantics` (`Lsc.Lang`, `Lsc.Security`,
 `Lsc.Tools`, barrel `Lsc.lean`) → `Stdlib` (`Stdlib.ERC20`, `Stdlib.Scales`,
 `Stdlib.SafeERC20`, barrel `Stdlib.lean`) → `Examples`
 (`Examples.Counter.*`, `Examples.Token.*`, `Examples.Vault.*`,
-`Examples.Cpamm.*`) → `Checks`. Import direction is strictly downward.
+`Examples.Cpamm.*`, `Examples.WETH.*`) → `Checks`. Import direction is strictly downward.
 
 ## `Lsc/Lang` — the language
 
@@ -133,6 +133,8 @@ Each protocol is a directory (`Examples/AGENTS.md`):
   `vault_solvent`.
 - **Cpamm** — `Examples/Cpamm/`. S2, two `IERC20.Ref`. `swap0for1_k`,
   `cpamm_no_unauthorized_extraction`, `cpamm_solvent`.
+- **WETH** — `Examples/WETH/`. Wrapped native (`Chain` profile). `weth_exact`,
+  `weth_backed`, `deposit_delta`, `withdraw_delta`.
 
 `Checks.lean` imports `Examples.<Name>.Theorems` only. Bytecode transport is
 the compiler family in `TransportTheorems.lean`, not per-example theorems.

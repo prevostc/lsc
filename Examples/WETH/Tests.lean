@@ -1,14 +1,14 @@
-import Examples.WNative.Contract
-import Examples.WNative.Theorems
+import Examples.WETH.Contract
+import Examples.WETH.Theorems
 
 /-!
-WNative smoke tests: deposit, withdraw, transfer, and `Exact.toSpec`
+WETH smoke tests: deposit, withdraw, transfer, and `Exact.toSpec`
 as the `IERC20.Spec` Vault quantifies over.
 -/
 
-open Lsc Lsc.Stdlib WNative
+open Lsc Lsc.Stdlib WETH
 
-namespace WNative
+namespace WETH
 
 def smokeWho : Address := 1
 def smokeTo : Address := 2
@@ -25,12 +25,12 @@ def acceptSend : Oracle ExtState where
 def smokeSend : World Storage ExtState Event :=
   { smokeEmpty with oracle := acceptSend }
 
-end WNative
+end WETH
 
-open WNative
+open WETH
 
 /-- `Exact.toSpec` is the `IERC20.Spec` Vault/Cpamm quantify over. -/
-example : IERC20.Spec WNative.impl := wnative_exact.toSpec
+example : IERC20.Spec WETH.impl := weth_exact.toSpec
 
 #guard
   (match Tx.run depositTx smokeCtx smokeEmpty with

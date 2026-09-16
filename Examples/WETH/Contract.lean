@@ -3,15 +3,17 @@ import Lsc.Lang.Reify
 import Stdlib.ERC20
 
 /-!
-# WNative — wrap / unwrap the chain's native asset as an ERC-20
+# WETH — wrap / unwrap the chain's native asset as an ERC-20
 
 `deposit` credits `msg.value` to the sender. `withdraw` burns and sends
-native (`Native.send`). Transfers match Token. Compiled for Ethereum ETH.
+native (`Native.send`). Transfers match Token. The native asset comes from
+the `Chain` profile, so the same contract is a wrapped-native token on any
+profile; this copy uses Ethereum ETH.
 -/
 
 open Lsc Lsc.Syntax Lsc.Stdlib
 
-namespace WNative
+namespace WETH
 
 /-- Ethereum profile; `native` is 18-decimal ETH. -/
 def chain : Chain := .ethereum
@@ -96,17 +98,17 @@ def allowance (owner spender : Address) : M (Amount native) :=
 /-- Recorded total supply. -/
 def totalSupply : M (Amount native) := read totalSupply
 
-end WNative
+end WETH
 
-lsc_schema WNative
-lsc_reify WNative.deposit
-lsc_reify WNative.withdraw
-lsc_reify WNative.transfer
-lsc_reify WNative.transferFrom
-lsc_reify WNative.approve
-lsc_reify WNative.totalSupply
-lsc_reify WNative.balanceOf
-lsc_reify WNative.allowance
-lsc_contract WNative deposit withdraw transfer transferFrom approve
+lsc_schema WETH
+lsc_reify WETH.deposit
+lsc_reify WETH.withdraw
+lsc_reify WETH.transfer
+lsc_reify WETH.transferFrom
+lsc_reify WETH.approve
+lsc_reify WETH.totalSupply
+lsc_reify WETH.balanceOf
+lsc_reify WETH.allowance
+lsc_contract WETH deposit withdraw transfer transferFrom approve
   totalSupply balanceOf allowance
-  implements IERC20 WNative.native
+  implements IERC20 WETH.native

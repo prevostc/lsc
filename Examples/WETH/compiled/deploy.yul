@@ -8,7 +8,7 @@
 //   0x70a08231  (1889567281)  balanceOf(address)
 //   0xdd62ed3e  (3714247998)  allowance(address,address)
 
-object "WNative" {
+object "WETH" {
     code {
         datacopy(0, dataoffset("runtime"), datasize("runtime"))
         return(0, datasize("runtime"))

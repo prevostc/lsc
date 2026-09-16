@@ -96,8 +96,10 @@ Share conversion is `Shares.toShares` / `Shares.toAssets` with
 `offset := ⟨6⟩` (virtual offset `10^6`).
 Cpamm (`Examples/Cpamm/Contract.lean`) binds two `Ref (IERC20 …)` tokens.
 See [External calls](EXTERNAL_CALLS.md).
-WNative (`Examples/WNative/Contract.lean`) wraps the chain native asset
-(`def chain := .ethereum`) as an ERC-20 (`IERC20.Exact`).
+WETH (`Examples/WETH/Contract.lean`) wraps the chain native asset as an
+ERC-20 (`IERC20.Exact`). The native asset comes from the `Chain` profile,
+so the same contract is a wrapped-native token on any profile (`def chain
+:= .ethereum` here).
 
 A function named `constructor` is deployment only; it is not a trace
 entrypoint. Token's constructor mints the initial supply to the owner.

@@ -670,7 +670,7 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             created: str | None = None
             create_tag = ""
-            if name in ("Counter", "WNative"):
+            if name in ("Counter", "WETH"):
                 create_tag = "deploy_create/"
                 try:
                     created = run_deploy_create(node, contract, rows)

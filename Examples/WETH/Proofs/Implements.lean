@@ -1,38 +1,38 @@
 import Stdlib.ERC20
-import Examples.WNative.Proofs.Tx
+import Examples.WETH.Proofs.Tx
 
 /-!
-`IERC20.Exact WNative.impl`: WNative keeps every ERC20 promise.
+`IERC20.Exact WETH.impl`: WETH keeps every ERC20 promise.
 -/
 
 set_option linter.unusedVariables false
 set_option linter.unusedSimpArgs false
 
-open Lsc Lsc.Stdlib WNative
+open Lsc Lsc.Stdlib WETH
 
-namespace WNative
+namespace WETH
 
 section
 
 variable (ctx : Ctx) (w : World Storage ExtState Event)
 
 @[simp] theorem impl_transfer (to : Address) (amount : Amount native) :
-    WNative.impl.transfer to amount ctx w =
+    WETH.impl.transfer to amount ctx w =
       (Tx.run (transfer to amount) ctx w).toOption :=
   rfl
 
 @[simp] theorem impl_transferFrom (src to : Address) (amount : Amount native) :
-    WNative.impl.transferFrom src to amount ctx w =
+    WETH.impl.transferFrom src to amount ctx w =
       (Tx.run (transferFrom src to amount) ctx w).toOption :=
   rfl
 
 @[simp] theorem impl_approve (spender : Address) (amount : Amount native) :
-    WNative.impl.approve spender amount ctx w =
+    WETH.impl.approve spender amount ctx w =
       (Tx.run (approve spender amount) ctx w).toOption :=
   rfl
 
 @[simp] theorem impl_balanceOf (who : Address) (w : World Storage ExtState Event) :
-    WNative.impl.balanceOf who w = w.self.balances who := by
+    WETH.impl.balanceOf who w = w.self.balances who := by
   change (match Tx.run (balanceOf who) { sender := (0 : Address) } w with
     | .ok (v, _) => v
     | .error _ => default) = _
@@ -40,14 +40,14 @@ variable (ctx : Ctx) (w : World Storage ExtState Event)
 
 @[simp] theorem impl_allowance (owner spender : Address)
     (w : World Storage ExtState Event) :
-    WNative.impl.allowance owner spender w = w.self.allowances owner spender := by
+    WETH.impl.allowance owner spender w = w.self.allowances owner spender := by
   change (match Tx.run (allowance owner spender) { sender := (0 : Address) } w with
     | .ok (v, _) => v
     | .error _ => default) = _
   rw [allowance_returns_stored { sender := 0 } w owner spender]
 
 @[simp] theorem impl_totalSupply (w : World Storage ExtState Event) :
-    WNative.impl.totalSupply w = w.self.totalSupply := by
+    WETH.impl.totalSupply w = w.self.totalSupply := by
   change (match Tx.run totalSupply { sender := (0 : Address) } w with
     | .ok (v, _) => v
     | .error _ => default) = _
@@ -169,7 +169,7 @@ end
 
 namespace Proof
 
-theorem wnative_exact : IERC20.Exact WNative.impl where
+theorem weth_exact : IERC20.Exact WETH.impl where
   transfer_moves := by
     intro to amount ctx w w' h
     have hok := Tx.run_toOption_ok (by simpa [impl_transfer] using h)
@@ -217,32 +217,32 @@ theorem wnative_exact : IERC20.Exact WNative.impl where
     cases fn with
     | transfer =>
       have hrun' : Tx.run (transfer args.1 args.2) ctx w = .ok (r, w') := by
-        simpa [Spec.exec, WNative.spec, WNative.entry] using hrun
+        simpa [Spec.exec, WETH.spec, WETH.entry] using hrun
       simpa [impl_balanceOf, impl_allowance] using
         transfer_balance_protected ctx w args.1 args.2 x hrun' hne
     | transferFrom =>
       have hrun' : Tx.run (transferFrom args.1 args.2.1 args.2.2) ctx w = .ok (r, w') := by
-        simpa [Spec.exec, WNative.spec, WNative.entry] using hrun
+        simpa [Spec.exec, WETH.spec, WETH.entry] using hrun
       simpa [impl_balanceOf, impl_allowance] using
         transferFrom_balance_protected ctx w args.1 args.2.1 args.2.2 x hrun' hne
     | approve =>
       have hrun' : Tx.run (approve args.1 args.2) ctx w = .ok (r, w') := by
-        simpa [Spec.exec, WNative.spec, WNative.entry] using hrun
+        simpa [Spec.exec, WETH.spec, WETH.entry] using hrun
       simpa [impl_balanceOf, impl_allowance] using
         approve_balance_protected ctx w args.1 args.2 x hrun'
     | deposit =>
       have hrun' : Tx.run depositTx ctx w = .ok (r, w') := by
-        simpa [Spec.exec, WNative.spec, WNative.entry, depositTx] using hrun
+        simpa [Spec.exec, WETH.spec, WETH.entry, depositTx] using hrun
       simpa [impl_balanceOf, impl_allowance] using
         deposit_balance_protected ctx w x hrun'
     | withdraw =>
       have hrun' : Tx.run (withdraw args) ctx w = .ok (r, w') := by
-        simpa [Spec.exec, WNative.spec, WNative.entry] using hrun
+        simpa [Spec.exec, WETH.spec, WETH.entry] using hrun
       simpa [impl_balanceOf, impl_allowance] using
         withdraw_balance_protected ctx w args x hrun' hne
     | balanceOf | allowance | totalSupply =>
       have : w' = w := by
-        simp [Spec.exec, WNative.spec, WNative.entry] at hrun
+        simp [Spec.exec, WETH.spec, WETH.entry] at hrun
         cases hrun; rfl
       subst this
       exact ge_self_add _ _
@@ -297,4 +297,4 @@ theorem wnative_exact : IERC20.Exact WNative.impl where
 
 end Proof
 
-end WNative
+end WETH

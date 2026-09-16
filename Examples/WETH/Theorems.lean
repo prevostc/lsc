@@ -1,18 +1,18 @@
 import Stdlib.ERC20
-import Examples.WNative.Spec
-import Examples.WNative.Proofs.Tx
-import Examples.WNative.Proofs.Implements
-import Examples.WNative.Proofs.Security
-import Examples.WNative.Contract
+import Examples.WETH.Spec
+import Examples.WETH.Proofs.Tx
+import Examples.WETH.Proofs.Implements
+import Examples.WETH.Proofs.Security
+import Examples.WETH.Contract
 
 /-!
-WNative theorems: deposit/withdraw deltas, transfer conservation, and
+WETH theorems: deposit/withdraw deltas, transfer conservation, and
 `IERC20.Exact` conformance.
 -/
 
-open Lsc Lsc.Stdlib WNative
+open Lsc Lsc.Stdlib WETH
 
-namespace WNative
+namespace WETH
 
 variable (ctx : Ctx) (w : World Storage ExtState Event)
 
@@ -45,15 +45,15 @@ theorem transfer_conserves (dst : Address) (amount : Amount native)
       w.self.balances ctx.sender + w.self.balances dst :=
   Proof.transfer_conserves ctx w dst amount h
 
-/-- WNative is an exact ERC-20: every promise in `IERC20.Spec` holds of
-`WNative.impl`. Vault/Cpamm take this via `.toSpec` with no new proofs. -/
-theorem wnative_exact : IERC20.Exact WNative.impl :=
-  Proof.wnative_exact
+/-- WETH is an exact ERC-20: every promise in `IERC20.Spec` holds of
+`WETH.impl`. Vault/Cpamm take this via `.toSpec` with no new proofs. -/
+theorem weth_exact : IERC20.Exact WETH.impl :=
+  Proof.weth_exact
 
 /-- Under `Inv`, wrapped `totalSupply` is backed by `self`'s native balance.
 Native extraction is not a Wealth `Claim` (see AUDIT_COVERAGE). -/
-theorem wnative_backed {w : World Storage ExtState Event} (h : Inv w) :
+theorem weth_backed {w : World Storage ExtState Event} (h : Inv w) :
     w.self.totalSupply.raw ≤ World.nativeBalance w :=
-  Proof.wnative_backed h
+  Proof.weth_backed h
 
-end WNative
+end WETH

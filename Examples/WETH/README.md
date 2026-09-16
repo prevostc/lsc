@@ -1,16 +1,18 @@
-# WNative
+# WETH
 
-Wraps the chain's native asset (Ethereum ETH, 18 decimals) as an ERC-20.
-`deposit` is payable and credits `msg.value`. `withdraw` burns wrapped
-tokens and `Native.send`s ETH to the caller.
+Wraps the chain's native asset as an ERC-20. The native asset comes from
+the `Chain` profile, so the same contract is a wrapped-native token on
+any profile. This copy uses Ethereum ETH (18 decimals). `deposit` is
+payable and credits `msg.value`. `withdraw` burns wrapped tokens and
+`Native.send`s ETH to the caller.
 
 ## What is proved
 
 - `deposit_delta` / `withdraw_delta` — storage deltas (and `nativeBalance`
   unchanged on deposit: Lean does not auto-credit `Ctx.value`).
 - `transfer_conserves` — Token-style local conservation.
-- `wnative_exact` — `IERC20.Exact WNative.impl`; Vault/Cpamm use `.toSpec`.
-- `wnative_backed` — `Inv` implies `totalSupply ≤` self's native balance.
+- `weth_exact` — `IERC20.Exact WETH.impl`; Vault/Cpamm use `.toSpec`.
+- `weth_backed` — `Inv` implies `totalSupply ≤` self's native balance.
 
 ## What is assumed
 

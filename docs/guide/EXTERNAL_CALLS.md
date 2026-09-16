@@ -64,7 +64,7 @@ Fee-on-transfer and reentrancy are outside `IERC20.Spec` as stated.
 
 `IERC20.Exact T` is `IERC20.Spec T` as a class (`extends`); Vault/Cpamm
 keep taking `hT : IERC20.Spec _` and discharge it with `exact.toSpec`.
-WNative proves `wnative_exact : IERC20.Exact WNative.impl`.
+WETH proves `weth_exact : IERC20.Exact WETH.impl`.
 
 `Native.send` is a value-carrying CALL with empty calldata (not an
 `I.Ref` method). The Yul is `call(extCallGas, to, value, 0, 0, 0, 0)`.
