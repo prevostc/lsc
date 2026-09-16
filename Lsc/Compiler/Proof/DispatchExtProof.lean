@@ -448,6 +448,52 @@ theorem exec_valueCheckPrefix_halt_inv {calls : ExternalCalls}
   have heq := execStmts_det_evm hfwd hdesc
   exact ⟨heq.2.2.symm, heq.1.symm, heq.2.1.symm⟩
 
+theorem exec_valueGuardPrefix_ok_inv {calls : ExternalCalls}
+    {funs : FunEnv (yulD calls)} {V : VEnv (yulD calls)} {st : EvmState}
+    {f : FnDef} {V' : VEnv (yulD calls)} {st' : EvmState} {o : Outcome}
+    (hfuns : noExtFuns funs = true)
+    (hok : f.payable = true ∨ st.env.callvalue = 0)
+    (hnw : f.payable = false ∨ st.env.selfBalance.ult st.env.callvalue = false)
+    (h : ExecStmts (yulD calls) funs V st (valueGuardPrefix f) V' st' o) :
+    o = .normal ∧ V' = V ∧ st' = st := by
+  have hdesc := execStmts_descend hfuns
+    (by simpa [noExtBlock] using noExt_valueGuardPrefix f) h
+  have hfwd :=
+    exec_valueGuardPrefix_ok (funs := funEnvUncast calls funs) (V := V) hok hnw
+  have heq := execStmts_det_evm hfwd hdesc
+  exact ⟨heq.2.2.symm, heq.1.symm, heq.2.1.symm⟩
+
+theorem exec_valueGuardPrefix_valueHalt_inv {calls : ExternalCalls}
+    {funs : FunEnv (yulD calls)} {V : VEnv (yulD calls)} {st : EvmState}
+    {f : FnDef} {V' : VEnv (yulD calls)} {st' : EvmState} {o : Outcome}
+    (hfuns : noExtFuns funs = true)
+    (hp : f.payable = false) (hv : st.env.callvalue ≠ 0)
+    (h : ExecStmts (yulD calls) funs V st (valueGuardPrefix f) V' st' o) :
+    o = .halt ∧ V' = V ∧
+      st' = { touchMemory st 0 0 with halted := some (.revert, []) } := by
+  have hdesc := execStmts_descend hfuns
+    (by simpa [noExtBlock] using noExt_valueGuardPrefix f) h
+  have hfwd :=
+    exec_valueGuardPrefix_valueHalt (funs := funEnvUncast calls funs) (V := V) hp hv
+  have heq := execStmts_det_evm hfwd hdesc
+  exact ⟨heq.2.2.symm, heq.1.symm, heq.2.1.symm⟩
+
+theorem exec_valueGuardPrefix_wrapHalt_inv {calls : ExternalCalls}
+    {funs : FunEnv (yulD calls)} {V : VEnv (yulD calls)} {st : EvmState}
+    {f : FnDef} {V' : VEnv (yulD calls)} {st' : EvmState} {o : Outcome}
+    (hfuns : noExtFuns funs = true)
+    (hp : f.payable = true)
+    (hw : st.env.selfBalance.ult st.env.callvalue = true)
+    (h : ExecStmts (yulD calls) funs V st (valueGuardPrefix f) V' st' o) :
+    o = .halt ∧ V' = V ∧
+      st' = { touchMemory st 0 0 with halted := some (.revert, []) } := by
+  have hdesc := execStmts_descend hfuns
+    (by simpa [noExtBlock] using noExt_valueGuardPrefix f) h
+  have hfwd :=
+    exec_valueGuardPrefix_wrapHalt (funs := funEnvUncast calls funs) (V := V) hp hw
+  have heq := execStmts_det_evm hfwd hdesc
+  exact ⟨heq.2.2.symm, heq.1.symm, heq.2.1.symm⟩
+
 /-! ### `selectedFn` inversion -/
 
 theorem selectedFn_none_of_find_none {c : ContractDef} {cd : List UInt8}
@@ -604,7 +650,7 @@ theorem runtimeBlock_correct_ext {S E ε : Type}
                 cases (some [revert00]) =
                 YulSemantics.Stmt.block
                   (emitGuardLt {} (4 + 32 * f.params.length)).stmts ::
-                  (valueCheckPrefix f ++ (lockSetPrefix f ++
+                  (valueGuardPrefix f ++ (lockSetPrefix f ++
                     [YulSemantics.Stmt.block body])) := by
             simpa [hfind] using hswM
           rw [hswEq] at hb
@@ -613,7 +659,7 @@ theorem runtimeBlock_correct_ext {S E ε : Type}
           have hhcase : hoist (yulD (toCalls o))
               (YulSemantics.Stmt.block
                 (emitGuardLt {} (4 + 32 * f.params.length)).stmts ::
-                (valueCheckPrefix f ++ (lockSetPrefix f ++
+                (valueGuardPrefix f ++ (lockSetPrefix f ++
                   [YulSemantics.Stmt.block body]))) = [] :=
             hoist_yulD_of_evm (calls := toCalls o) (hoist_entryCaseBody f _ _)
           rw [hhcase] at hcase
@@ -652,151 +698,196 @@ theorem runtimeBlock_correct_ext {S E ε : Type}
               cases execStmts_append_inv hrestF with
               | inr hstopV =>
                 obtain ⟨hneV, hval⟩ := hstopV
-                by_cases hvo : valueOk f ctx.value = true
-                · have hinv := exec_valueCheckPrefix_ok_inv hfuns1
-                    (valueOk_to_callvalue hctxA hvo) hval
-                  exact (hneV hinv.1).elim
-                · have hp : f.payable = false := by
-                    simp [valueOk] at hvo
+                by_cases hwrap : f.payable && st0.env.selfBalance.ult st0.env.callvalue
+                · have hp : f.payable = true := by
                     cases hpay : f.payable
+                    · simp [hpay] at hwrap
                     · rfl
-                    · simp [hpay] at hvo
-                  have hvnz : ctx.value ≠ 0 := by
-                    simp [valueOk, hp] at hvo
-                    exact hvo
-                  have hcv : (stAfterGuard st0).env.callvalue ≠ 0 := by
-                    intro heq
-                    exact hvnz ((callvalue_eq_zero_iff hctxA).mp heq)
-                  have hinv := exec_valueCheckPrefix_halt_inv hfuns1 hp hcv hval
-                  have hnone : dispatchedFn c cd ctx.value = none := by
+                  have hw :
+                      (stAfterGuard st0).env.selfBalance.ult
+                        (stAfterGuard st0).env.callvalue = true := by
+                    simp [stAfterGuard, hp] at hwrap
+                    exact hwrap
+                  have hinv := exec_valueGuardPrefix_wrapHalt_inv hfuns1 hp hw hval
+                  have hvo : valueOk f ctx.value = true := by
+                    simp [valueOk, hp]
+                  have hsome : dispatchedFn c cd ctx.value = some f := by
                     simp [dispatchedFn, hselF, hvo]
                   have hhalted : st'.halted = some (.revert, []) := by rw [hinv.2.2]
                   obtain ⟨hh, hR'⟩ := revert_obs hR hhalted
-                  simp [hnone]
+                  simp only [hsome, hwrap]
                   exact ⟨hinv.1, hh, hR'⟩
+                · by_cases hvo : valueOk f ctx.value = true
+                  · have hnw : f.payable = false ∨
+                        (stAfterGuard st0).env.selfBalance.ult
+                          (stAfterGuard st0).env.callvalue = false := by
+                      cases hpay : f.payable
+                      · exact Or.inl rfl
+                      · refine Or.inr ?_
+                        simpa [stAfterGuard, hpay] using hwrap
+                    have hinv := exec_valueGuardPrefix_ok_inv hfuns1
+                      (valueOk_to_callvalue hctxA hvo) hnw hval
+                    exact (hneV hinv.1).elim
+                  · have hp : f.payable = false := by
+                      simp [valueOk] at hvo
+                      cases hpay : f.payable
+                      · rfl
+                      · simp [hpay] at hvo
+                    have hvnz : ctx.value ≠ 0 := by
+                      simp [valueOk, hp] at hvo
+                      exact hvo
+                    have hcv : (stAfterGuard st0).env.callvalue ≠ 0 := by
+                      intro heq
+                      exact hvnz ((callvalue_eq_zero_iff hctxA).mp heq)
+                    have hinv := exec_valueGuardPrefix_valueHalt_inv hfuns1 hp hcv hval
+                    have hnone : dispatchedFn c cd ctx.value = none := by
+                      simp [dispatchedFn, hselF, hvo]
+                    have hhalted : st'.halted = some (.revert, []) := by rw [hinv.2.2]
+                    obtain ⟨hh, hR'⟩ := revert_obs hR hhalted
+                    simp [hnone]
+                    exact ⟨hinv.1, hh, hR'⟩
               | inl hokV =>
                 obtain ⟨VV, stV, hval, hrestL⟩ := hokV
-                by_cases hvo : valueOk f ctx.value = true
-                · have hinv := exec_valueCheckPrefix_ok_inv hfuns1
-                    (valueOk_to_callvalue hctxA hvo) hval
-                  obtain ⟨_, hVV, hstV⟩ := hinv
-                  subst hVV
-                  rw [hstV] at hrestL
-                  have hsome : dispatchedFn c cd ctx.value = some f := by
-                    simp [dispatchedFn, hselF, hvo]
-                  by_cases hlocks : locks f
-                  · have hpre : lockSetPrefix f = [lockSetStmt] := by
-                      simp [lockSetPrefix, hlocks]
-                    simp [hpre] at hrestL
-                    cases execStmts_cons_inv hrestL with
-                    | inr hstopS =>
-                      obtain ⟨hneS, hset⟩ := hstopS
-                      exact (hneS (exec_lockSet_inv hfuns1
-                        (ctxRel_static hctxA) hset).1).elim
-                    | inl hokS =>
-                      obtain ⟨VS, stS, hset, hrestB⟩ := hokS
-                      have hsetI := exec_lockSet_inv hfuns1 (ctxRel_static hctxA) hset
-                      obtain ⟨_, hVS, hstS⟩ := hsetI
-                      subst hVS
-                      rw [hstS] at hrestB
-                      have hbodyStmt := execStmts_singleton_inv hrestB
+                by_cases hwrap : f.payable && st0.env.selfBalance.ult st0.env.callvalue
+                · have hp : f.payable = true := by
+                    cases hpay : f.payable
+                    · simp [hpay] at hwrap
+                    · rfl
+                  have hw :
+                      (stAfterGuard st0).env.selfBalance.ult
+                        (stAfterGuard st0).env.callvalue = true := by
+                    simp [stAfterGuard, hp] at hwrap
+                    exact hwrap
+                  have hinv := exec_valueGuardPrefix_wrapHalt_inv hfuns1 hp hw hval
+                  cases hinv.1
+                · by_cases hvo : valueOk f ctx.value = true
+                  · have hnw : f.payable = false ∨
+                        (stAfterGuard st0).env.selfBalance.ult
+                          (stAfterGuard st0).env.callvalue = false := by
+                      cases hpay : f.payable
+                      · exact Or.inl rfl
+                      · refine Or.inr ?_
+                        simpa [stAfterGuard, hpay] using hwrap
+                    have hinv := exec_valueGuardPrefix_ok_inv hfuns1
+                      (valueOk_to_callvalue hctxA hvo) hnw hval
+                    obtain ⟨_, hVV, hstV⟩ := hinv
+                    subst hVV
+                    rw [hstV] at hrestL
+                    have hsome : dispatchedFn c cd ctx.value = some f := by
+                      simp [dispatchedFn, hselF, hvo]
+                    by_cases hlocks : locks f
+                    · have hpre : lockSetPrefix f = [lockSetStmt] := by
+                        simp [lockSetPrefix, hlocks]
+                      simp [hpre] at hrestL
+                      cases execStmts_cons_inv hrestL with
+                      | inr hstopS =>
+                        obtain ⟨hneS, hset⟩ := hstopS
+                        exact (hneS (exec_lockSet_inv hfuns1
+                          (ctxRel_static hctxA) hset).1).elim
+                      | inl hokS =>
+                        obtain ⟨VS, stS, hset, hrestB⟩ := hokS
+                        have hsetI := exec_lockSet_inv hfuns1 (ctxRel_static hctxA) hset
+                        obtain ⟨_, hVS, hstS⟩ := hsetI
+                        subst hVS
+                        rw [hstS] at hrestB
+                        have hbodyStmt := execStmts_singleton_inv hrestB
+                        obtain ⟨Vb3, hss, _⟩ := exec_block_inv hbodyStmt
+                        have hhf := hoist_yulD_of_evm (calls := toCalls o)
+                          (toYulFn_hoist hyF (hctor f hfmem))
+                        rw [hhf] at hss
+                        set stL := stTstore (stAfterGuard st0)
+                          (BitVec.ofNat 256 reentrancyLockSlot) 1
+                        have hss' :
+                            ExecStmts (yulD (toCalls o)) [[]] [] stL
+                              body Vb3 st' out :=
+                          execStmts_of_dropEmpty (by simp [dropEmpty]) hss
+                        have hRun :
+                            Run (yulD (toCalls o)) body stL [] st' out :=
+                          run_of_execStmts_open hhf hss'
+                        have hMOL := memOnly_tstore (stAfterGuard st0)
+                          (BitVec.ofNat 256 reentrancyLockSlot) 1
+                        have hctxL := ctxRel_memOnly hctxA hMOL
+                        have hRL := R_memOnly hRA hMOL
+                        have hAgrL := ExtAgree_tstore
+                          (slot := BitVec.ofNat 256 reentrancyLockSlot)
+                          (val := 1) hAgrA (ctxRel_address hctxA)
+                        have hfn := toYulFn_correct_ext (c := c) (Γ := Γ) hΓ κ hκ o f
+                          (hctor f hfmem) (hS2 f hfmem) hlen (hbound f hfmem) body hyF
+                          ctx w stL hctxL hRL (by simpa [stL, stTstore] using hAgrL)
+                          hOr hNR
+                        have hMO_L : MemOnly st0 stL := by
+                          simpa [stL, stAfterGuard] using
+                            memOnly_tstore st0 (BitVec.ofNat 256 reentrancyLockSlot) 1
+                        have hconcl := hfn st' out hRun
+                        simp only [hsome, hwrap]
+                        have hcdL : stL.env.calldata = cd := by
+                          simp [stL, stTstore, hcdA]
+                        rw [hcdL] at hconcl
+                        cases htx : Tx.run (Core.denote Γ f.core (decodeArgs f cd).reverse)
+                            ctx w with
+                        | ok p =>
+                          rcases p with ⟨v, w'⟩
+                          simp only [htx] at hconcl ⊢
+                          obtain ⟨ho, hsucc, hR', hAgr'⟩ := hconcl
+                          obtain ⟨k, bs, hh, hk⟩ := haltSuccess_commits hsucc
+                          have hh' : st'.halted = some (k, bs) := by
+                            simpa [committedState_halted_eq] using hh
+                          rw [committedState_commit (st0 := st0) hh' hk]
+                          rw [committedState_commit (st0 := stL) hh' hk] at hR' hAgr'
+                          exact ⟨ho, by simpa [committedState_halted_eq] using hsucc,
+                            hR', hAgr'⟩
+                        | error err =>
+                          simp only [htx] at hconcl ⊢
+                          obtain ⟨bytes, ho, hh, herr, hR'⟩ := hconcl
+                          exact ⟨bytes, ho, by simpa [committedState_halted_eq] using hh,
+                            herr, R_committed_of_memOnly hMO_L hR'⟩
+                    · have hpre : lockSetPrefix f = [] := by
+                        simp [lockSetPrefix, hlocks]
+                      simp [hpre] at hrestL
+                      have hbodyStmt := execStmts_singleton_inv hrestL
                       obtain ⟨Vb3, hss, _⟩ := exec_block_inv hbodyStmt
                       have hhf := hoist_yulD_of_evm (calls := toCalls o)
                         (toYulFn_hoist hyF (hctor f hfmem))
                       rw [hhf] at hss
-                      set stL := stTstore (stAfterGuard st0)
-                        (BitVec.ofNat 256 reentrancyLockSlot) 1
                       have hss' :
-                          ExecStmts (yulD (toCalls o)) [[]] [] stL
+                          ExecStmts (yulD (toCalls o)) [[]] [] (stAfterGuard st0)
                             body Vb3 st' out :=
                         execStmts_of_dropEmpty (by simp [dropEmpty]) hss
                       have hRun :
-                          Run (yulD (toCalls o)) body stL [] st' out :=
+                          Run (yulD (toCalls o)) body (stAfterGuard st0) [] st' out :=
                         run_of_execStmts_open hhf hss'
-                      have hMOL := memOnly_tstore (stAfterGuard st0)
-                        (BitVec.ofNat 256 reentrancyLockSlot) 1
-                      have hctxL := ctxRel_memOnly hctxA hMOL
-                      have hRL := R_memOnly hRA hMOL
-                      have hAgrL := ExtAgree_tstore
-                        (slot := BitVec.ofNat 256 reentrancyLockSlot)
-                        (val := 1) hAgrA (ctxRel_address hctxA)
                       have hfn := toYulFn_correct_ext (c := c) (Γ := Γ) hΓ κ hκ o f
                         (hctor f hfmem) (hS2 f hfmem) hlen (hbound f hfmem) body hyF
-                        ctx w stL hctxL hRL (by simpa [stL, stTstore] using hAgrL)
-                        hOr hNR
-                      have hMO_L : MemOnly st0 stL := by
-                        simpa [stL, stAfterGuard] using
-                          memOnly_tstore st0 (BitVec.ofNat 256 reentrancyLockSlot) 1
+                        ctx w (stAfterGuard st0) hctxA hRA hAgrA hOr hNR
                       have hconcl := hfn st' out hRun
-                      simp only [hsome]
-                      have hcdL : stL.env.calldata = cd := by
-                        simp [stL, stTstore, hcdA]
-                      rw [hcdL] at hconcl
+                      simp only [hsome, hwrap]
+                      rw [hcdA] at hconcl
                       cases htx : Tx.run (Core.denote Γ f.core (decodeArgs f cd).reverse)
                           ctx w with
                       | ok p =>
                         rcases p with ⟨v, w'⟩
                         simp only [htx] at hconcl ⊢
                         obtain ⟨ho, hsucc, hR', hAgr'⟩ := hconcl
-                        obtain ⟨k, bs, hh, hk⟩ := haltSuccess_commits hsucc
-                        have hh' : st'.halted = some (k, bs) := by
-                          simpa [committedState_halted_eq] using hh
-                        rw [committedState_commit (st0 := st0) hh' hk]
-                        rw [committedState_commit (st0 := stL) hh' hk] at hR' hAgr'
-                        exact ⟨ho, by simpa [committedState_halted_eq] using hsucc,
-                          hR', hAgr'⟩
+                        exact ⟨ho, haltSuccess_committed_guard hsucc,
+                          R_committed_guard hMO hR', ExtAgree_committed_guard hAgr'⟩
                       | error err =>
                         simp only [htx] at hconcl ⊢
                         obtain ⟨bytes, ho, hh, herr, hR'⟩ := hconcl
                         exact ⟨bytes, ho, by simpa [committedState_halted_eq] using hh,
-                          herr, R_committed_of_memOnly hMO_L hR'⟩
-                  · have hpre : lockSetPrefix f = [] := by
-                      simp [lockSetPrefix, hlocks]
-                    simp [hpre] at hrestL
-                    have hbodyStmt := execStmts_singleton_inv hrestL
-                    obtain ⟨Vb3, hss, _⟩ := exec_block_inv hbodyStmt
-                    have hhf := hoist_yulD_of_evm (calls := toCalls o)
-                      (toYulFn_hoist hyF (hctor f hfmem))
-                    rw [hhf] at hss
-                    have hss' :
-                        ExecStmts (yulD (toCalls o)) [[]] [] (stAfterGuard st0)
-                          body Vb3 st' out :=
-                      execStmts_of_dropEmpty (by simp [dropEmpty]) hss
-                    have hRun :
-                        Run (yulD (toCalls o)) body (stAfterGuard st0) [] st' out :=
-                      run_of_execStmts_open hhf hss'
-                    have hfn := toYulFn_correct_ext (c := c) (Γ := Γ) hΓ κ hκ o f
-                      (hctor f hfmem) (hS2 f hfmem) hlen (hbound f hfmem) body hyF
-                      ctx w (stAfterGuard st0) hctxA hRA hAgrA hOr hNR
-                    have hconcl := hfn st' out hRun
-                    simp only [hsome]
-                    rw [hcdA] at hconcl
-                    cases htx : Tx.run (Core.denote Γ f.core (decodeArgs f cd).reverse)
-                        ctx w with
-                    | ok p =>
-                      rcases p with ⟨v, w'⟩
-                      simp only [htx] at hconcl ⊢
-                      obtain ⟨ho, hsucc, hR', hAgr'⟩ := hconcl
-                      exact ⟨ho, haltSuccess_committed_guard hsucc,
-                        R_committed_guard hMO hR', ExtAgree_committed_guard hAgr'⟩
-                    | error err =>
-                      simp only [htx] at hconcl ⊢
-                      obtain ⟨bytes, ho, hh, herr, hR'⟩ := hconcl
-                      exact ⟨bytes, ho, by simpa [committedState_halted_eq] using hh,
-                        herr, R_committed_guard hMO hR'⟩
-                · have hp : f.payable = false := by
-                    simp [valueOk] at hvo
-                    cases hpay : f.payable
-                    · rfl
-                    · simp [hpay] at hvo
-                  have hvnz : ctx.value ≠ 0 := by
-                    simp [valueOk, hp] at hvo
-                    exact hvo
-                  have hcv : (stAfterGuard st0).env.callvalue ≠ 0 := by
-                    intro heq
-                    exact hvnz ((callvalue_eq_zero_iff hctxA).mp heq)
-                  have hinv := exec_valueCheckPrefix_halt_inv hfuns1 hp hcv hval
-                  cases hinv.1
+                          herr, R_committed_guard hMO hR'⟩
+                  · have hp : f.payable = false := by
+                      simp [valueOk] at hvo
+                      cases hpay : f.payable
+                      · rfl
+                      · simp [hpay] at hvo
+                    have hvnz : ctx.value ≠ 0 := by
+                      simp [valueOk, hp] at hvo
+                      exact hvo
+                    have hcv : (stAfterGuard st0).env.callvalue ≠ 0 := by
+                      intro heq
+                      exact hvnz ((callvalue_eq_zero_iff hctxA).mp heq)
+                    have hinv := exec_valueGuardPrefix_valueHalt_inv hfuns1 hp hcv hval
+                    cases hinv.1
 
 end Proof
 

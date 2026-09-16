@@ -40,13 +40,16 @@ theorem evmCallRun_of_correct_ext {S E ε : Type}
       match dispatchedFn c yst0.env.calldata ctx.value with
       | none => σ' = yst0.storage ∧ ξ' = evmForeign yst0
       | some f =>
-          match Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse)
-              ctx w with
-          | .ok (_, w') =>
-              storageRel c Γ evmKeccak w'.self σ' ∧ WorldWF c Γ w' ∧
-                ∃ stObs : EvmState, stObs.storage = σ' ∧ evmForeign stObs = ξ' ∧
-                  R c Γ evmKeccak w' stObs ∧ ExtAgree ctx.self w'.ext stObs
-          | .error _ => σ' = yst0.storage ∧ ξ' = evmForeign yst0 := by
+          if f.payable && yst0.env.selfBalance.ult yst0.env.callvalue then
+            σ' = yst0.storage ∧ ξ' = evmForeign yst0
+          else
+            match Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse)
+                ctx w with
+            | .ok (_, w') =>
+                storageRel c Γ evmKeccak w'.self σ' ∧ WorldWF c Γ w' ∧
+                  ∃ stObs : EvmState, stObs.storage = σ' ∧ evmForeign stObs = ξ' ∧
+                    R c Γ evmKeccak w' stObs ∧ ExtAgree ctx.self w'.ext stObs
+            | .error _ => σ' = yst0.storage ∧ ξ' = evmForeign yst0 := by
   obtain ⟨st', out, hrun⟩ :=
     yul_progress c Γ hΓ evmKeccak hκ o hctor hS2 hlen hbound rt hrt
       ctx w yst0 hctx hR
@@ -65,17 +68,22 @@ theorem evmCallRun_of_correct_ext {S E ε : Type}
     exact ⟨obs_storage_rollback rfl hhalted hh, obs_foreign_rollback rfl hhalted hh⟩
   | some f =>
     simp only [hsel] at hpred ⊢
-    cases htx : Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse)
-        ctx w with
-    | ok prod =>
-      rcases prod with ⟨v, w'⟩
-      simp only [htx] at hpred ⊢
-      rcases hpred with ⟨_, hsucc, hR', hAgr'⟩
-      exact ⟨hR'.1, hR'.2.2.2, stObs, rfl, rfl, hR', hAgr'⟩
-    | error e =>
-      simp only [htx] at hpred ⊢
-      rcases hpred with ⟨bytes, ⟨_, ⟨hh, _⟩⟩⟩
+    by_cases hwrap : f.payable && yst0.env.selfBalance.ult yst0.env.callvalue
+    · simp only [hwrap] at hpred ⊢
+      rcases hpred with ⟨_, ⟨hh, _⟩⟩
       exact ⟨obs_storage_rollback rfl hhalted hh, obs_foreign_rollback rfl hhalted hh⟩
+    · simp only [hwrap] at hpred ⊢
+      cases htx : Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse)
+          ctx w with
+      | ok prod =>
+        rcases prod with ⟨v, w'⟩
+        simp only [htx] at hpred ⊢
+        rcases hpred with ⟨_, hsucc, hR', hAgr'⟩
+        exact ⟨hR'.1, hR'.2.2.2, stObs, rfl, rfl, hR', hAgr'⟩
+      | error e =>
+        simp only [htx] at hpred ⊢
+        rcases hpred with ⟨bytes, ⟨_, ⟨hh, _⟩⟩⟩
+        exact ⟨obs_storage_rollback rfl hhalted hh, obs_foreign_rollback rfl hhalted hh⟩
 
 /-- Drop the `EvmStartOK` witness; `ExtAll` is a stricter `EvmTraceRunExt`.
 The converse needs a start state for every call, which `EvmTraceRunExt` does not store. -/
@@ -134,6 +142,9 @@ theorem evmCallRun_fnCalldata_ext {S E ε : Type}
   refine ⟨σ', ξ', hRun, ?_⟩
   rw [mkEvmStateExt_calldata] at hpost
   simp only [hsel] at hpost
+  have hwrap : (f.payable && yst0.env.selfBalance.ult yst0.env.callvalue) = false := by
+    simp only [yst0, mkEvmStateExt_selfBalance_ult_callvalue, Bool.and_false]
+  simp only [hwrap] at hpost
   rw [hdec] at hpost
   rw [show yst0.storage = σ from mkEvmStateExt_storage _ _ _ _ _] at hpost
   exact hpost

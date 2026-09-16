@@ -285,9 +285,12 @@ theorem evmCallRun_of_correct {S X E ε : Type} (c : ContractDef)
       match dispatchedFn c yst0.env.calldata ctx.value with
       | none => σ' = yst0.storage
       | some f =>
-        match Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse) ctx w with
-        | .ok (_, w') => storageRel c Γ evmKeccak w'.self σ' ∧ WorldWF c Γ w'
-        | .error _ => σ' = yst0.storage := by
+        if f.payable && yst0.env.selfBalance.ult yst0.env.callvalue then
+          σ' = yst0.storage
+        else
+          match Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse) ctx w with
+          | .ok (_, w') => storageRel c Γ evmKeccak w'.self σ' ∧ WorldWF c Γ w'
+          | .error _ => σ' = yst0.storage := by
   let _model : ExternalModel := closedModel
   obtain ⟨stObs, hRC, hconcl⟩ :=
     runtimeBlock_correct_callFree c Γ hΓ evmKeccak hκ hcf hctor hlen hbound rt hrt ctx w yst0 hctx hR hLock
@@ -335,25 +338,31 @@ theorem evmCallRun_of_correct {S X E ε : Type} (c : ContractDef)
         rw [postStorage_reverted hr.1, obs_storage_rollback hobs hhalted hh]
       | some f =>
         simp only [hsel] at hconcl
-        cases htx : Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse) ctx w with
-        | ok prod =>
-          rcases prod with ⟨v, w'⟩
-          simp only [htx] at hconcl
-          obtain ⟨hsucc, _⟩ := hconcl
-          obtain ⟨k, bs, hh, hk⟩ := haltSuccess_commits hsucc
-          have heq : stObs = yst' := obs_eq_of_commit hobs hhalted hh hk
-          have hOK' := haltOK_of_success (heq ▸ hsucc) hHM
-          have hnr : s'.halt ≠ .Reverted := by
-            unfold haltOK at hOK'
-            split at hOK'
-            · intro h; cases (hOK'.symm.trans h)
-            · intro h; cases (hOK'.1.symm.trans h)
-          rw [postStorage_commit hnr, heq, hstor, storage_eq_account hSM]
-        | error e =>
-          simp only [htx] at hconcl
-          obtain ⟨bytes, hh, _, _⟩ := hconcl
-          have hr := reverted_of_halted (hhalted ▸ hh) hHM
+        by_cases hwrap : f.payable && yst0.env.selfBalance.ult yst0.env.callvalue
+        · simp only [hwrap] at hconcl
+          obtain ⟨hh, _⟩ := hconcl
+          have hr := reverted_of_halted (bytes := []) (hhalted ▸ hh) hHM
           rw [postStorage_reverted hr.1, obs_storage_rollback hobs hhalted hh]
+        · simp only [hwrap] at hconcl
+          cases htx : Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse) ctx w with
+          | ok prod =>
+            rcases prod with ⟨v, w'⟩
+            simp only [htx] at hconcl
+            obtain ⟨hsucc, _⟩ := hconcl
+            obtain ⟨k, bs, hh, hk⟩ := haltSuccess_commits hsucc
+            have heq : stObs = yst' := obs_eq_of_commit hobs hhalted hh hk
+            have hOK' := haltOK_of_success (heq ▸ hsucc) hHM
+            have hnr : s'.halt ≠ .Reverted := by
+              unfold haltOK at hOK'
+              split at hOK'
+              · intro h; cases (hOK'.symm.trans h)
+              · intro h; cases (hOK'.1.symm.trans h)
+            rw [postStorage_commit hnr, heq, hstor, storage_eq_account hSM]
+          | error e =>
+            simp only [htx] at hconcl
+            obtain ⟨bytes, hh, _, _⟩ := hconcl
+            have hr := reverted_of_halted (hhalted ▸ hh) hHM
+            rw [postStorage_reverted hr.1, obs_storage_rollback hobs hhalted hh]
     refine ⟨⟨s', hSteps, hH⟩, ?_⟩
     intro s'' hS'' hH''
     rw [steps_halted_unique hS'' hSteps hH'' hH]
@@ -365,19 +374,24 @@ theorem evmCallRun_of_correct {S X E ε : Type} (c : ContractDef)
       exact obs_storage_rollback hobs hhalted hh
     | some f =>
       simp only [hsel] at hconcl ⊢
-      cases htx : Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse) ctx w with
-      | ok prod =>
-        rcases prod with ⟨v, w'⟩
-        simp only [htx] at hconcl ⊢
-        obtain ⟨hsucc, hR'⟩ := hconcl
-        obtain ⟨k, bs, hh, hk⟩ := haltSuccess_commits hsucc
-        have heq : stObs = yst' := obs_eq_of_commit hobs hhalted hh hk
-        rcases hR' with ⟨hs, _, _, hwf'⟩
-        exact ⟨by simpa [heq] using hs, hwf'⟩
-      | error e =>
-        simp only [htx] at hconcl ⊢
-        obtain ⟨bytes, hh, _, _⟩ := hconcl
+      by_cases hwrap : f.payable && yst0.env.selfBalance.ult yst0.env.callvalue
+      · simp only [hwrap] at hconcl ⊢
+        obtain ⟨hh, _⟩ := hconcl
         exact obs_storage_rollback hobs hhalted hh
+      · simp only [hwrap] at hconcl ⊢
+        cases htx : Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse) ctx w with
+        | ok prod =>
+          rcases prod with ⟨v, w'⟩
+          simp only [htx] at hconcl ⊢
+          obtain ⟨hsucc, hR'⟩ := hconcl
+          obtain ⟨k, bs, hh, hk⟩ := haltSuccess_commits hsucc
+          have heq : stObs = yst' := obs_eq_of_commit hobs hhalted hh hk
+          rcases hR' with ⟨hs, _, _, hwf'⟩
+          exact ⟨by simpa [heq] using hs, hwf'⟩
+        | error e =>
+          simp only [htx] at hconcl ⊢
+          obtain ⟨bytes, hh, _, _⟩ := hconcl
+          exact obs_storage_rollback hobs hhalted hh
 
 theorem coreRun_nil {S X E ε} {Γ : ContractSchema S X E ε} (w : World S X E) :
     coreRun Γ [] w = w := rfl
@@ -400,6 +414,11 @@ theorem mkEvmState_storage (cd σ κ ctx) :
 
 theorem mkEvmState_calldata (cd σ κ ctx) :
     (mkEvmState cd σ κ ctx).env.calldata = cd := rfl
+
+theorem mkEvmState_selfBalance_ult_callvalue (cd σ κ ctx) :
+    (mkEvmState cd σ κ ctx).env.selfBalance.ult
+      (mkEvmState cd σ κ ctx).env.callvalue = false := by
+  simp [mkEvmState, BitVec.ult]
 
 theorem mkEvmState_keccak (cd σ κ ctx) :
     (mkEvmState cd σ κ ctx).env.keccakOf = κ := rfl
@@ -502,6 +521,9 @@ theorem evmCallRun_fnCalldata {S X E ε : Type} (c : ContractDef)
   rw [← hdec]
   rw [mkEvmState_calldata] at hpost
   simp only [hsel] at hpost
+  have hwrap : (f.payable && yst0.env.selfBalance.ult yst0.env.callvalue) = false := by
+    simp only [yst0, mkEvmState_selfBalance_ult_callvalue, Bool.and_false]
+  simp only [hwrap] at hpost
   rw [mkEvmState_storage] at hpost
   exact hpost
 
@@ -648,24 +670,29 @@ theorem bytecode_call_correct_spill {S X E ε : Type} (c : ContractDef)
     exact reverted_of_halted (bytes := []) (hhalted ▸ hh) hHM'
   | some f =>
     simp only [hsel] at hconcl ⊢
-    cases htx : Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse) ctx w with
-    | ok prod =>
-      rcases prod with ⟨v, w'⟩
-      simp only [htx] at hconcl ⊢
-      obtain ⟨hsucc, hR'⟩ := hconcl
-      obtain ⟨k, bs, hh, hk⟩ := haltSuccess_commits hsucc
-      have heq : stObs = yst' := obs_eq_of_commit hobs hhalted hh hk
-      have hR'' : R c Γ evmKeccak w' ystF :=
-        R_of_scratchRel (heq ▸ hR') hscratch
-      rcases hR'' with ⟨hs, _, _, _⟩
-      have hsuccF : haltSuccess f.ret v ystF.halted := by
-        simpa [hhaltF, heq] using hsucc
-      exact ⟨haltOK_of_success hsuccF hHM, storageRel_account hs hSM⟩
-    | error e =>
-      simp only [htx] at hconcl ⊢
-      obtain ⟨bytes, hh, herr, _⟩ := hconcl
-      have hr' := reverted_of_halted (hhalted ▸ hh) hHM'
-      exact ⟨hr'.1, bytes, hr'.2, herr⟩
+    by_cases hwrap : f.payable && yst0.env.selfBalance.ult yst0.env.callvalue
+    · simp only [hwrap] at hconcl ⊢
+      obtain ⟨hh, _⟩ := hconcl
+      exact reverted_of_halted (bytes := []) (hhalted ▸ hh) hHM'
+    · simp only [hwrap] at hconcl ⊢
+      cases htx : Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse) ctx w with
+      | ok prod =>
+        rcases prod with ⟨v, w'⟩
+        simp only [htx] at hconcl ⊢
+        obtain ⟨hsucc, hR'⟩ := hconcl
+        obtain ⟨k, bs, hh, hk⟩ := haltSuccess_commits hsucc
+        have heq : stObs = yst' := obs_eq_of_commit hobs hhalted hh hk
+        have hR'' : R c Γ evmKeccak w' ystF :=
+          R_of_scratchRel (heq ▸ hR') hscratch
+        rcases hR'' with ⟨hs, _, _, _⟩
+        have hsuccF : haltSuccess f.ret v ystF.halted := by
+          simpa [hhaltF, heq] using hsucc
+        exact ⟨haltOK_of_success hsuccF hHM, storageRel_account hs hSM⟩
+      | error e =>
+        simp only [htx] at hconcl ⊢
+        obtain ⟨bytes, hh, herr, _⟩ := hconcl
+        have hr' := reverted_of_halted (hhalted ▸ hh) hHM'
+        exact ⟨hr'.1, bytes, hr'.2, herr⟩
 
 theorem bytecode_call_correct {S X E ε : Type} (c : ContractDef)
     (Γ : ContractSchema S X E ε)
@@ -717,20 +744,25 @@ theorem bytecode_call_correct {S X E ε : Type} (c : ContractDef)
       exact reverted_of_halted (bytes := []) (hhalted ▸ hh) hHM
     | some f =>
       simp only [hsel] at hconcl ⊢
-      cases htx : Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse) ctx w with
-      | ok prod =>
-        rcases prod with ⟨v, w'⟩
-        simp only [htx] at hconcl ⊢
-        obtain ⟨hsucc, hR'⟩ := hconcl
-        obtain ⟨k, bs, hh, hk⟩ := haltSuccess_commits hsucc
-        have heq : stObs = yst' := obs_eq_of_commit hobs hhalted hh hk
-        rcases hR' with ⟨hs, _, _, _⟩
-        exact ⟨haltOK_of_success (heq ▸ hsucc) hHM, storageRel_account (heq ▸ hs) hSM'⟩
-      | error e =>
-        simp only [htx] at hconcl ⊢
-        obtain ⟨bytes, hh, herr, _⟩ := hconcl
-        have hr := reverted_of_halted (hhalted ▸ hh) hHM
-        exact ⟨hr.1, bytes, hr.2, herr⟩
+      by_cases hwrap : f.payable && yst0.env.selfBalance.ult yst0.env.callvalue
+      · simp only [hwrap] at hconcl ⊢
+        obtain ⟨hh, _⟩ := hconcl
+        exact reverted_of_halted (bytes := []) (hhalted ▸ hh) hHM
+      · simp only [hwrap] at hconcl ⊢
+        cases htx : Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse) ctx w with
+        | ok prod =>
+          rcases prod with ⟨v, w'⟩
+          simp only [htx] at hconcl ⊢
+          obtain ⟨hsucc, hR'⟩ := hconcl
+          obtain ⟨k, bs, hh, hk⟩ := haltSuccess_commits hsucc
+          have heq : stObs = yst' := obs_eq_of_commit hobs hhalted hh hk
+          rcases hR' with ⟨hs, _, _, _⟩
+          exact ⟨haltOK_of_success (heq ▸ hsucc) hHM, storageRel_account (heq ▸ hs) hSM'⟩
+        | error e =>
+          simp only [htx] at hconcl ⊢
+          obtain ⟨bytes, hh, herr, _⟩ := hconcl
+          have hr := reverted_of_halted (hhalted ▸ hh) hHM
+          exact ⟨hr.1, bytes, hr.2, herr⟩
   | inr h =>
     obtain ⟨hne, hsp⟩ := h
     exact bytecode_call_correct_spill c Γ hΓ hκ hcf hctor hlen hbound rt hrt is hne hsp

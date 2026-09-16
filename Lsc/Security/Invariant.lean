@@ -10,6 +10,7 @@ abbrev Inv (S X E : Type) := World S X E → Prop
 
 /-- Between our calls, the ghost record evolves under `rely`. -/
 def RelyAlong [HasCreditValue X] {C : Spec S X E ε} [HasPayable C]
+    [HasSelfBalance X]
     (rely : X → X → Prop) :
     List (Step C) → World S X E → Prop
   | [], _ => True
@@ -18,6 +19,7 @@ def RelyAlong [HasCreditValue X] {C : Spec S X E ε} [HasPayable C]
 
 /-- Every call of `C` preserves `Inv` when it holds in the pre-world. -/
 def PreservesInv [HasCreditValue X] (C : Spec S X E ε) [HasPayable C]
+    [HasSelfBalance X]
     (Inv : World S X E → Prop) : Prop :=
   ∀ (c : Call C) (w : World S X E), Inv w → Inv (step (.call c) w)
 
@@ -41,6 +43,7 @@ def PreservesInvFnAt (C : Spec S X E ε) (Inv : World S X E → Prop) (self : Ad
 
 /-- `Inv` is preserved by well-formed calls at `self`. -/
 def PreservesInvAt [HasCreditValue X] (C : Spec S X E ε) [HasPayable C]
+    [HasSelfBalance X]
     (Inv : World S X E → Prop)
     (self : Address) : Prop :=
   ∀ (c : Call C) (w : World S X E),

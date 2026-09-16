@@ -623,7 +623,8 @@ theorem backed_step {c : Call spec} {w : World Storage ExtState Event}
     (hb : World.nativeBalance w + c.value < wordBound)
     (hw : Inv w) : Backed (step (.call c) w) := by
   rw [step_eq_run]
-  split_ifs with hvo
+  split_ifs with hvo hwrap
+  · exact hw.2.1
   · cases hrun : spec.exec c.fn c.args c.toCtx (World.creditValue w c.value) with
     | error _ => exact hw.2.1
     | ok p =>

@@ -1004,6 +1004,28 @@ theorem exec_valueCheckPrefix_halt_nils {calls : ExternalCalls} {n : Nat}
       { touchMemory st 0 0 with halted := some (.revert, []) } .halt :=
   execStmts_lift_nils (exec_valueCheckPrefix_halt hp hv)
 
+theorem exec_valueGuardPrefix_ok_nils {calls : ExternalCalls} {n : Nat}
+    {V : VEnv evm} {st : EvmState} {f : FnDef}
+    (hvo : f.payable = true ∨ st.env.callvalue = 0)
+    (hnw : f.payable = false ∨ st.env.selfBalance.ult st.env.callvalue = false) :
+    ExecStmts (yulD calls) (List.replicate n []) V st (valueGuardPrefix f) V st
+      .normal :=
+  execStmts_lift_nils (exec_valueGuardPrefix_ok hvo hnw)
+
+theorem exec_valueGuardPrefix_valueHalt_nils {calls : ExternalCalls} {n : Nat}
+    {V : VEnv evm} {st : EvmState} {f : FnDef}
+    (hp : f.payable = false) (hv : st.env.callvalue ≠ 0) :
+    ExecStmts (yulD calls) (List.replicate n []) V st (valueGuardPrefix f) V
+      { touchMemory st 0 0 with halted := some (.revert, []) } .halt :=
+  execStmts_lift_nils (exec_valueGuardPrefix_valueHalt hp hv)
+
+theorem exec_valueGuardPrefix_wrapHalt_nils {calls : ExternalCalls} {n : Nat}
+    {V : VEnv evm} {st : EvmState} {f : FnDef}
+    (hp : f.payable = true) (hw : st.env.selfBalance.ult st.env.callvalue = true) :
+    ExecStmts (yulD calls) (List.replicate n []) V st (valueGuardPrefix f) V
+      { touchMemory st 0 0 with halted := some (.revert, []) } .halt :=
+  execStmts_lift_nils (exec_valueGuardPrefix_wrapHalt hp hw)
+
 theorem exec_lockSetStmt_nils {calls : ExternalCalls} {n : Nat}
     {V : VEnv evm} {st : EvmState} (hstatic : st.env.static = false) :
     ExecStmt (yulD calls) (List.replicate n []) V st lockSetStmt V

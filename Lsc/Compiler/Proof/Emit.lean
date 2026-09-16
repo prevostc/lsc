@@ -1323,6 +1323,29 @@ theorem noExt_valueCheckPrefix (f : FnDef) : noExtStmts (valueCheckPrefix f) = t
   · simp [valueCheckPrefix, hpay, noExtStmts, noExt_valueCheckStmt]
   · simp [valueCheckPrefix, hpay, noExtStmts]
 
+theorem noExt_overflowCheckStmt : noExtStmt overflowCheckStmt = true := by
+  unfold overflowCheckStmt noExtStmt
+  rw [noExt_bop (op := YulSemantics.EVM.Op.lt) rfl
+    (noExtExprs_cons_true
+      (noExt_bop (op := YulSemantics.EVM.Op.selfbalance) rfl noExtExprs_nil)
+      (noExtExprs_cons_true
+        (noExt_bop (op := YulSemantics.EVM.Op.callvalue) rfl noExtExprs_nil)
+        noExtExprs_nil))]
+  simp [noExtStmts, noExt_revert00]
+
+theorem noExt_overflowCheckPrefix (f : FnDef) :
+    noExtStmts (overflowCheckPrefix f) = true := by
+  cases hpay : f.payable
+  · simp [overflowCheckPrefix, hpay, noExtStmts]
+  · simp [overflowCheckPrefix, hpay, noExtStmts, noExt_overflowCheckStmt]
+
+theorem noExt_valueGuardPrefix (f : FnDef) : noExtStmts (valueGuardPrefix f) = true := by
+  cases hpay : f.payable
+  · simp [valueGuardPrefix, valueCheckPrefix, overflowCheckPrefix, hpay,
+      noExtStmts, noExt_valueCheckStmt]
+  · simp [valueGuardPrefix, valueCheckPrefix, overflowCheckPrefix, hpay,
+      noExtStmts, noExt_overflowCheckStmt]
+
 theorem noExt_lockClear (e : Emit) (he : noExtBlock e.stmts = true) :
     noExtBlock (emitLockClear e).stmts = true :=
   noExt_push he noExt_lockClearStmt

@@ -55,17 +55,28 @@ inductive Step (C : Spec S X E ε)
   | call (c : Call C)
   | env (ext' : X)
 
+/-- After the EVM credits `v`, wrap occurred iff the 256-bit balance is
+`< v`. Matches dispatcher `lt(selfbalance(), callvalue())`. -/
+def creditWraps [HasCreditValue X] [HasSelfBalance X]
+    (w : World S X E) (v : Nat) : Bool :=
+  decide (HasSelfBalance.get (World.creditValue w v).ext < v)
+
 /-- Post-world of a call. Incoming value is credited only when the target
 is payable (`C.payable`); a revert of that body rolls the credit back.
 A nonzero-value call to a non-payable function is a revert step (world
-unchanged), matching compiler `valueOk` / `dispatchedFn`. Non-payable
+unchanged), matching compiler `valueOk` / `dispatchedFn`. A payable call
+whose credited balance wraps the 256-bit word is also a revert step,
+matching dispatcher `lt(selfbalance(), callvalue())`. Non-payable
 success has `v = 0`, so `creditValue w 0 = w`. -/
-def stepCall [HasCreditValue X] [HasPayable C] (c : Call C) (w : World S X E) :
-    World S X E :=
+def stepCall [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
+    (c : Call C) (w : World S X E) : World S X E :=
   if C.valueOk c.fn c.value then
-    match C.exec c.fn c.args c.toCtx (World.creditValue w c.value) with
-    | .ok (_, w') => w'
-    | .error _ => w
+    if C.payable c.fn && creditWraps w c.value then
+      w
+    else
+      match C.exec c.fn c.args c.toCtx (World.creditValue w c.value) with
+      | .ok (_, w') => w'
+      | .error _ => w
   else
     w
 
@@ -73,16 +84,18 @@ def stepCall [HasCreditValue X] [HasPayable C] (c : Call C) (w : World S X E) :
 
 Incoming `c.value` is credited onto `self`'s native balance *before*
 `Tx.run` only for an accepted payable call (EVM CALL is post-transfer
-at the callee, and a value-reject reverts the transfer). `Tx.run` is
-unchanged. -/
-def step [HasCreditValue X] [HasPayable C] : Step C → World S X E → World S X E
+at the callee, and a value-reject or wrap-reject reverts the transfer).
+`Tx.run` is unchanged. -/
+def step [HasCreditValue X] [HasPayable C] [HasSelfBalance X] :
+    Step C → World S X E → World S X E
   | .call c, w => stepCall c w
   | .env x', w => { w with ext := x' }
 
 /-- Left fold: first step first. -/
-def run [HasCreditValue X] [HasPayable C] (tr : List (Step C)) (w : World S X E) :
-    World S X E :=
-  tr.foldl (fun acc s => step s acc) w
+def run [HasCreditValue X] [HasPayable C] [HasSelfBalance X] :
+    List (Step C) → World S X E → World S X E
+  | [], w => w
+  | s :: tr, w => run tr (step s w)
 
 /-- Well-formed traces target `self`, are not self-calls, and never overflow a
 256-bit native balance — true on every chain since total native supply <

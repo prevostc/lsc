@@ -13,6 +13,7 @@ namespace Lsc.Security.Proof
 variable {S X E ε : Type} {C : Spec S X E ε}
 
 theorem no_unauthorized_extraction [HasCreditValue X] [HasPayable C]
+    [HasSelfBalance X]
     {Inv : World S X E → Prop} {claim : Claim S X E}
     {Auth : AuthPred C} {rely : X → X → Prop}
     (hN : NoUnauthorizedDecrease C Inv claim Auth)
@@ -215,6 +216,7 @@ theorem NativeSendAuth.of_debits [HasSelfBalance X] {claim : Claim S X E}
   simpa [selfNative] using hO dst v w.ext w'.ext hsend
 
 theorem NoUnauthorizedDecrease.of_fns [HasCreditValue X] [HasPayable C]
+    [HasSelfBalance X]
     {Inv : World S X E → Prop}
     {claim : Claim S X E} {Auth : AuthPred C}
     (h : ∀ fn, NoUnauthorizedDecreaseFn C Inv claim Auth fn)
@@ -230,12 +232,13 @@ theorem NoUnauthorizedDecrease.of_fns [HasCreditValue X] [HasPayable C]
 
 theorem NoUnauthorizedDecrease.of_fns_credit [HasCreditValue X]
     {Inv : World S X E → Prop} {claim : Claim S X E} {Auth : AuthPred C}
-    [HasPayable C]
+    [HasPayable C] [HasSelfBalance X]
     (h : ∀ fn, NoUnauthorizedDecreaseCreditFn C Inv claim Auth fn) :
     NoUnauthorizedDecrease C Inv claim Auth := by
   intro c w a hInv hlt
   rw [step_eq_run] at hlt
-  split_ifs at hlt with hvo
+  split_ifs at hlt with hvo hwrap
+  · exact (Nat.lt_irrefl _ hlt).elim
   · cases hrun : C.exec c.fn c.args c.toCtx (World.creditValue w c.value) with
     | error _ =>
       rw [hrun] at hlt
@@ -325,6 +328,7 @@ theorem NoUnauthorizedDecreaseCreditFn_of_fn [HasCreditValue X]
   exact h args ctx w a hInv hlt
 
 theorem Conservation.of_fns [HasCreditValue X] [HasPayable C]
+    [HasSelfBalance X]
     {Inv : World S X E → Prop} {claim : Claim S X E}
     {inflow : Inflow C}
     (h : ∀ fn, ConservesFn C Inv claim inflow fn)

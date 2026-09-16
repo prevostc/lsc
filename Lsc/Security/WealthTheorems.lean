@@ -30,6 +30,7 @@ Unlike `no_unauthorized_extraction_at`, this form does not require the caller
 to differ from the contract, and does not restrict to calls that target this
 contract. -/
 theorem no_unauthorized_extraction [HasCreditValue X] [HasPayable C]
+    [HasSelfBalance X]
     {Inv : World S X E → Prop} {claim : Claim S X E}
     {Auth : AuthPred C} {rely : X → X → Prop}
     (hN : NoUnauthorizedDecrease C Inv claim Auth)
@@ -207,6 +208,7 @@ theorem NativeSendAuth.of_debits [HasSelfBalance X] {claim : Claim S X E}
 /-- `NoUnauthorizedDecrease` follows from the per-entrypoint form.
 Non-payable contracts need no credit obligation. -/
 theorem NoUnauthorizedDecrease.of_fns [HasCreditValue X] [HasPayable C]
+    [HasSelfBalance X]
     {Inv : World S X E → Prop}
     {claim : Claim S X E} {Auth : AuthPred C}
     (h : ∀ fn, NoUnauthorizedDecreaseFn C Inv claim Auth fn)
@@ -220,7 +222,7 @@ then `Tx.run`), matching `stepCall`. Non-payable + nonzero value is still a
 revert step and cannot decrease `claim`. -/
 theorem NoUnauthorizedDecrease.of_fns_credit [HasCreditValue X]
     {Inv : World S X E → Prop} {claim : Claim S X E} {Auth : AuthPred C}
-    [HasPayable C]
+    [HasPayable C] [HasSelfBalance X]
     (h : ∀ fn, NoUnauthorizedDecreaseCreditFn C Inv claim Auth fn) :
     NoUnauthorizedDecrease C Inv claim Auth :=
   Proof.NoUnauthorizedDecrease.of_fns_credit h
@@ -281,6 +283,7 @@ theorem NoUnauthorizedDecreaseFn_of_ok {Inv : World S X E → Prop} {claim : Cla
 /-- `Conservation` follows from the per-entrypoint form. Non-payable
 contracts need no credit obligation. -/
 theorem Conservation.of_fns [HasCreditValue X] [HasPayable C]
+    [HasSelfBalance X]
     {Inv : World S X E → Prop} {claim : Claim S X E}
     {inflow : Inflow C}
     (h : ∀ fn, ConservesFn C Inv claim inflow fn)

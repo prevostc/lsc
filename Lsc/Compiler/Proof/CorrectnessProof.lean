@@ -28,6 +28,11 @@ theorem mkEvmStateExt_storage (cd σ ξ κ ctx) :
 theorem mkEvmStateExt_calldata (cd σ ξ κ ctx) :
     (mkEvmStateExt cd σ ξ κ ctx).env.calldata = cd := rfl
 
+theorem mkEvmStateExt_selfBalance_ult_callvalue (cd σ ξ κ ctx) :
+    (mkEvmStateExt cd σ ξ κ ctx).env.selfBalance.ult
+      (mkEvmStateExt cd σ ξ κ ctx).env.callvalue = false := by
+  simp [mkEvmStateExt, BitVec.ult]
+
 theorem mkEvmStateExt_keccak (cd σ ξ κ ctx) :
     (mkEvmStateExt cd σ ξ κ ctx).env.keccakOf = κ := rfl
 

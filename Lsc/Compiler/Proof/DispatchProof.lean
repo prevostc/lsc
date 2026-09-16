@@ -83,15 +83,31 @@ theorem hoist_valueCheckPrefix (f : FnDef) : hoist evm (valueCheckPrefix f) = []
   · simp [valueCheckPrefix, hpay, hoist, valueCheckStmt]
   · simp [valueCheckPrefix, hpay, hoist]
 
+theorem hoist_overflowCheckStmt : hoist evm [overflowCheckStmt] = [] := by
+  simp [overflowCheckStmt, hoist]
+
+theorem hoist_overflowCheckPrefix (f : FnDef) :
+    hoist evm (overflowCheckPrefix f) = [] := by
+  cases hpay : f.payable
+  · simp [overflowCheckPrefix, hpay, hoist]
+  · simp [overflowCheckPrefix, hpay, hoist, overflowCheckStmt]
+
+theorem hoist_valueGuardPrefix (f : FnDef) : hoist evm (valueGuardPrefix f) = [] := by
+  simp [valueGuardPrefix, hoist_append, hoist_valueCheckPrefix, hoist_overflowCheckPrefix]
+
 theorem hoist_entryCaseBody (f : FnDef) (guard body : YBlock) :
     hoist evm
       (YulSemantics.Stmt.block guard ::
-        (valueCheckPrefix f ++ (lockSetPrefix f ++ [YulSemantics.Stmt.block body]))) = [] := by
+        (valueGuardPrefix f ++ (lockSetPrefix f ++ [YulSemantics.Stmt.block body]))) = [] := by
   cases hpay : f.payable <;> cases hlocks : locks f
-  · simp [valueCheckPrefix, hpay, lockSetPrefix, hlocks, hoist, valueCheckStmt]
-  · simp [valueCheckPrefix, hpay, lockSetPrefix, hlocks, hoist, valueCheckStmt, lockSetStmt]
-  · simp [valueCheckPrefix, hpay, lockSetPrefix, hlocks, hoist]
-  · simp [valueCheckPrefix, hpay, lockSetPrefix, hlocks, hoist, lockSetStmt]
+  · simp [valueGuardPrefix, valueCheckPrefix, overflowCheckPrefix, hpay,
+      lockSetPrefix, hlocks, hoist, valueCheckStmt]
+  · simp [valueGuardPrefix, valueCheckPrefix, overflowCheckPrefix, hpay,
+      lockSetPrefix, hlocks, hoist, valueCheckStmt, lockSetStmt]
+  · simp [valueGuardPrefix, valueCheckPrefix, overflowCheckPrefix, hpay,
+      lockSetPrefix, hlocks, hoist, overflowCheckStmt]
+  · simp [valueGuardPrefix, valueCheckPrefix, overflowCheckPrefix, hpay,
+      lockSetPrefix, hlocks, hoist, overflowCheckStmt, lockSetStmt]
 
 theorem hoist_two_blocks (g b : YBlock) :
     hoist evm [.block g, .block b] = [] := by simp [hoist]
@@ -311,6 +327,80 @@ theorem exec_valueCheckPrefix_halt {funs V st f}
   simp [valueCheckPrefix, hp]
   exact Step.seqStop (exec_valueCheck_halt hv) halt_ne_normal
 
+theorem eval_selfbalance (funs : FunEnv evm) (V : VEnv evm) (st : EvmState) :
+    EvalExpr evm funs V st (bop Op.selfbalance [])
+      (.vals [st.env.selfBalance] st) :=
+  Step.builtinOk Step.argsNil (step_selfbalance _)
+
+theorem eval_lt_selfbalance_callvalue (funs : FunEnv evm) (V : VEnv evm)
+    (st : EvmState) :
+    EvalExpr evm funs V st
+      (bop Op.lt [bop Op.selfbalance [], bop Op.callvalue []])
+      (.vals [b2w (st.env.selfBalance.ult st.env.callvalue)] st) :=
+  Step.builtinOk
+    (Step.argsCons (Step.argsCons Step.argsNil (eval_callvalue funs V st))
+      (eval_selfbalance funs V st))
+    (step_lt _ _ _)
+
+theorem exec_overflowCheck_ok {funs V st}
+    (h : st.env.selfBalance.ult st.env.callvalue = false) :
+    ExecStmt evm funs V st overflowCheckStmt V st .normal := by
+  refine Step.ifFalse (D := evm) (eval_lt_selfbalance_callvalue funs V st) ?_
+  simp [h, b2w, Dialect.zero, litValue]
+
+theorem exec_overflowCheck_halt {funs V st}
+    (h : st.env.selfBalance.ult st.env.callvalue = true) :
+    ExecStmt evm funs V st overflowCheckStmt V
+      { touchMemory st 0 0 with halted := some (.revert, []) } .halt := by
+  have inner :
+      ExecStmts evm (hoist evm [revert00] :: funs) V st [revert00] V
+        { touchMemory st 0 0 with halted := some (.revert, []) } .halt := by
+    rw [hoist_revert00]
+    exact revert00_exec _ _ _
+  refine Step.ifTrue (D := evm) (eval_lt_selfbalance_callvalue funs V st) ?_ ?_
+  · simp [h, b2w, Dialect.zero, litValue]
+  · simpa [restore_self, overflowCheckStmt] using Step.block (D := evm) inner
+
+theorem exec_overflowCheckPrefix_ok {funs V st f}
+    (h : f.payable = false ∨ st.env.selfBalance.ult st.env.callvalue = false) :
+    ExecStmts evm funs V st (overflowCheckPrefix f) V st .normal := by
+  cases hpay : f.payable
+  · simp [overflowCheckPrefix, hpay]
+    exact Step.seqNil
+  · have hnw : st.env.selfBalance.ult st.env.callvalue = false := by
+      cases h with
+      | inl hp => simp [hp] at hpay
+      | inr hnw => exact hnw
+    simp [overflowCheckPrefix, hpay]
+    exact Step.seqCons (exec_overflowCheck_ok hnw) Step.seqNil
+
+theorem exec_overflowCheckPrefix_halt {funs V st f}
+    (hp : f.payable = true) (hw : st.env.selfBalance.ult st.env.callvalue = true) :
+    ExecStmts evm funs V st (overflowCheckPrefix f) V
+      { touchMemory st 0 0 with halted := some (.revert, []) } .halt := by
+  simp [overflowCheckPrefix, hp]
+  exact Step.seqStop (exec_overflowCheck_halt hw) halt_ne_normal
+
+theorem exec_valueGuardPrefix_ok {funs V st f}
+    (hvo : f.payable = true ∨ st.env.callvalue = 0)
+    (hnw : f.payable = false ∨ st.env.selfBalance.ult st.env.callvalue = false) :
+    ExecStmts evm funs V st (valueGuardPrefix f) V st .normal :=
+  execStmts_append (exec_valueCheckPrefix_ok hvo) (exec_overflowCheckPrefix_ok hnw)
+
+theorem exec_valueGuardPrefix_valueHalt {funs V st f}
+    (hp : f.payable = false) (hv : st.env.callvalue ≠ 0) :
+    ExecStmts evm funs V st (valueGuardPrefix f) V
+      { touchMemory st 0 0 with halted := some (.revert, []) } .halt := by
+  simp [valueGuardPrefix]
+  exact execStmts_append_halt (exec_valueCheckPrefix_halt hp hv)
+
+theorem exec_valueGuardPrefix_wrapHalt {funs V st f}
+    (hp : f.payable = true) (hw : st.env.selfBalance.ult st.env.callvalue = true) :
+    ExecStmts evm funs V st (valueGuardPrefix f) V
+      { touchMemory st 0 0 with halted := some (.revert, []) } .halt :=
+  execStmts_append (exec_valueCheckPrefix_ok (Or.inl hp))
+    (exec_overflowCheckPrefix_halt hp hw)
+
 theorem callvalue_eq_zero_iff {ctx st} (h : ctxRel ctx st) :
     st.env.callvalue = 0 ↔ ctx.value = 0 := by
   rw [ctxRel_callvalue h, ofNat256_eq_zero_iff (ctxRel_value_lt h)]
@@ -327,7 +417,7 @@ theorem entryCase_inv {c f p} (h : entryCase c f = some p) :
     ∃ body, toYulFn c f = some body ∧
       p = (YulSemantics.Literal.number f.selector,
         YulSemantics.Stmt.block (emitGuardLt {} (4 + 32 * f.params.length)).stmts ::
-          (valueCheckPrefix f ++ (lockSetPrefix f ++ [YulSemantics.Stmt.block body]))) := by
+          (valueGuardPrefix f ++ (lockSetPrefix f ++ [YulSemantics.Stmt.block body]))) := by
   simp [entryCase, Bind.bind, Option.bind] at h
   cases hb : toYulFn c f <;> simp [hb] at h
   exact ⟨_, rfl, by cases h; rfl⟩
@@ -363,7 +453,7 @@ theorem selectSwitch_mapM {c : ContractDef} {sel : Nat} (hsel : sel < wordBound)
             selectSwitch evm (BitVec.ofNat 256 sel) cases (some [revert00]) =
               YulSemantics.Stmt.block
                 (emitGuardLt {} (4 + 32 * f.params.length)).stmts ::
-                (valueCheckPrefix f ++ (lockSetPrefix f ++ [YulSemantics.Stmt.block body]))
+                (valueGuardPrefix f ++ (lockSetPrefix f ++ [YulSemantics.Stmt.block body]))
   | [], cases, hmap => by
     simp [List.mapM_nil] at hmap
     subst cases
@@ -543,14 +633,14 @@ theorem runtimeBlock_correct_callFree {S X E ε : Type} (c : ContractDef)
               cases (some [revert00]) =
                 YulSemantics.Stmt.block
                   (emitGuardLt {} (4 + 32 * f.params.length)).stmts ::
-                  (valueCheckPrefix f ++ (lockSetPrefix f ++
+                  (valueGuardPrefix f ++ (lockSetPrefix f ++
                     [YulSemantics.Stmt.block body])) := by
         simpa [hfind] using hswM
       have hlocks : locks f = false := locks_eq_false_of_callFree (hcf f hfmem)
       simp [lockSetPrefix, hlocks] at hswEq
       set caseBody : YBlock :=
         YulSemantics.Stmt.block (emitGuardLt {} (4 + 32 * f.params.length)).stmts ::
-          (valueCheckPrefix f ++ [YulSemantics.Stmt.block body])
+          (valueGuardPrefix f ++ [YulSemantics.Stmt.block body])
       have hcaseH : hoist evm caseBody = [] := by
         simpa [lockSetPrefix, hlocks] using hoist_entryCaseBody f _ body
       by_cases hshortF : cd.length < 4 + 32 * f.params.length
@@ -583,57 +673,89 @@ theorem runtimeBlock_correct_callFree {S X E ε : Type} (c : ContractDef)
         by_cases hvo : valueOk f ctx.value = true
         · have hsome : dispatchedFn c cd ctx.value = some f := by
             simp [dispatchedFn, hselF, hvo]
-          have hval : ExecStmts evm [[], []] [] stA (valueCheckPrefix f) [] stA .normal :=
-            exec_valueCheckPrefix_ok (valueOk_to_callvalue hctxA hvo)
-          have hsim := toYulFn_execStmts_callFree (c := c) (Γ := Γ) hΓ κ hκ f
-            (hctor f hfmem) (hcf f hfmem) hlen (hbound f hfmem) body hbody
-            ctx w stA hctxA hRA [[], [], []]
-          have hfH := toYulFn_hoist hbody (hctor f hfmem)
-          simp only [cd, hcdA] at hsim hsome
-          cases hrun : Tx.run (Core.denote Γ f.core
-              (decodeArgs f st0.env.calldata).reverse) ctx w with
-          | ok p =>
-            simp only [hrun, except_ok_prod, hcdA] at hsim
-            obtain ⟨V', st', hexecB, hsucc, hR'⟩ := hsim
-            have hbodyStmt :
-                ExecStmt evm [[], []] [] stA (.block body) [] st' .halt := by
-              have hb := exec_block_halt (funs := [[], []]) (V := []) hfH hexecB
-              rw [restore_nil] at hb
-              exact hb
-            have hcase : ExecStmts evm [[], []] [] stA caseBody [] st' .halt :=
-              exec_cons_normal hblkF
-                (execStmts_append hval (exec_head_halt hbodyStmt))
+          by_cases hwrap : f.payable && st0.env.selfBalance.ult st0.env.callvalue
+          · have hp : f.payable = true := by
+              cases hpay : f.payable
+              · simp [hpay] at hwrap
+              · rfl
+            have hw : stA.env.selfBalance.ult stA.env.callvalue = true := by
+              simp [stAfterGuard, hp] at hwrap
+              exact hwrap
+            have hvalH : ExecStmts evm [[], []] [] stA (valueGuardPrefix f) []
+                stRev .halt :=
+              exec_valueGuardPrefix_wrapHalt hp hw
+            have hcase : ExecStmts evm [[], []] [] stA caseBody [] stRev .halt :=
+              exec_cons_normal hblkF (execStmts_append_halt hvalH)
             have hswStmt := switch_halt_nil hselE hswEq hcaseH hcase
             have hexec :=
-              exec_cons_normal hG (exec_cons_normal hLockChk (exec_pair_halt hblk4 hswStmt))
-            have hRun := run_of_exec hhoist hexec
-            obtain ⟨k, bs, hh, hk⟩ := haltSuccess_commits hsucc
-            refine ⟨st', ⟨st', hRun, (committedState_commit hh hk).symm⟩, ?_⟩
+              exec_cons_normal hG (exec_cons_normal hLockChk
+                (exec_pair_halt hblk4 hswStmt))
+            have hRC := obs_revert (yul := erasedRuntime cases) hR
+              (run_of_exec hhoist hexec) hhRev
+            refine ⟨committedState st0 stRev, hRC.1, ?_⟩
             rw [hsome]
-            simp only [cd]
-            simp only [hrun, except_ok_prod]
-            exact ⟨hsucc, hR'⟩
-          | error err =>
-            simp only [hrun, except_error_prod, hcdA] at hsim
-            obtain ⟨V', st', bytes, hexecB, hh, herr⟩ := hsim
-            have hbodyStmt :
-                ExecStmt evm [[], []] [] stA (.block body) [] st' .halt := by
-              have hb := exec_block_halt (funs := [[], []]) (V := []) hfH hexecB
-              rw [restore_nil] at hb
-              exact hb
-            have hcase : ExecStmts evm [[], []] [] stA caseBody [] st' .halt :=
-              exec_cons_normal hblkF
-                (execStmts_append hval (exec_head_halt hbodyStmt))
-            have hswStmt := switch_halt_nil hselE hswEq hcaseH hcase
-            have hexec :=
-              exec_cons_normal hG (exec_cons_normal hLockChk (exec_pair_halt hblk4 hswStmt))
-            have hRun := run_of_exec hhoist hexec
-            refine ⟨committedState st0 st', ⟨st', hRun, rfl⟩, ?_⟩
-            rw [hsome]
-            simp only [cd]
-            simp only [hrun, except_error_prod]
-            refine ⟨bytes, ?_, herr, R_rollback_obs hR hh HaltKind.revert_commits⟩
-            simp [committedState_rollback hh HaltKind.revert_commits, hh]
+            simp [cd, hwrap]
+            exact ⟨hRC.2.1, hRC.2.2⟩
+          · have hnw : f.payable = false ∨
+                stA.env.selfBalance.ult stA.env.callvalue = false := by
+              cases hpay : f.payable
+              · exact Or.inl rfl
+              · simp [stAfterGuard, hpay] at hwrap
+                exact Or.inr hwrap
+            have hval : ExecStmts evm [[], []] [] stA (valueGuardPrefix f) []
+                stA .normal :=
+              exec_valueGuardPrefix_ok (valueOk_to_callvalue hctxA hvo) hnw
+            have hsim := toYulFn_execStmts_callFree (c := c) (Γ := Γ) hΓ κ hκ f
+              (hctor f hfmem) (hcf f hfmem) hlen (hbound f hfmem) body hbody
+              ctx w stA hctxA hRA [[], [], []]
+            have hfH := toYulFn_hoist hbody (hctor f hfmem)
+            simp only [cd, hcdA] at hsim hsome
+            cases hrun : Tx.run (Core.denote Γ f.core
+                (decodeArgs f st0.env.calldata).reverse) ctx w with
+            | ok p =>
+              simp only [hrun, except_ok_prod, hcdA] at hsim
+              obtain ⟨V', st', hexecB, hsucc, hR'⟩ := hsim
+              have hbodyStmt :
+                  ExecStmt evm [[], []] [] stA (.block body) [] st' .halt := by
+                have hb := exec_block_halt (funs := [[], []]) (V := []) hfH hexecB
+                rw [restore_nil] at hb
+                exact hb
+              have hcase : ExecStmts evm [[], []] [] stA caseBody [] st' .halt :=
+                exec_cons_normal hblkF
+                  (execStmts_append hval (exec_head_halt hbodyStmt))
+              have hswStmt := switch_halt_nil hselE hswEq hcaseH hcase
+              have hexec :=
+                exec_cons_normal hG (exec_cons_normal hLockChk
+                  (exec_pair_halt hblk4 hswStmt))
+              have hRun := run_of_exec hhoist hexec
+              obtain ⟨k, bs, hh, hk⟩ := haltSuccess_commits hsucc
+              refine ⟨st', ⟨st', hRun, (committedState_commit hh hk).symm⟩, ?_⟩
+              rw [hsome]
+              simp only [cd]
+              simp [hwrap, hrun, except_ok_prod]
+              exact ⟨hsucc, hR'⟩
+            | error err =>
+              simp only [hrun, except_error_prod, hcdA] at hsim
+              obtain ⟨V', st', bytes, hexecB, hh, herr⟩ := hsim
+              have hbodyStmt :
+                  ExecStmt evm [[], []] [] stA (.block body) [] st' .halt := by
+                have hb := exec_block_halt (funs := [[], []]) (V := []) hfH hexecB
+                rw [restore_nil] at hb
+                exact hb
+              have hcase : ExecStmts evm [[], []] [] stA caseBody [] st' .halt :=
+                exec_cons_normal hblkF
+                  (execStmts_append hval (exec_head_halt hbodyStmt))
+              have hswStmt := switch_halt_nil hselE hswEq hcaseH hcase
+              have hexec :=
+                exec_cons_normal hG (exec_cons_normal hLockChk
+                  (exec_pair_halt hblk4 hswStmt))
+              have hRun := run_of_exec hhoist hexec
+              refine ⟨committedState st0 st', ⟨st', hRun, rfl⟩, ?_⟩
+              rw [hsome]
+              simp only [cd]
+              simp [hwrap, hrun, except_error_prod]
+              refine ⟨bytes, ?_, herr, R_rollback_obs hR hh HaltKind.revert_commits⟩
+              simp [committedState_rollback hh HaltKind.revert_commits, hh]
         · have hnone : dispatchedFn c cd ctx.value = none := by
             simp [dispatchedFn, hselF, hvo]
           have hp : f.payable = false := by
@@ -647,8 +769,9 @@ theorem runtimeBlock_correct_callFree {S X E ε : Type} (c : ContractDef)
           have hcv : stA.env.callvalue ≠ 0 := by
             intro heq
             exact hvnz ((callvalue_eq_zero_iff hctxA).mp heq)
-          have hvalH : ExecStmts evm [[], []] [] stA (valueCheckPrefix f) [] stRev .halt :=
-            exec_valueCheckPrefix_halt hp hcv
+          have hvalH : ExecStmts evm [[], []] [] stA (valueGuardPrefix f) []
+              stRev .halt :=
+            exec_valueGuardPrefix_valueHalt hp hcv
           have hcase : ExecStmts evm [[], []] [] stA caseBody [] stRev .halt :=
             exec_cons_normal hblkF (execStmts_append_halt hvalH)
           have hswStmt := switch_halt_nil hselE hswEq hcaseH hcase

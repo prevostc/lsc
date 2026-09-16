@@ -845,6 +845,19 @@ theorem noGas_valueCheckPrefix (f : FnDef) : noGasStmts (valueCheckPrefix f) = t
   simp [valueCheckPrefix]
   split <;> simp [noGasStmts, noGas_valueCheckStmt]
 
+theorem noGas_overflowCheckStmt : noGasStmt overflowCheckStmt = true := by
+  simp [overflowCheckStmt, noGasStmt, bop, noGasExpr, noGasOp, noGasExprs,
+    noGasStmts, noGas_revert00]
+
+theorem noGas_overflowCheckPrefix (f : FnDef) :
+    noGasStmts (overflowCheckPrefix f) = true := by
+  simp [overflowCheckPrefix]
+  split <;> simp [noGasStmts, noGas_overflowCheckStmt]
+
+theorem noGas_valueGuardPrefix (f : FnDef) : noGasStmts (valueGuardPrefix f) = true := by
+  simp [valueGuardPrefix, noGasStmts_append, noGas_valueCheckPrefix,
+    noGas_overflowCheckPrefix]
+
 theorem toYulFn_noGas {c f yul} (h : toYulFn c f = some yul) :
     noGasStmts yul = true := by
   unfold toYulFn at h
@@ -863,7 +876,7 @@ theorem entryCase_noGas {c f p} (h : entryCase c f = some p) :
   simp [entryCase, Bind.bind, Option.bind] at h
   cases hb : toYulFn c f <;> simp [hb] at h
   cases h
-  simp [noGasStmts, noGasStmt, noGas_guardLt, noGasStmts_append, noGas_valueCheckPrefix f,
+  simp [noGasStmts, noGasStmt, noGas_guardLt, noGasStmts_append, noGas_valueGuardPrefix f,
     noGas_lockSetPrefix f, toYulFn_noGas hb]
 
 theorem mapM_entryCase_noGas {c : ContractDef} :

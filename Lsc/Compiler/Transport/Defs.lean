@@ -248,6 +248,7 @@ theorem wf_decodeTrace [HasCreditValue X] {T : TransportSetup S X E ε}
 /-- S1 only: post-`.self` ignores `log` (Token `exec` does not read `log`).
 Call-free contracts have no payable function, so `creditValue w 0 = w`. -/
 theorem post_congr_run [HasCreditValue X] {C : Spec S X E ε} [HasPayable C]
+    [HasSelfBalance X]
     (hpc : ∀ (fn : C.Fn) (args : C.Args fn) (ctx : Ctx) (w w' : World S X E),
       w.self = w'.self → w.ext = w'.ext →
         (worldAfter (C.exec fn args) ctx w).self =
@@ -277,12 +278,13 @@ theorem post_congr_run [HasCreditValue X] {C : Spec S X E ε} [HasPayable C]
           step_reject_value (c := c) (w := w') hp hv]
         exact ih w w' hs he
 
-theorem step_ofCtx [HasCreditValue X] (T : TransportSetup S X E ε)
-    [HasPayable T.spec]
+theorem step_ofCtx [HasCreditValue X] [HasSelfBalance X]
+    (T : TransportSetup S X E ε) [HasPayable T.spec]
     (ctx : Ctx)
     (fn : T.spec.Fn)
     (args : T.spec.Args fn) (w : World S X E)
-    (hvo : T.spec.valueOk fn ctx.value = true) :
+    (hvo : T.spec.valueOk fn ctx.value = true)
+    (hnw : (T.spec.payable fn && creditWraps w ctx.value) = false) :
     step (.call (Call.ofCtx ctx fn args)) w =
       match T.spec.exec fn args ctx (World.creditValue w ctx.value) with
       | .ok (_, w') => w'
@@ -291,6 +293,7 @@ theorem step_ofCtx [HasCreditValue X] (T : TransportSetup S X E ε)
   rw [Call.toCtx_ofCtx]
   dsimp only [Call.ofCtx]
   refine (if_pos hvo).trans ?_
+  simp [hnw]
   cases hrun : T.spec.exec fn args ctx (World.creditValue w ctx.value) <;> rfl
 
 theorem valueOk_spec_fnDef (T : TransportSetup S X E ε) (fn : T.spec.Fn)

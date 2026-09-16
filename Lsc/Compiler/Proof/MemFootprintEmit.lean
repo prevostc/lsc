@@ -1010,13 +1010,33 @@ theorem staticSafe_valueCheckPrefix (f : FnDef) :
   · simp [valueCheckPrefix, hpay, staticSafeStmts, staticSafe_valueCheckStmt]
   · simp [valueCheckPrefix, hpay, staticSafeStmts]
 
+theorem staticSafe_selfbalance :
+    staticSafeExpr memoryGuardK (bop Op.selfbalance []) = true := by
+  simp [bop, staticSafeExpr_builtin, staticSafeOp, staticSafeExprs]
+
+theorem staticSafe_overflowCheckStmt :
+    staticSafeStmt memoryGuardK overflowCheckStmt = true := by
+  simp [overflowCheckStmt, staticSafeStmt_cond, staticSafeStmts, staticSafe_revert00,
+    bop, staticSafeExpr_builtin, staticSafeOp, staticSafeExprs]
+
+theorem staticSafe_overflowCheckPrefix (f : FnDef) :
+    staticSafeStmts memoryGuardK (overflowCheckPrefix f) = true := by
+  cases hpay : f.payable
+  · simp [overflowCheckPrefix, hpay, staticSafeStmts]
+  · simp [overflowCheckPrefix, hpay, staticSafeStmts, staticSafe_overflowCheckStmt]
+
+theorem staticSafe_valueGuardPrefix (f : FnDef) :
+    staticSafeStmts memoryGuardK (valueGuardPrefix f) = true := by
+  simp [valueGuardPrefix, staticSafeStmts_append, staticSafe_valueCheckPrefix,
+    staticSafe_overflowCheckPrefix]
+
 theorem staticSafe_entryCase {c f p} (h : entryCase c f = some p) :
     staticSafeStmts memoryGuardK p.2 = true := by
   simp [entryCase, Bind.bind, Option.bind] at h
   cases hb : toYulFn c f <;> simp [hb] at h
   cases h
   simp [staticSafeStmts, staticSafeStmt, staticSafe_guardLt, staticSafeStmts_append,
-    staticSafe_valueCheckPrefix f, staticSafe_lockSetPrefix f, staticSafe_toYulFn hb]
+    staticSafe_valueGuardPrefix f, staticSafe_lockSetPrefix f, staticSafe_toYulFn hb]
 
 theorem staticSafe_mapM_entryCase {c : ContractDef} :
     ∀ {fs : List FnDef} {cases : List (Literal × YBlock)},

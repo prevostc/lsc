@@ -33,6 +33,13 @@ theorem mkEvmStateExt_calldata (cd σ ξ κ ctx) :
     (mkEvmStateExt cd σ ξ κ ctx).env.calldata = cd :=
   Proof.mkEvmStateExt_calldata cd σ ξ κ ctx
 
+/-- `mkEvmStateExt` sets `selfBalance` equal to `callvalue`, so the payable wrap
+check never fires in the transport skeleton. -/
+theorem mkEvmStateExt_selfBalance_ult_callvalue (cd σ ξ κ ctx) :
+    (mkEvmStateExt cd σ ξ κ ctx).env.selfBalance.ult
+      (mkEvmStateExt cd σ ξ κ ctx).env.callvalue = false :=
+  Proof.mkEvmStateExt_selfBalance_ult_callvalue cd σ ξ κ ctx
+
 /-- `mkEvmStateExt` installs the given keccak oracle. -/
 theorem mkEvmStateExt_keccak (cd σ ξ κ ctx) :
     (mkEvmStateExt cd σ ξ κ ctx).env.keccakOf = κ :=

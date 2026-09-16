@@ -73,15 +73,19 @@ theorem bytecode_call_correct_ext {S E ε : Type}
       exact hpred.1
     | some f =>
       simp only [hsel] at hpred
-      cases htx : Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse)
-          ctx w with
-      | ok prod =>
-        simp only [htx] at hpred
+      by_cases hwrap : f.payable && yst0.env.selfBalance.ult yst0.env.callvalue
+      · simp only [hwrap] at hpred
         exact hpred.1
-      | error e =>
-        simp only [htx] at hpred
-        rcases hpred with ⟨_, ⟨ho', _⟩⟩
-        exact ho'
+      · simp only [hwrap] at hpred
+        cases htx : Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse)
+            ctx w with
+        | ok prod =>
+          simp only [htx] at hpred
+          exact hpred.1
+        | error e =>
+          simp only [htx] at hpred
+          rcases hpred with ⟨_, ⟨ho', _⟩⟩
+          exact ho'
   have hHM : HaltedMatch st' s' := by
     rcases hOut with ⟨hn, _⟩ | ⟨_, hH'⟩
     · cases (hn.symm.trans ho)
@@ -96,27 +100,33 @@ theorem bytecode_call_correct_ext {S E ε : Type}
       rw [postStorage_reverted hr.1, obs_storage_rollback hobs hhalted hh]
     | some f =>
       simp only [hsel] at hpred
-      cases htx : Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse)
-          ctx w with
-      | ok prod =>
-        rcases prod with ⟨v, w'⟩
-        simp only [htx] at hpred
-        rcases hpred with ⟨_, ⟨hsucc, _⟩⟩
-        obtain ⟨k, bs, hh, hk⟩ := haltSuccess_commits hsucc
-        have heq : stObs = st' := obs_eq_of_commit hobs hhalted hh hk
-        have hsucc' : haltSuccess f.ret v st'.halted := by rw [← heq]; exact hsucc
-        have hOK' := haltOK_of_success hsucc' hHM
-        have hnr : s'.halt ≠ .Reverted := by
-          unfold haltOK at hOK'
-          split at hOK'
-          · intro h; cases (hOK'.symm.trans h)
-          · intro h; cases (hOK'.1.symm.trans h)
-        rw [postStorage_commit hnr, storage_eq_account hSM, hstor, heq]
-      | error e =>
-        simp only [htx] at hpred
-        rcases hpred with ⟨bytes, ⟨_, ⟨hh, _⟩⟩⟩
-        have hr := reverted_of_halted (hhalted ▸ hh) hHM
+      by_cases hwrap : f.payable && yst0.env.selfBalance.ult yst0.env.callvalue
+      · simp only [hwrap] at hpred
+        rcases hpred with ⟨_, ⟨hh, _⟩⟩
+        have hr := reverted_of_halted (bytes := []) (hhalted ▸ hh) hHM
         rw [postStorage_reverted hr.1, obs_storage_rollback hobs hhalted hh]
+      · simp only [hwrap] at hpred
+        cases htx : Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse)
+            ctx w with
+        | ok prod =>
+          rcases prod with ⟨v, w'⟩
+          simp only [htx] at hpred
+          rcases hpred with ⟨_, ⟨hsucc, _⟩⟩
+          obtain ⟨k, bs, hh, hk⟩ := haltSuccess_commits hsucc
+          have heq : stObs = st' := obs_eq_of_commit hobs hhalted hh hk
+          have hsucc' : haltSuccess f.ret v st'.halted := by rw [← heq]; exact hsucc
+          have hOK' := haltOK_of_success hsucc' hHM
+          have hnr : s'.halt ≠ .Reverted := by
+            unfold haltOK at hOK'
+            split at hOK'
+            · intro h; cases (hOK'.symm.trans h)
+            · intro h; cases (hOK'.1.symm.trans h)
+          rw [postStorage_commit hnr, storage_eq_account hSM, hstor, heq]
+        | error e =>
+          simp only [htx] at hpred
+          rcases hpred with ⟨bytes, ⟨_, ⟨hh, _⟩⟩⟩
+          have hr := reverted_of_halted (hhalted ▸ hh) hHM
+          rw [postStorage_reverted hr.1, obs_storage_rollback hobs hhalted hh]
   have hpostξ : evmForeign stObs = postForeign yst0 s' := by
     simp only [EvmCallRunExt] at hpred
     cases hsel : dispatchedFn c yst0.env.calldata ctx.value with
@@ -127,27 +137,33 @@ theorem bytecode_call_correct_ext {S E ε : Type}
       rw [postForeign_reverted hr.1, obs_foreign_rollback hobs hhalted hh]
     | some f =>
       simp only [hsel] at hpred
-      cases htx : Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse)
-          ctx w with
-      | ok prod =>
-        rcases prod with ⟨v, w'⟩
-        simp only [htx] at hpred
-        rcases hpred with ⟨_, ⟨hsucc, _⟩⟩
-        obtain ⟨k, bs, hh, hk⟩ := haltSuccess_commits hsucc
-        have heq : stObs = st' := obs_eq_of_commit hobs hhalted hh hk
-        have hsucc' : haltSuccess f.ret v st'.halted := by rw [← heq]; exact hsucc
-        have hOK' := haltOK_of_success hsucc' hHM
-        have hnr : s'.halt ≠ .Reverted := by
-          unfold haltOK at hOK'
-          split at hOK'
-          · intro h; cases (hOK'.symm.trans h)
-          · intro h; cases (hOK'.1.symm.trans h)
-        rw [postForeign_commit hnr, foreign_eq_account hSM, hξeq, heq]
-      | error e =>
-        simp only [htx] at hpred
-        rcases hpred with ⟨bytes, ⟨_, ⟨hh, _⟩⟩⟩
-        have hr := reverted_of_halted (hhalted ▸ hh) hHM
+      by_cases hwrap : f.payable && yst0.env.selfBalance.ult yst0.env.callvalue
+      · simp only [hwrap] at hpred
+        rcases hpred with ⟨_, ⟨hh, _⟩⟩
+        have hr := reverted_of_halted (bytes := []) (hhalted ▸ hh) hHM
         rw [postForeign_reverted hr.1, obs_foreign_rollback hobs hhalted hh]
+      · simp only [hwrap] at hpred
+        cases htx : Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse)
+            ctx w with
+        | ok prod =>
+          rcases prod with ⟨v, w'⟩
+          simp only [htx] at hpred
+          rcases hpred with ⟨_, ⟨hsucc, _⟩⟩
+          obtain ⟨k, bs, hh, hk⟩ := haltSuccess_commits hsucc
+          have heq : stObs = st' := obs_eq_of_commit hobs hhalted hh hk
+          have hsucc' : haltSuccess f.ret v st'.halted := by rw [← heq]; exact hsucc
+          have hOK' := haltOK_of_success hsucc' hHM
+          have hnr : s'.halt ≠ .Reverted := by
+            unfold haltOK at hOK'
+            split at hOK'
+            · intro h; cases (hOK'.symm.trans h)
+            · intro h; cases (hOK'.1.symm.trans h)
+          rw [postForeign_commit hnr, foreign_eq_account hSM, hξeq, heq]
+        | error e =>
+          simp only [htx] at hpred
+          rcases hpred with ⟨bytes, ⟨_, ⟨hh, _⟩⟩⟩
+          have hr := reverted_of_halted (hhalted ▸ hh) hHM
+          rw [postForeign_reverted hr.1, obs_foreign_rollback hobs hhalted hh]
   refine ⟨⟨s', hSteps, hH⟩, ?_⟩
   intro s'' hS'' hH''
   rw [steps_halted_unique hS'' hSteps hH'' hH]
@@ -195,17 +211,22 @@ theorem evmCallRunExtAll_of_progress {S E ε : Type}
     exact ⟨obs_storage_rollback rfl hhalted hh, obs_foreign_rollback rfl hhalted hh⟩
   | some f =>
     simp only [hsel] at hpred ⊢
-    cases htx : Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse)
-        ctx w with
-    | ok prod =>
-      rcases prod with ⟨v, w'⟩
-      simp only [htx] at hpred ⊢
-      rcases hpred with ⟨_, hsucc, hR', hAgr'⟩
-      exact ⟨hR'.1, stObs, rfl, rfl, hR', hAgr'⟩
-    | error e =>
-      simp only [htx] at hpred ⊢
-      rcases hpred with ⟨bytes, ⟨_, ⟨hh, _⟩⟩⟩
+    by_cases hwrap : f.payable && yst0.env.selfBalance.ult yst0.env.callvalue
+    · simp only [hwrap] at hpred ⊢
+      rcases hpred with ⟨_, ⟨hh, _⟩⟩
       exact ⟨obs_storage_rollback rfl hhalted hh, obs_foreign_rollback rfl hhalted hh⟩
+    · simp only [hwrap] at hpred ⊢
+      cases htx : Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse)
+          ctx w with
+      | ok prod =>
+        rcases prod with ⟨v, w'⟩
+        simp only [htx] at hpred ⊢
+        rcases hpred with ⟨_, hsucc, hR', hAgr'⟩
+        exact ⟨hR'.1, stObs, rfl, rfl, hR', hAgr'⟩
+      | error e =>
+        simp only [htx] at hpred ⊢
+        rcases hpred with ⟨bytes, ⟨_, ⟨hh, _⟩⟩⟩
+        exact ⟨obs_storage_rollback rfl hhalted hh, obs_foreign_rollback rfl hhalted hh⟩
 
 end Proof
 

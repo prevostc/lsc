@@ -25,11 +25,15 @@ def RuntimeBlockCorrectCallFree {S X E ε : Type} (c : ContractDef)
     match dispatchedFn c st0.env.calldata ctx.value with
     | none => stObs.halted = some (.revert, []) ∧ R c Γ κ w stObs
     | some f =>
-      match Tx.run (Core.denote Γ f.core (decodeArgs f st0.env.calldata).reverse) ctx w with
-      | .ok (v, w') => haltSuccess f.ret v stObs.halted ∧ R c Γ κ w' stObs
-      | .error e =>
-        ∃ bytes, stObs.halted = some (.revert, bytes) ∧
-          haltError c Γ e bytes ∧ R c Γ κ w stObs
+      if f.payable && st0.env.selfBalance.ult st0.env.callvalue then
+        stObs.halted = some (.revert, []) ∧ R c Γ κ w stObs
+      else
+        match Tx.run (Core.denote Γ f.core
+            (decodeArgs f st0.env.calldata).reverse) ctx w with
+        | .ok (v, w') => haltSuccess f.ret v stObs.halted ∧ R c Γ κ w' stObs
+        | .error e =>
+          ∃ bytes, stObs.halted = some (.revert, bytes) ∧
+            haltError c Γ e bytes ∧ R c Γ κ w stObs
 
 /-- `runtimeBlock` is a `memoryguard` marker, a transient-lock check, a
 calldata-size guard, and a selector `switch`. Used by the dispatcher proofs

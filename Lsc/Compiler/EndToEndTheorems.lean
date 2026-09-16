@@ -221,9 +221,12 @@ theorem evmCallRun_of_correct {S X E ε : Type} (c : ContractDef)
       match dispatchedFn c yst0.env.calldata ctx.value with
       | none => σ' = yst0.storage
       | some f =>
-        match Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse) ctx w with
-        | .ok (_, w') => storageRel c Γ evmKeccak w'.self σ' ∧ WorldWF c Γ w'
-        | .error _ => σ' = yst0.storage :=
+        if f.payable && yst0.env.selfBalance.ult yst0.env.callvalue then
+          σ' = yst0.storage
+        else
+          match Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse) ctx w with
+          | .ok (_, w') => storageRel c Γ evmKeccak w'.self σ' ∧ WorldWF c Γ w'
+          | .error _ => σ' = yst0.storage :=
   Proof.evmCallRun_of_correct c Γ hΓ hκ hcf hctor hlen hbound rt hrt is hcomp ctx w yst0 hctx hR himm0 hLock
 
 /-- The empty encoded-call fold is the identity on worlds. -/
@@ -259,6 +262,13 @@ theorem mkEvmState_storage (cd σ κ ctx) :
 theorem mkEvmState_calldata (cd σ κ ctx) :
     (mkEvmState cd σ κ ctx).env.calldata = cd :=
   Proof.mkEvmState_calldata cd σ κ ctx
+
+/-- `mkEvmState` sets `selfBalance` equal to `callvalue`, so the payable wrap
+check never fires in the transport skeleton. -/
+theorem mkEvmState_selfBalance_ult_callvalue (cd σ κ ctx) :
+    (mkEvmState cd σ κ ctx).env.selfBalance.ult
+      (mkEvmState cd σ κ ctx).env.callvalue = false :=
+  Proof.mkEvmState_selfBalance_ult_callvalue cd σ κ ctx
 
 /-- `mkEvmState` installs the given keccak oracle. -/
 theorem mkEvmState_keccak (cd σ κ ctx) :

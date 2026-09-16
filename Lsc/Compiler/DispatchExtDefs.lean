@@ -27,14 +27,19 @@ def RuntimeBlockCorrectExt {S E ε : Type}
       | none =>
           out = Outcome.halt ∧ stObs.halted = some (.revert, []) ∧ R c Γ κ w stObs
       | some f =>
-          match Tx.run (Core.denote Γ f.core (decodeArgs f st0.env.calldata).reverse)
-              ctx w with
-          | .ok (v, w') =>
-              out = Outcome.halt ∧ haltSuccess f.ret v stObs.halted ∧
-                R c Γ κ w' stObs ∧ ExtAgree ctx.self w'.ext stObs
-          | .error e =>
-              ∃ bytes, out = Outcome.halt ∧ stObs.halted = some (.revert, bytes) ∧
-                haltError c Γ e bytes ∧ R c Γ κ w stObs
+          if f.payable && st0.env.selfBalance.ult st0.env.callvalue then
+            out = Outcome.halt ∧ stObs.halted = some (.revert, []) ∧
+              R c Γ κ w stObs
+          else
+            match Tx.run (Core.denote Γ f.core
+                (decodeArgs f st0.env.calldata).reverse) ctx w with
+            | .ok (v, w') =>
+                out = Outcome.halt ∧ haltSuccess f.ret v stObs.halted ∧
+                  R c Γ κ w' stObs ∧ ExtAgree ctx.self w'.ext stObs
+            | .error e =>
+                ∃ bytes, out = Outcome.halt ∧
+                  stObs.halted = some (.revert, bytes) ∧
+                  haltError c Γ e bytes ∧ R c Γ κ w stObs
 
 abbrev RuntimeBlockCorrectExts {S E ε : Type} :=
   @RuntimeBlockCorrectExt S E ε

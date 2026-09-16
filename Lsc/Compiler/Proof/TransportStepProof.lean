@@ -57,6 +57,9 @@ theorem transport_step (T : TransportSetup S X E ε)
       simp [decodeCall, hsel, hfn]
     simp only [hsel] at hpost
     simp only [hdec]
+    have hwrap : (f.payable && yst0.env.selfBalance.ult yst0.env.callvalue) = false := by
+      simp only [yst0, mkEvmState_selfBalance_ult_callvalue, Bool.and_false]
+    simp only [hwrap] at hpost
     have hvoF := dispatchedFn_valueOk hsel
     have hvo : T.spec.valueOk fn ctx.value = true := by
       simpa [valueOk_spec_fnDef, heq] using hvoF
@@ -79,7 +82,8 @@ theorem transport_step (T : TransportSetup S X E ε)
       simp only [htx] at hpost
       simp [worldAfter_error htx]
       refine ⟨?_, WorldWF_log [] hwf⟩
-      simpa [yst0, mkEvmState_storage, hpost] using hs
+      rw [hpost]
+      simpa [yst0, mkEvmState_storage] using hs
 
 
 theorem transport_step_ext (T : TransportSetup S ExtState E ε)
@@ -128,6 +132,9 @@ theorem transport_step_ext (T : TransportSetup S ExtState E ε)
       simp [decodeCall, hsel, hfn]
     simp only [hsel] at hpost
     simp only [hdec]
+    have hwrap : (f.payable && yst0.env.selfBalance.ult yst0.env.callvalue) = false := by
+      simp only [yst0, mkEvmStateExt_selfBalance_ult_callvalue, Bool.and_false]
+    simp only [hwrap] at hpost
     have hvoF := dispatchedFn_valueOk hsel
     have hvo : T.spec.valueOk fn ctx.value = true := by
       simpa [valueOk_spec_fnDef, heq] using hvoF

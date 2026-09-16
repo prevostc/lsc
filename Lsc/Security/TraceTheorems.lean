@@ -44,60 +44,77 @@ theorem worldAfter_eq_self {x : Tx S X E ε α} {ctx : Ctx} {w : World S X E}
   Proof.worldAfter_eq_self hok
 
 /-- The empty trace does not change the world. -/
-@[simp] theorem run_nil [HasCreditValue X] [HasPayable C] (w : World S X E) :
+@[simp] theorem run_nil [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
+    (w : World S X E) :
     run ([] : List (Step C)) w = w :=
   Proof.run_nil w
 
 /-- `run` of a cons is `run` of the tail after one `step`. -/
-@[simp] theorem run_cons [HasCreditValue X] [HasPayable C] (s : Step C)
+@[simp] theorem run_cons [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
+    (s : Step C)
     (tr : List (Step C)) (w : World S X E) :
     run (s :: tr) w = run tr (step s w) :=
   Proof.run_cons s tr w
 
 /-- `run` of an append is sequential composition. -/
-theorem run_append [HasCreditValue X] [HasPayable C] (tr₁ tr₂ : List (Step C))
+theorem run_append [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
+    (tr₁ tr₂ : List (Step C))
     (w : World S X E) :
     run (tr₁ ++ tr₂) w = run tr₂ (run tr₁ w) :=
   Proof.run_append tr₁ tr₂ w
 
 /-- A reverting call step leaves the world unchanged. The run is on the
-post-transfer (value-credited) world when the call is `valueOk`. -/
-theorem step_of_revert [HasCreditValue X] [HasPayable C] {c : Call C}
-    {w : World S X E} {e : Err ε}
+post-transfer (value-credited) world when the call is `valueOk` and does
+not wrap. A wrap-reject is also a no-op. -/
+theorem step_of_revert [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
+    {c : Call C} {w : World S X E} {e : Err ε}
     (hvo : C.valueOk c.fn c.value = true)
     (h : C.exec c.fn c.args c.toCtx (World.creditValue w c.value) = .error e) :
     step (.call c) w = w :=
   Proof.step_of_revert hvo h
 
 /-- Nonzero value to a non-payable function is a revert step. -/
-theorem step_reject_value [HasCreditValue X] [HasPayable C] {c : Call C}
-    {w : World S X E}
+theorem step_reject_value [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
+    {c : Call C} {w : World S X E}
     (hp : C.payable c.fn = false) (hv : c.value ≠ 0) :
     step (.call c) w = w :=
   Proof.step_reject_value hp hv
 
+/-- Payable call whose credited native balance wraps is a revert step. -/
+theorem step_wrap [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
+    {c : Call C} {w : World S X E}
+    (hp : C.payable c.fn = true) (hw : creditWraps w c.value = true) :
+    step (.call c) w = w :=
+  Proof.step_wrap hp hw
+
 /-- A call step is `Tx.run` of the entrypoint on the post-transfer world
-when `valueOk`; otherwise it is the identity. -/
-theorem step_eq_run [HasCreditValue X] [HasPayable C] (c : Call C)
-    (w : World S X E) :
+when `valueOk` and the credit does not wrap; otherwise it is the identity. -/
+theorem step_eq_run [HasCreditValue X] [HasPayable C] [HasSelfBalance X]
+    (c : Call C) (w : World S X E) :
     step (.call c) w =
       if C.valueOk c.fn c.value then
-        match C.exec c.fn c.args c.toCtx (World.creditValue w c.value) with
-        | .ok (_, w') => w'
-        | .error _ => w
+        if C.payable c.fn && creditWraps w c.value then w
+        else
+          match C.exec c.fn c.args c.toCtx (World.creditValue w c.value) with
+          | .ok (_, w') => w'
+          | .error _ => w
       else w :=
   Proof.step_eq_run c w
 
-/-- When `valueOk` and `creditValue` is the identity, a call step is `worldAfter`. -/
+/-- When `valueOk`, `creditValue` is the identity, and the credit does not
+wrap, a call step is `worldAfter`. -/
 theorem step_eq_worldAfter_of_credit_id [HasCreditValue X] [HasPayable C]
+    [HasSelfBalance X]
     (c : Call C) (w : World S X E)
     (hvo : C.valueOk c.fn c.value = true)
-    (h : World.creditValue w c.value = w) :
+    (h : World.creditValue w c.value = w)
+    (hnw : (C.payable c.fn && creditWraps w c.value) = false) :
     step (.call c) w = worldAfter (C.exec c.fn c.args) c.toCtx w :=
-  Proof.step_eq_worldAfter_of_credit_id c w hvo h
+  Proof.step_eq_worldAfter_of_credit_id c w hvo h hnw
 
 /-- Non-payable success is `v = 0`, so the call step is `worldAfter`. -/
 theorem step_eq_worldAfter_of_not_payable [HasCreditValue X] [HasPayable C]
+    [HasSelfBalance X]
     (c : Call C) (w : World S X E)
     (hp : C.payable c.fn = false) (hv : c.value = 0) :
     step (.call c) w = worldAfter (C.exec c.fn c.args) c.toCtx w :=

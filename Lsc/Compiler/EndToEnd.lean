@@ -146,10 +146,13 @@ def BytecodeCallCorrect {S X E ε : Type} (c : ContractDef)
       match dispatchedFn c yst0.env.calldata ctx.value with
       | none => s'.halt = .Reverted ∧ s'.hReturn.toList = []
       | some f =>
-        match Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse) ctx w with
-        | .ok (v, w') => haltOK f.ret v s' ∧ storageRel' c Γ κ w'.self s'
-        | .error e =>
-          s'.halt = .Reverted ∧ ∃ bytes, s'.hReturn.toList = bytes ∧ haltError c Γ e bytes
+        if f.payable && yst0.env.selfBalance.ult yst0.env.callvalue then
+          s'.halt = .Reverted ∧ s'.hReturn.toList = []
+        else
+          match Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse) ctx w with
+          | .ok (v, w') => haltOK f.ret v s' ∧ storageRel' c Γ κ w'.self s'
+          | .error e =>
+            s'.halt = .Reverted ∧ ∃ bytes, s'.hReturn.toList = bytes ∧ haltError c Γ e bytes
 
 
 /-- Fold `Core.denote` like `Security.run` on encoded `(ctx, fn, args)` calls. -/

@@ -42,14 +42,17 @@ def EvmCallRunExt {S E ε : Type}
   | none =>
       out = Outcome.halt ∧ stObs.halted = some (.revert, []) ∧ R c Γ κ w stObs
   | some f =>
-      match Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse)
-          ctx w with
-      | .ok (v, w') =>
-          out = Outcome.halt ∧ haltSuccess f.ret v stObs.halted ∧
-            R c Γ κ w' stObs ∧ ExtAgree ctx.self w'.ext stObs
-      | .error e =>
-          ∃ bytes, out = Outcome.halt ∧ stObs.halted = some (.revert, bytes) ∧
-            haltError c Γ e bytes ∧ R c Γ κ w stObs
+      if f.payable && yst0.env.selfBalance.ult yst0.env.callvalue then
+        out = Outcome.halt ∧ stObs.halted = some (.revert, []) ∧ R c Γ κ w stObs
+      else
+        match Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse)
+            ctx w with
+        | .ok (v, w') =>
+            out = Outcome.halt ∧ haltSuccess f.ret v stObs.halted ∧
+              R c Γ κ w' stObs ∧ ExtAgree ctx.self w'.ext stObs
+        | .error e =>
+            ∃ bytes, out = Outcome.halt ∧ stObs.halted = some (.revert, bytes) ∧
+              haltError c Γ e bytes ∧ R c Γ κ w stObs
 
 /-- Backward bytecode theorem: every Yul `Run` of the compiled runtime is
 predicted (`EvmCallRunExt`) and has matching EVM `Steps` (`compile_correct`).
@@ -82,13 +85,16 @@ def EvmCallRunExtAll {S E ε : Type}
       match dispatchedFn c yst0.env.calldata ctx.value with
       | none => σ' = yst0.storage ∧ ξ' = evmForeign yst0
       | some f =>
-          match Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse)
-              ctx w with
-          | .ok (_, w') =>
-              storageRel c Γ κ w'.self σ' ∧
-                ∃ stObs : EvmState, stObs.storage = σ' ∧ evmForeign stObs = ξ' ∧
-                  R c Γ κ w' stObs ∧ ExtAgree ctx.self w'.ext stObs
-          | .error _ => σ' = yst0.storage ∧ ξ' = evmForeign yst0
+          if f.payable && yst0.env.selfBalance.ult yst0.env.callvalue then
+            σ' = yst0.storage ∧ ξ' = evmForeign yst0
+          else
+            match Tx.run (Core.denote Γ f.core (decodeArgs f yst0.env.calldata).reverse)
+                ctx w with
+            | .ok (_, w') =>
+                storageRel c Γ κ w'.self σ' ∧
+                  ∃ stObs : EvmState, stObs.storage = σ' ∧ evmForeign stObs = ξ' ∧
+                    R c Γ κ w' stObs ∧ ExtAgree ctx.self w'.ext stObs
+            | .error _ => σ' = yst0.storage ∧ ξ' = evmForeign yst0
 
 /-- Forward S2 trace: each call is an `EvmCallRunξ` at `mkEvmStateExt`. -/
 inductive EvmTraceRunExt (is : List Instr) :

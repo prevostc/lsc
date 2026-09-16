@@ -47,6 +47,7 @@ theorem inv_run_at [HasCreditValue X] {C : Spec S X E ε} [HasPayable C]
 contracts need no credit obligation: nonzero value is a revert step,
 and `creditValue w 0 = w`. -/
 theorem PreservesInv.of_fns [HasCreditValue X] {C : Spec S X E ε} [HasPayable C]
+    [HasSelfBalance X]
     {Inv : World S X E → Prop}
     (h : ∀ fn, PreservesInvFn C Inv fn)
     (hnp : ∀ fn, C.payable fn = false := by intro fn; cases fn <;> rfl) :
@@ -64,7 +65,7 @@ theorem PreservesInvFn_of_ok {C : Spec S X E ε} {Inv : World S X E → Prop} {f
 /-- `PreservesInv` for contracts that may have payable entrypoints.
 Each unpacked obligation is judged on the post-transfer world. -/
 theorem PreservesInv.of_fns_credit [HasCreditValue X] {C : Spec S X E ε}
-    [HasPayable C]
+    [HasPayable C] [HasSelfBalance X]
     {Inv : World S X E → Prop}
     (h : ∀ fn, PreservesInvCreditFn C Inv fn) :
     PreservesInv C Inv :=
@@ -73,6 +74,7 @@ theorem PreservesInv.of_fns_credit [HasCreditValue X] {C : Spec S X E ε}
 /-- `PreservesInvAt` follows from the per-entrypoint form at `self`.
 Non-payable contracts need no credit obligation. -/
 theorem PreservesInvAt.of_fns [HasCreditValue X] {C : Spec S X E ε} [HasPayable C]
+    [HasSelfBalance X]
     {Inv : World S X E → Prop}
     {self : Address}
     (h : ∀ fn, PreservesInvFnAt C Inv self fn)
@@ -82,7 +84,7 @@ theorem PreservesInvAt.of_fns [HasCreditValue X] {C : Spec S X E ε} [HasPayable
 
 /-- `PreservesInvAt` for contracts that may have payable entrypoints. -/
 theorem PreservesInvAt.of_fns_credit [HasCreditValue X] {C : Spec S X E ε}
-    [HasPayable C]
+    [HasPayable C] [HasSelfBalance X]
     {Inv : World S X E → Prop} {self : Address}
     (h : ∀ fn, PreservesInvCreditFnAt C Inv self fn) :
     PreservesInvAt C Inv self :=

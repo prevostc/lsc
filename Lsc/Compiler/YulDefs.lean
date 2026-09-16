@@ -206,6 +206,22 @@ after the calldata-size guard and before lock acquire. -/
 def valueCheckPrefix (f : FnDef) : YBlock :=
   if f.payable then [] else [valueCheckStmt]
 
+/-- `if lt(selfbalance(), callvalue()) { revert(0,0) }`. After the EVM
+credits `callvalue`, a 256-bit wrap is exactly `selfbalance() < callvalue()`. -/
+def overflowCheckStmt : YStmt :=
+  .cond (bop YulSemantics.EVM.Op.lt
+    [bop YulSemantics.EVM.Op.selfbalance [],
+     bop YulSemantics.EVM.Op.callvalue []]) [revert00]
+
+/-- Empty when `¬f.payable`. Payable entries insert this after the
+(empty) non-payable `callvalue` check and before lock acquire. -/
+def overflowCheckPrefix (f : FnDef) : YBlock :=
+  if f.payable then [overflowCheckStmt] else []
+
+/-- Non-payable: `if callvalue() { revert }`. Payable: wrap check. -/
+def valueGuardPrefix (f : FnDef) : YBlock :=
+  valueCheckPrefix f ++ overflowCheckPrefix f
+
 /-- Canonical constructor from `YulSemantics.EVM.constructorCode`. Nested `dataoffset` /
 `datasize` are required by powdr's object layout. -/
 def constructorCode (n : YIdent) : YBlock :=
@@ -868,16 +884,16 @@ def toYulCtor (c : ContractDef) (f : FnDef) : Option YBlock :=
       Emit.stmts
 
 /-- `if lt(calldatasize(), 4+32n) { revert(0,0) }`, then
-`if callvalue() { revert(0,0) }` when `¬f.payable`, then `tstore(0,1)`
-when `locks f`, then the function body. Payable non-locking cases stay
-two blocks. -/
+`if callvalue() { revert(0,0) }` when `¬f.payable`, then
+`if lt(selfbalance(), callvalue()) { revert(0,0) }` when `f.payable`,
+then `tstore(0,1)` when `locks f`, then the function body. -/
 def entryCase (c : ContractDef) (f : FnDef) : Option (YulSemantics.Literal × YBlock) := do
   let body ← toYulFn c f
   let min := 4 + 32 * f.params.length
   let guard := (emitGuardLt {} min).stmts
   some (YulSemantics.Literal.number f.selector,
     YulSemantics.Stmt.block guard ::
-      (valueCheckPrefix f ++ (lockSetPrefix f ++ [YulSemantics.Stmt.block body])))
+      (valueGuardPrefix f ++ (lockSetPrefix f ++ [YulSemantics.Stmt.block body])))
 
 /-- Discarded `memoryguard(k)` marker (`if memoryguard(k) {}`). powdr collects
 any `.call "memoryguard" [lit k]`; the dialect has no `pop`, and a truthiness

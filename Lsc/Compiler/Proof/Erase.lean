@@ -1006,13 +1006,27 @@ theorem noYulCall_valueCheckPrefix (f : FnDef) : noYulCallStmts (valueCheckPrefi
   simp [valueCheckPrefix]
   split <;> simp [noYulCallStmts, noYulCall_valueCheckStmt]
 
+theorem noYulCall_overflowCheckStmt : noYulCallStmt overflowCheckStmt = true := by
+  simp [overflowCheckStmt, noYulCallStmt, noYulCall_bop, noYulCallExprs, noYulCallExpr,
+    noYulCallStmts, noYulCall_revert00]
+
+theorem noYulCall_overflowCheckPrefix (f : FnDef) :
+    noYulCallStmts (overflowCheckPrefix f) = true := by
+  simp [overflowCheckPrefix]
+  split <;> simp [noYulCallStmts, noYulCall_overflowCheckStmt]
+
+theorem noYulCall_valueGuardPrefix (f : FnDef) :
+    noYulCallStmts (valueGuardPrefix f) = true := by
+  simp [valueGuardPrefix, noYulCallStmts_append, noYulCall_valueCheckPrefix,
+    noYulCall_overflowCheckPrefix]
+
 theorem entryCase_noYulCall {c f p} (h : entryCase c f = some p) :
     noYulCallStmts p.2 = true := by
   simp [entryCase, Bind.bind, Option.bind] at h
   cases hb : toYulFn c f <;> simp [hb] at h
   cases h
   simp [noYulCallStmts, noYulCallStmt, noYulCall_guardLt, noYulCallStmts_append,
-    noYulCall_valueCheckPrefix f, noYulCall_lockSetPrefix f, toYulFn_noYulCall hb]
+    noYulCall_valueGuardPrefix f, noYulCall_lockSetPrefix f, toYulFn_noYulCall hb]
 
 theorem mapM_entryCase_noYulCall {c : ContractDef} :
     ∀ {fs : List FnDef} {cases : List (Literal × YBlock)},

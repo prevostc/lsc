@@ -25,6 +25,9 @@ theorem step_address (st : EvmState) :
 theorem step_callvalue (st : EvmState) :
     stepOp Op.callvalue [] st = some (.ok [st.env.callvalue] st) := rfl
 
+theorem step_selfbalance (st : EvmState) :
+    stepOp Op.selfbalance [] st = some (.ok [st.env.selfBalance] st) := rfl
+
 theorem step_timestamp (st : EvmState) :
     stepOp YulSemantics.EVM.Op.timestamp [] st = some (.ok [st.env.timestamp] st) := rfl
 
