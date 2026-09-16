@@ -376,7 +376,7 @@ Receiving native value without `[Payable]` is a compile error.
 `Chain.native : Option Asset` (decimals from the profile). `none` means the
 chain has no gas token, so payable functions and native sends are compile
 errors. Multiple fee tokens do not change contract semantics. The example
-wrapper is `WNative`, not a built-in ETH type.
+wrapper is `WETH`, not a built-in ETH type.
 
 ## 2026-09-15 — `IERC20.Exact`; profile is `def chain`
 

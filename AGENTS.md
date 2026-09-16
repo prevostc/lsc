@@ -138,4 +138,6 @@ Tx.run (transfer to amount) ctx w = .ok ((), w') →
 `hne` is unnecessary: sender = receiver makes the sum trivially unchanged.
 
 Guarantee-module file split: `Lsc/AGENTS.md`. Example layout: `Examples/AGENTS.md`.
-`Checks.lean` imports `*Theorems` only.
+`Checks.lean` imports `*Theorems` only. It pins the axiom footprint of the
+headline theorems; agents update it when a pinned theorem is added or
+renamed, and explain the change in the commit message.

@@ -4,7 +4,8 @@ Every guarantee module exposes an API (definitions, theorem statements) in
 `*Theorems.lean` and keeps proofs in `*Proof.lean` (plus `*Defs.lean` when
 the statement needs structures). Downstream modules import `*Theorems`,
 never `*Proof`. `Checks.lean` pins exported theorems and the axiom
-footprint. Tasks should read APIs, not proofs.
+footprint. Agents update it when a pinned theorem is added or renamed
+(the commit message records what moved). Tasks should read APIs, not proofs.
 
 Lake libraries (`lakefile.lean`): `LscSemantics` (`Lsc.Lang`, `Lsc.Security`,
 `Lsc.Util`) → `Lsc` (`Lsc.Compiler`, `Lsc.Compiler.Proof`, `Lsc.Compiler.Transport`,

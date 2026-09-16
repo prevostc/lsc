@@ -6,6 +6,8 @@ What an end-to-end theorem of this project relies on beyond its own proof.
 
 Spec → Core → Yul → EVM bytecode. Axiom footprint of the chain is `propext`,
 `Classical.choice`, `Quot.sound`, pinned by `#guard_msgs` in `Checks.lean`.
+Agents update `Checks.lean` when a pinned theorem is added or renamed; the
+commit message records what moved.
 
 Example security (pinned in `Checks.lean`):
 
@@ -15,6 +17,8 @@ Example security (pinned in `Checks.lean`):
   `vault_solvent` (`Examples/Vault/Theorems.lean`).
 - Cpamm (S2, two `IERC20.Ref`): `cpamm_no_unauthorized_extraction`,
   `cpamm_solvent`, `swap0for1_k` (`Examples/Cpamm/Theorems.lean`).
+- WETH (payable wrap/unwrap): `weth_exact`, `weth_backed`, `deposit_delta`,
+  `withdraw_delta` (`Examples/WETH/Theorems.lean`).
 
 Compiler / glue (also pinned): `toYulFn_correct_callFree`,
 `toYulFn_correct_ext`, `core_sim_ext_callFree`,

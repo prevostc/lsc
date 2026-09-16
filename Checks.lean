@@ -2,6 +2,7 @@ import Examples.Counter.Theorems
 import Examples.Token.Theorems
 import Examples.Vault.Theorems
 import Examples.Cpamm.Theorems
+import Examples.WETH.Theorems
 import Lsc.Security.WealthTheorems
 import Lsc.Compiler.DispatchTheorems
 import Lsc.Compiler.CoreTheorems
@@ -18,7 +19,8 @@ import Lsc.Compiler.DeployTheorems
 
 Every certificate and end-to-end theorem must depend on nothing beyond the three standard
 axioms. `#guard_msgs` turns a widened footprint into a build error (see
-`docs/internals/TRUSTED_COMPUTING_BASE.md`).
+`docs/internals/TRUSTED_COMPUTING_BASE.md`). Agents update this file when a
+pinned theorem is added or renamed; the commit message records what moved.
 -/
 
 /-- info: 'Lsc.Security.no_unauthorized_extraction' depends on axioms: [propext] -/
@@ -53,6 +55,18 @@ axioms. `#guard_msgs` turns a widened footprint into a build error (see
 
 /-- info: 'Cpamm.cpamm_no_unauthorized_extraction' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms Cpamm.cpamm_no_unauthorized_extraction
+
+/-- info: 'WETH.weth_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms WETH.weth_exact
+
+/-- info: 'WETH.weth_backed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms WETH.weth_backed
+
+/-- info: 'WETH.deposit_delta' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms WETH.deposit_delta
+
+/-- info: 'WETH.withdraw_delta' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms WETH.withdraw_delta
 
 /-- info: 'Lsc.Compiler.toYulFn_correct_callFree' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms Lsc.Compiler.toYulFn_correct_callFree

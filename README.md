@@ -13,7 +13,8 @@ authorised the call, and the contract stays solvent relative to the assets it
 controls. Token, Vault, and Cpamm prove those facts at `Tx.run` / trace level
 (`token_no_unauthorized_extraction`, `vault_no_unauthorized_extraction`,
 `cpamm_no_unauthorized_extraction`, and the matching solvency theorems, pinned
-in `Checks.lean`). The compiler lifts a trace fact onto bytecode with
+in `Checks.lean` — agent-maintained: update the pins when a headline theorem
+is added or renamed). The compiler lifts a trace fact onto bytecode with
 `transport_claim_ext` / `transport_exists_claim_ext`
 (`Lsc/Compiler/TransportTheorems.lean`); examples do not ship per-contract
 `*_bytecode_*` theorems. Counter is a compiler demo. Constructors that call out,

@@ -2,7 +2,9 @@
 
 A **guarantee module** exports a theorem referenced by `Checks.lean`,
 `docs/internals/*.md` or `docs/guide/*.md`, or another module's *statement* (not
-just its proof). Split `Foo.lean` as:
+just its proof). `Checks.lean` is agent-maintained: update it when a pinned
+theorem is added or renamed, and explain the change in the commit message.
+Split `Foo.lean` as:
 
 - `FooTheorems.lean`: for each exported theorem, a plain-language docstring
   (what it guarantees, under which hypotheses, one to four sentences, no proof
